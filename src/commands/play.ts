@@ -1,7 +1,7 @@
 import path from "node:path";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output, stderr } from "node:process";
-import { AnthropicAgentSession, expandFileMentions } from "../agent/anthropic-session.js";
+import { PiAgentSession, expandFileMentions } from "../agent/pi-session.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 
@@ -47,7 +47,7 @@ async function optionalConfig(options: PlayCommandOptions) {
 async function runLocalCommand(
   line: string,
   workspace: LocalFileWorkspace,
-  session: AnthropicAgentSession,
+  session: PiAgentSession,
   saveSession: boolean,
 ): Promise<"handled" | "exit" | "not-command"> {
   if (!line.startsWith("/")) return "not-command";
@@ -97,14 +97,13 @@ export async function playCommand(options: PlayCommandOptions): Promise<void> {
   const workspace = await LocalFileWorkspace.create(options.root ?? process.cwd());
   const config = await optionalConfig(options);
   const profile = config ? profileForRole(config, "narrator").profile : undefined;
-  const model = options.model ?? profile?.model ?? process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5";
+  const model = options.model ?? profile?.model;
   const saveSession = options.saveSession ?? true;
   let textStarted = false;
-  const session = await AnthropicAgentSession.create({
+  const session = await PiAgentSession.create({
     workspace,
+    profile,
     model,
-    apiKeyEnv: profile?.apiKeyEnv,
-    maxTokens: profile?.maxTokens,
     continueSession: options.continueSession,
     saveSession,
     onText(delta) {
@@ -125,16 +124,17 @@ export async function playCommand(options: PlayCommandOptions): Promise<void> {
     if (textStarted) output.write("\n");
   };
 
-  if (options.printPrompt) {
-    await ask(options.printPrompt);
-    return;
-  }
-
-  const relativeRoot = path.relative(process.cwd(), workspace.root) || ".";
-  const configLabel = config ? path.relative(process.cwd(), options.configPath) || options.configPath : "defaults";
-  output.write(`Novel World Harness 0.1\nworkspace ${relativeRoot} · model ${model} · config ${configLabel}\nType /help for local commands.\n`);
-  const rl = readline.createInterface({ input, output });
   try {
+    if (options.printPrompt) {
+      await ask(options.printPrompt);
+      return;
+    }
+
+    const relativeRoot = path.relative(process.cwd(), workspace.root) || ".";
+    const configLabel = config ? path.relative(process.cwd(), options.configPath) || options.configPath : "defaults";
+    output.write(`Novel World Harness 0.1\nworkspace ${relativeRoot} · model ${session.model} · config ${configLabel}\nType /help for local commands.\n`);
+    const rl = readline.createInterface({ input, output });
+    try {
     while (true) {
       const line = (await rl.question("\nnwh › ")).trim();
       if (!line) continue;
@@ -147,7 +147,10 @@ export async function playCommand(options: PlayCommandOptions): Promise<void> {
         stderr.write(`! ${error instanceof Error ? error.message : String(error)}\n`);
       }
     }
+    } finally {
+      rl.close();
+    }
   } finally {
-    rl.close();
+    session.dispose();
   }
 }

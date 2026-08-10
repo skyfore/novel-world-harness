@@ -2,63 +2,49 @@
 
 ## Decision
 
-Phase 0 is a standalone Novel World Harness CLI, not a Pi integration.
-
-The interaction model borrows the useful terminal conventions of Claude Code while keeping the novel domain and safety boundary explicit:
+Phase 0 is a Novel World Harness CLI backed by Pi. Its interaction conventions deliberately resemble Claude Code:
 
 - `nwh` opens an interactive session in the current directory;
 - `nwh -p "..."` runs one prompt and exits;
-- `nwh --continue` resumes the latest workspace-local session;
+- `nwh --continue` resumes the latest workspace-local Pi session;
 - `@path` resolves a local file before the model request;
-- `/files`, `/search`, and `/read` work without a model or API key;
+- `/files`, `/search`, and `/read` work without a model request;
 - `NOVEL.md` provides checked-in project instructions;
-- `.novel-harness/instructions.md` provides a local override.
+- `.novel-harness/instructions.md` provides local additions.
 
-This is an interaction reference, not a dependency on Claude Code or its Agent SDK.
+Claude Code is an interaction reference, not a runtime dependency. Pi supplies the reusable agent loop, provider abstraction, event stream, tool protocol, and session format.
 
-## Local retrieval boundary
+## Retrieval boundary: file search, not RAG
 
-The model receives no automatic dump of the workspace. It can request three read-only tools:
+The model receives no automatic workspace dump and there is no embedding pipeline. It can request three read-only tools:
 
 1. `list_files`
 2. `search_files`
 3. `read_file`
 
-All three execute locally. Tool results or explicitly attached `@path` excerpts are then included in the Anthropic Messages API conversation. “Local-first” therefore means retrieval and access control happen locally; it does not mean the selected excerpts remain on-device when a model request is made.
+`search_files` invokes `rg` with fixed-string, case-insensitive, bounded options. If `rg` is absent, a safe Node scanner provides the same result shape. The usual flow is search first, then read a narrow evidence range.
 
-The implementation currently enforces:
+Tool results and explicit `@path` excerpts are included in the configured model provider request. Local-first therefore means local discovery, policy enforcement, and persistence; it does not mean selected text stays on-device when using a remote model.
 
-- workspace-root confinement;
-- real-path checks against `..` and symbolic-link escapes;
-- no traversal into `.git`, `.novel-harness`, `node_modules`, `dist`, or `coverage`;
-- direct denial of common credential files such as `.env`, `.npmrc`, private keys, and certificates;
-- UTF-8 text only;
-- 2 MiB maximum file size;
-- bounded line and character output;
-- fixed-string local search with bounded results.
+The access layer enforces:
 
-There is intentionally no shell, network, file-edit, database-write, MCP, gateway, or world-state commit tool in Phase 0.
+- workspace-root and real-path confinement;
+- rejection of `..` and symbolic-link escapes;
+- exclusion of `.git`, `.novel-harness`, dependency, build, and coverage directories;
+- denial of common credential and private-key files;
+- UTF-8 text only, 2 MiB maximum file size;
+- bounded line, character, and result counts;
+- no shell, write, network, database, or commit tool.
 
-## Model transport
+## Sessions and local state
 
-The initial transport uses `@anthropic-ai/sdk` against the official Anthropic API. Configuration contains only:
+Pi transcripts are stored under `.novel-harness/sessions/` unless `--no-save` is used. Because tool results become conversation context, retrieved excerpts can be present in a transcript. `/clear` starts a new Pi session without deleting prior append-only files.
 
-- `provider: anthropic`
-- `model`
-- `apiKeyEnv`
-- `maxTokens`
-
-Custom `baseUrl`, alternate API protocols, Pi credential storage, and external tool/service connections are out of scope for this phase.
-
-## Session policy
-
-Sessions are stored under `.novel-harness/sessions/` with file mode `0600`. `.novel-harness/latest-session` points to the most recent session. Session state is workspace-local and excluded from file discovery. Because tool results are part of the conversation, selected source excerpts can also be present in the persisted session transcript; use `--no-save` when that is undesirable.
-
-The transcript is useful conversational continuity, not durable world memory. Compiled evidence, entities, events, state deltas, knowledge states, and branches continue to belong in NWIR/PostgreSQL.
+Project manifests, source indexes, compiler jobs, and metrics are also local files. These are inspectable implementation state, not model memory. They remain hidden from general model file search.
 
 ## Next capability gate
 
-The next implementation step should not be a general-purpose edit or shell tool. It should be a narrow compiler proposal tool that writes a typed candidate artifact, followed by deterministic validation and an explicit commit step. This preserves the central invariant:
+The next model-side mutation should be a narrow compiler proposal tool producing a typed candidate artifact. Deterministic code must validate it before an explicit commit:
 
 ```text
 proposal -> validate -> commit -> render

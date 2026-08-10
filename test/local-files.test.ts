@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { expandFileMentions } from "../src/agent/anthropic-session.js";
+import { expandFileMentions } from "../src/agent/pi-session.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 
 const temporaryDirectories: string[] = [];

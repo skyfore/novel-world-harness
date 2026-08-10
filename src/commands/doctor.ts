@@ -1,6 +1,8 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import process from "node:process";
 import { loadConfig } from "../config/load.js";
-import { withDb } from "../db/client.js";
+import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { ok, fail, heading } from "../util/terminal.js";
 
 function nodeVersionOk(): boolean {
@@ -21,22 +23,25 @@ export async function doctorCommand(configPath: string): Promise<void> {
   const config = await loadConfig(configPath);
   ok(`Config valid: ${configPath}`);
 
+  const root = path.dirname(path.resolve(configPath));
+  await fs.access(root, fs.constants.R_OK | fs.constants.W_OK);
+  ok(`Local workspace readable and writable: ${root}`);
+
   for (const [name, profile] of Object.entries(config.llm.profiles)) {
-    if (process.env[profile.apiKeyEnv]) ok(`LLM profile '${name}' credential env present (${profile.apiKeyEnv})`);
-    else {
+    if (!profile.apiKeyEnv) {
+      ok(`LLM profile '${name}' delegates authentication to Pi (${profile.provider})`);
+    } else if (process.env[profile.apiKeyEnv]) {
+      ok(`LLM profile '${name}' credential env present (${profile.apiKeyEnv})`);
+    } else {
       fail(`LLM profile '${name}' missing env ${profile.apiKeyEnv}`);
       failed = true;
     }
   }
 
-  try {
-    await withDb(config, async (db) => {
-      const result = await db.query("SELECT current_database() AS db, version() AS version");
-      ok(`PostgreSQL reachable: ${result.rows[0].db}`);
-    });
-  } catch (error) {
-    fail(`PostgreSQL connection failed: ${error instanceof Error ? error.message : String(error)}`);
-    failed = true;
+  if (await LocalFileWorkspace.hasRipgrep()) {
+    ok("ripgrep available for local file search");
+  } else {
+    ok("ripgrep unavailable; safe Node file search fallback will be used");
   }
 
   if (failed) process.exitCode = 1;

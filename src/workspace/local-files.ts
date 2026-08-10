@@ -1,5 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const DEFAULT_IGNORED_DIRECTORIES = new Set([
   ".git",
@@ -78,6 +82,15 @@ export class LocalFileWorkspace {
     return new LocalFileWorkspace(realRoot);
   }
 
+  static async hasRipgrep(): Promise<boolean> {
+    try {
+      await execFileAsync("rg", ["--version"], { timeout: 2_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async listFiles(input: ListFilesInput = {}): Promise<string[]> {
     const start = await this.resolveInside(input.path ?? ".");
     const pattern = input.pattern?.toLocaleLowerCase();
@@ -152,12 +165,18 @@ export class LocalFileWorkspace {
     const query = input.query.trim();
     if (!query) throw new Error("Search query cannot be empty.");
     const limit = clamp(input.maxResults, 20, MAX_SEARCH_RESULTS);
+    const ripgrep = await this.searchWithRipgrep({ ...input, query }, limit);
+    if (ripgrep !== null) return ripgrep;
+    return this.searchWithNode({ ...input, query }, limit);
+  }
+
+  private async searchWithNode(input: SearchFilesInput, limit: number): Promise<string[]> {
     const files = await this.listFiles({
       path: input.path,
       pattern: input.pattern,
       maxResults: MAX_LIST_RESULTS,
     });
-    const normalizedQuery = query.toLocaleLowerCase();
+    const normalizedQuery = input.query.toLocaleLowerCase();
     const matches: string[] = [];
 
     for (const relative of files) {
@@ -176,6 +195,100 @@ export class LocalFileWorkspace {
       }
     }
     return matches;
+  }
+
+  private async searchWithRipgrep(input: SearchFilesInput, limit: number): Promise<string[] | null> {
+    const absoluteStart = await this.resolveInside(input.path ?? ".");
+    const relativeStart = normalizeRelative(path.relative(this.root, absoluteStart));
+    const excludedGlobs = [
+      ".git",
+      ".novel-harness",
+      ".aws",
+      ".ssh",
+      "coverage",
+      "dist",
+      "node_modules",
+    ].flatMap((directory) => [`!${directory}/**`, `!**/${directory}/**`]);
+    const sensitiveGlobs = ["!**/.env", "!**/.env.*", "!**/.netrc", "!**/.npmrc", "!**/.pypirc", "!**/*.key", "!**/*.p12", "!**/*.pem", "!**/*.pfx"];
+    const args = [
+      "--json",
+      "--fixed-strings",
+      "--ignore-case",
+      "--max-filesize",
+      `${MAX_FILE_BYTES}`,
+      ...excludedGlobs.flatMap((glob) => ["--glob", glob]),
+      ...sensitiveGlobs.flatMap((glob) => ["--glob", glob]),
+      "--",
+      input.query,
+      relativeStart,
+    ];
+
+    return new Promise<string[] | null>((resolve, reject) => {
+      const child = spawn("rg", args, {
+        cwd: this.root,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      const matches: string[] = [];
+      const pattern = input.pattern?.toLocaleLowerCase();
+      let pending = "";
+      let errorOutput = "";
+      let settled = false;
+      let stoppedAtLimit = false;
+
+      const finish = (value: string[] | null): void => {
+        if (settled) return;
+        settled = true;
+        value?.sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+        resolve(value);
+      };
+
+      const consume = (line: string): void => {
+        if (!line || matches.length >= limit) return;
+        let event: {
+          type?: string;
+          data?: { path?: { text?: string }; line_number?: number; lines?: { text?: string } };
+        };
+        try {
+          event = JSON.parse(line) as typeof event;
+        } catch {
+          return;
+        }
+        if (event.type !== "match") return;
+        const rawFile = event.data?.path?.text?.split(path.sep).join("/");
+        const file = rawFile?.startsWith("./") ? rawFile.slice(2) : rawFile;
+        const lineNumber = event.data?.line_number;
+        if (!file || !lineNumber || isExcludedRelative(file)) return;
+        if (pattern && !file.toLocaleLowerCase().includes(pattern)) return;
+        const preview = (event.data?.lines?.text ?? "").trim().replace(/\s+/g, " ").slice(0, 240);
+        matches.push(`${file}:${lineNumber}: ${preview}`);
+        if (matches.length >= limit) {
+          stoppedAtLimit = true;
+          child.kill();
+        }
+      };
+
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        pending += chunk;
+        const lines = pending.split("\n");
+        pending = lines.pop() ?? "";
+        for (const line of lines) consume(line);
+      });
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        errorOutput += chunk;
+      });
+      child.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") finish(null);
+        else if (!settled) reject(error);
+      });
+      child.on("close", (code) => {
+        consume(pending);
+        if (stoppedAtLimit || code === 0 || code === 1) finish(matches);
+        else if (!settled) reject(new Error(`ripgrep search failed${errorOutput.trim() ? `: ${errorOutput.trim()}` : ` (exit ${code})`}`));
+      });
+    });
   }
 
   private async resolveInside(value: string): Promise<string> {

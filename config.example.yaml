@@ -11,11 +11,13 @@ llm:
       provider: anthropic
       model: claude-sonnet-5
       apiKeyEnv: ANTHROPIC_API_KEY
+      thinkingLevel: medium
       maxTokens: 8192
     fast:
       provider: anthropic
       model: claude-haiku-4-5
       apiKeyEnv: ANTHROPIC_API_KEY
+      thinkingLevel: low
       maxTokens: 4096
   routing:
     controller: main
@@ -27,12 +29,6 @@ llm:
     causality: main
     verifier: main
     narrator: main
-
-database:
-  url: ${DATABASE_URL}
-  poolMin: 0
-  poolMax: 10
-  statementTimeoutMs: 30000
 
 harness:
   maxLoops: 5000

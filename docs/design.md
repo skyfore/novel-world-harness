@@ -22,7 +22,7 @@ Source Novel
 Compiler Harness
     │
     ▼
-NWIR / World Database
+NWIR / Local world files
     │
     ├── Canon timeline
     ├── World snapshots
@@ -253,9 +253,9 @@ Promotion/demotion is based on scene relevance and causal impact.
 
 ## 11. Storage
 
-PostgreSQL is the source of truth because the runtime needs transactions, temporal queries, event sourcing, snapshots, branch isolation, and strong consistency.
+Phase 0 uses human-readable, workspace-local files under `.novel-harness/` for project metadata, source manifests, compiler jobs, readiness metrics, and Pi sessions. Writes use atomic rename, and source documents remain ordinary local files. This keeps the first CLI inspectable and removes operational dependence on PostgreSQL or another attached database.
 
-A graph database can be a projection for analysis/visualization, not the authoritative store.
+The executable NWIR format is still a later design decision. If scale, concurrent workers, or transactional branch execution eventually require a database, it should be introduced behind the storage boundary with a migration plan. A graph or vector database is not required for source discovery; file search remains the default retrieval path.
 
 ## 12. LLM/program boundary
 
@@ -269,7 +269,7 @@ Use LLMs for:
 - candidate causal links
 - narrative rendering
 
-Use code/database constraints for:
+Use deterministic code and storage constraints for:
 
 - identity
 - time
@@ -295,7 +295,7 @@ Examples:
 ## 14. MVP sequence
 
 ### Phase 0 — local-first harness CLI
-Claude Code-style terminal interaction, workspace instructions, local read/search tools, bounded `@file` context, persistent sessions, configuration, DB schema, and the harness task-loop skeleton. No external tool services or write-capable model tools.
+Claude Code-style terminal interaction backed by Pi, workspace instructions, `rg`-first local read/search tools, bounded `@file` context, persistent local-file sessions/state, configuration, and the harness task-loop skeleton. No external database, RAG layer, or write-capable model tools.
 
 ### Phase 1 — executable canon
 Implement `Event -> StateDelta -> WorldState -> Canon Replay` for a constrained slice of one novel.

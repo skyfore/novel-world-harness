@@ -1,5 +1,5 @@
-import type { Db } from "../db/client.js";
 import type { HarnessConfig } from "../config/schema.js";
+import type { WorkspaceStore } from "../storage/workspace-store.js";
 
 export const jobTypes = [
   "segment-source",
@@ -29,8 +29,7 @@ export type BuildMetrics = {
 
 export type HarnessContext = {
   config: HarnessConfig;
-  db: Db;
-  projectId: string;
+  store: WorkspaceStore;
 };
 
 export type HarnessJob = {

@@ -3,7 +3,6 @@ import { Command } from "commander";
 import { resolveConfigPath } from "./config/load.js";
 import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
-import { migrateCommand } from "./commands/migrate.js";
 import { ingestCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
 import { playCommand } from "./commands/play.js";
@@ -14,7 +13,7 @@ program
   .description("Novel World Harness — compile novels into executable world models")
   .version("0.1.0")
   .option("--root <path>", "local novel workspace", process.cwd())
-  .option("--model <model>", "Anthropic model for the interactive session")
+  .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--continue", "continue the latest session in this workspace")
   .option("--no-save", "do not persist the interactive session");
@@ -28,14 +27,8 @@ program
 program
   .command("doctor")
   .option("-c, --config <path>", "configuration file")
-  .description("validate runtime, credentials and PostgreSQL connectivity")
+  .description("validate runtime, credentials and local file tooling")
   .action(async (options) => doctorCommand(resolveConfigPath(options.config)));
-
-program
-  .command("db:migrate")
-  .option("-c, --config <path>", "configuration file")
-  .description("apply the initial PostgreSQL schema")
-  .action(async (options) => migrateCommand(resolveConfigPath(options.config)));
 
 program
   .command("ingest")
@@ -55,7 +48,7 @@ program
   .command("play")
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
-  .option("--model <model>", "Anthropic model for the interactive session")
+  .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--continue", "continue the latest session in this workspace")
   .option("--no-save", "do not persist the interactive session")

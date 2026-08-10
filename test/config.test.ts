@@ -1,29 +1,69 @@
 import { describe, expect, it } from "vitest";
-import { llmProfileSchema } from "../src/config/schema.js";
+import { configSchema, llmProfileSchema } from "../src/config/schema.js";
+
+const baseConfig = {
+  version: 1 as const,
+  project: { name: "test", language: "zh-CN" },
+  llm: {
+    defaultProfile: "main",
+    profiles: { main: { provider: "anthropic", model: "claude-sonnet-5" } },
+    routing: {},
+  },
+  harness: {
+    maxLoops: 10,
+    maxConcurrentWorkers: 1,
+    batchSize: 1,
+    checkpointEvery: 1,
+    targetCoverage: {
+      source: 0.99,
+      evidence: 0.99,
+      entityResolution: 0.99,
+      majorEvents: 0.98,
+      temporalConsistency: 0.99,
+      stateDelta: 0.95,
+      epistemic: 0.9,
+      causality: 0.9,
+    },
+  },
+  runtime: {
+    defaultPlayerMode: "canon-character" as const,
+    canonAttractorWeight: 0.25,
+    divergenceDisableCanonAt: 0.8,
+    snapshotEveryEvents: 100,
+  },
+  logging: { level: "info" as const },
+};
 
 describe("llmProfileSchema", () => {
-  it("accepts the Phase 0 official Anthropic profile", () => {
-    expect(llmProfileSchema.parse({ model: "claude-test" })).toEqual({
-      provider: "anthropic",
-      model: "claude-test",
-      apiKeyEnv: "ANTHROPIC_API_KEY",
+  it("keeps Pi provider and model selection generic", () => {
+    expect(llmProfileSchema.parse({
+      provider: "openai-compatible-local",
+      model: "novel-model",
+      apiKeyEnv: "LOCAL_LLM_API_KEY",
+      baseUrl: "http://127.0.0.1:8080/v1",
+      apiProtocol: "openai-completions",
+    })).toMatchObject({
+      provider: "openai-compatible-local",
+      model: "novel-model",
+      thinkingLevel: "medium",
       maxTokens: 8_192,
     });
   });
 
-  it("rejects custom external endpoints and Pi protocol fields", () => {
+  it("does not allow repository config to select a general-purpose secret", () => {
     expect(() => llmProfileSchema.parse({
       provider: "anthropic",
       model: "claude-test",
-      baseUrl: "https://gateway.example.com",
-      apiProtocol: "anthropic-messages",
-    })).toThrow();
-  });
-
-  it("does not allow a repository config to select an arbitrary secret environment variable", () => {
-    expect(() => llmProfileSchema.parse({
-      model: "claude-test",
       apiKeyEnv: "AWS_SECRET_ACCESS_KEY",
+    })).toThrow("*_API_KEY");
+  });
+});
+
+describe("configSchema", () => {
+  it("rejects the removed external database block", () => {
+    expect(() => configSchema.parse({
+      ...baseConfig,
+      database: { url: "postgres://localhost/novel" },
     })).toThrow();
   });
 });

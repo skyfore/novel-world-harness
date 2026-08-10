@@ -12,10 +12,10 @@ export class CompilerLoop {
 
   async run(ctx: HarnessContext): Promise<{ loops: number; ready: boolean }> {
     for (let loop = 1; loop <= ctx.config.harness.maxLoops; loop += 1) {
-      const metrics = await readMetrics(ctx.db, ctx.projectId);
+      const metrics = await readMetrics(ctx.store);
       if (isRuntimeReady(ctx.config, metrics)) return { loops: loop - 1, ready: true };
 
-      const job = await claimNextJob(ctx.db, ctx.projectId);
+      const job = await claimNextJob(ctx.store);
       if (!job) {
         const gaps = readinessGaps(ctx.config, metrics);
         console.log("No pending harness jobs. Highest readiness gaps:");
@@ -27,15 +27,15 @@ export class CompilerLoop {
 
       const worker = this.workers.get(job.jobType);
       if (!worker) {
-        await failJob(ctx.db, job.id, new Error(`No worker registered for ${job.jobType}`));
+        await failJob(ctx.store, job.id, new Error(`No worker registered for ${job.jobType}`));
         continue;
       }
 
       try {
         const output = await worker.execute(ctx, job);
-        await finishJob(ctx.db, job.id, output);
+        await finishJob(ctx.store, job.id, output);
       } catch (error) {
-        await failJob(ctx.db, job.id, error);
+        await failJob(ctx.store, job.id, error);
         console.error(`[harness] ${job.jobType} failed:`, error);
       }
 

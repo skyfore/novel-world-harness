@@ -1,124 +1,110 @@
 # Novel World Harness
 
-A CLI-first **executable narrative world compiler and runtime**.
+A local-first CLI for compiling novels into verifiable executable worlds.
 
-The goal is not to build a novel RAG chatbot. The harness compiles a novel into a temporal, evidence-backed world model that can be replayed and then diverged. A user can select a character, enter the timeline at a valid point, make decisions, and let the world continue evolving until that character exits the story.
+The goal is not to build a novel RAG chatbot. The harness compiles a novel into a temporal, evidence-backed world model that can be replayed and then diverged. A user can eventually select a character, enter the timeline at a valid point, make decisions, and let the world continue evolving without being forced back to canon.
 
-## Why Pi
+## Current direction
 
-The project embeds the Pi SDK instead of forking Pi. Pi already provides a compact agent runtime, provider/model abstraction, persistent sessions, extension hooks, terminal-oriented interaction, and programmatic SDK/RPC modes. Novel World Harness owns the domain loop, database, world state, causality, and runtime invariants.
+Phase 0 now prioritizes a useful terminal harness before production compiler workers:
 
-Current target: `@earendil-works/pi-coding-agent 0.84.1`.
+- `nwh` opens an interactive session in the current novel workspace;
+- local `/files`, `/search`, and `/read` commands work without an API key;
+- the agent has the same three read-only local tools;
+- `@path` attaches a bounded local file excerpt;
+- `NOVEL.md` supplies project-level instructions;
+- `nwh --continue` resumes the latest local session;
+- `nwh -p "..."` supports one-shot use;
+- PostgreSQL/NWIR scaffolding remains available for compiler work.
 
-## Status
-
-**Phase 0 / foundation**
-
-Implemented in this initial scaffold:
-
-- CLI entry point (`nwh`)
-- YAML + environment based configuration
-- model profiles and per-worker model routing
-- PostgreSQL connection layer and initial schema
-- compiler loop state machine and readiness metrics
-- Pi SDK adapter boundary
-- commands: `init`, `doctor`, `db:migrate`, `ingest`, `status`, `play`
-- design docs for compiler, NWIR, world runtime, and Pi integration
-
-Not yet implemented:
-
-- production entity/event extraction workers
-- state-delta derivation workers
-- epistemic and causal graph builders
-- canon replay evaluator
-- full NPC/world simulator
-- polished Pi-style TUI
+Pi and custom external provider/service endpoints are not part of this phase. Model calls use the official Anthropic SDK. Local retrieval happens on-device, but any excerpt selected by `@path` or a model tool is sent to the configured Anthropic model as conversation context.
 
 ## Quick start
 
 ```bash
-cp config.example.yaml novel-harness.yaml
-cp .env.example .env
-docker compose up -d postgres
 npm install
 npm run build
+npm link
 
+export ANTHROPIC_API_KEY=your_key
+nwh
+```
+
+No `novel-harness.yaml` or PostgreSQL instance is needed for the interactive shell.
+
+Useful forms:
+
+```bash
+nwh -p "列出这个项目里的主要人物资料"
+nwh --continue
+nwh --root ./my-novel
+nwh play --model claude-sonnet-5
+```
+
+Inside a session:
+
+```text
+/files chapter
+/search 赤壁
+/read chapters/12.md 40:100
+分析 @chapters/12.md 中曹操的错误判断
+/status
+/clear
+/exit
+```
+
+Run `nwh init ./my-novel` to create `novel-harness.yaml` and a starter `NOVEL.md` without overwriting existing files.
+
+## Compiler setup
+
+The compiler skeleton still uses PostgreSQL:
+
+```bash
+cp .env.example .env
+docker compose up -d postgres
 nwh doctor --config novel-harness.yaml
 nwh db:migrate --config novel-harness.yaml
 nwh ingest ./books/three-kingdoms.txt --config novel-harness.yaml
 nwh status --config novel-harness.yaml
 ```
 
-For development:
+Production entity/event extraction, state-delta derivation, epistemic/causal builders, canon replay, and the full world simulator are not implemented yet.
 
-```bash
-npm run dev -- doctor --config config.example.yaml
-```
-
-## CLI shape
+## Product architecture
 
 ```text
-nwh
-├── init
-├── doctor
-├── db:migrate
-├── ingest <novel>
-├── status
-└── play [--character <id>] [--at <time>]
-```
-
-Long term, invoking `nwh` with no subcommand should open the interactive terminal runtime, similar in spirit to Claude Code/Pi.
-
-## Configuration
-
-The harness never requires API keys inside YAML. Profiles reference environment variables:
-
-```yaml
-llm:
-  profiles:
-    main:
-      provider: anthropic
-      model: claude-sonnet-4-6
-      apiKeyEnv: ANTHROPIC_API_KEY
-```
-
-A profile can optionally override `baseUrl`/`apiProtocol` for gateways or compatible providers. Worker roles route independently to profiles.
-
-See [docs/configuration.md](docs/configuration.md).
-
-## Architecture
-
-```text
-Novel
-  │
+Novel files
+  │ local list / search / bounded read
+  ▼
+Interactive Harness CLI
+  │ compiler proposals
   ▼
 Compiler Harness Loop
-  │
-  ├─ evidence / segmentation
-  ├─ entities / aliases
-  ├─ events / timeline
-  ├─ state deltas
-  ├─ knowledge states
-  ├─ causality
-  └─ verification / replay
-  │
+  │ evidence / entities / events / state / knowledge / causality
   ▼
 NWIR + World DB
-  │
+  │ validated state and branches
   ▼
 World Runtime
-  │
-  ├─ player action
-  ├─ NPC proposals
-  ├─ background events
-  ├─ validation/adjudication
-  ├─ event commit
-  └─ state transition
-  │
+  │ player + NPC + background proposals
   ▼
 Narrative renderer
 ```
 
-The critical invariant is **proposal -> validate -> commit -> render**. The LLM does not directly mutate world truth.
+The critical invariant is **proposal -> validate -> commit -> render**. An LLM never directly mutates world truth.
 
-See [docs/design.md](docs/design.md).
+The compiler may inspect the complete source. Runtime characters may only receive information visible from their epistemic state.
+
+## CLI commands
+
+```text
+nwh [--root <path>] [--continue] [-p <prompt>]
+├── init [directory]
+├── doctor
+├── db:migrate
+├── ingest <novel>
+├── status
+└── play
+```
+
+See [local CLI design](docs/local-cli.md), [configuration](docs/configuration.md), and [world-model design](docs/design.md).

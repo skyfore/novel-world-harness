@@ -294,8 +294,8 @@ Examples:
 
 ## 14. MVP sequence
 
-### Phase 0 — foundation
-CLI, configuration, DB schema, Pi adapter, harness task loop.
+### Phase 0 — local-first harness CLI
+Claude Code-style terminal interaction, workspace instructions, local read/search tools, bounded `@file` context, persistent sessions, configuration, DB schema, and the harness task-loop skeleton. No external tool services or write-capable model tools.
 
 ### Phase 1 — executable canon
 Implement `Event -> StateDelta -> WorldState -> Canon Replay` for a constrained slice of one novel.

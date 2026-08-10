@@ -7,7 +7,7 @@ import { configSchema, type HarnessConfig } from "./schema.js";
 const ENV_PATTERN = /\$\{([A-Z_][A-Z0-9_]*)\}/g;
 
 export async function loadConfig(configPath: string): Promise<HarnessConfig> {
-  dotenv.config();
+  dotenv.config({ quiet: true });
   const absolute = path.resolve(configPath);
   const raw = await fs.readFile(absolute, "utf8");
   const expanded = raw.replace(ENV_PATTERN, (_match, name: string) => {

@@ -1,33 +1,151 @@
+import path from "node:path";
 import readline from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
-import { loadConfig } from "../config/load.js";
-import { createPiSessionFactory } from "../llm/pi-session.js";
+import { stdin as input, stdout as output, stderr } from "node:process";
+import { AnthropicAgentSession, expandFileMentions } from "../agent/anthropic-session.js";
+import { loadConfig, profileForRole } from "../config/load.js";
+import { LocalFileWorkspace } from "../workspace/local-files.js";
 
-const SYSTEM_PROMPT = `You are the terminal shell for Novel World Harness.
-The executable world runtime is not yet enabled in Phase 0. Do not invent or mutate world state.
-Help the developer inspect the architecture, configuration, and next implementation work.
-When asked to role-play a novel character, explain that canon state replay must be implemented first.`;
+export type PlayCommandOptions = {
+  configPath: string;
+  allowMissingConfig?: boolean;
+  root?: string;
+  model?: string;
+  continueSession?: boolean;
+  saveSession?: boolean;
+  printPrompt?: string;
+};
 
-export async function playCommand(configPath: string): Promise<void> {
-  const config = await loadConfig(configPath);
-  const pi = await createPiSessionFactory(config);
-  const session = await pi.create("narrator", SYSTEM_PROMPT);
+const HELP = `Local commands:
+  /files [path filter]       list local workspace files
+  /search <text>             search local files for fixed text
+  /read <path> [start:end]   read a bounded line range
+  /status                    show workspace, model and session
+  /clear                     clear model conversation history
+  /help                      show this help
+  /exit                      end the session
 
-  session.subscribe((event) => {
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      output.write(event.assistantMessageEvent.delta);
+File references:
+  Ask about @chapters/01.md or @"drafts/chapter one.md" to attach a local file.`;
+
+function splitArguments(value: string): string[] {
+  const tokens: string[] = [];
+  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(value)) !== null) tokens.push(match[1] ?? match[2] ?? match[3] ?? "");
+  return tokens;
+}
+
+async function optionalConfig(options: PlayCommandOptions) {
+  try {
+    return await loadConfig(options.configPath);
+  } catch (error) {
+    if (options.allowMissingConfig && (error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+async function runLocalCommand(
+  line: string,
+  workspace: LocalFileWorkspace,
+  session: AnthropicAgentSession,
+  saveSession: boolean,
+): Promise<"handled" | "exit" | "not-command"> {
+  if (!line.startsWith("/")) return "not-command";
+  const [command = "", ...args] = splitArguments(line);
+  switch (command) {
+    case "/exit":
+    case "/quit":
+      return "exit";
+    case "/help":
+      output.write(`${HELP}\n`);
+      return "handled";
+    case "/files": {
+      const files = await workspace.listFiles({ pattern: args.join(" ") || undefined });
+      output.write(`${files.length ? files.join("\n") : "No matching files."}\n`);
+      return "handled";
     }
+    case "/search": {
+      const query = args.join(" ").trim();
+      if (!query) throw new Error("Usage: /search <text>");
+      const matches = await workspace.searchFiles({ query });
+      output.write(`${matches.length ? matches.join("\n") : "No matches."}\n`);
+      return "handled";
+    }
+    case "/read": {
+      const [filePath, range] = args;
+      if (!filePath) throw new Error("Usage: /read <path> [start:end]");
+      const rangeMatch = range?.match(/^(\d+)(?::(\d+))?$/);
+      if (range && !rangeMatch) throw new Error("Line range must use start:end, for example 40:80.");
+      const startLine = rangeMatch ? Number(rangeMatch[1]) : undefined;
+      const endLine = rangeMatch?.[2] ? Number(rangeMatch[2]) : undefined;
+      output.write(`${await workspace.readFile({ path: filePath, startLine, endLine })}\n`);
+      return "handled";
+    }
+    case "/status":
+      output.write(`workspace: ${workspace.root}\nmodel: ${session.model}\nsession: ${session.id}\nmessages: ${session.messageCount}\npersistence: ${saveSession ? "on" : "off"}\n`);
+      return "handled";
+    case "/clear":
+      await session.clear();
+      output.write("Conversation history cleared.\n");
+      return "handled";
+    default:
+      throw new Error(`Unknown command '${command}'. Use /help.`);
+  }
+}
+
+export async function playCommand(options: PlayCommandOptions): Promise<void> {
+  const workspace = await LocalFileWorkspace.create(options.root ?? process.cwd());
+  const config = await optionalConfig(options);
+  const profile = config ? profileForRole(config, "narrator").profile : undefined;
+  const model = options.model ?? profile?.model ?? process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5";
+  const saveSession = options.saveSession ?? true;
+  let textStarted = false;
+  const session = await AnthropicAgentSession.create({
+    workspace,
+    model,
+    apiKeyEnv: profile?.apiKeyEnv,
+    maxTokens: profile?.maxTokens,
+    continueSession: options.continueSession,
+    saveSession,
+    onText(delta) {
+      textStarted = true;
+      output.write(delta);
+    },
+    onTool(name, toolInput) {
+      const details = toolInput as Record<string, unknown>;
+      const target = details.path ?? details.query;
+      stderr.write(`\n↳ ${name}${target ? ` ${String(target)}` : ""}\n`);
+    },
   });
 
+  const ask = async (prompt: string): Promise<void> => {
+    textStarted = false;
+    const expanded = await expandFileMentions(prompt, workspace);
+    await session.prompt(expanded);
+    if (textStarted) output.write("\n");
+  };
+
+  if (options.printPrompt) {
+    await ask(options.printPrompt);
+    return;
+  }
+
+  const relativeRoot = path.relative(process.cwd(), workspace.root) || ".";
+  const configLabel = config ? path.relative(process.cwd(), options.configPath) || options.configPath : "defaults";
+  output.write(`Novel World Harness 0.1\nworkspace ${relativeRoot} · model ${model} · config ${configLabel}\nType /help for local commands.\n`);
   const rl = readline.createInterface({ input, output });
-  console.log("Novel World Harness interactive shell (Phase 0). Type /exit to quit.");
   try {
     while (true) {
-      const line = (await rl.question("\nnwh> ")).trim();
+      const line = (await rl.question("\nnwh › ")).trim();
       if (!line) continue;
-      if (line === "/exit" || line === "/quit") break;
-      await session.prompt(line);
-      output.write("\n");
+      try {
+        const local = await runLocalCommand(line, workspace, session, saveSession);
+        if (local === "exit") break;
+        if (local === "handled") continue;
+        await ask(line);
+      } catch (error) {
+        stderr.write(`! ${error instanceof Error ? error.message : String(error)}\n`);
+      }
     }
   } finally {
     rl.close();

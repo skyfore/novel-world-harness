@@ -12,12 +12,17 @@ const program = new Command();
 program
   .name("nwh")
   .description("Novel World Harness — compile novels into executable world models")
-  .version("0.1.0");
+  .version("0.1.0")
+  .option("--root <path>", "local novel workspace", process.cwd())
+  .option("--model <model>", "Anthropic model for the interactive session")
+  .option("-p, --print <prompt>", "run one prompt and exit")
+  .option("--continue", "continue the latest session in this workspace")
+  .option("--no-save", "do not persist the interactive session");
 
 program
   .command("init")
   .argument("[directory]", "target directory", process.cwd())
-  .description("create a starter novel-harness.yaml")
+  .description("create starter novel-harness.yaml and NOVEL.md files")
   .action(initCommand);
 
 program
@@ -49,11 +54,41 @@ program
 program
   .command("play")
   .option("-c, --config <path>", "configuration file")
-  .description("open the terminal session; full world runtime arrives after canon replay")
-  .action(async (options) => playCommand(resolveConfigPath(options.config)));
+  .option("--root <path>", "local novel workspace")
+  .option("--model <model>", "Anthropic model for the interactive session")
+  .option("-p, --print <prompt>", "run one prompt and exit")
+  .option("--continue", "continue the latest session in this workspace")
+  .option("--no-save", "do not persist the interactive session")
+  .description("open the local-first terminal session")
+  .action(async (options) => {
+    const globalOptions = program.opts();
+    await playCommand({
+      configPath: resolveConfigPath(options.config),
+      allowMissingConfig: !options.config,
+      root: options.root ?? globalOptions.root,
+      model: options.model ?? globalOptions.model,
+      printPrompt: options.print ?? globalOptions.print,
+      continueSession: options.continue || globalOptions.continue,
+      saveSession: options.save && globalOptions.save,
+    });
+  });
 
 program.action(async () => {
-  await playCommand(resolveConfigPath(undefined));
+  const options = program.opts();
+  await playCommand({
+    configPath: resolveConfigPath(undefined),
+    allowMissingConfig: true,
+    root: options.root,
+    model: options.model,
+    printPrompt: options.print,
+    continueSession: options.continue,
+    saveSession: options.save,
+  });
 });
 
-await program.parseAsync(process.argv);
+try {
+  await program.parseAsync(process.argv);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}

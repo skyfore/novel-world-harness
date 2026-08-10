@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "CLI-first executable narrative world compiler and runtime harness built on Pi.",
+  "description": "Local-first CLI for compiling novels into verifiable executable worlds.",
   "license": "MIT",
   "bin": {
     "nwh": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
@@ -19,7 +20,7 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@anthropic-ai/sdk": "^0.116.0",
     "commander": "^15.0.0",
     "dotenv": "^17.4.2",
     "pg": "^8.22.0",

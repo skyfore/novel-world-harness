@@ -1,8 +1,15 @@
 # Configuration
 
-The default configuration file is `novel-harness.yaml`. A different path can be supplied with `--config`.
+The interactive CLI can start without a configuration file. In that mode it uses:
 
-Environment references use `${NAME}` syntax and are expanded before YAML validation. Missing variables are errors.
+- workspace: current directory;
+- model: `ANTHROPIC_MODEL` or `claude-sonnet-5`;
+- credential: `ANTHROPIC_API_KEY`;
+- session storage: `.novel-harness/`.
+
+The compiler and database commands use `novel-harness.yaml`. A different path can be supplied with `--config`.
+
+Environment references use `${NAME}` syntax and are expanded before YAML validation. Missing references are errors.
 
 ## LLM profiles
 
@@ -12,34 +19,31 @@ llm:
   profiles:
     main:
       provider: anthropic
-      model: claude-sonnet-4-6
+      model: claude-sonnet-5
       apiKeyEnv: ANTHROPIC_API_KEY
-      thinkingLevel: high
+      maxTokens: 8192
     fast:
-      provider: openai
-      model: gpt-5.6-mini
-      apiKeyEnv: OPENAI_API_KEY
-      thinkingLevel: low
+      provider: anthropic
+      model: claude-haiku-4-5
+      apiKeyEnv: ANTHROPIC_API_KEY
+      maxTokens: 4096
   routing:
     controller: main
     extractor: fast
     verifier: main
+    narrator: main
 ```
 
-Profiles make model choice a deployment concern rather than hard-coded worker behavior.
+Phase 0 supports the official Anthropic API only. `apiKeyEnv` is fixed to `ANTHROPIC_API_KEY` so a repository configuration cannot select an unrelated secret environment variable. Custom endpoints, alternate protocols, external tool services, and Pi-specific settings are intentionally absent.
 
-Supported profile fields:
+Secrets stay in environment variables and must not be committed to YAML.
 
-- `provider`
-- `model`
-- `apiKeyEnv`
-- `thinkingLevel`
-- `baseUrl` (optional gateway/proxy)
-- `apiProtocol` (optional Pi API protocol for custom providers)
-- `contextWindow`
-- `maxTokens`
+## Local workspace instructions
 
-Secrets should remain in environment variables or Pi credential storage; never commit them to YAML.
+- `NOVEL.md`: project intent, source layout, terminology, constraints, and expected language. It is suitable for source control.
+- `.novel-harness/instructions.md`: machine-local or experimental additions.
+
+Both are loaded into the interactive system context. Novel source files themselves are not loaded until referenced or retrieved through a local tool.
 
 ## Database
 
@@ -51,14 +55,14 @@ database:
   statementTimeoutMs: 30000
 ```
 
-PostgreSQL is authoritative. The initial schema intentionally uses JSONB for evolving NWIR payloads while preserving first-class tables for identities, evidence, events, branches and harness jobs.
+PostgreSQL remains the authoritative store for compiled NWIR and runtime state. The interactive local file commands do not require PostgreSQL.
 
 ## Harness
 
 - `maxLoops`: hard safety bound for one compiler run.
 - `maxConcurrentWorkers`: worker concurrency cap.
-- `batchSize`: default amount of work assigned in a compiler batch.
-- `checkpointEvery`: persist/report loop state every N iterations.
+- `batchSize`: default work assigned in a compiler batch.
+- `checkpointEvery`: report cadence.
 - `targetCoverage`: readiness thresholds.
 
 ## Runtime

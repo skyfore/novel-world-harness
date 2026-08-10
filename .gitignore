@@ -1,9 +1,6 @@
-node_modules/
-dist/
-coverage/
 .env
-.env.*
-!.env.example
 .novel-harness/
-*.log
-.DS_Store
+dist/
+node_modules/
+novel-harness.yaml
+coverage/

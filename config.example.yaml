@@ -9,18 +9,14 @@ llm:
   profiles:
     main:
       provider: anthropic
-      model: claude-sonnet-4-6
+      model: claude-sonnet-5
       apiKeyEnv: ANTHROPIC_API_KEY
-      thinkingLevel: high
-      # baseUrl: https://your-gateway.example.com
-      # apiProtocol: anthropic-messages
-      # contextWindow: 200000
-      # maxTokens: 32000
+      maxTokens: 8192
     fast:
       provider: anthropic
       model: claude-haiku-4-5
       apiKeyEnv: ANTHROPIC_API_KEY
-      thinkingLevel: low
+      maxTokens: 4096
   routing:
     controller: main
     extractor: fast

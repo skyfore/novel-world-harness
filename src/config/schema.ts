@@ -1,25 +1,13 @@
 import { z } from "zod";
 
-export const thinkingLevelSchema = z.enum([
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
-
-export const llmProfileSchema = z.object({
-  provider: z.string().min(1),
-  model: z.string().min(1),
-  apiKeyEnv: z.string().min(1).optional(),
-  thinkingLevel: thinkingLevelSchema.default("medium"),
-  baseUrl: z.string().url().optional(),
-  apiProtocol: z.string().min(1).optional(),
-  contextWindow: z.number().int().positive().optional(),
-  maxTokens: z.number().int().positive().optional(),
-});
+export const llmProfileSchema = z
+  .object({
+    provider: z.literal("anthropic").default("anthropic"),
+    model: z.string().min(1),
+    apiKeyEnv: z.literal("ANTHROPIC_API_KEY").default("ANTHROPIC_API_KEY"),
+    maxTokens: z.number().int().positive().default(8_192),
+  })
+  .strict();
 
 const routingSchema = z
   .record(z.string(), z.string().min(1))

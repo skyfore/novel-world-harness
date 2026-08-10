@@ -1,7 +1,7 @@
 import process from "node:process";
 import { loadConfig } from "../config/load.js";
 import { withDb } from "../db/client.js";
-import { ok, fail, heading, warn } from "../util/terminal.js";
+import { ok, fail, heading } from "../util/terminal.js";
 
 function nodeVersionOk(): boolean {
   const [major, minor] = process.versions.node.split(".").map(Number);
@@ -14,7 +14,7 @@ export async function doctorCommand(configPath: string): Promise<void> {
 
   if (nodeVersionOk()) ok(`Node ${process.versions.node}`);
   else {
-    fail(`Node ${process.versions.node}; Pi 0.84.x requires Node >= 22.19.0`);
+    fail(`Node ${process.versions.node}; Novel World Harness requires Node >= 22.19.0`);
     failed = true;
   }
 
@@ -22,10 +22,6 @@ export async function doctorCommand(configPath: string): Promise<void> {
   ok(`Config valid: ${configPath}`);
 
   for (const [name, profile] of Object.entries(config.llm.profiles)) {
-    if (!profile.apiKeyEnv) {
-      warn(`LLM profile '${name}' has no apiKeyEnv; expecting Pi stored auth or provider-specific auth.`);
-      continue;
-    }
     if (process.env[profile.apiKeyEnv]) ok(`LLM profile '${name}' credential env present (${profile.apiKeyEnv})`);
     else {
       fail(`LLM profile '${name}' missing env ${profile.apiKeyEnv}`);

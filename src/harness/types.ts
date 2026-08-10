@@ -1,6 +1,5 @@
 import type { Db } from "../db/client.js";
 import type { HarnessConfig } from "../config/schema.js";
-import type { PiSessionFactory } from "../llm/pi-session.js";
 
 export const jobTypes = [
   "segment-source",
@@ -32,7 +31,6 @@ export type HarnessContext = {
   config: HarnessConfig;
   db: Db;
   projectId: string;
-  pi: PiSessionFactory;
 };
 
 export type HarnessJob = {

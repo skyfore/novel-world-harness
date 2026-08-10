@@ -1,0 +1,40 @@
+name: bootstrap-import
+
+on:
+  push:
+    paths:
+      - '.bootstrap/novel-world-harness.tar.gz.b64'
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decode project payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/nwh-import
+          base64 -d .bootstrap/novel-world-harness.tar.gz.b64 > /tmp/nwh.tar.gz
+          tar -xzf /tmp/nwh.tar.gz -C /tmp/nwh-import
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude '.bootstrap/' \
+            --exclude '.github/workflows/bootstrap-import.yml' \
+            /tmp/nwh-import/ ./
+          rm -rf .bootstrap
+          rm -f .github/workflows/bootstrap-import.yml
+      - name: Commit imported repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'initialize novel world harness'
+          git push origin HEAD:main

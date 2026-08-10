@@ -1,15 +1,54 @@
-[eval]:1
-process.stdout.write(require('fs').readFileSync(test/pi-session.test.ts,'utf8'))
-                                                ^
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { PiAgentSession } from "../src/agent/pi-session.js";
+import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 
-ReferenceError: test is not defined
-    at [eval]:1:49
-    at runScriptInThisContext (node:internal/vm:219:10)
-    at node:internal/process/execution:451:12
-    at [eval]-wrapper:6:24
-    at runScriptInContext (node:internal/process/execution:449:60)
-    at evalFunction (node:internal/process/execution:283:30)
-    at evalTypeScript (node:internal/process/execution:295:3)
-    at node:internal/main/eval_string:71:3
+const temporaryDirectories: string[] = [];
 
-Node.js v24.14.0
+afterEach(async () => {
+  for (const root of temporaryDirectories.splice(0)) await fs.rm(root, { recursive: true, force: true });
+});
+
+describe("PiAgentSession", () => {
+  it("uses Pi with an in-memory session without making a model request", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-"));
+    temporaryDirectories.push(root);
+    await fs.writeFile(path.join(root, "NOVEL.md"), "# Test novel\n", "utf8");
+    const session = await PiAgentSession.create({
+      workspace: await LocalFileWorkspace.create(root),
+      saveSession: false,
+      profile: {
+        provider: "anthropic",
+        model: "claude-sonnet-5",
+        thinkingLevel: "medium",
+        maxTokens: 8_192,
+      },
+    });
+    expect(session.model).toBe("anthropic/claude-sonnet-5");
+    expect(session.messageCount).toBe(0);
+    expect(session.sessionFile).toBeUndefined();
+    session.dispose();
+  });
+
+  it("registers a configured custom provider through Pi", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-custom-"));
+    temporaryDirectories.push(root);
+    const session = await PiAgentSession.create({
+      workspace: await LocalFileWorkspace.create(root),
+      saveSession: false,
+      profile: {
+        provider: "local-openai",
+        model: "novel-model",
+        baseUrl: "http://127.0.0.1:8080/v1",
+        apiProtocol: "openai-completions",
+        thinkingLevel: "off",
+        contextWindow: 32_768,
+        maxTokens: 4_096,
+      },
+    });
+    expect(session.model).toBe("local-openai/novel-model");
+    session.dispose();
+  });
+});

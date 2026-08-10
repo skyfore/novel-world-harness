@@ -14,7 +14,7 @@ export async function doctorCommand(configPath: string): Promise<void> {
 
   if (nodeVersionOk()) ok(`Node ${process.versions.node}`);
   else {
-    fail(`Node ${process.versions.node}; Pi 0.82.x requires Node >= 22.19.0`);
+    fail(`Node ${process.versions.node}; Pi 0.84.x requires Node >= 22.19.0`);
     failed = true;
   }
 

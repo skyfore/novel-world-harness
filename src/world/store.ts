@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import type { z } from "zod";
 import { canonicalJson, assertContentHash, contentHash } from "./canonical.js";
 import {
@@ -23,6 +24,8 @@ const BRANCH_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 type ObjectKind = "deltas" | "knowledge" | "events" | "commits";
 type Schema<T> = z.ZodType<T>;
 type BranchHead = { version: 1; commitId: CommitId; updatedAt: string };
+type BranchLock = { version: 1; pid: number; hostname: string; createdAt: string };
+export type BranchLockStatus = { present: boolean; stale: boolean; metadata?: BranchLock };
 
 function assertBranchId(id: string): void {
   if (!BRANCH_ID.test(id)) throw new Error(`Invalid branch id: ${id}`);
@@ -143,15 +146,60 @@ export class BranchStore {
     const lockPath = path.join(directory, "lock");
     let handle: fs.FileHandle | undefined;
     try {
-      handle = await fs.open(lockPath, "wx", 0o600);
+      handle = await this.acquireLock(id, lockPath);
       return await fn();
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Branch is locked: ${id}`);
-      throw error;
     } finally {
       await handle?.close();
       if (handle) await fs.rm(lockPath, { force: true });
     }
+  }
+  async inspectLock(id: BranchId): Promise<BranchLockStatus> {
+    assertBranchId(id);
+    const lockPath = path.join(this.branchDirectory(id), "lock");
+    try {
+      const raw = await fs.readFile(lockPath, "utf8");
+      let metadata: BranchLock | undefined;
+      try {
+        const value = JSON.parse(raw) as BranchLock;
+        if (value.version === 1 && Number.isInteger(value.pid) && value.pid > 0 && typeof value.hostname === "string" && typeof value.createdAt === "string") metadata = value;
+      } catch {
+        // A process may be between exclusive create and metadata write.
+      }
+      return { present: true, stale: await this.isStaleLock(lockPath, metadata), ...(metadata ? { metadata } : {}) };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { present: false, stale: false };
+      throw error;
+    }
+  }
+  private async acquireLock(id: BranchId, lockPath: string): Promise<fs.FileHandle> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const handle = await fs.open(lockPath, "wx", 0o600);
+        const metadata: BranchLock = { version: 1, pid: process.pid, hostname: os.hostname(), createdAt: new Date().toISOString() };
+        await handle.writeFile(`${JSON.stringify(metadata)}\n`, "utf8");
+        return handle;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const status = await this.inspectLock(id);
+        if (attempt > 0 || !status.stale) throw new Error(`Branch is locked: ${id}`);
+        await fs.rm(lockPath, { force: true });
+      }
+    }
+    throw new Error(`Branch is locked: ${id}`);
+  }
+  private async isStaleLock(lockPath: string, metadata?: BranchLock): Promise<boolean> {
+    if (metadata?.hostname === os.hostname()) {
+      try {
+        process.kill(metadata.pid, 0);
+        return false;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+        return false;
+      }
+    }
+    if (metadata) return false;
+    const stat = await fs.stat(lockPath);
+    return Date.now() - stat.mtimeMs > 5 * 60_000;
   }
   private async writeHead(id: BranchId, commitId: CommitId): Promise<void> {
     assertContentHash(commitId);

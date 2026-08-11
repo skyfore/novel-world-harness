@@ -2,7 +2,7 @@ import { z } from "zod";
 import { contentHash } from "./canonical.js";
 import type { ActorProposalCandidate, CharacterGoal, CharacterModel } from "./actors.js";
 import type { WorldEngine } from "./engine.js";
-import { KnowledgeProjector, type ActorWorldView } from "./knowledge.js";
+import { isActionableKnowledge, KnowledgeProjector, type ActorWorldView } from "./knowledge.js";
 import { knowledgeDeltaSchema, predicateSchema, stateDeltaSchema, type EvidenceRef } from "./model.js";
 
 export const actorActionTemplateSchema = z
@@ -49,7 +49,7 @@ export function modelActorProposalSource(
       const entity = engine.context.entities.get(goal.actorId);
       if (!entity || entity.kind !== "character") continue;
       const actor = await knowledge.view(goal.actorId, commitId);
-      const known = new Set(actor.knowledge.map((entry) => entry.fact.claimId));
+      const known = new Set(actor.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
       if (goal.requiresKnowledge.some((claimId) => !known.has(claimId))) continue;
       if (goal.blockedByKnowledge?.some((claimId) => known.has(claimId))) continue;
 

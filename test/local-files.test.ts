@@ -84,5 +84,14 @@ describe("expandFileMentions", () => {
     const { workspace } = await fixture();
     await expect(expandFileMentions("联系 editor@example.com", workspace)).resolves.toBe("联系 editor@example.com");
   });
+
+  it("does not recursively expand file mentions found inside an attachment", async () => {
+    const { root, workspace } = await fixture();
+    await fs.writeFile(path.join(root, "chapters", "one.md"), "转到 @chapters/two.md", "utf8");
+    const result = await expandFileMentions("查看 @chapters/one.md", workspace);
+    expect(result.match(/<attached-file/g)).toHaveLength(1);
+    expect(result).toContain("@chapters/two.md");
+    expect(result).not.toContain("曹操离开大厅");
+  });
 });
 

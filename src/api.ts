@@ -20,7 +20,7 @@ export { KnowledgeProjector, type ActorWorldView } from "./world/knowledge.js";
 export { isNarrativeInterpretation, NarrativeMetaView, type NarrativeObservation, type NarrativeMetaKind } from "./world/meta.js";
 export { modelActorProposalSource, actorActionTemplateSchema, type ActorActionTemplate, type ActorReasoner, type ActorReasoningInput } from "./world/model-actor-policy.js";
 export * from "./world/model.js";
-export { NarrativeRenderer, type NarrativeAdapter, type NarrativeEvent, type NarrativeFrame, type NarrativeStyle } from "./world/narrative.js";
+export { NarrativeRenderer, type ActorNarrativeFrame, type NarrativeAdapter, type NarrativeEvent, type NarrativeFrame, type NarrativeStyle, type OmniscientNarrativeFrame } from "./world/narrative.js";
 export { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "./world/possibility-model.js";
 export { runCanonReplay, verifyHistoryReplay, type CanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";
 export { WorldRuntime, adjudicateActorCandidates, type MoveInput, type MoveResult } from "./world/runtime.js";

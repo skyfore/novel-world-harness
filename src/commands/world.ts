@@ -2,18 +2,19 @@ import fs from "node:fs/promises";
 import { stdout } from "node:process";
 import { z } from "zod";
 import { validateEventProposal } from "../world/engine.js";
+import { diffWorldBranches } from "../world/diff.js";
 import { fsckWorld } from "../world/fsck.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { KnowledgeProjector } from "../world/knowledge.js";
-import { eventProposalSchema, predicateSchema, stateDeltaSchema, type CommitId, type WorldState } from "../world/model.js";
+import { eventProposalSchema, predicateSchema, stateDeltaSchema, type CommitId } from "../world/model.js";
 import { NarrativeRenderer } from "../world/narrative.js";
-import { runCanonReplay } from "../world/replay.js";
+import { runIsolatedCanonReplay } from "../world/replay.js";
 import { WorldSnapshotStore } from "../world/snapshot.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 
 async function openWorld(root: string) {
   const { engine, runtime, actorModels } = await openWorkspaceWorld(root);
-  return { context: engine.context, engine, actors: actorModels, runtime };
+  return { engine, actors: actorModels, runtime };
 }
 
 export async function worldCreateCommand(root: string, branchId: string, seedPath?: string): Promise<void> {
@@ -99,8 +100,9 @@ export async function worldRenderCommand(root: string, branchId: string, actorId
 const proposalFileSchema = eventProposalSchema.omit({ branchId: true, expectedParentCommit: true });
 
 export async function worldValidateCommand(root: string, branchId: string, proposalPath: string): Promise<void> {
-  const { engine, context } = await openWorld(root);
+  const { engine } = await openWorld(root);
   const head = await engine.branches.readHead(branchId);
+  const context = await engine.contextForCommit(head);
   const payload = proposalFileSchema.parse(JSON.parse(await fs.readFile(proposalPath, "utf8")));
   const proposal = eventProposalSchema.parse({ ...payload, branchId, expectedParentCommit: head });
   const state = await engine.projector.project(head);
@@ -124,16 +126,16 @@ export async function worldMoveCommand(root: string, branchId: string, proposalP
 
 export async function worldDiffCommand(root: string, leftBranch: string, rightBranch: string): Promise<void> {
   const { engine } = await openWorld(root);
-  const [leftHead, rightHead] = await Promise.all([engine.branches.readHead(leftBranch), engine.branches.readHead(rightBranch)]);
-  const [left, right] = await Promise.all([engine.projector.project(leftHead), engine.projector.project(rightHead)]);
-  stdout.write(`${JSON.stringify({ left: { branch: leftBranch, head: leftHead }, right: { branch: rightBranch, head: rightHead }, differences: diffWorldStates(left, right) }, null, 2)}\n`);
+  stdout.write(`${JSON.stringify(await diffWorldBranches(engine, leftBranch, rightBranch), null, 2)}\n`);
 }
 
 const replayFileSchema = z.array(z.object({ id: z.string().min(1), label: z.string().min(1), expected: z.array(predicateSchema) }).strict());
-export async function worldReplayCommand(root: string, branchId: string, checkpointPath: string, maxMoves: number): Promise<void> {
+export async function worldReplayCommand(root: string, branchId: string, checkpointPath: string, maxMoves: number, outputBranch?: string): Promise<void> {
   const { runtime } = await openWorld(root);
   const checkpoints = replayFileSchema.parse(JSON.parse(await fs.readFile(checkpointPath, "utf8")));
-  const result = await runCanonReplay(runtime, branchId, checkpoints, maxMoves);
+  const sourceHead = await runtime.engine.branches.readHead(branchId);
+  const replayBranch = outputBranch ?? `replay-${branchId}-${sourceHead.slice(0, 8)}-${Date.now().toString(36)}`;
+  const result = await runIsolatedCanonReplay(runtime, branchId, replayBranch, checkpoints, maxMoves);
   stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (!result.passed) process.exitCode = 3;
 }
@@ -151,23 +153,4 @@ export async function worldFsckCommand(root: string): Promise<void> {
   const report = await fsckWorld(engine);
   stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   if (!report.ok) process.exitCode = 4;
-}
-
-function diffWorldStates(left: WorldState, right: WorldState): Array<{ entityId: string; field: string; left: unknown; right: unknown }> {
-  const entityIds = new Set([...Object.keys(left.values), ...Object.keys(right.values)]);
-  const differences: Array<{ entityId: string; field: string; left: unknown; right: unknown }> = [];
-  for (const entityId of [...entityIds].sort()) {
-    const leftFields = left.values[entityId] ?? {};
-    const rightFields = right.values[entityId] ?? {};
-    const fields = new Set([...Object.keys(leftFields), ...Object.keys(rightFields)]);
-    for (const field of [...fields].sort()) {
-      const leftValue = leftFields[field];
-      const rightValue = rightFields[field];
-      if (JSON.stringify(leftValue) !== JSON.stringify(rightValue)) differences.push({ entityId, field, left: leftValue, right: rightValue });
-    }
-  }
-  const leftRules = [...left.activeRuleIds].sort();
-  const rightRules = [...right.activeRuleIds].sort();
-  if (JSON.stringify(leftRules) !== JSON.stringify(rightRules)) differences.push({ entityId: "$world", field: "activeRuleIds", left: leftRules, right: rightRules });
-  return differences;
 }

@@ -59,14 +59,21 @@ describe("NarrativeRenderer", () => {
     expect((await engine.projector.project(head)).values.hero?.["character.title"]).toBe("Commander");
   });
 
-  it("actor POV exposes an actor view instead of compiler omniscience", async () => {
+  it("actor POV exposes only an actor-scoped frame", async () => {
     const { engine, head } = await fixture();
-    const renderer = new NarrativeRenderer(engine, (frame) => JSON.stringify(frame.actorView));
+    const renderer = new NarrativeRenderer(engine, (frame) => JSON.stringify(frame));
     const output = await renderer.render("main", head, { pointOfView: "actor", actorId: "hero" });
     const parsed = JSON.parse(output) as Record<string, unknown>;
-    expect(parsed.actorId).toBe("hero");
-    expect(parsed).toHaveProperty("selfState");
-    expect(parsed).not.toHaveProperty("worldState");
+    expect(parsed.pointOfView).toBe("actor");
+    expect(parsed).not.toHaveProperty("state");
+    expect(parsed.actorView).toMatchObject({ actorId: "hero" });
+    expect(parsed.events).toBeInstanceOf(Array);
+  });
+
+  it("requires an actor id for actor point of view", async () => {
+    const { engine, head } = await fixture();
+    const renderer = new NarrativeRenderer(engine);
+    await expect(renderer.render("main", head, { pointOfView: "actor" })).rejects.toThrow("requires actorId");
   });
 });
 

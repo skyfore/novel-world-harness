@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { CanonicalCompiler, CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
+import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
 import {
   canonicalEventSchema,
   claimSchema,
@@ -14,7 +15,7 @@ import {
 } from "../world/model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 
-export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule";
+export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type BatchAcceptResult = {
   accepted: Array<{ id: string; kind: CanonicalProposalKind }>;
@@ -34,6 +35,7 @@ export class CompilerValidator {
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors, warnings);
     if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, events, rules, errors, warnings);
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors, warnings);
+    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, rules, errors);
     return { accepted: errors.length === 0, errors, warnings };
   }
   private validateEntity(entity: Entity, errors: ValidationIssue[], warnings: ValidationIssue[]): void {
@@ -50,21 +52,28 @@ export class CompilerValidator {
     for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
     for (const parent of event.causalParents) if (!events.has(parent)) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parent}`, "causalParents"));
     for (const predicate of event.preconditions) this.validatePredicate(predicate, entities, rules, errors);
-    for (let index = 0; index < event.observedOutcome.operations.length; index += 1) {
-      const operation = event.observedOutcome.operations[index]!;
-      try {
-        this.stateSchema.validateOperation(operation, entities);
-        if ((operation.op === "activate-rule" || operation.op === "deactivate-rule") && !rules.has(operation.ruleId)) errors.push(issue("UNKNOWN_RULE", `Unknown rule ${operation.ruleId}`, `observedOutcome.operations.${index}`));
-      } catch (error) {
-        errors.push(issue("INVALID_STATE_OPERATION", error instanceof Error ? error.message : String(error), `observedOutcome.operations.${index}`));
-      }
-    }
+    this.validateOperations(event.observedOutcome.operations, entities, rules, errors, "observedOutcome.operations");
   }
   private validateRule(rule: WorldRule, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[], _warnings: ValidationIssue[]): void {
     if (!rule.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Rule ${rule.id} has no source evidence`, "evidence"));
     const visibleRules = new Map(rules);
     visibleRules.set(rule.id, rule);
     for (const predicate of [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]) this.validatePredicate(predicate, entities, visibleRules, errors);
+  }
+  private validateInitialWorld(initial: InitialWorld, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
+    if (!initial.evidence.length) errors.push(issue("MISSING_EVIDENCE", "Initial world has no source evidence", "evidence"));
+    this.validateOperations(initial.delta.operations, entities, rules, errors, "delta.operations");
+  }
+  private validateOperations(operations: CanonicalEvent["observedOutcome"]["operations"], entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[], pathPrefix: string): void {
+    for (let index = 0; index < operations.length; index += 1) {
+      const operation = operations[index]!;
+      try {
+        this.stateSchema.validateOperation(operation, entities);
+        if ((operation.op === "activate-rule" || operation.op === "deactivate-rule") && !rules.has(operation.ruleId)) errors.push(issue("UNKNOWN_RULE", `Unknown rule ${operation.ruleId}`, `${pathPrefix}.${index}`));
+      } catch (error) {
+        errors.push(issue("INVALID_STATE_OPERATION", error instanceof Error ? error.message : String(error), `${pathPrefix}.${index}`));
+      }
+    }
   }
   private validatePredicate(predicate: Predicate, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
     if (predicate.op === "all" || predicate.op === "any") { for (const item of predicate.items) this.validatePredicate(item, entities, rules, errors); return; }
@@ -92,11 +101,13 @@ export class CompilerCommitService {
   readonly proposals: ProposalStore;
   readonly compiler: CanonicalCompiler;
   readonly validator: CompilerValidator;
+  readonly initialWorld: InitialWorldStore;
   constructor(workspaceRoot: string) {
     this.canon = new CanonicalModelStore(workspaceRoot);
     this.proposals = new ProposalStore(workspaceRoot);
     this.compiler = new CanonicalCompiler(this.proposals, this.canon);
     this.validator = new CompilerValidator(this.canon);
+    this.initialWorld = new InitialWorldStore(workspaceRoot);
   }
   async accept(kind: CanonicalProposalKind, id: string): Promise<CompilerValidation> {
     const schema = schemaFor(kind);
@@ -106,11 +117,15 @@ export class CompilerCommitService {
     if (kind === "entity") await this.compiler.acceptEntity(id);
     else if (kind === "claim") await this.compiler.acceptClaim(id);
     else if (kind === "canonical-event") await this.compiler.acceptEvent(id);
-    else await this.compiler.acceptRule(id);
+    else if (kind === "world-rule") await this.compiler.acceptRule(id);
+    else {
+      await this.initialWorld.put(initialWorldSchema.parse(proposal.payload));
+      await this.proposals.transition(id, "pending", "accepted");
+    }
     return validation;
   }
   async acceptAllValid(): Promise<BatchAcceptResult> {
-    const order: CanonicalProposalKind[] = ["entity", "claim", "world-rule", "canonical-event"];
+    const order: CanonicalProposalKind[] = ["entity", "claim", "world-rule", "initial-world", "canonical-event"];
     const accepted: BatchAcceptResult["accepted"] = [];
     let changed = true;
     while (changed) {
@@ -119,10 +134,7 @@ export class CompilerCommitService {
       for (const kind of order) {
         for (const proposal of pending.filter((item) => item.kind === kind)) {
           const validation = await this.accept(kind, proposal.id);
-          if (validation.accepted) {
-            accepted.push({ id: proposal.id, kind });
-            changed = true;
-          }
+          if (validation.accepted) { accepted.push({ id: proposal.id, kind }); changed = true; }
         }
       }
     }
@@ -130,10 +142,7 @@ export class CompilerCommitService {
     const blocked: BatchAcceptResult["blocked"] = [];
     const staging: BatchAcceptResult["staging"] = [];
     for (const proposal of remaining) {
-      if (!isCanonicalKind(proposal.kind)) {
-        staging.push({ id: proposal.id, kind: proposal.kind });
-        continue;
-      }
+      if (!isCanonicalKind(proposal.kind)) { staging.push({ id: proposal.id, kind: proposal.kind }); continue; }
       const schema = schemaFor(proposal.kind);
       const envelope = await this.proposals.read("pending", proposal.id, schema);
       const validation = await this.validator.validate(proposal.kind, envelope.payload);
@@ -143,6 +152,6 @@ export class CompilerCommitService {
   }
 }
 
-function isCanonicalKind(kind: string): kind is CanonicalProposalKind { return kind === "entity" || kind === "claim" || kind === "canonical-event" || kind === "world-rule"; }
-function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny { if (kind === "entity") return entitySchema; if (kind === "claim") return claimSchema; if (kind === "canonical-event") return canonicalEventSchema; return worldRuleSchema; }
+function isCanonicalKind(kind: string): kind is CanonicalProposalKind { return kind === "entity" || kind === "claim" || kind === "canonical-event" || kind === "world-rule" || kind === "initial-world"; }
+function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny { if (kind === "entity") return entitySchema; if (kind === "claim") return claimSchema; if (kind === "canonical-event") return canonicalEventSchema; if (kind === "initial-world") return initialWorldSchema; return worldRuleSchema; }
 function issue(code: string, message: string, path?: string): ValidationIssue { return path ? { code, message, path } : { code, message }; }

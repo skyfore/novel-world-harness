@@ -80,3 +80,4 @@ function safeId(value: string): string {
   if (!SAFE_ID.test(value)) throw new Error(`Unsafe possibility id: ${value}`);
   return value;
 }
+

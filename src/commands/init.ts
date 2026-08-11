@@ -47,3 +47,4 @@ export async function initCommand(target = process.cwd()): Promise<void> {
   await createIfMissing(path.join(root, "novel-harness.yaml"), config);
   await createIfMissing(path.join(root, "NOVEL.md"), NOVEL_INSTRUCTIONS);
 }
+

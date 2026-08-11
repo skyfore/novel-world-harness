@@ -82,3 +82,4 @@ describe("world fsck", () => {
     expect(report.issues.some((issue) => issue.code === "BRANCH_REPLAY_FAILED")).toBe(true);
   });
 });
+

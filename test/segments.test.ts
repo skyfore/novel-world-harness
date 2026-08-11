@@ -60,3 +60,4 @@ describe("source segmentation", () => {
     expect(manifest.segments.every((segment) => segment.endLine - segment.startLine + 1 <= 160)).toBe(true);
   });
 });
+

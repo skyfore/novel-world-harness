@@ -9,29 +9,6 @@ const baseConfig = {
     profiles: { main: { provider: "anthropic", model: "claude-sonnet-5" } },
     routing: {},
   },
-  harness: {
-    maxLoops: 10,
-    maxConcurrentWorkers: 1,
-    batchSize: 1,
-    checkpointEvery: 1,
-    targetCoverage: {
-      source: 0.99,
-      evidence: 0.99,
-      entityResolution: 0.99,
-      majorEvents: 0.98,
-      temporalConsistency: 0.99,
-      stateDelta: 0.95,
-      epistemic: 0.9,
-      causality: 0.9,
-    },
-  },
-  runtime: {
-    defaultPlayerMode: "canon-character" as const,
-    canonAttractorWeight: 0.25,
-    divergenceDisableCanonAt: 0.8,
-    snapshotEveryEvents: 100,
-  },
-  logging: { level: "info" as const },
 };
 
 describe("llmProfileSchema", () => {

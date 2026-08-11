@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -8,18 +7,16 @@ import { CompilerCommitService } from "../src/compiler/validator.js";
 import { loadWorldContext } from "../src/world/context.js";
 import { WorldEngine } from "../src/world/engine.js";
 import { InitialWorldStore } from "../src/world/initial.js";
+import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
-
-function evidence() {
-  return [{ span: { sourceId: "novel", startLine: 1, endLine: 1, quoteHash: crypto.createHash("sha256").update("opening").digest("hex") }, strength: "explicit" as const }];
-}
 
 describe("canonical initial world", () => {
   it("requires canonical entities before accepting the seed and replays it as genesis", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-initial-"));
     roots.push(root);
+    const source = await createEvidenceFixture(root, "opening\n");
     const proposals = new CompilerProposalService(root);
     const commits = new CompilerCommitService(root);
 
@@ -28,7 +25,7 @@ describe("canonical initial world", () => {
       payload: {
         version: 1,
         delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
-        evidence: evidence(),
+        evidence: source.evidence("opening"),
       },
       generatedBy: { worker: "test" },
     });
@@ -37,7 +34,7 @@ describe("canonical initial world", () => {
 
     await proposals.submit("entity", {
       proposalId: "hero-entity",
-      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: ["H"], evidence: evidence() },
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: ["H"], evidence: source.evidence("opening") },
       generatedBy: { worker: "test" },
     });
     expect((await commits.accept("entity", "hero-entity")).accepted).toBe(true);

@@ -94,7 +94,7 @@ The following data is rebuildable and MUST NOT become semantic truth:
 - possibility frontier materializations;
 - scheduler scores;
 - branch divergence metrics;
-- readiness metrics;
+- corpus evaluation reports with explicit denominators;
 - rendered prose;
 - LLM session transcripts.
 
@@ -434,29 +434,28 @@ Actor proposal generation receives `WorldView(actor, branch, commit)`, not omnis
 
 ## 6. Local storage architecture
 
-Keep the current `.novel-harness/` control-plane files for project, sources, jobs, metrics, and Pi sessions. Add a separate world data namespace rather than expanding `WorkspaceStore` into a monolith.
+Keep the `.novel-harness/` control-plane files for project metadata, sources, deterministic evidence segments, compiler batch checkpoints, proposals, and Pi sessions. World data remains a separate namespace rather than expanding `WorkspaceStore` into a monolith.
 
 ```text
 .novel-harness/
 ├── project.json
 ├── sources/
-├── jobs/
-├── metrics.json
+├── segments/
 ├── sessions/
 └── world/
     └── v1/
-        ├── schema/
-        │   ├── state-fields.json
-        │   └── model.json
+        ├── compiler/batches/
         ├── canon/
-        │   ├── entities/
-        │   ├── claims/
-        │   ├── events/
-        │   ├── rules/
-        │   └── indexes/
+        │   ├── entities/{refs,revisions}/
+        │   ├── claims/{refs,revisions}/
+        │   ├── events/{refs,revisions}/
+        │   ├── rules/{refs,revisions}/
+        │   ├── actors/
+        │   └── possibilities/{refs,revisions}/
         ├── objects/
         │   ├── events/<sha256>.json
         │   ├── deltas/<sha256>.json
+        │   ├── knowledge/<sha256>.json
         │   └── commits/<sha256>.json
         ├── branches/
         │   └── <branch-id>/
@@ -467,7 +466,6 @@ Keep the current `.novel-harness/` control-plane files for project, sources, job
         │   ├── pending/
         │   ├── accepted/
         │   └── rejected/
-        ├── validations/
         ├── snapshots/
         │   └── <commit-sha>.json
         └── frontier/
@@ -507,7 +505,7 @@ Phase 1 is **single-writer per branch**.
 
 Do not solve distributed transactions before there is a demonstrated need.
 
-The existing file-backed harness job queue is acceptable for the initial single-process compiler, but it must not be treated as safe multi-process claim coordination.
+Compiler batch checkpoints record completed bounded batches; they are not a worker queue and provide no multi-process claim coordination. The current compiler command is single-process.
 
 ## 7. World projection
 
@@ -841,7 +839,7 @@ This distinction should also exist in future CLI commands and model tools.
 
 ## 14. Compiler architecture
 
-The compiler remains gap-driven, but its workers should output explicit artifact proposals rather than arbitrary JSON blobs.
+The current compiler is source-batch-driven: one bounded evidence batch is analyzed at a time and produces explicit artifact proposals rather than arbitrary JSON blobs. A future gap-driven refinement loop may schedule targeted follow-up batches, but it is not implemented today.
 
 ### 14.1 Proposal envelope
 
@@ -862,31 +860,25 @@ type ArtifactProposal<T> = {
 };
 ```
 
-### 14.2 Compiler worker sequence for the vertical slice
+### 14.2 Current compiler sequence
 
 ```text
 segment-source
   ↓
-extract-entity-proposals
+bounded/resumable evidence batches
   ↓
-resolve-entities
+Pi model + typed propose_* tools
   ↓
-extract-canonical-event-proposals
+pending proposal store
   ↓
-derive-precondition/causality proposals
+evidence + cross-artifact validation
   ↓
-derive-state-delta proposals
-  ↓
-extract temporal-rule proposals
-  ↓
-validate canonical artifacts
-  ↓
-commit canonical model
+explicit canonical/possibility acceptance
   ↓
 canon replay evaluation
 ```
 
-Epistemic and narrative/meta workers join once the base event/state loop works.
+This is currently one general compiler-model pass per batch, not a implemented fleet of independent extractor/resolver workers. Separate workers remain an optimization to justify with corpus evidence.
 
 ### 14.3 Model-side mutation tools
 
@@ -1064,9 +1056,9 @@ Choose one constrained scene sequence containing at least:
 
 This fixture becomes the first vertical-slice acceptance test.
 
-## 20. Readiness metrics evolution
+## 20. Evaluation metrics
 
-The current extraction metrics remain useful, but runtime readiness should add metrics that reflect executable-world correctness:
+Inventory counts are not readiness metrics. Once annotated gold data exists, evaluation should include executable-world correctness dimensions such as:
 
 - `replayDeterminism`
 - `invariantPassRate`
@@ -1193,22 +1185,18 @@ Each should be introduced only when a concrete vertical-slice limitation proves 
 
 ## 23. Immediate implementation backlog
 
-The next code PR after this architecture work should be intentionally narrow:
+The semantic core and typed compiler proposal boundary now exist. The next milestone should prove the product loop rather than add another storage abstraction:
 
-1. add `src/world/model/*` contracts with Zod/TypeBox runtime validation;
-2. add canonical serialization + SHA-256 object IDs;
-3. add `WorldObjectStore` and `BranchStore` under `.novel-harness/world/v1/`;
-4. add a minimal state schema registry;
-5. add predicate evaluator;
-6. add `applyStateDelta` as a pure function;
-7. add `WorldProjector` with genesis replay only;
-8. add `validateEventProposal` with a small invariant set;
-9. add atomic branch commit with stale-parent protection;
-10. add tests for determinism, crash boundary, and branch isolation;
-11. hand-author one tiny world fixture before adding LLM proposal tools;
-12. only then expose `propose_canonical_event` and `propose_state_delta` through Pi.
+1. check in one annotated end-to-end novel slice and expose its compiler evaluation as a repeatable command;
+2. orchestrate ingest, bounded compile, proposal review summary, audit, and branch creation without bypassing explicit acceptance;
+3. translate a natural-language player action into a pending typed event proposal using only the actor-scoped view;
+4. add an interactive character session that shows perception, validation results, committed consequences, and the next prompt;
+5. connect one Pi-backed actor reasoner behind `ActorWorldView + CharacterGoal + CharacterModel`;
+6. connect one Pi-backed narrative adapter behind the immutable `NarrativeFrame` contract;
+7. measure epistemic leakage, event/state-delta fidelity, divergence durability, and narrative quality on several genres;
+8. refine schemas and scheduling only from observed corpus failures.
 
-That sequence intentionally proves the semantic core before allowing the model to generate world mutations.
+See [implementation-status.md](implementation-status.md) for the verified current boundary.
 
 ## 24. Success criterion
 

@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { EvidenceVerifier } from "./evidence.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
 import { CanonicalCompiler, CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
@@ -10,6 +11,7 @@ import {
   type CanonicalEvent,
   type Claim,
   type Entity,
+  type EvidenceRef,
   type Predicate,
   type ValidationIssue,
   type WorldRule,
@@ -146,6 +148,7 @@ export class CompilerCommitService {
   readonly validator: CompilerValidator;
   readonly initialWorld: InitialWorldStore;
   readonly actorModels: ActorModelStore;
+  private readonly evidence: EvidenceVerifier;
 
   constructor(workspaceRoot: string) {
     this.canon = new CanonicalModelStore(workspaceRoot);
@@ -154,12 +157,13 @@ export class CompilerCommitService {
     this.validator = new CompilerValidator(this.canon);
     this.initialWorld = new InitialWorldStore(workspaceRoot);
     this.actorModels = new ActorModelStore(workspaceRoot);
+    this.evidence = new EvidenceVerifier(workspaceRoot);
   }
 
   async accept(kind: CanonicalProposalKind, id: string): Promise<CompilerValidation> {
     const schema = schemaFor(kind);
     const proposal = await this.proposals.read("pending", id, schema);
-    const validation = await this.validator.validate(kind, proposal.payload);
+    const validation = await this.validateProposal(kind, proposal.payload, proposal.evidence);
     if (!validation.accepted) return validation;
     if (kind === "entity") await this.compiler.acceptEntity(id);
     else if (kind === "claim") await this.compiler.acceptClaim(id);
@@ -193,10 +197,18 @@ export class CompilerCommitService {
       if (!isCanonicalKind(proposal.kind)) { staging.push({ id: proposal.id, kind: proposal.kind }); continue; }
       const schema = schemaFor(proposal.kind);
       const envelope = await this.proposals.read("pending", proposal.id, schema);
-      const validation = await this.validator.validate(proposal.kind, envelope.payload);
+      const validation = await this.validateProposal(proposal.kind, envelope.payload, envelope.evidence);
       blocked.push({ id: proposal.id, kind: proposal.kind, errors: validation.errors });
     }
     return { accepted, blocked, staging };
+  }
+
+  private async validateProposal(kind: CanonicalProposalKind, payload: unknown, envelopeEvidence: readonly EvidenceRef[]): Promise<CompilerValidation> {
+    const validation = await this.validator.validate(kind, payload);
+    const payloadEvidence = (payload as { evidence?: EvidenceRef[] }).evidence ?? [];
+    const verified = await this.evidence.verifyAll([...payloadEvidence, ...envelopeEvidence]);
+    const errors = [...validation.errors, ...verified.issues];
+    return { accepted: errors.length === 0, errors, warnings: validation.warnings };
   }
 }
 

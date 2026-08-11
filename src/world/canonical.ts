@@ -23,3 +23,4 @@ export function contentHash(value: unknown): string {
 export function assertContentHash(hash: string): void {
   if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error(`Invalid SHA-256 object hash: ${hash}`);
 }
+

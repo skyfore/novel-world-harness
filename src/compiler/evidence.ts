@@ -21,15 +21,29 @@ export class EvidenceVerifier {
   constructor(private readonly workspaceRoot: string) {}
 
   async verifyAll(evidence: readonly EvidenceRef[]): Promise<EvidenceVerification> {
+    this.cache = undefined;
     const issues: ValidationIssue[] = [];
-    for (let index = 0; index < evidence.length; index += 1) {
-      const result = await this.verify(evidence[index]!);
-      for (const issue of result.issues) issues.push({ ...issue, path: issue.path ? `evidence.${index}.${issue.path}` : `evidence.${index}` });
+    try {
+      for (let index = 0; index < evidence.length; index += 1) {
+        const result = await this.verifyCached(evidence[index]!);
+        for (const issue of result.issues) issues.push({ ...issue, path: issue.path ? `evidence.${index}.${issue.path}` : `evidence.${index}` });
+      }
+      return { valid: issues.length === 0, issues };
+    } finally {
+      this.cache = undefined;
     }
-    return { valid: issues.length === 0, issues };
   }
 
   async verify(reference: EvidenceRef): Promise<EvidenceVerification> {
+    this.cache = undefined;
+    try {
+      return await this.verifyCached(reference);
+    } finally {
+      this.cache = undefined;
+    }
+  }
+
+  private async verifyCached(reference: EvidenceRef): Promise<EvidenceVerification> {
     const span = reference.span;
     const cached = await this.getSource(span.sourceId);
     if (!cached) {

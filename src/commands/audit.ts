@@ -8,3 +8,4 @@ export async function auditCommand(root: string): Promise<void> {
     process.exitCode = 5;
   }
 }
+

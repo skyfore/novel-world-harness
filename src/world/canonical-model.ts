@@ -1,7 +1,8 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { z } from "zod";
-import { canonicalJson } from "./canonical.js";
+import { canonicalJson, contentHash } from "./canonical.js";
 import {
   artifactProposalSchema,
   canonicalEventSchema,
@@ -16,7 +17,9 @@ import {
 } from "./model.js";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-type CanonicalKind = "entities" | "claims" | "events" | "rules";
+export type CanonicalKind = "entities" | "claims" | "events" | "rules";
+export type CanonicalRevisionRef = { id: string; hash: string };
+type StoredCanonicalRef = { version: 1; id: string; hash: string };
 export type ProposalStatus = "pending" | "accepted" | "rejected";
 export type ProposalSummary = { id: string; kind: string; schemaVersion: number; createdAt: string; worker: string };
 
@@ -35,6 +38,13 @@ async function writeImmutable(filePath: string, value: unknown): Promise<void> {
   }
 }
 
+async function atomicJson(filePath: string, value: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(temporary, `${canonicalJson(value)}\n`, { encoding: "utf8", mode: 0o600 });
+  await fs.rename(temporary, filePath);
+}
+
 export class CanonicalModelStore {
   readonly root: string;
   constructor(workspaceRoot: string) { this.root = path.join(workspaceRoot, ".novel-harness", "world", "v1", "canon"); }
@@ -50,16 +60,82 @@ export class CanonicalModelStore {
   listClaims(): Promise<Claim[]> { return this.list("claims", claimSchema); }
   listEvents(): Promise<CanonicalEvent[]> { return this.list("events", canonicalEventSchema); }
   listRules(): Promise<WorldRule[]> { return this.list("rules", worldRuleSchema); }
-  private put(kind: CanonicalKind, id: string, value: unknown): Promise<void> { return writeImmutable(path.join(this.root, kind, `${safeId(id)}.json`), value); }
-  private async get<T>(kind: CanonicalKind, id: string, schema: z.ZodType<T>): Promise<T> { return schema.parse(JSON.parse(await fs.readFile(path.join(this.root, kind, `${safeId(id)}.json`), "utf8"))); }
+  async currentRevision(kind: CanonicalKind, idInput: string): Promise<CanonicalRevisionRef | null> {
+    const id = safeId(idInput);
+    const ref = await this.readRef(kind, id);
+    if (ref) return { id, hash: ref.hash };
+    const legacy = await this.readLegacy(kind, id);
+    return legacy === null ? null : { id, hash: contentHash(legacy) };
+  }
+  async listRevisions(kind: CanonicalKind, idInput: string): Promise<CanonicalRevisionRef[]> {
+    const id = safeId(idInput);
+    const hashes = new Set<string>();
+    const directory = path.join(this.root, kind, "revisions", id);
+    try {
+      for (const name of await fs.readdir(directory)) {
+        if (/^[a-f0-9]{64}\.json$/.test(name)) hashes.add(name.slice(0, -5));
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const legacy = await this.readLegacy(kind, id);
+    if (legacy !== null) hashes.add(contentHash(legacy));
+    return [...hashes].sort().map((hash) => ({ id, hash }));
+  }
+  private async put(kind: CanonicalKind, idInput: string, value: unknown): Promise<void> {
+    const id = safeId(idInput);
+    const legacy = await this.readLegacy(kind, id);
+    if (legacy !== null) {
+      const legacyHash = contentHash(legacy);
+      await writeImmutable(this.revisionPath(kind, id, legacyHash), legacy);
+    }
+    const hash = contentHash(value);
+    await writeImmutable(this.revisionPath(kind, id, hash), value);
+    await atomicJson(this.refPath(kind, id), { version: 1, id, hash } satisfies StoredCanonicalRef);
+  }
+  private async get<T>(kind: CanonicalKind, idInput: string, schema: z.ZodType<T>): Promise<T> {
+    const id = safeId(idInput);
+    const ref = await this.readRef(kind, id);
+    if (!ref) {
+      const legacy = await this.readLegacy(kind, id);
+      if (legacy === null) throw Object.assign(new Error(`Canonical ${kind} artifact not found: ${id}`), { code: "ENOENT" });
+      return schema.parse(legacy);
+    }
+    const value = schema.parse(JSON.parse(await fs.readFile(this.revisionPath(kind, id, ref.hash), "utf8")));
+    if (contentHash(value) !== ref.hash) throw new Error(`Corrupt canonical ${kind} revision ${id}@${ref.hash}`);
+    return value;
+  }
   private async list<T>(kind: CanonicalKind, schema: z.ZodType<T>): Promise<T[]> {
-    const directory = path.join(this.root, kind);
-    let names: string[];
-    try { names = (await fs.readdir(directory)).filter((name) => name.endsWith(".json")).sort(); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    const ids = new Set<string>();
+    for (const directory of [path.join(this.root, kind, "refs"), path.join(this.root, kind)]) {
+      try {
+        for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+          if (entry.isFile() && entry.name.endsWith(".json")) ids.add(entry.name.slice(0, -5));
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
     const values: T[] = [];
-    for (const name of names) values.push(schema.parse(JSON.parse(await fs.readFile(path.join(directory, name), "utf8"))));
+    for (const id of [...ids].sort()) values.push(await this.get(kind, id, schema));
     return values;
+  }
+  private refPath(kind: CanonicalKind, id: string): string { return path.join(this.root, kind, "refs", `${id}.json`); }
+  private revisionPath(kind: CanonicalKind, id: string, hash: string): string { return path.join(this.root, kind, "revisions", id, `${hash}.json`); }
+  private legacyPath(kind: CanonicalKind, id: string): string { return path.join(this.root, kind, `${id}.json`); }
+  private async readRef(kind: CanonicalKind, id: string): Promise<StoredCanonicalRef | null> {
+    try {
+      const value = JSON.parse(await fs.readFile(this.refPath(kind, id), "utf8")) as StoredCanonicalRef;
+      if (value.version !== 1 || value.id !== id || !/^[a-f0-9]{64}$/.test(value.hash)) throw new Error(`Invalid canonical ref: ${kind}/${id}`);
+      return value;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+  private async readLegacy(kind: CanonicalKind, id: string): Promise<unknown | null> {
+    try { return JSON.parse(await fs.readFile(this.legacyPath(kind, id), "utf8")) as unknown; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
   }
 }
 

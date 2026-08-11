@@ -85,3 +85,4 @@ describe("canon replay", () => {
     expect(result.diagnostics[0]?.code).toBe("BLOCKED");
   });
 });
+

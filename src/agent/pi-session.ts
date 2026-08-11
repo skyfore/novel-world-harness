@@ -244,3 +244,4 @@ export async function expandFileMentions(input: string, workspace: LocalFileWork
   if (!attachments.length) return input;
   return `${input}\n\nLocally resolved file references:\n${attachments.join("\n\n")}`;
 }
+

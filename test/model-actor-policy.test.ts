@@ -79,3 +79,4 @@ describe("model actor policy", () => {
     expect(observed).not.toHaveProperty("worldState");
   });
 });
+

@@ -207,3 +207,4 @@ function auditCausalGraph(events: readonly CanonicalEvent[]): {
   for (const event of events) visit(event.id);
   return { cycles, missing };
 }
+

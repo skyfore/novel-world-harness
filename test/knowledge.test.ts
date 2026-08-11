@@ -105,3 +105,4 @@ describe("KnowledgeProjector", () => {
     expect((await projector.view("alice", forgotten.newHead)).knowledge).toHaveLength(0);
   });
 });
+

@@ -20,3 +20,4 @@ export async function loadWorldContext(workspaceRoot: string): Promise<{
   };
   return { canon, context };
 }
+

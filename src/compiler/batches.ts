@@ -193,3 +193,4 @@ async function atomicJson(filePath: string, value: unknown): Promise<void> {
 function hash(value: string): string {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");
 }
+

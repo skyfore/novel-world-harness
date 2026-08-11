@@ -28,3 +28,4 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     systemPromptAppendix: `Compiler mode is enabled. Use read-only local evidence tools to inspect the novel, then use only the typed propose_* tools for candidate structured artifacts. A proposal is not canonical truth and must not be described as committed. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`,
   });
 }
+

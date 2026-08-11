@@ -163,3 +163,4 @@ export class BranchStore {
     return path.join(this.root, id);
   }
 }
+

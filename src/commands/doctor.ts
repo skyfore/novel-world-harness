@@ -46,3 +46,4 @@ export async function doctorCommand(configPath: string): Promise<void> {
 
   if (failed) process.exitCode = 1;
 }
+

@@ -307,3 +307,4 @@ export class LocalFileWorkspace {
     return real;
   }
 }
+

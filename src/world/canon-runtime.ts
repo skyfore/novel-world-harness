@@ -28,3 +28,4 @@ export function canonicalPossibilitySource(canon: CanonicalModelStore): Possibil
     return events.map((event) => canonicalEventToPossibility(event, branchId, commitId));
   };
 }
+

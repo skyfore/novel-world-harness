@@ -46,3 +46,4 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     session.dispose();
   }
 }
+

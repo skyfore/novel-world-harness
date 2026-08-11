@@ -118,3 +118,4 @@ function diagnoseNoProgress(checkpoint: CanonReplayCheckpoint, frontier: Frontie
     frontier: compact,
   };
 }
+

@@ -91,3 +91,4 @@ describe("dynamic in-world rules", () => {
     expect((await engine.projector.project(enterAfter.newHead)).values.hero?.["character.location"]).toBe("garden");
   });
 });
+

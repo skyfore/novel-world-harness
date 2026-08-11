@@ -105,3 +105,4 @@ describe("actor adjudication", () => {
     expect(result.conflicts).toEqual([{ winnerProposalId: "high", loserProposalId: "low", writeKeys: ["state:shared:character.location"] }]);
   });
 });
+

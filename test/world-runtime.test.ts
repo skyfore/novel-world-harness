@@ -111,3 +111,4 @@ describe("WorldRuntime", () => {
     expect(mainState.values.hero?.["character.location"]).toBe("hall");
   });
 });
+

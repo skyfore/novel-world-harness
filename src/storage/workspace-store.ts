@@ -2,27 +2,14 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { HarnessConfig } from "../config/schema.js";
-import { jobTypes, type BuildMetrics, type HarnessJob, type HarnessJobType } from "../harness/types.js";
 
 const STATE_VERSION = 1;
-
-const EMPTY_METRICS: BuildMetrics = {
-  source: 0,
-  evidence: 0,
-  entityResolution: 0,
-  majorEvents: 0,
-  temporalConsistency: 0,
-  stateDelta: 0,
-  epistemic: 0,
-  causality: 0,
-};
 
 export type StoredProject = {
   version: 1;
   id: string;
   name: string;
   language: string;
-  status: "compiling" | "ready";
   createdAt: string;
   updatedAt: string;
 };
@@ -35,25 +22,6 @@ export type SourceDocument = {
   contentSha256: string;
   bytes: number;
   registeredAt: string;
-  updatedAt: string;
-};
-
-export type StoredJob = HarnessJob & {
-  version: 1;
-  status: "pending" | "running" | "done" | "failed";
-  attempts: number;
-  output?: unknown;
-  error?: string;
-  createdAt: string;
-  startedAt?: string;
-  finishedAt?: string;
-  updatedAt: string;
-};
-
-type StoredMetrics = {
-  version: 1;
-  values: BuildMetrics;
-  details: Partial<Record<keyof BuildMetrics, unknown>>;
   updatedAt: string;
 };
 
@@ -96,13 +64,11 @@ export class WorkspaceStore {
   readonly root: string;
   readonly stateDir: string;
   private readonly sourcesDir: string;
-  private readonly jobsDir: string;
 
   private constructor(root: string) {
     this.root = root;
     this.stateDir = path.join(root, ".novel-harness");
     this.sourcesDir = path.join(this.stateDir, "sources");
-    this.jobsDir = path.join(this.stateDir, "jobs");
   }
 
   static async create(root = process.cwd()): Promise<WorkspaceStore> {
@@ -121,12 +87,10 @@ export class WorkspaceStore {
       id: slugify(project.name),
       name: project.name,
       language: project.language,
-      status: existing?.status ?? "compiling",
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
     await atomicJson(filePath, next);
-    await this.ensureMetrics();
     return next;
   }
 
@@ -174,109 +138,6 @@ export class WorkspaceStore {
     return this.readDirectory<SourceDocument>(this.sourcesDir, (left, right) =>
       left.sourcePath.localeCompare(right.sourcePath),
     );
-  }
-
-  async enqueueJob(
-    jobType: HarnessJobType,
-    input: unknown,
-    priority = 0.5,
-    targetType?: string,
-    targetId?: string,
-  ): Promise<StoredJob> {
-    if (!jobTypes.includes(jobType)) throw new Error(`Unknown job type: ${jobType}`);
-    const stableKey = JSON.stringify([jobType, targetType ?? "", targetId ?? ""]);
-    const id = `${jobType}-${crypto.createHash("sha256").update(stableKey).digest("hex").slice(0, 16)}`;
-    const filePath = path.join(this.jobsDir, stateFileName(id));
-    const existing = await readJson<StoredJob>(filePath);
-    if (existing && ["pending", "running", "done"].includes(existing.status)) return existing;
-    const now = new Date().toISOString();
-    const job: StoredJob = {
-      version: STATE_VERSION,
-      id,
-      jobType,
-      targetType,
-      targetId,
-      priority,
-      input,
-      status: "pending",
-      attempts: existing?.attempts ?? 0,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
-    await atomicJson(filePath, job);
-    return job;
-  }
-
-  async listJobs(): Promise<StoredJob[]> {
-    return this.readDirectory<StoredJob>(this.jobsDir, (left, right) => {
-      if (left.priority !== right.priority) return right.priority - left.priority;
-      return left.createdAt.localeCompare(right.createdAt);
-    });
-  }
-
-  async claimNextJob(): Promise<StoredJob | null> {
-    const job = (await this.listJobs()).find((candidate) => candidate.status === "pending");
-    if (!job) return null;
-    const now = new Date().toISOString();
-    const claimed: StoredJob = {
-      ...job,
-      status: "running",
-      attempts: job.attempts + 1,
-      startedAt: now,
-      updatedAt: now,
-      error: undefined,
-    };
-    await atomicJson(path.join(this.jobsDir, stateFileName(job.id)), claimed);
-    return claimed;
-  }
-
-  async finishJob(id: string, output: unknown): Promise<void> {
-    await this.updateJob(id, { status: "done", output, error: undefined });
-  }
-
-  async failJob(id: string, error: unknown): Promise<void> {
-    const message = error instanceof Error ? error.stack ?? error.message : String(error);
-    await this.updateJob(id, { status: "failed", error: message });
-  }
-
-  async readMetrics(): Promise<BuildMetrics> {
-    return (await this.ensureMetrics()).values;
-  }
-
-  async writeMetric(metric: keyof BuildMetrics, value: number, details: unknown = {}): Promise<void> {
-    if (!Number.isFinite(value) || value < 0 || value > 1) {
-      throw new Error(`Metric ${metric} must be between 0 and 1.`);
-    }
-    const metrics = await this.ensureMetrics();
-    metrics.values[metric] = value;
-    metrics.details[metric] = details;
-    metrics.updatedAt = new Date().toISOString();
-    await atomicJson(path.join(this.stateDir, "metrics.json"), metrics);
-  }
-
-  private async ensureMetrics(): Promise<StoredMetrics> {
-    const filePath = path.join(this.stateDir, "metrics.json");
-    const existing = await readJson<StoredMetrics>(filePath);
-    if (existing) return existing;
-    const metrics: StoredMetrics = {
-      version: STATE_VERSION,
-      values: { ...EMPTY_METRICS },
-      details: {},
-      updatedAt: new Date().toISOString(),
-    };
-    await atomicJson(filePath, metrics);
-    return metrics;
-  }
-
-  private async updateJob(
-    id: string,
-    patch: Pick<StoredJob, "status"> & Partial<Pick<StoredJob, "output" | "error">>,
-  ): Promise<void> {
-    const filePath = path.join(this.jobsDir, stateFileName(id));
-    const job = await readJson<StoredJob>(filePath);
-    if (!job) throw new Error(`Harness job not found: ${id}`);
-    const now = new Date().toISOString();
-    await atomicJson(filePath, { ...job, ...patch, finishedAt: now, updatedAt: now });
   }
 
   private async readDirectory<T>(

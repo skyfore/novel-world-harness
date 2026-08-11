@@ -71,3 +71,4 @@ function toObservation(claim: Claim): NarrativeObservation {
     claimId: claim.id,
   };
 }
+

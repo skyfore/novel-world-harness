@@ -50,3 +50,4 @@ describe("NarrativeMetaView", () => {
     expect(JSON.stringify(state)).not.toContain("Power isolates");
   });
 });
+

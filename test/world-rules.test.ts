@@ -60,3 +60,4 @@ describe("temporal world rules", () => {
     expect((await engine.projector.project(genesis)).values.hero?.["character.location"]).toBe("hall");
   });
 });
+

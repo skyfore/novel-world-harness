@@ -182,3 +182,4 @@ export class WorldEngine {
 function touchedEntities(delta: StateDelta): EntityId[] {
   return [...new Set(delta.operations.flatMap((operation) => ("entityId" in operation ? [operation.entityId] : [])))].sort();
 }
+

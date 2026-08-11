@@ -62,3 +62,4 @@ export class WorldSnapshotStore {
     return path.join(this.root, `${commitId}.json`);
   }
 }
+

@@ -298,3 +298,4 @@ The project should use the following shorthand when evaluating future design dec
 - **Canon is evidence and an attractor, not a script.**
 - **Models before parser breadth.** Use extraction to pressure-test the abstraction, not to define it accidentally.
 - **Proposal -> validate -> commit -> render.** This remains the core mutation boundary.
+

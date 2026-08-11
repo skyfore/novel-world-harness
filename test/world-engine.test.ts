@@ -139,3 +139,4 @@ describe("predicate evaluation", () => {
     ).toBe(true);
   });
 });
+

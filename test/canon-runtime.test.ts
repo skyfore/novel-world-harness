@@ -77,3 +77,4 @@ describe("canonical runtime possibilities", () => {
     expect((await engine.projector.project(secondMove.newHead)).values.hero?.["character.title"]).toBe("Commander");
   });
 });
+

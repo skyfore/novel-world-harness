@@ -20,36 +20,5 @@ llm:
       thinkingLevel: low
       maxTokens: 4096
   routing:
-    controller: main
     extractor: fast
-    resolver: main
-    timeline: main
-    state: main
-    epistemic: main
-    causality: main
-    verifier: main
     narrator: main
-
-harness:
-  maxLoops: 5000
-  maxConcurrentWorkers: 4
-  batchSize: 8
-  checkpointEvery: 25
-  targetCoverage:
-    source: 0.99
-    evidence: 0.99
-    entityResolution: 0.99
-    majorEvents: 0.98
-    temporalConsistency: 0.99
-    stateDelta: 0.95
-    epistemic: 0.90
-    causality: 0.90
-
-runtime:
-  defaultPlayerMode: canon-character
-  canonAttractorWeight: 0.25
-  divergenceDisableCanonAt: 0.80
-  snapshotEveryEvents: 100
-
-logging:
-  level: info

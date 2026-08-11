@@ -30,3 +30,4 @@ export function profileForRole(config: HarnessConfig, role: string) {
   if (!profile) throw new Error(`No LLM profile configured for role '${role}'`);
   return { name, profile };
 }
+

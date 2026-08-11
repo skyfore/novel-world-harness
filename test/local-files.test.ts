@@ -85,3 +85,4 @@ describe("expandFileMentions", () => {
     await expect(expandFileMentions("联系 editor@example.com", workspace)).resolves.toBe("联系 editor@example.com");
   });
 });
+

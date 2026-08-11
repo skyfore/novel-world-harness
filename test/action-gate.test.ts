@@ -71,3 +71,4 @@ describe("knowledge-aware player actions", () => {
     expect(allowed.result?.report.accepted).toBe(true);
   });
 });
+

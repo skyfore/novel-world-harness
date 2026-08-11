@@ -190,3 +190,4 @@ function error(code: string, message: string, branchId?: string, objectId?: stri
 function warning(code: string, message: string, branchId?: string, objectId?: string): FsckIssue {
   return { severity: "warning", code, message, ...(branchId ? { branchId } : {}), ...(objectId ? { objectId } : {}) };
 }
+

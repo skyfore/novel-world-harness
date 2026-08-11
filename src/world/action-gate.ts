@@ -53,3 +53,4 @@ export async function commitKnowledgeAwareAction(engine: WorldEngine, input: Kno
   const proposal: EventProposal = { ...action.proposal, expectedParentCommit: gate.evaluatedAtCommit };
   return { gate, result: await engine.commitProposal(proposal) };
 }
+

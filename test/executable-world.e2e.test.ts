@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -11,29 +10,27 @@ import { WorldEngine } from "../src/world/engine.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { runCanonReplay } from "../src/world/replay.js";
 import { WorldRuntime } from "../src/world/runtime.js";
+import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
-
-function evidence(line: number, text: string) {
-  return [{ span: { sourceId: "novel", startLine: line, endLine: line, quoteHash: crypto.createHash("sha256").update(text).digest("hex") }, strength: "explicit" as const }];
-}
 
 describe("executable world vertical slice", () => {
   it("compiles canon, replays it, then preserves a durable counterfactual divergence", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-e2e-"));
     roots.push(root);
+    const source = await createEvidenceFixture(root, "Hero\nHall\nCamp\nHero begins in the hall\nHero is promoted in the hall\n");
     const proposals = new CompilerProposalService(root);
     const commits = new CompilerCommitService(root);
 
-    for (const [id, kind, name, line] of [
-      ["hero", "character", "Hero", 1],
-      ["hall", "location", "Hall", 2],
-      ["camp", "location", "Camp", 3],
+    for (const [id, kind, name] of [
+      ["hero", "character", "Hero"],
+      ["hall", "location", "Hall"],
+      ["camp", "location", "Camp"],
     ] as const) {
       await proposals.submit("entity", {
         proposalId: `entity-${id}`,
-        payload: { id, kind, canonicalName: name, aliases: [name.toLowerCase()], evidence: evidence(line, name) },
+        payload: { id, kind, canonicalName: name, aliases: [name.toLowerCase()], evidence: source.evidence(name) },
         generatedBy: { worker: "e2e" },
       });
     }
@@ -49,7 +46,7 @@ describe("executable world vertical slice", () => {
             { op: "set", entityId: "hero", field: "character.location", value: "hall" },
           ],
         },
-        evidence: evidence(4, "Hero begins in the hall"),
+        evidence: source.evidence("Hero begins in the hall"),
       },
       generatedBy: { worker: "e2e" },
     });
@@ -63,7 +60,7 @@ describe("executable world vertical slice", () => {
         storyTime: { kind: "ordinal", label: "promotion scene" },
         preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
         observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.title", value: "Commander" }] },
-        evidence: evidence(5, "Hero is promoted in the hall"),
+        evidence: source.evidence("Hero is promoted in the hall"),
         causalParents: [],
         confidence: 1,
       },

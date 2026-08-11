@@ -73,3 +73,4 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
   });
   stdout.write(`Compiler batches: total=${result.total} completed=${result.completed} skipped=${result.skipped} remaining=${result.remaining}\n`);
 }
+

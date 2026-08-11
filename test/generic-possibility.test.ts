@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PossibilityCommitService } from "../src/compiler/possibility-commit.js";
+import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { InitialWorldStore } from "../src/world/initial.js";
@@ -69,8 +69,7 @@ describe("generic possibility templates", () => {
       },
       generatedBy: { worker: "test" },
     });
-    const possibility = new PossibilityCommitService(root);
-    expect((await possibility.accept("storm-proposal")).accepted).toBe(true);
+    expect((await convergeWorldProposals(root)).possibilities.accepted).toEqual(["storm-proposal"]);
 
     const initial = await new InitialWorldStore(root).get();
     const { engine, runtime } = await openWorkspaceWorld(root);

@@ -28,3 +28,4 @@ describe("CanonicalModelStore revisions", () => {
     expect(revisions.map((revision) => revision.hash)).toContain(second?.hash);
   });
 });
+

@@ -102,3 +102,4 @@ function setMetric(expectedInput: readonly string[], actualInput: readonly strin
 function edgeId(from: string, to: string): string {
   return `${from}->${to}`;
 }
+

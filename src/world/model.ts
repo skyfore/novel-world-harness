@@ -207,3 +207,4 @@ export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion:
 
 export const WORLD_SCHEMA_VERSION = 1;
 export const WORLD_ENGINE_VERSION = "0.1.0";
+

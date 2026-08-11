@@ -218,7 +218,7 @@ Workers may share LLM profiles, but their prompts, tools and output contracts re
 
 ## 7. Completion/readiness
 
-A single pass over the text is not sufficient. The compiler reports explicit readiness metrics, for example:
+A single pass over the text is not sufficient. Corpus evaluation should eventually report metrics with explicit annotated denominators, for example:
 
 - source coverage >= 0.99
 - evidence binding >= 0.99
@@ -231,7 +231,7 @@ A single pass over the text is not sufficient. The compiler reports explicit rea
 - rule coverage for runtime-relevant constraints
 - replay determinism == 1.0 for committed fixtures
 
-Runtime readiness additionally requires invariant checks and canon replay tests. High extraction coverage alone does not mean the world is executable.
+Runtime readiness additionally requires invariant checks and canon replay tests. High extraction coverage alone does not mean the world is executable. The current `audit` command reports `null` for dimensions without a trustworthy denominator rather than fabricating these percentages.
 
 ## 8. Canon replay
 
@@ -329,7 +329,7 @@ Promotion/demotion is based on scene relevance, causal impact, active goals, pro
 
 ## 12. Storage
 
-Phase 0 retains human-readable, workspace-local files under `.novel-harness/` for project metadata, source manifests, compiler jobs, readiness metrics, and Pi sessions.
+Phase 0 retains human-readable, workspace-local files under `.novel-harness/` for project metadata, source manifests, deterministic evidence segments, compiler batch checkpoints, typed proposals, and Pi sessions.
 
 Executable world data should live in a separate `.novel-harness/world/` namespace. Branch truth should use immutable content-addressed event/delta/commit objects plus an atomically replaced branch head pointer. This gives local-file storage a Git-like crash-safe commit boundary without requiring a database.
 
@@ -385,26 +385,26 @@ Examples:
 
 ## 15. MVP sequence
 
-### Phase 0 — local-first harness CLI
-Claude Code-style terminal interaction backed by Pi, workspace instructions, `rg`-first local read/search tools, bounded `@file` context, persistent local-file sessions/state, configuration, and the harness task-loop skeleton. No external database, RAG layer, or write-capable model tools.
+### Phase 0 — local-first harness CLI (implemented)
+Claude Code-style terminal interaction backed by Pi, workspace instructions, `rg`-first local read/search tools, bounded `@file` context, and persistent local-file sessions/state. There is no external database or RAG layer. Ordinary sessions are read-only; explicit compiler sessions now add narrow typed proposal tools.
 
-### Phase 1A — executable history core
-Implement typed world contracts, immutable commit storage, branch heads, predicates, `StateDelta`, deterministic projection, and validation for a hand-authored fixture.
+### Phase 1A — executable history core (implemented vertical slice)
+Typed world contracts, immutable commit storage, branch heads, predicates, `StateDelta`, deterministic projection, and validation are implemented and tested on constrained fixtures.
 
-### Phase 1B — constrained canonical compiler
-Compile a small slice of one novel into evidence-backed entities, canonical events, preconditions, state deltas, and temporal rules.
+### Phase 1B — constrained canonical compiler (mechanism implemented; quality unproven)
+Bounded Pi batches can propose evidence-backed entities, claims, canonical events, preconditions, state deltas, rules, actor artifacts, and possibilities. Representative corpus accuracy has not been established.
 
-### Phase 1C — canon replay
-Reproduce canonical checkpoints from conditions/pressures and supported decisions without directly forcing future canonical events.
+### Phase 1C — canon replay (implemented vertical slice)
+Predicate checkpoints are evaluated against normal possibility-driven moves without directly forcing future canonical event IDs.
 
-### Phase 2 — possibility runtime
-Implement the possibility frontier, scheduler, branching, conflict adjudication, and a durable counterfactual divergence test.
+### Phase 2 — possibility runtime (implemented vertical slice)
+The possibility frontier, deterministic scheduler, branching, conflict adjudication, and durable counterfactual tests exist. Long-horizon policy quality remains unmeasured.
 
-### Phase 3 — actor runtime
-Add actor-scoped knowledge, goals, character policies, player control, and information propagation.
+### Phase 3 — actor runtime (partial)
+Actor-scoped knowledge, goals, deterministic candidate actions, conflict handling, and information propagation exist. Natural-language player control, Pi-backed actor reasoning, and interactive character embodiment are not connected.
 
-### Phase 4 — compiler breadth and narrative quality
-Expand full-book extraction, narrative/meta semantics, long-horizon rendering, and polished TUI/UI after the executable model is stable.
+### Phase 4 — compiler breadth and narrative quality (next)
+Add annotated corpus evaluation, model-backed narrative rendering, interactive world play, long-horizon testing, and terminal UX after the end-to-end product loop is reliable.
 
 ## 16. Primary success criterion
 

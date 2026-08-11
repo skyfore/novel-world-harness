@@ -5,6 +5,14 @@
   "type": "module",
   "description": "Local-first CLI for compiling novels into verifiable executable worlds.",
   "license": "MIT",
+  "main": "./dist/api.js",
+  "types": "./dist/api.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    }
+  },
   "bin": {
     "nwh": "./dist/cli.js"
   },

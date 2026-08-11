@@ -69,3 +69,4 @@ describe("NarrativeRenderer", () => {
     expect(parsed).not.toHaveProperty("worldState");
   });
 });
+

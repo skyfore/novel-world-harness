@@ -13,7 +13,7 @@ Novel World Harness owns the parts specific to executable fiction:
 - the evidence-first system prompt;
 - trusted `NOVEL.md` and local instruction loading;
 - safe local list/search/read tools;
-- compiler job and readiness semantics;
+- bounded compiler batches, typed proposal semantics, and evidence verification;
 - proposal/validation/commit boundaries;
 - future canon replay and world invariants.
 
@@ -21,4 +21,4 @@ The previous direct Anthropic SDK implementation coupled the CLI to one provider
 
 “Remove external services” applies to the external persistence layer in Phase 0: PostgreSQL and other attached databases are removed. It does not require removing Pi or forcing the official Claude API. A remote model is still optional infrastructure selected by the user; all harness state and retrieval stay file-based.
 
-For safety, the Pi session disables built-in coding tools and extension discovery. Only Novel Harness's three custom read-only local tools are active. Model content cannot write files, execute a shell, access the network as a tool, or commit world state.
+For safety, the Pi session disables built-in coding tools and extension discovery. Ordinary sessions expose only Novel Harness's three custom read-only local tools. Explicit compiler sessions add typed proposal tools, which can write pending proposal envelopes but cannot write arbitrary files, execute a shell, access the network as a tool, accept canonical truth, or commit world state.

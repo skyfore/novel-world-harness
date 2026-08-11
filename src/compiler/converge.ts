@@ -34,3 +34,4 @@ export async function convergeWorldProposals(workspaceRoot: string): Promise<Wor
       .map((item) => ({ id: item.id, kind: item.kind })),
   };
 }
+

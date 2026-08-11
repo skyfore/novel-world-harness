@@ -40,12 +40,14 @@ The access layer enforces:
 
 Pi transcripts are stored under `.novel-harness/sessions/` unless `--no-save` is used. Because tool results become conversation context, retrieved excerpts can be present in a transcript. `/clear` starts a new Pi session without deleting prior append-only files.
 
-Project manifests, source indexes, compiler jobs, and metrics are also local files. These are inspectable implementation state, not model memory. They remain hidden from general model file search.
+Project manifests, source indexes, compiler batch checkpoints, proposals, and world objects are also local files. These are inspectable implementation state, not model memory. They remain hidden from general model file search.
 
-## Next capability gate
+## Compiler capability boundary
 
-The next model-side mutation should be a narrow compiler proposal tool producing a typed candidate artifact. Deterministic code must validate it before an explicit commit:
+Compiler mode now adds narrow typed `propose_*` tools. They can create pending candidate artifacts, but cannot accept them, move a branch head, execute a shell, or write arbitrary files. Deterministic code verifies structure and source evidence before explicit acceptance:
 
 ```text
 proposal -> validate -> commit -> render
 ```
+
+The ordinary `nwh` / `nwh play` session remains read-only. World execution is currently exposed through explicit `nwh world ...` commands; an interactive character-embodiment loop is future product work.

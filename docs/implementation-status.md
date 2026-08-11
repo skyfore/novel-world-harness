@@ -1,200 +1,114 @@
-# Implementation status: executable novel world engine
+# Implementation status
 
 Date: 2026-08-11
 
-This document maps the implementation on `agent/local-first-novel-cli` to [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md) and [Technical Design](technical-design.md).
+This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
-## Executive status
+## Overall assessment
 
-The architecture is no longer only a Phase 0 CLI scaffold. The branch now contains a tested executable vertical slice from source evidence through canonical compilation, deterministic world execution, canon replay, branch divergence, actor-scoped knowledge/policy, and narrative rendering.
+The branch implements a credible executable-world engine vertical slice and a separate local-first Pi compiler harness. It does **not** yet implement the promised end-user experience of providing a novel, selecting a character, and playing through an evaluated world in one coherent session.
 
-The remaining uncertainty is primarily **semantic model quality and corpus coverage**, not the authority/commit/runtime architecture. That distinction matters: no amount of deterministic code can prove that an ambiguous literary interpretation is correct, but deterministic code can ensure that unsupported or structurally invalid model output does not silently become world truth.
+| Area | Status | What is actually usable |
+| --- | --- | --- |
+| Local file assistant | Implemented | Read-only terminal session, local lexical discovery, bounded reads, Pi sessions |
+| Source ingest | Implemented | Content hash, source manifest, deterministic evidence segments |
+| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals |
+| Canonical acceptance | Implemented | Structural and cryptographic evidence validation; dependency-ordered acceptance |
+| Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
+| World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
+| Canon replay and branching | Implemented vertical slice | Predicate checkpoints, fork, diff, divergent possibility eligibility |
+| Actor behavior | Partial | Deterministic goal actions are connected; model reasoner exists only as an adapter/API |
+| Narrative | Partial | Immutable narrative frames and deterministic text exist; no Pi narration adapter is connected |
+| Player experience | Not implemented | Player actions require hand-authored `EventProposal` JSON |
+| Character embodiment | Not implemented | No interactive select-character / perceive / decide / move loop |
+| Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
 
-## Milestone mapping
+## Verified architecture
 
-### M1 — world contracts and immutable storage: implemented
+### Evidence and compilation
 
-- strict Zod/TypeScript contracts for entities, claims, times, predicates, events, deltas, rules, branches, possibilities, knowledge, proposals, commits, and state;
-- canonical serialization/content hashing;
-- immutable content-addressed runtime delta/event/knowledge/commit objects;
-- atomic branch metadata/head writes;
-- stale-parent compare-and-swap protection;
-- single-writer branch lock semantics.
+- Source files remain in the workspace and are registered by path, size, and SHA-256.
+- Segments preserve source line and byte ranges.
+- `compile-source` processes bounded batches and checkpoints only successful batches.
+- Pi compiler sessions expose read-only file tools plus narrow `propose_*` tools.
+- Proposals remain pending until explicit acceptance.
+- Acceptance verifies that the registered source still has its ingest hash and that evidence byte/line ranges and quote hashes match.
+- Canonical entities, claims, events, and rules use logical refs over immutable revisions.
+- `proposals accept-all` accepts dependency-valid canonical artifacts and valid generic possibility templates; unsupported `state-delta` proposals remain staging artifacts.
 
-### M2 — deterministic reducer and validation: implemented
+Model interpretation is still probabilistic. These checks can reject unsupported or structurally invalid output, but cannot prove that an ambiguous passage was interpreted correctly.
 
-- registered state fields with type/domain constraints;
-- deterministic predicate evaluator;
-- deterministic `StateDelta` reducer;
-- replayable `WorldProjector`;
-- precondition validation;
-- engine invariants;
-- temporal in-world rule evaluation;
-- dry-run post-state rule prohibition checks;
-- stale-parent rejection at commit boundary.
+### Runtime authority
 
-### M3 — evidence-backed canonical compiler: implemented as a bounded model pipeline
+- Branch truth is an immutable commit chain.
+- State is deterministically projected from committed deltas.
+- Branch heads use expected-parent checks and a local exclusive mutation lock.
+- Temporal world rules are evaluated against pre-state and proposed post-state.
+- Canonical future events and generic background pressures enter the same possibility frontier.
+- Possibility selection alone does not create truth; the resulting event proposal must pass the commit boundary.
+- Knowledge is reconstructed per actor and per commit.
+- Narrative rendering receives immutable/projected history and checks that it did not move the branch head.
+- Snapshots are derived caches. `world fsck` verifies ancestry, hashes, replay, and snapshot drift.
 
-- deterministic source registration and hashing;
-- deterministic source segmentation preserving original UTF-8 byte/line spans;
-- source mutation detection after ingest;
-- bounded/resumable source compiler batches;
-- explicit Pi compiler mode with typed proposal tools and no general file write/shell capability;
-- pending/accepted/rejected proposal lifecycle;
-- deterministic cross-artifact validation;
-- cryptographic EvidenceRef verification against ingested source bytes;
-- dependency-ordered batch acceptance;
-- canonical initial-world seed;
-- actor goal/model artifacts.
-
-The semantic extractor is intentionally model-backed rather than a deterministic parser. Its quality must be evaluated against novels/fixtures; model output remains non-authoritative until validation.
-
-### M4 — canon replay: implemented
-
-- replay checkpoints are predicates over projected world state;
-- runtime does not receive a forced list of next canonical event IDs;
-- mismatch returns diagnostics rather than patching the history;
-- golden tests verify the runtime can reach canonical checkpoints through eligible possibilities.
-
-### M5 — possibility frontier and scheduler: implemented
-
-- lifecycle: latent / eligible / blocked / expired / superseded / realized;
-- preconditions/blockers/expiry;
-- explainable scheduler factor/score output;
-- canonical-event analogues are ordinary uncommitted possibilities;
-- canonical causal parents gate downstream eligibility;
-- realized possibility IDs are derived from committed history, preventing replay loops;
-- frontier materialization is a cache, not truth.
-
-### M6 — counterfactual branching: implemented
-
-- branches share immutable history at fork points;
-- new branch heads diverge independently;
-- future canonical events become latent when changed state destroys their preconditions;
-- branch state diff command exposes durable downstream differences;
-- golden E2E test verifies a high-impact intervention does not silently snap back to canon.
-
-### M7 — actor knowledge and policy: implemented for deterministic goal actions
-
-- knowledge deltas are immutable objects referenced by committed events;
-- `KnowledgeProjector` reconstructs actor-scoped knowledge per commit;
-- `ActorWorldView` exposes self state + known claims, not compiler omniscience;
-- character goals can require/block on actor knowledge;
-- actor action candidates are generated only from the actor's current view;
-- concurrent actor candidates use deterministic write-set conflict adjudication;
-- selected actor proposals are still revalidated against the current head before commit.
-
-The policy layer is deliberately simple and inspectable today. Frontier-model LLM actor reasoning can be added behind the same `ActorWorldView -> EventProposal` contract without changing world truth semantics.
-
-### M8 — narrative separation: implemented
-
-- rendering consumes immutable/projected history frames;
-- actor POV uses actor-scoped views;
-- renderer checks that branch head did not move;
-- the same committed history can be rendered in different styles without changing truth.
-
-Long-horizon literary quality remains a model/prompt evaluation problem rather than a mutation-authority problem.
-
-### M9 — full-source expansion: implementation framework complete; quality evaluation ongoing
-
-- whole sources are segmented deterministically;
-- compiler batches are bounded by size/count;
-- successful batches checkpoint and resume;
-- failed batches remain unfinished and retryable;
-- evidence references are supplied with source slices;
-- proposal review/acceptance remains separate from extraction.
-
-"Full-source support" here means the pipeline can process a complete source incrementally without changing the authority model. It does **not** mean every entity/event/theme in every genre is already extracted perfectly. That is an empirical model-quality target.
-
-## Reliability and operations
-
-Implemented:
-
-- derived snapshot cache that is never used as semantic authority;
-- `world fsck` traversal of branch heads and immutable object graph;
-- content-hash validation on reads;
-- replay determinism checks;
-- causal/fork ancestry checks;
-- unreachable immutable objects reported as warnings rather than silently deleted;
-- compiler audit reports source/proposal/canonical/evidence/causal inventory;
-- coverage dimensions without a trustworthy denominator remain `null` rather than being fabricated.
-
-## User workflows
-
-### Compile
+### CLI paths now connected
 
 ```text
 nwh ingest <novel>
-nwh compile-source [--source <id>] [--max-batches N]
-nwh proposals list
-nwh proposals accept-all
+nwh compile-source
+nwh proposals list|accept|accept-all|reject
+nwh audit
+nwh status
+
+nwh world create|show|history|frontier
+nwh world validate|move
+nwh world knowledge|actor
+nwh world fork|diff|replay|render
+nwh world snapshot|fsck
 ```
 
-### Execute
+The ordinary `nwh` / `nwh play` session remains intentionally read-only and does not mutate the world.
 
-```text
-nwh world create main
-nwh world show --branch main
-nwh world frontier --branch main
-nwh world validate <player-proposal.json> --branch main
-nwh world move --branch main [--player <proposal.json>]
-```
+## Removed obsolete scaffold
 
-### Inspect actors
+The initial generic harness job queue, synthetic readiness metrics, unused runtime configuration, and placeholder worker settings were removed. They had been superseded by concrete source segments, compiler batch checkpoints, proposals, compiler audit, and world integrity checks.
 
-```text
-nwh world knowledge <actor> --branch main
-nwh world actor <actor> --branch main
-```
+Readiness is no longer inferred from artifact counts or arbitrary percentages. `nwh status` reports inventory; `nwh audit` reports evidence and consistency facts. Semantic coverage requires an explicit annotated denominator.
 
-### Diverge and evaluate
+## Remaining product gaps
 
-```text
-nwh world fork alternate --branch main
-nwh world move --branch alternate --player <different-action.json>
-nwh world diff main alternate
-nwh world replay <checkpoints.json> --branch main
-```
+### 1. No orchestration from novel to runnable world
 
-### Operate
+The user must manually run ingest, compile, inspect/accept proposals, audit, and create a branch. Failures are not collected into a guided repair loop. There is no project-level state machine that says which prerequisite is missing and performs the next safe step.
 
-```text
-nwh world snapshot --branch main
-nwh world fsck
-```
+### 2. No natural-language player action boundary
 
-## Test strategy now represented in the repository
+`world move --player` accepts a typed JSON proposal. A real role-playing session needs a model adapter that receives the player's words plus the actor-scoped view and produces a pending `EventProposal`, followed by deterministic validation and explicit handling of rejected actions.
 
-The suite covers, among other cases:
+### 3. Model actor policy is not connected to the product CLI
 
-- immutable object/hash behavior;
-- branch CAS semantics;
-- state replay/invariants;
-- rule enforcement on proposed post-state;
-- possibility lifecycle and non-repetition;
-- canonical causal ordering without chapter scripting;
-- actor knowledge isolation and branch divergence;
-- actor policy knowledge gating and conflict adjudication;
-- narrative rendering purity;
-- canonical initial world;
-- source segmentation including CRLF byte offsets;
-- source mutation detection;
-- bounded/resumable compiler batches;
-- cryptographically verified compiler evidence;
-- canonical proposal validation;
-- snapshot/fsck behavior;
-- compiler-to-canon-to-replay-to-counterfactual-world E2E behavior.
+`modelActorProposalSource` correctly limits its input to `ActorWorldView + CharacterGoal + CharacterModel`, but no Pi-backed `ActorReasoner` is constructed by `world move`. The CLI uses deterministic pre-authored candidate actions only.
 
-## What should be optimized next
+### 4. Rendering is a debug renderer
 
-The next engineering work should be driven by corpus experiments, not by adding another storage abstraction prematurely:
+`NarrativeRenderer` enforces the correct authority boundary, but its default adapter only lists committed event titles. A model-backed renderer must be added behind the same immutable frame contract and tested for epistemic leakage.
 
-1. create golden annotated slices across multiple genres;
-2. measure entity identity stability, event/state-delta fidelity, temporal/causal accuracy, and epistemic leakage;
-3. improve compiler prompts and adjudication based on those failures;
-4. add richer non-authoritative narrative/meta observation artifacts;
-5. add LLM actor policy behind the existing actor-view contract where deterministic goal policies are insufficient;
-6. profile very large histories before introducing snapshot-assisted authoritative replay or a database;
-7. improve terminal UX only after model/runtime semantics remain stable.
+### 5. Compilation quality has no representative benchmark
 
-A future database remains an implementation option behind storage boundaries if concurrency/scale data justifies it. It is not required for source discovery or current runtime semantics.
+The repository includes an evaluator API, but not a checked-in annotated corpus or a repeatable model evaluation command. Full-source batching proves bounded processing, not complete or correct world extraction.
+
+### 6. Long-running evolution is still simplistic
+
+The scheduler is deterministic and explainable, but pressure scoring, expiry, actor relevance, background cadence, and conflict policy have only small-fixture coverage. Large branch histories and multi-actor scenes have not been profiled.
+
+## Recommended next milestone
+
+Build one complete, constrained “novel player” vertical slice before broadening the schemas:
+
+1. add a small checked-in annotated fixture with entities, knowledge transfer, one rule, a canonical checkpoint, and a durable divergence;
+2. add `nwh prepare <novel>` to orchestrate ingest → compile → review summary → audit → branch creation while preserving explicit acceptance;
+3. add `nwh play-world --character <id>` with actor-scoped perception and natural-language player-action proposal generation;
+4. connect one Pi actor reasoner and one Pi narrative adapter behind the existing safe contracts;
+5. expose rejection/repair feedback in the session instead of requiring JSON editing;
+6. run the same workflow on several genres and use measured failures to refine prompts and schemas.
+
+That milestone directly tests the product promise while preserving the architecture already established by [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md).

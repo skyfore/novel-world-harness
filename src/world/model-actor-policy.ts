@@ -85,3 +85,4 @@ export function modelActorProposalSource(
     return candidates;
   };
 }
+

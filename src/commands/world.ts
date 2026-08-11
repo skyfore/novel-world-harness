@@ -1,23 +1,19 @@
 import fs from "node:fs/promises";
 import { stdout } from "node:process";
 import { z } from "zod";
-import { ActorModelStore, deterministicActorProposalSource } from "../world/actors.js";
-import { canonicalPossibilitySource } from "../world/canon-runtime.js";
-import { loadWorldContext } from "../world/context.js";
-import { WorldEngine, validateEventProposal } from "../world/engine.js";
+import { validateEventProposal } from "../world/engine.js";
+import { fsckWorld } from "../world/fsck.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { KnowledgeProjector } from "../world/knowledge.js";
 import { eventProposalSchema, predicateSchema, stateDeltaSchema, type CommitId, type WorldState } from "../world/model.js";
 import { NarrativeRenderer } from "../world/narrative.js";
 import { runCanonReplay } from "../world/replay.js";
-import { WorldRuntime } from "../world/runtime.js";
+import { WorldSnapshotStore } from "../world/snapshot.js";
+import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 
 async function openWorld(root: string) {
-  const { canon, context } = await loadWorldContext(root);
-  const engine = new WorldEngine(root, context);
-  const actors = new ActorModelStore(root);
-  const runtime = new WorldRuntime(engine, canonicalPossibilitySource(canon), undefined, deterministicActorProposalSource(engine, actors));
-  return { canon, context, engine, actors, runtime };
+  const { engine, runtime, actorModels } = await openWorkspaceWorld(root);
+  return { context: engine.context, engine, actors: actorModels, runtime };
 }
 
 export async function worldCreateCommand(root: string, branchId: string, seedPath?: string): Promise<void> {
@@ -140,6 +136,21 @@ export async function worldReplayCommand(root: string, branchId: string, checkpo
   const result = await runCanonReplay(runtime, branchId, checkpoints, maxMoves);
   stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (!result.passed) process.exitCode = 3;
+}
+
+export async function worldSnapshotCommand(root: string, branchId: string): Promise<void> {
+  const { engine } = await openWorld(root);
+  const head = await engine.branches.readHead(branchId);
+  const state = await engine.projector.project(head);
+  const snapshot = await new WorldSnapshotStore(root).write(head, state);
+  stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
+}
+
+export async function worldFsckCommand(root: string): Promise<void> {
+  const { engine } = await openWorld(root);
+  const report = await fsckWorld(engine);
+  stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  if (!report.ok) process.exitCode = 4;
 }
 
 function diffWorldStates(left: WorldState, right: WorldState): Array<{ entityId: string; field: string; left: unknown; right: unknown }> {

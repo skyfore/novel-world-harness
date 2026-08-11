@@ -62,7 +62,6 @@ export class WorldRuntime {
     let currentHead = previousHead;
     const committedEvents: string[] = [];
     const rejectedProposals: string[] = [];
-    const realizedPossibilities = new Set<string>();
 
     if (input.playerProposal) {
       if (input.playerProposal.branchId !== input.branchId) throw new Error("Player proposal branch does not match Move branch");
@@ -71,7 +70,6 @@ export class WorldRuntime {
       if (result.report.accepted) {
         currentHead = result.newHead;
         if (result.eventHash) committedEvents.push(result.eventHash);
-        if (playerProposal.possibilityId) realizedPossibilities.add(playerProposal.possibilityId);
       } else {
         rejectedProposals.push(playerProposal.proposalId);
       }
@@ -79,7 +77,7 @@ export class WorldRuntime {
 
     const limit = input.maxBackgroundCandidates ?? 1;
     if (!Number.isInteger(limit) || limit < 0 || limit > 100) throw new Error("maxBackgroundCandidates must be an integer between 0 and 100");
-    let latestFrontier = await this.refreshFrontier(input.branchId, currentHead, realizedPossibilities);
+    let latestFrontier = await this.refreshFrontier(input.branchId, currentHead);
 
     for (let index = 0; index < limit; index += 1) {
       const candidate = selectEligible(latestFrontier, 1)[0];
@@ -92,9 +90,8 @@ export class WorldRuntime {
         break;
       }
       currentHead = result.newHead;
-      realizedPossibilities.add(candidate.possibility.id);
       if (result.eventHash) committedEvents.push(result.eventHash);
-      latestFrontier = await this.refreshFrontier(input.branchId, currentHead, realizedPossibilities);
+      latestFrontier = await this.refreshFrontier(input.branchId, currentHead);
     }
 
     const state = await this.engine.projector.project(currentHead);
@@ -109,13 +106,31 @@ export class WorldRuntime {
     };
   }
 
-  async refreshFrontier(branchId: BranchId, commitId?: CommitId, realizedIds?: ReadonlySet<string>): Promise<Frontier> {
+  async refreshFrontier(branchId: BranchId, commitId?: CommitId): Promise<Frontier> {
     const head = commitId ?? (await this.engine.branches.readHead(branchId));
     const state = await this.engine.projector.project(head);
     const templates = await this.possibilitySource({ branchId, commitId: head, state });
+    const realizedIds = await this.realizedPossibilityIds(head);
     const frontier = buildFrontier(branchId, head, state, templates, { realizedIds });
     await this.frontierStore.write(frontier);
     return frontier;
+  }
+
+  async realizedPossibilityIds(commitId: CommitId): Promise<ReadonlySet<string>> {
+    const realized = new Set<string>();
+    const seen = new Set<string>();
+    let cursor: CommitId | undefined = commitId;
+    while (cursor) {
+      if (seen.has(cursor)) throw new Error(`Commit ancestry cycle detected at ${cursor}`);
+      seen.add(cursor);
+      const commit = await this.engine.objects.getCommit(cursor);
+      for (const eventHash of commit.eventHashes) {
+        const event = await this.engine.objects.getEvent(eventHash);
+        if (event.possibilityId) realized.add(event.possibilityId);
+      }
+      cursor = commit.parentCommitId;
+    }
+    return realized;
   }
 
   private async isAncestor(ancestor: CommitId, descendant: CommitId): Promise<boolean> {

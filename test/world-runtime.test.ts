@@ -49,7 +49,7 @@ async function fixture() {
 }
 
 describe("WorldRuntime", () => {
-  it("lets a canonical possibility realize from surviving conditions", async () => {
+  it("lets a canonical possibility realize once from surviving conditions", async () => {
     const { engine, runtime } = await fixture();
     const genesis = await engine.createBranch("main", "Main", {
       version: 1,
@@ -66,6 +66,11 @@ describe("WorldRuntime", () => {
     expect(result.frontier.evaluated.find((entry) => entry.possibility.id === "canon-promotion")?.status).toBe("realized");
     const state = await engine.projector.project(result.newHead);
     expect(state.values.hero?.["character.title"]).toBe("Commander");
+
+    const second = await runtime.move({ branchId: "main", maxBackgroundCandidates: 1 });
+    expect(second.newHead).toBe(result.newHead);
+    expect(second.committedEvents).toEqual([]);
+    expect(second.frontier.evaluated.find((entry) => entry.possibility.id === "canon-promotion")?.status).toBe("realized");
   });
 
   it("forks history and keeps a destroyed canonical future blocked", async () => {

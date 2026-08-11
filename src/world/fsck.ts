@@ -43,6 +43,14 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
   const snapshots = new WorldSnapshotStore(path.resolve(engine.objects.root, "../../.."));
 
   for (const branch of branches) {
+    const lock = await engine.branches.inspectLock(branch.id);
+    if (lock.present) {
+      issues.push((lock.stale ? error : warning)(
+        lock.stale ? "STALE_BRANCH_LOCK" : "BRANCH_LOCK_PRESENT",
+        `${lock.stale ? "Stale" : "Active"} mutation lock exists for branch ${branch.id}`,
+        branch.id,
+      ));
+    }
     try {
       await auditBranch(engine, branch, reachable, issues);
       const first = await engine.projector.project(branch.headCommitId);
@@ -141,12 +149,7 @@ async function listBranches(engine: WorldEngine): Promise<Branch[]> {
     throw cause;
   }
   const branches: Branch[] = [];
-  for (const name of names) {
-    if (await exists(path.join(engine.branches.root, name, "lock"))) {
-      // A stale lock is suspicious, but an active process may legitimately hold it.
-    }
-    branches.push(await engine.branches.read(name));
-  }
+  for (const name of names) branches.push(await engine.branches.read(name));
   return branches;
 }
 
@@ -175,14 +178,6 @@ async function isAncestor(engine: WorldEngine, ancestor: CommitId, descendant: C
   return false;
 }
 
-async function exists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function error(code: string, message: string, branchId?: string, objectId?: string): FsckIssue {
   return { severity: "error", code, message, ...(branchId ? { branchId } : {}), ...(objectId ? { objectId } : {}) };

@@ -9,9 +9,11 @@ The interactive TUI can start without a configuration file. Defaults are:
 
 The TUI can open without credentials. Inside it, use `/login` to authenticate a
 subscription or provider, then `/model` to select a model. `/model` does not perform
-authentication. NWH stores Pi credentials per workspace in
-`.novel-harness/pi-auth.json`; the file is private harness state and is excluded from
-normal model file discovery and Git.
+authentication. NWH remembers the selection per workspace in
+`.novel-harness/pi/settings.json`. An explicit `--model` or a configured role profile
+overrides the saved selection for that invocation. Pi credentials are stored in
+`.novel-harness/pi-auth.json`; both files are private harness state and are excluded
+from normal model file discovery and Git.
 
 `init`, `doctor`, `ingest`, and `status` use `novel-harness.yaml`. Supply a different path with `--config`. `${NAME}` references are expanded before YAML validation; a missing referenced variable is an error.
 
@@ -82,6 +84,7 @@ There is no database configuration. Current state is stored locally:
 .novel-harness/
 ├── project.json
 ├── pi-auth.json
+├── pi/settings.json
 ├── sources/<content-id>.json
 ├── segments/<source-id>.json
 ├── sessions/<pi-session>.jsonl

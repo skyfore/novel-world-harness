@@ -10,6 +10,7 @@ export type NwhExtensionOptions = {
   workspace: LocalFileWorkspace;
   saveSession: boolean;
   mode: NwhInteractionMode;
+  onSessionShutdown?: () => Promise<void>;
 };
 
 const COMMAND_HELP = `NWH commands:
@@ -45,6 +46,8 @@ function modelLabel(model: { provider: string; id: string } | undefined): string
 export function createNwhExtension(options: NwhExtensionOptions): ExtensionFactory {
   const { workspace, saveSession, mode } = options;
   return (pi: ExtensionAPI) => {
+    pi.on("session_shutdown", async () => options.onSessionShutdown?.());
+
     pi.on("input", async (event, ctx) => {
       try {
         await expandFileMentions(event.text, workspace);

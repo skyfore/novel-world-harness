@@ -12,7 +12,7 @@ afterEach(async () => {
   for (const root of temporaryDirectories.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
-async function fixture() {
+async function fixture(onSessionShutdown?: () => Promise<void>) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-tui-extension-"));
   temporaryDirectories.push(root);
   await fs.mkdir(path.join(root, "chapters"));
@@ -29,7 +29,7 @@ async function fixture() {
     },
   } as unknown as ExtensionAPI;
   const workspace = await LocalFileWorkspace.create(root);
-  await createNwhExtension({ workspace, saveSession: true, mode: "assistant" })(pi);
+  await createNwhExtension({ workspace, saveSession: true, mode: "assistant", onSessionShutdown })(pi);
   return { commands, events, root };
 }
 
@@ -95,6 +95,15 @@ describe("NWH TUI extension", () => {
     ) as InputEventResult | undefined;
     expect(result).toEqual({ action: "handled" });
     expect(notifications[0]).toContain("Cannot attach local file");
+  });
+
+  it("flushes workspace settings before the TUI process exits", async () => {
+    let flushed = false;
+    const { events } = await fixture(async () => { flushed = true; });
+
+    await events.get("session_shutdown")?.();
+
+    expect(flushed).toBe(true);
   });
 
   it("parses quoted command paths without a readline shell", () => {

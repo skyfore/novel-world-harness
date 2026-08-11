@@ -51,4 +51,44 @@ describe("PiAgentSession", () => {
     expect(session.model).toBe("local-openai/novel-model");
     await session.dispose();
   });
+
+  it("restores the model selected in a previous workspace session", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-persisted-model-"));
+    temporaryDirectories.push(root);
+    const previousApiKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "test-key";
+
+    try {
+      const first = await PiAgentSession.create({
+        workspace: await LocalFileWorkspace.create(root),
+        saveSession: false,
+      });
+      const internals = first as unknown as {
+        runtimeHost: {
+          session: { setModel(model: unknown): Promise<void> };
+          services: { modelRuntime: { getModel(provider: string, modelId: string): unknown } };
+        };
+      };
+      const selectedModel = internals.runtimeHost.services.modelRuntime.getModel("anthropic", "claude-haiku-4-5");
+      expect(selectedModel).toBeDefined();
+      await internals.runtimeHost.session.setModel(selectedModel);
+      await first.dispose();
+
+      const restarted = await PiAgentSession.create({
+        workspace: await LocalFileWorkspace.create(root),
+        saveSession: false,
+      });
+      expect(restarted.model).toBe("anthropic/claude-haiku-4-5");
+      await restarted.dispose();
+
+      const savedSettings = JSON.parse(await fs.readFile(path.join(root, ".novel-harness", "pi", "settings.json"), "utf8")) as Record<string, unknown>;
+      expect(savedSettings).toMatchObject({
+        defaultProvider: "anthropic",
+        defaultModel: "claude-haiku-4-5",
+      });
+    } finally {
+      if (previousApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousApiKey;
+    }
+  });
 });

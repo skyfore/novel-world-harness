@@ -153,9 +153,18 @@ async function createModelRuntime(profile: LlmProfile, stateDir: string): Promis
   return { runtime, model };
 }
 
+async function flushSettings(settingsManager: SettingsManager): Promise<void> {
+  await settingsManager.flush();
+  const errors = settingsManager.drainErrors();
+  if (errors.length > 0) {
+    throw new Error(`Could not save Pi settings: ${errors.map(({ scope, error }) => `${scope}: ${error.message}`).join("; ")}`);
+  }
+}
+
 export class PiAgentSession {
   private runtimeHost!: AgentSessionRuntime;
   private readonly profile: LlmProfile;
+  private readonly hasConfiguredModel: boolean;
   private readonly stateDir: string;
   private readonly saveSession: boolean;
   private readonly onText?: (delta: string) => void;
@@ -165,8 +174,14 @@ export class PiAgentSession {
   private activeText = "";
   private unsubscribe?: () => void;
 
-  private constructor(private readonly options: PiAgentSessionOptions, runtime: ModelRuntime, model: NonNullable<ReturnType<ModelRuntime["getModel"]>>) {
+  private constructor(
+    private readonly options: PiAgentSessionOptions,
+    runtime: ModelRuntime,
+    model: NonNullable<ReturnType<ModelRuntime["getModel"]>>,
+    hasConfiguredModel: boolean,
+  ) {
     this.profile = options.profile ?? DEFAULT_PROFILE;
+    this.hasConfiguredModel = hasConfiguredModel;
     this.stateDir = path.join(options.workspace.root, ".novel-harness");
     this.saveSession = options.saveSession ?? true;
     this.onText = options.onText;
@@ -176,18 +191,22 @@ export class PiAgentSession {
   }
 
   static async create(options: PiAgentSessionOptions): Promise<PiAgentSession> {
+    const hasConfiguredModel = options.model !== undefined || options.profile !== undefined;
     const profile = { ...(options.profile ?? DEFAULT_PROFILE) };
     if (options.model) profile.model = options.model;
     const stateDir = path.join(options.workspace.root, ".novel-harness");
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
     const { runtime, model } = await createModelRuntime(profile, stateDir);
-    const wrapper = new PiAgentSession({ ...options, profile }, runtime, model);
+    const wrapper = new PiAgentSession({ ...options, profile }, runtime, model, hasConfiguredModel);
     await wrapper.initialize(Boolean(options.continueSession));
     return wrapper;
   }
   private get session(): AgentSession { return this.runtimeHost.session; }
   get id(): string { return this.session.sessionId; }
-  get model(): string { return `${this.resolvedModel.provider}/${this.resolvedModel.id}`; }
+  get model(): string {
+    const model = this.session.model ?? this.resolvedModel;
+    return `${model.provider}/${model.id}`;
+  }
   get messageCount(): number { return this.session.messages.length; }
   get sessionFile(): string | undefined { return this.session.sessionFile; }
   async clear(): Promise<void> {
@@ -220,6 +239,8 @@ export class PiAgentSession {
   async dispose(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    const settingsManager = this.runtimeHost.services.settingsManager;
+    await flushSettings(settingsManager);
     await this.runtimeHost.dispose();
   }
 
@@ -233,12 +254,18 @@ export class PiAgentSession {
       if (path.resolve(cwd) !== this.options.workspace.root) {
         throw new Error(`NWH cannot switch this session to another workspace (${cwd}). Start a new process with --root instead.`);
       }
-      const settingsManager = SettingsManager.inMemory({
+      const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
+      settingsManager.applyOverrides({
         quietStartup: true,
         tuiMode: "regular",
         enableInstallTelemetry: false,
         enableAnalytics: false,
-      }, { projectTrusted: false });
+      });
+      const savedProvider = settingsManager.getDefaultProvider();
+      const savedModelId = settingsManager.getDefaultModel();
+      const savedModel = !this.hasConfiguredModel && savedProvider && savedModelId
+        ? this.runtime.getModel(savedProvider, savedModelId)
+        : undefined;
       const services = await createAgentSessionServices({
         cwd,
         agentDir,
@@ -258,6 +285,7 @@ export class PiAgentSession {
               workspace: this.options.workspace,
               saveSession: this.saveSession,
               mode: this.options.interactionMode ?? "assistant",
+              onSessionShutdown: () => flushSettings(settingsManager),
             }),
           }],
         },
@@ -267,8 +295,8 @@ export class PiAgentSession {
           services,
           sessionManager: nextSessionManager,
           sessionStartEvent,
-          model: this.resolvedModel,
-          thinkingLevel: this.profile.thinkingLevel,
+          model: savedModel ?? this.resolvedModel,
+          thinkingLevel: this.hasConfiguredModel ? this.profile.thinkingLevel : undefined,
           noTools: "builtin",
           customTools: [...localTools(this.options.workspace), ...(this.options.additionalTools ?? [])],
         })),

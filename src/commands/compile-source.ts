@@ -67,10 +67,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         await session.prompt(batch.prompt);
         if (wroteText) stdout.write("\n");
       } finally {
-        session.dispose();
+        await session.dispose();
       }
     },
   });
   stdout.write(`Compiler batches: total=${result.total} completed=${result.completed} skipped=${result.skipped} remaining=${result.remaining}\n`);
 }
-

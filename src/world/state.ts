@@ -7,6 +7,7 @@ import type {
   StateOperation,
   StateValue,
   WorldState,
+  WorldRule,
 } from "./model.js";
 
 export class StateSchemaRegistry {
@@ -174,8 +175,14 @@ export function validateEngineInvariants(
   state: WorldState,
   registry: StateSchemaRegistry,
   entities: ReadonlyMap<EntityId, Entity>,
+  rules?: ReadonlyMap<string, WorldRule>,
 ): string[] {
   const errors: string[] = [];
+  if (rules) {
+    for (const ruleId of state.activeRuleIds) {
+      if (!rules.has(ruleId)) errors.push(`active state references unknown rule ${ruleId}`);
+    }
+  }
   for (const [entityId, fields] of Object.entries(state.values)) {
     const entity = entities.get(entityId);
     if (!entity) {

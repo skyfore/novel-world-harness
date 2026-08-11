@@ -122,9 +122,10 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
   return async ({ branchId, commitId }) => {
     const candidates: ActorProposalCandidate[] = [];
     const goals = await actors.listGoals();
+    const context = await engine.contextForCommit(commitId);
     for (const goal of goals) {
       if (!goal.candidateAction) continue;
-      const entity = engine.context.entities.get(goal.actorId);
+      const entity = context.entities.get(goal.actorId);
       if (!entity || entity.kind !== "character") continue;
       const view = await knowledge.view(goal.actorId, commitId);
       const known = new Set(view.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));

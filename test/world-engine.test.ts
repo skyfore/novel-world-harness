@@ -111,7 +111,7 @@ describe("WorldEngine", () => {
       evidence: [],
     });
     expect(result.report.accepted).toBe(false);
-    expect(result.report.errors.some((error) => error.code === "POST_STATE_INVARIANT")).toBe(true);
+    expect(result.report.errors.some((error) => error.code === "INVALID_DELTA" && error.message.includes("Unknown world rule"))).toBe(true);
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 

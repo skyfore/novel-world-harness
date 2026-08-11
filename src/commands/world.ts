@@ -1,12 +1,13 @@
 import fs from "node:fs/promises";
 import { stdout } from "node:process";
 import { z } from "zod";
+import { ActorModelStore, deterministicActorProposalSource } from "../world/actors.js";
 import { canonicalPossibilitySource } from "../world/canon-runtime.js";
 import { loadWorldContext } from "../world/context.js";
-import { WorldEngine } from "../world/engine.js";
+import { WorldEngine, validateEventProposal } from "../world/engine.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { KnowledgeProjector } from "../world/knowledge.js";
-import { predicateSchema, stateDeltaSchema, type CommitId } from "../world/model.js";
+import { eventProposalSchema, predicateSchema, stateDeltaSchema, type CommitId, type WorldState } from "../world/model.js";
 import { NarrativeRenderer } from "../world/narrative.js";
 import { runCanonReplay } from "../world/replay.js";
 import { WorldRuntime } from "../world/runtime.js";
@@ -14,16 +15,15 @@ import { WorldRuntime } from "../world/runtime.js";
 async function openWorld(root: string) {
   const { canon, context } = await loadWorldContext(root);
   const engine = new WorldEngine(root, context);
-  const runtime = new WorldRuntime(engine, canonicalPossibilitySource(canon));
-  return { canon, context, engine, runtime };
+  const actors = new ActorModelStore(root);
+  const runtime = new WorldRuntime(engine, canonicalPossibilitySource(canon), undefined, deterministicActorProposalSource(engine, actors));
+  return { canon, context, engine, actors, runtime };
 }
 
 export async function worldCreateCommand(root: string, branchId: string, seedPath?: string): Promise<void> {
   const { engine } = await openWorld(root);
   const canonicalInitial = seedPath ? null : await new InitialWorldStore(root).get();
-  const seed = seedPath
-    ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8")))
-    : canonicalInitial?.delta ?? { version: 1 as const, operations: [] };
+  const seed = seedPath ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8"))) : canonicalInitial?.delta ?? { version: 1 as const, operations: [] };
   const head = await engine.createBranch(branchId, branchId, seed);
   stdout.write(`${branchId}\t${head}${canonicalInitial && !seedPath ? "\t[canonical initial world]" : ""}\n`);
 }
@@ -71,8 +71,18 @@ export async function worldFrontierCommand(root: string, branchId: string): Prom
 export async function worldKnowledgeCommand(root: string, branchId: string, actorId: string): Promise<void> {
   const { engine } = await openWorld(root);
   const head = await engine.branches.readHead(branchId);
-  const view = await new KnowledgeProjector(engine).view(actorId, head);
-  stdout.write(`${JSON.stringify(view, null, 2)}\n`);
+  stdout.write(`${JSON.stringify(await new KnowledgeProjector(engine).view(actorId, head), null, 2)}\n`);
+}
+
+export async function worldActorCommand(root: string, branchId: string, actorId: string): Promise<void> {
+  const { engine, actors } = await openWorld(root);
+  const head = await engine.branches.readHead(branchId);
+  const [model, goals, view] = await Promise.all([
+    actors.getModel(actorId),
+    actors.listGoals(actorId),
+    new KnowledgeProjector(engine).view(actorId, head),
+  ]);
+  stdout.write(`${JSON.stringify({ actorId, model, goals, view }, null, 2)}\n`);
 }
 
 export async function worldForkCommand(root: string, parentBranchId: string, newBranchId: string, fromCommit?: string): Promise<void> {
@@ -90,6 +100,39 @@ export async function worldRenderCommand(root: string, branchId: string, actorId
   stdout.write(`${await renderer.render(branchId, head, style)}\n`);
 }
 
+const proposalFileSchema = eventProposalSchema.omit({ branchId: true, expectedParentCommit: true });
+
+export async function worldValidateCommand(root: string, branchId: string, proposalPath: string): Promise<void> {
+  const { engine, context } = await openWorld(root);
+  const head = await engine.branches.readHead(branchId);
+  const payload = proposalFileSchema.parse(JSON.parse(await fs.readFile(proposalPath, "utf8")));
+  const proposal = eventProposalSchema.parse({ ...payload, branchId, expectedParentCommit: head });
+  const state = await engine.projector.project(head);
+  stdout.write(`${JSON.stringify(validateEventProposal(proposal, head, state, context).report, null, 2)}\n`);
+}
+
+export async function worldMoveCommand(root: string, branchId: string, proposalPath: string | undefined, maxActors: number, maxBackground: number): Promise<void> {
+  const { engine, runtime } = await openWorld(root);
+  const head = await engine.branches.readHead(branchId);
+  const playerProposal = proposalPath
+    ? eventProposalSchema.parse({ ...proposalFileSchema.parse(JSON.parse(await fs.readFile(proposalPath, "utf8"))), branchId, expectedParentCommit: head })
+    : undefined;
+  const result = await runtime.move({
+    branchId,
+    ...(playerProposal ? { playerProposal } : {}),
+    maxActorCandidates: maxActors,
+    maxBackgroundCandidates: maxBackground,
+  });
+  stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
+export async function worldDiffCommand(root: string, leftBranch: string, rightBranch: string): Promise<void> {
+  const { engine } = await openWorld(root);
+  const [leftHead, rightHead] = await Promise.all([engine.branches.readHead(leftBranch), engine.branches.readHead(rightBranch)]);
+  const [left, right] = await Promise.all([engine.projector.project(leftHead), engine.projector.project(rightHead)]);
+  stdout.write(`${JSON.stringify({ left: { branch: leftBranch, head: leftHead }, right: { branch: rightBranch, head: rightHead }, differences: diffWorldStates(left, right) }, null, 2)}\n`);
+}
+
 const replayFileSchema = z.array(z.object({ id: z.string().min(1), label: z.string().min(1), expected: z.array(predicateSchema) }).strict());
 export async function worldReplayCommand(root: string, branchId: string, checkpointPath: string, maxMoves: number): Promise<void> {
   const { runtime } = await openWorld(root);
@@ -97,4 +140,23 @@ export async function worldReplayCommand(root: string, branchId: string, checkpo
   const result = await runCanonReplay(runtime, branchId, checkpoints, maxMoves);
   stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (!result.passed) process.exitCode = 3;
+}
+
+function diffWorldStates(left: WorldState, right: WorldState): Array<{ entityId: string; field: string; left: unknown; right: unknown }> {
+  const entityIds = new Set([...Object.keys(left.values), ...Object.keys(right.values)]);
+  const differences: Array<{ entityId: string; field: string; left: unknown; right: unknown }> = [];
+  for (const entityId of [...entityIds].sort()) {
+    const leftFields = left.values[entityId] ?? {};
+    const rightFields = right.values[entityId] ?? {};
+    const fields = new Set([...Object.keys(leftFields), ...Object.keys(rightFields)]);
+    for (const field of [...fields].sort()) {
+      const leftValue = leftFields[field];
+      const rightValue = rightFields[field];
+      if (JSON.stringify(leftValue) !== JSON.stringify(rightValue)) differences.push({ entityId, field, left: leftValue, right: rightValue });
+    }
+  }
+  const leftRules = [...left.activeRuleIds].sort();
+  const rightRules = [...right.activeRuleIds].sort();
+  if (JSON.stringify(leftRules) !== JSON.stringify(rightRules)) differences.push({ entityId: "$world", field: "activeRuleIds", left: leftRules, right: rightRules });
+  return differences;
 }

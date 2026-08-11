@@ -41,12 +41,13 @@ export function modelActorProposalSource(
   if (!Number.isInteger(maxActors) || maxActors <= 0 || maxActors > 100) throw new Error("maxActorsPerRefresh must be 1..100");
 
   return async ({ branchId, commitId }) => {
+    const context = await engine.contextForCommit(commitId);
     const goals = [...(await options.goals())]
       .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
       .slice(0, maxActors);
     const candidates: ActorProposalCandidate[] = [];
     for (const goal of goals) {
-      const entity = engine.context.entities.get(goal.actorId);
+      const entity = context.entities.get(goal.actorId);
       if (!entity || entity.kind !== "character") continue;
       const actor = await knowledge.view(goal.actorId, commitId);
       const known = new Set(actor.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
@@ -59,7 +60,7 @@ export function modelActorProposalSource(
       const action = actorActionTemplateSchema.parse(output);
       const participants = [...new Set([goal.actorId, ...action.participants])];
       for (const participant of participants) {
-        if (!engine.context.entities.has(participant)) throw new Error(`Actor reasoner proposed unknown participant ${participant}`);
+        if (!context.entities.has(participant)) throw new Error(`Actor reasoner proposed unknown participant ${participant}`);
       }
       const evidence: EvidenceRef[] = goal.evidence;
       candidates.push({

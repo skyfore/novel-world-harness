@@ -161,7 +161,7 @@ export class BranchStore {
       let metadata: BranchLock | undefined;
       try {
         const value = JSON.parse(raw) as BranchLock;
-        if (value.version === 1 && Number.isInteger(value.pid) && value.pid > 0 && typeof value.hostname === "string" && typeof value.createdAt === "string") metadata = value;
+        if (value.version === 1 && Number.isInteger(value.pid) && value.pid > 0 && typeof value.hostname === "string" && typeof value.createdAt === "string" && Number.isFinite(Date.parse(value.createdAt))) metadata = value;
       } catch {
         // A process may be between exclusive create and metadata write.
       }
@@ -176,7 +176,13 @@ export class BranchStore {
       try {
         const handle = await fs.open(lockPath, "wx", 0o600);
         const metadata: BranchLock = { version: 1, pid: process.pid, hostname: os.hostname(), createdAt: new Date().toISOString() };
-        await handle.writeFile(`${JSON.stringify(metadata)}\n`, "utf8");
+        try {
+          await handle.writeFile(`${JSON.stringify(metadata)}\n`, "utf8");
+        } catch (error) {
+          await handle.close();
+          await fs.rm(lockPath, { force: true });
+          throw error;
+        }
         return handle;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;

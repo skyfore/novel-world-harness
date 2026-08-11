@@ -59,14 +59,15 @@ export class KnowledgeProjector {
   }
 
   async view(actorId: EntityId, commitId: CommitId, worldState?: WorldState): Promise<ActorWorldView> {
-    const entity = this.engine.context.entities.get(actorId);
+    const context = await this.engine.contextForCommit(commitId);
+    const entity = context.entities.get(actorId);
     if (!entity || entity.kind !== "character") throw new Error(`Actor view requires a character: ${actorId}`);
     const state = worldState ?? (await this.engine.projector.project(commitId));
     if (state.atCommit !== commitId) throw new Error(`World state ${state.atCommit} does not match requested commit ${commitId}`);
     const knowledge = await this.project(commitId);
     const facts = Object.values(knowledge.actors[actorId] ?? {})
       .sort((left, right) => left.claimId.localeCompare(right.claimId))
-      .map((fact) => ({ fact, claim: this.engine.context.claims?.get(fact.claimId) }))
+      .map((fact) => ({ fact, claim: context.claims?.get(fact.claimId) }))
       .map(({ fact, claim }) => (claim ? { fact, claim } : { fact }));
     return {
       actorId,

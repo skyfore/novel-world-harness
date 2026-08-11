@@ -1,18 +1,28 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  createAgentSession,
+  createAgentSessionFromServices,
+  createAgentSessionRuntime,
+  createAgentSessionServices,
   defineTool,
-  DefaultResourceLoader,
+  initTheme,
+  InteractiveMode,
   ModelRuntime,
   SessionManager,
   SettingsManager,
   type AgentSession,
+  type AgentSessionRuntime,
+  type CreateAgentSessionRuntimeFactory,
+  type TuiMode,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { LlmProfile } from "../config/schema.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
+import { expandFileMentions } from "./file-mentions.js";
+import { createNwhExtension, type NwhInteractionMode } from "./nwh-extension.js";
+
+export { expandFileMentions } from "./file-mentions.js";
 
 const DEFAULT_PROFILE: LlmProfile = {
   provider: "anthropic",
@@ -32,6 +42,12 @@ export type PiAgentSessionOptions = {
   onTool?: (name: string, input: unknown) => void;
   additionalTools?: ToolDefinition[];
   systemPromptAppendix?: string;
+  interactionMode?: NwhInteractionMode;
+};
+
+export type PiInteractiveOptions = {
+  tuiMode?: TuiMode;
+  initialMessage?: string;
 };
 
 function textResult(text: string) {
@@ -139,7 +155,7 @@ async function createModelRuntime(profile: LlmProfile, stateDir: string): Promis
 }
 
 export class PiAgentSession {
-  private session!: AgentSession;
+  private runtimeHost!: AgentSessionRuntime;
   private readonly profile: LlmProfile;
   private readonly stateDir: string;
   private readonly saveSession: boolean;
@@ -167,59 +183,110 @@ export class PiAgentSession {
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
     const { runtime, model } = await createModelRuntime(profile, stateDir);
     const wrapper = new PiAgentSession({ ...options, profile }, runtime, model);
-    await wrapper.replaceSession(Boolean(options.continueSession));
+    await wrapper.initialize(Boolean(options.continueSession));
     return wrapper;
   }
+  private get session(): AgentSession { return this.runtimeHost.session; }
   get id(): string { return this.session.sessionId; }
   get model(): string { return `${this.resolvedModel.provider}/${this.resolvedModel.id}`; }
   get messageCount(): number { return this.session.messages.length; }
   get sessionFile(): string | undefined { return this.session.sessionFile; }
-  async clear(): Promise<void> { await this.replaceSession(false); }
+  async clear(): Promise<void> {
+    await this.runtimeHost.newSession();
+    this.bindSessionEvents();
+  }
   async prompt(input: string): Promise<string> {
     this.activeText = "";
-    await this.session.prompt(input, { source: "interactive" });
+    await this.session.prompt(await expandFileMentions(input, this.options.workspace), { source: "interactive" });
     const latest = [...this.session.messages].reverse().find((message) => message.role === "assistant");
     if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) throw new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
     if (this.activeText) return this.activeText;
     if (latest?.role !== "assistant") return "";
     return latest.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("");
   }
-  dispose(): void { this.unsubscribe?.(); this.session.dispose(); }
-
-  private async replaceSession(continueSession: boolean): Promise<void> {
+  async runInteractive(options: PiInteractiveOptions = {}): Promise<void> {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      throw new Error("The interactive NWH TUI requires a terminal. Use `nwh -p \"your prompt\"` for non-interactive execution.");
+    }
     this.unsubscribe?.();
-    this.session?.dispose();
-    const settingsManager = SettingsManager.inMemory({}, { projectTrusted: false });
-    const agentDir = path.join(this.stateDir, "pi");
-    const resourceLoader = new DefaultResourceLoader({
-      cwd: this.options.workspace.root,
-      agentDir,
-      settingsManager,
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
-      systemPrompt: await buildSystemPrompt(this.options.workspace, this.options.systemPromptAppendix),
+    this.unsubscribe = undefined;
+    initTheme(this.runtimeHost.services.settingsManager.getTheme(), true);
+    const mode = new InteractiveMode(this.runtimeHost, {
+      modelFallbackMessage: this.runtimeHost.modelFallbackMessage,
+      tuiMode: options.tuiMode ?? "regular",
+      ...(options.initialMessage ? { initialMessage: options.initialMessage } : {}),
     });
-    await resourceLoader.reload();
+    await mode.run();
+  }
+  async dispose(): Promise<void> {
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+    await this.runtimeHost.dispose();
+  }
+
+  private async initialize(continueSession: boolean): Promise<void> {
+    const agentDir = path.join(this.stateDir, "pi");
     const sessionsDir = path.join(this.stateDir, "sessions");
     const sessionManager = this.saveSession
       ? continueSession ? SessionManager.continueRecent(this.options.workspace.root, sessionsDir) : SessionManager.create(this.options.workspace.root, sessionsDir)
       : SessionManager.inMemory(this.options.workspace.root);
-    const result = await createAgentSession({
+    const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager: nextSessionManager, sessionStartEvent }) => {
+      if (path.resolve(cwd) !== this.options.workspace.root) {
+        throw new Error(`NWH cannot switch this session to another workspace (${cwd}). Start a new process with --root instead.`);
+      }
+      const settingsManager = SettingsManager.inMemory({
+        quietStartup: true,
+        tuiMode: "regular",
+        enableInstallTelemetry: false,
+        enableAnalytics: false,
+      }, { projectTrusted: false });
+      const services = await createAgentSessionServices({
+        cwd,
+        agentDir,
+        modelRuntime: this.runtime,
+        settingsManager,
+        resourceLoaderOptions: {
+          noExtensions: true,
+          noSkills: true,
+          noPromptTemplates: true,
+          noThemes: true,
+          noContextFiles: true,
+          systemPrompt: await buildSystemPrompt(this.options.workspace, this.options.systemPromptAppendix),
+          extensionFactories: [{
+            name: "nwh",
+            hidden: true,
+            factory: createNwhExtension({
+              workspace: this.options.workspace,
+              saveSession: this.saveSession,
+              mode: this.options.interactionMode ?? "assistant",
+            }),
+          }],
+        },
+      });
+      return {
+        ...(await createAgentSessionFromServices({
+          services,
+          sessionManager: nextSessionManager,
+          sessionStartEvent,
+          model: this.resolvedModel,
+          thinkingLevel: this.profile.thinkingLevel,
+          noTools: "builtin",
+          customTools: [...localTools(this.options.workspace), ...(this.options.additionalTools ?? [])],
+        })),
+        services,
+        diagnostics: services.diagnostics,
+      };
+    };
+    this.runtimeHost = await createAgentSessionRuntime(createRuntime, {
       cwd: this.options.workspace.root,
       agentDir,
-      modelRuntime: this.runtime,
-      model: this.resolvedModel,
-      thinkingLevel: this.profile.thinkingLevel,
-      noTools: "builtin",
-      customTools: [...localTools(this.options.workspace), ...(this.options.additionalTools ?? [])],
-      resourceLoader,
       sessionManager,
-      settingsManager,
     });
-    this.session = result.session;
+    this.bindSessionEvents();
+  }
+
+  private bindSessionEvents(): void {
+    this.unsubscribe?.();
     this.unsubscribe = this.session.subscribe((event) => {
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         this.activeText += event.assistantMessageEvent.delta;
@@ -228,20 +295,3 @@ export class PiAgentSession {
     });
   }
 }
-
-export async function expandFileMentions(input: string, workspace: LocalFileWorkspace): Promise<string> {
-  const mentionPattern = /(?:^|\s)@(?:"([^"]+)"|'([^']+)'|([^\s]+))/g;
-  const attachments: string[] = [];
-  const seen = new Set<string>();
-  let match: RegExpExecArray | null;
-  while ((match = mentionPattern.exec(input)) !== null) {
-    const filePath = match[1] ?? match[2] ?? match[3];
-    if (!filePath || seen.has(filePath)) continue;
-    seen.add(filePath);
-    const content = await workspace.readFile({ path: filePath });
-    attachments.push(`<attached-file path="${filePath}">\n${content}\n</attached-file>`);
-  }
-  if (!attachments.length) return input;
-  return `${input}\n\nLocally resolved file references:\n${attachments.join("\n\n")}`;
-}
-

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local-first CLI for compiling novels into verifiable executable worlds.",
+  "description": "Local-first terminal harness for compiling novels into verifiable executable worlds.",
   "license": "MIT",
   "main": "./dist/api.js",
   "types": "./dist/api.d.ts",

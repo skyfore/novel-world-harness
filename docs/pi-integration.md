@@ -6,6 +6,7 @@ Pi remains in the design because it solves the generic agent-runtime problems th
 - streaming assistant and tool-call events;
 - multi-turn agent execution;
 - append-only sessions and continuation;
+- terminal transcript, editor, tool-call rendering, status, and keyboard interaction;
 - thinking-level handling and future compaction support.
 
 Novel World Harness owns the parts specific to executable fiction:
@@ -17,8 +18,8 @@ Novel World Harness owns the parts specific to executable fiction:
 - proposal/validation/commit boundaries;
 - future canon replay and world invariants.
 
-The previous direct Anthropic SDK implementation coupled the CLI to one provider and duplicated session/tool-loop behavior already available in Pi. The current adapter resolves the configured profile through Pi and can register a custom provider endpoint when `baseUrl` and `apiProtocol` are supplied.
+The previous direct Anthropic SDK implementation coupled the CLI to one provider and duplicated session/tool-loop behavior already available in Pi. The current adapter resolves the configured profile through Pi and can register a custom provider endpoint when `baseUrl` and `apiProtocol` are supplied. Interactive use is hosted by Pi's public `AgentSessionRuntime` and `InteractiveMode`; an NWH inline extension supplies branding, safe local commands, and guarded file mentions.
 
 “Remove external services” applies to the external persistence layer in Phase 0: PostgreSQL and other attached databases are removed. It does not require removing Pi or forcing the official Claude API. A remote model is still optional infrastructure selected by the user; all harness state and retrieval stay file-based.
 
-For safety, the Pi session disables built-in coding tools and extension discovery. Ordinary sessions expose only Novel Harness's three custom read-only local tools. Explicit compiler sessions add typed proposal tools, which can write pending proposal envelopes but cannot write arbitrary files, execute a shell, access the network as a tool, accept canonical truth, or commit world state.
+For safety, the Pi session disables built-in model coding tools and external extension discovery. Ordinary sessions expose only Novel Harness's three custom read-only local tools. Explicit compiler sessions add typed proposal tools, which can write pending proposal envelopes but cannot write arbitrary files, execute a shell as a model tool, access the network as a tool, accept canonical truth, or commit world state. The TUI's `!command` path is a deliberate user terminal action, not an agent capability.

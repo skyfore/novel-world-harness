@@ -1,6 +1,6 @@
 # Configuration
 
-The interactive CLI can start without a configuration file. Defaults are:
+The interactive TUI can start without a configuration file. Defaults are:
 
 - workspace: current directory;
 - Pi provider/model: `anthropic/claude-sonnet-5`;
@@ -34,13 +34,15 @@ llm:
       thinkingLevel: low
       maxTokens: 4096
   routing:
+    controller: main
     extractor: fast
     narrator: main
 ```
 
-The current CLI consumes two role routes:
+The current terminal harness consumes three role routes:
 
-- `extractor`: `compile` and `compile-source`;
+- `controller`: guided `nwh compile` sessions;
+- `extractor`: bounded `compile-source` batches;
 - `narrator`: ordinary `nwh` / `nwh play` sessions.
 
 Unknown routes are allowed for future adapters, but they have no effect until code asks for that role.

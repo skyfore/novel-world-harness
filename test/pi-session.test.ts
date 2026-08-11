@@ -29,7 +29,7 @@ describe("PiAgentSession", () => {
     expect(session.model).toBe("anthropic/claude-sonnet-5");
     expect(session.messageCount).toBe(0);
     expect(session.sessionFile).toBeUndefined();
-    session.dispose();
+    await session.dispose();
   });
 
   it("registers a configured custom provider through Pi", async () => {
@@ -49,7 +49,6 @@ describe("PiAgentSession", () => {
       },
     });
     expect(session.model).toBe("local-openai/novel-model");
-    session.dispose();
+    await session.dispose();
   });
 });
-

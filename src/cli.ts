@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import type { TuiMode } from "@earendil-works/pi-coding-agent";
 import { resolveConfigPath } from "./config/load.js";
 import { auditCommand } from "./commands/audit.js";
 import { initCommand } from "./commands/init.js";
@@ -35,6 +36,7 @@ program
   .option("--root <path>", "local novel workspace", process.cwd())
   .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
+  .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
   .option("--continue", "continue the latest session in this workspace")
   .option("--no-save", "do not persist the interactive session");
 
@@ -45,6 +47,10 @@ function nonNegativeInteger(value: string, name: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${name} must be a non-negative integer`);
   return parsed;
+}
+function parseTuiMode(value: string): TuiMode {
+  if (value !== "regular" && value !== "fullscreen") throw new Error("--tui-mode must be regular or fullscreen");
+  return value;
 }
 
 program.command("init").argument("[directory]", "target directory", process.cwd()).description("create starter novel-harness.yaml and NOVEL.md files").action(initCommand);
@@ -59,6 +65,7 @@ program
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
   .option("--model <model>", "override compiler model")
+  .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
   .option("--no-save", "do not persist compiler session")
   .description("open an explicit compiler session with typed proposal tools")
   .action(async (prompt, options) => {
@@ -68,6 +75,7 @@ program
       configPath: resolveConfigPath(options.config),
       allowMissingConfig: !options.config,
       model: options.model ?? globalOptions.model,
+      tuiMode: options.tuiMode ?? globalOptions.tuiMode,
       saveSession: options.save && globalOptions.save,
       ...(prompt ? { prompt } : {}),
     });
@@ -131,6 +139,7 @@ program
   .option("--root <path>", "local novel workspace")
   .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
+  .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
   .option("--continue", "continue the latest session in this workspace")
   .option("--no-save", "do not persist the interactive session")
   .description("open the local-first terminal session")
@@ -142,6 +151,7 @@ program
       root: rootFor(options),
       model: options.model ?? globalOptions.model,
       printPrompt: options.print ?? globalOptions.print,
+      tuiMode: options.tuiMode ?? globalOptions.tuiMode,
       continueSession: options.continue || globalOptions.continue,
       saveSession: options.save && globalOptions.save,
     });
@@ -155,6 +165,7 @@ program.action(async () => {
     root: options.root,
     model: options.model,
     printPrompt: options.print,
+    tuiMode: options.tuiMode,
     continueSession: options.continue,
     saveSession: options.save,
   });

@@ -10,7 +10,7 @@ The branch implements a credible executable-world engine vertical slice and a se
 
 | Area | Status | What is actually usable |
 | --- | --- | --- |
-| Local file assistant | Implemented | Read-only terminal session, local lexical discovery, bounded reads, Pi sessions |
+| Local file assistant | Implemented | Claude Code-style TUI, streaming/tool rendering, local lexical discovery, bounded reads, Pi sessions; model tools are read-only |
 | Source ingest | Implemented | Content hash, source manifest, deterministic evidence segments |
 | Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation; dependency-ordered acceptance |
@@ -67,6 +67,8 @@ nwh world snapshot|fsck
 ```
 
 The ordinary `nwh` / `nwh play` session remains intentionally read-only and does not mutate the world.
+
+Its terminal shell is now a real Pi-backed TUI rather than a `readline` loop: regular/fullscreen rendering, transcript history, streaming state, tool rows, multiline editing, command completion, queue/interrupt shortcuts, status/footer data, and session replacement are connected. This completes the generic assistant interaction layer; it does not by itself implement character embodiment or natural-language world moves.
 
 ## Removed obsolete scaffold
 

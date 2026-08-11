@@ -1,6 +1,6 @@
 # Novel World Harness
 
-A local-first, Pi-backed CLI for compiling novels into evidence-backed executable worlds.
+A local-first, Pi-backed terminal harness for compiling novels into evidence-backed executable worlds.
 
 The target is not a novel RAG chatbot. Source text is compiled into a canonical model; runtime branches then evolve through validated events without forcing a divergent branch back onto the book's future plot.
 
@@ -10,7 +10,7 @@ The repository contains a tested engine vertical slice, not yet a finished role-
 
 Implemented:
 
-- Claude Code-style terminal interaction with bounded local `list_files`, `search_files`, and `read_file` tools;
+- Claude Code-style TUI with a persistent transcript, streaming responses, rendered tool calls, a multiline editor, status/footer information, and bounded local `list_files`, `search_files`, and `read_file` tools;
 - local state under `.novel-harness/`, with no PostgreSQL, vector database, or RAG service;
 - deterministic source registration, hashing, segmentation, and resumable compiler batches;
 - Pi compiler sessions that can only create typed pending proposals;
@@ -54,9 +54,12 @@ nwh
 nwh -p "列出这个工作区中的主要人物资料"
 nwh --continue
 nwh --root ./my-novel
+nwh --tui-mode fullscreen
 ```
 
-The ordinary session is read-only. Inside it:
+`nwh` and `nwh play` open the TUI in `regular` mode by default, preserving terminal scrollback. `--tui-mode fullscreen` uses an alternate-screen layout. `-p` remains the non-interactive path for scripts and pipelines.
+
+The model in the ordinary session is read-only. Inside the TUI:
 
 ```text
 /files chapter
@@ -68,7 +71,11 @@ The ordinary session is read-only. Inside it:
 /exit
 ```
 
+The TUI also supports multiline editing, interrupt/queue shortcuts, session navigation, and expandable tool output; use `/hotkeys` for the current key map. A leading `!` is an explicit user-run shell command provided by the terminal UI. It is not exposed to the model as a tool.
+
 Selected excerpts are sent to the configured model provider. “Local-first” describes discovery, access control, and persistence; it is not an offline-model guarantee.
+
+Pi may also perform startup metadata checks or obtain its optional `fd` autocomplete helper. Set `PI_OFFLINE=1` to suppress those startup operations; model prompts still require the configured provider unless that provider is local.
 
 ## Compile a source
 
@@ -87,6 +94,8 @@ nwh status
 ```
 
 `ingest` stores a content-addressed source manifest and deterministic evidence segments. It does not copy the novel into a database. `compile-source` sends bounded evidence batches to the selected model, and model tools can only write pending typed proposals. `accept-all` revalidates structure and source evidence before moving valid canonical and possibility proposals into revisioned stores.
+
+For guided compiler work, `nwh compile` opens the same TUI in compiler mode and starts a small evidence-backed proposal batch. `nwh compile "<instruction>"` preserves the one-shot form.
 
 ## Execute a compiled world
 

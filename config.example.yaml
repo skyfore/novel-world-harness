@@ -20,5 +20,6 @@ llm:
       thinkingLevel: low
       maxTokens: 4096
   routing:
+    controller: main
     extractor: fast
     narrator: main

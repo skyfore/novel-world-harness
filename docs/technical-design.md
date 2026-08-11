@@ -1179,7 +1179,7 @@ Do not prematurely lock these down:
 - a universal probabilistic simulation model;
 - fully general predicate/effect programming;
 - multi-agent continuous simulation for every character;
-- final polished TUI.
+- world-specific character/perception/action panels beyond the generic assistant TUI.
 
 Each should be introduced only when a concrete vertical-slice limitation proves the need.
 

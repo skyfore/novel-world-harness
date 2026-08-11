@@ -385,8 +385,8 @@ Examples:
 
 ## 15. MVP sequence
 
-### Phase 0 — local-first harness CLI (implemented)
-Claude Code-style terminal interaction backed by Pi, workspace instructions, `rg`-first local read/search tools, bounded `@file` context, and persistent local-file sessions/state. There is no external database or RAG layer. Ordinary sessions are read-only; explicit compiler sessions now add narrow typed proposal tools.
+### Phase 0 — local-first harness TUI (implemented)
+Claude Code-style continuous terminal rendering backed by Pi, workspace instructions, `rg`-first local read/search tools, bounded `@file` context, and persistent local-file sessions/state. There is no external database or RAG layer. Ordinary model sessions are read-only; explicit compiler sessions add narrow typed proposal tools.
 
 ### Phase 1A — executable history core (implemented vertical slice)
 Typed world contracts, immutable commit storage, branch heads, predicates, `StateDelta`, deterministic projection, and validation are implemented and tested on constrained fixtures.
@@ -404,7 +404,7 @@ The possibility frontier, deterministic scheduler, branching, conflict adjudicat
 Actor-scoped knowledge, goals, deterministic candidate actions, conflict handling, and information propagation exist. Natural-language player control, Pi-backed actor reasoning, and interactive character embodiment are not connected.
 
 ### Phase 4 — compiler breadth and narrative quality (next)
-Add annotated corpus evaluation, model-backed narrative rendering, interactive world play, long-horizon testing, and terminal UX after the end-to-end product loop is reliable.
+Add annotated corpus evaluation, model-backed narrative rendering, interactive world play, long-horizon testing, and world-specific terminal views after the end-to-end product loop is reliable.
 
 ## 16. Primary success criterion
 

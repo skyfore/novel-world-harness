@@ -28,9 +28,12 @@ export type SegmentManifest = {
   segments: SourceSegment[];
 };
 
+type LineRecord = { text: string; eol: string; startByte: number; endByte: number };
+type Span = { start: number; end: number; kind: "section" | "block"; title?: string };
+
 const HEADING_PATTERNS = [
   /^\s{0,3}#{1,6}\s+\S/,
-  /^\s*第[零〇一二三四五六七八九十百千万两\d]+[章节卷回部篇]\b/u,
+  /^\s*第[零〇一二三四五六七八九十百千万两\d]+[章节卷回部篇](?:\s|$)/u,
   /^\s*(?:chapter|book|part|volume)\s+[\divxlcdm]+\b/i,
 ];
 const MAX_BLOCK_LINES = 160;
@@ -83,12 +86,12 @@ export async function segmentSource(workspaceRoot: string, source: SourceDocumen
     throw new Error(`Source changed since ingest: ${source.sourcePath}; expected ${source.contentSha256}, found ${sourceSha256}`);
   }
   if (buffer.subarray(0, 8_000).includes(0)) throw new Error(`Source must be UTF-8 text: ${source.sourcePath}`);
-  const text = buffer.toString("utf8").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const lines = text.split("\n");
-  const byteStarts = lineByteStarts(lines);
+
+  const records = parseLines(buffer.toString("utf8"));
+  const lines = records.map((record) => record.text);
   const boundaries = findBoundaries(lines);
-  const spans = boundaries.length > 1 ? sectionSpans(lines, boundaries) : blockSpans(lines);
-  const segments = spans.map((span, ordinal) => materializeSegment(source, lines, byteStarts, span, ordinal));
+  const spans = boundaries.length > 1 ? sectionSpans(lines, records, boundaries) : blockSpans(lines, records);
+  const segments = spans.map((span, ordinal) => materializeSegment(source, buffer, records, span, ordinal));
   return {
     version: 1,
     sourceId: source.id,
@@ -101,13 +104,31 @@ export async function segmentSource(workspaceRoot: string, source: SourceDocumen
 
 export async function readSegmentText(workspaceRoot: string, segment: SourceSegment): Promise<string> {
   const absolute = path.resolve(workspaceRoot, segment.sourcePath);
+  const relative = path.relative(workspaceRoot, absolute);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Segment source escapes workspace: ${segment.sourcePath}`);
   const buffer = await fs.readFile(absolute);
   const slice = buffer.subarray(segment.startByte, segment.endByte);
   if (sha256(slice) !== segment.textSha256) throw new Error(`Segment source changed: ${segment.id}`);
   return slice.toString("utf8");
 }
 
-type Span = { start: number; end: number; kind: "section" | "block"; title?: string };
+function parseLines(text: string): LineRecord[] {
+  const records: LineRecord[] = [];
+  const pattern = /([^\r\n]*)(\r\n|\r|\n|$)/g;
+  let match: RegExpExecArray | null;
+  let byteOffset = 0;
+  while ((match = pattern.exec(text)) !== null) {
+    const line = match[1] ?? "";
+    const eol = match[2] ?? "";
+    if (!line && !eol && match.index === text.length) break;
+    const bytes = Buffer.byteLength(line + eol, "utf8");
+    records.push({ text: line, eol, startByte: byteOffset, endByte: byteOffset + bytes });
+    byteOffset += bytes;
+    if (!eol) break;
+  }
+  if (!records.length) records.push({ text: "", eol: "", startByte: 0, endByte: 0 });
+  return records;
+}
 
 function findBoundaries(lines: string[]): number[] {
   const boundaries: number[] = [];
@@ -119,26 +140,29 @@ function findBoundaries(lines: string[]): number[] {
   return boundaries;
 }
 
-function sectionSpans(lines: string[], boundaries: number[]): Span[] {
+function sectionSpans(lines: string[], records: LineRecord[], boundaries: number[]): Span[] {
   const spans: Span[] = [];
   for (let index = 0; index < boundaries.length; index += 1) {
     const start = boundaries[index]!;
     const end = (boundaries[index + 1] ?? lines.length) - 1;
-    for (const block of splitOversized(lines, start, end)) {
+    const pieces = splitOversized(lines, records, start, end);
+    for (let pieceIndex = 0; pieceIndex < pieces.length; pieceIndex += 1) {
+      const block = pieces[pieceIndex]!;
       const heading = (lines[start] ?? "").trim();
-      spans.push({ ...block, kind: "section", ...(heading ? { title: heading.slice(0, 200) } : {}) });
+      const title = pieceIndex === 0 && heading ? heading.slice(0, 200) : heading ? `${heading.slice(0, 180)} [${pieceIndex + 1}]` : undefined;
+      spans.push({ ...block, kind: "section", ...(title ? { title } : {}) });
     }
   }
   return spans.filter((span) => span.end >= span.start && lines.slice(span.start, span.end + 1).some((line) => line.trim()));
 }
 
-function blockSpans(lines: string[]): Span[] {
-  return splitOversized(lines, 0, Math.max(0, lines.length - 1))
+function blockSpans(lines: string[], records: LineRecord[]): Span[] {
+  return splitOversized(lines, records, 0, Math.max(0, lines.length - 1))
     .map((span) => ({ ...span, kind: "block" as const }))
     .filter((span) => lines.slice(span.start, span.end + 1).some((line) => line.trim()));
 }
 
-function splitOversized(lines: string[], start: number, end: number): Array<{ start: number; end: number }> {
+function splitOversized(lines: string[], records: LineRecord[], start: number, end: number): Array<{ start: number; end: number }> {
   const spans: Array<{ start: number; end: number }> = [];
   let cursor = start;
   while (cursor <= end) {
@@ -146,11 +170,11 @@ function splitOversized(lines: string[], start: number, end: number): Array<{ st
     let bytes = 0;
     let lastBlank = -1;
     while (blockEnd <= end && blockEnd - cursor < MAX_BLOCK_LINES) {
-      const line = lines[blockEnd] ?? "";
-      const nextBytes = Buffer.byteLength(line, "utf8") + (blockEnd < lines.length - 1 ? 1 : 0);
+      const record = records[blockEnd]!;
+      const nextBytes = record.endByte - record.startByte;
       if (blockEnd > cursor && bytes + nextBytes > MAX_BLOCK_BYTES) break;
       bytes += nextBytes;
-      if (!line.trim()) lastBlank = blockEnd;
+      if (!(lines[blockEnd] ?? "").trim()) lastBlank = blockEnd;
       blockEnd += 1;
     }
     if (blockEnd <= end && lastBlank >= cursor + 1) blockEnd = lastBlank + 1;
@@ -164,16 +188,15 @@ function splitOversized(lines: string[], start: number, end: number): Array<{ st
 
 function materializeSegment(
   source: SourceDocument,
-  lines: string[],
-  byteStarts: number[],
+  buffer: Buffer,
+  records: LineRecord[],
   span: Span,
   ordinal: number,
 ): SourceSegment {
-  const startByte = byteStarts[span.start] ?? 0;
-  const endByte = span.end + 1 < byteStarts.length ? (byteStarts[span.end + 1] ?? startByte) : Buffer.byteLength(lines.join("\n"), "utf8");
-  const text = lines.slice(span.start, span.end + 1).join("\n") + (span.end < lines.length - 1 ? "\n" : "");
-  const bytes = Buffer.byteLength(text, "utf8");
-  const textSha256 = sha256(Buffer.from(text, "utf8"));
+  const startByte = records[span.start]?.startByte ?? 0;
+  const endByte = records[span.end]?.endByte ?? startByte;
+  const slice = buffer.subarray(startByte, endByte);
+  const textSha256 = sha256(slice);
   const id = `${source.id}-${String(ordinal + 1).padStart(5, "0")}-${textSha256.slice(0, 12)}`;
   return {
     version: 1,
@@ -188,19 +211,8 @@ function materializeSegment(
     startByte,
     endByte,
     textSha256,
-    bytes,
+    bytes: slice.byteLength,
   };
-}
-
-function lineByteStarts(lines: string[]): number[] {
-  const starts: number[] = [];
-  let offset = 0;
-  for (let index = 0; index < lines.length; index += 1) {
-    starts.push(offset);
-    offset += Buffer.byteLength(lines[index] ?? "", "utf8");
-    if (index < lines.length - 1) offset += 1;
-  }
-  return starts;
 }
 
 async function atomicJson(filePath: string, value: unknown): Promise<void> {

@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { BranchId, CommitId, EventProposal, Possibility, WorldState } from "./model.js";
 import { buildFrontier, FrontierStore, possibilityToProposal, selectEligible, type Frontier } from "./frontier.js";
 import { WorldEngine } from "./engine.js";
@@ -38,7 +39,8 @@ export class WorldRuntime {
     private readonly possibilitySource: PossibilitySource,
     private readonly render?: NarrativeRender,
   ) {
-    this.frontierStore = new FrontierStore(engine.objects.root.replace(/\/objects$/, "").replace(/\/world\/v1$/, ""));
+    const workspaceRoot = path.resolve(engine.objects.root, "../../..");
+    this.frontierStore = new FrontierStore(workspaceRoot);
   }
 
   async forkBranch(parentBranchId: BranchId, forkCommitId: CommitId, newBranchId: BranchId, name: string): Promise<void> {
@@ -60,6 +62,7 @@ export class WorldRuntime {
     let currentHead = previousHead;
     const committedEvents: string[] = [];
     const rejectedProposals: string[] = [];
+    const realizedPossibilities = new Set<string>();
 
     if (input.playerProposal) {
       if (input.playerProposal.branchId !== input.branchId) throw new Error("Player proposal branch does not match Move branch");
@@ -68,6 +71,7 @@ export class WorldRuntime {
       if (result.report.accepted) {
         currentHead = result.newHead;
         if (result.eventHash) committedEvents.push(result.eventHash);
+        if (playerProposal.possibilityId) realizedPossibilities.add(playerProposal.possibilityId);
       } else {
         rejectedProposals.push(playerProposal.proposalId);
       }
@@ -75,7 +79,7 @@ export class WorldRuntime {
 
     const limit = input.maxBackgroundCandidates ?? 1;
     if (!Number.isInteger(limit) || limit < 0 || limit > 100) throw new Error("maxBackgroundCandidates must be an integer between 0 and 100");
-    let latestFrontier = await this.refreshFrontier(input.branchId, currentHead);
+    let latestFrontier = await this.refreshFrontier(input.branchId, currentHead, realizedPossibilities);
 
     for (let index = 0; index < limit; index += 1) {
       const candidate = selectEligible(latestFrontier, 1)[0];
@@ -88,8 +92,9 @@ export class WorldRuntime {
         break;
       }
       currentHead = result.newHead;
+      realizedPossibilities.add(candidate.possibility.id);
       if (result.eventHash) committedEvents.push(result.eventHash);
-      latestFrontier = await this.refreshFrontier(input.branchId, currentHead, new Set([candidate.possibility.id]));
+      latestFrontier = await this.refreshFrontier(input.branchId, currentHead, realizedPossibilities);
     }
 
     const state = await this.engine.projector.project(currentHead);

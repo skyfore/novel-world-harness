@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import os from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { canonicalJson, contentHash } from "../src/world/canonical.js";
 import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, type StateDelta, type WorldCommit } from "../src/world/model.js";

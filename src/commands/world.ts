@@ -4,6 +4,7 @@ import { z } from "zod";
 import { canonicalPossibilitySource } from "../world/canon-runtime.js";
 import { loadWorldContext } from "../world/context.js";
 import { WorldEngine } from "../world/engine.js";
+import { InitialWorldStore } from "../world/initial.js";
 import { KnowledgeProjector } from "../world/knowledge.js";
 import { predicateSchema, stateDeltaSchema, type CommitId } from "../world/model.js";
 import { NarrativeRenderer } from "../world/narrative.js";
@@ -19,11 +20,12 @@ async function openWorld(root: string) {
 
 export async function worldCreateCommand(root: string, branchId: string, seedPath?: string): Promise<void> {
   const { engine } = await openWorld(root);
+  const canonicalInitial = seedPath ? null : await new InitialWorldStore(root).get();
   const seed = seedPath
     ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8")))
-    : { version: 1 as const, operations: [] };
+    : canonicalInitial?.delta ?? { version: 1 as const, operations: [] };
   const head = await engine.createBranch(branchId, branchId, seed);
-  stdout.write(`${branchId}\t${head}\n`);
+  stdout.write(`${branchId}\t${head}${canonicalInitial && !seedPath ? "\t[canonical initial world]" : ""}\n`);
 }
 
 export async function worldShowCommand(root: string, branchId: string): Promise<void> {
@@ -84,16 +86,11 @@ export async function worldRenderCommand(root: string, branchId: string, actorId
   const { engine } = await openWorld(root);
   const head = await engine.branches.readHead(branchId);
   const renderer = new NarrativeRenderer(engine);
-  const style = actorId
-    ? { pointOfView: "actor" as const, actorId, ...(tone ? { tone } : {}) }
-    : { pointOfView: "omniscient" as const, ...(tone ? { tone } : {}) };
+  const style = actorId ? { pointOfView: "actor" as const, actorId, ...(tone ? { tone } : {}) } : { pointOfView: "omniscient" as const, ...(tone ? { tone } : {}) };
   stdout.write(`${await renderer.render(branchId, head, style)}\n`);
 }
 
-const replayFileSchema = z.array(
-  z.object({ id: z.string().min(1), label: z.string().min(1), expected: z.array(predicateSchema) }).strict(),
-);
-
+const replayFileSchema = z.array(z.object({ id: z.string().min(1), label: z.string().min(1), expected: z.array(predicateSchema) }).strict());
 export async function worldReplayCommand(root: string, branchId: string, checkpointPath: string, maxMoves: number): Promise<void> {
   const { runtime } = await openWorld(root);
   const checkpoints = replayFileSchema.parse(JSON.parse(await fs.readFile(checkpointPath, "utf8")));

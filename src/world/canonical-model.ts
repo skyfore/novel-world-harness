@@ -18,6 +18,7 @@ import {
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 type CanonicalKind = "entities" | "claims" | "events" | "rules";
 export type ProposalStatus = "pending" | "accepted" | "rejected";
+export type ProposalSummary = { id: string; kind: string; schemaVersion: number; createdAt: string; worker: string };
 
 function safeId(id: string): string {
   if (!SAFE_ID.test(id)) throw new Error(`Unsafe artifact id: ${id}`);
@@ -71,6 +72,22 @@ export class ProposalStore {
   }
   async read<T>(status: ProposalStatus, id: string, payloadSchema: z.ZodType<T>): Promise<ArtifactProposal<T>> {
     return artifactProposalSchema(payloadSchema).parse(JSON.parse(await fs.readFile(this.proposalPath(status, id), "utf8"))) as ArtifactProposal<T>;
+  }
+  async list(status: ProposalStatus = "pending"): Promise<ProposalSummary[]> {
+    const directory = path.join(this.root, status);
+    let names: string[];
+    try { names = (await fs.readdir(directory)).filter((name) => name.endsWith(".json")).sort(); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    const summaries: ProposalSummary[] = [];
+    for (const name of names) {
+      const value = JSON.parse(await fs.readFile(path.join(directory, name), "utf8")) as Record<string, unknown>;
+      const generatedBy = value.generatedBy as Record<string, unknown> | undefined;
+      if (typeof value.id !== "string" || typeof value.kind !== "string" || typeof value.schemaVersion !== "number" || typeof value.createdAt !== "string" || typeof generatedBy?.worker !== "string") {
+        throw new Error(`Invalid proposal envelope: ${name}`);
+      }
+      summaries.push({ id: value.id, kind: value.kind, schemaVersion: value.schemaVersion, createdAt: value.createdAt, worker: generatedBy.worker });
+    }
+    return summaries;
   }
   async transition(id: string, from: ProposalStatus, to: Exclude<ProposalStatus, "pending">): Promise<void> {
     const source = this.proposalPath(from, id);

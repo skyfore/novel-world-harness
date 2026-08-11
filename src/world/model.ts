@@ -165,7 +165,7 @@ export type CommittedEvent = z.infer<typeof committedEventSchema>;
 
 export const branchSchema = z.object({ id: idSchema, name: z.string().min(1), parentBranchId: idSchema.optional(), forkCommitId: idSchema.optional(), headCommitId: idSchema }).strict();
 export type Branch = z.infer<typeof branchSchema>;
-export const worldCommitSchema = z.object({ version: z.literal(1), parentCommitId: idSchema.optional(), branchId: idSchema, logicalTime: logicalTimeSchema, eventHashes: z.array(idSchema), engineVersion: z.string().min(1), schemaVersion: z.number().int().positive() }).strict();
+export const worldCommitSchema = z.object({ version: z.literal(1), parentCommitId: idSchema.optional(), branchId: idSchema, logicalTime: logicalTimeSchema, eventHashes: z.array(idSchema), canonicalSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), engineVersion: z.string().min(1), schemaVersion: z.number().int().positive() }).strict();
 export type WorldCommit = z.infer<typeof worldCommitSchema>;
 export const worldStateSchema = z.object({ atCommit: idSchema, logicalTime: logicalTimeSchema, values: z.record(z.string(), z.record(z.string(), stateValueSchema)), activeRuleIds: z.array(idSchema) }).strict();
 export type WorldState = z.infer<typeof worldStateSchema>;

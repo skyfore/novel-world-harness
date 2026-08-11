@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
 import { CanonicalCompiler, CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
 import {
@@ -15,7 +16,7 @@ import {
 } from "../world/model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 
-export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world";
+export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type BatchAcceptResult = {
   accepted: Array<{ id: string; kind: CanonicalProposalKind }>;
@@ -25,45 +26,86 @@ export type BatchAcceptResult = {
 
 export class CompilerValidator {
   constructor(private readonly canon: CanonicalModelStore, private readonly stateSchema = new StateSchemaRegistry(DEFAULT_STATE_FIELDS)) {}
+
   async validate(kind: CanonicalProposalKind, payload: unknown): Promise<CompilerValidation> {
-    const entities = new Map((await this.canon.listEntities()).map((entity) => [entity.id, entity]));
-    const events = new Map((await this.canon.listEvents()).map((event) => [event.id, event]));
-    const rules = new Map((await this.canon.listRules()).map((rule) => [rule.id, rule]));
+    const [entityList, claimList, eventList, ruleList] = await Promise.all([
+      this.canon.listEntities(),
+      this.canon.listClaims(),
+      this.canon.listEvents(),
+      this.canon.listRules(),
+    ]);
+    const entities = new Map(entityList.map((entity) => [entity.id, entity]));
+    const claims = new Map(claimList.map((claim) => [claim.id, claim]));
+    const events = new Map(eventList.map((event) => [event.id, event]));
+    const rules = new Map(ruleList.map((rule) => [rule.id, rule]));
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
+
     if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors, warnings);
-    if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors, warnings);
-    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, events, rules, errors, warnings);
-    if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors, warnings);
+    if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
+    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, events, rules, errors);
+    if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
     if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, rules, errors);
+    if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, claims, rules, errors);
+    if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, errors);
     return { accepted: errors.length === 0, errors, warnings };
   }
+
   private validateEntity(entity: Entity, errors: ValidationIssue[], warnings: ValidationIssue[]): void {
     if (!entity.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Entity ${entity.id} has no source evidence`, "evidence"));
     if (!entity.aliases.length) warnings.push(issue("NO_ALIASES", `Entity ${entity.id} has no aliases; this may be valid`));
   }
-  private validateClaim(claim: Claim, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[], _warnings: ValidationIssue[]): void {
+
+  private validateClaim(claim: Claim, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
     if (!entities.has(claim.subject)) errors.push(issue("UNKNOWN_SUBJECT", `Claim subject ${claim.subject} is not canonical`, "subject"));
     if (claim.speaker && !entities.has(claim.speaker)) errors.push(issue("UNKNOWN_SPEAKER", `Claim speaker ${claim.speaker} is not canonical`, "speaker"));
     if (!claim.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Claim ${claim.id} has no source evidence`, "evidence"));
   }
-  private validateEvent(event: CanonicalEvent, entities: ReadonlyMap<string, Entity>, events: ReadonlyMap<string, CanonicalEvent>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[], _warnings: ValidationIssue[]): void {
+
+  private validateEvent(event: CanonicalEvent, entities: ReadonlyMap<string, Entity>, events: ReadonlyMap<string, CanonicalEvent>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
     if (!event.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event ${event.id} has no source evidence`, "evidence"));
     for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
     for (const parent of event.causalParents) if (!events.has(parent)) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parent}`, "causalParents"));
     for (const predicate of event.preconditions) this.validatePredicate(predicate, entities, rules, errors);
     this.validateOperations(event.observedOutcome.operations, entities, rules, errors, "observedOutcome.operations");
   }
-  private validateRule(rule: WorldRule, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[], _warnings: ValidationIssue[]): void {
+
+  private validateRule(rule: WorldRule, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
     if (!rule.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Rule ${rule.id} has no source evidence`, "evidence"));
     const visibleRules = new Map(rules);
     visibleRules.set(rule.id, rule);
     for (const predicate of [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]) this.validatePredicate(predicate, entities, visibleRules, errors);
   }
+
   private validateInitialWorld(initial: InitialWorld, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
     if (!initial.evidence.length) errors.push(issue("MISSING_EVIDENCE", "Initial world has no source evidence", "evidence"));
     this.validateOperations(initial.delta.operations, entities, rules, errors, "delta.operations");
   }
+
+  private validateGoal(goal: CharacterGoal, entities: ReadonlyMap<string, Entity>, claims: ReadonlyMap<string, Claim>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
+    const actor = entities.get(goal.actorId);
+    if (!actor || actor.kind !== "character") errors.push(issue("INVALID_GOAL_ACTOR", `Goal actor ${goal.actorId} is not a canonical character`, "actorId"));
+    if (!goal.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Goal ${goal.id} has no source evidence`, "evidence"));
+    for (const claimId of [...goal.requiresKnowledge, ...(goal.blockedByKnowledge ?? [])]) {
+      if (!claims.has(claimId)) errors.push(issue("UNKNOWN_GOAL_CLAIM", `Goal ${goal.id} references unknown claim ${claimId}`));
+    }
+    if (goal.candidateAction) {
+      for (const participant of goal.candidateAction.participants ?? []) if (!entities.has(participant)) errors.push(issue("UNKNOWN_GOAL_PARTICIPANT", `Unknown goal participant ${participant}`));
+      for (const predicate of goal.candidateAction.preconditions) this.validatePredicate(predicate, entities, rules, errors);
+      this.validateOperations(goal.candidateAction.proposedDelta.operations, entities, rules, errors, "candidateAction.proposedDelta.operations");
+      for (const operation of goal.candidateAction.proposedKnowledge?.operations ?? []) {
+        if (!entities.has(operation.actorId)) errors.push(issue("UNKNOWN_KNOWLEDGE_ACTOR", `Unknown knowledge actor ${operation.actorId}`));
+        if (operation.op === "learn" && !claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Unknown knowledge claim ${operation.claimId}`));
+      }
+    }
+  }
+
+  private validateCharacterModel(model: CharacterModel, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
+    const actor = entities.get(model.actorId);
+    if (!actor || actor.kind !== "character") errors.push(issue("INVALID_MODEL_ACTOR", `Character model actor ${model.actorId} is not a canonical character`, "actorId"));
+    if (!model.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Character model ${model.actorId} has no source evidence`, "evidence"));
+  }
+
   private validateOperations(operations: CanonicalEvent["observedOutcome"]["operations"], entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[], pathPrefix: string): void {
     for (let index = 0; index < operations.length; index += 1) {
       const operation = operations[index]!;
@@ -75,6 +117,7 @@ export class CompilerValidator {
       }
     }
   }
+
   private validatePredicate(predicate: Predicate, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
     if (predicate.op === "all" || predicate.op === "any") { for (const item of predicate.items) this.validatePredicate(item, entities, rules, errors); return; }
     if (predicate.op === "not") { this.validatePredicate(predicate.item, entities, rules, errors); return; }
@@ -102,13 +145,17 @@ export class CompilerCommitService {
   readonly compiler: CanonicalCompiler;
   readonly validator: CompilerValidator;
   readonly initialWorld: InitialWorldStore;
+  readonly actorModels: ActorModelStore;
+
   constructor(workspaceRoot: string) {
     this.canon = new CanonicalModelStore(workspaceRoot);
     this.proposals = new ProposalStore(workspaceRoot);
     this.compiler = new CanonicalCompiler(this.proposals, this.canon);
     this.validator = new CompilerValidator(this.canon);
     this.initialWorld = new InitialWorldStore(workspaceRoot);
+    this.actorModels = new ActorModelStore(workspaceRoot);
   }
+
   async accept(kind: CanonicalProposalKind, id: string): Promise<CompilerValidation> {
     const schema = schemaFor(kind);
     const proposal = await this.proposals.read("pending", id, schema);
@@ -118,14 +165,15 @@ export class CompilerCommitService {
     else if (kind === "claim") await this.compiler.acceptClaim(id);
     else if (kind === "canonical-event") await this.compiler.acceptEvent(id);
     else if (kind === "world-rule") await this.compiler.acceptRule(id);
-    else {
-      await this.initialWorld.put(initialWorldSchema.parse(proposal.payload));
-      await this.proposals.transition(id, "pending", "accepted");
-    }
+    else if (kind === "initial-world") await this.initialWorld.put(initialWorldSchema.parse(proposal.payload));
+    else if (kind === "character-goal") await this.actorModels.putGoal(characterGoalSchema.parse(proposal.payload));
+    else await this.actorModels.putModel(characterModelSchema.parse(proposal.payload));
+    if (kind === "initial-world" || kind === "character-goal" || kind === "character-model") await this.proposals.transition(id, "pending", "accepted");
     return validation;
   }
+
   async acceptAllValid(): Promise<BatchAcceptResult> {
-    const order: CanonicalProposalKind[] = ["entity", "claim", "world-rule", "initial-world", "canonical-event"];
+    const order: CanonicalProposalKind[] = ["entity", "claim", "world-rule", "initial-world", "character-model", "character-goal", "canonical-event"];
     const accepted: BatchAcceptResult["accepted"] = [];
     let changed = true;
     while (changed) {
@@ -152,6 +200,16 @@ export class CompilerCommitService {
   }
 }
 
-function isCanonicalKind(kind: string): kind is CanonicalProposalKind { return kind === "entity" || kind === "claim" || kind === "canonical-event" || kind === "world-rule" || kind === "initial-world"; }
-function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny { if (kind === "entity") return entitySchema; if (kind === "claim") return claimSchema; if (kind === "canonical-event") return canonicalEventSchema; if (kind === "initial-world") return initialWorldSchema; return worldRuleSchema; }
+function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
+  return kind === "entity" || kind === "claim" || kind === "canonical-event" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+}
+function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
+  if (kind === "entity") return entitySchema;
+  if (kind === "claim") return claimSchema;
+  if (kind === "canonical-event") return canonicalEventSchema;
+  if (kind === "initial-world") return initialWorldSchema;
+  if (kind === "character-goal") return characterGoalSchema;
+  if (kind === "character-model") return characterModelSchema;
+  return worldRuleSchema;
+}
 function issue(code: string, message: string, path?: string): ValidationIssue { return path ? { code, message, path } : { code, message }; }

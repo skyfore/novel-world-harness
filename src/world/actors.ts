@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
-import { KnowledgeProjector } from "./knowledge.js";
+import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import {
   evidenceRefSchema,
   knowledgeDeltaSchema,
@@ -127,7 +127,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
       const entity = engine.context.entities.get(goal.actorId);
       if (!entity || entity.kind !== "character") continue;
       const view = await knowledge.view(goal.actorId, commitId);
-      const known = new Set(view.knowledge.map((entry) => entry.fact.claimId));
+      const known = new Set(view.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
       if (goal.requiresKnowledge.some((claimId) => !known.has(claimId))) continue;
       if (goal.blockedByKnowledge?.some((claimId) => known.has(claimId))) continue;
       const action = goal.candidateAction;

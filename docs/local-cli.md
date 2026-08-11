@@ -9,6 +9,8 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `nwh --continue` resumes the latest workspace-local Pi session;
 - `--tui-mode regular|fullscreen` selects scrollback-friendly or alternate-screen layout;
 - `@path` resolves a local file before the model request;
+- a standalone quoted, unquoted, absolute, or workspace-relative novel path starts
+  the durable source compiler loop;
 - `/files`, `/search`, and `/read` work without a model request;
 - `NOVEL.md` provides checked-in project instructions;
 - `.novel-harness/instructions.md` provides local additions.
@@ -17,9 +19,19 @@ The TUI has a transcript, incremental assistant rendering, explicit tool-call/re
 
 NWH loads a hidden inline extension to supply its header, working/status labels, safe local commands, and `@path` transformation. Project or user Pi extensions, skills, prompt templates, context files, and built-in model coding tools remain disabled.
 
+When a standalone text novel path (`.txt`, `.text`, `.novel`, `.md`, or
+`.markdown`) is submitted, the extension deterministically registers and segments
+that source, injects the next bounded evidence batch as hidden model context, and
+dynamically enables the narrow `propose_*` tools. The
+first batch starts immediately; `/compile-next` advances the same source after a
+successful checkpoint. Repository code remains available as secondary read-only
+context, but prompts and tool guidance keep the novel world as the primary subject.
+
 ## Retrieval boundary: file search, not RAG
 
-The model receives no automatic workspace dump and there is no embedding pipeline. It can request three read-only tools:
+The model receives no automatic workspace dump and there is no embedding
+pipeline. Before a source compiler loop begins, it can request three read-only
+discovery tools:
 
 1. `list_files`
 2. `search_files`
@@ -39,7 +51,9 @@ The access layer enforces:
 - denial of common credential and private-key files;
 - UTF-8 text only, 2 MiB maximum file size;
 - bounded line, character, and result counts;
-- no shell, write, network, database, or commit tool available to the model.
+- no shell, general filesystem write, network, database, or truth-commit tool
+  available to the model. A source compiler loop adds only typed writes to the
+  pending proposal store.
 
 The TUI accepts `!command` as an explicit user action, matching agent-terminal conventions. That path is handled by the terminal UI and is never registered as an LLM tool. Use `-p` when a non-interactive, shell-free transport is required.
 
@@ -57,6 +71,10 @@ Compiler mode now adds narrow typed `propose_*` tools. They can create pending c
 proposal -> validate -> commit -> render
 ```
 
-The ordinary `nwh` / `nwh play` session remains read-only. World execution is currently exposed through explicit `nwh world ...` commands; an interactive character-embodiment loop is future product work.
+The ordinary `nwh` / `nwh play` session starts read-only. Supplying a standalone
+novel path temporarily adds the same narrow `propose_*` capability for its source
+compiler loop. World execution is currently exposed through explicit
+`nwh world ...` commands; an interactive character-embodiment loop is future
+product work.
 
 `nwh compile` uses the same TUI with narrow `propose_*` tools and starts an evidence-backed batch. Supplying `nwh compile "<instruction>"` keeps the one-shot compiler path for automation. Neither form can accept proposals or mutate canonical/runtime truth.

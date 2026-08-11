@@ -15,8 +15,8 @@ describe("NWH welcome header", () => {
     expect(output).toContain("(o,o)");
     expect(output).toContain("/login");
     expect(output).toContain("/model");
-    expect(output).toContain("/files");
-    expect(output).toContain("@path");
+    expect(output).toContain("novel path");
+    expect(output).toContain("/compile-next");
   });
 
   it("uses a shorter message for an existing conversation and narrow terminals", () => {

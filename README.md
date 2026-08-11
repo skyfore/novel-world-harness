@@ -80,15 +80,35 @@ pnpm dev --root ./my-novel
 pnpm dev --tui-mode fullscreen
 ```
 
+Paste or drag a standalone UTF-8 novel path (`.txt`, `.text`, `.novel`, `.md`, or
+`.markdown`) into the TUI to begin the compiler workflow immediately. NWH
+registers the source, builds bounded evidence segments,
+dynamically enables the typed pending-proposal tools, and processes the first
+compiler batch without first exploring the repository or explaining the CLI:
+
+```text
+'/absolute/path/to/novel.txt'
+/compile-next
+```
+
+Each successful batch is checkpointed under `.novel-harness/`. `/compile-next`
+continues the active novel from the next unfinished batch. The loop is deliberately
+one batch per user action so importing a long novel cannot silently trigger an
+unbounded sequence of model requests. Generated artifacts remain pending proposals
+until deterministic validation and explicit acceptance.
+
 `nwh` and `nwh play` open the TUI in `regular` mode by default, preserving terminal scrollback. `--tui-mode fullscreen` uses an alternate-screen layout. `-p` remains the non-interactive path for scripts and pipelines.
 
-The model in the ordinary session is read-only. Inside the TUI:
+Ordinary conversation starts with read-only discovery tools. Starting a source
+compiler loop adds only the narrow typed tools that can create pending proposals;
+it still cannot commit world truth or write arbitrary files. Inside the TUI:
 
 ```text
 /files chapter
 /search 赤壁
 /read chapters/12.md 40:100
 分析 @chapters/12.md 中曹操的错误判断
+/compile-next
 /status
 /clear
 /exit

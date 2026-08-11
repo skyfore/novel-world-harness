@@ -44,8 +44,8 @@ function copyLines(options: NwhWelcomeOptions): string[] {
     "NWH  Novel World Harness",
     subtitle,
     "1  Sign in with /login, then choose with /model",
-    "2  Explore with /files or /search <text>",
-    "3  Ask about @path; use /help for every command",
+    "2  Paste a novel path to start the world compiler loop",
+    "3  Continue with /compile-next; /help shows every command",
   ];
 }
 
@@ -62,7 +62,7 @@ export function renderNwhWelcome(
     return [
       `${theme.fg("accent", `(${eyes})`)} ${theme.bold("NWH")}`,
       theme.fg("muted", options.freshConversation ? "/login -> /model" : "Welcome back. /status"),
-      theme.fg("dim", "/help for commands"),
+      theme.fg("dim", options.freshConversation ? "paste novel path -> compile" : "/help for commands"),
     ];
   }
 

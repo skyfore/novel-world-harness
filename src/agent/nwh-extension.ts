@@ -1,7 +1,14 @@
 import path from "node:path";
-import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { expandFileMentions } from "./file-mentions.js";
 import { createNwhWelcomeHeader, isFreshConversation, NWH_WORKING_FRAMES } from "./nwh-welcome.js";
+import { createCompilerProposalTools } from "../compiler/proposal-tools.js";
+import {
+  markSourceLoopBatchComplete,
+  prepareNextSourceLoopTurn,
+  prepareSourceLoopFromInput,
+  type SourceLoopTurn,
+} from "../compiler/source-loop.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
@@ -17,6 +24,7 @@ const COMMAND_HELP = `NWH commands:
   /files [path filter]       list safe workspace files
   /search <text>             search local files for fixed text
   /read <path> [start:end]   read a bounded line range
+  /compile-next              process the next evidence batch for the active novel
   /status                    show workspace, model and session
   /clear                     start a new conversation
   /help                      show this help
@@ -46,9 +54,52 @@ function modelLabel(model: { provider: string; id: string } | undefined): string
 export function createNwhExtension(options: NwhExtensionOptions): ExtensionFactory {
   const { workspace, saveSession, mode } = options;
   return (pi: ExtensionAPI) => {
+    let compilerToolsActive = mode === "compiler";
+    let activeSourceId: string | undefined;
+    let pendingTurn: SourceLoopTurn | undefined;
+
+    const activateCompilerTools = (ctx: ExtensionContext) => {
+      if (!compilerToolsActive) {
+        const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
+        for (const tool of createCompilerProposalTools(workspace.root, generatedBy)) pi.registerTool(tool);
+        compilerToolsActive = true;
+      }
+      if (ctx.mode === "tui") ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · world compiler loop"));
+    };
+
+    const userPromptForTurn = (turn: SourceLoopTurn) =>
+      `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for ${turn.source.sourcePath}. Analyze the supplied evidence now and record typed pending proposals.`;
+
     pi.on("session_shutdown", async () => options.onSessionShutdown?.());
 
     pi.on("input", async (event, ctx) => {
+      if (event.source === "extension") return { action: "continue" };
+      if (pendingTurn) {
+        ctx.ui.notify("A novel compiler batch is already running. Wait for it to finish before starting another.", "warning");
+        return { action: "handled" };
+      }
+
+      try {
+        const preparation = await prepareSourceLoopFromInput(workspace.root, event.text);
+        if (preparation) {
+          activeSourceId = preparation.source.id;
+          if (preparation.status === "complete") {
+            ctx.ui.notify(`${preparation.source.title} is already fully processed (${preparation.totalBatches} batches).`, "info");
+            return { action: "handled" };
+          }
+          activateCompilerTools(ctx);
+          pendingTurn = preparation;
+          ctx.ui.notify(
+            `Novel indexed: ${preparation.source.sourcePath} · starting batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`,
+            "info",
+          );
+          return { action: "transform", text: userPromptForTurn(preparation) };
+        }
+      } catch (error) {
+        ctx.ui.notify(`Cannot start novel compiler: ${error instanceof Error ? error.message : String(error)}`, "error");
+        return { action: "handled" };
+      }
+
       try {
         await expandFileMentions(event.text, workspace);
         return { action: "continue" };
@@ -60,14 +111,35 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     pi.on("before_agent_start", async (event) => {
       const expanded = await expandFileMentions(event.prompt, workspace);
-      if (expanded === event.prompt) return;
+      const context: string[] = [];
+      if (pendingTurn) context.push(pendingTurn.prompt);
+      if (expanded !== event.prompt) context.push(expanded.slice(event.prompt.length).trim());
+      if (!context.length) return;
       return {
         message: {
-          customType: "nwh-file-context",
-          content: expanded.slice(event.prompt.length).trim(),
+          customType: pendingTurn ? "nwh-compiler-batch" : "nwh-file-context",
+          content: context.join("\n\n"),
           display: false,
         },
       };
+    });
+
+    pi.on("agent_end", async (event, ctx) => {
+      const completedTurn = pendingTurn;
+      if (!completedTurn) return;
+      pendingTurn = undefined;
+      const assistant = [...event.messages].reverse().find((message) => message.role === "assistant");
+      if (!assistant || assistant.role !== "assistant" || assistant.stopReason === "error" || assistant.stopReason === "aborted") {
+        ctx.ui.notify(`Compiler batch ${completedTurn.batch.ordinal + 1} was not checkpointed and can be retried with /compile-next.`, "warning");
+        return;
+      }
+      await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id);
+      ctx.ui.notify(
+        completedTurn.remainingAfterBatch > 0
+          ? `Compiler batch ${completedTurn.completedBatches + 1}/${completedTurn.totalBatches} checkpointed · ${completedTurn.remainingAfterBatch} remaining · /compile-next to continue`
+          : `All ${completedTurn.totalBatches} compiler batches for ${completedTurn.source.title} are checkpointed.`,
+        "info",
+      );
     });
 
     pi.on("session_start", async (_event, ctx) => {
@@ -116,12 +188,37 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       },
     });
 
+    pi.registerCommand("compile-next", {
+      description: "Process the next evidence batch for the active novel",
+      handler: async (_args, ctx) => {
+        if (pendingTurn) {
+          ctx.ui.notify("A novel compiler batch is already running.", "warning");
+          return;
+        }
+        const preparation = await prepareNextSourceLoopTurn(workspace.root, activeSourceId);
+        if (!preparation) {
+          ctx.ui.notify("No novel source is registered. Paste or drag a novel file path into the TUI first.", "warning");
+          return;
+        }
+        activeSourceId = preparation.source.id;
+        if (preparation.status === "complete") {
+          ctx.ui.notify(`${preparation.source.title} is already fully processed (${preparation.totalBatches} batches).`, "info");
+          return;
+        }
+        activateCompilerTools(ctx);
+        pendingTurn = preparation;
+        ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
+        pi.sendUserMessage(userPromptForTurn(preparation));
+      },
+    });
+
     pi.registerCommand("status", {
       description: "Show NWH workspace and session status",
       handler: async (_args, ctx) => {
         ctx.ui.notify([
           `workspace: ${workspace.root}`,
-          `mode: ${mode}`,
+          `mode: ${compilerToolsActive && mode === "assistant" ? "world-compiler-loop" : mode}`,
+          `active source: ${activeSourceId ?? "none"}`,
           `model: ${modelLabel(ctx.model)}`,
           `session: ${ctx.sessionManager.getSessionId()}`,
           `entries: ${ctx.sessionManager.getEntries().length}`,

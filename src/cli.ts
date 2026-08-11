@@ -7,6 +7,7 @@ import { ingestCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
 import { playCommand } from "./commands/play.js";
 import { compileCommand } from "./commands/compile.js";
+import { compileSourceCommand } from "./commands/compile-source.js";
 import { acceptAllValidProposalsCommand, acceptProposalCommand, listProposalsCommand, rejectProposalCommand } from "./commands/proposals.js";
 import {
   worldActorCommand,
@@ -45,7 +46,7 @@ function nonNegativeInteger(value: string, name: string): number {
 
 program.command("init").argument("[directory]", "target directory", process.cwd()).description("create starter novel-harness.yaml and NOVEL.md files").action(initCommand);
 program.command("doctor").option("-c, --config <path>", "configuration file").description("validate runtime, credentials and local file tooling").action(async (options) => doctorCommand(resolveConfigPath(options.config)));
-program.command("ingest").argument("<novel>", "UTF-8 source novel path").option("-c, --config <path>", "configuration file").option("--no-loop", "register source and queue jobs without running compiler loop").description("register a novel and start the compiler harness").action(async (novel, options) => ingestCommand(novel, resolveConfigPath(options.config), options.loop));
+program.command("ingest").argument("<novel>", "UTF-8 source novel path").option("-c, --config <path>", "configuration file").option("--no-loop", "register source and queue jobs without running compiler loop").description("register a novel and start deterministic source segmentation").action(async (novel, options) => ingestCommand(novel, resolveConfigPath(options.config), options.loop));
 program.command("status").option("-c, --config <path>", "configuration file").description("show build metrics and job state").action(async (options) => statusCommand(resolveConfigPath(options.config)));
 
 program
@@ -65,6 +66,29 @@ program
       model: options.model ?? globalOptions.model,
       saveSession: options.save && globalOptions.save,
       ...(prompt ? { prompt } : {}),
+    });
+  });
+
+program
+  .command("compile-source")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id; required when more than one source exists")
+  .option("--model <model>", "override compiler model")
+  .option("--max-batches <n>", "run at most N unfinished source batches")
+  .option("--no-resume", "restart source batch progress from the beginning")
+  .description("compile an ingested source through bounded, resumable evidence batches")
+  .action(async (options) => {
+    const globalOptions = program.opts();
+    const maxBatches = options.maxBatches === undefined ? undefined : nonNegativeInteger(options.maxBatches, "--max-batches");
+    await compileSourceCommand({
+      root: rootFor(options),
+      configPath: resolveConfigPath(options.config),
+      allowMissingConfig: !options.config,
+      sourceId: options.source,
+      model: options.model ?? globalOptions.model,
+      ...(maxBatches !== undefined ? { maxBatches } : {}),
+      resume: options.resume,
     });
   });
 

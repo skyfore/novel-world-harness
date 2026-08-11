@@ -2,7 +2,15 @@ import { stdout } from "node:process";
 import { CompilerCommitService, type CanonicalProposalKind } from "../compiler/validator.js";
 import { ProposalStore, type ProposalStatus } from "../world/canonical-model.js";
 
-const canonicalKinds = new Set<CanonicalProposalKind>(["entity", "claim", "canonical-event", "world-rule"]);
+const canonicalKinds = new Set<CanonicalProposalKind>([
+  "entity",
+  "claim",
+  "canonical-event",
+  "world-rule",
+  "initial-world",
+  "character-goal",
+  "character-model",
+]);
 
 export async function listProposalsCommand(root: string, status: ProposalStatus = "pending"): Promise<void> {
   const proposals = await new ProposalStore(root).list(status);

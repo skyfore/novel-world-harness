@@ -56,6 +56,10 @@ export class CanonicalModelStore {
   getClaim(id: string): Promise<Claim> { return this.get("claims", id, claimSchema); }
   getEvent(id: string): Promise<CanonicalEvent> { return this.get("events", id, canonicalEventSchema); }
   getRule(id: string): Promise<WorldRule> { return this.get("rules", id, worldRuleSchema); }
+  getEntityRevision(id: string, hash: string): Promise<Entity> { return this.getRevision("entities", id, hash, entitySchema); }
+  getClaimRevision(id: string, hash: string): Promise<Claim> { return this.getRevision("claims", id, hash, claimSchema); }
+  getEventRevision(id: string, hash: string): Promise<CanonicalEvent> { return this.getRevision("events", id, hash, canonicalEventSchema); }
+  getRuleRevision(id: string, hash: string): Promise<WorldRule> { return this.getRevision("rules", id, hash, worldRuleSchema); }
   listEntities(): Promise<Entity[]> { return this.list("entities", entitySchema); }
   listClaims(): Promise<Claim[]> { return this.list("claims", claimSchema); }
   listEvents(): Promise<CanonicalEvent[]> { return this.list("events", canonicalEventSchema); }
@@ -103,6 +107,24 @@ export class CanonicalModelStore {
     }
     const value = schema.parse(JSON.parse(await fs.readFile(this.revisionPath(kind, id, ref.hash), "utf8")));
     if (contentHash(value) !== ref.hash) throw new Error(`Corrupt canonical ${kind} revision ${id}@${ref.hash}`);
+    return value;
+  }
+  private async getRevision<T>(kind: CanonicalKind, idInput: string, hashInput: string, schema: z.ZodType<T>): Promise<T> {
+    const id = safeId(idInput);
+    if (!/^[a-f0-9]{64}$/.test(hashInput)) throw new Error(`Invalid canonical revision hash: ${hashInput}`);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await fs.readFile(this.revisionPath(kind, id, hashInput), "utf8")) as unknown;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const legacy = await this.readLegacy(kind, id);
+      if (legacy === null || contentHash(legacy) !== hashInput) {
+        throw Object.assign(new Error(`Canonical ${kind} revision not found: ${id}@${hashInput}`), { code: "ENOENT" });
+      }
+      raw = legacy;
+    }
+    const value = schema.parse(raw);
+    if (contentHash(value) !== hashInput) throw new Error(`Corrupt canonical ${kind} revision ${id}@${hashInput}`);
     return value;
   }
   private async list<T>(kind: CanonicalKind, schema: z.ZodType<T>): Promise<T[]> {

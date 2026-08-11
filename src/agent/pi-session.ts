@@ -19,7 +19,6 @@ import {
 import { Type } from "typebox";
 import type { LlmProfile } from "../config/schema.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import { expandFileMentions } from "./file-mentions.js";
 import { createNwhExtension, type NwhInteractionMode } from "./nwh-extension.js";
 
 export { expandFileMentions } from "./file-mentions.js";

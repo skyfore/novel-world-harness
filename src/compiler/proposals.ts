@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { ProposalStore } from "../world/canonical-model.js";
+import { initialWorldSchema } from "../world/initial.js";
 import {
   canonicalEventSchema,
   claimSchema,
@@ -13,29 +14,22 @@ import {
 } from "../world/model.js";
 
 export const possibilityTemplateSchema = possibilitySchema.omit({ branchId: true, evaluatedAtCommit: true });
-export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "state-delta" | "possibility";
 
 const schemas = {
   entity: entitySchema,
   claim: claimSchema,
   "canonical-event": canonicalEventSchema,
   "world-rule": worldRuleSchema,
+  "initial-world": initialWorldSchema,
   "state-delta": stateDeltaSchema,
   possibility: possibilityTemplateSchema,
 } satisfies Record<CompilerProposalKind, z.ZodTypeAny>;
 
 export class CompilerProposalService {
   readonly store: ProposalStore;
-  constructor(workspaceRoot: string) {
-    this.store = new ProposalStore(workspaceRoot);
-  }
-
-  async submit(kind: CompilerProposalKind, input: {
-    proposalId: string;
-    payload: unknown;
-    evidence?: unknown;
-    generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string };
-  }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
+  constructor(workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
+  async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string } }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
     const schema = schemas[kind];
     const payload = schema.parse(input.payload);
     const evidence = input.evidence === undefined ? [] : evidenceRefSchema.array().parse(input.evidence);

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import type { Entity, Possibility } from "../src/world/model.js";
-import { runCanonReplay } from "../src/world/replay.js";
+import { runCanonReplay, runIsolatedCanonReplay } from "../src/world/replay.js";
 import { WorldRuntime } from "../src/world/runtime.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 
@@ -83,6 +83,23 @@ describe("canon replay", () => {
     expect(result.passed).toBe(false);
     expect(result.endCommit).toBe(result.startCommit);
     expect(result.diagnostics[0]?.code).toBe("BLOCKED");
+  });
+
+  it("runs isolated replay without changing the source branch", async () => {
+    const runtime = await setup(true);
+    const sourceHead = await runtime.engine.branches.readHead("replay");
+    const result = await runIsolatedCanonReplay(runtime, "replay", "replay-check", [
+      {
+        id: "promoted",
+        label: "hero promoted",
+        expected: [{ op: "fact-equals", entityId: "hero", field: "character.title", value: "Commander" }],
+      },
+    ]);
+    expect(result.passed).toBe(true);
+    expect(result.sourceCommit).toBe(sourceHead);
+    expect(result.endCommit).not.toBe(sourceHead);
+    await expect(runtime.engine.branches.readHead("replay")).resolves.toBe(sourceHead);
+    await expect(runtime.engine.branches.readHead("replay-check")).resolves.toBe(result.endCommit);
   });
 });
 

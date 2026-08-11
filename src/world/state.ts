@@ -128,19 +128,22 @@ export function applyStateDelta(
   delta: StateDelta,
   registry: StateSchemaRegistry,
   entities: ReadonlyMap<EntityId, Entity>,
+  worldRules: ReadonlyMap<string, WorldRule>,
 ): WorldState {
   const values: WorldState["values"] = {};
   for (const [entityId, fields] of Object.entries(input.values)) values[entityId] = cloneFields(fields);
-  const rules = new Set(input.activeRuleIds);
+  const activeRules = new Set(input.activeRuleIds);
 
   for (const operation of delta.operations) {
     registry.validateOperation(operation, entities);
     if (operation.op === "activate-rule") {
-      rules.add(operation.ruleId);
+      if (!worldRules.has(operation.ruleId)) throw new Error(`Unknown world rule: ${operation.ruleId}`);
+      activeRules.add(operation.ruleId);
       continue;
     }
     if (operation.op === "deactivate-rule") {
-      rules.delete(operation.ruleId);
+      if (!worldRules.has(operation.ruleId)) throw new Error(`Unknown world rule: ${operation.ruleId}`);
+      activeRules.delete(operation.ruleId);
       continue;
     }
     const current = (values[operation.entityId] ??= {});
@@ -168,7 +171,7 @@ export function applyStateDelta(
     }
   }
 
-  return { ...input, values, activeRuleIds: [...rules].sort() };
+  return { ...input, values, activeRuleIds: [...activeRules].sort() };
 }
 
 export function validateEngineInvariants(
@@ -218,4 +221,3 @@ function deepEqual(left: unknown, right: unknown): boolean {
   }
   return left === right;
 }
-

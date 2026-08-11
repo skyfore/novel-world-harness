@@ -41,14 +41,16 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 ### Runtime authority
 
 - Branch truth is an immutable commit chain.
+- Every new branch pins the exact canonical entity, claim, event, rule, and state-schema revisions used by its commits; later canonical edits do not change historical replay or actor views.
 - State is deterministically projected from committed deltas.
-- Branch heads use expected-parent checks and a local exclusive mutation lock.
+- Branch heads use expected-parent checks and a local exclusive mutation lock; dead same-host lock owners are recovered and `world fsck` reports stale or active locks.
 - Temporal world rules are evaluated against pre-state and proposed post-state.
 - Canonical future events and generic background pressures enter the same possibility frontier.
 - Possibility selection alone does not create truth; the resulting event proposal must pass the commit boundary.
 - Knowledge is reconstructed per actor and per commit.
-- Narrative rendering receives immutable/projected history and checks that it did not move the branch head.
+- Omniscient narrative rendering receives immutable projected state/history; actor rendering receives only the actor view and participant-visible events, and both paths check that rendering did not move the branch head.
 - Snapshots are derived caches. `world fsck` verifies ancestry, hashes, replay, and snapshot drift.
+- `world diff` compares projected state, divergent committed events, and actor knowledge. `world replay` always writes to a newly forked output branch.
 
 ### CLI paths now connected
 

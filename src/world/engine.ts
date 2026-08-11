@@ -90,6 +90,8 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
       }
     }
   }
+
+  const applicableRules: WorldRule[] = [];
   for (const ruleId of state.activeRuleIds) {
     const rule = context.rules.get(ruleId);
     if (!rule) {
@@ -97,15 +99,23 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
       continue;
     }
     if (!rule.appliesWhen.every((predicate) => evaluatePredicate(state, predicate))) continue;
-    if (rule.requires?.some((predicate) => !evaluatePredicate(state, predicate))) errors.push({ code: "RULE_REQUIREMENT_FAILED", message: `Rule ${ruleId} requirement is not satisfied` });
-    if (rule.forbids?.length && rule.forbids.every((predicate) => evaluatePredicate(state, predicate))) errors.push({ code: "RULE_FORBIDS", message: `Rule ${ruleId} forbids this state transition context` });
+    applicableRules.push(rule);
+    if (rule.requires?.some((predicate) => !evaluatePredicate(state, predicate))) {
+      errors.push({ code: "RULE_REQUIREMENT_FAILED", message: `Rule ${ruleId} requirement is not satisfied` });
+    }
   }
+
   let postState: WorldState | undefined;
   if (!errors.length) {
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
       postState = applyStateDelta(state, delta, context.stateSchema, context.entities);
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities)) errors.push({ code: "POST_STATE_INVARIANT", message });
+      for (const rule of applicableRules) {
+        if (rule.forbids?.length && rule.forbids.every((predicate) => evaluatePredicate(postState!, predicate))) {
+          errors.push({ code: "RULE_FORBIDS", message: `Rule ${rule.id} forbids the proposed post-state` });
+        }
+      }
     } catch (error) {
       errors.push({ code: "INVALID_DELTA", message: error instanceof Error ? error.message : String(error) });
     }

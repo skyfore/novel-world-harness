@@ -6,12 +6,14 @@ import {
   knowledgeDeltaSchema,
   stateDeltaSchema,
   type BranchId,
+  type CanonicalEvent,
   type Claim,
   type CommitId,
   type CommittedEvent,
   type Entity,
   type EntityId,
   type EventProposal,
+  type ObjectHash,
   type StateDelta,
   type ValidationIssue,
   type ValidationReport,
@@ -22,14 +24,32 @@ import { StateSchemaRegistry, applyStateDelta, emptyWorldState, evaluatePredicat
 import { BranchStore, WorldObjectStore } from "./store.js";
 
 export type WorldModelContext = {
+  canonicalSnapshotHash?: ObjectHash;
   entities: ReadonlyMap<EntityId, Entity>;
   rules: ReadonlyMap<string, WorldRule>;
   stateSchema: StateSchemaRegistry;
   claims?: ReadonlyMap<string, Claim>;
+  events?: ReadonlyMap<string, CanonicalEvent>;
 };
 
+export type ResolvedWorldModelContext = WorldModelContext & { canonicalSnapshotHash: ObjectHash };
+export type WorldContextResolver = (snapshotHash: ObjectHash) => Promise<WorldModelContext>;
+
 export class WorldProjector {
-  constructor(private readonly objects: WorldObjectStore, private readonly context: WorldModelContext) {}
+  private readonly contextForSnapshot: (snapshotHash?: ObjectHash) => Promise<ResolvedWorldModelContext>;
+  constructor(objects: WorldObjectStore, context: WorldModelContext);
+  constructor(objects: WorldObjectStore, contextForSnapshot: (snapshotHash?: ObjectHash) => Promise<ResolvedWorldModelContext>);
+  constructor(private readonly objects: WorldObjectStore, source: WorldModelContext | ((snapshotHash?: ObjectHash) => Promise<ResolvedWorldModelContext>)) {
+    if (typeof source === "function") {
+      this.contextForSnapshot = source;
+    } else {
+      const context = resolveContext(source);
+      this.contextForSnapshot = async (snapshotHash) => {
+        if (snapshotHash && snapshotHash !== context.canonicalSnapshotHash) throw new Error(`Canonical snapshot is not available: ${snapshotHash}`);
+        return context;
+      };
+    }
+  }
   async project(commitId: CommitId): Promise<WorldState> {
     const chain: { id: CommitId; commit: Awaited<ReturnType<WorldObjectStore["getCommit"]>> }[] = [];
     const seen = new Set<string>();
@@ -48,14 +68,15 @@ export class WorldProjector {
     let state = emptyWorldState(chain[0]?.id ?? commitId, 0);
     let previousStep = -1;
     for (const entry of chain) {
+      const context = await this.contextForSnapshot(entry.commit.canonicalSnapshotHash);
       if (entry.commit.logicalTime.step <= previousStep) throw new Error(`Non-monotonic logical time at commit ${entry.id}`);
       for (const eventHash of entry.commit.eventHashes) {
         const event = await this.objects.getEvent(eventHash);
         if (event.logicalTime.step !== entry.commit.logicalTime.step) throw new Error(`Event/commit logical time mismatch for ${eventHash}`);
-        state = applyStateDelta(state, await this.objects.getDelta(event.deltaHash), this.context.stateSchema, this.context.entities);
+        state = applyStateDelta(state, await this.objects.getDelta(event.deltaHash), context.stateSchema, context.entities, context.rules);
       }
       state = { ...state, atCommit: entry.id, logicalTime: entry.commit.logicalTime };
-      const invariantErrors = validateEngineInvariants(state, this.context.stateSchema, this.context.entities, this.context.rules);
+      const invariantErrors = validateEngineInvariants(state, context.stateSchema, context.entities, context.rules);
       if (invariantErrors.length) throw new Error(`Projected state violates invariants: ${invariantErrors.join("; ")}`);
       previousStep = entry.commit.logicalTime.step;
     }
@@ -109,7 +130,7 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   if (!errors.length) {
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
-      postState = applyStateDelta(state, delta, context.stateSchema, context.entities);
+      postState = applyStateDelta(state, delta, context.stateSchema, context.entities, context.rules);
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
       for (const rule of applicableRules) {
         if (rule.forbids?.length && rule.forbids.every((predicate) => evaluatePredicate(postState!, predicate))) {
@@ -130,29 +151,38 @@ export class WorldEngine {
   readonly objects: WorldObjectStore;
   readonly branches: BranchStore;
   readonly projector: WorldProjector;
-  constructor(workspaceRoot: string, readonly context: WorldModelContext) {
+  readonly context: ResolvedWorldModelContext;
+  private readonly contextCache = new Map<ObjectHash, ResolvedWorldModelContext>();
+  constructor(workspaceRoot: string, context: WorldModelContext, private readonly contextResolver?: WorldContextResolver) {
     this.objects = new WorldObjectStore(workspaceRoot);
     this.branches = new BranchStore(workspaceRoot);
-    this.projector = new WorldProjector(this.objects, context);
+    this.context = resolveContext(context);
+    this.contextCache.set(this.context.canonicalSnapshotHash, this.context);
+    this.projector = new WorldProjector(this.objects, (snapshotHash) => this.contextForSnapshot(snapshotHash));
+  }
+  async contextForCommit(commitId: CommitId): Promise<ResolvedWorldModelContext> {
+    const commit = await this.objects.getCommit(commitId);
+    return this.contextForSnapshot(commit.canonicalSnapshotHash);
   }
   async createBranch(branchId: BranchId, name: string, initialDelta: StateDelta = { version: 1, operations: [] }): Promise<CommitId> {
     stateDeltaSchema.parse(initialDelta);
-    const initialState = applyStateDelta(emptyWorldState("genesis", 0), initialDelta, this.context.stateSchema, this.context.entities);
+    const initialState = applyStateDelta(emptyWorldState("genesis", 0), initialDelta, this.context.stateSchema, this.context.entities, this.context.rules);
     const invariantErrors = validateEngineInvariants(initialState, this.context.stateSchema, this.context.entities, this.context.rules);
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
     const deltaHash = await this.objects.putDelta(initialDelta);
     const eventId = contentHash({ kind: "genesis", branchId, deltaHash });
     const event: CommittedEvent = { version: 1, eventId, branchId, logicalTime: { step: 0 }, title: "Genesis", participants: touchedEntities(initialDelta), deltaHash, evidence: [], causalParents: [] };
     const eventHash = await this.objects.putEvent(event);
-    const commitHash = await this.objects.putCommit({ version: 1, branchId, logicalTime: { step: 0 }, eventHashes: [eventHash], engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
+    const commitHash = await this.objects.putCommit({ version: 1, branchId, logicalTime: { step: 0 }, eventHashes: [eventHash], canonicalSnapshotHash: this.context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
     await this.branches.create({ id: branchId, name, headCommitId: commitHash });
     return commitHash;
   }
   async commitProposal(proposal: EventProposal): Promise<CommitProposalResult> {
     const parsed = eventProposalSchema.parse(proposal);
     const head = await this.branches.readHead(parsed.branchId);
+    const context = await this.contextForCommit(head);
     const state = await this.projector.project(head);
-    const { report } = validateEventProposal(parsed, head, state, this.context);
+    const { report } = validateEventProposal(parsed, head, state, context);
     if (!report.accepted) return { report, previousHead: head, newHead: head };
     const deltaHash = await this.objects.putDelta(parsed.proposedDelta);
     const knowledgeDeltaHash = parsed.proposedKnowledge ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge) : undefined;
@@ -173,13 +203,36 @@ export class WorldEngine {
       ...(parsed.possibilityId ? { possibilityId: parsed.possibilityId } : {}),
     };
     const eventHash = await this.objects.putEvent(event);
-    const commitHash = await this.objects.putCommit({ version: 1, parentCommitId: head, branchId: parsed.branchId, logicalTime, eventHashes: [eventHash], engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
+    const commitHash = await this.objects.putCommit({ version: 1, parentCommitId: head, branchId: parsed.branchId, logicalTime, eventHashes: [eventHash], canonicalSnapshotHash: context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
     await this.branches.updateHead(parsed.branchId, head, commitHash);
     return { report, previousHead: head, newHead: commitHash, eventHash };
   }
+
+  private async contextForSnapshot(snapshotHash?: ObjectHash): Promise<ResolvedWorldModelContext> {
+    if (!snapshotHash) return this.context;
+    const cached = this.contextCache.get(snapshotHash);
+    if (cached) return cached;
+    if (!this.contextResolver) throw new Error(`Canonical snapshot is not available: ${snapshotHash}`);
+    const loaded = resolveContext(await this.contextResolver(snapshotHash));
+    if (loaded.canonicalSnapshotHash !== snapshotHash) {
+      throw new Error(`Canonical snapshot resolver returned ${loaded.canonicalSnapshotHash} for ${snapshotHash}`);
+    }
+    this.contextCache.set(snapshotHash, loaded);
+    return loaded;
+  }
+}
+
+function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
+  const canonicalSnapshotHash = context.canonicalSnapshotHash ?? contentHash({
+    entities: [...context.entities.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    rules: [...context.rules.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    stateFields: context.stateSchema.list(),
+  });
+  return { ...context, canonicalSnapshotHash };
 }
 
 function touchedEntities(delta: StateDelta): EntityId[] {
   return [...new Set(delta.operations.flatMap((operation) => ("entityId" in operation ? [operation.entityId] : [])))].sort();
 }
-

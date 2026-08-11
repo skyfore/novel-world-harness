@@ -1,3 +1,4 @@
+import { SegmentStore, segmentSource } from "../compiler/segments.js";
 import type { HarnessWorker } from "./types.js";
 import { writeMetric } from "./metrics.js";
 
@@ -10,15 +11,27 @@ const segmentSourceWorker: HarnessWorker = {
     const source = await ctx.store.getSource(input.documentId);
     if (!source) throw new Error(`Source document not found: ${input.documentId}`);
 
-    // The initial scaffold intentionally does not guess a universal chapter/scene splitter.
-    // The first production worker should load the source text and create hierarchical
-    // chapter/scene/dialogue segments with offsets and evidence-preserving boundaries.
-    await writeMetric(ctx.store, "source", 0.01, {
-      note: "Document registered. Production segmentation worker is the next implementation milestone.",
+    const manifest = await segmentSource(ctx.store.root, source);
+    await new SegmentStore(ctx.store.root).write(manifest);
+    const coveredBytes = manifest.segments.reduce((sum, segment) => sum + segment.bytes, 0);
+    const coverage = source.bytes === 0 ? 1 : Math.min(1, coveredBytes / source.bytes);
+    await writeMetric(ctx.store, "source", coverage, {
       sourcePath: source.sourcePath,
+      sourceSha256: source.contentSha256,
+      segments: manifest.segments.length,
+      coveredBytes,
+      sourceBytes: source.bytes,
+      segmenterVersion: manifest.segmenterVersion,
+      note: "Source segmentation is deterministic evidence indexing only; semantic artifacts still require proposal/validation/commit.",
     });
 
-    return { registered: true, documentId: input.documentId };
+    return {
+      documentId: input.documentId,
+      sourcePath: source.sourcePath,
+      segments: manifest.segments.length,
+      coveredBytes,
+      coverage,
+    };
   },
 };
 

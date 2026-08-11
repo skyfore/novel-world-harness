@@ -13,15 +13,16 @@ export type WorkspaceWorld = {
 };
 
 export async function openWorkspaceWorld(workspaceRoot: string, render?: NarrativeRender): Promise<WorkspaceWorld> {
-  const { canon, context } = await loadWorldContext(workspaceRoot);
-  const engine = new WorldEngine(workspaceRoot, context);
+  const { context, contexts } = await loadWorldContext(workspaceRoot);
+  const engine = new WorldEngine(workspaceRoot, context, (snapshotHash) => contexts.load(snapshotHash));
   const actorModels = new ActorModelStore(workspaceRoot);
   const possibilityTemplates = new PossibilityTemplateStore(workspaceRoot);
   const possibilitySource: PossibilitySource = async ({ branchId, commitId }) => {
-    const [events, templates] = await Promise.all([
-      canon.listEvents(),
+    const [commitContext, templates] = await Promise.all([
+      engine.contextForCommit(commitId),
       possibilityTemplates.materialize(branchId, commitId),
     ]);
+    const events = [...(commitContext.events?.values() ?? [])];
     const canonical = events.map((event) => canonicalEventToPossibility(event, branchId, commitId));
     const byId = new Map([...canonical, ...templates].map((possibility) => [possibility.id, possibility]));
     return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));

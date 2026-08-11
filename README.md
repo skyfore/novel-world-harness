@@ -39,9 +39,10 @@ See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for t
 ## Install
 
 ```bash
-npm ci
-npm run build
-npm link
+corepack enable pnpm
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm link --global
 ```
 
 Node 22.19 or newer is required.

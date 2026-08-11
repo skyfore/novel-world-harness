@@ -197,7 +197,7 @@ export class PiAgentSession {
   }
   async prompt(input: string): Promise<string> {
     this.activeText = "";
-    await this.session.prompt(await expandFileMentions(input, this.options.workspace), { source: "interactive" });
+    await this.session.prompt(input, { source: "interactive" });
     const latest = [...this.session.messages].reverse().find((message) => message.role === "assistant");
     if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) throw new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
     if (this.activeText) return this.activeText;

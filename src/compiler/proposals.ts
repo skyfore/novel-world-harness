@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { ProposalStore } from "../world/canonical-model.js";
 import { initialWorldSchema } from "../world/initial.js";
 import {
@@ -14,7 +15,7 @@ import {
 } from "../world/model.js";
 
 export const possibilityTemplateSchema = possibilitySchema.omit({ branchId: true, evaluatedAtCommit: true });
-export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 
 const schemas = {
   entity: entitySchema,
@@ -22,6 +23,8 @@ const schemas = {
   "canonical-event": canonicalEventSchema,
   "world-rule": worldRuleSchema,
   "initial-world": initialWorldSchema,
+  "character-goal": characterGoalSchema,
+  "character-model": characterModelSchema,
   "state-delta": stateDeltaSchema,
   possibility: possibilityTemplateSchema,
 } satisfies Record<CompilerProposalKind, z.ZodTypeAny>;

@@ -16,7 +16,7 @@ Implemented:
 - Pi compiler sessions that can only create typed pending proposals;
 - cryptographic evidence verification before canonical or possibility acceptance;
 - logical canonical IDs backed by immutable content-addressed revisions;
-- event-sourced branch history, deterministic state projection, temporal rules, knowledge isolation, snapshots, and integrity checks;
+- event-sourced branch history pinned to immutable canonical snapshots, deterministic state projection, temporal rules, knowledge isolation, snapshots, and integrity checks;
 - canonical and non-canonical possibilities, counterfactual branches, checkpoint replay, and deterministic actor-goal policies.
 
 Not implemented as an end-user loop yet:
@@ -120,10 +120,12 @@ Branch and integrity workflows:
 ```bash
 nwh world fork alternate --branch main
 nwh world diff main alternate
-nwh world replay ./checkpoints.json --branch main
+nwh world replay ./checkpoints.json --branch main --output-branch replay-main
 nwh world snapshot --branch main
 nwh world fsck
 ```
+
+`world diff` reports state, committed-history, and actor-knowledge divergence. `world replay` always forks a new output branch (or generates one when `--output-branch` is omitted), so replay success or failure never advances the source branch.
 
 Actor inspection is available, but it is not yet an interactive embodiment loop:
 

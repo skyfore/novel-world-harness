@@ -26,6 +26,26 @@ export type CanonReplayResult = {
   passed: boolean;
 };
 
+export type IsolatedCanonReplayResult = CanonReplayResult & {
+  sourceBranchId: BranchId;
+  sourceCommit: CommitId;
+};
+
+export async function runIsolatedCanonReplay(
+  runtime: WorldRuntime,
+  sourceBranchId: BranchId,
+  replayBranchId: BranchId,
+  checkpoints: readonly CanonReplayCheckpoint[],
+  maxMoves = 100,
+): Promise<IsolatedCanonReplayResult> {
+  if (!Number.isInteger(maxMoves) || maxMoves <= 0) throw new Error("maxMoves must be a positive integer");
+  if (sourceBranchId === replayBranchId) throw new Error("Replay output branch must differ from the source branch");
+  const sourceCommit = await runtime.engine.branches.readHead(sourceBranchId);
+  await runtime.forkBranch(sourceBranchId, sourceCommit, replayBranchId, `Replay of ${sourceBranchId}`);
+  const result = await runCanonReplay(runtime, replayBranchId, checkpoints, maxMoves);
+  return { ...result, sourceBranchId, sourceCommit };
+}
+
 export async function runCanonReplay(
   runtime: WorldRuntime,
   branchId: BranchId,
@@ -118,4 +138,3 @@ function diagnoseNoProgress(checkpoint: CanonReplayCheckpoint, frontier: Frontie
     frontier: compact,
   };
 }
-

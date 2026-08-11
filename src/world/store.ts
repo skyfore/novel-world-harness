@@ -5,12 +5,14 @@ import { canonicalJson, assertContentHash, contentHash } from "./canonical.js";
 import {
   branchSchema,
   committedEventSchema,
+  knowledgeDeltaSchema,
   stateDeltaSchema,
   worldCommitSchema,
   type Branch,
   type BranchId,
   type CommitId,
   type CommittedEvent,
+  type KnowledgeDelta,
   type ObjectHash,
   type StateDelta,
   type WorldCommit,
@@ -18,27 +20,22 @@ import {
 
 const WORLD_STORAGE_VERSION = "v1";
 const BRANCH_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-type ObjectKind = "deltas" | "events" | "commits";
+type ObjectKind = "deltas" | "knowledge" | "events" | "commits";
 type Schema<T> = z.ZodType<T>;
-
 type BranchHead = { version: 1; commitId: CommitId; updatedAt: string };
 
 function assertBranchId(id: string): void {
   if (!BRANCH_ID.test(id)) throw new Error(`Invalid branch id: ${id}`);
 }
-
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
 }
-
 async function atomicWrite(filePath: string, content: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
   const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   await fs.writeFile(temporary, content, { encoding: "utf8", mode: 0o600 });
   await fs.rename(temporary, filePath);
 }
-
 async function writeImmutable(filePath: string, content: string): Promise<void> {
   await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
   try {
@@ -52,51 +49,45 @@ async function writeImmutable(filePath: string, content: string): Promise<void> 
 
 export class WorldObjectStore {
   readonly root: string;
-
   constructor(workspaceRoot: string) {
     this.root = path.join(workspaceRoot, ".novel-harness", "world", WORLD_STORAGE_VERSION);
   }
-
-  async putDelta(delta: StateDelta): Promise<ObjectHash> {
+  putDelta(delta: StateDelta): Promise<ObjectHash> {
     return this.put("deltas", stateDeltaSchema, delta);
   }
-
-  async putEvent(event: CommittedEvent): Promise<ObjectHash> {
+  putKnowledgeDelta(delta: KnowledgeDelta): Promise<ObjectHash> {
+    return this.put("knowledge", knowledgeDeltaSchema, delta);
+  }
+  putEvent(event: CommittedEvent): Promise<ObjectHash> {
     return this.put("events", committedEventSchema, event);
   }
-
-  async putCommit(commit: WorldCommit): Promise<CommitId> {
+  putCommit(commit: WorldCommit): Promise<CommitId> {
     return this.put("commits", worldCommitSchema, commit);
   }
-
-  async getDelta(hash: ObjectHash): Promise<StateDelta> {
+  getDelta(hash: ObjectHash): Promise<StateDelta> {
     return this.get("deltas", stateDeltaSchema, hash);
   }
-
-  async getEvent(hash: ObjectHash): Promise<CommittedEvent> {
+  getKnowledgeDelta(hash: ObjectHash): Promise<KnowledgeDelta> {
+    return this.get("knowledge", knowledgeDeltaSchema, hash);
+  }
+  getEvent(hash: ObjectHash): Promise<CommittedEvent> {
     return this.get("events", committedEventSchema, hash);
   }
-
-  async getCommit(hash: CommitId): Promise<WorldCommit> {
+  getCommit(hash: CommitId): Promise<WorldCommit> {
     return this.get("commits", worldCommitSchema, hash);
   }
-
   private async put<T>(kind: ObjectKind, schema: Schema<T>, input: T): Promise<ObjectHash> {
     const value = schema.parse(input);
     const hash = contentHash(value);
-    const serialized = `${canonicalJson(value)}\n`;
-    await writeImmutable(this.objectPath(kind, hash), serialized);
+    await writeImmutable(this.objectPath(kind, hash), `${canonicalJson(value)}\n`);
     return hash;
   }
-
   private async get<T>(kind: ObjectKind, schema: Schema<T>, hash: ObjectHash): Promise<T> {
     assertContentHash(hash);
-    const filePath = this.objectPath(kind, hash);
-    const value = schema.parse(await readJson<unknown>(filePath));
+    const value = schema.parse(await readJson<unknown>(this.objectPath(kind, hash)));
     if (contentHash(value) !== hash) throw new Error(`Corrupt ${kind} object: ${hash}`);
     return value;
   }
-
   private objectPath(kind: ObjectKind, hash: ObjectHash): string {
     assertContentHash(hash);
     return path.join(this.root, "objects", kind, `${hash}.json`);
@@ -105,11 +96,9 @@ export class WorldObjectStore {
 
 export class BranchStore {
   readonly root: string;
-
   constructor(workspaceRoot: string) {
     this.root = path.join(workspaceRoot, ".novel-harness", "world", WORLD_STORAGE_VERSION, "branches");
   }
-
   async create(input: Branch): Promise<Branch> {
     const branch = branchSchema.parse(input);
     assertBranchId(branch.id);
@@ -117,11 +106,7 @@ export class BranchStore {
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const branchPath = path.join(directory, "branch.json");
     try {
-      await fs.writeFile(branchPath, `${JSON.stringify(branch, null, 2)}\n`, {
-        encoding: "utf8",
-        mode: 0o600,
-        flag: "wx",
-      });
+      await fs.writeFile(branchPath, `${JSON.stringify(branch, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       throw new Error(`Branch already exists: ${branch.id}`);
@@ -129,14 +114,11 @@ export class BranchStore {
     await this.writeHead(branch.id, branch.headCommitId);
     return branch;
   }
-
   async read(id: BranchId): Promise<Branch> {
     assertBranchId(id);
     const branch = branchSchema.parse(await readJson<unknown>(path.join(this.branchDirectory(id), "branch.json")));
-    const headCommitId = await this.readHead(id);
-    return { ...branch, headCommitId };
+    return { ...branch, headCommitId: await this.readHead(id) };
   }
-
   async readHead(id: BranchId): Promise<CommitId> {
     assertBranchId(id);
     const head = await readJson<BranchHead>(path.join(this.branchDirectory(id), "head.json"));
@@ -144,20 +126,16 @@ export class BranchStore {
     assertContentHash(head.commitId);
     return head.commitId;
   }
-
   async updateHead(id: BranchId, expected: CommitId, next: CommitId): Promise<void> {
     assertBranchId(id);
     assertContentHash(expected);
     assertContentHash(next);
     await this.withLock(id, async () => {
       const current = await this.readHead(id);
-      if (current !== expected) {
-        throw new Error(`Stale branch head for ${id}: expected ${expected}, found ${current}`);
-      }
+      if (current !== expected) throw new Error(`Stale branch head for ${id}: expected ${expected}, found ${current}`);
       await this.writeHead(id, next);
     });
   }
-
   async withLock<T>(id: BranchId, fn: () => Promise<T>): Promise<T> {
     assertBranchId(id);
     const directory = this.branchDirectory(id);
@@ -175,13 +153,11 @@ export class BranchStore {
       if (handle) await fs.rm(lockPath, { force: true });
     }
   }
-
   private async writeHead(id: BranchId, commitId: CommitId): Promise<void> {
     assertContentHash(commitId);
     const head: BranchHead = { version: 1, commitId, updatedAt: new Date().toISOString() };
     await atomicWrite(path.join(this.branchDirectory(id), "head.json"), `${JSON.stringify(head, null, 2)}\n`);
   }
-
   private branchDirectory(id: BranchId): string {
     assertBranchId(id);
     return path.join(this.root, id);

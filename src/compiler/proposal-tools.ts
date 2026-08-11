@@ -10,6 +10,8 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit a source-observed canonical event candidate with preconditions and deterministic outcome delta." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed StateDelta used to create a runtime genesis branch." },
+  "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
+  "character-model": { name: "propose_character_model", label: "Propose character model", description: "Submit evidence-backed traits and decision biases for one actor. The model never grants omniscient knowledge." },
   "state-delta": { name: "propose_state_delta", label: "Propose state delta", description: "Submit a deterministic state-delta candidate for later validation. This never moves a branch head." },
   possibility: { name: "propose_possibility", label: "Propose possibility", description: "Submit an uncommitted future possibility template with conditions, blockers and optional candidate effects." },
 };

@@ -78,6 +78,28 @@ describe("actor policy", () => {
     expect(afterKnowledge.committedEvents).toHaveLength(1);
     expect((await engine.projector.project(afterKnowledge.newHead)).values.alice?.["character.location"]).toBe("meeting");
   });
+
+  it("does not treat a disbelieved claim as actionable knowledge", async () => {
+    const { engine, runtime, head } = await fixture();
+    const learned = await engine.commitProposal({
+      proposalId: "reject-invitation",
+      branchId: "main",
+      expectedParentCommit: head,
+      source: "background",
+      title: "Alice dismisses the invitation as false",
+      participants: ["alice"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      proposedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "alice", claimId: "invited", status: "disbelieves", confidence: 1 }] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(learned.report.accepted).toBe(true);
+    const result = await runtime.move({ branchId: "main", maxActorCandidates: 1, maxBackgroundCandidates: 0 });
+    expect(result.newHead).toBe(learned.newHead);
+    expect((await engine.projector.project(result.newHead)).values.alice?.["character.location"]).toBe("home");
+  });
 });
 
 describe("actor adjudication", () => {

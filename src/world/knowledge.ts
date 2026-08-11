@@ -13,6 +13,10 @@ export type ActorWorldView = {
   knowledge: Array<{ fact: KnowledgeFact; claim?: Claim }>;
 };
 
+export function isActionableKnowledge(fact: KnowledgeFact): boolean {
+  return fact.status !== "disbelieves";
+}
+
 export class KnowledgeProjector {
   constructor(private readonly engine: WorldEngine) {}
 

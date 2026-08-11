@@ -55,7 +55,7 @@ export class WorldProjector {
         state = applyStateDelta(state, await this.objects.getDelta(event.deltaHash), this.context.stateSchema, this.context.entities);
       }
       state = { ...state, atCommit: entry.id, logicalTime: entry.commit.logicalTime };
-      const invariantErrors = validateEngineInvariants(state, this.context.stateSchema, this.context.entities);
+      const invariantErrors = validateEngineInvariants(state, this.context.stateSchema, this.context.entities, this.context.rules);
       if (invariantErrors.length) throw new Error(`Projected state violates invariants: ${invariantErrors.join("; ")}`);
       previousStep = entry.commit.logicalTime.step;
     }
@@ -110,7 +110,7 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
       postState = applyStateDelta(state, delta, context.stateSchema, context.entities);
-      for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities)) errors.push({ code: "POST_STATE_INVARIANT", message });
+      for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
       for (const rule of applicableRules) {
         if (rule.forbids?.length && rule.forbids.every((predicate) => evaluatePredicate(postState!, predicate))) {
           errors.push({ code: "RULE_FORBIDS", message: `Rule ${rule.id} forbids the proposed post-state` });
@@ -138,7 +138,7 @@ export class WorldEngine {
   async createBranch(branchId: BranchId, name: string, initialDelta: StateDelta = { version: 1, operations: [] }): Promise<CommitId> {
     stateDeltaSchema.parse(initialDelta);
     const initialState = applyStateDelta(emptyWorldState("genesis", 0), initialDelta, this.context.stateSchema, this.context.entities);
-    const invariantErrors = validateEngineInvariants(initialState, this.context.stateSchema, this.context.entities);
+    const invariantErrors = validateEngineInvariants(initialState, this.context.stateSchema, this.context.entities, this.context.rules);
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
     const deltaHash = await this.objects.putDelta(initialDelta);
     const eventId = contentHash({ kind: "genesis", branchId, deltaHash });

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import os from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { canonicalJson, contentHash } from "../src/world/canonical.js";
 import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, type StateDelta, type WorldCommit } from "../src/world/model.js";
@@ -77,6 +78,28 @@ describe("BranchStore", () => {
     await branches.updateHead("main", genesis, next);
     await expect(branches.readHead("main")).resolves.toBe(next);
     await expect(branches.updateHead("main", genesis, next)).rejects.toThrow("Stale branch head");
+  });
+
+  it("recovers a lock left by a dead process", async () => {
+    const root = await tempRoot();
+    const objects = new WorldObjectStore(root);
+    const branches = new BranchStore(root);
+    const genesis = await objects.putCommit({
+      version: 1,
+      branchId: "main",
+      logicalTime: { step: 0 },
+      eventHashes: [],
+      engineVersion: WORLD_ENGINE_VERSION,
+      schemaVersion: WORLD_SCHEMA_VERSION,
+    });
+    await branches.create({ id: "main", name: "Main", headCommitId: genesis });
+    await fs.writeFile(
+      path.join(branches.root, "main", "lock"),
+      JSON.stringify({ version: 1, pid: 2_147_483_647, hostname: os.hostname(), createdAt: new Date(0).toISOString() }),
+      "utf8",
+    );
+    await expect(branches.withLock("main", async () => "recovered")).resolves.toBe("recovered");
+    expect((await branches.inspectLock("main")).present).toBe(false);
   });
 
   it("serializes mutations with an exclusive branch lock", async () => {

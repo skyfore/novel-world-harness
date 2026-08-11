@@ -94,6 +94,27 @@ describe("WorldEngine", () => {
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
+  it("rejects activation of an unknown world rule", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main");
+    const result = await engine.commitProposal({
+      proposalId: "unknown-rule",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "background",
+      title: "Activate missing rule",
+      participants: [],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [{ op: "activate-rule", ruleId: "missing-rule" }] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(result.report.accepted).toBe(false);
+    expect(result.report.errors.some((error) => error.code === "POST_STATE_INVARIANT")).toBe(true);
+    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
+  });
+
   it("rejects ordinary actions by a dead actor", async () => {
     const { engine } = await fixture();
     const genesis = await engine.createBranch("main", "Main", {

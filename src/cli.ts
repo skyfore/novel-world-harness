@@ -125,10 +125,10 @@ world.command("move").option("--root <path>", "local novel workspace").option("-
 world.command("fork").argument("<new-branch>").option("--root <path>", "local novel workspace").option("--branch <id>", "parent branch", "main").option("--from <commit>", "fork commit; defaults to parent head").action(async (newBranch, options) => worldForkCommand(rootFor(options), options.branch, newBranch, options.from));
 world.command("diff").argument("<left-branch>").argument("<right-branch>").option("--root <path>", "local novel workspace").action(async (left, right, options) => worldDiffCommand(rootFor(options), left, right));
 world.command("render").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").option("--actor <id>", "actor point of view").option("--tone <tone>", "rendering tone label").action(async (options) => worldRenderCommand(rootFor(options), options.branch, options.actor, options.tone));
-world.command("replay").argument("<checkpoints>", "checkpoint JSON file").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").option("--max-moves <n>", "move limit", "100").action(async (checkpoints, options) => {
+world.command("replay").argument("<checkpoints>", "checkpoint JSON file").option("--root <path>", "local novel workspace").option("--branch <id>", "source branch id", "main").option("--output-branch <id>", "new branch that receives replay commits").option("--max-moves <n>", "move limit", "100").action(async (checkpoints, options) => {
   const maxMoves = nonNegativeInteger(options.maxMoves, "--max-moves");
   if (maxMoves === 0) throw new Error("--max-moves must be positive");
-  await worldReplayCommand(rootFor(options), options.branch, checkpoints, maxMoves);
+  await worldReplayCommand(rootFor(options), options.branch, checkpoints, maxMoves, options.outputBranch);
 });
 world.command("snapshot").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").description("materialize a derived state snapshot for a branch head").action(async (options) => worldSnapshotCommand(rootFor(options), options.branch));
 world.command("fsck").option("--root <path>", "local novel workspace").description("verify branch ancestry, object hashes, replay and snapshots").action(async (options) => worldFsckCommand(rootFor(options)));

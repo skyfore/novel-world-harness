@@ -4,8 +4,14 @@ The interactive TUI can start without a configuration file. Defaults are:
 
 - workspace: current directory;
 - Pi provider/model: `anthropic/claude-sonnet-5`;
-- credential variable: `ANTHROPIC_API_KEY`;
+- authentication: Pi `/login` or the optional `ANTHROPIC_API_KEY` variable;
 - local state and sessions: `.novel-harness/`.
+
+The TUI can open without credentials. Inside it, use `/login` to authenticate a
+subscription or provider, then `/model` to select a model. `/model` does not perform
+authentication. NWH stores Pi credentials per workspace in
+`.novel-harness/pi-auth.json`; the file is private harness state and is excluded from
+normal model file discovery and Git.
 
 `init`, `doctor`, `ingest`, and `status` use `novel-harness.yaml`. Supply a different path with `--config`. `${NAME}` references are expanded before YAML validation; a missing referenced variable is an error.
 
@@ -64,7 +70,9 @@ llm:
   routing: {}
 ```
 
-`apiKeyEnv` is optional for Pi-managed authentication and, when present, must name an `*_API_KEY` variable. Secrets stay in environment variables and must not be committed to YAML.
+`apiKeyEnv` is optional. Omit it when using Pi-managed `/login` authentication;
+when present, it must name an `*_API_KEY` variable. Secrets stay in environment
+variables or the private Pi auth store and must not be committed to YAML.
 
 ## Local workspace state
 
@@ -73,6 +81,7 @@ There is no database configuration. Current state is stored locally:
 ```text
 .novel-harness/
 ├── project.json
+├── pi-auth.json
 ├── sources/<content-id>.json
 ├── segments/<source-id>.json
 ├── sessions/<pi-session>.jsonl

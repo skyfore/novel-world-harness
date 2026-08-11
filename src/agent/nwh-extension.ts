@@ -20,6 +20,11 @@ const COMMAND_HELP = `NWH commands:
   /help                      show this help
   /exit                      end the session
 
+Provider and model:
+  /login                     sign in to a provider (subscription/OAuth or API key)
+  /logout                    remove provider authentication
+  /model                     select a model after signing in
+
 TUI shortcuts:
   Enter send · Shift+Enter newline · Esc interrupt · Ctrl+O expand tools
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
@@ -76,7 +81,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           "",
           `${theme.bold(theme.fg("accent", "NWH"))}${theme.fg("muted", "  Novel World Harness")}`,
           theme.fg("dim", `${modeLabel} · local files · evidence first`),
-          theme.fg("dim", "Enter to send · /help for NWH commands · /hotkeys for shortcuts"),
+          theme.fg("dim", "Enter to send · /login to authenticate · /model to switch · /help for commands"),
           "",
         ],
         invalidate() {},

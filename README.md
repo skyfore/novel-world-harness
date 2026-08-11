@@ -50,12 +50,32 @@ Node 22.19 or newer is required.
 ## Local terminal assistant
 
 ```bash
+pnpm dev
+```
+
+No API key is required to open the TUI. To use an existing provider subscription,
+authenticate and select a model inside the session:
+
+```text
+/login
+/model
+```
+
+Pi supports subscription sign-in for ChatGPT Plus/Pro (Codex), Claude Pro/Max,
+and GitHub Copilot. `/model` switches models but does not authenticate a provider,
+so run `/login` first. Credentials are stored locally in
+`.novel-harness/pi-auth.json` for this workspace and are excluded from model file
+tools and Git.
+
+API keys remain supported as an alternative:
+
+```bash
 export ANTHROPIC_API_KEY=your_key
-nwh
-nwh -p "列出这个工作区中的主要人物资料"
-nwh --continue
-nwh --root ./my-novel
-nwh --tui-mode fullscreen
+pnpm dev
+pnpm dev -p "列出这个工作区中的主要人物资料"
+pnpm dev --continue
+pnpm dev --root ./my-novel
+pnpm dev --tui-mode fullscreen
 ```
 
 `nwh` and `nwh play` open the TUI in `regular` mode by default, preserving terminal scrollback. `--tui-mode fullscreen` uses an alternate-screen layout. `-p` remains the non-interactive path for scripts and pipelines.

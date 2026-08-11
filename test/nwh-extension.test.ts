@@ -59,11 +59,14 @@ describe("NWH TUI extension", () => {
 
     await commands.get("files")?.handler("chapter", ctx);
     await commands.get("read")?.handler('"chapters/chapter one.md" 2:2', ctx);
+    await commands.get("help")?.handler("", ctx);
     await commands.get("clear")?.handler("", ctx);
     await commands.get("exit")?.handler("", ctx);
 
     expect(notifications[0]).toContain("chapters/chapter one.md");
     expect(notifications[1]).toContain("2: second line");
+    expect(notifications[2]).toContain("/login");
+    expect(notifications[2]).toContain("/model");
     expect(actions).toEqual({ cleared: true, shutdown: true });
   });
 

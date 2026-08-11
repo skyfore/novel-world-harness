@@ -108,8 +108,9 @@ export function selectEligible(frontier: Frontier, limit = 10): EvaluatedPossibi
 }
 
 export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: string): EventProposal | null {
-  if (entry.status !== "eligible" || !entry.possibility.proposedDelta) return null;
   const possibility = entry.possibility;
+  const proposedDelta = possibility.proposedDelta;
+  if (entry.status !== "eligible" || !proposedDelta) return null;
   return {
     proposalId: `poss-${contentHash({ id: possibility.id, at: possibility.evaluatedAtCommit }).slice(0, 24)}`,
     branchId: possibility.branchId,
@@ -120,7 +121,7 @@ export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: str
     participants: possibility.participants,
     proposedTime: possibility.candidateWindow ?? { kind: "unknown" },
     preconditions: possibility.preconditions,
-    proposedDelta: possibility.proposedDelta,
+    proposedDelta,
     causalParents: possibility.causalParents,
     evidence: possibility.evidence,
     possibilityId: possibility.id,

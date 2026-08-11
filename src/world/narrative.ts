@@ -3,13 +3,21 @@ import type { WorldEngine } from "./engine.js";
 import { KnowledgeProjector, type ActorWorldView } from "./knowledge.js";
 
 export type NarrativeEvent = { hash: string; event: CommittedEvent };
-export type NarrativeFrame = {
+export type OmniscientNarrativeFrame = {
+  pointOfView: "omniscient";
   branchId: string;
   commitId: CommitId;
   state: WorldState;
   events: NarrativeEvent[];
-  actorView?: ActorWorldView;
 };
+export type ActorNarrativeFrame = {
+  pointOfView: "actor";
+  branchId: string;
+  commitId: CommitId;
+  events: NarrativeEvent[];
+  actorView: ActorWorldView;
+};
+export type NarrativeFrame = OmniscientNarrativeFrame | ActorNarrativeFrame;
 export type NarrativeStyle = { pointOfView?: "omniscient" | "actor"; actorId?: EntityId; tone?: string };
 export type NarrativeAdapter = (frame: Readonly<NarrativeFrame>, style: Readonly<NarrativeStyle>) => Promise<string> | string;
 
@@ -22,10 +30,25 @@ export class NarrativeRenderer {
   async frame(branchId: string, commitId: CommitId, style: NarrativeStyle = {}): Promise<NarrativeFrame> {
     const state = await this.engine.projector.project(commitId);
     const events = await collectEvents(this.engine, commitId);
-    const actorView = style.pointOfView === "actor" && style.actorId
-      ? await this.knowledge.view(style.actorId, commitId, state)
-      : undefined;
-    return { branchId, commitId, state: structuredClone(state), events: structuredClone(events), ...(actorView ? { actorView: structuredClone(actorView) } : {}) };
+    if (style.pointOfView === "actor") {
+      if (!style.actorId) throw new Error("Actor point of view requires actorId");
+      const actorView = await this.knowledge.view(style.actorId, commitId, state);
+      const visibleEvents = events.filter(({ event }) => event.participants.includes(style.actorId!));
+      return {
+        pointOfView: "actor",
+        branchId,
+        commitId,
+        events: structuredClone(visibleEvents),
+        actorView: structuredClone(actorView),
+      };
+    }
+    return {
+      pointOfView: "omniscient",
+      branchId,
+      commitId,
+      state: structuredClone(state),
+      events: structuredClone(events),
+    };
   }
 
   async render(branchId: string, commitId: CommitId, style: NarrativeStyle = {}): Promise<string> {
@@ -58,10 +81,7 @@ async function collectEvents(engine: WorldEngine, commitId: CommitId): Promise<N
 
 function deterministicRender(frame: Readonly<NarrativeFrame>, style: Readonly<NarrativeStyle>): string {
   const prefix = style.tone ? `[${style.tone}] ` : "";
-  const visible = style.pointOfView === "actor" && frame.actorView
-    ? frame.events.filter(({ event }) => event.participants.includes(frame.actorView!.actorId))
-    : frame.events;
-  return visible.map(({ event }) => `${prefix}${event.logicalTime.step}. ${event.title}`).join("\n");
+  return frame.events.map(({ event }) => `${prefix}${event.logicalTime.step}. ${event.title}`).join("\n");
 }
 
 function deepFreeze<T>(value: T): T {

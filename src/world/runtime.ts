@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { ActorProposalCandidate, ActorProposalSource } from "./actors.js";
 import type { BranchId, CommitId, EventProposal, Possibility, WorldState } from "./model.js";
 import { buildFrontier, FrontierStore, possibilityToProposal, selectEligible, type Frontier } from "./frontier.js";
 import { WorldEngine } from "./engine.js";
@@ -12,7 +13,14 @@ export type PossibilitySource = (input: {
 export type MoveInput = {
   branchId: BranchId;
   playerProposal?: EventProposal;
+  maxActorCandidates?: number;
   maxBackgroundCandidates?: number;
+};
+
+export type AdjudicationConflict = {
+  winnerProposalId: string;
+  loserProposalId: string;
+  writeKeys: string[];
 };
 
 export type MoveResult = {
@@ -20,6 +28,7 @@ export type MoveResult = {
   newHead: CommitId;
   committedEvents: string[];
   rejectedProposals: string[];
+  adjudicationConflicts: AdjudicationConflict[];
   frontier: Frontier;
   renderedText?: string;
 };
@@ -38,6 +47,7 @@ export class WorldRuntime {
     readonly engine: WorldEngine,
     private readonly possibilitySource: PossibilitySource,
     private readonly render?: NarrativeRender,
+    private readonly actorProposalSource?: ActorProposalSource,
   ) {
     const workspaceRoot = path.resolve(engine.objects.root, "../../..");
     this.frontierStore = new FrontierStore(workspaceRoot);
@@ -48,13 +58,7 @@ export class WorldRuntime {
     if (!(await this.isAncestor(forkCommitId, parentHead))) {
       throw new Error(`Commit ${forkCommitId} is not an ancestor of branch ${parentBranchId}`);
     }
-    await this.engine.branches.create({
-      id: newBranchId,
-      name,
-      parentBranchId,
-      forkCommitId,
-      headCommitId: forkCommitId,
-    });
+    await this.engine.branches.create({ id: newBranchId, name, parentBranchId, forkCommitId, headCommitId: forkCommitId });
   }
 
   async move(input: MoveInput): Promise<MoveResult> {
@@ -62,6 +66,7 @@ export class WorldRuntime {
     let currentHead = previousHead;
     const committedEvents: string[] = [];
     const rejectedProposals: string[] = [];
+    const adjudicationConflicts: AdjudicationConflict[] = [];
 
     if (input.playerProposal) {
       if (input.playerProposal.branchId !== input.branchId) throw new Error("Player proposal branch does not match Move branch");
@@ -75,11 +80,27 @@ export class WorldRuntime {
       }
     }
 
-    const limit = input.maxBackgroundCandidates ?? 1;
-    if (!Number.isInteger(limit) || limit < 0 || limit > 100) throw new Error("maxBackgroundCandidates must be an integer between 0 and 100");
-    let latestFrontier = await this.refreshFrontier(input.branchId, currentHead);
+    const actorLimit = boundedLimit(input.maxActorCandidates ?? 1, "maxActorCandidates");
+    if (this.actorProposalSource && actorLimit > 0) {
+      const candidates = await this.actorProposalSource({ branchId: input.branchId, commitId: currentHead });
+      const adjudicated = adjudicateActorCandidates(candidates, actorLimit);
+      adjudicationConflicts.push(...adjudicated.conflicts);
+      rejectedProposals.push(...adjudicated.conflicts.map((conflict) => conflict.loserProposalId));
+      for (const candidate of adjudicated.selected) {
+        const proposal = { ...candidate.proposal, branchId: input.branchId, expectedParentCommit: currentHead };
+        const result = await this.engine.commitProposal(proposal);
+        if (!result.report.accepted) {
+          rejectedProposals.push(proposal.proposalId);
+          continue;
+        }
+        currentHead = result.newHead;
+        if (result.eventHash) committedEvents.push(result.eventHash);
+      }
+    }
 
-    for (let index = 0; index < limit; index += 1) {
+    const backgroundLimit = boundedLimit(input.maxBackgroundCandidates ?? 1, "maxBackgroundCandidates");
+    let latestFrontier = await this.refreshFrontier(input.branchId, currentHead);
+    for (let index = 0; index < backgroundLimit; index += 1) {
       const candidate = selectEligible(latestFrontier, 1)[0];
       if (!candidate) break;
       const proposal = possibilityToProposal(candidate);
@@ -100,7 +121,8 @@ export class WorldRuntime {
       previousHead,
       newHead: currentHead,
       committedEvents,
-      rejectedProposals,
+      rejectedProposals: [...new Set(rejectedProposals)],
+      adjudicationConflicts,
       frontier: latestFrontier,
       ...(renderedText ? { renderedText } : {}),
     };
@@ -144,4 +166,39 @@ export class WorldRuntime {
     }
     return false;
   }
+}
+
+export function adjudicateActorCandidates(candidates: readonly ActorProposalCandidate[], limit: number): { selected: ActorProposalCandidate[]; conflicts: AdjudicationConflict[] } {
+  const ordered = [...candidates].sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId));
+  const selected: ActorProposalCandidate[] = [];
+  const selectedWrites = new Map<string, string>();
+  const conflicts: AdjudicationConflict[] = [];
+  for (const candidate of ordered) {
+    if (selected.length >= limit) break;
+    const writes = proposalWriteSet(candidate.proposal);
+    const collisions = [...writes].filter((key) => selectedWrites.has(key));
+    if (collisions.length) {
+      const winnerProposalId = selectedWrites.get(collisions[0]!)!;
+      conflicts.push({ winnerProposalId, loserProposalId: candidate.proposal.proposalId, writeKeys: collisions.sort() });
+      continue;
+    }
+    selected.push(candidate);
+    for (const key of writes) selectedWrites.set(key, candidate.proposal.proposalId);
+  }
+  return { selected, conflicts };
+}
+
+function proposalWriteSet(proposal: EventProposal): Set<string> {
+  const writes = new Set<string>();
+  for (const operation of proposal.proposedDelta.operations) {
+    if (operation.op === "activate-rule" || operation.op === "deactivate-rule") writes.add(`rule:${operation.ruleId}`);
+    else writes.add(`state:${operation.entityId}:${operation.field}`);
+  }
+  for (const operation of proposal.proposedKnowledge?.operations ?? []) writes.add(`knowledge:${operation.actorId}:${operation.claimId}`);
+  return writes;
+}
+
+function boundedLimit(value: number, name: string): number {
+  if (!Number.isInteger(value) || value < 0 || value > 100) throw new Error(`${name} must be an integer between 0 and 100`);
+  return value;
 }

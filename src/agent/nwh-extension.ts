@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { expandFileMentions } from "./file-mentions.js";
+import { createNwhWelcomeHeader, isFreshConversation, NWH_WORKING_FRAMES } from "./nwh-welcome.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
@@ -74,18 +75,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const titleTimer = setTimeout(() => ctx.ui.setTitle(terminalTitle), 0);
       titleTimer.unref();
       ctx.ui.setWorkingMessage(mode === "compiler" ? "Building evidence-backed proposals..." : "Consulting local evidence...");
+      ctx.ui.setWorkingIndicator({ frames: NWH_WORKING_FRAMES, intervalMs: 180 });
       ctx.ui.setHiddenThinkingLabel("Reasoning");
       ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
-      ctx.ui.setHeader((_tui, theme) => ({
-        render: () => [
-          "",
-          `${theme.bold(theme.fg("accent", "NWH"))}${theme.fg("muted", "  Novel World Harness")}`,
-          theme.fg("dim", `${modeLabel} · local files · evidence first`),
-          theme.fg("dim", "Enter to send · /login to authenticate · /model to switch · /help for commands"),
-          "",
-        ],
-        invalidate() {},
-      }));
+      const freshConversation = isFreshConversation(ctx.sessionManager.getEntries());
+      ctx.ui.setHeader((tui, theme) => createNwhWelcomeHeader(tui, theme, { mode, freshConversation }));
     });
 
     pi.registerCommand("files", {

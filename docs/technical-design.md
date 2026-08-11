@@ -379,6 +379,7 @@ type WorldCommit = {
   branchId: BranchId;
   logicalTime: LogicalTime;
   eventHashes: ObjectHash[];
+  canonicalSnapshotHash?: ObjectHash; // required on new commits; optional only for legacy v1 reads
   engineVersion: string;
   schemaVersion: number;
 };
@@ -450,6 +451,7 @@ Keep the `.novel-harness/` control-plane files for project metadata, sources, de
         │   ├── claims/{refs,revisions}/
         │   ├── events/{refs,revisions}/
         │   ├── rules/{refs,revisions}/
+        │   ├── snapshots/<sha256>.json
         │   ├── actors/
         │   └── possibilities/{refs,revisions}/
         ├── objects/
@@ -502,6 +504,7 @@ Phase 1 is **single-writer per branch**.
 - commits to one branch are serialized;
 - optimistic parent-commit matching rejects stale proposals;
 - a local exclusive lock file prevents same-branch concurrent mutation.
+- lock metadata records PID, hostname, and creation time; a dead same-host owner is recoverable and integrity checks surface stale locks.
 
 Do not solve distributed transactions before there is a demonstrated need.
 
@@ -1004,8 +1007,10 @@ nwh world inspect-event <hash>
 nwh world explain-state <entity> <field>
 nwh world frontier <branch>
 nwh world explain-possibility <id>
-nwh world replay <branch>
+nwh world replay <checkpoints> --branch <source> [--output-branch <new-branch>]
 ```
+
+Replay forks the source head before executing moves. The source branch is read-only during evaluation, including when a checkpoint fails. Branch diff output covers state, post-fork committed history, and actor-scoped knowledge rather than comparing final state alone.
 
 These are design targets, not Phase 0 CLI commitments.
 

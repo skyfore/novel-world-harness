@@ -44,6 +44,8 @@ TUI shortcuts:
   Enter send · Shift+Enter newline · Esc interrupt · Ctrl+O expand tools
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
+const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
+
 export function splitCommandArguments(value: string): string[] {
   const tokens: string[] = [];
   const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
@@ -86,6 +88,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for ${turn.source.sourcePath}. Analyze the supplied evidence now and record typed pending proposals.`;
 
     pi.on("session_shutdown", async () => options.onSessionShutdown?.());
+
+    pi.on("tool_call", (event) => {
+      if (!pendingTurn || !LOCAL_EVIDENCE_TOOL_NAMES.has(event.toolName)) return;
+      return {
+        block: true,
+        reason: "This compiler batch may use only the evidence slice supplied by the host; workspace file tools are disabled until the batch settles.",
+      };
+    });
 
     pi.on("input", async (event, ctx) => {
       if (event.source === "extension") return { action: "continue" };

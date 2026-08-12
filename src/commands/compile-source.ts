@@ -57,6 +57,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         ...(profile ? { profile } : {}),
         ...(options.model ? { model: options.model } : {}),
         saveSession: false,
+        includeLocalTools: false,
         segmentIds: batch.segmentIds,
         ...(options.liveTest ? { liveTest: options.liveTest } : {}),
         onText(delta) {

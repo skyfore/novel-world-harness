@@ -12,6 +12,7 @@ export type PiCompilerOptions = {
   onTool?: (name: string, input: unknown) => void;
   liveTest?: PiLiveTestOptions;
   segmentIds?: readonly string[];
+  includeLocalTools?: boolean;
 };
 
 export const DEFAULT_COMPILER_LIVE_MAX_REQUESTS = 64;
@@ -33,6 +34,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
   const proposalToolset = createCompilerProposalToolset(workspace.root, generatedBy);
   proposalToolset.beginBatch(options.segmentIds);
   const liveTest = compilerLiveTestOptions(options.liveTest);
+  const includeLocalTools = options.includeLocalTools ?? true;
   return PiAgentSession.create({
     workspace,
     ...(options.profile ? { profile: options.profile } : {}),
@@ -42,8 +44,11 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     ...(options.onTool ? { onTool: options.onTool } : {}),
     ...(liveTest ? { liveTest } : {}),
     interactionMode: "compiler",
+    includeLocalTools,
     additionalTools: proposalToolset.tools,
     resetCompilerProposalTools: proposalToolset.beginBatch,
-    systemPromptAppendix: `Compiler mode is enabled. Use read-only local evidence tools to inspect the novel, then use only the typed propose_* tools for candidate structured artifacts. A proposal is not canonical truth and must not be described as committed. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`,
+    systemPromptAppendix: includeLocalTools
+      ? `Compiler mode is enabled. Use read-only local evidence tools to inspect the novel, then use only the typed propose_* tools for candidate structured artifacts. A proposal is not canonical truth and must not be described as committed. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`
+      : `Compiler batch mode is enabled. The host has supplied the complete allowed evidence slice in the user context. Do not list, search, or read workspace files and do not use facts outside that slice. Use only the typed propose_* tools for candidate structured artifacts. A proposal is not canonical truth and must not be described as committed. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`,
   });
 }

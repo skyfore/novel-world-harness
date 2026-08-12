@@ -143,6 +143,9 @@ describe("NWH TUI extension", () => {
     expect(context?.message?.display).toBe(false);
     expect(context?.message?.content).toContain("<source-segment");
     expect(context?.message?.content).toContain("first line");
+
+    expect(events.get("tool_call")?.({ type: "tool_call", toolName: "read_file", toolCallId: "read-1", input: {} }, ctx))
+      .toMatchObject({ block: true, reason: expect.stringContaining("evidence slice") });
   });
 
   it("keeps standalone source-code paths as read-only attachments", async () => {

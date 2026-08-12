@@ -21,6 +21,7 @@ import type { LlmProfile } from "../config/schema.js";
 import { compilerBatchOutcomeFromMessages, type CompilerBatchOutcome } from "../compiler/batch-outcome.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { createNwhExtension, type NwhInteractionMode } from "./nwh-extension.js";
+import { nwhRuntimeDir, workspaceSessionDir } from "./runtime-paths.js";
 import {
   DEFAULT_LIVE_MAX_OUTPUT_TOKENS,
   DEFAULT_LIVE_MAX_REQUESTS,
@@ -48,6 +49,7 @@ export type PiAgentSessionOptions = {
   resetCompilerProposalTools?: (segmentIds?: readonly string[]) => void;
   liveTest?: PiLiveTestOptions;
   interactionMode?: NwhInteractionMode;
+  runtimeDir?: string;
 };
 
 export type PiLiveTestOptions = {
@@ -237,7 +239,7 @@ export class PiAgentSession {
     model: NonNullable<ReturnType<ModelRuntime["getModel"]>> | undefined,
   ) {
     this.profile = options.profile;
-    this.stateDir = path.join(options.workspace.root, ".novel-harness");
+    this.stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
     this.saveSession = options.saveSession ?? true;
     this.onText = options.onText;
     this.onTool = options.onTool;
@@ -247,7 +249,7 @@ export class PiAgentSession {
 
   static async create(options: PiAgentSessionOptions): Promise<PiAgentSession> {
     const profile = options.profile ? { ...options.profile } : undefined;
-    const stateDir = path.join(options.workspace.root, ".novel-harness");
+    const stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
     const { runtime, model } = await createModelRuntime(profile, stateDir);
     const wrapper = new PiAgentSession({ ...options, ...(profile ? { profile } : {}) }, runtime, model);
@@ -311,7 +313,7 @@ export class PiAgentSession {
 
   private async initialize(continueSession: boolean): Promise<void> {
     const agentDir = path.join(this.stateDir, "pi");
-    const sessionsDir = path.join(this.stateDir, "sessions");
+    const sessionsDir = workspaceSessionDir(this.options.workspace.root, this.stateDir);
     const sessionManager = this.saveSession
       ? continueSession ? SessionManager.continueRecent(this.options.workspace.root, sessionsDir) : SessionManager.create(this.options.workspace.root, sessionsDir)
       : SessionManager.inMemory(this.options.workspace.root);

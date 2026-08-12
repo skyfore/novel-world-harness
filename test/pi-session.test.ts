@@ -18,6 +18,7 @@ describe("PiAgentSession", () => {
     await fs.writeFile(path.join(root, "NOVEL.md"), "# Test novel\n", "utf8");
     const session = await PiAgentSession.create({
       workspace: await LocalFileWorkspace.create(root),
+      runtimeDir: path.join(root, "user-runtime"),
       saveSession: false,
       profile: {
         provider: "anthropic",
@@ -37,6 +38,7 @@ describe("PiAgentSession", () => {
     temporaryDirectories.push(root);
     const session = await PiAgentSession.create({
       workspace: await LocalFileWorkspace.create(root),
+      runtimeDir: path.join(root, "user-runtime"),
       saveSession: false,
       profile: {
         provider: "local-openai",
@@ -57,6 +59,7 @@ describe("PiAgentSession", () => {
     temporaryDirectories.push(root);
     const session = await PiAgentSession.create({
       workspace: await LocalFileWorkspace.create(root),
+      runtimeDir: path.join(root, "user-runtime"),
       saveSession: false,
       model: "anthropic/claude-haiku-4-5",
       profile: {
@@ -81,6 +84,7 @@ describe("PiAgentSession", () => {
     try {
       const first = await PiAgentSession.create({
         workspace: await LocalFileWorkspace.create(root),
+        runtimeDir: path.join(root, "user-runtime"),
         saveSession: false,
       });
       const internals = first as unknown as {
@@ -96,12 +100,13 @@ describe("PiAgentSession", () => {
 
       const restarted = await PiAgentSession.create({
         workspace: await LocalFileWorkspace.create(root),
+        runtimeDir: path.join(root, "user-runtime"),
         saveSession: false,
       });
       expect(restarted.model).toBe("anthropic/claude-haiku-4-5");
       await restarted.dispose();
 
-      const savedSettings = JSON.parse(await fs.readFile(path.join(root, ".novel-harness", "pi", "settings.json"), "utf8")) as Record<string, unknown>;
+      const savedSettings = JSON.parse(await fs.readFile(path.join(root, "user-runtime", "pi", "settings.json"), "utf8")) as Record<string, unknown>;
       expect(savedSettings).toMatchObject({
         defaultProvider: "anthropic",
         defaultModel: "claude-haiku-4-5",

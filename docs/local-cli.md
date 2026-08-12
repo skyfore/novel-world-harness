@@ -1,5 +1,11 @@
 # Local-first terminal UI design
 
+NWH keeps executable world evidence and committed history in the workspace's
+`.novel-harness/` directory. Process runtime state is separate: saved terminal
+sessions and other NWH runtime files live under `~/.novel-harness/` (or
+`NWH_HOME` when explicitly set), so running the CLI does not add session files
+to the current project.
+
 ## Decision
 
 Phase 0 is a Novel World Harness terminal application backed by Pi. The default interaction deliberately resembles Claude Code rather than a `readline` prompt:

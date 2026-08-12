@@ -26,16 +26,18 @@ export class PossibilityCommitService {
 
   async validate(templateInput: unknown, envelopeEvidence: readonly EvidenceRef[] = []): Promise<PossibilityValidation> {
     const template = possibilityTemplateSchema.parse(templateInput);
-    const [entities, rules, events, claims] = await Promise.all([
+    const [entities, rules, events, claims, templates] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listRules(),
       this.canon.listEvents(),
       this.canon.listClaims(),
+      this.templates.list(),
     ]);
     const entityMap = new Map(entities.map((entity) => [entity.id, entity]));
     const ruleMap = new Map(rules.map((rule) => [rule.id, rule]));
     const eventIds = new Set(events.map((event) => event.id));
     const claimIds = new Set(claims.map((claim) => claim.id));
+    const templateIds = new Set(templates.map((candidate) => candidate.id));
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
@@ -51,6 +53,15 @@ export class PossibilityCommitService {
     }
     if (template.kind === "canon-analogue" && !template.canonicalEventId) {
       errors.push(issue("CANON_ANALOGUE_EVENT_REQUIRED", `Canon-analogue possibility ${template.id} must reference its canonical event`, "canonicalEventId"));
+    }
+    if (template.kind === "actor-plan") {
+      errors.push(issue("UNSCHEDULABLE_ACTOR_PLAN", `Actor-plan possibility ${template.id} has no runtime consumer; compile evidence-backed character goals instead`, "kind"));
+    }
+    for (let index = 0; index < template.causalParents.length; index += 1) {
+      const parent = template.causalParents[index]!;
+      if (!eventIds.has(parent) && !templateIds.has(parent)) {
+        errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Possibility ${template.id} references unknown causal parent ${parent}`, `causalParents.${index}`));
+      }
     }
     for (const predicate of [...template.preconditions, ...template.blockers, ...(template.expiry ?? [])]) {
       validatePredicate(predicate, entityMap, ruleMap, this.stateSchema, errors);

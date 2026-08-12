@@ -183,7 +183,11 @@ export class WorldEngine {
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
     const deltaHash = await this.objects.putDelta(initialDelta);
     const knowledgeDeltaHash = knowledge ? await this.objects.putKnowledgeDelta(knowledge) : undefined;
-    const eventId = contentHash({ kind: "genesis", branchId, deltaHash, knowledgeDeltaHash });
+    const realizesCanonicalEventIds = [...(this.context.events?.values() ?? [])]
+      .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge))
+      .map((event) => event.id)
+      .sort();
+    const eventId = contentHash({ kind: "genesis", branchId, deltaHash, knowledgeDeltaHash, realizesCanonicalEventIds });
     const event: CommittedEvent = {
       version: 1,
       eventId,
@@ -195,6 +199,7 @@ export class WorldEngine {
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
       evidence: [],
       causalParents: [],
+      ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
     };
     const eventHash = await this.objects.putEvent(event);
     const commitHash = await this.objects.putCommit({ version: 1, branchId, logicalTime: { step: 0 }, eventHashes: [eventHash], canonicalSnapshotHash: this.context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
@@ -268,6 +273,25 @@ function validateKnowledgeDeltaForContext(knowledge: KnowledgeDelta, context: Wo
       }
     }
   }
+}
+
+function canonicalEventSatisfiedAtGenesis(event: CanonicalEvent, state: WorldState, knowledge?: KnowledgeDelta): boolean {
+  if (event.causalParents.length > 0 || event.preconditions.some((predicate) => !evaluatePredicate(state, predicate))) return false;
+  const stateSatisfied = event.observedOutcome.operations.every((operation) => {
+    if (operation.op === "activate-rule") return state.activeRuleIds.includes(operation.ruleId);
+    if (operation.op === "deactivate-rule") return !state.activeRuleIds.includes(operation.ruleId);
+    const value = state.values[operation.entityId]?.[operation.field];
+    if (operation.op === "set") return JSON.stringify(value) === JSON.stringify(operation.value);
+    if (operation.op === "unset") return value === undefined;
+    if (operation.op === "add-member") return Array.isArray(value) && value.includes(operation.member);
+    return !Array.isArray(value) || !value.includes(operation.member);
+  });
+  const initialKnowledge = knowledge?.operations ?? [];
+  const knowledgeSatisfied = (event.observedKnowledge?.operations ?? []).every((operation) =>
+    initialKnowledge.some((candidate) => JSON.stringify(candidate) === JSON.stringify(operation)),
+  );
+  const hasEffect = event.observedOutcome.operations.length > 0 || (event.observedKnowledge?.operations.length ?? 0) > 0;
+  return hasEffect && stateSatisfied && knowledgeSatisfied;
 }
 
 function touchedKnowledgeEntities(knowledge?: KnowledgeDelta): EntityId[] {

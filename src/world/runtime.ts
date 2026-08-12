@@ -158,12 +158,12 @@ export class WorldRuntime {
     const frontier = await this.refreshFrontier(proposal.branchId, proposal.expectedParentCommit);
     const eligible = frontier.evaluated.filter((entry) =>
       entry.status === "eligible"
-      && Boolean(entry.possibility.canonicalEventId)
+      && (Boolean(entry.possibility.canonicalEventId) || entry.possibility.kind === "player-choice")
       && Boolean(proposal.actorId && entry.possibility.participants.includes(proposal.actorId)),
     );
     const matching = eligible.filter((entry) => effectsEquivalent(proposal, entry.possibility));
     const supersedesCanonicalEventIds = eligible
-      .filter((entry) => deltasConflict(proposal.proposedDelta, entry.possibility.proposedDelta))
+      .filter((entry) => Boolean(entry.possibility.canonicalEventId) && deltasConflict(proposal.proposedDelta, entry.possibility.proposedDelta))
       .map((entry) => entry.possibility.canonicalEventId!)
       .sort();
     return {
@@ -184,6 +184,7 @@ export class WorldRuntime {
       for (const eventHash of commit.eventHashes) {
         const event = await this.engine.objects.getEvent(eventHash);
         if (event.possibilityId) realized.add(event.possibilityId);
+        for (const eventId of event.realizesCanonicalEventIds ?? []) realized.add(`canon-${eventId}`);
         for (const eventId of event.supersedesCanonicalEventIds ?? []) superseded.add(`canon-${eventId}`);
       }
       cursor = commit.parentCommitId;

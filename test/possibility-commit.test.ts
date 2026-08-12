@@ -72,4 +72,26 @@ describe("PossibilityCommitService", () => {
     });
     expect(valid.accepted).toBe(true);
   });
+
+  it("rejects actor-plan templates and unknown causal parents", async () => {
+    const { service, evidence } = await fixture();
+    const validation = await service.validate({
+      id: "unwired-plan",
+      kind: "actor-plan",
+      title: "Hero plans something",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      causalParents: ["missing-parent"],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence,
+    });
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "UNSCHEDULABLE_ACTOR_PLAN" }),
+      expect.objectContaining({ code: "UNKNOWN_CAUSAL_PARENT" }),
+    ]));
+  });
 });

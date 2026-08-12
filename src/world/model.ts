@@ -175,6 +175,7 @@ export const committedEventSchema = z
     evidence: z.array(evidenceRefSchema),
     causalParents: z.array(idSchema),
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
+    realizesCanonicalEventIds: z.array(idSchema).optional(),
     possibilityId: idSchema.optional(),
   })
   .strict();

@@ -88,4 +88,56 @@ describe("canonical runtime possibilities", () => {
     expect(secondMove.committedEvents).toHaveLength(1);
     expect((await engine.projector.project(secondMove.newHead)).values.hero?.["character.title"]).toBe("Commander");
   });
+
+  it("marks a root opening event realized when genesis already contains all of its effects", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-canon-genesis-"));
+    roots.push(root);
+    const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] };
+    const claim: Claim = { id: "opening-fact", subject: "hero", predicate: "is", object: "ready", epistemicType: "explicit-fact", evidence: [] };
+    const opening: CanonicalEvent = {
+      id: "opening",
+      title: "Opening snapshot",
+      participants: ["hero"],
+      storyTime: { kind: "ordinal", label: "opening" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+      observedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "opening-fact", status: "knows", confidence: 1 }] },
+      evidence: [],
+      causalParents: [],
+      confidence: 1,
+    };
+    const next: CanonicalEvent = {
+      id: "next",
+      title: "Next transition",
+      participants: ["hero"],
+      storyTime: { kind: "ordinal", label: "next" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.title", value: "Ready" }] },
+      evidence: [],
+      causalParents: ["opening"],
+      confidence: 1,
+    };
+    const canon = new CanonicalModelStore(root);
+    await canon.putEvent(opening);
+    await canon.putEvent(next);
+    const context: WorldModelContext = {
+      entities: new Map([[hero.id, hero]]),
+      claims: new Map([[claim.id, claim]]),
+      events: new Map([[opening.id, opening], [next.id, next]]),
+      rules: new Map(),
+      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    };
+    const engine = new WorldEngine(root, context);
+    const head = await engine.createBranch(
+      "main",
+      "Main",
+      { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+      { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "opening-fact", status: "knows", confidence: 1 }] },
+    );
+    const genesis = await engine.objects.getEvent((await engine.objects.getCommit(head)).eventHashes[0]!);
+    expect(genesis.realizesCanonicalEventIds).toEqual(["opening"]);
+    const frontier = await new WorldRuntime(engine, canonicalPossibilitySource(canon)).refreshFrontier("main");
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === "canon-opening")?.status).toBe("realized");
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === "canon-next")?.status).toBe("eligible");
+  });
 });

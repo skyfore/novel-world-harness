@@ -387,6 +387,44 @@ describe("PlayerTurnService", () => {
     expect(after.frontier.evaluated.find((entry) => entry.possibility.id === "canon-give-key")?.status).toBe("realized");
   });
 
+  it("marks a matching player-choice possibility realized for dependent consequences", async () => {
+    const { engine } = await fixture();
+    const runtime = new WorldRuntime(engine, ({ branchId, commitId }) => [{
+      id: "refuse-key",
+      branchId,
+      evaluatedAtCommit: commitId,
+      kind: "player-choice",
+      title: "Hero refuses the key transfer",
+      preconditions: [{ op: "fact-equals", entityId: "silver-key", field: "artifact.owner", value: "hero" }],
+      blockers: [],
+      participants: ["hero", "mo-yan"],
+      causalParents: [],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "silver-key", field: "artifact.owner", value: "hero" }] },
+      evidence: [],
+    }]);
+    const service = new PlayerTurnService(
+      engine,
+      () => ({
+        title: "Hero refuses and keeps the key",
+        participants: ["mo-yan"],
+        preconditions: [{ op: "fact-equals", entityId: "silver-key", field: "artifact.owner", value: "hero" }],
+        proposedDelta: { version: 1, operations: [{ op: "set", entityId: "silver-key", field: "artifact.owner", value: "hero" }] },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+      undefined,
+      (proposal) => runtime.resolveEligibleCanonicalEvents(proposal),
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "I refuse to give Mo Yan the key." });
+
+    expect(result.accepted).toBe(true);
+    expect(result.proposal?.possibilityId).toBe("refuse-key");
+    expect((await runtime.realizedPossibilityIds(result.newHead)).has("refuse-key")).toBe(true);
+  });
+
   it("rejects an unmentioned destination and an explicitly named but unowned artifact", async () => {
     const { engine, head } = await fixture();
     const unmentionedDestination = new PlayerTurnService(engine, () => ({

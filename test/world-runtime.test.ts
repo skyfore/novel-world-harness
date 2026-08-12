@@ -68,11 +68,33 @@ describe("WorldRuntime", () => {
     };
     const frontier = buildFrontier("main", "head", state, [
       { ...base, id: "player-only", kind: "player-choice" },
+      { ...base, id: "actor-only", kind: "actor-plan" },
       { ...base, id: "background", kind: "generated" },
     ]);
     expect(frontier.evaluated.find((entry) => entry.possibility.id === "player-only")?.status).toBe("eligible");
     expect(selectEligible(frontier).map((entry) => entry.possibility.id)).toEqual(["background"]);
-    expect(selectEligible(frontier, 10, { includePlayerChoices: true }).map((entry) => entry.possibility.id).sort()).toEqual(["background", "player-only"]);
+    expect(selectEligible(frontier, 10, { includePlayerChoices: true }).map((entry) => entry.possibility.id).sort()).toEqual(["actor-only", "background", "player-only"]);
+  });
+
+  it("keeps a consequence latent until its non-canonical possibility parent is realized", () => {
+    const state = emptyWorldState("head");
+    const consequence: Possibility = {
+      id: "consequence",
+      branchId: "main",
+      evaluatedAtCommit: "head",
+      kind: "causal-consequence",
+      title: "Consequence",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      causalParents: ["player-choice"],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence: [],
+    };
+    expect(buildFrontier("main", "head", state, [consequence]).evaluated[0]?.status).toBe("latent");
+    expect(buildFrontier("main", "head", state, [consequence], { realizedIds: new Set(["player-choice"]) }).evaluated[0]?.status).toBe("eligible");
   });
 
   it("lets a canonical possibility realize once from surviving conditions", async () => {

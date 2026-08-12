@@ -11,7 +11,10 @@ export type Frontier = { version: 1; branchId: BranchId; commitId: CommitId; eva
 
 export function evaluatePossibility(state: WorldState, possibility: Possibility, options: { realizedIds?: ReadonlySet<string>; supersededIds?: ReadonlySet<string>; canonAffinity?: number } = {}): EvaluatedPossibility {
   const reasons: string[] = [];
-  const canonicalParentsSatisfied = possibility.kind !== "canon-analogue" || possibility.causalParents.every((parent) => options.realizedIds?.has(`canon-${parent}`));
+  const unresolvedParents = possibility.causalParents.filter((parent) =>
+    !options.realizedIds?.has(parent) && !options.realizedIds?.has(`canon-${parent}`),
+  );
+  const causalParentsSatisfied = unresolvedParents.length === 0;
   let status: PossibilityStatus;
   if (options.realizedIds?.has(possibility.id)) {
     status = "realized";
@@ -27,10 +30,9 @@ export function evaluatePossibility(state: WorldState, possibility: Possibility,
     if (activeBlockers.length) {
       status = "blocked";
       reasons.push(`${activeBlockers.length} blocker(s) are active`);
-    } else if (!canonicalParentsSatisfied) {
+    } else if (!causalParentsSatisfied) {
       status = "latent";
-      const unresolved = possibility.causalParents.filter((parent) => !options.realizedIds?.has(`canon-${parent}`));
-      reasons.push(`waiting for canonical causal parent(s): ${unresolved.join(", ")}`);
+      reasons.push(`waiting for causal parent(s): ${unresolvedParents.join(", ")}`);
     } else {
       const satisfied = possibility.preconditions.filter((predicate) => evaluatePredicate(state, predicate)).length;
       if (satisfied === possibility.preconditions.length) {
@@ -45,7 +47,7 @@ export function evaluatePossibility(state: WorldState, possibility: Possibility,
   const conditionStrength = possibility.preconditions.length ? possibility.preconditions.filter((predicate) => evaluatePredicate(state, predicate)).length / possibility.preconditions.length : 1;
   const factors: SchedulerFactors = {
     urgency: 1,
-    causalSupport: possibility.causalParents.length ? (canonicalParentsSatisfied ? 1 : 0) : 0.8,
+    causalSupport: possibility.causalParents.length ? (causalParentsSatisfied ? 1 : 0) : 0.8,
     actorPressure: clampFactor(possibility.pressure),
     runtimeRelevance: clampFactor(possibility.relevance),
     conditionStrength,
@@ -66,7 +68,7 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
 export function selectEligible(frontier: Frontier, limit = 10, options: { includePlayerChoices?: boolean } = {}): EvaluatedPossibility[] {
   if (!Number.isInteger(limit) || limit < 0) throw new Error("Scheduler limit must be a non-negative integer");
   return frontier.evaluated
-    .filter((entry) => entry.status === "eligible" && (options.includePlayerChoices || entry.possibility.kind !== "player-choice"))
+    .filter((entry) => entry.status === "eligible" && (options.includePlayerChoices || !["player-choice", "actor-plan"].includes(entry.possibility.kind)))
     .slice(0, limit);
 }
 

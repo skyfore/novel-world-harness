@@ -6,6 +6,7 @@ import {
   compilerProposalSchemas,
   COMPILER_STATE_FIELDS,
   CompilerProposalService,
+  validateCompilerProposalClosure,
   type CompilerProposalKind,
 } from "./proposals.js";
 
@@ -167,6 +168,10 @@ export function createCompilerProposalToolset(
         || reviewedIds.length !== uniqueReviewedIds.length
       ) {
         throw new Error(`reviewed_segments must account exactly once for: ${expectedSegmentIds.join(", ") || "(none)"}`);
+      }
+      const closureIssues = await validateCompilerProposalClosure(workspaceRoot, listed);
+      if (closureIssues.length) {
+        throw new Error(`Compiler batch proposal graph is incomplete:\n- ${closureIssues.join("\n- ")}`);
       }
       finished = true;
       return {

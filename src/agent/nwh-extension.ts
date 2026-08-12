@@ -14,6 +14,7 @@ import {
   type SourceLoopTurn,
 } from "../compiler/source-loop.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
+import { SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS } from "../compiler/pi-compiler.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -78,7 +79,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (!compilerToolsActive) {
         const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
         registeredCompilerToolset = createCompilerProposalToolset(workspace.root, generatedBy);
-        for (const tool of registeredCompilerToolset.tools) pi.registerTool(tool);
+        for (const tool of registeredCompilerToolset.tools) {
+          if (!SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name)) pi.registerTool(tool);
+        }
         compilerToolsActive = true;
       }
       if (ctx.mode === "tui") ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · world compiler loop"));

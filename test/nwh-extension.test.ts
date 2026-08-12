@@ -129,6 +129,7 @@ describe("NWH TUI extension", () => {
     expect(transformed?.action).toBe("transform");
     expect(transformed && "text" in transformed ? transformed.text : "").toContain("Begin novel-world compiler batch");
     expect(registeredTools).toContain("propose_entity");
+    expect(registeredTools).not.toContain("propose_world_rule");
     expect(statuses).toContain("NWH · world compiler loop");
     expect(notifications[0]).toContain("Novel indexed");
 

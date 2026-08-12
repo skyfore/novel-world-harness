@@ -223,6 +223,63 @@ describe("compiler proposal tools", () => {
       .rejects.toThrow("already finished");
   });
 
+  it("does not checkpoint proposals until their logical references form a closed graph", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-closure-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "林岐站在钟楼下。\n");
+    const toolset = createCompilerProposalToolset(root);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const initial = toolset.tools.find((candidate) => candidate.name === "propose_initial_world")!;
+    const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    toolset.beginBatch([fixture.segmentId]);
+    await entity.execute("lin-qi", {
+      proposal_id: "entity-lin-qi",
+      payload: {
+        id: "lin-qi",
+        kind: "character",
+        canonicalName: "林岐",
+        aliases: [],
+        evidence: fixture.evidence("林岐"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await initial.execute("opening", {
+      proposal_id: "opening-world",
+      payload: {
+        version: 1,
+        delta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "lin-qi", field: "character.location", value: "bell-tower" }],
+        },
+        evidence: fixture.evidence("林岐站在钟楼下。"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext);
+    const finishInput = {
+      outcome: "complete",
+      proposal_ids: ["entity-lin-qi", "opening-world"],
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Recorded the opening." }],
+      summary: "done",
+    };
+    await expect(finish.execute("missing-bell-tower", finishInput as never, undefined, undefined, {} as ExtensionContext))
+      .rejects.toThrow("unknown entity 'bell-tower'");
+
+    await entity.execute("bell-tower", {
+      proposal_id: "entity-bell-tower",
+      payload: {
+        id: "bell-tower",
+        kind: "location",
+        canonicalName: "钟楼",
+        aliases: [],
+        evidence: fixture.evidence("钟楼"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await expect(finish.execute("closed", {
+      ...finishInput,
+      proposal_ids: [...finishInput.proposal_ids, "entity-bell-tower"],
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true },
+    });
+  });
+
   it("resets finish state only when the host starts a new compiler batch", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-batches-"));
     roots.push(root);

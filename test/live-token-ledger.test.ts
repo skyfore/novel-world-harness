@@ -17,6 +17,7 @@ import {
   DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS,
   DEFAULT_COMPILER_LIVE_MAX_REQUESTS,
   DEFAULT_COMPILER_LIVE_REQUEST_TIMEOUT_MS,
+  SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS,
 } from "../src/compiler/pi-compiler.js";
 
 const roots: string[] = [];
@@ -66,6 +67,10 @@ describe("compiler live-test defaults", () => {
       maxOutputTokens: 2048,
       requestTimeoutMs: 1000,
     });
+  });
+
+  it("keeps story-clock world rules out of automated source batches", () => {
+    expect(SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS).toEqual(new Set(["propose_world_rule"]));
   });
 });
 

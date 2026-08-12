@@ -3,6 +3,8 @@ import type { LlmProfile } from "../config/schema.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { createCompilerProposalToolset } from "./proposal-tools.js";
 
+export const SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS = new Set(["propose_world_rule"]);
+
 export type PiCompilerOptions = {
   root: string;
   profile?: LlmProfile;
@@ -47,7 +49,9 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     ...(liveTest ? { liveTest } : {}),
     interactionMode: "compiler",
     includeLocalTools,
-    additionalTools: proposalToolset.tools,
+    additionalTools: options.segmentIds
+      ? proposalToolset.tools.filter((tool) => !SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name))
+      : proposalToolset.tools,
     resetCompilerProposalTools: proposalToolset.beginBatch,
     systemPromptAppendix: includeLocalTools
       ? `Compiler mode is enabled. Use read-only local evidence tools to inspect the novel, then use only the typed propose_* tools for candidate structured artifacts. A proposal is not canonical truth and must not be described as committed. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`

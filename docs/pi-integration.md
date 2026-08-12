@@ -1,88 +1,25 @@
-# Pi integration strategy
+# Pi integration boundary
 
-Current compatibility target: `@earendil-works/pi-coding-agent 0.84.1` on Node.js `>=22.19.0`.
+Pi remains in the design because it solves the generic agent-runtime problems that Novel World Harness should not reimplement:
 
-## Decision
+- provider and model selection;
+- streaming assistant and tool-call events;
+- multi-turn agent execution;
+- append-only sessions and continuation;
+- terminal transcript, editor, tool-call rendering, status, and keyboard interaction;
+- thinking-level handling and future compaction support.
 
-**Embed Pi through its SDK. Do not fork Pi core for the initial implementation.**
+Novel World Harness owns the parts specific to executable fiction:
 
-Pi already exposes the pieces this project needs:
+- the evidence-first system prompt;
+- trusted `NOVEL.md` and local instruction loading;
+- safe local list/search/read tools;
+- bounded compiler batches, typed proposal semantics, and evidence verification;
+- proposal/validation/commit boundaries;
+- future canon replay and world invariants.
 
-- `ModelRuntime` for provider/model/auth management
-- `createAgentSession()` for programmable agent sessions
-- custom tools and extensions
-- session persistence and branching
-- SDK, RPC and interactive run modes
-- terminal UI components
-- model/provider overrides and custom endpoints
+The previous direct Anthropic SDK implementation coupled the CLI to one provider and duplicated session/tool-loop behavior already available in Pi. The current adapter resolves the configured profile through Pi and can register a custom provider endpoint when `baseUrl` and `apiProtocol` are supplied. Interactive use is hosted by Pi's public `AgentSessionRuntime` and `InteractiveMode`; an NWH inline extension supplies branding, safe local commands, and guarded file mentions.
 
-Novel World Harness should own all domain-specific orchestration and treat Pi as the LLM/agent execution substrate.
+“Remove external services” applies to the external persistence layer in Phase 0: PostgreSQL and other attached databases are removed. It does not require removing Pi or forcing the official Claude API. A remote model is still optional infrastructure selected by the user; all harness state and retrieval stay file-based.
 
-## Why SDK instead of a Pi package only
-
-A Pi extension/package is excellent for adding commands/tools to the stock `pi` CLI, but this project needs to own:
-
-- the compiler loop lifecycle
-- Postgres transactions
-- world-build scheduling
-- runtime branch ownership
-- command semantics (`ingest`, `status`, `play`)
-- future server/API process boundaries
-
-Embedding the SDK allows the project to keep its own executable (`nwh`) while still using Pi's provider/runtime/session machinery.
-
-## Why not fork
-
-Forking immediately would couple world-model development to Pi internals and upgrades. Current Pi extension/SDK surfaces are broad enough that a fork is only justified if a proven blocker appears in:
-
-1. terminal lifecycle control,
-2. model runtime isolation,
-3. session replacement/branching,
-4. tool/event interception, or
-5. custom rendering.
-
-Until then, keep Pi behind `src/llm/pi-session.ts`.
-
-## Configuration mapping
-
-Harness model profiles map onto Pi models:
-
-```yaml
-llm:
-  defaultProfile: main
-  profiles:
-    main:
-      provider: anthropic
-      model: claude-sonnet-4-6
-      apiKeyEnv: ANTHROPIC_API_KEY
-      thinkingLevel: high
-```
-
-At runtime:
-
-1. create `ModelRuntime`;
-2. optionally write a project-local Pi model override for `baseUrl`;
-3. inject API key with `setRuntimeApiKey()` from the configured environment variable;
-4. resolve model through `modelRuntime.getModel(provider, model)`;
-5. create a dedicated `AgentSession` for a worker invocation or long-lived interactive role.
-
-Worker roles route to named profiles, so extraction can use a faster/cheaper model while verification or simulation uses a stronger one.
-
-## Session policy
-
-Compiler workers should default to short-lived or tightly scoped sessions. Their durable memory is the database, not chat history.
-
-Runtime/player sessions can be long-lived, but context must be rebuilt from world state and character memory rather than relying on an indefinitely growing transcript.
-
-## TUI path
-
-Phase 0 uses a minimal terminal shell around Pi sessions. Later phases can adopt Pi's TUI components/InteractiveMode for:
-
-- build progress
-- coverage/readiness dashboard
-- character selection
-- timeline/branch status
-- model/tool visibility
-- compact event rendering
-
-A future browser UI should talk to the same application/runtime layer, not reimplement the harness.
+For safety, the Pi session disables built-in model coding tools and external extension discovery. Ordinary sessions expose only Novel Harness's three custom read-only local tools. Explicit compiler sessions add typed proposal tools, which can write pending proposal envelopes but cannot write arbitrary files, execute a shell as a model tool, access the network as a tool, accept canonical truth, or commit world state. The TUI's `!command` path is a deliberate user terminal action, not an agent capability.

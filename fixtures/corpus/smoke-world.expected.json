@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "source": "smoke-world.txt",
+  "playableCharacters": ["lin-qi", "mo-yan"],
+  "entities": [
+    "lin-qi",
+    "mo-yan",
+    "old-dock",
+    "bell-tower",
+    "north-gate",
+    "silver-key",
+    "ceasefire-letter"
+  ],
+  "openingState": {
+    "lin-qi.character.alive": true,
+    "lin-qi.character.location": "old-dock",
+    "lin-qi.character.inventory": ["silver-key"],
+    "silver-key.artifact.owner": "lin-qi",
+    "mo-yan.character.location": "bell-tower"
+  },
+  "knowledgeIsolation": {
+    "beforeMessage": {
+      "lin-qiKnowsKeyHolder": true,
+      "mo-yanKnowsKeyHolder": false
+    },
+    "afterMessage": {
+      "mo-yanKnowsKeyHolder": true
+    }
+  },
+  "rule": "north-gate-closes-after-seventh-bell",
+  "canonicalChoice": "lin-qi-gives-silver-key",
+  "divergentChoice": "lin-qi-refuses-silver-key",
+  "durableDivergence": "mo-yan-cannot-deliver-truce-letter-on-canonical-schedule"
+}

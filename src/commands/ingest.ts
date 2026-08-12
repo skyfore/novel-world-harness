@@ -1,26 +1,29 @@
-import { loadConfig } from "../config/load.js";
-import { withDb } from "../db/client.js";
-import { ensureProject, ingestSourceDocument } from "../db/projects.js";
-import { bootstrapCompilerJobs } from "../harness/bootstrap.js";
-import { CompilerLoop } from "../harness/compiler-loop.js";
-import { initialWorkers } from "../harness/workers.js";
-import { createPiSessionFactory } from "../llm/pi-session.js";
+import path from "node:path";
+import { SegmentStore, segmentSource } from "../compiler/segments.js";
+import { loadOptionalConfig } from "../config/load.js";
+import type { HarnessConfig } from "../config/schema.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
 
-export async function ingestCommand(filePath: string, configPath: string, runLoop: boolean): Promise<void> {
-  const config = await loadConfig(configPath);
-  const pi = await createPiSessionFactory(config);
-  await withDb(config, async (db) => {
-    const project = await ensureProject(db, config.project.name, config.project.language);
-    const { document } = await ingestSourceDocument(db, project.id, filePath);
-    await bootstrapCompilerJobs(db, project.id, document.id);
-    console.log(`Registered source ${document.title} for project ${project.slug}.`);
+export async function ingestWorkspaceSource(
+  root: string,
+  filePath: string,
+  project?: HarnessConfig["project"],
+) {
+  const store = await WorkspaceStore.create(root);
+  const storedProject = await store.ensureProject(project);
+  const document = await store.registerSource(filePath);
+  const manifest = await segmentSource(store.root, document);
+  await new SegmentStore(store.root).write(manifest);
+  return { project: storedProject, document, manifest };
+}
 
-    if (runLoop) {
-      const loop = new CompilerLoop(initialWorkers());
-      const result = await loop.run({ config, db, projectId: project.id, pi });
-      console.log(`Compiler loop stopped after ${result.loops} iteration(s); ready=${result.ready}.`);
-    } else {
-      console.log("Compiler jobs queued. Use ingest without --no-loop or a future worker command to continue.");
-    }
-  });
+export async function ingestCommand(filePath: string, configPath: string): Promise<void> {
+  const config = await loadOptionalConfig(configPath);
+  const { project, document, manifest } = await ingestWorkspaceSource(
+    path.dirname(path.resolve(configPath)),
+    filePath,
+    config?.project,
+  );
+  console.log(`Registered source ${document.title} for project ${project.id}.`);
+  console.log(`Indexed ${manifest.segments.length} evidence segment(s); run nwh compile-source to create pending proposals.`);
 }

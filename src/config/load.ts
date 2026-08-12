@@ -7,7 +7,7 @@ import { configSchema, type HarnessConfig } from "./schema.js";
 const ENV_PATTERN = /\$\{([A-Z_][A-Z0-9_]*)\}/g;
 
 export async function loadConfig(configPath: string): Promise<HarnessConfig> {
-  dotenv.config();
+  dotenv.config({ quiet: true });
   const absolute = path.resolve(configPath);
   const raw = await fs.readFile(absolute, "utf8");
   const expanded = raw.replace(ENV_PATTERN, (_match, name: string) => {
@@ -20,11 +20,21 @@ export async function loadConfig(configPath: string): Promise<HarnessConfig> {
   return configSchema.parse(YAML.parse(expanded));
 }
 
+export async function loadOptionalConfig(configPath: string): Promise<HarnessConfig | undefined> {
+  try {
+    return await loadConfig(configPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
 export function resolveConfigPath(value?: string): string {
   return path.resolve(value ?? "novel-harness.yaml");
 }
 
 export function profileForRole(config: HarnessConfig, role: string) {
+  if (!config.llm) return { name: undefined, profile: undefined };
   const name = config.llm.routing[role] ?? config.llm.defaultProfile;
   const profile = config.llm.profiles[name];
   if (!profile) throw new Error(`No LLM profile configured for role '${role}'`);

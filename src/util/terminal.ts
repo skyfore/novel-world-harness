@@ -6,10 +6,6 @@ export function ok(value: string): void {
   console.log(`✓ ${value}`);
 }
 
-export function warn(value: string): void {
-  console.warn(`! ${value}`);
-}
-
 export function fail(value: string): void {
   console.error(`✗ ${value}`);
 }

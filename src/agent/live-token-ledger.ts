@@ -142,6 +142,13 @@ export class LiveRequestLimitError extends LiveTokenBudgetError {
   }
 }
 
+export class LiveRequestTimeoutError extends LiveTokenBudgetError {
+  constructor(message: string) {
+    super(message);
+    this.name = "LiveRequestTimeoutError";
+  }
+}
+
 export class LiveTokenLedger {
   readonly filePath: string;
   readonly campaignId: string;
@@ -465,6 +472,7 @@ export type LiveStreamOptionsLike = {
   maxTokens?: number;
   maxRetries?: number;
   deferred?: false | { window?: "15m" | "1h" | "24h" };
+  signal?: AbortSignal;
 };
 
 export type LiveAssistantMessageLike = {
@@ -495,6 +503,7 @@ export type LiveStreamBudgetOptions = {
   runId: string;
   maxOutputTokens?: number;
   maxRequests?: number;
+  requestTimeoutMs?: number;
 };
 
 export function wrapLiveStreamFunction<
@@ -516,6 +525,7 @@ export function wrapLiveStreamFunction<
     throw new LiveTokenBudgetError(`maxOutputTokens must be at least ${MIN_LIVE_MAX_OUTPUT_TOKENS}.`);
   }
   const maxRequests = requirePositiveInteger(policy.maxRequests ?? DEFAULT_LIVE_MAX_REQUESTS, "maxRequests");
+  const requestTimeoutMs = requirePositiveInteger(policy.requestTimeoutMs ?? 120_000, "requestTimeoutMs");
   let requestCount = 0;
 
   const wrapped = (model: TModel, context: TContext, options?: TOptions): TStream => {
@@ -531,7 +541,11 @@ export function wrapLiveStreamFunction<
       );
     }
     const cappedModel = { ...model, maxTokens: outputCap } as TModel;
-    const cappedOptions = { ...options, maxTokens: outputCap, maxRetries: 0, deferred: false } as TOptions;
+    const timeoutController = new AbortController();
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, timeoutController.signal])
+      : timeoutController.signal;
+    const cappedOptions = { ...options, maxTokens: outputCap, maxRetries: 0, deferred: false, signal } as TOptions;
 
     let reservation: LiveTokenReservation | undefined;
     let settlement: Promise<SettledLiveTokenRequest> | undefined;
@@ -545,6 +559,8 @@ export function wrapLiveStreamFunction<
     };
 
     const proxy = createLazyLiveAssistantMessageEventStream(async (output) => {
+      let timedOut = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
         reservation = await policy.ledger.reserve({
           provider: model.provider,
@@ -555,12 +571,25 @@ export function wrapLiveStreamFunction<
           outputCap,
         });
         requestCount += 1;
-        const stream = await streamFunction(cappedModel, context, cappedOptions);
-        for await (const event of stream) {
-          if (isTerminalStreamEvent(event)) continue;
-          output.push(event as never);
-        }
-        const message = await stream.result();
+        const timeoutError = new LiveRequestTimeoutError(
+          `Live provider request timed out after ${requestTimeoutMs}ms for ${model.provider}/${model.id}.`,
+        );
+        const deadline = new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => {
+            timedOut = true;
+            timeoutController.abort(timeoutError);
+            reject(timeoutError);
+          }, requestTimeoutMs);
+        });
+        const provider = (async () => {
+          const stream = await streamFunction(cappedModel, context, cappedOptions);
+          for await (const event of stream) {
+            if (timedOut || isTerminalStreamEvent(event)) continue;
+            output.push(event as never);
+          }
+          return stream.result();
+        })();
+        const message = await Promise.race([provider, deadline]);
         await settleOnce({
           stopReason: message.stopReason ?? "unknown",
           ...(message.usage ? { usage: message.usage } : {}),
@@ -572,6 +601,8 @@ export function wrapLiveStreamFunction<
         }
         const failure = syntheticErrorMessage(model, error) as unknown as TMessage;
         output.push({ type: "error", reason: "error", error: failure } as never);
+      } finally {
+        if (timeout) clearTimeout(timeout);
       }
     });
     return proxy as unknown as TStream;

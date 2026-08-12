@@ -405,6 +405,7 @@ export class PiAgentSession {
             runId: created.session.sessionId,
             maxOutputTokens: this.options.liveTest.maxOutputTokens ?? DEFAULT_LIVE_MAX_OUTPUT_TOKENS,
             maxRequests: this.options.liveTest.maxRequests ?? DEFAULT_LIVE_MAX_REQUESTS,
+            requestTimeoutMs: this.options.liveTest.requestTimeoutMs ?? 120_000,
           },
         ) as typeof created.session.agent.streamFunction;
       }

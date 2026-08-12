@@ -258,6 +258,7 @@ type FakeOptions = {
   maxRetries?: number;
   temperature?: number;
   deferred?: false | { window?: "15m" | "1h" | "24h" };
+  signal?: AbortSignal;
 };
 
 type FakeMessage = {
@@ -446,6 +447,32 @@ describe("wrapLiveStreamFunction", () => {
       stopReason: "error",
       errorMessage: "transport exploded",
     });
+    await expect(ledger.status()).resolves.toMatchObject({
+      chargedTokens: 1_000,
+      conservativeChargeTokens: 1_000,
+      reservedTokens: 0,
+    });
+  });
+
+  it("aborts and settles a provider that ignores the host request deadline", async () => {
+    const { ledger } = await createLedger(2_000);
+    let observedSignal: AbortSignal | undefined;
+    const never = new Promise<FakeStream>(() => undefined);
+    const original = async (_model: FakeModel, _context: object, options?: FakeOptions) => {
+      observedSignal = options?.signal;
+      return never;
+    };
+    const wrapped = wrapLiveStreamFunction(original, {
+      ledger,
+      runId: "timed-out-stream",
+      requestTimeoutMs: 20,
+    });
+
+    await expect(wrapped(fakeModel, {}).result()).resolves.toMatchObject({
+      stopReason: "error",
+      errorMessage: expect.stringContaining("timed out after 20ms"),
+    });
+    expect(observedSignal?.aborted).toBe(true);
     await expect(ledger.status()).resolves.toMatchObject({
       chargedTokens: 1_000,
       conservativeChargeTokens: 1_000,

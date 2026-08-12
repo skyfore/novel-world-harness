@@ -109,7 +109,11 @@ function parseTuiMode(value: string): TuiMode {
   return value;
 }
 
-program.command("init").argument("[directory]", "target directory", process.cwd()).description("create starter novel-harness.yaml and NOVEL.md files").action(initCommand);
+program.command("init")
+  .argument("[directory]", "target directory")
+  .option("--root <path>", "local novel workspace")
+  .description("create starter novel-harness.yaml and NOVEL.md files")
+  .action(async (directory, options) => initCommand(directory ?? rootFor(options)));
 program.command("doctor").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("validate runtime, credentials and local file tooling").action(async (options) => doctorCommand(configFor(options)));
 program.command("ingest").argument("<novel>", "UTF-8 source novel path").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("register a novel and build its deterministic evidence index").action(async (novel, options) => ingestCommand(novel, configFor(options)));
 program.command("status").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("show inventory and the next safe preparation step").action(async (options) => statusCommand(configFor(options)));

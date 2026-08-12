@@ -1,11 +1,14 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import YAML from "yaml";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initCommand } from "../src/commands/init.js";
 
 const roots: string[] = [];
+const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -41,5 +44,17 @@ describe("init command", () => {
     await initCommand(root);
 
     await expect(fs.readFile(configPath, "utf8")).resolves.toBe("user-owned\n");
+  });
+
+  it("honors --root when it is written after the init subcommand", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-init-root-option-"));
+    roots.push(root);
+
+    await execFileAsync(process.execPath, ["--import", "tsx", "src/cli.ts", "init", "--root", root], {
+      cwd: path.resolve(import.meta.dirname, ".."),
+    });
+
+    await expect(fs.readFile(path.join(root, "novel-harness.yaml"), "utf8")).resolves.toContain(path.basename(root));
+    await expect(fs.readFile(path.join(root, "NOVEL.md"), "utf8")).resolves.toContain("Novel workspace");
   });
 });

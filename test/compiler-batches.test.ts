@@ -7,6 +7,8 @@ import { prepareCompilerBatches, runCompilerBatches } from "../src/compiler/batc
 import { compilerBatchFailure, compilerBatchOutcomeFromMessages } from "../src/compiler/batch-outcome.js";
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import type { SourceDocument } from "../src/storage/workspace-store.js";
+import { ProposalStore } from "../src/world/canonical-model.js";
+import { entitySchema } from "../src/world/model.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -133,6 +135,41 @@ describe("compiler batches", () => {
     });
     expect(noWork.completed).toBe(0);
     expect(noWork.skipped).toBe(noWork.total);
+  });
+
+  it("refreshes pending entity identities between batches in the same run", async () => {
+    const { root, source } = await fixture();
+    const seen: string[] = [];
+    await runCompilerBatches({
+      workspaceRoot: root,
+      source,
+      maxBatches: 2,
+      runner: async (batch) => {
+        seen.push(batch.prompt);
+        if (seen.length !== 1) return;
+        await new ProposalStore(root).writePending({
+          id: "proposal-existing-person",
+          kind: "entity",
+          schemaVersion: 1,
+          payload: {
+            id: "existing-person",
+            kind: "character",
+            canonicalName: "人物2",
+            aliases: ["Existing Person"],
+            evidence: [],
+          },
+          evidence: [],
+          generatedBy: { worker: "test" },
+          createdAt: new Date(0).toISOString(),
+        }, entitySchema);
+      },
+    });
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toContain("<existing-entity-catalog>\n[]");
+    expect(seen[1]).toContain('"id":"existing-person"');
+    expect(seen[1]).toContain('"status":"pending"');
+    expect(seen[1]).toContain("Do not call propose_entity for an identity already present");
   });
 
   it("does not checkpoint a failed batch", async () => {

@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 import { characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { ProposalStore } from "../world/canonical-model.js";
 import { initialWorldSchema } from "../world/initial.js";
@@ -7,15 +7,34 @@ import {
   claimSchema,
   entitySchema,
   evidenceRefSchema,
+  idSchema,
   possibilitySchema,
   stateDeltaSchema,
+  stateValueSchema,
   worldRuleSchema,
   type ArtifactProposal,
   type EvidenceRef,
+  type Predicate,
 } from "../world/model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 
 const possibilityTemplateSchema = possibilitySchema.omit({ branchId: true, evaluatedAtCommit: true });
+const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
+  z.discriminatedUnion("op", [
+    z.object({ op: z.literal("fact-equals"), entityId: idSchema, field: z.string().min(1), value: stateValueSchema }).strict(),
+    z.object({ op: z.literal("fact-exists"), entityId: idSchema, field: z.string().min(1) }).strict(),
+    z.object({ op: z.literal("entity-in"), entityId: idSchema, field: z.string().min(1), member: idSchema }).strict(),
+    z.object({ op: z.literal("rule-active"), ruleId: idSchema }).strict(),
+    z.object({ op: z.literal("all"), items: z.array(compilerRulePredicateSchema) }).strict(),
+    z.object({ op: z.literal("any"), items: z.array(compilerRulePredicateSchema) }).strict(),
+    z.object({ op: z.literal("not"), item: compilerRulePredicateSchema }).strict(),
+  ]),
+);
+const compilerWorldRuleSchema = worldRuleSchema.extend({
+  appliesWhen: z.array(compilerRulePredicateSchema),
+  forbids: z.array(compilerRulePredicateSchema).optional(),
+  requires: z.array(compilerRulePredicateSchema).optional(),
+});
 export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -25,7 +44,7 @@ export const compilerProposalSchemas = {
   entity: entitySchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   claim: claimSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "canonical-event": canonicalEventSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
-  "world-rule": worldRuleSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
+  "world-rule": compilerWorldRuleSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "initial-world": initialWorldSchema,
   "character-goal": characterGoalSchema,
   "character-model": characterModelSchema,

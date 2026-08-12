@@ -8,7 +8,7 @@ import { compilerBatchFailure, compilerBatchOutcomeFromMessages } from "../src/c
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import type { SourceDocument } from "../src/storage/workspace-store.js";
 import { ProposalStore } from "../src/world/canonical-model.js";
-import { entitySchema } from "../src/world/model.js";
+import { claimSchema, entitySchema } from "../src/world/model.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -162,14 +162,31 @@ describe("compiler batches", () => {
           generatedBy: { worker: "test" },
           createdAt: new Date(0).toISOString(),
         }, entitySchema);
+        await new ProposalStore(root).writePending({
+          id: "proposal-existing-claim",
+          kind: "claim",
+          schemaVersion: 1,
+          payload: {
+            id: "existing-claim",
+            subject: "existing-person",
+            predicate: "entered",
+            object: "city",
+            epistemicType: "explicit-fact",
+            evidence: [],
+          },
+          evidence: [],
+          generatedBy: { worker: "test" },
+          createdAt: new Date(0).toISOString(),
+        }, claimSchema);
       },
     });
 
     expect(seen).toHaveLength(2);
-    expect(seen[0]).toContain("<existing-entity-catalog>\n[]");
+    expect(seen[0]).toContain('"entities":[]');
     expect(seen[1]).toContain('"id":"existing-person"');
+    expect(seen[1]).toContain('"id":"existing-claim"');
     expect(seen[1]).toContain('"status":"pending"');
-    expect(seen[1]).toContain("Do not call propose_entity for an identity already present");
+    expect(seen[1]).toContain("Do not call propose_entity or propose_claim");
   });
 
   it("does not checkpoint a failed batch", async () => {

@@ -135,6 +135,28 @@ describe("compiler proposal tools", () => {
     expect(Compile(tool.parameters).Check(valid)).toBe(true);
   });
 
+  it("rejects compiler world rules that map narrative time onto engine steps", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-rule-time-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "第七声钟响后，北门必须关闭。\n");
+    const tool = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_world_rule")!;
+    const prepared = tool.prepareArguments?.({
+      proposal_id: "rule-gate",
+      payload: {
+        id: "gate-after-bell",
+        name: "第七声钟后关门",
+        scope: "location",
+        appliesWhen: [],
+        requires: [{ op: "after-step", step: 7 }],
+        forbids: [{ op: "fact-equals", entityId: "gate", field: "location.open", value: true }],
+        evidence: fixture.evidence("第七声钟响后，北门必须关闭。"),
+      },
+    });
+    expect(Compile(tool.parameters).Check(prepared)).toBe(false);
+    await expect(tool.execute("rule-time", prepared as never, undefined, undefined, {} as ExtensionContext))
+      .rejects.toThrow();
+  });
+
   it("requires an explicit finish whose ids exactly match successful submissions", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-finish-"));
     roots.push(root);

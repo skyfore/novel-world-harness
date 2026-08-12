@@ -14,12 +14,13 @@ afterEach(async () => {
 });
 
 describe("doctor command", () => {
-  it("recognizes workspace-local Pi auth without exposing the credential", async () => {
+  it("recognizes Pi's default auth store without exposing the credential", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-doctor-"));
     roots.push(root);
-    await fs.mkdir(path.join(root, ".novel-harness"), { recursive: true });
+    const piAgentDir = path.join(root, "pi-agent");
+    await fs.mkdir(piAgentDir, { recursive: true });
     await fs.writeFile(
-      path.join(root, ".novel-harness", "pi-auth.json"),
+      path.join(piAgentDir, "auth.json"),
       `${JSON.stringify({ anthropic: { type: "api_key", key: "doctor-test-secret" } })}\n`,
       { encoding: "utf8", mode: 0o600 },
     );
@@ -28,7 +29,7 @@ describe("doctor command", () => {
     vi.spyOn(console, "error").mockImplementation((value?: unknown) => messages.push(String(value)));
     process.exitCode = undefined;
 
-    await doctorCommand(path.join(root, "novel-harness.yaml"));
+    await doctorCommand(path.join(root, "novel-harness.yaml"), piAgentDir);
 
     const output = messages.join("\n");
     expect(output).toContain("Pi-managed authentication available for anthropic");

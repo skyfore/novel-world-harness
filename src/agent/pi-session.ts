@@ -5,6 +5,7 @@ import {
   createAgentSessionRuntime,
   createAgentSessionServices,
   defineTool,
+  getAgentDir,
   initTheme,
   InteractiveMode,
   ModelRuntime,
@@ -50,6 +51,7 @@ export type PiAgentSessionOptions = {
   liveTest?: PiLiveTestOptions;
   interactionMode?: NwhInteractionMode;
   runtimeDir?: string;
+  piAgentDir?: string;
 };
 
 export type PiLiveTestOptions = {
@@ -150,11 +152,17 @@ The invariant is proposal -> validate -> commit -> render. Compiler output and n
 Workspace root: ${workspace.root}${projectInstructions ? `\n\nProject instructions:\n${projectInstructions}` : ""}${appendix ? `\n\nAdditional mode instructions:\n${appendix}` : ""}`;
 }
 
-async function createModelRuntime(profile: LlmProfile | undefined, stateDir: string): Promise<{
+async function createModelRuntime(profile: LlmProfile | undefined, piAgentDir?: string): Promise<{
   runtime: ModelRuntime;
   model?: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
 }> {
-  const runtime = await ModelRuntime.create({ authPath: path.join(stateDir, "pi-auth.json"), modelsPath: null, refreshOnCreate: false });
+  const runtime = await ModelRuntime.create({
+    ...(piAgentDir ? {
+      authPath: path.join(piAgentDir, "auth.json"),
+      modelsPath: path.join(piAgentDir, "models.json"),
+    } : {}),
+    refreshOnCreate: false,
+  });
   if (!profile) return { runtime };
   let model = runtime.getModel(profile.provider, profile.model);
   if (profile.baseUrl || !model) {
@@ -251,7 +259,7 @@ export class PiAgentSession {
     const profile = options.profile ? { ...options.profile } : undefined;
     const stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
-    const { runtime, model } = await createModelRuntime(profile, stateDir);
+    const { runtime, model } = await createModelRuntime(profile, options.piAgentDir);
     const wrapper = new PiAgentSession({ ...options, ...(profile ? { profile } : {}) }, runtime, model);
     await wrapper.initialize(Boolean(options.continueSession));
     return wrapper;
@@ -312,7 +320,7 @@ export class PiAgentSession {
   }
 
   private async initialize(continueSession: boolean): Promise<void> {
-    const agentDir = path.join(this.stateDir, "pi");
+    const agentDir = path.resolve(this.options.piAgentDir ?? getAgentDir());
     const sessionsDir = workspaceSessionDir(this.options.workspace.root, this.stateDir);
     const sessionManager = this.saveSession
       ? continueSession ? SessionManager.continueRecent(this.options.workspace.root, sessionsDir) : SessionManager.create(this.options.workspace.root, sessionsDir)

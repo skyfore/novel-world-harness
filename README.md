@@ -65,11 +65,12 @@ authenticate and select a model inside the session:
 
 Pi supports subscription sign-in for ChatGPT Plus/Pro (Codex), Claude Pro/Max,
 and GitHub Copilot. `/model` switches models but does not authenticate a provider,
-so run `/login` first. The selected model is remembered per workspace in
-`.novel-harness/pi/settings.json`; an explicit `--model` or configured role profile
-overrides it for that invocation. Credentials are stored locally in
-`.novel-harness/pi-auth.json` for this workspace and are excluded from model file
-tools and Git.
+so run `/login` first. NWH reuses Pi's native authentication, model catalog, and
+default model selection in `~/.pi/agent/`; a user who has already configured Pi
+does not need to authenticate again. An explicit `--model` or configured role
+profile overrides Pi's default for that invocation. NWH conversations are stored
+separately under `~/.novel-harness/`, while compiled world data remains in the
+workspace's `.novel-harness/` directory.
 
 API keys remain supported as an alternative:
 

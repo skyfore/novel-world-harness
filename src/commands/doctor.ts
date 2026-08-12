@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { loadOptionalConfig } from "../config/load.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { ok, fail, heading } from "../util/terminal.js";
@@ -11,7 +11,7 @@ function nodeVersionOk(): boolean {
   return major > 22 || (major === 22 && minor >= 19);
 }
 
-export async function doctorCommand(configPath: string): Promise<void> {
+export async function doctorCommand(configPath: string, piAgentDir = getAgentDir()): Promise<void> {
   let failed = false;
   heading("Novel World Harness doctor");
 
@@ -31,8 +31,8 @@ export async function doctorCommand(configPath: string): Promise<void> {
 
   try {
     const runtime = await ModelRuntime.create({
-      authPath: path.join(root, ".novel-harness", "pi-auth.json"),
-      modelsPath: null,
+      authPath: path.join(piAgentDir, "auth.json"),
+      modelsPath: path.join(piAgentDir, "models.json"),
       allowModelNetwork: false,
     });
     const authenticatedProviders = new Set<string>();
@@ -60,7 +60,7 @@ export async function doctorCommand(configPath: string): Promise<void> {
       failed = true;
     }
   } catch {
-    fail("Pi authentication state could not be read; check .novel-harness/pi-auth.json permissions and format");
+    fail(`Pi authentication state could not be read; check ${path.join(piAgentDir, "auth.json")} permissions and format`);
     failed = true;
   }
 

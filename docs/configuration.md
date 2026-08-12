@@ -3,17 +3,17 @@
 The interactive TUI can start without a configuration file. Defaults are:
 
 - workspace: current directory;
-- Pi provider/model: the workspace's saved authenticated selection, otherwise Pi's first available authenticated model;
+- Pi provider/model: the user's Pi selection, otherwise Pi's first available authenticated model;
 - authentication: Pi `/login`, a Pi-managed credential, or an optional profile environment variable;
-- local state and sessions: `.novel-harness/`.
+- world data: the workspace's `.novel-harness/` directory;
+- terminal sessions: the user's `~/.novel-harness/` directory.
 
-The TUI can open without credentials. Inside it, use `/login` to authenticate a
-subscription or provider, then `/model` to select a model. `/model` does not perform
-authentication. NWH remembers the selection per workspace in
-`.novel-harness/pi/settings.json`. An explicit `--model` or a configured role profile
-overrides the saved selection for that invocation. Pi credentials are stored in
-`.novel-harness/pi-auth.json`; both files are private harness state and are excluded
-from normal model file discovery and Git.
+The TUI can open without credentials. NWH directly uses Pi's native user-level
+authentication, model catalog, and default model settings from `~/.pi/agent/` (or
+Pi's configured agent directory). Existing Pi login and model selection therefore
+work without a second NWH setup. Inside NWH, `/login` and `/model` update that same
+Pi state. An explicit `--model` or configured role profile overrides the default
+selection for that invocation.
 
 `nwh init` writes only a provider-neutral project section; `llm` is optional. `init`, `doctor`, `ingest`, and `status` use `novel-harness.yaml` when present. Supply a different path with `--config`. `${NAME}` references are expanded before YAML validation; a missing referenced variable is an error.
 
@@ -83,11 +83,8 @@ There is no database configuration. Current state is stored locally:
 ```text
 .novel-harness/
 ├── project.json
-├── pi-auth.json
-├── pi/settings.json
 ├── sources/<content-id>.json
 ├── segments/<source-id>.json
-├── sessions/<pi-session>.jsonl
 ├── live-tests/token-budget-v1.json
 ├── instructions.md
 └── world/v1/

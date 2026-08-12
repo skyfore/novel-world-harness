@@ -19,6 +19,7 @@ describe("PiAgentSession", () => {
     const session = await PiAgentSession.create({
       workspace: await LocalFileWorkspace.create(root),
       runtimeDir: path.join(root, "user-runtime"),
+      piAgentDir: path.join(root, "pi-agent"),
       saveSession: false,
       profile: {
         provider: "anthropic",
@@ -39,6 +40,7 @@ describe("PiAgentSession", () => {
     const session = await PiAgentSession.create({
       workspace: await LocalFileWorkspace.create(root),
       runtimeDir: path.join(root, "user-runtime"),
+      piAgentDir: path.join(root, "pi-agent"),
       saveSession: false,
       profile: {
         provider: "local-openai",
@@ -60,6 +62,7 @@ describe("PiAgentSession", () => {
     const session = await PiAgentSession.create({
       workspace: await LocalFileWorkspace.create(root),
       runtimeDir: path.join(root, "user-runtime"),
+      piAgentDir: path.join(root, "pi-agent"),
       saveSession: false,
       model: "anthropic/claude-haiku-4-5",
       profile: {
@@ -85,6 +88,7 @@ describe("PiAgentSession", () => {
       const first = await PiAgentSession.create({
         workspace: await LocalFileWorkspace.create(root),
         runtimeDir: path.join(root, "user-runtime"),
+        piAgentDir: path.join(root, "pi-agent"),
         saveSession: false,
       });
       const internals = first as unknown as {
@@ -101,12 +105,13 @@ describe("PiAgentSession", () => {
       const restarted = await PiAgentSession.create({
         workspace: await LocalFileWorkspace.create(root),
         runtimeDir: path.join(root, "user-runtime"),
+        piAgentDir: path.join(root, "pi-agent"),
         saveSession: false,
       });
       expect(restarted.model).toBe("anthropic/claude-haiku-4-5");
       await restarted.dispose();
 
-      const savedSettings = JSON.parse(await fs.readFile(path.join(root, "user-runtime", "pi", "settings.json"), "utf8")) as Record<string, unknown>;
+      const savedSettings = JSON.parse(await fs.readFile(path.join(root, "pi-agent", "settings.json"), "utf8")) as Record<string, unknown>;
       expect(savedSettings).toMatchObject({
         defaultProvider: "anthropic",
         defaultModel: "claude-haiku-4-5",

@@ -16,7 +16,7 @@ function proposalResult(text: string, details: { proposalId: string; kind: Compi
 const labels: Record<CompilerProposalKind, { name: string; label: string; description: string }> = {
   entity: { name: "propose_entity", label: "Propose entity", description: "Submit a typed entity candidate backed by source evidence. This creates a pending proposal only." },
   claim: { name: "propose_claim", label: "Propose claim", description: "Submit an evidence-backed claim candidate. This does not commit canonical truth." },
-  "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit a source-observed canonical event candidate with preconditions and deterministic outcome delta." },
+  "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Later canon remains a candidate until runtime commitment." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed StateDelta used to create a runtime genesis branch." },
   "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
@@ -82,7 +82,7 @@ function constrainCompilerStateFields(value: unknown): void {
       propertyRecord.field = {
         type: "string",
         enum: COMPILER_STATE_FIELDS,
-        description: "A registered deterministic world-state field; use the complete namespaced value.",
+        description: "A registered deterministic world-state field. character.* applies only to characters; artifact.owner only to artifacts; location.open only to locations; faction.leader only to factions.",
       };
     }
   }

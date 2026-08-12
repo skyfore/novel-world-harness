@@ -18,6 +18,7 @@ export function canonicalEventToPossibility(event: CanonicalEvent, branchId: str
     pressure: event.confidence,
     relevance: 1,
     proposedDelta: event.observedOutcome,
+    ...(event.observedKnowledge ? { proposedKnowledge: event.observedKnowledge } : {}),
     evidence: event.evidence,
   };
 }
@@ -28,4 +29,3 @@ export function canonicalPossibilitySource(canon: CanonicalModelStore): Possibil
     return events.map((event) => canonicalEventToPossibility(event, branchId, commitId));
   };
 }
-

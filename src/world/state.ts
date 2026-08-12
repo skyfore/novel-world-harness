@@ -90,6 +90,7 @@ export const DEFAULT_STATE_FIELDS: StateFieldSpec[] = [
   { key: "character.title", appliesTo: ["character"], valueType: "string", cardinality: "one" },
   { key: "character.inventory", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many" },
   { key: "artifact.owner", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", exclusive: true },
+  { key: "location.open", appliesTo: ["location"], valueType: "boolean", cardinality: "one" },
   { key: "faction.leader", appliesTo: ["faction"], valueType: "entity-ref", cardinality: "one", exclusive: true },
 ];
 

@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { canonicalPossibilitySource } from "../src/world/canon-runtime.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
-import type { CanonicalEvent, Entity } from "../src/world/model.js";
+import { KnowledgeProjector } from "../src/world/knowledge.js";
+import type { CanonicalEvent, Claim, Entity } from "../src/world/model.js";
 import { WorldRuntime } from "../src/world/runtime.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 
@@ -20,8 +21,17 @@ async function fixture() {
   const entities: Entity[] = [
     { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] },
   ];
+  const claim: Claim = {
+    id: "first-witnessed",
+    subject: "hero",
+    predicate: "witnessed",
+    object: "first",
+    epistemicType: "explicit-fact",
+    evidence: [],
+  };
   const context: WorldModelContext = {
     entities: new Map(entities.map((entity) => [entity.id, entity])),
+    claims: new Map([[claim.id, claim]]),
     rules: new Map(),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
   };
@@ -33,6 +43,7 @@ async function fixture() {
     storyTime: { kind: "ordinal", label: "first" },
     preconditions: [],
     observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.title", value: "Witness" }] },
+    observedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "first-witnessed", status: "knows", confidence: 1 }] },
     evidence: [],
     causalParents: [],
     confidence: 1,
@@ -70,6 +81,7 @@ describe("canonical runtime possibilities", () => {
     const firstMove = await runtime.move({ branchId: "main", maxBackgroundCandidates: 1 });
     expect(firstMove.committedEvents).toHaveLength(1);
     expect((await engine.projector.project(firstMove.newHead)).values.hero?.["character.title"]).toBe("Witness");
+    expect((await new KnowledgeProjector(engine).view("hero", firstMove.newHead)).knowledge.map((entry) => entry.fact.claimId)).toEqual(["first-witnessed"]);
     expect(firstMove.frontier.evaluated.find((entry) => entry.possibility.id === "canon-second")?.status).toBe("eligible");
 
     const secondMove = await runtime.move({ branchId: "main", maxBackgroundCandidates: 1 });
@@ -77,4 +89,3 @@ describe("canonical runtime possibilities", () => {
     expect((await engine.projector.project(secondMove.newHead)).values.hero?.["character.title"]).toBe("Commander");
   });
 });
-

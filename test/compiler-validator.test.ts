@@ -56,6 +56,35 @@ describe("CompilerCommitService", () => {
     await expect(commits.proposals.read("pending", "bad-event", (await import("../src/world/model.js")).canonicalEventSchema)).resolves.toMatchObject({ id: "bad-event" });
   });
 
+  it("keeps an event with an unknown observed-knowledge claim pending", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "entity-cao")).accepted).toBe(true);
+    await proposals.submit("canonical-event", {
+      proposalId: "knowledge-event",
+      payload: {
+        id: "cao-learns-secret",
+        title: "曹操得知秘密",
+        participants: ["cao-cao"],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        observedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "cao-cao", claimId: "missing-claim", status: "knows", confidence: 1 }] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    const validation = await commits.accept("canonical-event", "knowledge-event");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "UNKNOWN_KNOWLEDGE_CLAIM" }));
+  });
+
   it("does not misreport a blocked canonical proposal as staging", async () => {
     const { proposals, evidence } = await fixture();
     await proposals.submit("entity", {

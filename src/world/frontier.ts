@@ -83,6 +83,7 @@ export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: str
     proposedTime: possibility.candidateWindow ?? { kind: "unknown" },
     preconditions: possibility.preconditions,
     proposedDelta,
+    ...(possibility.proposedKnowledge ? { proposedKnowledge: possibility.proposedKnowledge } : {}),
     causalParents: possibility.causalParents,
     evidence: possibility.evidence,
     possibilityId: possibility.id,
@@ -110,4 +111,3 @@ export class FrontierStore {
   }
 }
 function clampFactor(value: number): number { return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0; }
-

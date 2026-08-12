@@ -45,7 +45,7 @@ export class CompilerValidator {
 
     if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors, warnings);
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
-    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, events, rules, errors);
+    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, claims, events, rules, errors);
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
     if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, claims, rules, errors);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, claims, rules, errors);
@@ -64,12 +64,31 @@ export class CompilerValidator {
     if (!claim.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Claim ${claim.id} has no source evidence`, "evidence"));
   }
 
-  private validateEvent(event: CanonicalEvent, entities: ReadonlyMap<string, Entity>, events: ReadonlyMap<string, CanonicalEvent>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
+  private validateEvent(
+    event: CanonicalEvent,
+    entities: ReadonlyMap<string, Entity>,
+    claims: ReadonlyMap<string, Claim>,
+    events: ReadonlyMap<string, CanonicalEvent>,
+    rules: ReadonlyMap<string, WorldRule>,
+    errors: ValidationIssue[],
+  ): void {
     if (!event.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event ${event.id} has no source evidence`, "evidence"));
     for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
     for (const parent of event.causalParents) if (!events.has(parent)) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parent}`, "causalParents"));
     for (const predicate of event.preconditions) this.validatePredicate(predicate, entities, rules, errors);
     this.validateOperations(event.observedOutcome.operations, entities, rules, errors, "observedOutcome.operations");
+    for (let index = 0; index < (event.observedKnowledge?.operations.length ?? 0); index += 1) {
+      const operation = event.observedKnowledge!.operations[index]!;
+      const actor = entities.get(operation.actorId);
+      if (!actor || actor.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_ACTOR", `Event knowledge actor ${operation.actorId} is not a canonical character`, `observedKnowledge.operations.${index}`));
+      if (operation.op === "learn") {
+        if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Event knowledge references unknown claim ${operation.claimId}`, `observedKnowledge.operations.${index}`));
+        if (operation.sourceActorId) {
+          const source = entities.get(operation.sourceActorId);
+          if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Event knowledge source ${operation.sourceActorId} is not a canonical character`, `observedKnowledge.operations.${index}`));
+        }
+      }
+    }
   }
 
   private validateRule(rule: WorldRule, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {

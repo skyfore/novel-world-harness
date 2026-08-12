@@ -123,7 +123,18 @@ export type KnowledgeOperation = z.infer<typeof knowledgeOperationSchema>;
 export const knowledgeDeltaSchema = z.object({ version: z.literal(1), operations: z.array(knowledgeOperationSchema) }).strict();
 export type KnowledgeDelta = z.infer<typeof knowledgeDeltaSchema>;
 
-export const canonicalEventSchema = z.object({ id: idSchema, title: z.string().min(1), participants: z.array(idSchema), storyTime: storyTimeSchema, preconditions: z.array(predicateSchema), observedOutcome: stateDeltaSchema, evidence: z.array(evidenceRefSchema), causalParents: z.array(idSchema), confidence: z.number().min(0).max(1) }).strict();
+export const canonicalEventSchema = z.object({
+  id: idSchema,
+  title: z.string().min(1),
+  participants: z.array(idSchema),
+  storyTime: storyTimeSchema,
+  preconditions: z.array(predicateSchema),
+  observedOutcome: stateDeltaSchema,
+  observedKnowledge: knowledgeDeltaSchema.optional(),
+  evidence: z.array(evidenceRefSchema),
+  causalParents: z.array(idSchema),
+  confidence: z.number().min(0).max(1),
+}).strict();
 export type CanonicalEvent = z.infer<typeof canonicalEventSchema>;
 
 export const worldRuleSchema = z.object({ id: idSchema, name: z.string().min(1), scope: z.enum(["global", "entity", "location", "faction", "institution"]), appliesWhen: z.array(predicateSchema), forbids: z.array(predicateSchema).optional(), requires: z.array(predicateSchema).optional(), evidence: z.array(evidenceRefSchema) }).strict();
@@ -191,6 +202,7 @@ export const possibilitySchema = z
     pressure: z.number().min(0),
     relevance: z.number().min(0),
     proposedDelta: stateDeltaSchema.optional(),
+    proposedKnowledge: knowledgeDeltaSchema.optional(),
     evidence: z.array(evidenceRefSchema),
   })
   .strict();

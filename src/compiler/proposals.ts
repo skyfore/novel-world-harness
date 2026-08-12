@@ -10,6 +10,7 @@ import {
   idSchema,
   possibilitySchema,
   stateDeltaSchema,
+  stateOperationSchema,
   stateValueSchema,
   worldRuleSchema,
   type ArtifactProposal,
@@ -35,6 +36,11 @@ const compilerWorldRuleSchema = worldRuleSchema.extend({
   forbids: z.array(compilerRulePredicateSchema).optional(),
   requires: z.array(compilerRulePredicateSchema).optional(),
 });
+const compilerCanonicalEventSchema = canonicalEventSchema.extend({
+  observedOutcome: stateDeltaSchema.extend({
+    operations: z.array(stateOperationSchema).max(1, "Compiler canonical events must describe one world-state operation at a time."),
+  }),
+});
 export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -43,7 +49,7 @@ const stateFieldOperations = new Set(["set", "unset", "add-member", "remove-memb
 export const compilerProposalSchemas = {
   entity: entitySchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   claim: claimSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
-  "canonical-event": canonicalEventSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
+  "canonical-event": compilerCanonicalEventSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "world-rule": compilerWorldRuleSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "initial-world": initialWorldSchema,
   "character-goal": characterGoalSchema,

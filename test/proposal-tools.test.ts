@@ -157,6 +157,36 @@ describe("compiler proposal tools", () => {
       .rejects.toThrow();
   });
 
+  it("requires source compiler events to split independent world-state operations", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-event-atomic-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "墨砚开门并送出停战信。\n");
+    const tool = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_canonical_event")!;
+    const prepared = tool.prepareArguments?.({
+      proposal_id: "combined-event",
+      payload: {
+        id: "combined-event",
+        title: "开门并送信",
+        participants: ["mo-yan", "north-gate", "ceasefire-letter"],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: {
+          version: 1,
+          operations: [
+            { op: "set", entityId: "north-gate", field: "location.open", value: true },
+            { op: "set", entityId: "ceasefire-letter", field: "artifact.delivered", value: true },
+          ],
+        },
+        evidence: fixture.evidence("墨砚开门并送出停战信。"),
+        causalParents: [],
+        confidence: 1,
+      },
+    });
+    expect(Compile(tool.parameters).Check(prepared)).toBe(false);
+    await expect(tool.execute("combined-event", prepared as never, undefined, undefined, {} as ExtensionContext))
+      .rejects.toThrow("one world-state operation at a time");
+  });
+
   it("requires an explicit finish whose ids exactly match successful submissions", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-finish-"));
     roots.push(root);

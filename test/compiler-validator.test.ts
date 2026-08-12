@@ -112,4 +112,31 @@ describe("CompilerCommitService", () => {
     ]));
     expect(result.staging).not.toContainEqual({ id: "bad-rule", kind: "world-rule" });
   });
+
+  it("rejects self-forbidding rules at the deterministic commit boundary", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "gate",
+      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "gate")).accepted).toBe(true);
+    const condition = { op: "fact-equals" as const, entityId: "north-gate", field: "location.open", value: true };
+    await proposals.submit("world-rule", {
+      proposalId: "self-forbidding-rule",
+      payload: {
+        id: "self-forbidding-rule",
+        name: "门开时禁止门开",
+        scope: "location",
+        appliesWhen: [condition],
+        forbids: [condition],
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("world-rule", "self-forbidding-rule");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "SELF_FORBIDDING_WORLD_RULE" }));
+  });
 });

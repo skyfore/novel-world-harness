@@ -17,6 +17,7 @@ import {
   type WorldRule,
 } from "../world/model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
+import { canonicalJson } from "../world/canonical.js";
 
 export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
@@ -73,6 +74,9 @@ export class CompilerValidator {
     errors: ValidationIssue[],
   ): void {
     if (!event.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event ${event.id} has no source evidence`, "evidence"));
+    if (event.observedOutcome.operations.length > 1) {
+      errors.push(issue("NON_ATOMIC_CANONICAL_EVENT", `Event ${event.id} contains multiple world-state operations; submit one explicitly narrated transition per canonical event`, "observedOutcome.operations"));
+    }
     for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
     for (const parent of event.causalParents) if (!events.has(parent)) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parent}`, "causalParents"));
     for (const predicate of event.preconditions) this.validatePredicate(predicate, entities, rules, errors);
@@ -95,6 +99,13 @@ export class CompilerValidator {
     if (!rule.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Rule ${rule.id} has no source evidence`, "evidence"));
     if (!(rule.requires?.length || rule.forbids?.length)) {
       errors.push(issue("INERT_WORLD_RULE", `Rule ${rule.id} has neither requires nor forbids constraints and cannot affect deterministic validation`, "requires"));
+    }
+    const forbidden = new Set((rule.forbids ?? []).map((predicate) => canonicalJson(predicate)));
+    if (rule.appliesWhen.some((predicate) => forbidden.has(canonicalJson(predicate)))) {
+      errors.push(issue("SELF_FORBIDDING_WORLD_RULE", `Rule ${rule.id} forbids the same condition that makes it applicable`, "forbids"));
+    }
+    if ((rule.requires ?? []).some((predicate) => forbidden.has(canonicalJson(predicate)))) {
+      errors.push(issue("CONTRADICTORY_WORLD_RULE", `Rule ${rule.id} both requires and forbids the same condition`, "forbids"));
     }
     const visibleRules = new Map(rules);
     visibleRules.set(rule.id, rule);

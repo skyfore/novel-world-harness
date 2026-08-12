@@ -24,6 +24,7 @@ import {
   type ValidationReport,
 } from "./model.js";
 import { NarrativeRenderer } from "./narrative.js";
+import type { CanonicalChoiceResolution } from "./runtime.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -125,7 +126,7 @@ export type PlayerTurnRender = (input: Readonly<{
   actorId: EntityId;
 }>) => Promise<string> | string;
 
-export type PlayerSupersessionResolver = (proposal: EventProposal) => Promise<readonly string[]> | readonly string[];
+export type PlayerCanonResolver = (proposal: EventProposal) => Promise<CanonicalChoiceResolution> | CanonicalChoiceResolution;
 
 /**
  * Derive a model-safe view from committed actor knowledge at one commit.
@@ -404,7 +405,7 @@ export class PlayerTurnService {
     private readonly engine: WorldEngine,
     private readonly translator: PlayerActionTranslator,
     render?: PlayerTurnRender,
-    private readonly resolveSupersessions?: PlayerSupersessionResolver,
+    private readonly resolveCanon?: PlayerCanonResolver,
   ) {
     if (render) this.render = render;
     else {
@@ -460,12 +461,17 @@ export class PlayerTurnService {
     if (spatialIssues.length) {
       return this.rejected(input, previousHead, contextBefore, "scope", spatialIssues, candidate, action.proposal);
     }
-    if (this.resolveSupersessions) {
-      const supersedesCanonicalEventIds = [...new Set(await this.resolveSupersessions(action.proposal))].sort();
-      if (supersedesCanonicalEventIds.length) {
+    if (this.resolveCanon) {
+      const resolution = await this.resolveCanon(action.proposal);
+      const supersedesCanonicalEventIds = [...new Set(resolution.supersedesCanonicalEventIds)].sort();
+      if (supersedesCanonicalEventIds.length || resolution.realizedPossibilityId) {
         action = {
           ...action,
-          proposal: eventProposalSchema.parse({ ...action.proposal, supersedesCanonicalEventIds }),
+          proposal: eventProposalSchema.parse({
+            ...action.proposal,
+            ...(supersedesCanonicalEventIds.length ? { supersedesCanonicalEventIds } : {}),
+            ...(resolution.realizedPossibilityId ? { possibilityId: resolution.realizedPossibilityId } : {}),
+          }),
         };
       }
     }

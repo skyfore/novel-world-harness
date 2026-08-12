@@ -251,6 +251,7 @@ program
   .option("--branch <id>", "playable branch id")
   .option("--character <id-or-name>", "character to inhabit")
   .option("-a, --action <text>", "perform one natural-language action and exit")
+  .option("--advance-background <n>", "maximum background/canon events after an accepted action", "1")
   .option("--list-characters", "list committed playable characters")
   .option("--model <model>", "override action translator model; use provider/model when ambiguous")
   .description("inhabit a committed character and drive a validated alternate timeline")
@@ -261,6 +262,7 @@ program
       ...(options.branch ? { branchId: options.branch } : {}),
       ...(options.character ? { character: options.character } : {}),
       ...(options.action !== undefined ? { action: options.action } : {}),
+      advanceBackground: nonNegativeInteger(options.advanceBackground, "--advance-background"),
       listCharacters: Boolean(options.listCharacters),
       model: options.model ?? program.opts().model,
       ...liveTestArgument(rootFor(options)),

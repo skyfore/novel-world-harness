@@ -33,6 +33,11 @@ export type MoveResult = {
   renderedText?: string;
 };
 
+export type CanonicalChoiceResolution = {
+  realizedPossibilityId?: string;
+  supersedesCanonicalEventIds: string[];
+};
+
 export type NarrativeRender = (input: {
   branchId: BranchId;
   commitId: CommitId;
@@ -146,16 +151,25 @@ export class WorldRuntime {
   }
 
   async conflictingEligibleCanonicalEventIds(proposal: EventProposal): Promise<string[]> {
+    return (await this.resolveEligibleCanonicalEvents(proposal)).supersedesCanonicalEventIds;
+  }
+
+  async resolveEligibleCanonicalEvents(proposal: EventProposal): Promise<CanonicalChoiceResolution> {
     const frontier = await this.refreshFrontier(proposal.branchId, proposal.expectedParentCommit);
-    return frontier.evaluated
-      .filter((entry) =>
-        entry.status === "eligible"
-        && Boolean(entry.possibility.canonicalEventId)
-        && Boolean(proposal.actorId && entry.possibility.participants.includes(proposal.actorId))
-        && deltasConflict(proposal.proposedDelta, entry.possibility.proposedDelta),
-      )
+    const eligible = frontier.evaluated.filter((entry) =>
+      entry.status === "eligible"
+      && Boolean(entry.possibility.canonicalEventId)
+      && Boolean(proposal.actorId && entry.possibility.participants.includes(proposal.actorId)),
+    );
+    const matching = eligible.filter((entry) => effectsEquivalent(proposal, entry.possibility));
+    const supersedesCanonicalEventIds = eligible
+      .filter((entry) => deltasConflict(proposal.proposedDelta, entry.possibility.proposedDelta))
       .map((entry) => entry.possibility.canonicalEventId!)
       .sort();
+    return {
+      ...(matching.length === 1 ? { realizedPossibilityId: matching[0]!.possibility.id } : {}),
+      supersedesCanonicalEventIds,
+    };
   }
 
   private async possibilityHistory(commitId: CommitId): Promise<{ realizedIds: ReadonlySet<string>; supersededIds: ReadonlySet<string> }> {
@@ -229,6 +243,23 @@ function deltasConflict(left: EventProposal["proposedDelta"], right?: EventPropo
     if (JSON.stringify(leftValue) !== JSON.stringify(rightWrites.get(key))) return true;
   }
   return false;
+}
+
+function effectsEquivalent(proposal: EventProposal, possibility: Possibility): boolean {
+  const proposedDelta = possibility.proposedDelta;
+  if (!proposedDelta) return false;
+  const hasEffect = proposal.proposedDelta.operations.length > 0 || (proposal.proposedKnowledge?.operations.length ?? 0) > 0;
+  if (!hasEffect) return false;
+  return mapsEqual(finalStateWrites(proposal.proposedDelta), finalStateWrites(proposedDelta))
+    && JSON.stringify(proposal.proposedKnowledge?.operations ?? []) === JSON.stringify(possibility.proposedKnowledge?.operations ?? []);
+}
+
+function mapsEqual(left: ReadonlyMap<string, unknown>, right: ReadonlyMap<string, unknown>): boolean {
+  if (left.size !== right.size) return false;
+  for (const [key, value] of left) {
+    if (!right.has(key) || JSON.stringify(value) !== JSON.stringify(right.get(key))) return false;
+  }
+  return true;
 }
 
 function finalStateWrites(delta: EventProposal["proposedDelta"]): Map<string, unknown> {

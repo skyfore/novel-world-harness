@@ -346,7 +346,7 @@ describe("PlayerTurnService", () => {
         forbidsKnowledge: [],
       }),
       undefined,
-      (proposal) => runtime.conflictingEligibleCanonicalEventIds(proposal),
+      (proposal) => runtime.resolveEligibleCanonicalEvents(proposal),
     );
 
     const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "I refuse to give Mo Yan the silver key." });
@@ -355,6 +355,36 @@ describe("PlayerTurnService", () => {
     expect(result.proposal?.supersedesCanonicalEventIds).toEqual(["give-key"]);
     const frontier = await runtime.refreshFrontier("main", result.newHead);
     expect(frontier.evaluated.find((entry) => entry.possibility.id === "canon-give-key")?.status).toBe("superseded");
+  });
+
+  it("marks a player-performed canonical effect realized instead of scheduling it twice", async () => {
+    const { engine } = await fixture();
+    const giveKey = engine.context.events!.get("give-key")!;
+    const runtime = new WorldRuntime(engine, ({ branchId, commitId }) => [canonicalEventToPossibility(giveKey, branchId, commitId)]);
+    const service = new PlayerTurnService(
+      engine,
+      () => ({
+        title: "Hero gives the silver key to Mo Yan",
+        participants: ["mo-yan"],
+        preconditions: [{ op: "fact-equals", entityId: "silver-key", field: "artifact.owner", value: "hero" }],
+        proposedDelta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "silver-key", field: "artifact.owner", value: "mo-yan" }],
+        },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+      undefined,
+      (proposal) => runtime.resolveEligibleCanonicalEvents(proposal),
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "I give Mo Yan the silver key." });
+
+    expect(result.accepted).toBe(true);
+    expect(result.proposal?.possibilityId).toBe("canon-give-key");
+    const after = await runtime.move({ branchId: "main", maxActorCandidates: 0, maxBackgroundCandidates: 1 });
+    expect(after.committedEvents).toEqual([]);
+    expect(after.frontier.evaluated.find((entry) => entry.possibility.id === "canon-give-key")?.status).toBe("realized");
   });
 
   it("rejects an unmentioned destination and an explicitly named but unowned artifact", async () => {

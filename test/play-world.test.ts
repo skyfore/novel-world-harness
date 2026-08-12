@@ -14,13 +14,26 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
-async function fixture() {
+async function fixture(options: { withCanon?: boolean } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-world-"));
   roots.push(root);
   const canon = new CanonicalModelStore(root);
   await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: ["Lin Qi"], evidence: [] });
   await canon.putEntity({ id: "hall", kind: "location", canonicalName: "前厅", aliases: [], evidence: [] });
   await canon.putEntity({ id: "camp", kind: "location", canonicalName: "营地", aliases: [], evidence: [] });
+  if (options.withCanon) {
+    await canon.putEvent({
+      id: "hero-goes-to-camp",
+      title: "林岐按既定轨迹前往营地",
+      participants: ["hero"],
+      storyTime: { kind: "ordinal", label: "next" },
+      preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
+      observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "camp" }] },
+      evidence: [],
+      causalParents: [],
+      confidence: 1,
+    });
+  }
   const { engine } = await openWorkspaceWorld(root);
   const genesis = await engine.createBranch("main", "Main", {
     version: 1,
@@ -92,5 +105,37 @@ describe("play-world command", () => {
     expect(result?.accepted).toBe(false);
     expect(result?.issues).toContainEqual(expect.objectContaining({ code: "PRECONDITION_FAILED" }));
     expect(await (await openWorkspaceWorld(root)).engine.branches.readHead("main")).toBe(genesis);
+  });
+
+  it("advances one background event after an accepted player turn", async () => {
+    const { root } = await fixture({ withCanon: true });
+    const output: string[] = [];
+    vi.spyOn(stdout, "write").mockImplementation(((value: string | Uint8Array) => {
+      output.push(String(value));
+      return true;
+    }) as typeof stdout.write);
+    const result = await playWorldCommand({
+      root,
+      configPath: path.join(root, "novel-harness.yaml"),
+      branchId: "main",
+      character: "hero",
+      action: "我在前厅等待片刻。",
+      translator: () => ({
+        title: "林岐在前厅等待",
+        participants: [],
+        preconditions: [],
+        proposedDelta: { version: 1, operations: [] },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+    });
+
+    expect(result?.accepted).toBe(true);
+    expect(output.join("")).toContain("World advanced: 林岐按既定轨迹前往营地");
+    const reopened = await openWorkspaceWorld(root);
+    const finalHead = await reopened.engine.branches.readHead("main");
+    expect(finalHead).not.toBe(result!.newHead);
+    expect((await reopened.engine.projector.project(finalHead)).values.hero?.["character.location"]).toBe("camp");
+    await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ lastCommitId: finalHead });
   });
 });

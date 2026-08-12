@@ -219,6 +219,7 @@ export class WorldEngine {
       deltaHash,
       knowledgeDeltaHash,
       supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds,
+      possibilityId: parsed.possibilityId,
     });
     const event: CommittedEvent = {
       version: 1,

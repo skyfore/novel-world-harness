@@ -5,6 +5,10 @@ import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, 
 import { afterEach, describe, expect, it } from "vitest";
 import { createNwhExtension, splitCommandArguments } from "../src/agent/nwh-extension.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
+import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { createEvidenceFixture } from "./helpers/evidence.js";
+import { BranchStore } from "../src/world/store.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -23,6 +27,7 @@ async function fixture(onSessionShutdown?: () => Promise<void>) {
   const registeredTools: string[] = [];
   const registeredToolDefinitions = new Map<string, ToolDefinition>();
   const sentUserMessages: string[] = [];
+  const sentHiddenMessages: string[] = [];
   const pi = {
     registerCommand(name: string, command: { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> | void }) {
       commands.set(name, command);
@@ -37,10 +42,13 @@ async function fixture(onSessionShutdown?: () => Promise<void>) {
     sendUserMessage(message: string) {
       sentUserMessages.push(message);
     },
+    sendMessage(message: { content: string }, options?: { triggerTurn?: boolean }) {
+      if (options?.triggerTurn) sentHiddenMessages.push(message.content);
+    },
   } as unknown as ExtensionAPI;
   const workspace = await LocalFileWorkspace.create(root);
   await createNwhExtension({ workspace, saveSession: true, mode: "assistant", onSessionShutdown })(pi);
-  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages };
+  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages };
 }
 
 function commandContext(notifications: string[], actions: { cleared: boolean; shutdown: boolean }): ExtensionCommandContext {
@@ -59,10 +67,26 @@ function commandContext(notifications: string[], actions: { cleared: boolean; sh
   } as unknown as ExtensionCommandContext;
 }
 
+function preparationContext(notifications: string[], questions: string[]): ExtensionCommandContext {
+  return {
+    ...commandContext(notifications, { cleared: false, shutdown: false }),
+    mode: "tui",
+    ui: {
+      notify(message: string) { notifications.push(message); },
+      async select(title: string, choices: string[]) {
+        questions.push(title);
+        return choices[0];
+      },
+      setStatus: () => undefined,
+      theme: { fg: (_color: string, text: string) => text },
+    },
+  } as unknown as ExtensionCommandContext;
+}
+
 describe("NWH TUI extension", () => {
   it("registers local commands and keeps their output in the transcript", async () => {
     const { commands } = await fixture();
-    expect([...commands.keys()]).toEqual(["files", "search", "read", "compile-next", "status", "clear", "help", "exit"]);
+    expect([...commands.keys()]).toEqual(["files", "search", "read", "compile-next", "prepare-all", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
     const ctx = commandContext(notifications, actions);
@@ -164,6 +188,77 @@ describe("NWH TUI extension", () => {
     expect(result).toEqual({ action: "continue" });
     expect(registeredTools).toEqual([]);
     expect(notifications).toEqual([]);
+  });
+
+  it("offers /prepare-all and completes validated preparation inside the TUI", async () => {
+    const { commands, root, sentHiddenMessages } = await fixture();
+    const evidence = await createEvidenceFixture(root, "Hero waits at the opening.\n", "ready-novel.txt");
+    const batches = await prepareCompilerBatches(root, evidence.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(evidence.source.id, batch.id);
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "tui-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: evidence.evidence("Hero") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "tui-initial",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        evidence: evidence.evidence("Hero waits at the opening."),
+      },
+      generatedBy: { worker: "test" },
+    });
+    const notifications: string[] = [];
+    const questions: string[] = [];
+
+    await commands.get("prepare-all")?.handler(evidence.source.id, preparationContext(notifications, questions));
+
+    expect(questions).toEqual(["Accept validated proposals?", "Create playable branch?"]);
+    expect(notifications.some((message) => message.includes("Preparation complete"))).toBe(true);
+    expect(sentHiddenMessages).toEqual([]);
+    await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
+  });
+
+  it("continues with the next compiler batch automatically during /prepare-all", async () => {
+    const { commands, events, root, sentHiddenMessages } = await fixture();
+    const content = Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n");
+    const evidence = await createEvidenceFixture(root, content, "all-batches.txt");
+    const notifications: string[] = [];
+    const questions: string[] = [];
+    const ctx = preparationContext(notifications, questions);
+
+    await commands.get("prepare-all")?.handler(evidence.source.id, ctx);
+    expect(questions).toEqual(["Complete novel compilation?"]);
+    expect(sentHiddenMessages).toHaveLength(1);
+
+    const before = await events.get("before_agent_start")?.({
+      type: "before_agent_start",
+      prompt: sentHiddenMessages[0],
+      systemPrompt: "system",
+      systemPromptOptions: {},
+    });
+    const hiddenContext = String((before as { message?: { content?: string } } | undefined)?.message?.content);
+    const segmentIds = [...hiddenContext.matchAll(/<source-segment id="([^"]+)">/g)].map((match) => match[1]!);
+    const finishInput = {
+      outcome: "no-artifacts",
+      proposal_ids: [],
+      reviewed_segments: segmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No supported facts." })),
+      summary: "No supported facts.",
+    };
+    await events.get("agent_end")?.({
+      type: "agent_end",
+      messages: [
+        { role: "assistant", content: [{ type: "toolCall", id: "finish-all", name: "finish_compiler_batch", arguments: finishInput }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "finish-all", toolName: "finish_compiler_batch", content: [], isError: false },
+        { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+      ],
+    }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+
+    expect(sentHiddenMessages).toHaveLength(2);
+    expect(notifications.some((message) => message.includes("starting compiler batch 2/"))).toBe(true);
   });
 
   it("checkpoints a successful compiler batch before /compile-next advances", async () => {

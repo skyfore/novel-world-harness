@@ -18,6 +18,7 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - a standalone quoted, unquoted, absolute, or workspace-relative novel path starts
   the durable source compiler loop;
 - `/files`, `/search`, and `/read` work without a model request;
+- `/prepare-all [source-id] [branch-id]` completes guided preparation in the current TUI;
 - `NOVEL.md` provides checked-in project instructions;
 - `.novel-harness/instructions.md` provides local additions.
 
@@ -69,7 +70,7 @@ The TUI accepts `!command` as an explicit user action, matching agent-terminal c
 
 ## Sessions and local state
 
-Pi transcripts are stored under `.novel-harness/sessions/` unless `--no-save` is used. Because tool results become conversation context, retrieved excerpts can be present in a transcript. `/clear` starts a new Pi runtime session without deleting prior append-only files. Session replacement is owned by `AgentSessionRuntime`, so `/new`, `/resume`, `/fork`, and `/clear` rebind the TUI and tools to the active session instead of leaving stale event subscriptions.
+Pi transcripts are stored under `~/.novel-harness/sessions/` unless `--no-save` is used. Because tool results become conversation context, retrieved excerpts can be present in a transcript. `/clear` starts a new Pi runtime session without deleting prior append-only files. Session replacement is owned by `AgentSessionRuntime`, so `/new`, `/resume`, `/fork`, and `/clear` rebind the TUI and tools to the active session instead of leaving stale event subscriptions.
 
 Project manifests, source indexes, compiler batch checkpoints, proposals, and world objects are also local files. These are inspectable implementation state, not model memory. They remain hidden from general model file search.
 
@@ -104,3 +105,9 @@ branch. Multiple registered sources are also presented as a choice. Choosing a
 pause/review answer preserves progress. `--yes` is the explicit non-interactive
 form and selects each recommended answer. Validation-blocked and staging-only
 proposals stop either form rather than being forced into world truth.
+
+The TUI `/prepare-all` command presents the same decisions with Pi-native
+selection dialogs. Remaining compiler batches execute sequentially in the current
+session; internal continuation instructions are hidden, so they do not replace or
+masquerade as user input. Other prompts, `/compile-next`, and `/clear` are held
+back while full preparation is active to prevent interleaved state machines.

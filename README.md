@@ -99,6 +99,11 @@ one batch per user action so importing a long novel cannot silently trigger an
 unbounded sequence of model requests. Generated artifacts remain pending proposals
 until deterministic validation and explicit acceptance.
 
+Run `/prepare-all [source-id] [branch-id]` inside the TUI to finish the remaining
+batches in the current session, review guided acceptance choices, generate a
+missing opening state, and create a playable branch. Its internal continuation
+messages stay hidden from the visible transcript.
+
 `nwh` and `nwh play` open the TUI in `regular` mode by default, preserving terminal scrollback. `--tui-mode fullscreen` uses an alternate-screen layout. `-p` remains the non-interactive path for scripts and pipelines.
 
 Ordinary conversation starts with read-only discovery tools. Starting a source
@@ -111,6 +116,7 @@ it still cannot commit world truth or write arbitrary files. Inside the TUI:
 /read chapters/12.md 40:100
 分析 @chapters/12.md 中曹操的错误判断
 /compile-next
+/prepare-all
 /status
 /clear
 /exit

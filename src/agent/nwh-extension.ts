@@ -15,6 +15,10 @@ import {
 } from "../compiler/source-loop.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS } from "../compiler/pi-compiler.js";
+import { convergeWorldProposals } from "../compiler/converge.js";
+import { inspectPreparation } from "../workflow/prepare.js";
+import { InitialWorldStore } from "../world/initial.js";
+import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -31,6 +35,7 @@ const COMMAND_HELP = `NWH commands:
   /search <text>             search local files for fixed text
   /read <path> [start:end]   read a bounded line range
   /compile-next              process the next evidence batch for the active novel
+  /prepare-all [source]      finish compilation and create a playable world
   /status                    show workspace, model and session
   /clear                     start a new conversation
   /help                      show this help
@@ -46,6 +51,14 @@ TUI shortcuts:
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
 const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
+const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence and existing artifact catalog. Propose one evidence-backed initial-world representing only the state already true at the opening. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.`;
+
+type TuiPrepareAllState = {
+  sourceId: string;
+  branchId: string;
+  compileAllApproved: boolean;
+  initialWorldRequestRunning: boolean;
+};
 
 export function splitCommandArguments(value: string): string[] {
   const tokens: string[] = [];
@@ -67,6 +80,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let pendingTurn: SourceLoopTurn | undefined;
     let pendingRunMessages: unknown[] = [];
     let registeredCompilerToolset: CompilerProposalToolset | undefined;
+    let prepareAllState: TuiPrepareAllState | undefined;
 
     const beginTurn = (turn: SourceLoopTurn) => {
       registeredCompilerToolset?.beginBatch(turn.batch.segmentIds);
@@ -90,6 +104,129 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     const compilerPromptForTurn = (turn: SourceLoopTurn) =>
       `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for ${turn.source.sourcePath}. Analyze the supplied evidence now and record typed pending proposals.`;
 
+    const choose = async <T extends string>(
+      ctx: ExtensionContext,
+      title: string,
+      choices: ReadonlyArray<{ value: T; label: string; description: string; recommended?: boolean }>,
+    ): Promise<T | undefined> => {
+      const labels = choices.map((choice) =>
+        `${choice.label}${choice.recommended ? " (recommended)" : ""} — ${choice.description}`);
+      const selected = await ctx.ui.select(title, labels);
+      return choices.find((_choice, index) => labels[index] === selected)?.value;
+    };
+
+    const stopPrepareAll = (ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "warning") => {
+      prepareAllState = undefined;
+      ctx.ui.setStatus("nwh-prepare-all", undefined);
+      ctx.ui.notify(message, level);
+    };
+
+    const sendHiddenPreparationTurn = (content: string, customType: string) => {
+      pi.sendMessage({ customType, content, display: false }, { triggerTurn: true });
+    };
+
+    const advancePrepareAll = async (ctx: ExtensionContext): Promise<void> => {
+      const state = prepareAllState;
+      if (!state) return;
+      const inspection = await inspectPreparation(workspace.root, {
+        sourceId: state.sourceId,
+        branchId: state.branchId,
+      });
+      if (inspection.stage === "compile") {
+        if (!state.compileAllApproved) {
+          const decision = await choose(ctx, "Complete novel compilation?", [
+            { value: "continue", label: "Compile all", description: `Run all ${inspection.totalBatches - inspection.completedBatches} remaining evidence batches.`, recommended: true },
+            { value: "pause", label: "Pause", description: "Keep current progress and return to the TUI." },
+          ]);
+          if (decision !== "continue") {
+            stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
+            return;
+          }
+          state.compileAllApproved = true;
+        }
+        const preparation = await prepareNextSourceLoopTurn(workspace.root, state.sourceId);
+        if (!preparation || preparation.status === "complete") {
+          stopPrepareAll(ctx, "Could not resolve the next compiler batch.", "error");
+          return;
+        }
+        activeSourceId = preparation.source.id;
+        activateCompilerTools(ctx);
+        beginTurn(preparation);
+        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Preparing · batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`));
+        ctx.ui.notify(`Full preparation: starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches}.`, "info");
+        sendHiddenPreparationTurn(compilerPromptForTurn(preparation), "nwh-prepare-all-batch");
+        return;
+      }
+      if (inspection.stage === "review") {
+        const decision = await choose(ctx, "Accept validated proposals?", [
+          { value: "accept", label: "Accept valid", description: `Validate and commit all ${inspection.pending.length} pending proposals that pass.`, recommended: true },
+          { value: "review", label: "Review first", description: "Stop before accepting anything; use proposal CLI commands." },
+        ]);
+        if (decision !== "accept") {
+          stopPrepareAll(ctx, `Full preparation paused for proposal review. Next: ${inspection.next}`, "info");
+          return;
+        }
+        const result = await convergeWorldProposals(workspace.root);
+        const blocked = result.canonical.blocked.length + result.possibilities.blocked.length;
+        if (blocked || result.staging.length) {
+          stopPrepareAll(
+            ctx,
+            `Full preparation stopped: ${blocked} validation-blocked and ${result.staging.length} staging-only proposal(s). Run nwh proposals list for details.`,
+            "error",
+          );
+          return;
+        }
+        ctx.ui.notify(`Accepted ${result.canonical.accepted.length + result.possibilities.accepted.length} validated proposal(s).`, "info");
+        await advancePrepareAll(ctx);
+        return;
+      }
+      if (inspection.stage === "needs-initial-world") {
+        if (state.initialWorldRequestRunning) {
+          stopPrepareAll(ctx, "The opening-state compiler did not produce an acceptable initial-world proposal. Review the model output and retry /prepare-all.", "error");
+          return;
+        }
+        const decision = await choose(ctx, "Generate opening world?", [
+          { value: "generate", label: "Generate proposal", description: "Ask the current compiler session for an evidence-backed opening state.", recommended: true },
+          { value: "pause", label: "Pause", description: "Leave the opening world unresolved for manual work." },
+        ]);
+        if (decision !== "generate") {
+          stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
+          return;
+        }
+        activateCompilerTools(ctx);
+        registeredCompilerToolset?.beginBatch();
+        options.resetCompilerProposalTools?.();
+        state.initialWorldRequestRunning = true;
+        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing · opening world"));
+        sendHiddenPreparationTurn(INITIAL_WORLD_PROMPT, "nwh-prepare-all-initial-world");
+        return;
+      }
+      if (inspection.stage === "create-branch") {
+        const decision = await choose(ctx, "Create playable branch?", [
+          { value: "create", label: "Create branch", description: `Commit genesis for branch '${state.branchId}'.`, recommended: true },
+          { value: "pause", label: "Pause", description: "Keep canonical preparation complete without creating a branch." },
+        ]);
+        if (decision !== "create") {
+          stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
+          return;
+        }
+        const initial = await new InitialWorldStore(workspace.root).get();
+        if (!initial) {
+          stopPrepareAll(ctx, "Cannot create a branch without an accepted initial world.", "error");
+          return;
+        }
+        const { engine } = await openWorkspaceWorld(workspace.root);
+        await engine.createBranch(state.branchId, state.branchId, initial.delta, initial.knowledge);
+        await advancePrepareAll(ctx);
+        return;
+      }
+      if (inspection.stage === "ready") {
+        stopPrepareAll(ctx, `Preparation complete. Run nwh play-world --branch ${state.branchId} --list-characters to enter the world.`, "info");
+        return;
+      }
+      stopPrepareAll(ctx, `Full preparation stopped at '${inspection.stage}'. Next: ${inspection.next}`, inspection.stage === "repair" ? "error" : "warning");
+    };
+
     pi.on("session_shutdown", async () => options.onSessionShutdown?.());
 
     pi.on("tool_call", (event) => {
@@ -102,8 +239,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     pi.on("input", async (event, ctx) => {
       if (event.source === "extension") return { action: "continue" };
-      if (pendingTurn) {
-        ctx.ui.notify("A novel compiler batch is already running. Wait for it to finish before starting another.", "warning");
+      if (pendingTurn || prepareAllState) {
+        ctx.ui.notify("Novel preparation is already running. Wait for it to finish before sending another message.", "warning");
         return { action: "handled" };
       }
 
@@ -162,16 +299,21 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     pi.on("agent_settled", async (_event, ctx) => {
       const completedTurn = pendingTurn;
-      if (!completedTurn) return;
+      if (!completedTurn) {
+        if (prepareAllState?.initialWorldRequestRunning) await advancePrepareAll(ctx);
+        return;
+      }
       pendingTurn = undefined;
       const outcome = compilerBatchOutcomeFromMessages(pendingRunMessages);
       pendingRunMessages = [];
       const failure = compilerBatchFailure(outcome);
       if (failure) {
+        const wasPreparingAll = Boolean(prepareAllState);
         ctx.ui.notify(
           `Compiler batch ${completedTurn.batch.ordinal + 1} was not checkpointed (${failure}); /compile-next retries the same evidence.`,
           "warning",
         );
+        if (wasPreparingAll) stopPrepareAll(ctx, "Full preparation stopped because the compiler batch did not complete. Retry /prepare-all to resume.");
         return;
       }
       await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id);
@@ -181,6 +323,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           : `All ${completedTurn.totalBatches} compiler batches for ${completedTurn.source.title} are checkpointed.`,
         "info",
       );
+      if (prepareAllState) await advancePrepareAll(ctx);
     });
 
     pi.on("session_start", async (_event, ctx) => {
@@ -232,8 +375,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("compile-next", {
       description: "Process the next evidence batch for the active novel",
       handler: async (_args, ctx) => {
-        if (pendingTurn) {
-          ctx.ui.notify("A novel compiler batch is already running.", "warning");
+        if (pendingTurn || prepareAllState) {
+          ctx.ui.notify("A novel preparation run is already active.", "warning");
           return;
         }
         const preparation = await prepareNextSourceLoopTurn(workspace.root, activeSourceId);
@@ -250,6 +393,54 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         beginTurn(preparation);
         ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
         pi.sendUserMessage(compilerPromptForTurn(preparation));
+      },
+    });
+
+    pi.registerCommand("prepare-all", {
+      description: "Complete compilation, accept validated proposals and create a playable branch",
+      handler: async (args, ctx) => {
+        if (pendingTurn || prepareAllState) {
+          ctx.ui.notify("A compiler or full-preparation run is already active.", "warning");
+          return;
+        }
+        const [requestedSourceId, requestedBranchId] = splitCommandArguments(args);
+        const branchId = requestedBranchId || "main";
+        let inspection = await inspectPreparation(workspace.root, {
+          sourceId: requestedSourceId || activeSourceId,
+          branchId,
+        });
+        let sourceId = inspection.source?.id;
+        if (inspection.stage === "needs-source") {
+          ctx.ui.notify("No novel source is registered. Paste or drag a novel path into the TUI first, then run /prepare-all.", "warning");
+          return;
+        }
+        if (inspection.stage === "choose-source") {
+          const choices = inspection.sources.map((source, index) => ({
+            value: source.id,
+            label: source.title,
+            description: `${source.sourcePath} (${source.id})`,
+            recommended: index === 0,
+          }));
+          sourceId = await choose(ctx, "Choose a novel source", choices);
+          if (!sourceId) {
+            ctx.ui.notify("Full preparation cancelled.", "info");
+            return;
+          }
+          inspection = await inspectPreparation(workspace.root, { sourceId, branchId });
+        }
+        if (!sourceId) {
+          ctx.ui.notify(`Cannot start full preparation at '${inspection.stage}'.`, "error");
+          return;
+        }
+        activeSourceId = sourceId;
+        prepareAllState = {
+          sourceId,
+          branchId,
+          compileAllApproved: false,
+          initialWorldRequestRunning: false,
+        };
+        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing world"));
+        await advancePrepareAll(ctx);
       },
     });
 
@@ -271,6 +462,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("clear", {
       description: "Start a new NWH conversation",
       handler: async (_args, ctx) => {
+        if (pendingTurn || prepareAllState) {
+          ctx.ui.notify("Wait for the active preparation run to finish before clearing the conversation.", "warning");
+          return;
+        }
         const result = await ctx.newSession();
         if (!result.cancelled) ctx.ui.notify("Conversation history cleared.", "info");
       },

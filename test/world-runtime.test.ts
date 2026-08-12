@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import type { Entity, EventProposal, Possibility } from "../src/world/model.js";
 import { WorldRuntime } from "../src/world/runtime.js";
+import { buildFrontier, selectEligible } from "../src/world/frontier.js";
+import { emptyWorldState } from "../src/world/state.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 
 const roots: string[] = [];
@@ -49,6 +51,30 @@ async function fixture() {
 }
 
 describe("WorldRuntime", () => {
+  it("keeps player-only choices visible but out of background scheduling", () => {
+    const state = emptyWorldState("head");
+    const base = {
+      branchId: "main",
+      evaluatedAtCommit: "head",
+      title: "Choice",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      causalParents: [],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1 as const, operations: [] },
+      evidence: [],
+    };
+    const frontier = buildFrontier("main", "head", state, [
+      { ...base, id: "player-only", kind: "player-choice" },
+      { ...base, id: "background", kind: "generated" },
+    ]);
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === "player-only")?.status).toBe("eligible");
+    expect(selectEligible(frontier).map((entry) => entry.possibility.id)).toEqual(["background"]);
+    expect(selectEligible(frontier, 10, { includePlayerChoices: true }).map((entry) => entry.possibility.id).sort()).toEqual(["background", "player-only"]);
+  });
+
   it("lets a canonical possibility realize once from surviving conditions", async () => {
     const { engine, runtime } = await fixture();
     const genesis = await engine.createBranch("main", "Main", {
@@ -111,4 +137,3 @@ describe("WorldRuntime", () => {
     expect(mainState.values.hero?.["character.location"]).toBe("hall");
   });
 });
-

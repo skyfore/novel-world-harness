@@ -228,6 +228,7 @@ export class PiAgentSession {
   private readonly runtime: ModelRuntime;
   private readonly resolvedModel?: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
   private activeText = "";
+  private lastAssistantStopReason?: string;
   private unsubscribe?: () => void;
 
   private constructor(
@@ -270,6 +271,7 @@ export class PiAgentSession {
   }
   async promptWithReport(input: string): Promise<PiPromptReport> {
     this.activeText = "";
+    this.lastAssistantStopReason = undefined;
     const messageCountBeforePrompt = this.session.messages.length;
     await this.session.prompt(input, { source: "interactive" });
     const promptMessages = this.session.messages.slice(messageCountBeforePrompt);
@@ -278,7 +280,12 @@ export class PiAgentSession {
     const text = this.activeText || (latest?.role === "assistant"
       ? latest.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("")
       : "");
-    return { text, ...compilerBatchOutcomeFromMessages(promptMessages) };
+    const outcome = compilerBatchOutcomeFromMessages(promptMessages);
+    return {
+      text,
+      ...outcome,
+      ...(outcome.assistantStopReason ? {} : this.lastAssistantStopReason ? { assistantStopReason: this.lastAssistantStopReason } : {}),
+    };
   }
   async runInteractive(options: PiInteractiveOptions = {}): Promise<void> {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -421,6 +428,8 @@ export class PiAgentSession {
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         this.activeText += event.assistantMessageEvent.delta;
         this.onText?.(event.assistantMessageEvent.delta);
+      } else if (event.type === "message_end" && event.message.role === "assistant") {
+        this.lastAssistantStopReason = event.message.stopReason;
       } else if (event.type === "tool_execution_start") this.onTool?.(event.toolName, event.args);
     });
   }

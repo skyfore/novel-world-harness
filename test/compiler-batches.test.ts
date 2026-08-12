@@ -79,9 +79,12 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("Compile explicitly narrated later canonical events too"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("observedKnowledge"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("location.open"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("artifact.location"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("one explicitly narrated transition at a time"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("never use a chapter number, bell count"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Pending proposals are immutable"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("kind=canon-analogue"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Use player-choice"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Copy a supplied whole-segment EvidenceRef exactly"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("finish_compiler_batch"))).toBe(true);
   });

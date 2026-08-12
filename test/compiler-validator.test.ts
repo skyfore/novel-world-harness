@@ -106,6 +106,10 @@ describe("CompilerCommitService", () => {
 
     const result = await convergeWorldProposals(roots.at(-1)!);
     expect(result.canonical.blocked).toMatchObject([{ id: "bad-rule", kind: "world-rule" }]);
+    expect(result.canonical.blocked[0]?.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INERT_WORLD_RULE" }),
+      expect.objectContaining({ code: "INVALID_PREDICATE_FIELD" }),
+    ]));
     expect(result.staging).not.toContainEqual({ id: "bad-rule", kind: "world-rule" });
   });
 });

@@ -8,7 +8,8 @@
     "old-dock",
     "bell-tower",
     "north-gate",
-    "silver-key"
+    "silver-key",
+    "ceasefire-letter"
   ],
   "openingState": {
     "lin-qi.character.alive": true,

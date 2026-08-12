@@ -63,9 +63,11 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
   return { version: 1, branchId, commitId, evaluated };
 }
 
-export function selectEligible(frontier: Frontier, limit = 10): EvaluatedPossibility[] {
+export function selectEligible(frontier: Frontier, limit = 10, options: { includePlayerChoices?: boolean } = {}): EvaluatedPossibility[] {
   if (!Number.isInteger(limit) || limit < 0) throw new Error("Scheduler limit must be a non-negative integer");
-  return frontier.evaluated.filter((entry) => entry.status === "eligible").slice(0, limit);
+  return frontier.evaluated
+    .filter((entry) => entry.status === "eligible" && (options.includePlayerChoices || entry.possibility.kind !== "player-choice"))
+    .slice(0, limit);
 }
 
 export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: string): EventProposal | null {

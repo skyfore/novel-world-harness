@@ -192,7 +192,7 @@ export const possibilitySchema = z
     id: idSchema,
     branchId: idSchema,
     evaluatedAtCommit: idSchema,
-    kind: z.enum(["canon-analogue", "actor-plan", "obligation", "causal-consequence", "background-pressure", "environmental", "generated"]),
+    kind: z.enum(["canon-analogue", "player-choice", "actor-plan", "obligation", "causal-consequence", "background-pressure", "environmental", "generated"]),
     title: z.string().min(1),
     candidateWindow: storyTimeSchema.optional(),
     preconditions: z.array(predicateSchema),

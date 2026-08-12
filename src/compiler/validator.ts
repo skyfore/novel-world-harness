@@ -93,6 +93,9 @@ export class CompilerValidator {
 
   private validateRule(rule: WorldRule, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
     if (!rule.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Rule ${rule.id} has no source evidence`, "evidence"));
+    if (!(rule.requires?.length || rule.forbids?.length)) {
+      errors.push(issue("INERT_WORLD_RULE", `Rule ${rule.id} has neither requires nor forbids constraints and cannot affect deterministic validation`, "requires"));
+    }
     const visibleRules = new Map(rules);
     visibleRules.set(rule.id, rule);
     for (const predicate of [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]) this.validatePredicate(predicate, entities, visibleRules, errors);

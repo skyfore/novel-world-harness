@@ -12,6 +12,7 @@ import { playCommand } from "./commands/play.js";
 import { compileCommand } from "./commands/compile.js";
 import { compileSourceCommand } from "./commands/compile-source.js";
 import { prepareCommand } from "./commands/prepare.js";
+import { prepareAllCommand } from "./commands/prepare-all.js";
 import { playWorldCommand } from "./commands/play-world.js";
 import { acceptAllValidProposalsCommand, acceptProposalCommand, listProposalsCommand, rejectProposalCommand, showProposalCommand } from "./commands/proposals.js";
 import {
@@ -166,6 +167,28 @@ program
       branchId: options.branch,
       model: options.model ?? program.opts().model,
       maxBatches: nonNegativeInteger(options.maxBatches, "--max-batches"),
+    });
+  });
+
+program
+  .command("prepare-all")
+  .argument("[novel]", "UTF-8 source novel path inside the workspace")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "registered source id")
+  .option("--branch <id>", "playable branch id", "main")
+  .option("--model <model>", "override compiler model; use provider/model when ambiguous")
+  .option("-y, --yes", "accept every recommended preparation decision without prompting")
+  .description("guide full compilation, validation and playable-branch preparation")
+  .action(async (novel, options) => {
+    await prepareAllCommand({
+      root: rootFor(options),
+      configPath: configFor(options),
+      ...(novel ? { novelPath: novel } : {}),
+      ...(options.source ? { sourceId: options.source } : {}),
+      branchId: options.branch,
+      model: options.model ?? program.opts().model,
+      yes: Boolean(options.yes),
     });
   });
 

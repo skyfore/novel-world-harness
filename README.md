@@ -124,6 +124,29 @@ Pi may also perform startup metadata checks or obtain its optional `fd` autocomp
 
 ## Prepare and enter a world
 
+To authorize one command to compile all remaining batches, automatically accept
+every proposal that passes deterministic validation, create the initial world,
+and open a playable branch:
+
+```bash
+nwh prepare-all ./books/novel.txt
+nwh play-world --list-characters
+```
+
+`prepare-all` asks focused multiple-choice questions before running all model
+batches, accepting validated proposals, generating a missing opening state, and
+creating the playable branch. Choose the review/pause option at any question to
+retain the current durable progress. For scripts and CI, `--yes` accepts every
+recommended choice without prompting:
+
+```bash
+nwh prepare-all ./books/novel.txt --yes
+```
+
+`prepare-all` never force-accepts a blocked proposal. It stops with diagnostics
+when evidence, dependencies, audit checks, or staging-only artifacts still need
+attention. The existing `prepare` flow below remains the review-first path.
+
 ```bash
 nwh init ./my-novel
 cd ./my-novel

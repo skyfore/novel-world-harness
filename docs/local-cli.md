@@ -95,3 +95,12 @@ scope, knowledge, world-rule, invariant, and optimistic-head validation before t
 host may commit it. Rejected turns do not move branch truth.
 
 `nwh compile` uses the same TUI with narrow `propose_*` tools and starts an evidence-backed batch. Supplying `nwh compile "<instruction>"` keeps the one-shot compiler path for automation. Neither form can accept proposals or mutate canonical/runtime truth.
+
+`nwh prepare-all [novel]` is the guided full-preparation path. Invoking it
+opens AskUserQuestion-style choices before NWH compiles every unfinished source
+batch, accepts canonical and possibility proposals that pass deterministic
+validation, requests an opening-state proposal, or creates the selected playable
+branch. Multiple registered sources are also presented as a choice. Choosing a
+pause/review answer preserves progress. `--yes` is the explicit non-interactive
+form and selects each recommended answer. Validation-blocked and staging-only
+proposals stop either form rather than being forced into world truth.

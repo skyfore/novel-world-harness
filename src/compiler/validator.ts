@@ -18,6 +18,7 @@ import {
 } from "../world/model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { canonicalJson } from "../world/canonical.js";
+import { isMetaKnowledgePredicate } from "./semantics.js";
 
 export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
@@ -62,6 +63,9 @@ export class CompilerValidator {
   private validateClaim(claim: Claim, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
     if (!entities.has(claim.subject)) errors.push(issue("UNKNOWN_SUBJECT", `Claim subject ${claim.subject} is not canonical`, "subject"));
     if (claim.speaker && !entities.has(claim.speaker)) errors.push(issue("UNKNOWN_SPEAKER", `Claim speaker ${claim.speaker} is not canonical`, "speaker"));
+    if (isMetaKnowledgePredicate(claim.predicate)) {
+      errors.push(issue("META_KNOWLEDGE_CLAIM", `Claim ${claim.id} encodes character knowledge in predicate '${claim.predicate}'; use KnowledgeDelta over a base-world claim instead`, "predicate"));
+    }
     if (!claim.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Claim ${claim.id} has no source evidence`, "evidence"));
   }
 

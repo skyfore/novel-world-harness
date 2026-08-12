@@ -157,6 +157,43 @@ describe("compiler proposal tools", () => {
       .rejects.toThrow();
   });
 
+  it("rejects meta-knowledge claims and inert player choices at submission", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-semantics-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "墨砚不知道银钥在林岐手里。\n");
+    const tools = createCompilerProposalTools(root);
+    const claim = tools.find((candidate) => candidate.name === "propose_claim")!;
+    await expect(claim.execute("meta-claim", {
+      proposal_id: "meta-claim",
+      payload: {
+        id: "meta-claim",
+        subject: "mo-yan",
+        predicate: "does-not-know",
+        object: "silver-key",
+        epistemicType: "explicit-fact",
+        evidence: fixture.evidence("墨砚不知道银钥在林岐手里。"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("KnowledgeDelta");
+
+    const possibility = tools.find((candidate) => candidate.name === "propose_possibility")!;
+    await expect(possibility.execute("inert-choice", {
+      proposal_id: "inert-choice",
+      payload: {
+        id: "inert-choice",
+        kind: "player-choice",
+        title: "Lin Qi refuses",
+        preconditions: [],
+        blockers: [],
+        participants: ["lin-qi"],
+        causalParents: [],
+        pressure: 1,
+        relevance: 1,
+        proposedDelta: { version: 1, operations: [] },
+        evidence: fixture.evidence("墨砚不知道银钥在林岐手里。"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("concrete state or knowledge effect");
+  });
+
   it("requires source compiler events to split independent world-state operations", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-event-atomic-"));
     roots.push(root);

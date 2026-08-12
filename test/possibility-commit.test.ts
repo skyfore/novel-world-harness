@@ -94,4 +94,23 @@ describe("PossibilityCommitService", () => {
       expect.objectContaining({ code: "UNKNOWN_CAUSAL_PARENT" }),
     ]));
   });
+
+  it("rejects an inert player choice that cannot preserve divergence", async () => {
+    const { service, evidence } = await fixture();
+    const validation = await service.validate({
+      id: "refuse-without-effect",
+      kind: "player-choice",
+      title: "Hero refuses",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      causalParents: [],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence,
+    });
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "INERT_PLAYER_CHOICE" }));
+  });
 });

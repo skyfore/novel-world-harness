@@ -25,6 +25,7 @@ import {
 } from "../world/model.js";
 import { PossibilityTemplateStore, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
+import { hasExecutablePossibilityEffect, isMetaKnowledgePredicate } from "./semantics.js";
 
 const possibilityTemplateSchema = possibilitySchema.omit({ branchId: true, evaluatedAtCommit: true });
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
@@ -48,6 +49,24 @@ const compilerCanonicalEventSchema = canonicalEventSchema.extend({
     operations: z.array(stateOperationSchema).max(1, "Compiler canonical events must describe one world-state operation at a time."),
   }),
 });
+const compilerClaimSchema = claimSchema.extend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((claim, ctx) => {
+  if (isMetaKnowledgePredicate(claim.predicate)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["predicate"],
+      message: "Character knowledge must use KnowledgeDelta over a base-world claim; ignorance is the absence of that learned claim, not a knows/does-not-know meta-claim.",
+    });
+  }
+});
+const compilerPossibilitySchema = possibilityTemplateSchema.extend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
+  if (possibility.kind === "player-choice" && !hasExecutablePossibilityEffect(possibility)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["proposedDelta"],
+      message: "A player-choice must contain a concrete state or knowledge effect so it can diverge from canon.",
+    });
+  }
+});
 export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -55,14 +74,14 @@ const stateFieldOperations = new Set(["set", "unset", "add-member", "remove-memb
 
 export const compilerProposalSchemas = {
   entity: entitySchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
-  claim: claimSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
+  claim: compilerClaimSchema,
   "canonical-event": compilerCanonicalEventSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "world-rule": compilerWorldRuleSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "initial-world": initialWorldSchema,
   "character-goal": characterGoalSchema,
   "character-model": characterModelSchema,
   "state-delta": stateDeltaSchema,
-  possibility: possibilityTemplateSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
+  possibility: compilerPossibilitySchema,
 } satisfies Record<CompilerProposalKind, z.ZodTypeAny>;
 
 export class CompilerProposalService {

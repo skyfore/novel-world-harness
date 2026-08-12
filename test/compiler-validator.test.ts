@@ -85,6 +85,21 @@ describe("CompilerCommitService", () => {
     expect(validation.errors).toContainEqual(expect.objectContaining({ code: "UNKNOWN_KNOWLEDGE_CLAIM" }));
   });
 
+  it("rejects meta-knowledge claims in favor of deterministic knowledge deltas", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "entity-cao")).accepted).toBe(true);
+    await expect(proposals.submit("claim", {
+      proposalId: "cao-does-not-know",
+      payload: { id: "cao-does-not-know", subject: "cao-cao", predicate: "does-not-know", object: "secret", epistemicType: "interpretation", evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    })).rejects.toThrow("KnowledgeDelta");
+  });
+
   it("does not misreport a blocked canonical proposal as staging", async () => {
     const { proposals, evidence } = await fixture();
     await proposals.submit("entity", {

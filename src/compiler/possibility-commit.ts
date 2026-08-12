@@ -3,6 +3,7 @@ import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js"
 import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { EvidenceVerifier } from "./evidence.js";
+import { hasExecutablePossibilityEffect } from "./semantics.js";
 
 export type PossibilityValidation = {
   accepted: boolean;
@@ -56,6 +57,9 @@ export class PossibilityCommitService {
     }
     if (template.kind === "actor-plan") {
       errors.push(issue("UNSCHEDULABLE_ACTOR_PLAN", `Actor-plan possibility ${template.id} has no runtime consumer; compile evidence-backed character goals instead`, "kind"));
+    }
+    if (template.kind === "player-choice" && !hasExecutablePossibilityEffect(template)) {
+      errors.push(issue("INERT_PLAYER_CHOICE", `Player-choice possibility ${template.id} has no concrete state or knowledge effect and cannot diverge from canon`, "proposedDelta"));
     }
     for (let index = 0; index < template.causalParents.length; index += 1) {
       const parent = template.causalParents[index]!;

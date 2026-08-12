@@ -72,7 +72,8 @@ describe("compiler batches", () => {
     const { root, source } = await fixture();
     const batches = await prepareCompilerBatches(root, source);
     expect(batches.length).toBeGreaterThan(1);
-    expect(batches.every((batch) => batch.segmentIds.length <= 6)).toBe(true);
+    expect(batches).toHaveLength(12);
+    expect(batches.every((batch) => batch.segmentIds.length === 1)).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("EvidenceRef"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);

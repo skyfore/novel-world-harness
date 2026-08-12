@@ -60,8 +60,12 @@ describe("novel source compiler loop", () => {
     expect(second.completedBatches).toBe(1);
     expect(second.batch.id).not.toBe(first.batch.id);
 
-    await markSourceLoopBatchComplete(root, second.source.id, second.batch.id);
-    await expect(prepareNextSourceLoopTurn(root, second.source.id)).resolves.toMatchObject({
+    let next = second;
+    while (next.status === "ready") {
+      await markSourceLoopBatchComplete(root, next.source.id, next.batch.id);
+      next = await prepareNextSourceLoopTurn(root, next.source.id);
+    }
+    expect(next).toMatchObject({
       status: "complete",
       source: { id: second.source.id },
     });

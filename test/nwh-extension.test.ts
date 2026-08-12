@@ -200,7 +200,7 @@ describe("NWH TUI extension", () => {
 
     expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);
     expect(sentUserMessages).toHaveLength(1);
-    expect(sentUserMessages[0]).toContain("batch 2/2");
+    expect(sentUserMessages[0]).toMatch(/batch 2\/\d+/);
   });
 
   it("does not checkpoint a compiler batch when proposal tools fail", async () => {
@@ -240,7 +240,7 @@ describe("NWH TUI extension", () => {
 
     expect(notifications.some((message) => message.includes("not checkpointed") && message.includes("failed"))).toBe(true);
     expect(sentUserMessages).toHaveLength(1);
-    expect(sentUserMessages[0]).toContain("batch 1/2");
+    expect(sentUserMessages[0]).toMatch(/batch 1\/\d+/);
   });
 
   it("waits through low-level retries and preserves unresolved failures until agent_settled", async () => {
@@ -290,7 +290,7 @@ describe("NWH TUI extension", () => {
 
     expect(notifications.some((message) => message.includes("not checkpointed") && message.includes("failed"))).toBe(true);
     expect(sentUserMessages).toHaveLength(1);
-    expect(sentUserMessages[0]).toContain("batch 1/2");
+    expect(sentUserMessages[0]).toMatch(/batch 1\/\d+/);
   });
 
   it("resets the registered finish handshake before the next TUI compiler batch", async () => {

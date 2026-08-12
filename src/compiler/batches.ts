@@ -25,7 +25,10 @@ export type BatchProgress = {
 export type BatchRunner = (batch: CompilerBatch) => Promise<void>;
 
 const MAX_BATCH_CHARS = 28_000;
-const MAX_SEGMENTS_PER_BATCH = 6;
+// Typed proposal output grows with the number of semantic sections, not just input bytes.
+// Keep each evidence/checkpoint boundary independently retryable so one long model turn
+// cannot strand several reviewed chapters behind a single finish handshake.
+const MAX_SEGMENTS_PER_BATCH = 1;
 
 export class CompilerBatchStore {
   readonly root: string;

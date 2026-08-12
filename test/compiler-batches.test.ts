@@ -87,6 +87,39 @@ describe("compiler batches", () => {
     expect(outcome.proposalFailed).toBe(1);
     expect(compilerBatchFailure(outcome)).toBeUndefined();
   });
+
+  it("removes a successfully withdrawn proposal from the active batch outcome", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "draft", name: "propose_claim", arguments: { proposal_id: "claim-draft" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "draft", toolName: "propose_claim", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "withdraw", name: "withdraw_compiler_proposal", arguments: { proposal_id: "claim-draft", reason: "bad reference" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "withdraw", toolName: "withdraw_compiler_proposal", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "final", name: "propose_claim", arguments: { proposal_id: "claim-final" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "final", toolName: "propose_claim", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["claim-final"], reviewed_segments: [], summary: "done" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "finish", toolName: "finish_compiler_batch", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+    ]);
+    expect(outcome).toMatchObject({ proposalSucceeded: 1, proposalFailed: 0, completionSignaled: true });
+    expect(compilerBatchFailure(outcome)).toBeUndefined();
+  });
+
+  it("reports a terminating finish circuit breaker as a batch failure", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["claim-draft"], reviewed_segments: [], summary: "done" } }], stopReason: "toolUse" },
+      {
+        role: "toolResult",
+        toolCallId: "finish",
+        toolName: "finish_compiler_batch",
+        isError: true,
+        content: [],
+        details: { compilerBatchBlocked: true, reason: "graph remains incomplete", finishFailureCount: 2 },
+      },
+    ]);
+    expect(outcome).toMatchObject({ completionSignaled: false, blockedReason: "graph remains incomplete" });
+    expect(compilerBatchFailure(outcome)).toContain("finish circuit breaker");
+  });
+
   it("builds bounded prompts with explicit evidence refs", async () => {
     const { root, source } = await fixture();
     const batches = await prepareCompilerBatches(root, source);
@@ -96,6 +129,7 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("EvidenceRef"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("ASCII logical entity ID"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Compile explicitly narrated later canonical events too"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("observedKnowledge"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("location.open"))).toBe(true);
@@ -104,6 +138,7 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("Every explicitly narrated character movement"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("never use a chapter number, bell count"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Pending proposals are immutable"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("withdraw_compiler_proposal"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("kind=canon-analogue"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Use player-choice"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Copy a supplied whole-segment EvidenceRef exactly"))).toBe(true);

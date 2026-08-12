@@ -153,6 +153,7 @@ describe("NWH TUI extension", () => {
 
     expect(result).toEqual({ action: "continue" });
     expect(registeredTools).toContain("propose_entity");
+    expect(registeredTools).toContain("withdraw_compiler_proposal");
     expect(registeredTools).not.toContain("propose_world_rule");
     expect(statuses).toContain("NWH · world compiler loop");
     expect(notifications[0]).toContain("Novel indexed");
@@ -172,6 +173,34 @@ describe("NWH TUI extension", () => {
 
     expect(events.get("tool_call")?.({ type: "tool_call", toolName: "read_file", toolCallId: "read-1", input: {} }, ctx))
       .toMatchObject({ block: true, reason: expect.stringContaining("evidence slice") });
+  });
+
+  it("blocks every subsequent tool call until a circuit-broken agent run settles", async () => {
+    const { events } = await fixture();
+    const ctx = {} as ExtensionContext;
+    expect(events.get("tool_result")?.({
+      type: "tool_result",
+      toolName: "finish_compiler_batch",
+      toolCallId: "finish-blocked",
+      input: {},
+      content: [],
+      isError: false,
+      details: { compilerBatchBlocked: true, reason: "same finish error", finishFailureCount: 2 },
+    }, ctx)).toEqual({ isError: true });
+    expect(events.get("tool_call")?.({
+      type: "tool_call",
+      toolName: "propose_entity",
+      toolCallId: "late-proposal",
+      input: {},
+    }, ctx)).toMatchObject({ block: true, terminate: true });
+
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+    expect(events.get("tool_call")?.({
+      type: "tool_call",
+      toolName: "propose_entity",
+      toolCallId: "next-run",
+      input: {},
+    }, ctx)).toBeUndefined();
   });
 
   it("keeps standalone source-code paths as read-only attachments", async () => {

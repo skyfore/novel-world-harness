@@ -4,6 +4,7 @@ export type CompilerBatchOutcome = {
   proposalFailed: number;
   completionSignaled: boolean;
   completionOutcome?: "complete" | "no-artifacts";
+  blockedReason?: string;
 };
 
 export function isCompilerProposalTool(toolName: string): boolean {
@@ -11,11 +12,12 @@ export function isCompilerProposalTool(toolName: string): boolean {
 }
 
 export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): CompilerBatchOutcome {
-  const calls = new Map<string, { toolName: string; proposalId?: string; finishOutcome?: "complete" | "no-artifacts" }>();
+  const calls = new Map<string, { toolName: string; proposalId?: string; withdrawnProposalId?: string; finishOutcome?: "complete" | "no-artifacts" }>();
   const failed = new Set<string>();
   const succeeded = new Set<string>();
   let assistantStopReason: string | undefined;
   let completionOutcome: "complete" | "no-artifacts" | undefined;
+  let blockedReason: string | undefined;
 
   for (const value of messages) {
     if (!value || typeof value !== "object") continue;
@@ -30,12 +32,17 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
           content.type !== "toolCall" ||
           typeof content.id !== "string" ||
           typeof content.name !== "string" ||
-          !isCompilerProposalTool(content.name) && content.name !== "finish_compiler_batch"
+          !isCompilerProposalTool(content.name)
+            && content.name !== "withdraw_compiler_proposal"
+            && content.name !== "finish_compiler_batch"
         ) continue;
         const args = content.arguments;
         if (content.name === "finish_compiler_batch") {
           const outcome = finishOutcome(args);
           calls.set(content.id, outcome ? { toolName: content.name, finishOutcome: outcome } : { toolName: content.name });
+        } else if (content.name === "withdraw_compiler_proposal") {
+          const withdrawnProposalId = proposalEnvelopeIdentity(args);
+          calls.set(content.id, withdrawnProposalId ? { toolName: content.name, withdrawnProposalId } : { toolName: content.name });
         } else {
           const proposalId = proposalIdentity(content.name, args);
           calls.set(content.id, proposalId ? { toolName: content.name, proposalId } : { toolName: content.name });
@@ -47,7 +54,22 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     const call = calls.get(message.toolCallId);
     const toolName = call?.toolName ?? (typeof message.toolName === "string" ? message.toolName : "");
     if (toolName === "finish_compiler_batch") {
+      const details = message.details && typeof message.details === "object" && !Array.isArray(message.details)
+        ? message.details as Record<string, unknown>
+        : undefined;
+      if (details?.compilerBatchBlocked === true) {
+        blockedReason = typeof details.reason === "string" ? details.reason : "finish circuit breaker opened";
+        continue;
+      }
       if (message.isError !== true && call?.finishOutcome) completionOutcome = call.finishOutcome;
+      continue;
+    }
+    if (toolName === "withdraw_compiler_proposal") {
+      if (message.isError !== true && call?.withdrawnProposalId) {
+        for (const key of succeeded) {
+          if (key.endsWith(`:${call.withdrawnProposalId}`)) succeeded.delete(key);
+        }
+      }
       continue;
     }
     if (!isCompilerProposalTool(toolName)) continue;
@@ -65,6 +87,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     proposalFailed: failed.size,
     completionSignaled: completionOutcome !== undefined,
     ...(completionOutcome ? { completionOutcome } : {}),
+    ...(blockedReason ? { blockedReason } : {}),
   };
 }
 
@@ -96,7 +119,14 @@ function proposalIdentity(toolName: string, argsValue: unknown): string | undefi
   return undefined;
 }
 
+function proposalEnvelopeIdentity(argsValue: unknown): string | undefined {
+  if (!argsValue || typeof argsValue !== "object" || Array.isArray(argsValue)) return undefined;
+  const proposalId = (argsValue as Record<string, unknown>).proposal_id;
+  return typeof proposalId === "string" ? `envelope:${proposalId}` : undefined;
+}
+
 export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | undefined {
+  if (outcome.blockedReason) return `finish circuit breaker stopped the batch: ${outcome.blockedReason}`;
   if (outcome.assistantStopReason !== "stop") {
     return `model ended with ${outcome.assistantStopReason ?? "no final assistant response"}`;
   }

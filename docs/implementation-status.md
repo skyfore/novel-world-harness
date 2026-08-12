@@ -12,7 +12,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | --- | --- | --- |
 | Local file assistant | Implemented | Claude Code-style TUI, streaming/tool rendering, local lexical discovery, bounded reads, Pi sessions; model tools are read-only |
 | Source ingest | Implemented | Content hash, source manifest, deterministic evidence segments |
-| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals and require an explicit finish handshake |
+| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals, allow narrow current-batch withdrawal, and require a circuit-broken explicit finish handshake |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation; dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
@@ -31,7 +31,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 
 - Source files remain in the workspace and are registered by path, size, and SHA-256.
 - Segments preserve source line and byte ranges.
-- `compile-source` processes bounded batches and checkpoints only after successful proposal calls, a clean model stop, and `finish_compiler_batch`.
+- `compile-source` processes bounded batches and checkpoints only after active proposal calls form a closed graph, the model stops cleanly, and `finish_compiler_batch` succeeds. Repeated unchanged finish failures terminate without checkpointing.
 - Pi compiler sessions expose read-only file tools plus narrow `propose_*` tools.
 - Proposals remain pending until explicit acceptance.
 - Acceptance verifies that the registered source still has its ingest hash and that evidence byte/line ranges and quote hashes match.

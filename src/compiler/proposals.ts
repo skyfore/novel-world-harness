@@ -69,6 +69,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.extend({ evidence: e
 });
 export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
+const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
 const stateFieldOperations = new Set(["set", "unset", "add-member", "remove-member", "fact-equals", "fact-exists", "entity-in"]);
 
@@ -103,6 +104,9 @@ export class CompilerProposalService {
     };
     await this.store.writePending(proposal, schema);
     return { proposalId: input.proposalId, kind };
+  }
+  async withdraw(proposalId: string): Promise<void> {
+    await this.store.transition(proposalId, "pending", "rejected");
   }
 }
 
@@ -318,5 +322,55 @@ function assertCompilerStateFields(value: unknown): void {
   if (typeof record.op === "string" && stateFieldOperations.has(record.op) && typeof record.field === "string" && !compilerStateFieldSet.has(record.field)) {
     throw new Error(`Unsupported compiler state field '${record.field}'. Allowed fields: ${COMPILER_STATE_FIELDS.join(", ")}.`);
   }
+  if (typeof record.op === "string" && stateFieldOperations.has(record.op) && typeof record.field === "string") {
+    const spec = compilerStateFieldMap.get(record.field);
+    if (spec && (record.op === "set" || record.op === "fact-equals")) {
+      assertCompilerStateValueShape(spec, record.value);
+    }
+    if (spec && ["add-member", "remove-member", "entity-in"].includes(record.op) && spec.valueType !== "entity-ref-set") {
+      throw new Error(`${record.op} requires an entity-ref-set field; '${record.field}' is ${spec.valueType}.`);
+    }
+  }
   for (const nested of Object.values(record)) assertCompilerStateFields(nested);
+}
+
+function assertCompilerStateValueShape(
+  spec: (typeof DEFAULT_STATE_FIELDS)[number],
+  value: unknown,
+): void {
+  if (value === null) {
+    if (spec.required) throw new Error(`Required compiler state field cannot be null: ${spec.key}.`);
+    return;
+  }
+  if (spec.cardinality === "many" && !Array.isArray(value)) {
+    throw new Error(`Compiler state field '${spec.key}' requires an array value.`);
+  }
+  if (spec.cardinality === "one" && Array.isArray(value)) {
+    throw new Error(`Compiler state field '${spec.key}' requires a scalar value.`);
+  }
+  if (spec.valueType === "boolean" && typeof value !== "boolean") {
+    throw new Error(`Compiler state field '${spec.key}' requires a boolean value.`);
+  }
+  if (spec.valueType === "number" && (typeof value !== "number" || !Number.isFinite(value))) {
+    throw new Error(`Compiler state field '${spec.key}' requires a finite number value.`);
+  }
+  if (
+    (spec.valueType === "string" || spec.valueType === "json-scalar")
+    && typeof value !== "string"
+    && typeof value !== "number"
+    && typeof value !== "boolean"
+  ) {
+    throw new Error(`Compiler state field '${spec.key}' requires a scalar value.`);
+  }
+  if (spec.valueType === "entity-ref") assertCompilerEntityReferenceShape(spec.key, value);
+  if (spec.valueType === "entity-ref-set") {
+    if (!Array.isArray(value)) throw new Error(`Compiler state field '${spec.key}' requires an entity-reference array.`);
+    value.forEach((item, index) => assertCompilerEntityReferenceShape(`${spec.key}[${index}]`, item));
+  }
+}
+
+function assertCompilerEntityReferenceShape(field: string, value: unknown): void {
+  if (typeof value !== "string" || !idSchema.safeParse(value).success) {
+    throw new Error(`Compiler state field '${field}' contains invalid entity reference '${String(value)}'; entity references must be ASCII logical IDs.`);
+  }
 }

@@ -33,7 +33,8 @@ context files, and built-in model coding tools remain disabled.
 When a standalone text novel path (`.txt`, `.text`, `.novel`, `.md`, or
 `.markdown`) is submitted, the extension deterministically registers and segments
 that source, injects the next bounded evidence batch as hidden model context, and
-dynamically enables the narrow `propose_*` tools. The
+dynamic compiler toolset exposes the narrow `propose_*` tools plus
+`withdraw_compiler_proposal` and `finish_compiler_batch`. The
 first batch starts immediately; `/compile-next` advances the same source after a
 successful proposal run and explicit `finish_compiler_batch` handshake. Repository code remains available as secondary read-only
 context, but prompts and tool guidance keep the novel world as the primary subject.

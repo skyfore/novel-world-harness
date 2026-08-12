@@ -174,6 +174,15 @@ export class ProposalStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    for (const status of ["accepted", "rejected"] as const) {
+      try {
+        await fs.access(this.proposalPath(status, parsed.id));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      throw new Error(`Proposal ${parsed.id} already exists in ${status} history; submit a new proposal id.`);
+    }
     await writeImmutable(filePath, parsed);
   }
   async read<T>(status: ProposalStatus, id: string, payloadSchema: z.ZodType<T>): Promise<ArtifactProposal<T>> {

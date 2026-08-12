@@ -97,7 +97,9 @@ Each successful batch is checkpointed under `.novel-harness/`. `/compile-next`
 continues the active novel from the next unfinished batch. The loop is deliberately
 one batch per user action so importing a long novel cannot silently trigger an
 unbounded sequence of model requests. Generated artifacts remain pending proposals
-until deterministic validation and explicit acceptance.
+until deterministic validation and explicit acceptance. A defective proposal can
+be withdrawn to rejected history within its originating batch, and repeated
+unchanged finish failures trip a circuit breaker instead of extending the Pi tool loop.
 
 Run `/prepare-all [source-id] [branch-id]` inside the TUI to finish the remaining
 batches in the current session, review guided acceptance choices, generate a
@@ -107,8 +109,9 @@ messages stay hidden from the visible transcript.
 `nwh` and `nwh play` open the TUI in `regular` mode by default, preserving terminal scrollback. `--tui-mode fullscreen` uses an alternate-screen layout. `-p` remains the non-interactive path for scripts and pipelines.
 
 Ordinary conversation starts with read-only discovery tools. Starting a source
-compiler loop adds only the narrow typed tools that can create pending proposals;
-it still cannot commit world truth or write arbitrary files. Inside the TUI:
+compiler loop adds only the narrow typed tools that can create pending proposals,
+withdraw defective current-batch drafts, and finish the batch; it still cannot
+commit world truth or write arbitrary files. Inside the TUI:
 
 ```text
 /files chapter

@@ -81,10 +81,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let pendingRunMessages: unknown[] = [];
     let registeredCompilerToolset: CompilerProposalToolset | undefined;
     let prepareAllState: TuiPrepareAllState | undefined;
+    let compilerCircuitBroken = false;
 
     const beginTurn = (turn: SourceLoopTurn) => {
       registeredCompilerToolset?.beginBatch(turn.batch.segmentIds);
       options.resetCompilerProposalTools?.(turn.batch.segmentIds);
+      compilerCircuitBroken = false;
       pendingTurn = turn;
       pendingRunMessages = [];
     };
@@ -196,6 +198,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         activateCompilerTools(ctx);
         registeredCompilerToolset?.beginBatch();
         options.resetCompilerProposalTools?.();
+        compilerCircuitBroken = false;
         state.initialWorldRequestRunning = true;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing · opening world"));
         sendHiddenPreparationTurn(INITIAL_WORLD_PROMPT, "nwh-prepare-all-initial-world");
@@ -230,11 +233,29 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.on("session_shutdown", async () => options.onSessionShutdown?.());
 
     pi.on("tool_call", (event) => {
+      if (compilerCircuitBroken) {
+        return {
+          block: true,
+          reason: "The compiler finish circuit breaker opened; this batch turn is stopping without a checkpoint.",
+          terminate: true,
+        };
+      }
       if (!pendingTurn || !LOCAL_EVIDENCE_TOOL_NAMES.has(event.toolName)) return;
       return {
         block: true,
         reason: "This compiler batch may use only the evidence slice supplied by the host; workspace file tools are disabled until the batch settles.",
       };
+    });
+
+    pi.on("tool_result", (event) => {
+      if (event.toolName !== "finish_compiler_batch") return;
+      const details = event.details && typeof event.details === "object" && !Array.isArray(event.details)
+        ? event.details as Record<string, unknown>
+        : undefined;
+      if (details?.compilerBatchBlocked === true) {
+        compilerCircuitBroken = true;
+        return { isError: true };
+      }
     });
 
     pi.on("input", async (event, ctx) => {
@@ -298,6 +319,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     });
 
     pi.on("agent_settled", async (_event, ctx) => {
+      compilerCircuitBroken = false;
       const completedTurn = pendingTurn;
       if (!completedTurn) {
         if (prepareAllState?.initialWorldRequestRunning) await advancePrepareAll(ctx);

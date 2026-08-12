@@ -17,12 +17,14 @@ export type PiCompilerOptions = {
 
 export const DEFAULT_COMPILER_LIVE_MAX_REQUESTS = 64;
 export const DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS = 16_384;
+export const DEFAULT_COMPILER_LIVE_REQUEST_TIMEOUT_MS = 300_000;
 
 export function compilerLiveTestOptions(options?: PiLiveTestOptions): PiLiveTestOptions | undefined {
   return options ? {
     ...options,
     maxRequests: options.maxRequests ?? DEFAULT_COMPILER_LIVE_MAX_REQUESTS,
     maxOutputTokens: options.maxOutputTokens ?? DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS,
+    requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_COMPILER_LIVE_REQUEST_TIMEOUT_MS,
   } : undefined;
 }
 

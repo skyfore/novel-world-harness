@@ -12,7 +12,12 @@ import {
   type LiveTokenUsage,
   wrapLiveStreamFunction,
 } from "../src/agent/live-token-ledger.js";
-import { compilerLiveTestOptions, DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS, DEFAULT_COMPILER_LIVE_MAX_REQUESTS } from "../src/compiler/pi-compiler.js";
+import {
+  compilerLiveTestOptions,
+  DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS,
+  DEFAULT_COMPILER_LIVE_MAX_REQUESTS,
+  DEFAULT_COMPILER_LIVE_REQUEST_TIMEOUT_MS,
+} from "../src/compiler/pi-compiler.js";
 
 const roots: string[] = [];
 
@@ -54,10 +59,12 @@ describe("compiler live-test defaults", () => {
     expect(compilerLiveTestOptions({ ledgerPath: "/tmp/ledger.json" })).toMatchObject({
       maxRequests: DEFAULT_COMPILER_LIVE_MAX_REQUESTS,
       maxOutputTokens: DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS,
+      requestTimeoutMs: DEFAULT_COMPILER_LIVE_REQUEST_TIMEOUT_MS,
     });
-    expect(compilerLiveTestOptions({ ledgerPath: "/tmp/ledger.json", maxRequests: 7, maxOutputTokens: 2048 })).toMatchObject({
+    expect(compilerLiveTestOptions({ ledgerPath: "/tmp/ledger.json", maxRequests: 7, maxOutputTokens: 2048, requestTimeoutMs: 1000 })).toMatchObject({
       maxRequests: 7,
       maxOutputTokens: 2048,
+      requestTimeoutMs: 1000,
     });
   });
 });

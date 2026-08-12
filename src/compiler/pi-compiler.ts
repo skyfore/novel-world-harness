@@ -1,7 +1,7 @@
-import { PiAgentSession } from "../agent/pi-session.js";
+import { PiAgentSession, type PiLiveTestOptions } from "../agent/pi-session.js";
 import type { LlmProfile } from "../config/schema.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import { createCompilerProposalTools } from "./proposal-tools.js";
+import { createCompilerProposalToolset } from "./proposal-tools.js";
 
 export type PiCompilerOptions = {
   root: string;
@@ -10,6 +10,7 @@ export type PiCompilerOptions = {
   saveSession?: boolean;
   onText?: (delta: string) => void;
   onTool?: (name: string, input: unknown) => void;
+  liveTest?: PiLiveTestOptions;
 };
 
 export async function createPiCompilerSession(options: PiCompilerOptions): Promise<PiAgentSession> {
@@ -17,6 +18,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
   const generatedBy: { provider?: string; model?: string } = {};
   if (options.profile?.provider) generatedBy.provider = options.profile.provider;
   if (options.model ?? options.profile?.model) generatedBy.model = options.model ?? options.profile?.model;
+  const proposalToolset = createCompilerProposalToolset(workspace.root, generatedBy);
   return PiAgentSession.create({
     workspace,
     ...(options.profile ? { profile: options.profile } : {}),
@@ -24,8 +26,10 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     saveSession: options.saveSession ?? true,
     ...(options.onText ? { onText: options.onText } : {}),
     ...(options.onTool ? { onTool: options.onTool } : {}),
+    ...(options.liveTest ? { liveTest: options.liveTest } : {}),
     interactionMode: "compiler",
-    additionalTools: createCompilerProposalTools(workspace.root, generatedBy),
+    additionalTools: proposalToolset.tools,
+    resetCompilerProposalTools: proposalToolset.beginBatch,
     systemPromptAppendix: `Compiler mode is enabled. Use read-only local evidence tools to inspect the novel, then use only the typed propose_* tools for candidate structured artifacts. A proposal is not canonical truth and must not be described as committed. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`,
   });
 }

@@ -6,6 +6,7 @@ import type { WorldEngine } from "./engine.js";
 import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import {
   evidenceRefSchema,
+  idSchema,
   knowledgeDeltaSchema,
   predicateSchema,
   stateDeltaSchema,
@@ -14,16 +15,16 @@ import {
 
 export const characterGoalSchema = z
   .object({
-    id: z.string().min(1),
-    actorId: z.string().min(1),
+    id: idSchema,
+    actorId: idSchema,
     description: z.string().min(1),
     priority: z.number().min(0).max(1),
-    requiresKnowledge: z.array(z.string()),
-    blockedByKnowledge: z.array(z.string()).optional(),
+    requiresKnowledge: z.array(idSchema),
+    blockedByKnowledge: z.array(idSchema).optional(),
     candidateAction: z
       .object({
         title: z.string().min(1),
-        participants: z.array(z.string()).optional(),
+        participants: z.array(idSchema).optional(),
         preconditions: z.array(predicateSchema),
         proposedDelta: stateDeltaSchema,
         proposedKnowledge: knowledgeDeltaSchema.optional(),
@@ -37,7 +38,7 @@ export type CharacterGoal = z.infer<typeof characterGoalSchema>;
 
 export const characterModelSchema = z
   .object({
-    actorId: z.string().min(1),
+    actorId: idSchema,
     traits: z.record(z.string(), z.number().min(-1).max(1)),
     decisionBiases: z.record(z.string(), z.number().min(-1).max(1)),
     evidence: z.array(evidenceRefSchema).min(1),
@@ -162,4 +163,3 @@ function safeId(id: string): string {
   if (!SAFE_ID.test(id)) throw new Error(`Unsafe actor artifact id: ${id}`);
   return id;
 }
-

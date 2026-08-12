@@ -19,6 +19,19 @@ afterEach(async () => {
 });
 
 describe("WorkspaceStore", () => {
+  it("can persist provider-neutral default project metadata", async () => {
+    const { root, store } = await fixture();
+
+    const project = await store.ensureProject();
+
+    expect(project).toMatchObject({
+      id: path.basename(root).toLowerCase(),
+      name: path.basename(root),
+      language: "zh-CN",
+    });
+    await expect(store.readProject()).resolves.toMatchObject({ id: project.id, name: project.name });
+  });
+
   it("keeps project and content-addressed source manifests in idempotent local files", async () => {
     const { root, store } = await fixture();
     const project = await store.ensureProject({ name: "三国世界", language: "zh-CN" });

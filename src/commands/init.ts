@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import YAML from "yaml";
 
 const NOVEL_INSTRUCTIONS = `# Novel workspace
 
@@ -43,8 +44,11 @@ export async function initCommand(target = process.cwd()): Promise<void> {
   await fs.mkdir(root, { recursive: true });
   const here = path.dirname(fileURLToPath(import.meta.url));
   const source = path.resolve(here, "../../config.example.yaml");
-  const config = await fs.readFile(source, "utf8");
+  const template = YAML.parse(await fs.readFile(source, "utf8")) as {
+    project: { name: string };
+  };
+  template.project.name = path.basename(root) || "novel-world";
+  const config = YAML.stringify(template);
   await createIfMissing(path.join(root, "novel-harness.yaml"), config);
   await createIfMissing(path.join(root, "NOVEL.md"), NOVEL_INSTRUCTIONS);
 }
-

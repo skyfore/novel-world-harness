@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { prepareCompilerBatches, runCompilerBatches } from "../src/compiler/batches.js";
+import { compilerBatchFailure, compilerBatchOutcomeFromMessages } from "../src/compiler/batch-outcome.js";
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import type { SourceDocument } from "../src/storage/workspace-store.js";
 
@@ -33,6 +34,40 @@ async function fixture(): Promise<{ root: string; source: SourceDocument }> {
 }
 
 describe("compiler batches", () => {
+  it("requires a clean model stop and an explicit, consistent finish handshake", () => {
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toBeUndefined();
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "no-artifacts" })).toBeUndefined();
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: false })).toContain("explicitly finish");
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("without a valid");
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 2, proposalFailed: 1, completionSignaled: true, completionOutcome: "complete" })).toContain("failed");
+    expect(compilerBatchFailure({ assistantStopReason: "length", proposalSucceeded: 2, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("length");
+  });
+
+  it("treats a successful retry of the same proposal id as resolving its earlier tool error", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "bad", name: "propose_claim", arguments: { proposal_id: "claim-1", payload: "{not-json" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "bad", toolName: "propose_claim", isError: true, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "fixed", name: "propose_claim", arguments: { proposal_id: "claim-1", payload: JSON.stringify({ id: "claim-1" }) } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "fixed", toolName: "propose_claim", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["claim-1"], summary: "done" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "finish", toolName: "finish_compiler_batch", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+    ]);
+    expect(outcome).toEqual({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" });
+    expect(compilerBatchFailure(outcome)).toBeUndefined();
+  });
+
+  it("keeps an abandoned proposal error unresolved", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "bad", name: "propose_claim", arguments: { proposal_id: "claim-1" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "bad", toolName: "propose_claim", isError: true, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "other", name: "propose_claim", arguments: { proposal_id: "claim-2" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "other", toolName: "propose_claim", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+    ]);
+    expect(outcome.proposalFailed).toBe(1);
+    expect(compilerBatchFailure(outcome)).toContain("failed");
+  });
   it("builds bounded prompts with explicit evidence refs", async () => {
     const { root, source } = await fixture();
     const batches = await prepareCompilerBatches(root, source);
@@ -40,6 +75,9 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.segmentIds.length <= 6)).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("EvidenceRef"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Copy a supplied whole-segment EvidenceRef exactly"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("finish_compiler_batch"))).toBe(true);
   });
 
   it("marks successful batches and resumes after an interrupted run", async () => {
@@ -94,4 +132,3 @@ describe("compiler batches", () => {
     expect(retried).toHaveLength(1);
   });
 });
-

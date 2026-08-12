@@ -24,7 +24,7 @@ When a standalone text novel path (`.txt`, `.text`, `.novel`, `.md`, or
 that source, injects the next bounded evidence batch as hidden model context, and
 dynamically enables the narrow `propose_*` tools. The
 first batch starts immediately; `/compile-next` advances the same source after a
-successful checkpoint. Repository code remains available as secondary read-only
+successful proposal run and explicit `finish_compiler_batch` handshake. Repository code remains available as secondary read-only
 context, but prompts and tool guidance keep the novel world as the primary subject.
 
 ## Retrieval boundary: file search, not RAG
@@ -73,8 +73,15 @@ proposal -> validate -> commit -> render
 
 The ordinary `nwh` / `nwh play` session starts read-only. Supplying a standalone
 novel path temporarily adds the same narrow `propose_*` capability for its source
-compiler loop. World execution is currently exposed through explicit
-`nwh world ...` commands; an interactive character-embodiment loop is future
-product work.
+compiler loop. `nwh prepare` exposes the durable compile/review/audit/branch state
+machine without bypassing explicit acceptance.
+
+`nwh play-world` is a separate character-embodiment boundary. Each natural-language
+action receives only an actor-scoped view plus entities explicitly named by the
+player and artifacts currently owned by that actor. Its fresh Pi session has no
+file tools, project instructions, compiler extension, source text, future canon,
+or mutation tool. A single capture-only candidate is passed to deterministic
+scope, knowledge, world-rule, invariant, and optimistic-head validation before the
+host may commit it. Rejected turns do not move branch truth.
 
 `nwh compile` uses the same TUI with narrow `propose_*` tools and starts an evidence-backed batch. Supplying `nwh compile "<instruction>"` keeps the one-shot compiler path for automation. Neither form can accept proposals or mutate canonical/runtime truth.

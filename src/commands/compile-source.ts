@@ -1,8 +1,10 @@
 import { stderr, stdout } from "node:process";
 import { runCompilerBatches } from "../compiler/batches.js";
+import { compilerBatchFailure } from "../compiler/batch-outcome.js";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import type { PiLiveTestOptions } from "../agent/pi-session.js";
 
 export type CompileSourceOptions = {
   root: string;
@@ -12,6 +14,7 @@ export type CompileSourceOptions = {
   model?: string;
   maxBatches?: number;
   resume?: boolean;
+  liveTest?: PiLiveTestOptions;
 };
 
 async function optionalConfig(options: CompileSourceOptions) {
@@ -54,6 +57,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         ...(profile ? { profile } : {}),
         ...(options.model ? { model: options.model } : {}),
         saveSession: false,
+        ...(options.liveTest ? { liveTest: options.liveTest } : {}),
         onText(delta) {
           wroteText = true;
           stdout.write(delta);
@@ -64,7 +68,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         },
       });
       try {
-        await session.prompt(batch.prompt);
+        const report = await session.promptWithReport(batch.prompt);
+        const failure = compilerBatchFailure(report);
+        if (failure) throw new Error(`Compiler batch ${batch.ordinal + 1} was not checkpointed: ${failure}.`);
         if (wroteText) stdout.write("\n");
       } finally {
         await session.dispose();

@@ -177,9 +177,13 @@ function buildBatchPrompt(source: SourceDocument, batchId: string, pieces: strin
   return `You are processing compiler batch ${batchId} for source ${source.sourcePath} (${source.id}).\n\n` +
     `Analyze only the supplied evidence slices. Produce small typed pending proposals with the available propose_* tools. ` +
     `Do not commit truth. Reuse stable entity IDs when the evidence clearly refers to the same identity. ` +
+    `Every logical ID must use only ASCII letters, digits, dot, underscore, and hyphen, and must start with a letter or digit. ` +
+    `Every canonical proposal must contain at least one EvidenceRef. Copy a supplied whole-segment EvidenceRef exactly, including its byte range, line range, and full quoteHash; never edit one range while retaining another range's hash. ` +
     `Prefer entity and claim proposals before events that reference them. Canonical events must describe observed transitions, not summaries. ` +
-    `Character goals/models are policy inputs and must be evidence-backed. The initial-world proposal should only be made when this batch contains genuine opening-state evidence. ` +
-    `Do not infer future runtime truth from later canon. If evidence is insufficient, make fewer proposals rather than inventing facts.\n\n` +
+    `Character goals/models are policy inputs and must be evidence-backed. The initial-world proposal should only be made when this batch contains genuine opening-state evidence; put explicitly supported opening character knowledge in its optional knowledge delta so actor views begin with only what those characters know. ` +
+    `State operations may use only these registered fields: character.alive, character.location, character.faction, character.title, character.inventory, artifact.owner, and faction.leader. ` +
+    `Do not infer future runtime truth from later canon. If evidence is insufficient, make fewer proposals rather than inventing facts. ` +
+    `After every proposal call has succeeded, call finish_compiler_batch exactly once with all successful proposal IDs. Use no-artifacts only when this slice supports no proposal. Without that explicit finish, the batch remains retryable.\n\n` +
     pieces.join("\n\n");
 }
 
@@ -193,4 +197,3 @@ async function atomicJson(filePath: string, value: unknown): Promise<void> {
 function hash(value: string): string {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");
 }
-

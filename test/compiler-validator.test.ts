@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
@@ -53,5 +54,29 @@ describe("CompilerCommitService", () => {
     expect(validation.errors.some((error) => error.code === "UNKNOWN_PARTICIPANT")).toBe(true);
     await expect(commits.canon.getEvent("event-1")).rejects.toThrow();
     await expect(commits.proposals.read("pending", "bad-event", (await import("../src/world/model.js")).canonicalEventSchema)).resolves.toMatchObject({ id: "bad-event" });
+  });
+
+  it("does not misreport a blocked canonical proposal as staging", async () => {
+    const { proposals, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "place",
+      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("world-rule", {
+      proposalId: "bad-rule",
+      payload: {
+        id: "bad-rule",
+        name: "Location uses a character-only field",
+        scope: "location",
+        appliesWhen: [{ op: "fact-exists", entityId: "north-gate", field: "character.alive" }],
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await convergeWorldProposals(roots.at(-1)!);
+    expect(result.canonical.blocked).toMatchObject([{ id: "bad-rule", kind: "world-rule" }]);
+    expect(result.staging).not.toContainEqual({ id: "bad-rule", kind: "world-rule" });
   });
 });

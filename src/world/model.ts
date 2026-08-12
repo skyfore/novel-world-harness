@@ -10,7 +10,11 @@ export type ProposalId = string;
 export type CommitId = string;
 export type ObjectHash = string;
 
-const idSchema = z.string().min(1);
+export const SAFE_LOGICAL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export const idSchema = z.string().regex(
+  SAFE_LOGICAL_ID,
+  "IDs must start with an ASCII letter or digit and contain only letters, digits, dot, underscore, or hyphen",
+);
 
 export const sourceSpanSchema = z
   .object({
@@ -207,4 +211,3 @@ export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion:
 
 export const WORLD_SCHEMA_VERSION = 1;
 export const WORLD_ENGINE_VERSION = "0.1.0";
-

@@ -52,6 +52,26 @@ describe("PiAgentSession", () => {
     await session.dispose();
   });
 
+  it("resolves a provider/model override without corrupting the configured profile", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-model-override-"));
+    temporaryDirectories.push(root);
+    const session = await PiAgentSession.create({
+      workspace: await LocalFileWorkspace.create(root),
+      saveSession: false,
+      model: "anthropic/claude-haiku-4-5",
+      profile: {
+        provider: "anthropic",
+        model: "claude-sonnet-5",
+        thinkingLevel: "low",
+        maxTokens: 2_048,
+      },
+    });
+    expect(session.model).toBe("anthropic/claude-haiku-4-5");
+    const internals = session as unknown as { runtimeHost: { session: { model?: { maxTokens: number } } } };
+    expect(internals.runtimeHost.session.model?.maxTokens).toBe(2_048);
+    await session.dispose();
+  });
+
   it("restores the model selected in a previous workspace session", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-persisted-model-"));
     temporaryDirectories.push(root);

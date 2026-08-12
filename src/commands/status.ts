@@ -2,21 +2,18 @@ import path from "node:path";
 import { ActorModelStore } from "../world/actors.js";
 import { CompilerBatchStore } from "../compiler/batches.js";
 import { SegmentStore } from "../compiler/segments.js";
-import { loadConfig } from "../config/load.js";
+import { loadOptionalConfig } from "../config/load.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
+import { inspectPreparation } from "../workflow/prepare.js";
 
 export async function statusCommand(configPath: string): Promise<void> {
-  await loadConfig(configPath);
+  const config = await loadOptionalConfig(configPath);
   const root = path.dirname(path.resolve(configPath));
   const store = await WorkspaceStore.create(root);
   const project = await store.readProject();
-  if (!project) {
-    console.log("Project has no local harness state. Run nwh ingest first.");
-    return;
-  }
 
   const sources = await store.listSources();
   const segments = new SegmentStore(root);
@@ -52,7 +49,9 @@ export async function statusCommand(configPath: string): Promise<void> {
     new PossibilityTemplateStore(root).list(),
   ]);
 
-  console.log(`Project: ${project.name} (${project.id})`);
+  if (project) console.log(`Project: ${project.name} (${project.id})`);
+  else if (config) console.log(`Project: ${config.project.name} (no local harness state)`);
+  else console.log(`Project: ${path.basename(root) || "novel-world"} (no config or local harness state)`);
   console.table(sourceRows);
   console.table([
     { area: "proposals", pending: pending.length, accepted: accepted.length, rejected: rejected.length },
@@ -60,4 +59,7 @@ export async function statusCommand(configPath: string): Promise<void> {
     { area: "runtime inputs", initialWorld: initialWorld ? 1 : 0, goals: goals.length, models: models.length, possibilities: possibilities.length },
   ]);
   console.log("Use `nwh audit` for evidence integrity and consistency checks; readiness is not inferred from artifact counts.");
+  const preparation = await inspectPreparation(root);
+  console.log(`Preparation: ${preparation.stage}`);
+  console.log(`Next: ${preparation.next}`);
 }

@@ -20,8 +20,13 @@ async function openWorld(root: string) {
 export async function worldCreateCommand(root: string, branchId: string, seedPath?: string): Promise<void> {
   const { engine } = await openWorld(root);
   const canonicalInitial = seedPath ? null : await new InitialWorldStore(root).get();
-  const seed = seedPath ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8"))) : canonicalInitial?.delta ?? { version: 1 as const, operations: [] };
-  const head = await engine.createBranch(branchId, branchId, seed);
+  if (!seedPath && !canonicalInitial) {
+    throw new Error("No accepted initial world. Review and accept an initial-world proposal before creating a playable branch, or pass --seed explicitly.");
+  }
+  const seed = seedPath
+    ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8")))
+    : canonicalInitial!.delta;
+  const head = await engine.createBranch(branchId, branchId, seed, seedPath ? undefined : canonicalInitial?.knowledge);
   stdout.write(`${branchId}\t${head}${canonicalInitial && !seedPath ? "\t[canonical initial world]" : ""}\n`);
 }
 

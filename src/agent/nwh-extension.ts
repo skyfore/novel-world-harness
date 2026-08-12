@@ -2,7 +2,11 @@ import path from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { expandFileMentions } from "./file-mentions.js";
 import { createNwhWelcomeHeader, isFreshConversation, NWH_WORKING_FRAMES } from "./nwh-welcome.js";
-import { createCompilerProposalTools } from "../compiler/proposal-tools.js";
+import {
+  createCompilerProposalToolset,
+  type CompilerProposalToolset,
+} from "../compiler/proposal-tools.js";
+import { compilerBatchFailure, compilerBatchOutcomeFromMessages } from "../compiler/batch-outcome.js";
 import {
   markSourceLoopBatchComplete,
   prepareNextSourceLoopTurn,
@@ -18,6 +22,7 @@ export type NwhExtensionOptions = {
   saveSession: boolean;
   mode: NwhInteractionMode;
   onSessionShutdown?: () => Promise<void>;
+  resetCompilerProposalTools?: () => void;
 };
 
 const COMMAND_HELP = `NWH commands:
@@ -57,11 +62,21 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let compilerToolsActive = mode === "compiler";
     let activeSourceId: string | undefined;
     let pendingTurn: SourceLoopTurn | undefined;
+    let pendingRunMessages: unknown[] = [];
+    let registeredCompilerToolset: CompilerProposalToolset | undefined;
+
+    const beginTurn = (turn: SourceLoopTurn) => {
+      registeredCompilerToolset?.beginBatch();
+      options.resetCompilerProposalTools?.();
+      pendingTurn = turn;
+      pendingRunMessages = [];
+    };
 
     const activateCompilerTools = (ctx: ExtensionContext) => {
       if (!compilerToolsActive) {
         const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
-        for (const tool of createCompilerProposalTools(workspace.root, generatedBy)) pi.registerTool(tool);
+        registeredCompilerToolset = createCompilerProposalToolset(workspace.root, generatedBy);
+        for (const tool of registeredCompilerToolset.tools) pi.registerTool(tool);
         compilerToolsActive = true;
       }
       if (ctx.mode === "tui") ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · world compiler loop"));
@@ -88,7 +103,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             return { action: "handled" };
           }
           activateCompilerTools(ctx);
-          pendingTurn = preparation;
+          beginTurn(preparation);
           ctx.ui.notify(
             `Novel indexed: ${preparation.source.sourcePath} · starting batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`,
             "info",
@@ -124,13 +139,26 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       };
     });
 
-    pi.on("agent_end", async (event, ctx) => {
+    pi.on("agent_end", (event) => {
+      if (!pendingTurn) return;
+      // agent_end is per low-level run. Keep every run until agent_settled so
+      // provider retries, compaction retries, and queued continuations cannot
+      // erase an earlier unresolved proposal failure or finish handshake.
+      pendingRunMessages.push(...event.messages);
+    });
+
+    pi.on("agent_settled", async (_event, ctx) => {
       const completedTurn = pendingTurn;
       if (!completedTurn) return;
       pendingTurn = undefined;
-      const assistant = [...event.messages].reverse().find((message) => message.role === "assistant");
-      if (!assistant || assistant.role !== "assistant" || assistant.stopReason === "error" || assistant.stopReason === "aborted") {
-        ctx.ui.notify(`Compiler batch ${completedTurn.batch.ordinal + 1} was not checkpointed and can be retried with /compile-next.`, "warning");
+      const outcome = compilerBatchOutcomeFromMessages(pendingRunMessages);
+      pendingRunMessages = [];
+      const failure = compilerBatchFailure(outcome);
+      if (failure) {
+        ctx.ui.notify(
+          `Compiler batch ${completedTurn.batch.ordinal + 1} was not checkpointed (${failure}); /compile-next retries the same evidence.`,
+          "warning",
+        );
         return;
       }
       await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id);
@@ -206,7 +234,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activateCompilerTools(ctx);
-        pendingTurn = preparation;
+        beginTurn(preparation);
         ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
         pi.sendUserMessage(userPromptForTurn(preparation));
       },

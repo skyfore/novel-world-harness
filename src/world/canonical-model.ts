@@ -171,6 +171,11 @@ export class ProposalStore {
   async read<T>(status: ProposalStatus, id: string, payloadSchema: z.ZodType<T>): Promise<ArtifactProposal<T>> {
     return artifactProposalSchema(payloadSchema).parse(JSON.parse(await fs.readFile(this.proposalPath(status, id), "utf8"))) as ArtifactProposal<T>;
   }
+  async readEnvelope(status: ProposalStatus, id: string): Promise<Record<string, unknown>> {
+    const value = JSON.parse(await fs.readFile(this.proposalPath(status, id), "utf8")) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid proposal envelope: ${id}`);
+    return value as Record<string, unknown>;
+  }
   async list(status: ProposalStatus = "pending"): Promise<ProposalSummary[]> {
     const directory = path.join(this.root, status);
     let names: string[];

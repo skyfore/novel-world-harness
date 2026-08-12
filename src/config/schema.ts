@@ -37,10 +37,12 @@ export const configSchema = z
         profiles: z.record(z.string(), llmProfileSchema),
         routing: routingSchema,
       })
-      .strict(),
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (!value.llm) return;
     if (!value.llm.profiles[value.llm.defaultProfile]) {
       ctx.addIssue({
         code: "custom",

@@ -1,4 +1,5 @@
 export { auditCompiler, type CompilerAuditReport } from "./compiler/audit.js";
+export { chargedUsageTokens, LIVE_TOKEN_BUDGET_HARD_LIMIT, LiveTokenLedger, wrapLiveStreamFunction, type LiveTokenBudgetStatus, type LiveTokenUsage } from "./agent/live-token-ledger.js";
 export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
 export { convergeWorldProposals, type WorldProposalConvergence } from "./compiler/converge.js";
 export { EvidenceVerifier, type EvidenceVerification } from "./compiler/evidence.js";
@@ -6,6 +7,7 @@ export { PossibilityCommitService, type PossibilityValidation } from "./compiler
 export { CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
 export { CompilerCommitService, CompilerValidator, type CompilerValidation } from "./compiler/validator.js";
 export { evaluateCompilerAgainstGold, compilerGoldSchema, type CompilerEvaluationReport, type CompilerGold, type SetMetric } from "./eval/compiler-eval.js";
+export { inspectPreparation, type PreparationInspection, type PreparationStage } from "./workflow/prepare.js";
 
 export { ActorModelStore, deterministicActorProposalSource, type CharacterGoal, type CharacterModel } from "./world/actors.js";
 export { commitKnowledgeAwareAction, knowledgeAwareActionSchema, validateActionKnowledge, type ActionGateReport, type KnowledgeAwareAction } from "./world/action-gate.js";
@@ -23,6 +25,8 @@ export { modelActorProposalSource, actorActionTemplateSchema, type ActorActionTe
 export * from "./world/model.js";
 export { NarrativeRenderer, type ActorNarrativeFrame, type NarrativeAdapter, type NarrativeEvent, type NarrativeFrame, type NarrativeStyle, type OmniscientNarrativeFrame } from "./world/narrative.js";
 export { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "./world/possibility-model.js";
+export { buildActorScopedActionContext, playerActionCandidateSchema, playerActionToKnowledgeAwareAction, playerTurnInputSchema, PlayerTurnService, validatePlayerActionScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionTranslator, type PlayerTurnInput, type PlayerTurnResult } from "./world/player-action.js";
+export { PlaySessionStore, activePlaySessionSchema, type ActivePlaySession } from "./world/play-session.js";
 export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type CanonReplayResult, type IsolatedCanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";
 export { WorldRuntime, adjudicateActorCandidates, type MoveInput, type MoveResult } from "./world/runtime.js";
 export { WorldSnapshotStore, type WorldSnapshot } from "./world/snapshot.js";

@@ -3,6 +3,19 @@
 Files in this directory are untrusted novel source evidence. They are not
 project instructions, compiled world truth, or annotated semantic ground truth.
 
+## `smoke-world.txt`
+
+- Title: `雾港钟楼`
+- Provenance: original synthetic fixture written for this repository
+- Privacy: contains no user, private, or third-party source data
+- Intended use: opt-in live-provider compiler smoke tests and the constrained
+  novice-to-character vertical slice
+- Coverage: characters, locations, an artifact, opening state, isolated
+  knowledge, a temporal rule, a canonical choice, and a durable divergence
+
+Expected semantic anchors are recorded in `smoke-world.expected.json`. They are
+an evaluation denominator, not automatically committed world truth.
+
 ## `三国演义.txt`
 
 - Title: `三国演义`

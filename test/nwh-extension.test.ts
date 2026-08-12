@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult } from "@earendil-works/pi-coding-agent";
+import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNwhExtension, splitCommandArguments } from "../src/agent/nwh-extension.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
@@ -21,6 +21,7 @@ async function fixture(onSessionShutdown?: () => Promise<void>) {
   const commands = new Map<string, { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> | void }>();
   const events = new Map<string, (...args: unknown[]) => unknown>();
   const registeredTools: string[] = [];
+  const registeredToolDefinitions = new Map<string, ToolDefinition>();
   const sentUserMessages: string[] = [];
   const pi = {
     registerCommand(name: string, command: { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> | void }) {
@@ -31,6 +32,7 @@ async function fixture(onSessionShutdown?: () => Promise<void>) {
     },
     registerTool(tool: { name: string }) {
       registeredTools.push(tool.name);
+      registeredToolDefinitions.set(tool.name, tool as ToolDefinition);
     },
     sendUserMessage(message: string) {
       sentUserMessages.push(message);
@@ -38,7 +40,7 @@ async function fixture(onSessionShutdown?: () => Promise<void>) {
   } as unknown as ExtensionAPI;
   const workspace = await LocalFileWorkspace.create(root);
   await createNwhExtension({ workspace, saveSession: true, mode: "assistant", onSessionShutdown })(pi);
-  return { commands, events, registeredTools, root, sentUserMessages };
+  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages };
 }
 
 function commandContext(notifications: string[], actions: { cleared: boolean; shutdown: boolean }): ExtensionCommandContext {
@@ -183,18 +185,155 @@ describe("NWH TUI extension", () => {
       { type: "input", text: novelPath, source: "interactive" } as InputEvent,
       ctx as unknown as ExtensionContext,
     );
-    await events.get("agent_end")?.(
-      {
-        type: "agent_end",
-        messages: [{ role: "assistant", content: [{ type: "text", text: "batch complete" }], stopReason: "stop" }],
-      },
-      ctx,
-    );
+    await events.get("agent_end")?.({
+      type: "agent_end",
+      messages: [
+        { role: "assistant", content: [{ type: "toolCall", id: "proposal-1", name: "propose_entity", arguments: { proposal_id: "entity-1" } }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "proposal-1", toolName: "propose_entity", content: [], isError: false },
+        { role: "assistant", content: [{ type: "toolCall", id: "finish-1", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["entity-1"], summary: "done" } }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "finish-1", toolName: "finish_compiler_batch", content: [], isError: false },
+        { role: "assistant", content: [{ type: "text", text: "batch complete" }], stopReason: "stop" },
+      ],
+    }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
     await commands.get("compile-next")?.handler("", ctx);
 
     expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);
     expect(sentUserMessages).toHaveLength(1);
     expect(sentUserMessages[0]).toContain("batch 2/2");
+  });
+
+  it("does not checkpoint a compiler batch when proposal tools fail", async () => {
+    const { commands, events, root, sentUserMessages } = await fixture();
+    const novelPath = path.join(root, "failed-novel.txt");
+    await fs.writeFile(
+      novelPath,
+      Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n"),
+      "utf8",
+    );
+    const notifications: string[] = [];
+    const actions = { cleared: false, shutdown: false };
+    const ctx = {
+      ...commandContext(notifications, actions),
+      mode: "tui",
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await events.get("input")?.(
+      { type: "input", text: novelPath, source: "interactive" } as InputEvent,
+      ctx as unknown as ExtensionContext,
+    );
+    await events.get("agent_end")?.({
+      type: "agent_end",
+      messages: [
+        { role: "assistant", content: [{ type: "toolCall", id: "proposal-failed", name: "propose_entity", arguments: { proposal_id: "entity-failed" } }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "proposal-failed", toolName: "propose_entity", content: [], isError: true },
+        { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+      ],
+    }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+    await commands.get("compile-next")?.handler("", ctx);
+
+    expect(notifications.some((message) => message.includes("not checkpointed") && message.includes("failed"))).toBe(true);
+    expect(sentUserMessages).toHaveLength(1);
+    expect(sentUserMessages[0]).toContain("batch 1/2");
+  });
+
+  it("waits through low-level retries and preserves unresolved failures until agent_settled", async () => {
+    const { commands, events, root, sentUserMessages } = await fixture();
+    const novelPath = path.join(root, "retry-novel.txt");
+    await fs.writeFile(
+      novelPath,
+      Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n"),
+      "utf8",
+    );
+    const notifications: string[] = [];
+    const actions = { cleared: false, shutdown: false };
+    const ctx = {
+      ...commandContext(notifications, actions),
+      mode: "tui",
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await events.get("input")?.(
+      { type: "input", text: novelPath, source: "interactive" } as InputEvent,
+      ctx as unknown as ExtensionContext,
+    );
+    await events.get("agent_end")?.({
+      type: "agent_end",
+      messages: [
+        { role: "assistant", content: [{ type: "toolCall", id: "abandoned", name: "propose_entity", arguments: { proposal_id: "entity-abandoned" } }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "abandoned", toolName: "propose_entity", content: [], isError: true },
+        { role: "assistant", content: [], stopReason: "error" },
+      ],
+    }, ctx);
+    await events.get("agent_end")?.({
+      type: "agent_end",
+      messages: [
+        { role: "assistant", content: [{ type: "toolCall", id: "recovered", name: "propose_entity", arguments: { proposal_id: "entity-recovered" } }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "recovered", toolName: "propose_entity", content: [], isError: false },
+        { role: "assistant", content: [{ type: "toolCall", id: "finished", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["entity-recovered"], summary: "done" } }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "finished", toolName: "finish_compiler_batch", content: [], isError: false },
+        { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+      ],
+    }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+    await commands.get("compile-next")?.handler("", ctx);
+
+    expect(notifications.some((message) => message.includes("not checkpointed") && message.includes("failed"))).toBe(true);
+    expect(sentUserMessages).toHaveLength(1);
+    expect(sentUserMessages[0]).toContain("batch 1/2");
+  });
+
+  it("resets the registered finish handshake before the next TUI compiler batch", async () => {
+    const { commands, events, registeredToolDefinitions, root } = await fixture();
+    const novelPath = path.join(root, "multi-batch-novel.txt");
+    await fs.writeFile(
+      novelPath,
+      Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n这里没有足够事实${index + 1}。\n`).join("\n"),
+      "utf8",
+    );
+    const notifications: string[] = [];
+    const actions = { cleared: false, shutdown: false };
+    const ctx = {
+      ...commandContext(notifications, actions),
+      mode: "tui",
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await events.get("input")?.(
+      { type: "input", text: novelPath, source: "interactive" } as InputEvent,
+      ctx as unknown as ExtensionContext,
+    );
+    const finish = registeredToolDefinitions.get("finish_compiler_batch")!;
+    const finishInput = { outcome: "no-artifacts", proposal_ids: [], summary: "No supported facts." };
+    await expect(finish.execute("finish-first", finishInput as never, undefined, undefined, ctx))
+      .resolves.toMatchObject({ details: { compilerBatchFinished: true, outcome: "no-artifacts" } });
+    await events.get("agent_end")?.({
+      type: "agent_end",
+      messages: [
+        { role: "assistant", content: [{ type: "toolCall", id: "finish-first", name: "finish_compiler_batch", arguments: finishInput }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "finish-first", toolName: "finish_compiler_batch", content: [], isError: false },
+        { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+      ],
+    }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+    await commands.get("compile-next")?.handler("", ctx);
+
+    await expect(finish.execute("finish-second", finishInput as never, undefined, undefined, ctx))
+      .resolves.toMatchObject({ details: { compilerBatchFinished: true, outcome: "no-artifacts" } });
   });
 
   it("flushes workspace settings before the TUI process exits", async () => {

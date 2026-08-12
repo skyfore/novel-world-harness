@@ -8,6 +8,7 @@ import {
   prepareNextSourceLoopTurn,
   prepareSourceLoopFromInput,
 } from "../src/compiler/source-loop.js";
+import { WorkspaceStore } from "../src/storage/workspace-store.js";
 
 const roots: string[] = [];
 
@@ -47,6 +48,10 @@ describe("novel source compiler loop", () => {
     expect(first.prompt).toContain("EvidenceRef");
     expect(first.prompt).toContain("人物1进入城池");
     await expect(fs.stat(path.join(root, ".novel-harness", "sources", `${first.source.id}.json`))).resolves.toBeDefined();
+    await expect((await WorkspaceStore.create(root)).readProject()).resolves.toMatchObject({
+      name: path.basename(root),
+      language: "zh-CN",
+    });
 
     await markSourceLoopBatchComplete(root, first.source.id, first.batch.id);
     const second = await prepareNextSourceLoopTurn(root, first.source.id);
@@ -65,6 +70,23 @@ describe("novel source compiler loop", () => {
   it("leaves ordinary conversation input unchanged", async () => {
     const { root } = await fixture();
     await expect(prepareSourceLoopFromInput(root, "请分析刘备的角色目标")).resolves.toBeNull();
+  });
+
+  it("uses configured project metadata when a pasted path initializes local state", async () => {
+    const { root, novel } = await fixture();
+    await fs.writeFile(
+      path.join(root, "novel-harness.yaml"),
+      "version: 1\nproject:\n  name: configured-world\n  language: en\n",
+      "utf8",
+    );
+
+    await prepareSourceLoopFromInput(root, `'${novel}'`);
+
+    await expect((await WorkspaceStore.create(root)).readProject()).resolves.toMatchObject({
+      id: "configured-world",
+      name: "configured-world",
+      language: "en",
+    });
   });
 
   it("does not turn a standalone source-code attachment into a novel compiler loop", async () => {

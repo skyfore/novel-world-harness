@@ -13,6 +13,7 @@ import {
   type Entity,
   type EntityId,
   type EventProposal,
+  type KnowledgeDelta,
   type ObjectHash,
   type StateDelta,
   type ValidationIssue,
@@ -164,14 +165,33 @@ export class WorldEngine {
     const commit = await this.objects.getCommit(commitId);
     return this.contextForSnapshot(commit.canonicalSnapshotHash);
   }
-  async createBranch(branchId: BranchId, name: string, initialDelta: StateDelta = { version: 1, operations: [] }): Promise<CommitId> {
+  async createBranch(
+    branchId: BranchId,
+    name: string,
+    initialDelta: StateDelta = { version: 1, operations: [] },
+    initialKnowledge?: KnowledgeDelta,
+  ): Promise<CommitId> {
     stateDeltaSchema.parse(initialDelta);
+    const knowledge = initialKnowledge ? knowledgeDeltaSchema.parse(initialKnowledge) : undefined;
+    if (knowledge) validateKnowledgeDeltaForContext(knowledge, this.context);
     const initialState = applyStateDelta(emptyWorldState("genesis", 0), initialDelta, this.context.stateSchema, this.context.entities, this.context.rules);
     const invariantErrors = validateEngineInvariants(initialState, this.context.stateSchema, this.context.entities, this.context.rules);
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
     const deltaHash = await this.objects.putDelta(initialDelta);
-    const eventId = contentHash({ kind: "genesis", branchId, deltaHash });
-    const event: CommittedEvent = { version: 1, eventId, branchId, logicalTime: { step: 0 }, title: "Genesis", participants: touchedEntities(initialDelta), deltaHash, evidence: [], causalParents: [] };
+    const knowledgeDeltaHash = knowledge ? await this.objects.putKnowledgeDelta(knowledge) : undefined;
+    const eventId = contentHash({ kind: "genesis", branchId, deltaHash, knowledgeDeltaHash });
+    const event: CommittedEvent = {
+      version: 1,
+      eventId,
+      branchId,
+      logicalTime: { step: 0 },
+      title: "Genesis",
+      participants: [...new Set([...touchedEntities(initialDelta), ...touchedKnowledgeEntities(knowledge)])].sort(),
+      deltaHash,
+      ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
+      evidence: [],
+      causalParents: [],
+    };
     const eventHash = await this.objects.putEvent(event);
     const commitHash = await this.objects.putCommit({ version: 1, branchId, logicalTime: { step: 0 }, eventHashes: [eventHash], canonicalSnapshotHash: this.context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
     await this.branches.create({ id: branchId, name, headCommitId: commitHash });
@@ -220,6 +240,27 @@ export class WorldEngine {
     this.contextCache.set(snapshotHash, loaded);
     return loaded;
   }
+}
+
+function validateKnowledgeDeltaForContext(knowledge: KnowledgeDelta, context: WorldModelContext): void {
+  for (const operation of knowledge.operations) {
+    const actor = context.entities.get(operation.actorId);
+    if (!actor || actor.kind !== "character") throw new Error(`Initial knowledge actor ${operation.actorId} is not a character`);
+    if (operation.op === "learn") {
+      if (context.claims && !context.claims.has(operation.claimId)) throw new Error(`Initial knowledge references unknown claim ${operation.claimId}`);
+      if (operation.sourceActorId) {
+        const source = context.entities.get(operation.sourceActorId);
+        if (!source || source.kind !== "character") throw new Error(`Initial knowledge source ${operation.sourceActorId} is not a character`);
+      }
+    }
+  }
+}
+
+function touchedKnowledgeEntities(knowledge?: KnowledgeDelta): EntityId[] {
+  if (!knowledge) return [];
+  return knowledge.operations.flatMap((operation) => operation.op === "learn" && operation.sourceActorId
+    ? [operation.actorId, operation.sourceActorId]
+    : [operation.actorId]);
 }
 
 function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {

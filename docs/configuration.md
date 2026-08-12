@@ -3,8 +3,8 @@
 The interactive TUI can start without a configuration file. Defaults are:
 
 - workspace: current directory;
-- Pi provider/model: `anthropic/claude-sonnet-5`;
-- authentication: Pi `/login` or the optional `ANTHROPIC_API_KEY` variable;
+- Pi provider/model: the workspace's saved authenticated selection, otherwise Pi's first available authenticated model;
+- authentication: Pi `/login`, a Pi-managed credential, or an optional profile environment variable;
 - local state and sessions: `.novel-harness/`.
 
 The TUI can open without credentials. Inside it, use `/login` to authenticate a
@@ -15,7 +15,7 @@ overrides the saved selection for that invocation. Pi credentials are stored in
 `.novel-harness/pi-auth.json`; both files are private harness state and are excluded
 from normal model file discovery and Git.
 
-`init`, `doctor`, `ingest`, and `status` use `novel-harness.yaml`. Supply a different path with `--config`. `${NAME}` references are expanded before YAML validation; a missing referenced variable is an error.
+`nwh init` writes only a provider-neutral project section; `llm` is optional. `init`, `doctor`, `ingest`, and `status` use `novel-harness.yaml` when present. Supply a different path with `--config`. `${NAME}` references are expanded before YAML validation; a missing referenced variable is an error.
 
 ## Pi model profiles
 
@@ -51,7 +51,7 @@ The current terminal harness consumes three role routes:
 
 - `controller`: guided `nwh compile` sessions;
 - `extractor`: bounded `compile-source` batches;
-- `narrator`: ordinary `nwh` / `nwh play` sessions.
+- `narrator`: ordinary `nwh` / `nwh play` sessions and the restricted `play-world` action translator.
 
 Unknown routes are allowed for future adapters, but they have no effect until code asks for that role.
 
@@ -88,6 +88,7 @@ There is no database configuration. Current state is stored locally:
 ├── sources/<content-id>.json
 ├── segments/<source-id>.json
 ├── sessions/<pi-session>.jsonl
+├── live-tests/token-budget-v1.json
 ├── instructions.md
 └── world/v1/
     ├── compiler/batches/<source-id>.json
@@ -95,6 +96,7 @@ There is no database configuration. Current state is stored locally:
     ├── canon/
     ├── objects/
     ├── branches/
+    ├── play/active.json
     ├── frontier/
     └── snapshots/
 ```

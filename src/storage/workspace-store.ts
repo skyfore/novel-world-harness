@@ -25,6 +25,13 @@ export type SourceDocument = {
   updatedAt: string;
 };
 
+export function defaultProjectForRoot(root: string): HarnessConfig["project"] {
+  return {
+    name: path.basename(path.resolve(root)) || "novel-world",
+    language: "zh-CN",
+  };
+}
+
 function slugify(input: string): string {
   return (
     input
@@ -78,7 +85,7 @@ export class WorkspaceStore {
     return new WorkspaceStore(realRoot);
   }
 
-  async ensureProject(project: HarnessConfig["project"]): Promise<StoredProject> {
+  async ensureProject(project: HarnessConfig["project"] = defaultProjectForRoot(this.root)): Promise<StoredProject> {
     const filePath = path.join(this.stateDir, "project.json");
     const existing = await readJson<StoredProject>(filePath);
     const now = new Date().toISOString();

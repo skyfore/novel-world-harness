@@ -2,12 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { canonicalJson } from "./canonical.js";
-import { evidenceRefSchema, stateDeltaSchema } from "./model.js";
+import { evidenceRefSchema, knowledgeDeltaSchema, stateDeltaSchema } from "./model.js";
 
 export const initialWorldSchema = z
   .object({
     version: z.literal(1),
     delta: stateDeltaSchema,
+    knowledge: knowledgeDeltaSchema.optional(),
     evidence: z.array(evidenceRefSchema).min(1),
   })
   .strict();
@@ -42,4 +43,3 @@ export class InitialWorldStore {
     }
   }
 }
-

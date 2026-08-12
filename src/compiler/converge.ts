@@ -26,12 +26,12 @@ export async function convergeWorldProposals(workspaceRoot: string): Promise<Wor
   }
 
   const remaining = await proposals.list("pending");
+  const blockedCanonicalIds = new Set(canonical.blocked.map((item) => item.id));
   return {
     canonical,
     possibilities: { accepted, blocked },
     staging: remaining
-      .filter((item) => item.kind !== "possibility")
+      .filter((item) => item.kind !== "possibility" && !blockedCanonicalIds.has(item.id))
       .map((item) => ({ id: item.id, kind: item.kind })),
   };
 }
-

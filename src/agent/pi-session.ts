@@ -18,18 +18,18 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { LlmProfile } from "../config/schema.js";
+import { compilerBatchOutcomeFromMessages, type CompilerBatchOutcome } from "../compiler/batch-outcome.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { createNwhExtension, type NwhInteractionMode } from "./nwh-extension.js";
+import {
+  DEFAULT_LIVE_MAX_OUTPUT_TOKENS,
+  DEFAULT_LIVE_MAX_REQUESTS,
+  LIVE_TOKEN_BUDGET_HARD_LIMIT,
+  LiveTokenLedger,
+  wrapLiveStreamFunction,
+} from "./live-token-ledger.js";
 
 export { expandFileMentions } from "./file-mentions.js";
-
-const DEFAULT_PROFILE: LlmProfile = {
-  provider: "anthropic",
-  model: "claude-sonnet-5",
-  apiKeyEnv: "ANTHROPIC_API_KEY",
-  thinkingLevel: "medium",
-  maxTokens: 8_192,
-};
 
 export type PiAgentSessionOptions = {
   workspace: LocalFileWorkspace;
@@ -41,13 +41,30 @@ export type PiAgentSessionOptions = {
   onTool?: (name: string, input: unknown) => void;
   additionalTools?: ToolDefinition[];
   systemPromptAppendix?: string;
+  systemPromptOverride?: string;
+  includeProjectInstructions?: boolean;
+  includeLocalTools?: boolean;
+  includeNwhExtension?: boolean;
+  resetCompilerProposalTools?: () => void;
+  liveTest?: PiLiveTestOptions;
   interactionMode?: NwhInteractionMode;
+};
+
+export type PiLiveTestOptions = {
+  ledgerPath: string;
+  campaignId?: string;
+  tokenBudget?: number;
+  maxOutputTokens?: number;
+  maxRequests?: number;
+  requestTimeoutMs?: number;
 };
 
 export type PiInteractiveOptions = {
   tuiMode?: TuiMode;
   initialMessage?: string;
 };
+
+export type PiPromptReport = CompilerBatchOutcome & { text: string };
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: undefined };
@@ -108,8 +125,16 @@ async function loadProjectInstructions(workspace: LocalFileWorkspace): Promise<s
   return instructions.join("\n\n");
 }
 
-async function buildSystemPrompt(workspace: LocalFileWorkspace, appendix?: string): Promise<string> {
-  const projectInstructions = await loadProjectInstructions(workspace);
+async function buildSystemPrompt(
+  workspace: LocalFileWorkspace,
+  appendix?: string,
+  override?: string,
+  includeProjectInstructions = true,
+): Promise<string> {
+  const projectInstructions = includeProjectInstructions ? await loadProjectInstructions(workspace) : "";
+  if (override) {
+    return `${override.trim()}${projectInstructions ? `\n\nProject instructions:\n${projectInstructions}` : ""}${appendix ? `\n\nAdditional mode instructions:\n${appendix}` : ""}`;
+  }
   return `You are Novel World Harness, a local-first terminal agent whose primary subject is the world expressed by the user's novel evidence. You understand and compile novels into executable world models.
 
 When the user supplies a novel or an active novel source is known, immediately work on that novel-world task. Follow an evidence loop: inspect structure, read a bounded source slice, derive stable entity/claim/event/rule/knowledge candidates, record typed pending proposals when proposal tools are available, report contradictions and uncertainty, then leave a clear frontier for the next batch. Do not stop after identifying the book, explain NWH's architecture instead of doing the work, or ask what to do when the source itself is the request to begin compilation.
@@ -123,8 +148,12 @@ The invariant is proposal -> validate -> commit -> render. Compiler output and n
 Workspace root: ${workspace.root}${projectInstructions ? `\n\nProject instructions:\n${projectInstructions}` : ""}${appendix ? `\n\nAdditional mode instructions:\n${appendix}` : ""}`;
 }
 
-async function createModelRuntime(profile: LlmProfile, stateDir: string): Promise<{ runtime: ModelRuntime; model: NonNullable<ReturnType<ModelRuntime["getModel"]>> }> {
+async function createModelRuntime(profile: LlmProfile | undefined, stateDir: string): Promise<{
+  runtime: ModelRuntime;
+  model?: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
+}> {
   const runtime = await ModelRuntime.create({ authPath: path.join(stateDir, "pi-auth.json"), modelsPath: null, refreshOnCreate: false });
+  if (!profile) return { runtime };
   let model = runtime.getModel(profile.provider, profile.model);
   if (profile.baseUrl || !model) {
     const api = profile.apiProtocol ?? model?.api;
@@ -152,7 +181,10 @@ async function createModelRuntime(profile: LlmProfile, stateDir: string): Promis
     const key = process.env[profile.apiKeyEnv];
     if (key) await runtime.setRuntimeApiKey(profile.provider, key);
   }
-  return { runtime, model };
+  const cappedModel = profile.maxTokens && profile.maxTokens < model.maxTokens
+    ? { ...model, maxTokens: profile.maxTokens }
+    : model;
+  return { runtime, model: cappedModel };
 }
 
 async function flushSettings(settingsManager: SettingsManager): Promise<void> {
@@ -163,27 +195,47 @@ async function flushSettings(settingsManager: SettingsManager): Promise<void> {
   }
 }
 
+function resolveModelOverride(
+  runtime: ModelRuntime,
+  value: string,
+  savedProvider?: string,
+): NonNullable<ReturnType<ModelRuntime["getModel"]>> {
+  const separator = value.indexOf("/");
+  if (separator > 0) {
+    const provider = value.slice(0, separator);
+    const modelId = value.slice(separator + 1);
+    const model = runtime.getModel(provider, modelId);
+    if (!model) throw new Error(`Pi could not resolve model ${value}. Use provider/model.`);
+    return model;
+  }
+  const saved = savedProvider ? runtime.getModel(savedProvider, value) : undefined;
+  if (saved) return saved;
+  const candidates = runtime.getAvailableSnapshot().filter((model) => model.id === value);
+  if (candidates.length === 1) return candidates[0]!;
+  if (candidates.length > 1) {
+    throw new Error(`Model '${value}' is available from multiple providers; use provider/model.`);
+  }
+  throw new Error(`Pi could not resolve authenticated model '${value}'. Use provider/model or /login first.`);
+}
+
 export class PiAgentSession {
   private runtimeHost!: AgentSessionRuntime;
-  private readonly profile: LlmProfile;
-  private readonly hasConfiguredModel: boolean;
+  private readonly profile?: LlmProfile;
   private readonly stateDir: string;
   private readonly saveSession: boolean;
   private readonly onText?: (delta: string) => void;
   private readonly onTool?: (name: string, input: unknown) => void;
   private readonly runtime: ModelRuntime;
-  private readonly resolvedModel: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
+  private readonly resolvedModel?: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
   private activeText = "";
   private unsubscribe?: () => void;
 
   private constructor(
     private readonly options: PiAgentSessionOptions,
     runtime: ModelRuntime,
-    model: NonNullable<ReturnType<ModelRuntime["getModel"]>>,
-    hasConfiguredModel: boolean,
+    model: NonNullable<ReturnType<ModelRuntime["getModel"]>> | undefined,
   ) {
-    this.profile = options.profile ?? DEFAULT_PROFILE;
-    this.hasConfiguredModel = hasConfiguredModel;
+    this.profile = options.profile;
     this.stateDir = path.join(options.workspace.root, ".novel-harness");
     this.saveSession = options.saveSession ?? true;
     this.onText = options.onText;
@@ -193,13 +245,11 @@ export class PiAgentSession {
   }
 
   static async create(options: PiAgentSessionOptions): Promise<PiAgentSession> {
-    const hasConfiguredModel = options.model !== undefined || options.profile !== undefined;
-    const profile = { ...(options.profile ?? DEFAULT_PROFILE) };
-    if (options.model) profile.model = options.model;
+    const profile = options.profile ? { ...options.profile } : undefined;
     const stateDir = path.join(options.workspace.root, ".novel-harness");
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
     const { runtime, model } = await createModelRuntime(profile, stateDir);
-    const wrapper = new PiAgentSession({ ...options, profile }, runtime, model, hasConfiguredModel);
+    const wrapper = new PiAgentSession({ ...options, ...(profile ? { profile } : {}) }, runtime, model);
     await wrapper.initialize(Boolean(options.continueSession));
     return wrapper;
   }
@@ -207,7 +257,7 @@ export class PiAgentSession {
   get id(): string { return this.session.sessionId; }
   get model(): string {
     const model = this.session.model ?? this.resolvedModel;
-    return `${model.provider}/${model.id}`;
+    return model ? `${model.provider}/${model.id}` : "unresolved";
   }
   get messageCount(): number { return this.session.messages.length; }
   get sessionFile(): string | undefined { return this.session.sessionFile; }
@@ -216,13 +266,19 @@ export class PiAgentSession {
     this.bindSessionEvents();
   }
   async prompt(input: string): Promise<string> {
+    return (await this.promptWithReport(input)).text;
+  }
+  async promptWithReport(input: string): Promise<PiPromptReport> {
     this.activeText = "";
+    const messageCountBeforePrompt = this.session.messages.length;
     await this.session.prompt(input, { source: "interactive" });
-    const latest = [...this.session.messages].reverse().find((message) => message.role === "assistant");
+    const promptMessages = this.session.messages.slice(messageCountBeforePrompt);
+    const latest = [...promptMessages].reverse().find((message) => message.role === "assistant");
     if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) throw new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
-    if (this.activeText) return this.activeText;
-    if (latest?.role !== "assistant") return "";
-    return latest.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("");
+    const text = this.activeText || (latest?.role === "assistant"
+      ? latest.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("")
+      : "");
+    return { text, ...compilerBatchOutcomeFromMessages(promptMessages) };
   }
   async runInteractive(options: PiInteractiveOptions = {}): Promise<void> {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -262,12 +318,29 @@ export class PiAgentSession {
         tuiMode: "regular",
         enableInstallTelemetry: false,
         enableAnalytics: false,
+        ...(this.options.liveTest ? {
+          retry: {
+            enabled: false,
+            maxRetries: 0,
+            provider: {
+              maxRetries: 0,
+              timeoutMs: this.options.liveTest.requestTimeoutMs ?? 120_000,
+            },
+          },
+        } : {}),
       });
       const savedProvider = settingsManager.getDefaultProvider();
       const savedModelId = settingsManager.getDefaultModel();
-      const savedModel = !this.hasConfiguredModel && savedProvider && savedModelId
+      const savedModel = !this.options.profile && savedProvider && savedModelId
         ? this.runtime.getModel(savedProvider, savedModelId)
         : undefined;
+      const overrideModel = this.options.model
+        ? resolveModelOverride(this.runtime, this.options.model, this.profile?.provider ?? savedProvider)
+        : undefined;
+      const selectedModelValue = overrideModel ?? savedModel ?? this.resolvedModel;
+      const selectedModel = selectedModelValue && this.profile?.maxTokens && this.profile.maxTokens < selectedModelValue.maxTokens
+        ? { ...selectedModelValue, maxTokens: this.profile.maxTokens }
+        : selectedModelValue;
       const services = await createAgentSessionServices({
         cwd,
         agentDir,
@@ -279,8 +352,13 @@ export class PiAgentSession {
           noPromptTemplates: true,
           noThemes: true,
           noContextFiles: true,
-          systemPrompt: await buildSystemPrompt(this.options.workspace, this.options.systemPromptAppendix),
-          extensionFactories: [{
+          systemPrompt: await buildSystemPrompt(
+            this.options.workspace,
+            this.options.systemPromptAppendix,
+            this.options.systemPromptOverride,
+            this.options.includeProjectInstructions ?? true,
+          ),
+          extensionFactories: this.options.includeNwhExtension === false ? [] : [{
             name: "nwh",
             hidden: true,
             factory: createNwhExtension({
@@ -288,20 +366,43 @@ export class PiAgentSession {
               saveSession: this.saveSession,
               mode: this.options.interactionMode ?? "assistant",
               onSessionShutdown: () => flushSettings(settingsManager),
+              ...(this.options.resetCompilerProposalTools
+                ? { resetCompilerProposalTools: this.options.resetCompilerProposalTools }
+                : {}),
             }),
           }],
         },
       });
-      return {
-        ...(await createAgentSessionFromServices({
+      const created = await createAgentSessionFromServices({
           services,
           sessionManager: nextSessionManager,
           sessionStartEvent,
-          model: savedModel ?? this.resolvedModel,
-          thinkingLevel: this.hasConfiguredModel ? this.profile.thinkingLevel : undefined,
+          ...(selectedModel ? { model: selectedModel } : {}),
+          thinkingLevel: this.profile ? this.profile.thinkingLevel : undefined,
           noTools: "builtin",
-          customTools: [...localTools(this.options.workspace), ...(this.options.additionalTools ?? [])],
-        })),
+          customTools: [
+            ...(this.options.includeLocalTools === false ? [] : localTools(this.options.workspace)),
+            ...(this.options.additionalTools ?? []),
+          ],
+        });
+      if (this.options.liveTest) {
+        const ledger = await LiveTokenLedger.open({
+          filePath: this.options.liveTest.ledgerPath,
+          campaignId: this.options.liveTest.campaignId ?? "nwh-white-box",
+          limit: this.options.liveTest.tokenBudget ?? LIVE_TOKEN_BUDGET_HARD_LIMIT,
+        });
+        created.session.agent.streamFunction = wrapLiveStreamFunction(
+          created.session.agent.streamFunction,
+          {
+            ledger,
+            runId: created.session.sessionId,
+            maxOutputTokens: this.options.liveTest.maxOutputTokens ?? DEFAULT_LIVE_MAX_OUTPUT_TOKENS,
+            maxRequests: this.options.liveTest.maxRequests ?? DEFAULT_LIVE_MAX_REQUESTS,
+          },
+        ) as typeof created.session.agent.streamFunction;
+      }
+      return {
+        ...created,
         services,
         diagnostics: services.diagnostics,
       };

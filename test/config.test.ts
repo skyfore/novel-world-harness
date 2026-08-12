@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { profileForRole } from "../src/config/load.js";
 import { configSchema, llmProfileSchema } from "../src/config/schema.js";
 
 const baseConfig = {
@@ -37,6 +38,19 @@ describe("llmProfileSchema", () => {
 });
 
 describe("configSchema", () => {
+  it("allows a provider-neutral project config", () => {
+    const config = configSchema.parse({
+      version: 1,
+      project: { name: "fresh-world" },
+    });
+
+    expect(config).toEqual({
+      version: 1,
+      project: { name: "fresh-world", language: "zh-CN" },
+    });
+    expect(profileForRole(config, "narrator")).toEqual({ name: undefined, profile: undefined });
+  });
+
   it("rejects the removed external database block", () => {
     expect(() => configSchema.parse({
       ...baseConfig,

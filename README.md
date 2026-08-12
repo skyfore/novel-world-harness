@@ -6,7 +6,7 @@ The target is not a novel RAG chatbot. Source text is compiled into a canonical 
 
 ## Current status
 
-The repository contains a tested engine vertical slice, not yet a finished role-playing product.
+The repository contains a tested, constrained end-to-end novel-player vertical slice. It is not yet evidence that arbitrary full novels compile reliably or that the runtime is a finished role-playing product.
 
 Implemented:
 
@@ -14,18 +14,20 @@ Implemented:
 - local state under `.novel-harness/`, with no PostgreSQL, vector database, or RAG service;
 - deterministic source registration, hashing, segmentation, and resumable compiler batches;
 - Pi compiler sessions that can only create typed pending proposals;
+- an explicit compiler-batch finish handshake, so failed or partial tool runs remain retryable instead of being checkpointed;
 - cryptographic evidence verification before canonical or possibility acceptance;
 - logical canonical IDs backed by immutable content-addressed revisions;
 - event-sourced branch history pinned to immutable canonical snapshots, deterministic state projection, temporal rules, knowledge isolation, snapshots, and integrity checks;
 - canonical and non-canonical possibilities, counterfactual branches, checkpoint replay, and deterministic actor-goal policies.
+- a derived `prepare` workflow that guides ingest, bounded compilation, explicit review, audit, and branch creation without automatically accepting model output;
+- `play-world`, which selects a committed character and translates natural-language actions through an actor-scoped, capture-only model tool before deterministic scope, knowledge, engine, and commit gates;
+- a persistent real-provider test ledger with a non-increasable 100,000,000-token hard ceiling, per-session request caps, and conservative crash accounting.
 
-Not implemented as an end-user loop yet:
+Still intentionally limited:
 
-- one command that takes a novel from ingest through reviewed world creation;
-- natural-language player actions translated into validated event proposals;
 - a Pi/LLM actor reasoner connected to the CLI runtime;
 - model-backed literary narration connected to `world render`;
-- an interactive “select a character and inhabit the world” session;
+- player actions can change the selected actor and currently owned artifacts, but broader physical/social simulation is not yet modeled;
 - corpus-backed proof that model extraction is reliable across full novels and genres.
 
 The governing invariant is:
@@ -120,23 +122,26 @@ Selected excerpts are sent to the configured model provider. “Local-first” d
 
 Pi may also perform startup metadata checks or obtain its optional `fd` autocomplete helper. Set `PI_OFFLINE=1` to suppress those startup operations; model prompts still require the configured provider unless that provider is local.
 
-## Compile a source
+## Prepare and enter a world
 
 ```bash
 nwh init ./my-novel
 cd ./my-novel
-export ANTHROPIC_API_KEY=your_key
-
 nwh doctor
-nwh ingest ./books/novel.txt
-nwh compile-source
+nwh prepare ./books/novel.txt
 nwh proposals list
-nwh proposals accept-all
+nwh proposals show <proposal-id>
+nwh proposals accept <kind> <proposal-id>   # or: nwh proposals reject <proposal-id>
 nwh audit
+nwh prepare --source <source-id>
 nwh status
+nwh play-world --list-characters
+nwh play-world --character <id-or-name> --action "我前往藏书楼。"
 ```
 
-`ingest` stores a content-addressed source manifest and deterministic evidence segments. It does not copy the novel into a database. `compile-source` sends bounded evidence batches to the selected model, and model tools can only write pending typed proposals. `accept-all` revalidates structure and source evidence before moving valid canonical and possibility proposals into revisioned stores.
+`init` is provider-neutral. Use the TUI's `/login` and `/model`, an existing workspace-local Pi authorization, or an explicit optional `llm` profile. `prepare` derives the next safe stage from durable artifacts, runs at most one unfinished compiler batch by default, and always prints `Next:`. It stops at the review barrier and never accepts model output. Once every proposal is explicitly accepted or rejected and the audit is clean, rerunning `prepare` creates the canonical-initialized branch exactly once.
+
+`ingest` and `compile-source` remain available as lower-level commands. Ingest stores a content-addressed source manifest and deterministic evidence segments; it does not copy the novel into a database. Compiler tools can only write pending typed proposals. `proposals accept-all` remains an automation helper that revalidates dependencies and evidence, but individual `show` plus `accept`/`reject` is the recommended review path.
 
 For guided compiler work, `nwh compile` opens the same TUI in compiler mode and starts a small evidence-backed proposal batch. `nwh compile "<instruction>"` preserves the one-shot form.
 
@@ -151,12 +156,14 @@ nwh world history --branch main
 nwh world render --branch main
 ```
 
-Player actions currently use an explicit `EventProposal` JSON file:
+The low-level runtime also accepts an explicit `EventProposal` JSON file:
 
 ```bash
 nwh world validate ./player-action.json --branch main
 nwh world move --branch main --player ./player-action.json
 ```
+
+The safer natural-language path is `play-world`. Every action uses a fresh Pi session with no novel-file tools, project instructions, compiler extension, future canon, or branch-write capability. The model can only capture one candidate in memory; the host supplies branch/head/source/actor identity and commits only after deterministic validation. Rejections print concrete issue codes and leave the branch head unchanged. Omitting `--action` in a terminal opens a repeatable action prompt, and the active branch/character is persisted locally.
 
 Branch and integrity workflows:
 
@@ -170,12 +177,25 @@ nwh world fsck
 
 `world diff` reports state, committed-history, and actor-knowledge divergence. `world replay` always forks a new output branch (or generates one when `--output-branch` is omitted), so replay success or failure never advances the source branch.
 
-Actor inspection is available, but it is not yet an interactive embodiment loop:
+Actor inspection remains available alongside the embodiment loop:
 
 ```bash
 nwh world knowledge hero --branch main
 nwh world actor hero --branch main
 ```
+
+## Metered real-provider testing
+
+Unit tests never call a model. Real white-box runs require explicit opt-in and are protected by a persistent ledger:
+
+```bash
+nwh --live-test --live-token-budget 100000000 prepare ./books/novel.txt
+nwh live-budget status
+```
+
+Before each provider call NWH durably reserves the model context ceiling. Successful calls reconcile against reported input, output, cache-read, and cache-write usage; errors, aborts, missing usage, or crashes remain charged conservatively. The hard ceiling cannot be configured above 100,000,000 tokens. Optional `--live-ledger`, `--live-max-requests`, `--live-max-output-tokens`, and `--live-request-timeout-ms` flags further constrain a campaign.
+
+If a process dies while holding the ledger lock, inspect it with `nwh live-budget lock`. Only after verifying the returned owner may `nwh live-budget repair-lock --owner <exact-id>` remove it; active, remote-host, malformed, or changed locks are refused.
 
 ## Architecture
 

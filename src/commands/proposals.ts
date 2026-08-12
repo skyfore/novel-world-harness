@@ -20,6 +20,11 @@ export async function listProposalsCommand(root: string, status: ProposalStatus 
   for (const proposal of proposals) stdout.write(`${proposal.id}\t${proposal.kind}\t${proposal.worker}\t${proposal.createdAt}\n`);
 }
 
+export async function showProposalCommand(root: string, id: string, status: ProposalStatus = "pending"): Promise<void> {
+  const proposal = await new ProposalStore(root).readEnvelope(status, id);
+  stdout.write(`${JSON.stringify(proposal, null, 2)}\n`);
+}
+
 export async function acceptProposalCommand(root: string, kind: string, id: string): Promise<void> {
   if (kind === "possibility") {
     const validation = await new PossibilityCommitService(root).accept(id);

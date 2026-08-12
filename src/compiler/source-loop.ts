@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { CompilerBatchStore, prepareCompilerBatches, type CompilerBatch } from "./batches.js";
+import { loadOptionalConfig } from "../config/load.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
@@ -58,6 +59,8 @@ export async function prepareSourceLoopFromInput(
   const workspace = await LocalFileWorkspace.create(workspaceRoot);
   await workspace.readFile({ path: absolute, startLine: 1, endLine: 1 });
   const store = await WorkspaceStore.create(workspaceRoot);
+  const config = await loadOptionalConfig(path.join(workspaceRoot, "novel-harness.yaml"));
+  await store.ensureProject(config?.project);
   const source = await store.registerSource(absolute);
   return prepareSourceLoopForSource(workspaceRoot, source);
 }

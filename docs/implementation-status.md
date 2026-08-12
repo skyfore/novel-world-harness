@@ -6,21 +6,23 @@ This document describes behavior verified from the code on `agent/local-first-no
 
 ## Overall assessment
 
-The branch implements a credible executable-world engine vertical slice and a separate local-first Pi compiler harness. It does **not** yet implement the promised end-user experience of providing a novel, selecting a character, and playing through an evaluated world in one coherent session.
+The branch now implements a constrained end-to-end path from a local novel through reviewed compilation to selecting a character and committing natural-language actions. The authority boundaries are connected; extraction quality across arbitrary novels and a rich literary runtime are not yet established.
 
 | Area | Status | What is actually usable |
 | --- | --- | --- |
 | Local file assistant | Implemented | Claude Code-style TUI, streaming/tool rendering, local lexical discovery, bounded reads, Pi sessions; model tools are read-only |
 | Source ingest | Implemented | Content hash, source manifest, deterministic evidence segments |
-| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals |
+| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals and require an explicit finish handshake |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation; dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
 | Canon replay and branching | Implemented vertical slice | Predicate checkpoints, fork, diff, divergent possibility eligibility |
 | Actor behavior | Partial | Deterministic goal actions are connected; model reasoner exists only as an adapter/API |
 | Narrative | Partial | Immutable narrative frames and deterministic text exist; no Pi narration adapter is connected |
-| Player experience | Not implemented | Player actions require hand-authored `EventProposal` JSON |
-| Character embodiment | Not implemented | No interactive select-character / perceive / decide / move loop |
+| Preparation workflow | Implemented vertical slice | Derived ingest/compile/review/audit/branch stages; one batch per invocation; never auto-accepts proposals |
+| Player experience | Implemented vertical slice | Restricted Pi translation of natural language into a host-owned validated player event |
+| Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, durable branch and resume selection |
+| Live-test budget | Implemented | Persistent pre-request reservation and usage reconciliation under a 100M hard ceiling |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
 
 ## Verified architecture
@@ -29,7 +31,7 @@ The branch implements a credible executable-world engine vertical slice and a se
 
 - Source files remain in the workspace and are registered by path, size, and SHA-256.
 - Segments preserve source line and byte ranges.
-- `compile-source` processes bounded batches and checkpoints only successful batches.
+- `compile-source` processes bounded batches and checkpoints only after successful proposal calls, a clean model stop, and `finish_compiler_batch`.
 - Pi compiler sessions expose read-only file tools plus narrow `propose_*` tools.
 - Proposals remain pending until explicit acceptance.
 - Acceptance verifies that the registered source still has its ingest hash and that evidence byte/line ranges and quote hashes match.
@@ -56,8 +58,9 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 
 ```text
 nwh ingest <novel>
+nwh prepare [novel]
 nwh compile-source
-nwh proposals list|accept|accept-all|reject
+nwh proposals list|show|accept|accept-all|reject
 nwh audit
 nwh status
 
@@ -66,11 +69,13 @@ nwh world validate|move
 nwh world knowledge|actor
 nwh world fork|diff|replay|render
 nwh world snapshot|fsck
+nwh play-world --list-characters|--character|--action
+nwh live-budget status
 ```
 
 The ordinary `nwh` / `nwh play` session remains intentionally read-only and does not mutate the world.
 
-Its terminal shell is now a real Pi-backed TUI rather than a `readline` loop: regular/fullscreen rendering, transcript history, streaming state, tool rows, multiline editing, command completion, queue/interrupt shortcuts, status/footer data, and session replacement are connected. This completes the generic assistant interaction layer; it does not by itself implement character embodiment or natural-language world moves.
+Its terminal shell is a real Pi-backed TUI rather than a `readline` loop: regular/fullscreen rendering, transcript history, streaming state, tool rows, multiline editing, command completion, queue/interrupt shortcuts, status/footer data, and session replacement are connected. Character embodiment intentionally uses a separate restricted session boundary so a player action cannot inherit compiler omniscience or source access.
 
 ## Removed obsolete scaffold
 
@@ -80,19 +85,19 @@ Readiness is no longer inferred from artifact counts or arbitrary percentages. `
 
 ## Remaining product gaps
 
-### 1. No orchestration from novel to runnable world
+### 1. Preparation still requires human semantic review
 
-The user must manually run ingest, compile, inspect/accept proposals, audit, and create a branch. Failures are not collected into a guided repair loop. There is no project-level state machine that says which prerequisite is missing and performs the next safe step.
+`nwh prepare` derives and advances the safe state machine, but intentionally stops whenever pending proposals require semantic judgment. It points to `proposals show`; the user must accept or reject candidates. Repair suggestions are still coarse rather than proposal-specific.
 
-### 2. No natural-language player action boundary
+### 2. Player action semantics are deliberately narrow
 
-`world move --player` accepts a typed JSON proposal. A real role-playing session needs a model adapter that receives the player's words plus the actor-scoped view and produces a pending `EventProposal`, followed by deterministic validation and explicit handling of rejected actions.
+`play-world` connects natural language to deterministic commitment, but the current capability closure allows changes only to the selected actor and artifacts the actor owns. Explicitly named entities may be referenced but other characters cannot be directly rewritten. Rich physical affordances, dialogue consequences, combat, and social mechanics need dedicated deterministic rules rather than broader model authority.
 
 ### 3. Model actor policy is not connected to the product CLI
 
 `modelActorProposalSource` correctly limits its input to `ActorWorldView + CharacterGoal + CharacterModel`, but no Pi-backed `ActorReasoner` is constructed by `world move`. The CLI uses deterministic pre-authored candidate actions only.
 
-### 4. Rendering is a debug renderer
+### 4. Rendering is still a debug renderer
 
 `NarrativeRenderer` enforces the correct authority boundary, but its default adapter only lists committed event titles. A model-backed renderer must be added behind the same immutable frame contract and tested for epistemic leakage.
 
@@ -108,11 +113,10 @@ The scheduler is deterministic and explainable, but pressure scoring, expiry, ac
 
 Build one complete, constrained “novel player” vertical slice before broadening the schemas:
 
-1. add a small checked-in annotated fixture with entities, knowledge transfer, one rule, a canonical checkpoint, and a durable divergence;
-2. add `nwh prepare <novel>` to orchestrate ingest → compile → review summary → audit → branch creation while preserving explicit acceptance;
-3. add `nwh play-world --character <id>` with actor-scoped perception and natural-language player-action proposal generation;
-4. connect one Pi actor reasoner and one Pi narrative adapter behind the existing safe contracts;
-5. expose rejection/repair feedback in the session instead of requiring JSON editing;
-6. run the same workflow on several genres and use measured failures to refine prompts and schemas.
+1. turn the checked-in synthetic smoke fixture into a repeatable opt-in live evaluation with expected artifact and player-turn assertions;
+2. connect one Pi actor reasoner and one Pi narrative adapter behind the existing safe contracts;
+3. add deterministic affordance/interaction rules for dialogue, transfer, travel, and conflict without granting a general write capability;
+4. expose proposal-specific repair guidance in the preparation session;
+5. run the same workflow on several licensed or user-provided annotated genres and use measured failures to refine prompts and schemas.
 
 That milestone directly tests the product promise while preserving the architecture already established by [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md).

@@ -47,7 +47,7 @@ export class CompilerValidator {
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
     if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, events, rules, errors);
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
-    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, rules, errors);
+    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, claims, rules, errors);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, claims, rules, errors);
     if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, errors);
     return { accepted: errors.length === 0, errors, warnings };
@@ -79,9 +79,27 @@ export class CompilerValidator {
     for (const predicate of [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]) this.validatePredicate(predicate, entities, visibleRules, errors);
   }
 
-  private validateInitialWorld(initial: InitialWorld, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
+  private validateInitialWorld(
+    initial: InitialWorld,
+    entities: ReadonlyMap<string, Entity>,
+    claims: ReadonlyMap<string, Claim>,
+    rules: ReadonlyMap<string, WorldRule>,
+    errors: ValidationIssue[],
+  ): void {
     if (!initial.evidence.length) errors.push(issue("MISSING_EVIDENCE", "Initial world has no source evidence", "evidence"));
     this.validateOperations(initial.delta.operations, entities, rules, errors, "delta.operations");
+    for (let index = 0; index < (initial.knowledge?.operations.length ?? 0); index += 1) {
+      const operation = initial.knowledge!.operations[index]!;
+      const actor = entities.get(operation.actorId);
+      if (!actor || actor.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_ACTOR", `Initial knowledge actor ${operation.actorId} is not a canonical character`, `knowledge.operations.${index}`));
+      if (operation.op === "learn") {
+        if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Initial knowledge references unknown claim ${operation.claimId}`, `knowledge.operations.${index}`));
+        if (operation.sourceActorId) {
+          const source = entities.get(operation.sourceActorId);
+          if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Initial knowledge source ${operation.sourceActorId} is not a canonical character`, `knowledge.operations.${index}`));
+        }
+      }
+    }
   }
 
   private validateGoal(goal: CharacterGoal, entities: ReadonlyMap<string, Entity>, claims: ReadonlyMap<string, Claim>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {

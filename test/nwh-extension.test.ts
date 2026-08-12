@@ -121,13 +121,13 @@ describe("NWH TUI extension", () => {
         theme: { fg: (_color: string, text: string) => text },
       },
     } as unknown as ExtensionContext;
-    const transformed = await input?.(
-      { type: "input", text: `'${path.join(root, "chapters", "chapter one.md")}'`, source: "interactive" } as InputEvent,
+    const userInput = `'${path.join(root, "chapters", "chapter one.md")}'`;
+    const result = await input?.(
+      { type: "input", text: userInput, source: "interactive" } as InputEvent,
       ctx,
     ) as InputEventResult | undefined;
 
-    expect(transformed?.action).toBe("transform");
-    expect(transformed && "text" in transformed ? transformed.text : "").toContain("Begin novel-world compiler batch");
+    expect(result).toEqual({ action: "continue" });
     expect(registeredTools).toContain("propose_entity");
     expect(registeredTools).not.toContain("propose_world_rule");
     expect(statuses).toContain("NWH · world compiler loop");
@@ -136,7 +136,7 @@ describe("NWH TUI extension", () => {
     const beforeAgentStart = events.get("before_agent_start");
     const context = await beforeAgentStart?.({
       type: "before_agent_start",
-      prompt: transformed && "text" in transformed ? transformed.text : "",
+      prompt: userInput,
       systemPrompt: "system",
       systemPromptOptions: {},
     } as unknown as BeforeAgentStartEvent) as BeforeAgentStartEventResult | undefined;
@@ -144,6 +144,7 @@ describe("NWH TUI extension", () => {
     expect(context?.message?.display).toBe(false);
     expect(context?.message?.content).toContain("<source-segment");
     expect(context?.message?.content).toContain("first line");
+    expect(context?.message?.content).not.toContain("Begin novel-world compiler batch");
 
     expect(events.get("tool_call")?.({ type: "tool_call", toolName: "read_file", toolCallId: "read-1", input: {} }, ctx))
       .toMatchObject({ block: true, reason: expect.stringContaining("evidence slice") });

@@ -14,7 +14,7 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `nwh -p "..."` runs one prompt and exits;
 - `nwh --continue` resumes the latest workspace-local Pi session;
 - `--tui-mode regular|fullscreen` selects scrollback-friendly or alternate-screen layout;
-- `@path` resolves a local file before the model request;
+- `@path` attaches local file context without changing the displayed user message;
 - a standalone quoted, unquoted, absolute, or workspace-relative novel path starts
   the durable source compiler loop;
 - `/files`, `/search`, and `/read` work without a model request;
@@ -23,7 +23,11 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 
 The TUI has a transcript, incremental assistant rendering, explicit tool-call/result rows, a multiline editor, working state, queued messages, a footer, slash-command completion, and keyboard shortcuts. Claude Code is an interaction reference, not a runtime dependency. NWH uses Pi's public `AgentSessionRuntime` and `InteractiveMode` instead of maintaining terminal control sequences itself.
 
-NWH loads a hidden inline extension to supply its header, working/status labels, safe local commands, and `@path` transformation. Project or user Pi extensions, skills, prompt templates, context files, and built-in model coding tools remain disabled.
+NWH loads a hidden inline extension to supply its header, working/status labels,
+safe local commands, and invisible `@path` context attachment. User input is kept
+verbatim in the transcript; compiler instructions and evidence slices are added as
+non-displayed context. Project or user Pi extensions, skills, prompt templates,
+context files, and built-in model coding tools remain disabled.
 
 When a standalone text novel path (`.txt`, `.text`, `.novel`, `.md`, or
 `.markdown`) is submitted, the extension deterministically registers and segments

@@ -87,7 +87,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (ctx.mode === "tui") ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · world compiler loop"));
     };
 
-    const userPromptForTurn = (turn: SourceLoopTurn) =>
+    const compilerPromptForTurn = (turn: SourceLoopTurn) =>
       `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for ${turn.source.sourcePath}. Analyze the supplied evidence now and record typed pending proposals.`;
 
     pi.on("session_shutdown", async () => options.onSessionShutdown?.());
@@ -121,7 +121,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             `Novel indexed: ${preparation.source.sourcePath} · starting batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`,
             "info",
           );
-          return { action: "transform", text: userPromptForTurn(preparation) };
+          return { action: "continue" };
         }
       } catch (error) {
         ctx.ui.notify(`Cannot start novel compiler: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -249,7 +249,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         activateCompilerTools(ctx);
         beginTurn(preparation);
         ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
-        pi.sendUserMessage(userPromptForTurn(preparation));
+        pi.sendUserMessage(compilerPromptForTurn(preparation));
       },
     });
 

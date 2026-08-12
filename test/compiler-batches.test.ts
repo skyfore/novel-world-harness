@@ -9,6 +9,8 @@ import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import type { SourceDocument } from "../src/storage/workspace-store.js";
 import { ProposalStore } from "../src/world/canonical-model.js";
 import { claimSchema, entitySchema } from "../src/world/model.js";
+import { initialWorldSchema } from "../src/world/initial.js";
+import { characterGoalSchema, characterModelSchema } from "../src/world/actors.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -41,7 +43,8 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "no-artifacts" })).toBeUndefined();
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: false })).toContain("explicitly finish");
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("without a valid");
-    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 2, proposalFailed: 1, completionSignaled: true, completionOutcome: "complete" })).toContain("failed");
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 2, proposalFailed: 1, completionSignaled: true, completionOutcome: "complete" })).toBeUndefined();
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 1, completionSignaled: true, completionOutcome: "no-artifacts" })).toContain("failed");
     expect(compilerBatchFailure({ assistantStopReason: "length", proposalSucceeded: 2, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("length");
   });
 
@@ -69,6 +72,20 @@ describe("compiler batches", () => {
     ]);
     expect(outcome.proposalFailed).toBe(1);
     expect(compilerBatchFailure(outcome)).toContain("failed");
+  });
+
+  it("treats a successful complete handshake as authoritative after corrected or abandoned drafts", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "bad", name: "propose_claim", arguments: { proposal_id: "claim-draft" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "bad", toolName: "propose_claim", isError: true, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "fixed", name: "propose_claim", arguments: { proposal_id: "claim-final" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "fixed", toolName: "propose_claim", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["claim-final"], reviewed_segments: [], summary: "done" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "finish", toolName: "finish_compiler_batch", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+    ]);
+    expect(outcome.proposalFailed).toBe(1);
+    expect(compilerBatchFailure(outcome)).toBeUndefined();
   });
   it("builds bounded prompts with explicit evidence refs", async () => {
     const { root, source } = await fixture();
@@ -178,6 +195,34 @@ describe("compiler batches", () => {
           generatedBy: { worker: "test" },
           createdAt: new Date(0).toISOString(),
         }, claimSchema);
+        const evidence = [{ span: { sourceId: source.id, startLine: 1, endLine: 1, quoteHash: "fixture" }, strength: "explicit" as const }];
+        await new ProposalStore(root).writePending({
+          id: "proposal-opening",
+          kind: "initial-world",
+          schemaVersion: 1,
+          payload: { version: 1, delta: { version: 1, operations: [] }, evidence },
+          evidence: [],
+          generatedBy: { worker: "test" },
+          createdAt: new Date(0).toISOString(),
+        }, initialWorldSchema);
+        await new ProposalStore(root).writePending({
+          id: "proposal-existing-goal",
+          kind: "character-goal",
+          schemaVersion: 1,
+          payload: { id: "existing-goal", actorId: "existing-person", description: "Enter the city", priority: 0.8, requiresKnowledge: [], evidence },
+          evidence: [],
+          generatedBy: { worker: "test" },
+          createdAt: new Date(0).toISOString(),
+        }, characterGoalSchema);
+        await new ProposalStore(root).writePending({
+          id: "proposal-existing-model",
+          kind: "character-model",
+          schemaVersion: 1,
+          payload: { actorId: "existing-person", traits: { bold: 0.5 }, decisionBiases: {}, evidence },
+          evidence: [],
+          generatedBy: { worker: "test" },
+          createdAt: new Date(0).toISOString(),
+        }, characterModelSchema);
       },
     });
 
@@ -185,8 +230,11 @@ describe("compiler batches", () => {
     expect(seen[0]).toContain('"entities":[]');
     expect(seen[1]).toContain('"id":"existing-person"');
     expect(seen[1]).toContain('"id":"existing-claim"');
+    expect(seen[1]).toContain('"proposalId":"proposal-opening"');
+    expect(seen[1]).toContain('"id":"existing-goal"');
+    expect(seen[1]).toContain('"proposalId":"proposal-existing-model"');
     expect(seen[1]).toContain('"status":"pending"');
-    expect(seen[1]).toContain("Do not call propose_entity or propose_claim");
+    expect(seen[1]).toContain("Do not submit a second initial-world");
   });
 
   it("does not checkpoint a failed batch", async () => {

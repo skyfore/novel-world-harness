@@ -100,10 +100,8 @@ export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | un
   if (outcome.assistantStopReason !== "stop") {
     return `model ended with ${outcome.assistantStopReason ?? "no final assistant response"}`;
   }
-  if (outcome.proposalFailed > 0) {
-    return `${outcome.proposalFailed} proposal tool call(s) failed`;
-  }
   if (!outcome.completionSignaled) {
+    if (outcome.proposalFailed > 0) return `${outcome.proposalFailed} proposal tool call(s) failed`;
     return "the model did not explicitly finish the compiler batch";
   }
   if (outcome.completionOutcome === "complete" && outcome.proposalSucceeded === 0) {
@@ -111,6 +109,9 @@ export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | un
   }
   if (outcome.completionOutcome === "no-artifacts" && outcome.proposalSucceeded > 0) {
     return "the model declared no artifacts after recording proposals";
+  }
+  if (outcome.completionOutcome === "no-artifacts" && outcome.proposalFailed > 0) {
+    return `${outcome.proposalFailed} proposal tool call(s) failed before the model declared no artifacts`;
   }
   return undefined;
 }

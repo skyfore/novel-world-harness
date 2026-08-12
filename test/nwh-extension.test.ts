@@ -247,7 +247,7 @@ describe("NWH TUI extension", () => {
     expect(sentUserMessages[0]).toMatch(/batch 1\/\d+/);
   });
 
-  it("waits through low-level retries and preserves unresolved failures until agent_settled", async () => {
+  it("lets a successful finish supersede abandoned drafts after low-level retries settle", async () => {
     const { commands, events, root, sentUserMessages } = await fixture();
     const novelPath = path.join(root, "retry-novel.txt");
     await fs.writeFile(
@@ -292,9 +292,9 @@ describe("NWH TUI extension", () => {
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
     await commands.get("compile-next")?.handler("", ctx);
 
-    expect(notifications.some((message) => message.includes("not checkpointed") && message.includes("failed"))).toBe(true);
+    expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);
     expect(sentUserMessages).toHaveLength(1);
-    expect(sentUserMessages[0]).toMatch(/batch 1\/\d+/);
+    expect(sentUserMessages[0]).toMatch(/batch 2\/\d+/);
   });
 
   it("resets the registered finish handshake before the next TUI compiler batch", async () => {

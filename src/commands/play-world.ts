@@ -6,7 +6,6 @@ import type { Entity } from "../world/model.js";
 import { PlayerTurnService, type PlayerActionTranslator, type PlayerTurnResult } from "../world/player-action.js";
 import { PlaySessionStore } from "../world/play-session.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
-import type { PiLiveTestOptions } from "../agent/pi-session.js";
 import type { WorldRuntime } from "../world/runtime.js";
 
 export type PlayWorldCommandOptions = {
@@ -19,7 +18,6 @@ export type PlayWorldCommandOptions = {
   model?: string;
   translator?: PlayerActionTranslator;
   advanceBackground?: number;
-  liveTest?: PiLiveTestOptions;
 };
 
 export async function playWorldCommand(options: PlayWorldCommandOptions): Promise<PlayerTurnResult | undefined> {
@@ -59,7 +57,6 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
     root: options.root,
     ...(profile ? { profile } : {}),
     ...(options.model ? { model: options.model } : {}),
-    ...(options.liveTest ? { liveTest: options.liveTest } : {}),
   });
   const turns = new PlayerTurnService(
     engine,

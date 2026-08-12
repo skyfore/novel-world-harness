@@ -1,4 +1,4 @@
-import { PiAgentSession, type PiLiveTestOptions } from "../agent/pi-session.js";
+import { PiAgentSession, type PiAgentSessionOptions } from "../agent/pi-session.js";
 import type { LlmProfile } from "../config/schema.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { createCompilerProposalToolset } from "./proposal-tools.js";
@@ -12,23 +12,10 @@ export type PiCompilerOptions = {
   saveSession?: boolean;
   onText?: (delta: string) => void;
   onTool?: (name: string, input: unknown) => void;
-  liveTest?: PiLiveTestOptions;
+  onRetry?: PiAgentSessionOptions["onRetry"];
   segmentIds?: readonly string[];
   includeLocalTools?: boolean;
 };
-
-export const DEFAULT_COMPILER_LIVE_MAX_REQUESTS = 64;
-export const DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS = 16_384;
-export const DEFAULT_COMPILER_LIVE_REQUEST_TIMEOUT_MS = 300_000;
-
-export function compilerLiveTestOptions(options?: PiLiveTestOptions): PiLiveTestOptions | undefined {
-  return options ? {
-    ...options,
-    maxRequests: options.maxRequests ?? DEFAULT_COMPILER_LIVE_MAX_REQUESTS,
-    maxOutputTokens: options.maxOutputTokens ?? DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS,
-    requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_COMPILER_LIVE_REQUEST_TIMEOUT_MS,
-  } : undefined;
-}
 
 export async function createPiCompilerSession(options: PiCompilerOptions): Promise<PiAgentSession> {
   const workspace = await LocalFileWorkspace.create(options.root);
@@ -37,7 +24,6 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
   if (options.model ?? options.profile?.model) generatedBy.model = options.model ?? options.profile?.model;
   const proposalToolset = createCompilerProposalToolset(workspace.root, generatedBy);
   proposalToolset.beginBatch(options.segmentIds);
-  const liveTest = compilerLiveTestOptions(options.liveTest);
   const includeLocalTools = options.includeLocalTools ?? true;
   return PiAgentSession.create({
     workspace,
@@ -46,7 +32,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     saveSession: options.saveSession ?? true,
     ...(options.onText ? { onText: options.onText } : {}),
     ...(options.onTool ? { onTool: options.onTool } : {}),
-    ...(liveTest ? { liveTest } : {}),
+    ...(options.onRetry ? { onRetry: options.onRetry } : {}),
     interactionMode: "compiler",
     includeLocalTools,
     additionalTools: options.segmentIds

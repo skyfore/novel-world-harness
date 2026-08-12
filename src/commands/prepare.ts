@@ -5,7 +5,6 @@ import { inspectPreparation, type PreparationInspection } from "../workflow/prep
 import { compileSourceCommand } from "./compile-source.js";
 import { ingestWorkspaceSource } from "./ingest.js";
 import { worldCreateCommand } from "./world.js";
-import type { PiLiveTestOptions } from "../agent/pi-session.js";
 
 export type PrepareCommandOptions = {
   root: string;
@@ -15,7 +14,6 @@ export type PrepareCommandOptions = {
   branchId?: string;
   model?: string;
   maxBatches?: number;
-  liveTest?: PiLiveTestOptions;
 };
 
 export async function prepareCommand(options: PrepareCommandOptions): Promise<PreparationInspection> {
@@ -39,7 +37,6 @@ export async function prepareCommand(options: PrepareCommandOptions): Promise<Pr
       ...(options.model ? { model: options.model } : {}),
       maxBatches: options.maxBatches ?? 1,
       resume: true,
-      ...(options.liveTest ? { liveTest: options.liveTest } : {}),
     });
     inspection = await inspectPreparation(root, {
       sourceId: inspection.source!.id,

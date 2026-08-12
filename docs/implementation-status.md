@@ -70,7 +70,6 @@ nwh world knowledge|actor
 nwh world fork|diff|replay|render
 nwh world snapshot|fsck
 nwh play-world --list-characters|--character|--action
-nwh live-budget status
 ```
 
 The ordinary `nwh` / `nwh play` session remains intentionally read-only and does not mutate the world.

@@ -2,8 +2,6 @@
 import path from "node:path";
 import { Command } from "commander";
 import type { TuiMode } from "@earendil-works/pi-coding-agent";
-import type { PiLiveTestOptions } from "./agent/pi-session.js";
-import { LIVE_TOKEN_BUDGET_HARD_LIMIT } from "./agent/live-token-ledger.js";
 import { resolveConfigPath } from "./config/load.js";
 import { auditCommand } from "./commands/audit.js";
 import { initCommand } from "./commands/init.js";
@@ -15,11 +13,6 @@ import { compileCommand } from "./commands/compile.js";
 import { compileSourceCommand } from "./commands/compile-source.js";
 import { prepareCommand } from "./commands/prepare.js";
 import { playWorldCommand } from "./commands/play-world.js";
-import {
-  liveBudgetLockCommand,
-  liveBudgetRepairLockCommand,
-  liveBudgetStatusCommand,
-} from "./commands/live-budget.js";
 import { acceptAllValidProposalsCommand, acceptProposalCommand, listProposalsCommand, rejectProposalCommand, showProposalCommand } from "./commands/proposals.js";
 import {
   worldActorCommand,
@@ -48,13 +41,7 @@ program
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
   .option("--continue", "continue the latest session in this workspace")
-  .option("--no-save", "do not persist the interactive session")
-  .option("--live-test", "explicitly enable metered real-provider white-box testing")
-  .option("--live-ledger <path>", "shared live-test token ledger")
-  .option("--live-token-budget <n>", "campaign token ceiling (maximum 100000000)")
-  .option("--live-max-requests <n>", "maximum provider requests per model session")
-  .option("--live-max-output-tokens <n>", "maximum output tokens per provider request")
-  .option("--live-request-timeout-ms <n>", "provider request timeout in milliseconds");
+  .option("--no-save", "do not persist the interactive session");
 
 function rootFor(options: { root?: string }): string {
   return options.root ?? program.opts().root ?? process.cwd();
@@ -66,43 +53,6 @@ function nonNegativeInteger(value: string, name: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${name} must be a non-negative integer`);
   return parsed;
-}
-function positiveInteger(value: string, name: string): number {
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`${name} must be a positive safe integer`);
-  return parsed;
-}
-function liveTestFor(root: string): PiLiveTestOptions | undefined {
-  const options = program.opts();
-  const enabled = options.liveTest === true || process.env.NWH_LIVE_TESTS === "1";
-  const configured = options.liveLedger ?? options.liveTokenBudget ?? options.liveMaxRequests
-    ?? options.liveMaxOutputTokens ?? options.liveRequestTimeoutMs
-    ?? process.env.NWH_LIVE_LEDGER ?? process.env.NWH_LIVE_TOKEN_BUDGET
-    ?? process.env.NWH_LIVE_MAX_REQUESTS ?? process.env.NWH_LIVE_MAX_OUTPUT_TOKENS
-    ?? process.env.NWH_LIVE_REQUEST_TIMEOUT_MS;
-  if (!enabled) {
-    if (configured !== undefined) throw new Error("Live-test limits require --live-test or NWH_LIVE_TESTS=1.");
-    return undefined;
-  }
-  const tokenBudget = positiveInteger(String(options.liveTokenBudget ?? process.env.NWH_LIVE_TOKEN_BUDGET ?? LIVE_TOKEN_BUDGET_HARD_LIMIT), "--live-token-budget");
-  if (tokenBudget > LIVE_TOKEN_BUDGET_HARD_LIMIT) throw new Error(`--live-token-budget cannot exceed ${LIVE_TOKEN_BUDGET_HARD_LIMIT}`);
-  return {
-    ledgerPath: path.resolve(options.liveLedger ?? process.env.NWH_LIVE_LEDGER ?? path.join(root, ".novel-harness", "live-tests", "token-budget-v1.json")),
-    tokenBudget,
-    ...(options.liveMaxRequests ?? process.env.NWH_LIVE_MAX_REQUESTS
-      ? { maxRequests: positiveInteger(String(options.liveMaxRequests ?? process.env.NWH_LIVE_MAX_REQUESTS), "--live-max-requests") }
-      : {}),
-    ...(options.liveMaxOutputTokens ?? process.env.NWH_LIVE_MAX_OUTPUT_TOKENS
-      ? { maxOutputTokens: positiveInteger(String(options.liveMaxOutputTokens ?? process.env.NWH_LIVE_MAX_OUTPUT_TOKENS), "--live-max-output-tokens") }
-      : {}),
-    ...(options.liveRequestTimeoutMs ?? process.env.NWH_LIVE_REQUEST_TIMEOUT_MS
-      ? { requestTimeoutMs: positiveInteger(String(options.liveRequestTimeoutMs ?? process.env.NWH_LIVE_REQUEST_TIMEOUT_MS), "--live-request-timeout-ms") }
-      : {}),
-  };
-}
-function liveTestArgument(root: string): { liveTest: PiLiveTestOptions } | Record<string, never> {
-  const liveTest = liveTestFor(root);
-  return liveTest ? { liveTest } : {};
 }
 function parseTuiMode(value: string): TuiMode {
   if (value !== "regular" && value !== "fullscreen") throw new Error("--tui-mode must be regular or fullscreen");
@@ -137,7 +87,6 @@ program
       model: options.model ?? globalOptions.model,
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
       saveSession: options.save && globalOptions.save,
-      ...liveTestArgument(rootFor(options)),
       ...(prompt ? { prompt } : {}),
     });
   });
@@ -162,7 +111,6 @@ program
       model: options.model ?? globalOptions.model,
       ...(maxBatches !== undefined ? { maxBatches } : {}),
       resume: options.resume,
-      ...liveTestArgument(rootFor(options)),
     });
   });
 
@@ -199,32 +147,6 @@ world.command("replay").argument("<checkpoints>", "checkpoint JSON file").option
 world.command("snapshot").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").description("materialize a derived state snapshot for a branch head").action(async (options) => worldSnapshotCommand(rootFor(options), options.branch));
 world.command("fsck").option("--root <path>", "local novel workspace").description("verify branch ancestry, object hashes, replay and snapshots").action(async (options) => worldFsckCommand(rootFor(options)));
 
-const liveBudget = program.command("live-budget").description("inspect the persistent real-provider white-box token budget");
-function liveLedgerPath(options: { root?: string; ledger?: string }): string {
-  const globalOptions = program.opts();
-  const root = rootFor(options);
-  return path.resolve(
-    options.ledger
-      ?? globalOptions.liveLedger
-      ?? process.env.NWH_LIVE_LEDGER
-      ?? path.join(root, ".novel-harness", "live-tests", "token-budget-v1.json"),
-  );
-}
-liveBudget.command("status").option("--root <path>", "local novel workspace").option("--ledger <path>", "token ledger path").action(async (options) => {
-  const globalOptions = program.opts();
-  const tokenBudget = positiveInteger(String(globalOptions.liveTokenBudget ?? process.env.NWH_LIVE_TOKEN_BUDGET ?? LIVE_TOKEN_BUDGET_HARD_LIMIT), "--live-token-budget");
-  await liveBudgetStatusCommand({
-    ledgerPath: liveLedgerPath(options),
-    tokenBudget,
-  });
-});
-liveBudget.command("lock").option("--root <path>", "local novel workspace").option("--ledger <path>", "token ledger path").description("inspect a ledger lock before any repair").action(async (options) => {
-  await liveBudgetLockCommand(liveLedgerPath(options));
-});
-liveBudget.command("repair-lock").requiredOption("--owner <id>", "exact owner id returned by live-budget lock").option("--root <path>", "local novel workspace").option("--ledger <path>", "token ledger path").description("remove only a verified dead local lock owner").action(async (options) => {
-  await liveBudgetRepairLockCommand(liveLedgerPath(options), options.owner);
-});
-
 program
   .command("prepare")
   .argument("[novel]", "UTF-8 source novel path inside the workspace")
@@ -244,7 +166,6 @@ program
       branchId: options.branch,
       model: options.model ?? program.opts().model,
       maxBatches: nonNegativeInteger(options.maxBatches, "--max-batches"),
-      ...liveTestArgument(rootFor(options)),
     });
   });
 
@@ -269,7 +190,6 @@ program
       advanceBackground: nonNegativeInteger(options.advanceBackground, "--advance-background"),
       listCharacters: Boolean(options.listCharacters),
       model: options.model ?? program.opts().model,
-      ...liveTestArgument(rootFor(options)),
     });
     if (result && !result.accepted) process.exitCode = 2;
   });
@@ -295,7 +215,6 @@ program
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
       continueSession: options.continue || globalOptions.continue,
       saveSession: options.save && globalOptions.save,
-      ...liveTestArgument(rootFor(options)),
     });
   });
 
@@ -310,7 +229,6 @@ program.action(async () => {
     tuiMode: options.tuiMode,
     continueSession: options.continue,
     saveSession: options.save,
-    ...liveTestArgument(options.root),
   });
 });
 

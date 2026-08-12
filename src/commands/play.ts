@@ -1,9 +1,8 @@
 import { stdout as output, stderr } from "node:process";
 import type { TuiMode } from "@earendil-works/pi-coding-agent";
-import { PiAgentSession } from "../agent/pi-session.js";
+import { formatRetryNotice, PiAgentSession } from "../agent/pi-session.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import type { PiLiveTestOptions } from "../agent/pi-session.js";
 
 export type PlayCommandOptions = {
   configPath: string;
@@ -14,7 +13,6 @@ export type PlayCommandOptions = {
   saveSession?: boolean;
   printPrompt?: string;
   tuiMode?: TuiMode;
-  liveTest?: PiLiveTestOptions;
 };
 
 async function optionalConfig(options: PlayCommandOptions) {
@@ -40,7 +38,9 @@ export async function playCommand(options: PlayCommandOptions): Promise<void> {
     model,
     continueSession: options.continueSession,
     saveSession,
-    ...(options.liveTest ? { liveTest: options.liveTest } : {}),
+    ...(printMode ? { onRetry(event) {
+      stderr.write(`\n${formatRetryNotice(event)}\n`);
+    } } : {}),
     ...(printMode ? { onText(delta: string) {
       textStarted = true;
       output.write(delta);

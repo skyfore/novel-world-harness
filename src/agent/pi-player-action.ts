@@ -1,14 +1,14 @@
 import type { LlmProfile } from "../config/schema.js";
 import type { PlayerActionTranslator } from "../world/player-action.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import { PiAgentSession, type PiLiveTestOptions } from "./pi-session.js";
+import { stderr } from "node:process";
+import { formatRetryNotice, PiAgentSession } from "./pi-session.js";
 import { createPlayerActionCaptureTool } from "./player-action-tool.js";
 
 export type PiPlayerActionTranslatorOptions = {
   root: string;
   profile?: LlmProfile;
   model?: string;
-  liveTest?: PiLiveTestOptions;
 };
 
 const PLAYER_ACTION_SYSTEM_PROMPT = `You translate one player's natural-language action into one strict candidate for a deterministic novel-world engine.
@@ -41,7 +41,9 @@ export function createPiPlayerActionTranslator(options: PiPlayerActionTranslator
       includeNwhExtension: false,
       systemPromptOverride: PLAYER_ACTION_SYSTEM_PROMPT,
       additionalTools: [capture.tool],
-      ...(options.liveTest ? { liveTest: options.liveTest } : {}),
+      onRetry(event) {
+        stderr.write(`${formatRetryNotice(event)}\n`);
+      },
     });
     try {
       await session.prompt(JSON.stringify({

@@ -34,13 +34,11 @@ llm:
       model: claude-sonnet-5
       apiKeyEnv: ANTHROPIC_API_KEY
       thinkingLevel: medium
-      maxTokens: 8192
     fast:
       provider: anthropic
       model: claude-haiku-4-5
       apiKeyEnv: ANTHROPIC_API_KEY
       thinkingLevel: low
-      maxTokens: 4096
   routing:
     controller: main
     extractor: fast
@@ -75,6 +73,8 @@ llm:
 `apiKeyEnv` is optional. Omit it when using Pi-managed `/login` authentication;
 when present, it must name an `*_API_KEY` variable. Secrets stay in environment
 variables or the private Pi auth store and must not be committed to YAML.
+NWH does not lower Pi catalog output limits. `maxTokens` is required only as
+model metadata for a custom model that Pi does not already know.
 
 ## Local workspace state
 
@@ -85,7 +85,6 @@ There is no database configuration. Current state is stored locally:
 ├── project.json
 ├── sources/<content-id>.json
 ├── segments/<source-id>.json
-├── live-tests/token-budget-v1.json
 ├── instructions.md
 └── world/v1/
     ├── compiler/batches/<source-id>.json

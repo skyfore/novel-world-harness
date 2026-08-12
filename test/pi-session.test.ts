@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { PiAgentSession } from "../src/agent/pi-session.js";
+import { formatRetryNotice, PiAgentSession } from "../src/agent/pi-session.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 
 const temporaryDirectories: string[] = [];
@@ -56,7 +56,7 @@ describe("PiAgentSession", () => {
     await session.dispose();
   });
 
-  it("resolves a provider/model override without corrupting the configured profile", async () => {
+  it("does not use profile metadata to cap a native Pi model", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-model-override-"));
     temporaryDirectories.push(root);
     const session = await PiAgentSession.create({
@@ -73,9 +73,26 @@ describe("PiAgentSession", () => {
       },
     });
     expect(session.model).toBe("anthropic/claude-haiku-4-5");
-    const internals = session as unknown as { runtimeHost: { session: { model?: { maxTokens: number } } } };
-    expect(internals.runtimeHost.session.model?.maxTokens).toBe(2_048);
+    const internals = session as unknown as {
+      runtimeHost: {
+        session: { model?: { maxTokens: number } };
+        services: { modelRuntime: { getModel(provider: string, model: string): { maxTokens: number } } };
+      };
+    };
+    const catalogModel = internals.runtimeHost.services.modelRuntime.getModel("anthropic", "claude-haiku-4-5");
+    expect(internals.runtimeHost.session.model?.maxTokens).toBe(catalogModel.maxTokens);
+    expect(internals.runtimeHost.session.model?.maxTokens).toBeGreaterThan(2_048);
     await session.dispose();
+  });
+
+  it("formats a visible notice for automatic API retries", () => {
+    expect(formatRetryNotice({
+      type: "auto_retry_start",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      errorMessage: "provider unavailable",
+    })).toBe("LLM API call failed; retrying 1/3 in 2s: provider unavailable");
   });
 
   it("restores the model selected in a previous workspace session", async () => {

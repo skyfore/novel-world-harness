@@ -21,7 +21,6 @@ Implemented:
 - canonical and non-canonical possibilities, counterfactual branches, checkpoint replay, and deterministic actor-goal policies.
 - a derived `prepare` workflow that guides ingest, bounded compilation, explicit review, audit, and branch creation without automatically accepting model output;
 - `play-world`, which selects a committed character and translates natural-language actions through an actor-scoped, capture-only model tool before deterministic scope, knowledge, engine, and commit gates;
-- a persistent real-provider test ledger with a non-increasable 100,000,000-token hard ceiling, per-session request caps, and conservative crash accounting.
 
 Still intentionally limited:
 
@@ -185,18 +184,10 @@ nwh world knowledge hero --branch main
 nwh world actor hero --branch main
 ```
 
-## Metered real-provider testing
-
-Unit tests never call a model. Real white-box runs require explicit opt-in and are protected by a persistent ledger:
-
-```bash
-nwh --live-test --live-token-budget 100000000 prepare ./books/novel.txt
-nwh live-budget status
-```
-
-Before each provider call NWH durably reserves the model context ceiling. Successful calls reconcile against reported input, output, cache-read, and cache-write usage; errors, aborts, missing usage, or crashes remain charged conservatively. The hard ceiling cannot be configured above 100,000,000 tokens. Optional `--live-ledger`, `--live-max-requests`, `--live-max-output-tokens`, and `--live-request-timeout-ms` flags further constrain a campaign.
-
-If a process dies while holding the ledger lock, inspect it with `nwh live-budget lock`. Only after verifying the returned owner may `nwh live-budget repair-lock --owner <exact-id>` remove it; active, remote-host, malformed, or changed locks are refused.
+NWH does not impose a token budget, request-count ceiling, or smaller output cap
+on Pi model calls. Transient provider failures use Pi's automatic retry policy;
+the CLI reports retry progress and only returns a failure after retries are
+exhausted.
 
 ## Architecture
 

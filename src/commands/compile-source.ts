@@ -1,10 +1,10 @@
 import { stderr, stdout } from "node:process";
+import { formatRetryNotice } from "../agent/pi-session.js";
 import { runCompilerBatches } from "../compiler/batches.js";
 import { compilerBatchFailure } from "../compiler/batch-outcome.js";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
-import type { PiLiveTestOptions } from "../agent/pi-session.js";
 
 export type CompileSourceOptions = {
   root: string;
@@ -14,7 +14,6 @@ export type CompileSourceOptions = {
   model?: string;
   maxBatches?: number;
   resume?: boolean;
-  liveTest?: PiLiveTestOptions;
 };
 
 async function optionalConfig(options: CompileSourceOptions) {
@@ -59,7 +58,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         saveSession: false,
         includeLocalTools: false,
         segmentIds: batch.segmentIds,
-        ...(options.liveTest ? { liveTest: options.liveTest } : {}),
+        onRetry(event) {
+          stderr.write(`${formatRetryNotice(event)}\n`);
+        },
         onText(delta) {
           wroteText = true;
           stdout.write(delta);

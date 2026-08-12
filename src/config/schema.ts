@@ -16,7 +16,7 @@ export const llmProfileSchema = z
     baseUrl: z.url().optional(),
     apiProtocol: z.string().min(1).optional(),
     contextWindow: z.number().int().positive().optional(),
-    maxTokens: z.number().int().positive().default(8_192),
+    maxTokens: z.number().int().positive().optional(),
   })
   .strict();
 

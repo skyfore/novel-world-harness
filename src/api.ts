@@ -1,5 +1,4 @@
 export { auditCompiler, type CompilerAuditReport } from "./compiler/audit.js";
-export { chargedUsageTokens, LIVE_TOKEN_BUDGET_HARD_LIMIT, LiveTokenLedger, wrapLiveStreamFunction, type LiveTokenBudgetStatus, type LiveTokenUsage } from "./agent/live-token-ledger.js";
 export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
 export { convergeWorldProposals, type WorldProposalConvergence } from "./compiler/converge.js";
 export { EvidenceVerifier, type EvidenceVerification } from "./compiler/evidence.js";

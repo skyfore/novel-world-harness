@@ -15,6 +15,7 @@ import {
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
   type TuiMode,
+  type AgentSessionEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -23,13 +24,6 @@ import { compilerBatchOutcomeFromMessages, type CompilerBatchOutcome } from "../
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { createNwhExtension, type NwhInteractionMode } from "./nwh-extension.js";
 import { nwhRuntimeDir, workspaceSessionDir } from "./runtime-paths.js";
-import {
-  DEFAULT_LIVE_MAX_OUTPUT_TOKENS,
-  DEFAULT_LIVE_MAX_REQUESTS,
-  LIVE_TOKEN_BUDGET_HARD_LIMIT,
-  LiveTokenLedger,
-  wrapLiveStreamFunction,
-} from "./live-token-ledger.js";
 
 export { expandFileMentions } from "./file-mentions.js";
 
@@ -41,6 +35,7 @@ export type PiAgentSessionOptions = {
   saveSession?: boolean;
   onText?: (delta: string) => void;
   onTool?: (name: string, input: unknown) => void;
+  onRetry?: (event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>) => void;
   additionalTools?: ToolDefinition[];
   systemPromptAppendix?: string;
   systemPromptOverride?: string;
@@ -48,19 +43,9 @@ export type PiAgentSessionOptions = {
   includeLocalTools?: boolean;
   includeNwhExtension?: boolean;
   resetCompilerProposalTools?: (segmentIds?: readonly string[]) => void;
-  liveTest?: PiLiveTestOptions;
   interactionMode?: NwhInteractionMode;
   runtimeDir?: string;
   piAgentDir?: string;
-};
-
-export type PiLiveTestOptions = {
-  ledgerPath: string;
-  campaignId?: string;
-  tokenBudget?: number;
-  maxOutputTokens?: number;
-  maxRequests?: number;
-  requestTimeoutMs?: number;
 };
 
 export type PiInteractiveOptions = {
@@ -69,6 +54,11 @@ export type PiInteractiveOptions = {
 };
 
 export type PiPromptReport = CompilerBatchOutcome & { text: string };
+
+export function formatRetryNotice(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): string {
+  const delaySeconds = Math.max(0, Math.ceil(event.delayMs / 1_000));
+  return `LLM API call failed; retrying ${event.attempt}/${event.maxAttempts} in ${delaySeconds}s: ${event.errorMessage}`;
+}
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: undefined };
@@ -168,6 +158,9 @@ async function createModelRuntime(profile: LlmProfile | undefined, piAgentDir?: 
   if (profile.baseUrl || !model) {
     const api = profile.apiProtocol ?? model?.api;
     if (!api) throw new Error(`Model ${profile.provider}/${profile.model} is not in Pi's catalog; set apiProtocol and baseUrl for a custom model.`);
+    if (!model && profile.maxTokens === undefined) {
+      throw new Error(`Custom model ${profile.provider}/${profile.model} must declare maxTokens as model metadata.`);
+    }
     runtime.registerProvider(profile.provider, {
       name: profile.provider,
       baseUrl: profile.baseUrl ?? model?.baseUrl,
@@ -181,7 +174,7 @@ async function createModelRuntime(profile: LlmProfile | undefined, piAgentDir?: 
         input: model?.input ?? ["text"],
         cost: model?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: profile.contextWindow ?? model?.contextWindow ?? 200_000,
-        maxTokens: profile.maxTokens ?? model?.maxTokens ?? 8_192,
+        maxTokens: profile.maxTokens ?? model!.maxTokens,
       }],
     });
     model = runtime.getModel(profile.provider, profile.model);
@@ -191,10 +184,7 @@ async function createModelRuntime(profile: LlmProfile | undefined, piAgentDir?: 
     const key = process.env[profile.apiKeyEnv];
     if (key) await runtime.setRuntimeApiKey(profile.provider, key);
   }
-  const cappedModel = profile.maxTokens && profile.maxTokens < model.maxTokens
-    ? { ...model, maxTokens: profile.maxTokens }
-    : model;
-  return { runtime, model: cappedModel };
+  return { runtime, model };
 }
 
 async function flushSettings(settingsManager: SettingsManager): Promise<void> {
@@ -335,16 +325,6 @@ export class PiAgentSession {
         tuiMode: "regular",
         enableInstallTelemetry: false,
         enableAnalytics: false,
-        ...(this.options.liveTest ? {
-          retry: {
-            enabled: false,
-            maxRetries: 0,
-            provider: {
-              maxRetries: 0,
-              timeoutMs: this.options.liveTest.requestTimeoutMs ?? 120_000,
-            },
-          },
-        } : {}),
       });
       const savedProvider = settingsManager.getDefaultProvider();
       const savedModelId = settingsManager.getDefaultModel();
@@ -355,9 +335,7 @@ export class PiAgentSession {
         ? resolveModelOverride(this.runtime, this.options.model, this.profile?.provider ?? savedProvider)
         : undefined;
       const selectedModelValue = overrideModel ?? savedModel ?? this.resolvedModel;
-      const selectedModel = selectedModelValue && this.profile?.maxTokens && this.profile.maxTokens < selectedModelValue.maxTokens
-        ? { ...selectedModelValue, maxTokens: this.profile.maxTokens }
-        : selectedModelValue;
+      const selectedModel = selectedModelValue;
       const services = await createAgentSessionServices({
         cwd,
         agentDir,
@@ -402,23 +380,6 @@ export class PiAgentSession {
             ...(this.options.additionalTools ?? []),
           ],
         });
-      if (this.options.liveTest) {
-        const ledger = await LiveTokenLedger.open({
-          filePath: this.options.liveTest.ledgerPath,
-          campaignId: this.options.liveTest.campaignId ?? "nwh-white-box",
-          limit: this.options.liveTest.tokenBudget ?? LIVE_TOKEN_BUDGET_HARD_LIMIT,
-        });
-        created.session.agent.streamFunction = wrapLiveStreamFunction(
-          created.session.agent.streamFunction,
-          {
-            ledger,
-            runId: created.session.sessionId,
-            maxOutputTokens: this.options.liveTest.maxOutputTokens ?? DEFAULT_LIVE_MAX_OUTPUT_TOKENS,
-            maxRequests: this.options.liveTest.maxRequests ?? DEFAULT_LIVE_MAX_REQUESTS,
-            requestTimeoutMs: this.options.liveTest.requestTimeoutMs ?? 120_000,
-          },
-        ) as typeof created.session.agent.streamFunction;
-      }
       return {
         ...created,
         services,
@@ -441,6 +402,8 @@ export class PiAgentSession {
         this.onText?.(event.assistantMessageEvent.delta);
       } else if (event.type === "message_end" && event.message.role === "assistant") {
         this.lastAssistantStopReason = event.message.stopReason;
+      } else if (event.type === "auto_retry_start") {
+        this.options.onRetry?.(event);
       } else if (event.type === "tool_execution_start") this.onTool?.(event.toolName, event.args);
     });
   }

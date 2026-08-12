@@ -24,8 +24,8 @@ describe("llmProfileSchema", () => {
       provider: "openai-compatible-local",
       model: "novel-model",
       thinkingLevel: "medium",
-      maxTokens: 8_192,
     });
+    expect(llmProfileSchema.parse({ provider: "anthropic", model: "claude-sonnet-5" }).maxTokens).toBeUndefined();
   });
 
   it("does not allow repository config to select a general-purpose secret", () => {

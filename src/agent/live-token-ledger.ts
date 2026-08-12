@@ -599,8 +599,9 @@ export function wrapLiveStreamFunction<
         if (reservation) {
           await settleOnce({ stopReason: "error", failure: errorMessage(error) }).catch(() => undefined);
         }
-        const failure = syntheticErrorMessage(model, error) as unknown as TMessage;
-        output.push({ type: "error", reason: "error", error: failure } as never);
+        const stopReason = error instanceof LiveRequestTimeoutError ? "aborted" : "error";
+        const failure = syntheticErrorMessage(model, error, stopReason) as unknown as TMessage;
+        output.push({ type: "error", reason: stopReason, error: failure } as never);
       } finally {
         if (timeout) clearTimeout(timeout);
       }
@@ -724,7 +725,11 @@ function terminalStreamEvent<TMessage extends LiveAssistantMessageLike>(message:
   return { type: "done", reason, message };
 }
 
-function syntheticErrorMessage<TModel extends LiveModelLike>(model: TModel, error: unknown): unknown {
+function syntheticErrorMessage<TModel extends LiveModelLike>(
+  model: TModel,
+  error: unknown,
+  stopReason: "error" | "aborted" = "error",
+): unknown {
   return {
     role: "assistant",
     content: [],
@@ -739,7 +744,7 @@ function syntheticErrorMessage<TModel extends LiveModelLike>(model: TModel, erro
       totalTokens: 0,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
-    stopReason: "error",
+    stopReason,
     errorMessage: errorMessage(error),
     timestamp: Date.now(),
   };

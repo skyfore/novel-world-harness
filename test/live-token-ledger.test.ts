@@ -469,7 +469,7 @@ describe("wrapLiveStreamFunction", () => {
     });
 
     await expect(wrapped(fakeModel, {}).result()).resolves.toMatchObject({
-      stopReason: "error",
+      stopReason: "aborted",
       errorMessage: expect.stringContaining("timed out after 20ms"),
     });
     expect(observedSignal?.aborted).toBe(true);

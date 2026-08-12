@@ -125,6 +125,8 @@ export type PlayerTurnRender = (input: Readonly<{
   actorId: EntityId;
 }>) => Promise<string> | string;
 
+export type PlayerSupersessionResolver = (proposal: EventProposal) => Promise<readonly string[]> | readonly string[];
+
 /**
  * Derive a model-safe view from committed actor knowledge at one commit.
  * Canonical context is used only to resolve names and field types for IDs that
@@ -301,6 +303,58 @@ export function validatePlayerActionScope(
   return issues;
 }
 
+/**
+ * Host-only physical interaction gate. Naming an entity makes its identity
+ * referenceable, but never proves that a distant character is present. The
+ * full projected state is consulted only after model translation and is not
+ * returned to the model.
+ */
+export async function validatePlayerActionSpatialScope(
+  engine: WorldEngine,
+  candidateInput: PlayerActionCandidate,
+  actorId: EntityId,
+  commitId: CommitId,
+): Promise<ValidationIssue[]> {
+  const candidate = playerActionCandidateSchema.parse(candidateInput);
+  const [context, state] = await Promise.all([
+    engine.contextForCommit(commitId),
+    engine.projector.project(commitId),
+  ]);
+  const interactionCharacters = new Set<EntityId>();
+  for (const participant of candidate.participants) {
+    if (participant !== actorId && context.entities.get(participant)?.kind === "character") interactionCharacters.add(participant);
+  }
+  for (const operation of candidate.proposedDelta.operations) {
+    if (
+      operation.op === "set"
+      && operation.field === "artifact.owner"
+      && typeof operation.value === "string"
+      && operation.value !== actorId
+      && context.entities.get(operation.value)?.kind === "character"
+    ) {
+      interactionCharacters.add(operation.value);
+    }
+  }
+  for (const operation of candidate.proposedKnowledge?.operations ?? []) {
+    if (operation.op === "learn" && operation.sourceActorId && operation.sourceActorId !== actorId) {
+      interactionCharacters.add(operation.sourceActorId);
+    }
+  }
+  const actorLocation = state.values[actorId]?.["character.location"];
+  const issues: ValidationIssue[] = [];
+  for (const characterId of [...interactionCharacters].sort()) {
+    const characterLocation = state.values[characterId]?.["character.location"];
+    if (typeof actorLocation !== "string" || typeof characterLocation !== "string" || actorLocation !== characterLocation) {
+      issues.push(issue(
+        "PLAYER_REMOTE_INTERACTION_FORBIDDEN",
+        `Player action cannot physically interact with ${characterId} because that character is not co-located with the selected actor`,
+        "participants",
+      ));
+    }
+  }
+  return issues;
+}
+
 /** Construct the only EventProposal that may cross the world-engine boundary. */
 export function playerActionToKnowledgeAwareAction(input: {
   branchId: string;
@@ -350,6 +404,7 @@ export class PlayerTurnService {
     private readonly engine: WorldEngine,
     private readonly translator: PlayerActionTranslator,
     render?: PlayerTurnRender,
+    private readonly resolveSupersessions?: PlayerSupersessionResolver,
   ) {
     if (render) this.render = render;
     else {
@@ -390,7 +445,7 @@ export class PlayerTurnService {
       );
     }
     const candidate = parsedCandidate.data;
-    const action = playerActionToKnowledgeAwareAction({
+    let action = playerActionToKnowledgeAwareAction({
       branchId: input.branchId,
       actorId: input.actorId,
       expectedParentCommit: previousHead,
@@ -400,6 +455,19 @@ export class PlayerTurnService {
     const scopeIssues = validatePlayerActionScope(candidate, contextBefore);
     if (scopeIssues.length) {
       return this.rejected(input, previousHead, contextBefore, "scope", scopeIssues, candidate, action.proposal);
+    }
+    const spatialIssues = await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead);
+    if (spatialIssues.length) {
+      return this.rejected(input, previousHead, contextBefore, "scope", spatialIssues, candidate, action.proposal);
+    }
+    if (this.resolveSupersessions) {
+      const supersedesCanonicalEventIds = [...new Set(await this.resolveSupersessions(action.proposal))].sort();
+      if (supersedesCanonicalEventIds.length) {
+        action = {
+          ...action,
+          proposal: eventProposalSchema.parse({ ...action.proposal, supersedesCanonicalEventIds }),
+        };
+      }
     }
 
     const committed = await commitKnowledgeAwareAction(this.engine, action);

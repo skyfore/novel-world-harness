@@ -132,14 +132,35 @@ export class WorldRuntime {
     const head = commitId ?? (await this.engine.branches.readHead(branchId));
     const state = await this.engine.projector.project(head);
     const templates = await this.possibilitySource({ branchId, commitId: head, state });
-    const realizedIds = await this.realizedPossibilityIds(head);
-    const frontier = buildFrontier(branchId, head, state, templates, { realizedIds });
+    const history = await this.possibilityHistory(head);
+    const frontier = buildFrontier(branchId, head, state, templates, {
+      realizedIds: history.realizedIds,
+      supersededIds: history.supersededIds,
+    });
     await this.frontierStore.write(frontier);
     return frontier;
   }
 
   async realizedPossibilityIds(commitId: CommitId): Promise<ReadonlySet<string>> {
+    return (await this.possibilityHistory(commitId)).realizedIds;
+  }
+
+  async conflictingEligibleCanonicalEventIds(proposal: EventProposal): Promise<string[]> {
+    const frontier = await this.refreshFrontier(proposal.branchId, proposal.expectedParentCommit);
+    return frontier.evaluated
+      .filter((entry) =>
+        entry.status === "eligible"
+        && Boolean(entry.possibility.canonicalEventId)
+        && Boolean(proposal.actorId && entry.possibility.participants.includes(proposal.actorId))
+        && deltasConflict(proposal.proposedDelta, entry.possibility.proposedDelta),
+      )
+      .map((entry) => entry.possibility.canonicalEventId!)
+      .sort();
+  }
+
+  private async possibilityHistory(commitId: CommitId): Promise<{ realizedIds: ReadonlySet<string>; supersededIds: ReadonlySet<string> }> {
     const realized = new Set<string>();
+    const superseded = new Set<string>();
     const seen = new Set<string>();
     let cursor: CommitId | undefined = commitId;
     while (cursor) {
@@ -149,10 +170,11 @@ export class WorldRuntime {
       for (const eventHash of commit.eventHashes) {
         const event = await this.engine.objects.getEvent(eventHash);
         if (event.possibilityId) realized.add(event.possibilityId);
+        for (const eventId of event.supersedesCanonicalEventIds ?? []) superseded.add(`canon-${eventId}`);
       }
       cursor = commit.parentCommitId;
     }
-    return realized;
+    return { realizedIds: realized, supersededIds: superseded };
   }
 
   private async isAncestor(ancestor: CommitId, descendant: CommitId): Promise<boolean> {
@@ -198,8 +220,30 @@ function proposalWriteSet(proposal: EventProposal): Set<string> {
   return writes;
 }
 
+function deltasConflict(left: EventProposal["proposedDelta"], right?: EventProposal["proposedDelta"]): boolean {
+  if (!right) return false;
+  const leftWrites = finalStateWrites(left);
+  const rightWrites = finalStateWrites(right);
+  for (const [key, leftValue] of leftWrites) {
+    if (!rightWrites.has(key)) continue;
+    if (JSON.stringify(leftValue) !== JSON.stringify(rightWrites.get(key))) return true;
+  }
+  return false;
+}
+
+function finalStateWrites(delta: EventProposal["proposedDelta"]): Map<string, unknown> {
+  const writes = new Map<string, unknown>();
+  for (const operation of delta.operations) {
+    if (operation.op === "activate-rule") writes.set(`rule:${operation.ruleId}`, true);
+    else if (operation.op === "deactivate-rule") writes.set(`rule:${operation.ruleId}`, false);
+    else if (operation.op === "set") writes.set(`state:${operation.entityId}:${operation.field}`, operation.value);
+    else if (operation.op === "unset") writes.set(`state:${operation.entityId}:${operation.field}`, { unset: true });
+    else writes.set(`state:${operation.entityId}:${operation.field}`, { op: operation.op, member: operation.member });
+  }
+  return writes;
+}
+
 function boundedLimit(value: number, name: string): number {
   if (!Number.isInteger(value) || value < 0 || value > 100) throw new Error(`${name} must be an integer between 0 and 100`);
   return value;
 }
-

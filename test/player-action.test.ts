@@ -5,6 +5,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Compile } from "typebox/compile";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPlayerActionCaptureTool } from "../src/agent/player-action-tool.js";
+import { canonicalEventToPossibility } from "../src/world/canon-runtime.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import type { CanonicalEvent, Claim, Entity } from "../src/world/model.js";
 import {
@@ -13,6 +14,7 @@ import {
   type PlayerActionCandidate,
 } from "../src/world/player-action.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
+import { WorldRuntime } from "../src/world/runtime.js";
 
 const roots: string[] = [];
 
@@ -69,10 +71,25 @@ async function fixture() {
     causalParents: [],
     confidence: 1,
   };
+  const giveKeyEvent: CanonicalEvent = {
+    id: "give-key",
+    title: "Hero gives the silver key to Mo Yan",
+    participants: ["hero", "mo-yan"],
+    storyTime: { kind: "ordinal", label: "now" },
+    preconditions: [
+      { op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" },
+      { op: "fact-equals", entityId: "mo-yan", field: "character.location", value: "hall" },
+      { op: "fact-equals", entityId: "silver-key", field: "artifact.owner", value: "hero" },
+    ],
+    observedOutcome: { version: 1, operations: [{ op: "set", entityId: "silver-key", field: "artifact.owner", value: "mo-yan" }] },
+    evidence: [],
+    causalParents: [],
+    confidence: 1,
+  };
   const context: WorldModelContext = {
     entities: new Map(entities.map((entity) => [entity.id, entity])),
     claims: new Map([route, rumor, futureSecret].map((claim) => [claim.id, claim])),
-    events: new Map([[futureEvent.id, futureEvent]]),
+    events: new Map([futureEvent, giveKeyEvent].map((event) => [event.id, event])),
     rules: new Map(),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
   };
@@ -84,6 +101,8 @@ async function fixture() {
       { op: "set", entityId: "hero", field: "character.location", value: "hall" },
       { op: "set", entityId: "villain", field: "character.alive", value: true },
       { op: "set", entityId: "villain", field: "character.location", value: "secret-lair" },
+      { op: "set", entityId: "mo-yan", field: "character.alive", value: true },
+      { op: "set", entityId: "mo-yan", field: "character.location", value: "hall" },
       { op: "set", entityId: "silver-key", field: "artifact.owner", value: "hero" },
       { op: "set", entityId: "black-key", field: "artifact.owner", value: "villain" },
     ],
@@ -285,6 +304,57 @@ describe("PlayerTurnService", () => {
     expect(otherResult.stage).toBe("scope");
     expect(otherResult.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_WRITE_OUT_OF_SCOPE" }));
     expect(await engine.branches.readHead("main")).toBe(head);
+  });
+
+  it("rejects a named but distant character as a physical participant", async () => {
+    const { engine, head } = await fixture();
+    const service = new PlayerTurnService(engine, () => ({
+      title: "Hero refuses to hand the silver key to the Hidden Villain",
+      participants: ["villain"],
+      preconditions: [],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "silver-key", field: "artifact.owner", value: "hero" }],
+      },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    }));
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "I refuse to give the key to Hidden Villain." });
+
+    expect(result.accepted).toBe(false);
+    expect(result.stage).toBe("scope");
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_REMOTE_INTERACTION_FORBIDDEN" }));
+    expect(await engine.branches.readHead("main")).toBe(head);
+  });
+
+  it("host-derives supersession when a co-located player choice conflicts with eligible canon", async () => {
+    const { engine } = await fixture();
+    const giveKey = engine.context.events!.get("give-key")!;
+    const runtime = new WorldRuntime(engine, ({ branchId, commitId }) => [canonicalEventToPossibility(giveKey, branchId, commitId)]);
+    const service = new PlayerTurnService(
+      engine,
+      () => ({
+        title: "Hero refuses and keeps the silver key",
+        participants: ["mo-yan"],
+        preconditions: [{ op: "fact-equals", entityId: "silver-key", field: "artifact.owner", value: "hero" }],
+        proposedDelta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "silver-key", field: "artifact.owner", value: "hero" }],
+        },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+      undefined,
+      (proposal) => runtime.conflictingEligibleCanonicalEventIds(proposal),
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "I refuse to give Mo Yan the silver key." });
+
+    expect(result.accepted).toBe(true);
+    expect(result.proposal?.supersedesCanonicalEventIds).toEqual(["give-key"]);
+    const frontier = await runtime.refreshFrontier("main", result.newHead);
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === "canon-give-key")?.status).toBe("superseded");
   });
 
   it("rejects an unmentioned destination and an explicitly named but unowned artifact", async () => {

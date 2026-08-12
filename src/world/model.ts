@@ -154,6 +154,7 @@ export const eventProposalSchema = z
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
     causalParents: z.array(idSchema),
+    supersedesCanonicalEventIds: z.array(idSchema).optional(),
     evidence: z.array(evidenceRefSchema),
     possibilityId: idSchema.optional(),
   })
@@ -173,6 +174,7 @@ export const committedEventSchema = z
     knowledgeDeltaHash: idSchema.optional(),
     evidence: z.array(evidenceRefSchema),
     causalParents: z.array(idSchema),
+    supersedesCanonicalEventIds: z.array(idSchema).optional(),
     possibilityId: idSchema.optional(),
   })
   .strict();

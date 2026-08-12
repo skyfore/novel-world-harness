@@ -24,7 +24,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
   const sessionStore = new PlaySessionStore(options.root);
   const active = await sessionStore.read();
   const branchId = options.branchId ?? active?.branchId ?? "main";
-  const { engine } = await openWorkspaceWorld(options.root);
+  const { engine, runtime } = await openWorkspaceWorld(options.root);
   let head: string;
   try {
     head = await engine.branches.readHead(branchId);
@@ -59,7 +59,12 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
     ...(options.model ? { model: options.model } : {}),
     ...(options.liveTest ? { liveTest: options.liveTest } : {}),
   });
-  const turns = new PlayerTurnService(engine, translator);
+  const turns = new PlayerTurnService(
+    engine,
+    translator,
+    undefined,
+    (proposal) => runtime.conflictingEligibleCanonicalEventIds(proposal),
+  );
   if (options.action !== undefined) {
     return runAndPrintTurn(turns, sessionStore, branchId, actor, options.action);
   }

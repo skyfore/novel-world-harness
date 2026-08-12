@@ -94,6 +94,10 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   for (const entityId of proposal.participants) if (!context.entities.has(entityId)) errors.push({ code: "UNKNOWN_PARTICIPANT", message: `Unknown participant ${entityId}` });
   if (proposal.actorId && !context.entities.has(proposal.actorId)) errors.push({ code: "UNKNOWN_ACTOR", message: `Unknown actor ${proposal.actorId}` });
   if (proposal.actorId && state.values[proposal.actorId]?.["character.alive"] === false) errors.push({ code: "ACTOR_DEAD", message: `Actor ${proposal.actorId} is not alive` });
+  for (let index = 0; index < (proposal.supersedesCanonicalEventIds?.length ?? 0); index += 1) {
+    const eventId = proposal.supersedesCanonicalEventIds![index]!;
+    if (!context.events?.has(eventId)) errors.push({ code: "UNKNOWN_SUPERSEDED_CANONICAL_EVENT", message: `Unknown superseded canonical event ${eventId}`, path: `supersedesCanonicalEventIds.${index}` });
+  }
   for (let index = 0; index < proposal.preconditions.length; index += 1) {
     if (!evaluatePredicate(state, proposal.preconditions[index]!)) errors.push({ code: "PRECONDITION_FAILED", message: `Precondition ${index} is false`, path: `preconditions.${index}` });
   }
@@ -207,7 +211,15 @@ export class WorldEngine {
     const deltaHash = await this.objects.putDelta(parsed.proposedDelta);
     const knowledgeDeltaHash = parsed.proposedKnowledge ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge) : undefined;
     const logicalTime = { step: state.logicalTime.step + 1, storyTime: parsed.proposedTime } as const;
-    const eventId = contentHash({ branchId: parsed.branchId, parent: head, proposalId: parsed.proposalId, title: parsed.title, deltaHash, knowledgeDeltaHash });
+    const eventId = contentHash({
+      branchId: parsed.branchId,
+      parent: head,
+      proposalId: parsed.proposalId,
+      title: parsed.title,
+      deltaHash,
+      knowledgeDeltaHash,
+      supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds,
+    });
     const event: CommittedEvent = {
       version: 1,
       eventId,
@@ -220,6 +232,7 @@ export class WorldEngine {
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
       evidence: parsed.evidence,
       causalParents: parsed.causalParents,
+      ...(parsed.supersedesCanonicalEventIds ? { supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds } : {}),
       ...(parsed.possibilityId ? { possibilityId: parsed.possibilityId } : {}),
     };
     const eventHash = await this.objects.putEvent(event);

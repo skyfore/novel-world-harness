@@ -26,14 +26,16 @@ export class PossibilityCommitService {
 
   async validate(templateInput: unknown, envelopeEvidence: readonly EvidenceRef[] = []): Promise<PossibilityValidation> {
     const template = possibilityTemplateSchema.parse(templateInput);
-    const [entities, rules, events] = await Promise.all([
+    const [entities, rules, events, claims] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listRules(),
       this.canon.listEvents(),
+      this.canon.listClaims(),
     ]);
     const entityMap = new Map(entities.map((entity) => [entity.id, entity]));
     const ruleMap = new Map(rules.map((rule) => [rule.id, rule]));
     const eventIds = new Set(events.map((event) => event.id));
+    const claimIds = new Set(claims.map((claim) => claim.id));
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
@@ -46,6 +48,9 @@ export class PossibilityCommitService {
     }
     if (template.canonicalEventId && !eventIds.has(template.canonicalEventId)) {
       errors.push(issue("UNKNOWN_CANONICAL_EVENT", `Possibility ${template.id} references unknown canonical event ${template.canonicalEventId}`, "canonicalEventId"));
+    }
+    if (template.kind === "canon-analogue" && !template.canonicalEventId) {
+      errors.push(issue("CANON_ANALOGUE_EVENT_REQUIRED", `Canon-analogue possibility ${template.id} must reference its canonical event`, "canonicalEventId"));
     }
     for (const predicate of [...template.preconditions, ...template.blockers, ...(template.expiry ?? [])]) {
       validatePredicate(predicate, entityMap, ruleMap, this.stateSchema, errors);
@@ -62,6 +67,18 @@ export class PossibilityCommitService {
       }
     }
     if (!template.proposedDelta) warnings.push(issue("NO_PROPOSED_DELTA", `Possibility ${template.id} is descriptive until a candidate event supplies effects`));
+    for (let index = 0; index < (template.proposedKnowledge?.operations.length ?? 0); index += 1) {
+      const operation = template.proposedKnowledge!.operations[index]!;
+      const actor = entityMap.get(operation.actorId);
+      if (!actor || actor.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_ACTOR", `Possibility knowledge actor ${operation.actorId} is not a canonical character`, `proposedKnowledge.operations.${index}`));
+      if (operation.op === "learn") {
+        if (!claimIds.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Possibility knowledge references unknown claim ${operation.claimId}`, `proposedKnowledge.operations.${index}`));
+        if (operation.sourceActorId) {
+          const source = entityMap.get(operation.sourceActorId);
+          if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Possibility knowledge source ${operation.sourceActorId} is not a canonical character`, `proposedKnowledge.operations.${index}`));
+        }
+      }
+    }
     return { accepted: errors.length === 0, errors, warnings };
   }
 
@@ -116,4 +133,3 @@ function validatePredicate(
 function issue(code: string, message: string, path?: string): ValidationIssue {
   return path ? { code, message, path } : { code, message };
 }
-

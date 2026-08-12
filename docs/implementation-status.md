@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-11
+Date: 2026-08-12
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
@@ -12,14 +12,14 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | --- | --- | --- |
 | Local file assistant | Implemented | Claude Code-style TUI, streaming/tool rendering, local lexical discovery, bounded reads, Pi sessions; model tools are read-only |
 | Source ingest | Implemented | Content hash, source manifest, deterministic evidence segments |
-| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals, allow narrow current-batch withdrawal, and require a circuit-broken explicit finish handshake |
+| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals, recover drafts across retries, allow narrow withdrawal, and use a host-owned circuit-broken finish handshake |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation; dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
 | Canon replay and branching | Implemented vertical slice | Predicate checkpoints, fork, diff, divergent possibility eligibility |
 | Actor behavior | Partial | Deterministic goal actions are connected; model reasoner exists only as an adapter/API |
 | Narrative | Partial | Immutable narrative frames and deterministic text exist; no Pi narration adapter is connected |
-| Preparation workflow | Implemented vertical slice | Derived ingest/compile/review/audit/branch stages; one batch per invocation; never auto-accepts proposals |
+| Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
 | Player experience | Implemented vertical slice | Restricted Pi translation of natural language into a host-owned validated player event |
 | Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, durable branch and resume selection |
 | Live-test budget | Implemented | Persistent pre-request reservation and usage reconciliation under a 100M hard ceiling |
@@ -31,12 +31,15 @@ The branch now implements a constrained end-to-end path from a local novel throu
 
 - Source files remain in the workspace and are registered by path, size, and SHA-256.
 - Segments preserve source line and byte ranges.
-- `compile-source` processes bounded batches and checkpoints only after active proposal calls form a closed graph, the model stops cleanly, and `finish_compiler_batch` succeeds. Repeated unchanged finish failures terminate without checkpointing.
+- `compile-source` processes bounded batches and checkpoints only after active proposal calls form a closed graph, the model stops cleanly, and `finish_compiler_batch` succeeds. Stable batch provenance recovers pending drafts after process/session failure; the host owns the active proposal set, and repeated unchanged finish failures terminate without checkpointing.
 - Pi compiler sessions expose read-only file tools plus narrow `propose_*` tools.
 - Proposals remain pending until explicit acceptance.
 - Acceptance verifies that the registered source still has its ingest hash and that evidence byte/line ranges and quote hashes match.
 - Canonical entities, claims, events, and rules use logical refs over immutable revisions.
 - `proposals accept-all` accepts dependency-valid canonical artifacts and valid generic possibility templates; unsupported `state-delta` proposals remain staging artifacts.
+- Automated source preparation does not expose the staging-only raw `state-delta` tool. Its catalogs, review barrier, and convergence are scoped to the selected source.
+- Only the active batch is hydrated with a size-bounded artifact catalog, preventing later full-book prompts from growing with every prior batch.
+- Guided `prepare-all` quarantines uncommittable drafts in rejected history and uses a conservative evidence-backed empty-delta opening seed only when the dedicated opening model pass produces no valid initial world.
 
 Model interpretation is still probabilistic. These checks can reject unsupported or structurally invalid output, but cannot prove that an ambiguous passage was interpreted correctly.
 

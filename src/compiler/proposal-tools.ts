@@ -92,7 +92,7 @@ function constrainCompilerStateFields(value: unknown): void {
 
 export type CompilerProposalToolset = {
   tools: ToolDefinition[];
-  beginBatch(segmentIds?: readonly string[]): void;
+  beginBatch(segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string): Promise<void>;
 };
 
 const MAX_CONSECUTIVE_FINISH_FAILURES = 3;
@@ -110,6 +110,8 @@ export function createCompilerProposalToolset(
   const service = new CompilerProposalService(workspaceRoot);
   const successfulProposalIds = new Set<string>();
   let expectedSegmentIds: string[] = [];
+  let compilerBatchId: string | undefined;
+  let activeSourceId: string | undefined;
   let finished = false;
   let circuitBreak: { reason: string; failureCount: number } | undefined;
   let totalFinishFailures = 0;
@@ -160,7 +162,16 @@ export function createCompilerProposalToolset(
       async execute(_id, input, signal) {
         signal?.throwIfAborted();
         assertBatchWritable();
-        const accepted = await service.submit(kind, { proposalId: input.proposal_id, payload: input.payload, evidence: input.evidence, generatedBy: { worker: metadata.name, ...generatedBy } });
+        const accepted = await service.submit(kind, {
+          proposalId: input.proposal_id,
+          payload: input.payload,
+          evidence: input.evidence,
+          generatedBy: {
+            worker: metadata.name,
+            ...generatedBy,
+            ...(compilerBatchId ? { compilerBatchId } : {}),
+          },
+        });
         successfulProposalIds.add(accepted.proposalId);
         recordProposalProgress();
         return proposalResult(
@@ -202,7 +213,6 @@ export function createCompilerProposalToolset(
   });
   const finishParameters = Type.Object({
     outcome: Type.Union([Type.Literal("complete"), Type.Literal("no-artifacts")]),
-    proposal_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), { uniqueItems: true }),
     reviewed_segments: Type.Array(Type.Object({
       segment_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
       disposition: Type.Union([Type.Literal("proposed"), Type.Literal("no-artifacts")]),
@@ -217,8 +227,8 @@ export function createCompilerProposalToolset(
     promptSnippet: "Finish the compiler batch only after proposal work is complete",
     promptGuidelines: [
       "Call this after all propose_* calls and after withdrawing any invalid successful draft.",
-      "Use outcome=complete with every active successfully submitted proposal_id, or no-artifacts only when the evidence supports no active proposals.",
-      "After a failed finish, correct the reported issue or proposal ID set before trying again; never repeat an identical failing call.",
+      "Use outcome=complete when the batch has active proposals, or no-artifacts only when it has none. The host automatically includes every active proposal; do not enumerate proposal_ids.",
+      "After a failed finish, correct the reported proposal or segment-review issue before trying again; never repeat an identical failing call.",
     ],
     executionMode: "sequential",
     parameters: finishParameters,
@@ -226,17 +236,13 @@ export function createCompilerProposalToolset(
       signal?.throwIfAborted();
       if (finished) throw new Error("Compiler batch was already finished.");
       if (circuitBreak) return circuitBreakResult(circuitBreak.reason, circuitBreak.failureCount);
-      const supplied = new Set(input.proposal_ids);
       const expected = [...successfulProposalIds].sort();
-      const listed = [...supplied].sort();
+      const listed = expected;
       if (input.outcome === "no-artifacts" && expected.length > 0) {
         return failFinish("no-artifacts cannot be used after active successful proposal submissions.");
       }
       if (input.outcome === "complete" && expected.length === 0) {
         return failFinish("complete requires at least one active successful proposal submission.");
-      }
-      if (expected.length !== listed.length || expected.some((id, index) => id !== listed[index])) {
-        return failFinish(`proposal_ids must exactly match active successful submissions: ${expected.join(", ") || "(none)"}`);
       }
       const reviewedIds = input.reviewed_segments.map((review) => review.segment_id).sort();
       const uniqueReviewedIds = [...new Set(reviewedIds)];
@@ -247,7 +253,7 @@ export function createCompilerProposalToolset(
       ) {
         return failFinish(`reviewed_segments must account exactly once for: ${expectedSegmentIds.join(", ") || "(none)"}`);
       }
-      const closureIssues = await validateCompilerProposalClosure(workspaceRoot, listed);
+      const closureIssues = await validateCompilerProposalClosure(workspaceRoot, listed, activeSourceId);
       if (closureIssues.length) {
         return failFinish(`Compiler batch proposal graph is incomplete:\n- ${closureIssues.join("\n- ")}`);
       }
@@ -260,14 +266,29 @@ export function createCompilerProposalToolset(
   });
   return {
     tools: [...proposalTools, withdrawTool, finishTool],
-    beginBatch(segmentIds = []) {
+    async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
       successfulProposalIds.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
+      compilerBatchId = nextCompilerBatchId;
+      activeSourceId = sourceId;
       finished = false;
       circuitBreak = undefined;
       totalFinishFailures = 0;
       consecutiveFinishFailures = 0;
       finishFailureCounts.clear();
+      if (!compilerBatchId) return;
+      for (const summary of await service.store.list("pending")) {
+        const envelope = await service.store.readEnvelope("pending", summary.id);
+        const origin = envelope.generatedBy;
+        if (
+          origin
+          && typeof origin === "object"
+          && !Array.isArray(origin)
+          && (origin as Record<string, unknown>).compilerBatchId === compilerBatchId
+        ) {
+          successfulProposalIds.add(summary.id);
+        }
+      }
     },
   };
 }

@@ -61,7 +61,16 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
         blockedReason = typeof details.reason === "string" ? details.reason : "finish circuit breaker opened";
         continue;
       }
-      if (message.isError !== true && call?.finishOutcome) completionOutcome = call.finishOutcome;
+      if (message.isError !== true && call?.finishOutcome) {
+        completionOutcome = call.finishOutcome;
+        if (Array.isArray(details?.proposalIds)) {
+          for (const proposalId of details.proposalIds) {
+            if (typeof proposalId !== "string") continue;
+            const suffix = `:envelope:${proposalId}`;
+            if (![...succeeded].some((key) => key.endsWith(suffix))) succeeded.add(`finish:envelope:${proposalId}`);
+          }
+        }
+      }
       continue;
     }
     if (toolName === "withdraw_compiler_proposal") {

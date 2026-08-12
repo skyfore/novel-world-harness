@@ -193,7 +193,7 @@ export class ProposalStore {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid proposal envelope: ${id}`);
     return value as Record<string, unknown>;
   }
-  async list(status: ProposalStatus = "pending"): Promise<ProposalSummary[]> {
+  async list(status: ProposalStatus = "pending", sourceId?: string): Promise<ProposalSummary[]> {
     const directory = path.join(this.root, status);
     let names: string[];
     try { names = (await fs.readdir(directory)).filter((name) => name.endsWith(".json")).sort(); }
@@ -201,6 +201,7 @@ export class ProposalStore {
     const summaries: ProposalSummary[] = [];
     for (const name of names) {
       const value = JSON.parse(await fs.readFile(path.join(directory, name), "utf8")) as Record<string, unknown>;
+      if (sourceId && !proposalContainsSource(value, sourceId)) continue;
       const generatedBy = value.generatedBy as Record<string, unknown> | undefined;
       if (typeof value.id !== "string" || typeof value.kind !== "string" || typeof value.schemaVersion !== "number" || typeof value.createdAt !== "string" || typeof generatedBy?.worker !== "string") {
         throw new Error(`Invalid proposal envelope: ${name}`);
@@ -217,6 +218,14 @@ export class ProposalStore {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`Proposal not found: ${id}`); throw error; }
   }
   private proposalPath(status: ProposalStatus, id: string): string { return path.join(this.root, status, `${safeId(id)}.json`); }
+}
+
+function proposalContainsSource(value: unknown, sourceId: string): boolean {
+  if (Array.isArray(value)) return value.some((item) => proposalContainsSource(item, sourceId));
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (record.sourceId === sourceId) return true;
+  return Object.values(record).some((item) => proposalContainsSource(item, sourceId));
 }
 
 function proposalIdentity<T>(proposal: ArtifactProposal<T>): Omit<ArtifactProposal<T>, "createdAt"> {

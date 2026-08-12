@@ -88,6 +88,17 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure(outcome)).toBeUndefined();
   });
 
+  it("counts host-recovered proposals acknowledged only by the finish result", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", reviewed_segments: [], summary: "recovered" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "finish", toolName: "finish_compiler_batch", isError: false, content: [], details: { compilerBatchFinished: true, proposalIds: ["proposal-from-prior-run"] } },
+      { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+    ]);
+
+    expect(outcome).toMatchObject({ proposalSucceeded: 1, completionSignaled: true, completionOutcome: "complete" });
+    expect(compilerBatchFailure(outcome)).toBeUndefined();
+  });
+
   it("removes a successfully withdrawn proposal from the active batch outcome", () => {
     const outcome = compilerBatchOutcomeFromMessages([
       { role: "assistant", content: [{ type: "toolCall", id: "draft", name: "propose_claim", arguments: { proposal_id: "claim-draft" } }], stopReason: "toolUse" },
@@ -127,6 +138,7 @@ describe("compiler batches", () => {
     expect(batches).toHaveLength(12);
     expect(batches.every((batch) => batch.segmentIds.length === 1)).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("EvidenceRef"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("at most 24 high-leverage active proposals"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("ASCII logical entity ID"))).toBe(true);
@@ -200,6 +212,7 @@ describe("compiler batches", () => {
       runner: async (batch) => {
         seen.push(batch.prompt);
         if (seen.length !== 1) return;
+        const evidence = [{ span: { sourceId: source.id, startLine: 1, endLine: 1, quoteHash: "fixture" }, strength: "explicit" as const }];
         await new ProposalStore(root).writePending({
           id: "proposal-existing-person",
           kind: "entity",
@@ -209,7 +222,7 @@ describe("compiler batches", () => {
             kind: "character",
             canonicalName: "人物2",
             aliases: ["Existing Person"],
-            evidence: [],
+            evidence,
           },
           evidence: [],
           generatedBy: { worker: "test" },
@@ -225,13 +238,12 @@ describe("compiler batches", () => {
             predicate: "entered",
             object: "city",
             epistemicType: "explicit-fact",
-            evidence: [],
+            evidence,
           },
           evidence: [],
           generatedBy: { worker: "test" },
           createdAt: new Date(0).toISOString(),
         }, claimSchema);
-        const evidence = [{ span: { sourceId: source.id, startLine: 1, endLine: 1, quoteHash: "fixture" }, strength: "explicit" as const }];
         await new ProposalStore(root).writePending({
           id: "proposal-opening",
           kind: "initial-world",
@@ -271,6 +283,63 @@ describe("compiler batches", () => {
     expect(seen[1]).toContain('"proposalId":"proposal-existing-model"');
     expect(seen[1]).toContain('"status":"pending"');
     expect(seen[1]).toContain("Do not submit a second initial-world");
+  });
+
+  it("does not leak pending artifacts from another source into the active catalog", async () => {
+    const { root, source } = await fixture();
+    await new ProposalStore(root).writePending({
+      id: "foreign-entity-proposal",
+      kind: "entity",
+      schemaVersion: 1,
+      payload: {
+        id: "foreign-entity",
+        kind: "character",
+        canonicalName: "Foreign",
+        aliases: [],
+        evidence: [{ span: { sourceId: "another-source", startLine: 1, endLine: 1, quoteHash: "foreign" }, strength: "explicit" }],
+      },
+      evidence: [],
+      generatedBy: { worker: "test" },
+      createdAt: new Date(0).toISOString(),
+    }, entitySchema);
+
+    let prompt = "";
+    await runCompilerBatches({
+      workspaceRoot: root,
+      source,
+      maxBatches: 1,
+      runner: async (batch) => { prompt = batch.prompt; },
+    });
+
+    expect(prompt).not.toContain("foreign-entity");
+  });
+
+  it("bounds the hydrated artifact catalog for long full-book runs", async () => {
+    const { root, source } = await fixture();
+    const proposals = new ProposalStore(root);
+    const evidence = [{ span: { sourceId: source.id, startLine: 1, endLine: 1, quoteHash: "fixture" }, strength: "explicit" as const }];
+    await Promise.all(Array.from({ length: 450 }, async (_, index) => {
+      const id = `catalog-person-${String(index).padStart(4, "0")}`;
+      await proposals.writePending({
+        id: `proposal-${id}`,
+        kind: "entity",
+        schemaVersion: 1,
+        payload: { id, kind: "character", canonicalName: `Person ${index}`, aliases: [], evidence },
+        evidence: [],
+        generatedBy: { worker: "test" },
+        createdAt: new Date(0).toISOString(),
+      }, entitySchema);
+    }));
+    let prompt = "";
+    await runCompilerBatches({
+      workspaceRoot: root,
+      source,
+      maxBatches: 1,
+      runner: async (batch) => { prompt = batch.prompt; },
+    });
+
+    expect(prompt.length).toBeLessThan(100_000);
+    expect(prompt).toContain('"omitted":{"entities":50}');
   });
 
   it("does not checkpoint a failed batch", async () => {

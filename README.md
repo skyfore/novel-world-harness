@@ -100,6 +100,9 @@ unbounded sequence of model requests. Generated artifacts remain pending proposa
 until deterministic validation and explicit acceptance. A defective proposal can
 be withdrawn to rejected history within its originating batch, and repeated
 unchanged finish failures trip a circuit breaker instead of extending the Pi tool loop.
+Batch identity is persisted on each proposal, so retrying an interrupted batch
+recovers its active drafts and can withdraw them. The finish handshake is host-owned:
+the model reviews segment IDs but no longer has to echo an ever-growing proposal-ID list.
 
 Run `/prepare-all [source-id] [branch-id]` inside the TUI to finish the remaining
 batches in the current session, review guided acceptance choices, generate a
@@ -152,9 +155,12 @@ recommended choice without prompting:
 nwh prepare-all ./books/novel.txt --yes
 ```
 
-`prepare-all` never force-accepts a blocked proposal. It stops with diagnostics
-when evidence, dependencies, audit checks, or staging-only artifacts still need
-attention. The existing `prepare` flow below remains the review-first path.
+`prepare-all` never force-accepts a blocked proposal. After the user authorizes
+safe convergence, invalid and staging-only drafts move to immutable rejected
+history while validated artifacts continue. If the dedicated opening-state model
+pass leaves no valid initial world, NWH commits a conservative evidence-backed
+empty-delta seed so branch creation can still complete without inventing facts.
+The existing `prepare` flow below remains the review-first path.
 
 ```bash
 nwh init ./my-novel

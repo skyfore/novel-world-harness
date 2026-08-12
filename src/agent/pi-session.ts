@@ -42,7 +42,7 @@ export type PiAgentSessionOptions = {
   includeProjectInstructions?: boolean;
   includeLocalTools?: boolean;
   includeNwhExtension?: boolean;
-  resetCompilerProposalTools?: (segmentIds?: readonly string[]) => void;
+  resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
   interactionMode?: NwhInteractionMode;
   runtimeDir?: string;
   piAgentDir?: string;

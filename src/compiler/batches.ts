@@ -6,9 +6,9 @@ import type { SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
-import { canonicalEventSchema, claimSchema, entitySchema, worldRuleSchema, type CanonicalEvent, type Claim, type Entity, type WorldRule } from "../world/model.js";
+import { canonicalEventSchema, claimSchema, entitySchema, worldRuleSchema, type CanonicalEvent, type Claim, type Entity, type EvidenceRef, type WorldRule } from "../world/model.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
-import { compilerProposalSchemas } from "./proposals.js";
+import { CompilerProposalService, compilerProposalSchemas } from "./proposals.js";
 
 export type CompilerBatch = {
   id: string;
@@ -18,6 +18,7 @@ export type CompilerBatch = {
   startLine: number;
   endLine: number;
   characters: number;
+  evidence: EvidenceRef[];
   prompt: string;
 };
 
@@ -78,6 +79,7 @@ type CompilerArtifactCatalog = {
 };
 
 const MAX_BATCH_CHARS = 28_000;
+const MAX_CATALOG_JSON_CHARS = 80_000;
 // Typed proposal output grows with the number of semantic sections, not just input bytes.
 // Keep each evidence/checkpoint boundary independently retryable so one long model turn
 // cannot strand several reviewed chapters behind a single finish handshake.
@@ -149,16 +151,17 @@ export async function prepareCompilerBatches(workspaceRoot: string, source: Sour
   }
   if (current.length) groups.push(current);
 
-  const artifactCatalog = await loadCompilerArtifactCatalog(workspaceRoot);
+  const artifactCatalog = emptyCompilerArtifactCatalog();
   const batches: CompilerBatch[] = [];
   for (let ordinal = 0; ordinal < groups.length; ordinal += 1) {
     const segments = groups[ordinal]!;
     const pieces: string[] = [];
+    const evidenceRefs: EvidenceRef[] = [];
     let characterCount = 0;
     for (const segment of segments) {
       const text = await readSegmentText(workspaceRoot, segment);
       characterCount += text.length;
-      const evidence = {
+      const evidence: EvidenceRef = {
         span: {
           sourceId: segment.sourceId,
           startByte: segment.startByte,
@@ -169,6 +172,7 @@ export async function prepareCompilerBatches(workspaceRoot: string, source: Sour
         },
         strength: "explicit",
       };
+      evidenceRefs.push(evidence);
       pieces.push(
         `### SEGMENT ${segment.id}\n` +
           `EvidenceRef to copy into evidence-backed proposals when the whole segment supports the artifact:\n` +
@@ -188,10 +192,63 @@ export async function prepareCompilerBatches(workspaceRoot: string, source: Sour
       startLine: Math.min(...segments.map((segment) => segment.startLine)),
       endLine: Math.max(...segments.map((segment) => segment.endLine)),
       characters: characterCount,
+      evidence: evidenceRefs,
       prompt: buildBatchPrompt(source, id, segmentIds, pieces, artifactCatalog),
     });
   }
   return batches;
+}
+
+export async function proposeMinimalOpeningWorld(
+  workspaceRoot: string,
+  source: SourceDocument,
+): Promise<string> {
+  const opening = await prepareOpeningWorldCompilerBatch(workspaceRoot, source);
+  const proposals = new CompilerProposalService(workspaceRoot);
+  const used = new Set([
+    ...(await proposals.store.list("pending")).map((item) => item.id),
+    ...(await proposals.store.list("accepted")).map((item) => item.id),
+    ...(await proposals.store.list("rejected")).map((item) => item.id),
+  ]);
+  const base = `fallback-initial-${source.id}`;
+  let proposalId = base;
+  for (let revision = 2; used.has(proposalId); revision += 1) proposalId = `${base}-v${revision}`;
+  await proposals.submit("initial-world", {
+    proposalId,
+    payload: {
+      version: 1,
+      delta: { version: 1, operations: [] },
+      evidence: opening.evidence,
+    },
+    generatedBy: { worker: "prepare-all-deterministic-fallback", compilerBatchId: opening.id },
+  });
+  return proposalId;
+}
+
+export async function prepareOpeningWorldCompilerBatch(
+  workspaceRoot: string,
+  source: SourceDocument,
+): Promise<CompilerBatch> {
+  const opening = (await prepareCompilerBatches(workspaceRoot, source))[0];
+  if (!opening) throw new Error(`Source ${source.id} has no opening evidence segment.`);
+  const hydrated = await hydrateCompilerBatch(workspaceRoot, opening);
+  const id = `opening-${opening.id}`;
+  return {
+    ...hydrated,
+    id,
+    prompt:
+      `This is a supplemental opening-world pass for source ${source.sourcePath}. ` +
+      `Use the supplied opening evidence and existing artifact catalog to propose exactly one missing initial-world plus only the entities or claims it directly references. ` +
+      `Do not repeat unrelated extraction from the already reviewed opening segment, and do not include later canonical developments. ` +
+      `Finish the supplemental batch explicitly; the host tracks its active proposal set across retries.\n\n${hydrated.prompt}`,
+  };
+}
+
+export async function hydrateCompilerBatch(workspaceRoot: string, batch: CompilerBatch): Promise<CompilerBatch> {
+  return {
+    ...batch,
+    prompt: replaceArtifactCatalog(batch.prompt, await loadCompilerArtifactCatalog(workspaceRoot, batch.sourceId)),
+  };
 }
 
 export async function runCompilerBatches(options: {
@@ -221,10 +278,7 @@ export async function runCompilerBatches(options: {
     }
     if (completed >= maxBatches) break;
     options.onProgress?.(`compiler batch ${batch.ordinal + 1}/${batches.length}: ${batch.startLine}-${batch.endLine}`);
-    await options.runner({
-      ...batch,
-      prompt: replaceArtifactCatalog(batch.prompt, await loadCompilerArtifactCatalog(options.workspaceRoot)),
-    });
+    await options.runner(await hydrateCompilerBatch(options.workspaceRoot, batch));
     await store.markComplete(options.source.id, batch.id);
     completedIds.add(batch.id);
     completed += 1;
@@ -241,7 +295,7 @@ function buildBatchPrompt(
   artifactCatalog: CompilerArtifactCatalog,
 ): string {
   return `You are processing compiler batch ${batchId} for source ${source.sourcePath} (${source.id}).\n\n` +
-    `Analyze only the supplied evidence slices. Produce small typed pending proposals with the available propose_* tools. ` +
+    `Analyze only the supplied evidence slices. Produce small typed pending proposals with the available propose_* tools. Keep this pass to at most 24 high-leverage active proposals; prioritize stable identities and executable state/knowledge transitions over exhaustive mention extraction. ` +
     `Do not commit truth. Reuse stable entity IDs when the evidence clearly refers to the same identity. ` +
     `Every logical ID must use only ASCII letters, digits, dot, underscore, and hyphen, and must start with a letter or digit. ` +
     `Every canonical proposal must contain at least one EvidenceRef. Copy a supplied whole-segment EvidenceRef exactly, including its byte range, line range, and full quoteHash; never edit one range while retaining another range's hash. ` +
@@ -257,11 +311,11 @@ function buildBatchPrompt(
     `Pending proposals are immutable. If a successful proposal needs correction, first submit the corrected candidate under a new proposal_id such as -v2, then call withdraw_compiler_proposal for the defective current-batch candidate so it moves to rejected history; never pretend that reusing the old ID overwrote it. ` +
     `Never install later canon in the initial world, leak it into opening character knowledge, or treat it as already committed branch history. Do not infer developments absent from the source. If evidence is insufficient, make fewer proposals rather than inventing facts. ` +
     `This is the only compiler pass guaranteed to contain these evidence segments: ${segmentIds.join(", ")}. Process every supplied section now; never defer a supplied act, chapter, or later-canonical paragraph to a hypothetical future batch. ` +
-    `After all proposal work and any required withdrawals, call finish_compiler_batch with every active successful proposal ID and one reviewed_segments entry for each of those exact segment IDs. Each segment review must briefly state what was proposed or why it supports no artifact. Use no-artifacts only when every slice supports no active proposal. If finish reports an error, correct that specific issue before retrying and never repeat an identical failing call. Without one successful explicit finish, the batch remains retryable.\n\n` +
+    `After all proposal work and any required withdrawals, call finish_compiler_batch with one reviewed_segments entry for each of those exact segment IDs. The host automatically includes all active proposals created by this batch, including proposals recovered from an earlier failed attempt, so omit proposal_ids. Each segment review must briefly state what was proposed or why it supports no artifact. Use no-artifacts only when every slice supports no active proposal. If finish reports an error, correct that specific issue before retrying and never repeat an identical failing call. Without one successful explicit finish, the batch remains retryable.\n\n` +
     pieces.join("\n\n");
 }
 
-async function loadCompilerArtifactCatalog(workspaceRoot: string): Promise<CompilerArtifactCatalog> {
+async function loadCompilerArtifactCatalog(workspaceRoot: string, sourceId: string): Promise<CompilerArtifactCatalog> {
   const identities = new Map<string, CompilerEntityIdentity>();
   const claims = new Map<string, CompilerClaimIdentity>();
   const events = new Map<string, CompilerEventIdentity>();
@@ -284,18 +338,19 @@ async function loadCompilerArtifactCatalog(workspaceRoot: string): Promise<Compi
     actors.listModels(),
     possibilityStore.list(),
   ]);
-  for (const entity of canonicalEntities) identities.set(entity.id, entityIdentity(entity, "canonical"));
-  for (const claim of canonicalClaims) claims.set(claim.id, claimIdentity(claim, "canonical"));
-  for (const event of canonicalEvents) events.set(event.id, eventIdentity(event, "canonical"));
-  for (const rule of canonicalRules) rules.set(rule.id, ruleIdentity(rule, "canonical"));
-  if (canonicalInitial) initialWorlds.push(initialWorldIdentity(canonicalInitial, "canonical"));
-  for (const goal of canonicalGoals) goals.set(goal.id, goalIdentity(goal, "canonical"));
-  for (const model of canonicalModels) models.push(characterModelIdentity(model, "canonical"));
+  for (const entity of canonicalEntities.filter((item) => hasSourceEvidence(item, sourceId))) identities.set(entity.id, entityIdentity(entity, "canonical"));
+  for (const claim of canonicalClaims.filter((item) => hasSourceEvidence(item, sourceId))) claims.set(claim.id, claimIdentity(claim, "canonical"));
+  for (const event of canonicalEvents.filter((item) => hasSourceEvidence(item, sourceId))) events.set(event.id, eventIdentity(event, "canonical"));
+  for (const rule of canonicalRules.filter((item) => hasSourceEvidence(item, sourceId))) rules.set(rule.id, ruleIdentity(rule, "canonical"));
+  if (canonicalInitial && hasSourceEvidence(canonicalInitial, sourceId)) initialWorlds.push(initialWorldIdentity(canonicalInitial, "canonical"));
+  for (const goal of canonicalGoals.filter((item) => hasSourceEvidence(item, sourceId))) goals.set(goal.id, goalIdentity(goal, "canonical"));
+  for (const model of canonicalModels.filter((item) => hasSourceEvidence(item, sourceId))) models.push(characterModelIdentity(model, "canonical"));
   for (const possibility of canonicalPossibilities) {
+    if (!hasSourceEvidence(possibility, sourceId)) continue;
     possibilities.set(possibility.id, possibilityIdentity(possibility, "canonical"));
   }
   const proposals = new ProposalStore(workspaceRoot);
-  for (const summary of await proposals.list("pending")) {
+  for (const summary of await proposals.list("pending", sourceId)) {
     if (summary.kind === "entity") {
       const proposal = await proposals.read("pending", summary.id, entitySchema);
       if (!identities.has(proposal.payload.id)) identities.set(proposal.payload.id, entityIdentity(proposal.payload, "pending"));
@@ -335,6 +390,10 @@ async function loadCompilerArtifactCatalog(workspaceRoot: string): Promise<Compi
     characterModels: models.sort((left, right) => `${left.actorId}:${left.proposalId ?? ""}`.localeCompare(`${right.actorId}:${right.proposalId ?? ""}`)),
     possibilities: byId(possibilities.values()),
   };
+}
+
+function hasSourceEvidence(value: { evidence?: readonly EvidenceRef[] }, sourceId: string): boolean {
+  return value.evidence?.some((reference) => reference.span.sourceId === sourceId) ?? false;
 }
 
 function entityIdentity(entity: Entity, status: CompilerEntityIdentity["status"]): CompilerEntityIdentity {
@@ -415,7 +474,63 @@ function possibilityIdentity(
 const ARTIFACT_CATALOG_PATTERN = /<existing-artifact-catalogs>[\s\S]*?<\/existing-artifact-catalogs>/;
 
 function artifactCatalogBlock(catalog: CompilerArtifactCatalog): string {
-  return `<existing-artifact-catalogs>\n${JSON.stringify(catalog)}\n</existing-artifact-catalogs>`;
+  const compact = compactArtifactCatalog(catalog);
+  return `<existing-artifact-catalogs>\n${JSON.stringify(compact)}\n</existing-artifact-catalogs>`;
+}
+
+function emptyCompilerArtifactCatalog(): CompilerArtifactCatalog {
+  return {
+    entities: [],
+    claims: [],
+    events: [],
+    rules: [],
+    initialWorlds: [],
+    characterGoals: [],
+    characterModels: [],
+    possibilities: [],
+  };
+}
+
+function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtifactCatalog & { omitted: Record<string, number> } {
+  const limits = {
+    entities: 400,
+    claims: 120,
+    events: 120,
+    rules: 80,
+    initialWorlds: 4,
+    characterGoals: 120,
+    characterModels: 120,
+    possibilities: 120,
+  } as const;
+  const compact = {
+    entities: sampleCatalog(catalog.entities, limits.entities),
+    claims: sampleCatalog(catalog.claims, limits.claims),
+    events: sampleCatalog(catalog.events, limits.events),
+    rules: sampleCatalog(catalog.rules, limits.rules),
+    initialWorlds: sampleCatalog(catalog.initialWorlds, limits.initialWorlds),
+    characterGoals: sampleCatalog(catalog.characterGoals, limits.characterGoals),
+    characterModels: sampleCatalog(catalog.characterModels, limits.characterModels),
+    possibilities: sampleCatalog(catalog.possibilities, limits.possibilities),
+    omitted: {} as Record<string, number>,
+  };
+  for (const key of Object.keys(limits) as Array<keyof typeof limits>) {
+    const omitted = catalog[key].length - compact[key].length;
+    if (omitted > 0) compact.omitted[key] = omitted;
+  }
+  const removable = ["possibilities", "events", "claims", "characterGoals", "characterModels", "rules", "entities"] as const;
+  while (JSON.stringify(compact).length > MAX_CATALOG_JSON_CHARS) {
+    const key = removable.find((candidate) => compact[candidate].length > 1);
+    if (!key) break;
+    compact[key].splice(Math.floor(compact[key].length / 2), 1);
+    compact.omitted[key] = (compact.omitted[key] ?? 0) + 1;
+  }
+  return compact;
+}
+
+function sampleCatalog<T>(items: T[], limit: number): T[] {
+  if (items.length <= limit) return [...items];
+  const first = Math.ceil(limit / 2);
+  return [...items.slice(0, first), ...items.slice(items.length - (limit - first))];
 }
 
 function replaceArtifactCatalog(prompt: string, catalog: CompilerArtifactCatalog): string {

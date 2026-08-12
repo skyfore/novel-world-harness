@@ -76,6 +76,31 @@ describe("preparation workflow inspection", () => {
     });
   });
 
+  it("does not let another source's pending proposals block the selected source", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-source-isolation-"));
+    roots.push(root);
+    const selected = await createEvidenceFixture(root, "Selected opening.\n", "selected.txt");
+    const foreign = await createEvidenceFixture(root, "Foreign hero.\n", "foreign.txt");
+    const batches = await prepareCompilerBatches(root, selected.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(selected.source.id, batch.id);
+    await new CompilerProposalService(root).submit("entity", {
+      proposalId: "foreign-hero",
+      payload: {
+        id: "foreign-hero",
+        kind: "character",
+        canonicalName: "Foreign Hero",
+        aliases: [],
+        evidence: foreign.evidence("Foreign hero."),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    await expect(inspectPreparation(root, { sourceId: selected.source.id })).resolves.toMatchObject({
+      stage: "needs-initial-world",
+      pending: [],
+    });
+  });
+
   it("the command never accepts pending proposals and only auto-creates a branch after deterministic gates", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-command-"));
     roots.push(root);

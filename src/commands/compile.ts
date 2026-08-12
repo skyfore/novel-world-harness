@@ -13,6 +13,11 @@ export type CompileCommandOptions = {
   saveSession?: boolean;
   prompt?: string;
   tuiMode?: TuiMode;
+  segmentIds?: readonly string[];
+  compilerBatchId?: string;
+  sourceId?: string;
+  includeLocalTools?: boolean;
+  disabledProposalTools?: readonly string[];
 };
 
 const DEFAULT_COMPILER_PROMPT = `Inspect the novel workspace and build a small, evidence-backed compiler batch. Start by searching and reading relevant source spans. Prefer stable entity proposals first, then claims, world rules, and canonical events whose references can be validated. Use propose_state_delta or propose_possibility only when they are useful staging artifacts. Do not attempt to commit anything and do not describe pending proposals as truth.`;
@@ -36,6 +41,11 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     ...(profile ? { profile } : {}),
     ...(options.model ? { model: options.model } : {}),
     saveSession: options.saveSession ?? true,
+    ...(options.segmentIds ? { segmentIds: options.segmentIds } : {}),
+    ...(options.compilerBatchId ? { compilerBatchId: options.compilerBatchId } : {}),
+    ...(options.sourceId ? { sourceId: options.sourceId } : {}),
+    ...(options.includeLocalTools !== undefined ? { includeLocalTools: options.includeLocalTools } : {}),
+    ...(options.disabledProposalTools ? { disabledProposalTools: options.disabledProposalTools } : {}),
     ...(printMode ? { onRetry(event) {
       stderr.write(`\n${formatRetryNotice(event)}\n`);
     } } : {}),

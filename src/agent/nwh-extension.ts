@@ -15,7 +15,9 @@ import {
 } from "../compiler/source-loop.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS } from "../compiler/pi-compiler.js";
-import { convergeWorldProposals } from "../compiler/converge.js";
+import { prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld } from "../compiler/batches.js";
+import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
+import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
 import { inspectPreparation } from "../workflow/prepare.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
@@ -27,7 +29,7 @@ export type NwhExtensionOptions = {
   saveSession: boolean;
   mode: NwhInteractionMode;
   onSessionShutdown?: () => Promise<void>;
-  resetCompilerProposalTools?: (segmentIds?: readonly string[]) => void;
+  resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
 };
 
 const COMMAND_HELP = `NWH commands:
@@ -58,6 +60,8 @@ type TuiPrepareAllState = {
   branchId: string;
   compileAllApproved: boolean;
   initialWorldRequestRunning: boolean;
+  initialWorldAttempted: boolean;
+  initialWorldBatchId?: string;
 };
 
 export function splitCommandArguments(value: string): string[] {
@@ -83,12 +87,16 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let prepareAllState: TuiPrepareAllState | undefined;
     let compilerCircuitBroken = false;
 
-    const beginTurn = (turn: SourceLoopTurn) => {
-      registeredCompilerToolset?.beginBatch(turn.batch.segmentIds);
-      options.resetCompilerProposalTools?.(turn.batch.segmentIds);
+    const resetCompilerBatch = async (segmentIds: readonly string[], compilerBatchId: string, sourceId: string) => {
+      await registeredCompilerToolset?.beginBatch(segmentIds, compilerBatchId, sourceId);
+      await options.resetCompilerProposalTools?.(segmentIds, compilerBatchId, sourceId);
       compilerCircuitBroken = false;
-      pendingTurn = turn;
       pendingRunMessages = [];
+    };
+
+    const beginTurn = async (turn: SourceLoopTurn) => {
+      await resetCompilerBatch(turn.batch.segmentIds, turn.batch.id, turn.source.id);
+      pendingTurn = turn;
     };
 
     const activateCompilerTools = (ctx: ExtensionContext) => {
@@ -153,7 +161,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }
         activeSourceId = preparation.source.id;
         activateCompilerTools(ctx);
-        beginTurn(preparation);
+        await beginTurn(preparation);
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Preparing · batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`));
         ctx.ui.notify(`Full preparation: starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches}.`, "info");
         sendHiddenPreparationTurn(compilerPromptForTurn(preparation), "nwh-prepare-all-batch");
@@ -161,30 +169,41 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
       if (inspection.stage === "review") {
         const decision = await choose(ctx, "Accept validated proposals?", [
-          { value: "accept", label: "Accept valid", description: `Validate and commit all ${inspection.pending.length} pending proposals that pass.`, recommended: true },
+          { value: "accept", label: "Converge safely", description: `Commit valid proposals and preserve uncommittable drafts in rejected history (${inspection.pending.length} pending).`, recommended: true },
           { value: "review", label: "Review first", description: "Stop before accepting anything; use proposal CLI commands." },
         ]);
         if (decision !== "accept") {
           stopPrepareAll(ctx, `Full preparation paused for proposal review. Next: ${inspection.next}`, "info");
           return;
         }
-        const result = await convergeWorldProposals(workspace.root);
+        const result = await convergeWorldProposals(workspace.root, state.sourceId);
         const blocked = result.canonical.blocked.length + result.possibilities.blocked.length;
-        if (blocked || result.staging.length) {
-          stopPrepareAll(
-            ctx,
-            `Full preparation stopped: ${blocked} validation-blocked and ${result.staging.length} staging-only proposal(s). Run nwh proposals list for details.`,
-            "error",
+        const quarantined = await quarantineUncommittableProposals(workspace.root, result);
+        if (quarantined.length) {
+          ctx.ui.notify(
+            `Rejected ${blocked} validation-blocked and ${result.staging.length} staging-only proposal(s) to immutable history; continuing with validated artifacts.`,
+            "warning",
           );
-          return;
         }
         ctx.ui.notify(`Accepted ${result.canonical.accepted.length + result.possibilities.accepted.length} validated proposal(s).`, "info");
         await advancePrepareAll(ctx);
         return;
       }
       if (inspection.stage === "needs-initial-world") {
-        if (state.initialWorldRequestRunning) {
-          stopPrepareAll(ctx, "The opening-state compiler did not produce an acceptable initial-world proposal. Review the model output and retry /prepare-all.", "error");
+        if (state.initialWorldAttempted) {
+          const fallbackId = await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
+          const result = await convergeWorldProposals(workspace.root, state.sourceId);
+          await quarantineUncommittableProposals(workspace.root, result);
+          ctx.ui.notify(`The model did not leave a valid opening state; accepted conservative empty-delta fallback ${fallbackId}.`, "warning");
+          const afterFallback = await inspectPreparation(workspace.root, {
+            sourceId: state.sourceId,
+            branchId: state.branchId,
+          });
+          if (afterFallback.stage === "needs-initial-world") {
+            stopPrepareAll(ctx, "The deterministic opening-state fallback could not be committed. Run nwh audit for conflicting world data.", "error");
+            return;
+          }
+          await advancePrepareAll(ctx);
           return;
         }
         const decision = await choose(ctx, "Generate opening world?", [
@@ -196,12 +215,13 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activateCompilerTools(ctx);
-        registeredCompilerToolset?.beginBatch();
-        options.resetCompilerProposalTools?.();
-        compilerCircuitBroken = false;
+        const openingBatch = await prepareOpeningWorldCompilerBatch(workspace.root, inspection.source!);
+        await resetCompilerBatch(openingBatch.segmentIds, openingBatch.id, inspection.source!.id);
         state.initialWorldRequestRunning = true;
+        state.initialWorldAttempted = true;
+        state.initialWorldBatchId = openingBatch.id;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing · opening world"));
-        sendHiddenPreparationTurn(INITIAL_WORLD_PROMPT, "nwh-prepare-all-initial-world");
+        sendHiddenPreparationTurn(`${INITIAL_WORLD_PROMPT}\n\n${openingBatch.prompt}`, "nwh-prepare-all-initial-world");
         return;
       }
       if (inspection.stage === "create-branch") {
@@ -274,7 +294,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             return { action: "handled" };
           }
           activateCompilerTools(ctx);
-          beginTurn(preparation);
+          await beginTurn(preparation);
           ctx.ui.notify(
             `Novel indexed: ${preparation.source.sourcePath} · starting batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`,
             "info",
@@ -311,7 +331,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     });
 
     pi.on("agent_end", (event) => {
-      if (!pendingTurn) return;
+      if (!pendingTurn && !prepareAllState?.initialWorldRequestRunning) return;
       // agent_end is per low-level run. Keep every run until agent_settled so
       // provider retries, compaction retries, and queued continuations cannot
       // erase an earlier unresolved proposal failure or finish handshake.
@@ -321,13 +341,24 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.on("agent_settled", async (_event, ctx) => {
       compilerCircuitBroken = false;
       const completedTurn = pendingTurn;
+      const openingRequest = !completedTurn && prepareAllState?.initialWorldRequestRunning;
+      if (!completedTurn && !openingRequest) return;
+      const outcome = compilerBatchOutcomeFromMessages(pendingRunMessages);
+      pendingRunMessages = [];
       if (!completedTurn) {
-        if (prepareAllState?.initialWorldRequestRunning) await advancePrepareAll(ctx);
+        prepareAllState!.initialWorldRequestRunning = false;
+        const failure = compilerBatchFailure(outcome);
+        if (failure) {
+          const rejected = prepareAllState!.initialWorldBatchId
+            ? await rejectPendingCompilerBatchProposals(workspace.root, prepareAllState!.initialWorldBatchId!)
+            : [];
+          ctx.ui.notify(`Opening-state compiler did not complete (${failure}); converging any valid drafts before fallback.`, "warning");
+          if (rejected.length) ctx.ui.notify(`Rejected ${rejected.length} partial opening-state proposal(s); incomplete model turns cannot enter canonical truth.`, "warning");
+        }
+        await advancePrepareAll(ctx);
         return;
       }
       pendingTurn = undefined;
-      const outcome = compilerBatchOutcomeFromMessages(pendingRunMessages);
-      pendingRunMessages = [];
       const failure = compilerBatchFailure(outcome);
       if (failure) {
         const wasPreparingAll = Boolean(prepareAllState);
@@ -412,7 +443,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activateCompilerTools(ctx);
-        beginTurn(preparation);
+        await beginTurn(preparation);
         ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
         pi.sendUserMessage(compilerPromptForTurn(preparation));
       },
@@ -460,6 +491,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           branchId,
           compileAllApproved: false,
           initialWorldRequestRunning: false,
+          initialWorldAttempted: false,
         };
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing world"));
         await advancePrepareAll(ctx);

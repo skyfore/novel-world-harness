@@ -58,6 +58,8 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         saveSession: false,
         includeLocalTools: false,
         segmentIds: batch.segmentIds,
+        compilerBatchId: batch.id,
+        sourceId: batch.sourceId,
         onRetry(event) {
           stderr.write(`${formatRetryNotice(event)}\n`);
         },

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { CompilerBatchStore, prepareCompilerBatches, type CompilerBatch } from "./batches.js";
+import { CompilerBatchStore, hydrateCompilerBatch, prepareCompilerBatches, type CompilerBatch } from "./batches.js";
 import { loadOptionalConfig } from "../config/load.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -93,16 +93,17 @@ async function prepareSourceLoopForSource(
   const completed = new Set(progress.completedBatchIds);
   const batch = batches.find((candidate) => !completed.has(candidate.id));
   if (!batch) return { status: "complete", source, totalBatches: batches.length };
+  const hydratedBatch = await hydrateCompilerBatch(workspaceRoot, batch);
 
   const completedBatches = batches.filter((candidate) => completed.has(candidate.id)).length;
   return {
     status: "ready",
     source,
-    batch,
+    batch: hydratedBatch,
     totalBatches: batches.length,
     completedBatches,
     remainingAfterBatch: Math.max(0, batches.length - completedBatches - 1),
-    prompt: buildSourceLoopPrompt(source, batch, completedBatches, batches.length),
+    prompt: buildSourceLoopPrompt(source, hydratedBatch, completedBatches, batches.length),
   };
 }
 

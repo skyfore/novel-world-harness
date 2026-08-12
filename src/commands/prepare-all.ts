@@ -1,11 +1,13 @@
 import path from "node:path";
 import { stdout } from "node:process";
-import { convergeWorldProposals, type WorldProposalConvergence } from "../compiler/converge.js";
+import { convergeWorldProposals, quarantineUncommittableProposals, type WorldProposalConvergence } from "../compiler/converge.js";
 import { loadOptionalConfig } from "../config/load.js";
 import { inspectPreparation, type PreparationInspection } from "../workflow/prepare.js";
 import { askUserQuestion, recommendedAnswer, type AskUserQuestion } from "../util/ask-user-question.js";
 import { compileCommand } from "./compile.js";
 import { compileSourceCommand } from "./compile-source.js";
+import { prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld } from "../compiler/batches.js";
+import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { ingestWorkspaceSource } from "./ingest.js";
 import { worldCreateCommand } from "./world.js";
 
@@ -102,12 +104,12 @@ export async function prepareAllCommand(
       header: "Proposals",
       question: `Accept all ${inspection.pending.length} pending proposal(s) that pass deterministic validation?`,
       options: [
-        { value: "accept", label: "Accept valid", description: "Commit only proposals whose evidence, schema, and dependencies validate.", recommended: true },
+        { value: "accept", label: "Converge safely", description: "Commit validated proposals and preserve uncommittable drafts in rejected history.", recommended: true },
         { value: "review", label: "Review first", description: "Stop at the proposal review barrier without accepting anything." },
       ],
     });
     if (decision === "review") return pausePreparation(inspection);
-    await convergeOrThrow(root, dependencies.converge);
+    await convergeForPreparation(root, sourceId, dependencies.converge);
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
 
@@ -122,26 +124,44 @@ export async function prepareAllCommand(
     });
     if (decision === "pause") return pausePreparation(inspection);
     stdout.write("No accepted initial world exists; compiling an opening-state proposal.\n");
-    await dependencies.compileInitialWorld({
-      root,
-      configPath,
-      allowMissingConfig: true,
-      ...(options.model ? { model: options.model } : {}),
-      saveSession: false,
-      prompt: INITIAL_WORLD_PROMPT,
-    });
+    const openingBatch = await prepareOpeningWorldCompilerBatch(root, inspection.source!);
+    try {
+      await dependencies.compileInitialWorld({
+        root,
+        configPath,
+        allowMissingConfig: true,
+        ...(options.model ? { model: options.model } : {}),
+        saveSession: false,
+        prompt: `${INITIAL_WORLD_PROMPT}\n\n${openingBatch.prompt}`,
+        segmentIds: openingBatch.segmentIds,
+        compilerBatchId: openingBatch.id,
+        sourceId,
+        includeLocalTools: false,
+        disabledProposalTools: ["propose_state_delta"],
+      });
+    } catch (error) {
+      stdout.write(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}\n`);
+      const rejected = await rejectPendingCompilerBatchProposals(root, openingBatch.id);
+      if (rejected.length) stdout.write(`Rejected ${rejected.length} partial opening-state proposal(s) before fallback.\n`);
+    }
     inspection = await inspectPreparation(root, { sourceId, branchId });
     if (inspection.pending.length) {
       const acceptance = await ask({
         header: "Opening proposal",
         question: `Accept the ${inspection.pending.length} new proposal(s) that pass deterministic validation?`,
         options: [
-          { value: "accept", label: "Accept valid", description: "Validate and commit the generated opening artifacts.", recommended: true },
+          { value: "accept", label: "Converge safely", description: "Commit validated opening artifacts and reject uncommittable drafts.", recommended: true },
           { value: "review", label: "Review first", description: "Stop before committing the generated proposals." },
         ],
       });
       if (acceptance === "review") return pausePreparation(inspection);
-      await convergeOrThrow(root, dependencies.converge);
+      await convergeForPreparation(root, sourceId, dependencies.converge);
+      inspection = await inspectPreparation(root, { sourceId, branchId });
+    }
+    if (inspection.stage === "needs-initial-world") {
+      const fallbackId = await proposeMinimalOpeningWorld(root, inspection.source!);
+      stdout.write(`No valid model opening state remained; created conservative empty-delta proposal ${fallbackId}.\n`);
+      await convergeForPreparation(root, sourceId, dependencies.converge);
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
   }
@@ -166,17 +186,16 @@ export async function prepareAllCommand(
   return inspection;
 }
 
-async function convergeOrThrow(
+async function convergeForPreparation(
   root: string,
+  sourceId: string,
   converge: typeof convergeWorldProposals,
 ): Promise<void> {
-  const result = await converge(root);
+  const result = await converge(root, sourceId);
   printConvergence(result);
-  const blocked = result.canonical.blocked.length + result.possibilities.blocked.length;
-  if (blocked || result.staging.length) {
-    throw new Error(
-      `Automatic preparation stopped with ${blocked} validation-blocked and ${result.staging.length} staging-only proposal(s). Inspect them with \`nwh proposals list\`.`,
-    );
+  const quarantined = await quarantineUncommittableProposals(root, result);
+  for (const item of quarantined) {
+    stdout.write(`Rejected uncommittable ${item.kind} proposal ${item.id}; preserved in rejected history.\n`);
   }
 }
 

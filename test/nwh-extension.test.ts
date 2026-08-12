@@ -250,6 +250,97 @@ describe("NWH TUI extension", () => {
     await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
   });
 
+  it("supplies opening evidence and requires a successful finish before completing /prepare-all", async () => {
+    const { commands, events, registeredToolDefinitions, root, sentHiddenMessages } = await fixture();
+    const evidence = await createEvidenceFixture(root, "Hero waits at the opening.\n", "opening-novel.txt");
+    const batches = await prepareCompilerBatches(root, evidence.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(evidence.source.id, batch.id);
+    const notifications: string[] = [];
+    const questions: string[] = [];
+    const ctx = preparationContext(notifications, questions);
+
+    await commands.get("prepare-all")?.handler(evidence.source.id, ctx);
+
+    expect(questions).toEqual(["Generate opening world?"]);
+    expect(sentHiddenMessages).toHaveLength(1);
+    expect(sentHiddenMessages[0]).toContain("<source-segment");
+    expect(sentHiddenMessages[0]).toContain("Hero waits at the opening.");
+    const segmentId = sentHiddenMessages[0]!.match(/<source-segment id="([^"]+)">/)?.[1];
+    expect(segmentId).toBeDefined();
+
+    const initial = registeredToolDefinitions.get("propose_initial_world")!;
+    const finish = registeredToolDefinitions.get("finish_compiler_batch")!;
+    const proposalInput = {
+      proposal_id: "tui-generated-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [] },
+        evidence: evidence.evidence("Hero waits at the opening."),
+      },
+    };
+    const proposalResult = await initial.execute("opening-proposal", proposalInput as never, undefined, undefined, ctx);
+    const finishInput = {
+      outcome: "complete",
+      reviewed_segments: [{ segment_id: segmentId!, disposition: "proposed", summary: "Recorded the opening state." }],
+      summary: "Opening state complete.",
+    };
+    const finishResult = await finish.execute("opening-finish", finishInput as never, undefined, undefined, ctx);
+    await events.get("agent_end")?.({
+      type: "agent_end",
+      messages: [
+        { role: "assistant", content: [{ type: "toolCall", id: "opening-proposal", name: "propose_initial_world", arguments: proposalInput }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "opening-proposal", toolName: "propose_initial_world", ...proposalResult, isError: false },
+        { role: "assistant", content: [{ type: "toolCall", id: "opening-finish", name: "finish_compiler_batch", arguments: finishInput }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "opening-finish", toolName: "finish_compiler_batch", ...finishResult, isError: false },
+        { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+      ],
+    }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+
+    expect(questions).toEqual(["Generate opening world?", "Accept validated proposals?", "Create playable branch?"]);
+    expect(notifications.some((message) => message.includes("Preparation complete"))).toBe(true);
+    await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
+  });
+
+  it("falls back conservatively when an opening-state run never completes its finish handshake", async () => {
+    const { commands, events, registeredToolDefinitions, root } = await fixture();
+    const evidence = await createEvidenceFixture(root, "Hero waits at the opening.\n", "unfinished-opening.txt");
+    const batches = await prepareCompilerBatches(root, evidence.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(evidence.source.id, batch.id);
+    const notifications: string[] = [];
+    const questions: string[] = [];
+    const ctx = preparationContext(notifications, questions);
+    await commands.get("prepare-all")?.handler(evidence.source.id, ctx);
+    const proposalInput = {
+      proposal_id: "partial-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [] },
+        evidence: evidence.evidence("Hero waits at the opening."),
+      },
+    };
+    const proposalResult = await registeredToolDefinitions.get("propose_initial_world")!
+      .execute("partial-opening-call", proposalInput as never, undefined, undefined, ctx);
+
+    await events.get("agent_end")?.({
+      type: "agent_end",
+      messages: [
+        { role: "assistant", content: [{ type: "toolCall", id: "partial-opening-call", name: "propose_initial_world", arguments: proposalInput }], stopReason: "toolUse" },
+        { role: "toolResult", toolCallId: "partial-opening-call", toolName: "propose_initial_world", ...proposalResult, isError: false },
+        { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+      ],
+    }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+
+    expect(questions).toEqual(["Generate opening world?", "Create playable branch?"]);
+    expect(notifications.some((message) => message.includes("Opening-state compiler did not complete") && message.includes("explicitly finish"))).toBe(true);
+    expect(notifications.some((message) => message.includes("conservative empty-delta fallback"))).toBe(true);
+    await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toContainEqual(
+      expect.objectContaining({ id: "partial-opening" }),
+    );
+    await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
+  });
+
   it("continues with the next compiler batch automatically during /prepare-all", async () => {
     const { commands, events, root, sentHiddenMessages } = await fixture();
     const content = Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n");

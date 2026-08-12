@@ -105,7 +105,12 @@ validation, requests an opening-state proposal, or creates the selected playable
 branch. Multiple registered sources are also presented as a choice. Choosing a
 pause/review answer preserves progress. `--yes` is the explicit non-interactive
 form and selects each recommended answer. Validation-blocked and staging-only
-proposals stop either form rather than being forced into world truth.
+proposals are never forced into world truth: full preparation preserves them in
+rejected history and continues with validated artifacts. Source batches hide the
+staging-only raw state-delta tool, recover active drafts by stable batch identity,
+and let the host supply the active proposal set to the finish handshake. A missing
+or failed model-generated opening state falls back to an evidence-backed empty
+delta, which asserts no unsupported facts but still permits genesis.
 
 The TUI `/prepare-all` command presents the same decisions with Pi-native
 selection dialogs. Remaining compiler batches execute sequentially in the current

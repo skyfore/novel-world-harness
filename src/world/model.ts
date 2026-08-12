@@ -220,9 +220,9 @@ export const validationReportSchema = z.object({ proposalId: idSchema, evaluated
 export type ValidationReport = z.infer<typeof validationReportSchema>;
 
 export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
-  z.object({ id: idSchema, kind: z.string().min(1), schemaVersion: z.number().int().positive(), payload, evidence: z.array(evidenceRefSchema), generatedBy: z.object({ worker: z.string().min(1), provider: z.string().optional(), model: z.string().optional(), promptHash: z.string().optional() }).strict(), createdAt: z.string().min(1) }).strict();
+  z.object({ id: idSchema, kind: z.string().min(1), schemaVersion: z.number().int().positive(), payload, evidence: z.array(evidenceRefSchema), generatedBy: z.object({ worker: z.string().min(1), provider: z.string().optional(), model: z.string().optional(), promptHash: z.string().optional(), compilerBatchId: idSchema.optional() }).strict(), createdAt: z.string().min(1) }).strict();
 
-export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string }; createdAt: string };
+export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
 export const WORLD_SCHEMA_VERSION = 1;
 export const WORLD_ENGINE_VERSION = "0.1.0";

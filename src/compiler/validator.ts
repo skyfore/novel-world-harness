@@ -231,13 +231,13 @@ export class CompilerCommitService {
     return validation;
   }
 
-  async acceptAllValid(): Promise<BatchAcceptResult> {
+  async acceptAllValid(sourceId?: string): Promise<BatchAcceptResult> {
     const order: CanonicalProposalKind[] = ["entity", "claim", "world-rule", "initial-world", "character-model", "character-goal", "canonical-event"];
     const accepted: BatchAcceptResult["accepted"] = [];
     let changed = true;
     while (changed) {
       changed = false;
-      const pending = await this.proposals.list("pending");
+      const pending = await this.proposals.list("pending", sourceId);
       for (const kind of order) {
         for (const proposal of pending.filter((item) => item.kind === kind)) {
           const validation = await this.accept(kind, proposal.id);
@@ -245,7 +245,7 @@ export class CompilerCommitService {
         }
       }
     }
-    const remaining = await this.proposals.list("pending");
+    const remaining = await this.proposals.list("pending", sourceId);
     const blocked: BatchAcceptResult["blocked"] = [];
     const staging: BatchAcceptResult["staging"] = [];
     for (const proposal of remaining) {

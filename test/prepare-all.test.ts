@@ -10,6 +10,7 @@ import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { WorldEngine } from "../src/world/engine.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 import { worldCreateCommand } from "../src/commands/world.js";
+import { InitialWorldStore } from "../src/world/initial.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -130,7 +131,7 @@ describe("prepare-all command", () => {
     await expect(engine.branches.read("main")).resolves.toMatchObject({ id: "main" });
   });
 
-  it("stops instead of committing validation-blocked proposals", async () => {
+  it("quarantines validation-blocked proposals and completes with validated artifacts", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-blocked-"));
     roots.push(root);
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
@@ -146,13 +147,25 @@ describe("prepare-all command", () => {
       generatedBy: { worker: "test" },
     });
 
-    await expect(prepareAllCommand({ root, sourceId: fixture.source.id, yes: true }, {
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },
-      compileInitialWorld: async () => { throw new Error("compileInitialWorld should not run"); },
+      compileInitialWorld: async () => {
+        await proposals.submit("initial-world", {
+          proposalId: "fallback-opening",
+          payload: {
+            version: 1,
+            delta: { version: 1, operations: [] },
+            evidence: fixture.evidence("Hero waits."),
+          },
+          generatedBy: { worker: "test" },
+        });
+      },
       converge: convergeWorldProposals,
       createBranch: worldCreateCommand,
-    })).rejects.toThrow("validation-blocked");
-    await expect(proposals.store.list("pending")).resolves.toEqual([
+    });
+    expect(result.stage).toBe("ready");
+    await expect(proposals.store.list("pending")).resolves.toEqual([]);
+    await expect(proposals.store.list("rejected")).resolves.toEqual([
       expect.objectContaining({ id: "entity-invalid" }),
     ]);
   });
@@ -168,8 +181,14 @@ describe("prepare-all command", () => {
 
     const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },
-      compileInitialWorld: async () => {
+      compileInitialWorld: async (options) => {
         initialCompilerCalls += 1;
+        expect(options.includeLocalTools).toBe(false);
+        expect(options.segmentIds).toHaveLength(1);
+        expect(options.compilerBatchId).toMatch(/^opening-batch-/);
+        expect(options.sourceId).toBe(fixture.source.id);
+        expect(options.prompt).toContain("<source-segment");
+        expect(options.prompt).toContain("The world begins quietly.");
         await new CompilerProposalService(root).submit("initial-world", {
           proposalId: "generated-initial-world",
           payload: {
@@ -186,6 +205,42 @@ describe("prepare-all command", () => {
 
     expect(initialCompilerCalls).toBe(1);
     expect(result.stage).toBe("ready");
+  });
+
+  it("uses a conservative evidence-backed opening fallback when the model pass fails", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-initial-fallback-"));
+    roots.push(root);
+    vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
+    const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true }, {
+      compileSource: async () => { throw new Error("compileSource should not run"); },
+      compileInitialWorld: async (options) => {
+        await new CompilerProposalService(root).submit("initial-world", {
+          proposalId: "partial-model-opening",
+          payload: {
+            version: 1,
+            delta: { version: 1, operations: [] },
+            evidence: fixture.evidence("The world begins quietly."),
+          },
+          generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
+        });
+        throw new Error("provider unavailable");
+      },
+      converge: convergeWorldProposals,
+      createBranch: worldCreateCommand,
+    });
+
+    expect(result.stage).toBe("ready");
+    await expect(new InitialWorldStore(root).get()).resolves.toMatchObject({
+      delta: { operations: [] },
+      evidence: [expect.objectContaining({ span: expect.objectContaining({ sourceId: fixture.source.id }) })],
+    });
+    await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toContainEqual(
+      expect.objectContaining({ id: "partial-model-opening" }),
+    );
   });
 
   it("rejects unattended execution unless --yes is explicit", async () => {

@@ -88,7 +88,7 @@ export const compilerProposalSchemas = {
 export class CompilerProposalService {
   readonly store: ProposalStore;
   constructor(workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
-  async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string } }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
+  async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string } }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
     const schema = compilerProposalSchemas[kind];
     const payload = schema.parse(input.payload);
     if (kind !== "entity" && kind !== "claim" && kind !== "character-model") assertCompilerStateFields(payload);
@@ -110,6 +110,27 @@ export class CompilerProposalService {
   }
 }
 
+export async function rejectPendingCompilerBatchProposals(
+  workspaceRoot: string,
+  compilerBatchId: string,
+): Promise<string[]> {
+  const store = new ProposalStore(workspaceRoot);
+  const rejected: string[] = [];
+  for (const summary of await store.list("pending")) {
+    const envelope = await store.readEnvelope("pending", summary.id);
+    const generatedBy = envelope.generatedBy;
+    if (
+      !generatedBy
+      || typeof generatedBy !== "object"
+      || Array.isArray(generatedBy)
+      || (generatedBy as Record<string, unknown>).compilerBatchId !== compilerBatchId
+    ) continue;
+    await store.transition(summary.id, "pending", "rejected");
+    rejected.push(summary.id);
+  }
+  return rejected;
+}
+
 type ProposalClosureCatalog = {
   entities: Set<string>;
   claims: Set<string>;
@@ -126,7 +147,11 @@ type StagedProposal = { kind: CompilerProposalKind; payload: unknown };
  * proposals or mutate canonical truth; it only prevents an evidence batch from
  * being checkpointed while its proposal graph is incomplete.
  */
-export async function validateCompilerProposalClosure(workspaceRoot: string, proposalIds: readonly string[]): Promise<string[]> {
+export async function validateCompilerProposalClosure(
+  workspaceRoot: string,
+  proposalIds: readonly string[],
+  sourceId?: string,
+): Promise<string[]> {
   if (!proposalIds.length) return [];
   const proposals = new ProposalStore(workspaceRoot);
   const canon = new CanonicalModelStore(workspaceRoot);
@@ -139,15 +164,21 @@ export async function validateCompilerProposalClosure(workspaceRoot: string, pro
     possibilities.list(),
     proposals.list("pending"),
   ]);
+  const fromActiveSource = <T extends { evidence?: readonly EvidenceRef[] }>(item: T) =>
+    !sourceId || item.evidence?.some((reference) => reference.span.sourceId === sourceId);
   const catalog: ProposalClosureCatalog = {
-    entities: new Set(canonicalEntities.map((item) => item.id)),
-    claims: new Set(canonicalClaims.map((item) => item.id)),
-    events: new Set(canonicalEvents.map((item) => item.id)),
-    rules: new Set(canonicalRules.map((item) => item.id)),
-    possibilities: new Set(canonicalPossibilities.map((item) => item.id)),
+    entities: new Set(canonicalEntities.filter(fromActiveSource).map((item) => item.id)),
+    claims: new Set(canonicalClaims.filter(fromActiveSource).map((item) => item.id)),
+    events: new Set(canonicalEvents.filter(fromActiveSource).map((item) => item.id)),
+    rules: new Set(canonicalRules.filter(fromActiveSource).map((item) => item.id)),
+    possibilities: new Set(canonicalPossibilities.filter(fromActiveSource).map((item) => item.id)),
   };
   const staged = new Map<string, StagedProposal>();
+  const activePendingIds = sourceId
+    ? new Set((await proposals.list("pending", sourceId)).map((summary) => summary.id))
+    : undefined;
   for (const summary of pending) {
+    if (activePendingIds && !activePendingIds.has(summary.id)) continue;
     if (!isCompilerProposalKind(summary.kind)) continue;
     const envelope = await proposals.readEnvelope("pending", summary.id);
     const payload = compilerProposalSchemas[summary.kind].parse(envelope.payload);

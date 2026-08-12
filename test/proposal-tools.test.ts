@@ -274,13 +274,14 @@ describe("compiler proposal tools", () => {
       .rejects.toThrow("one world-state operation at a time");
   });
 
-  it("requires an explicit finish whose ids exactly match successful submissions", async () => {
+  it("automatically finishes every active successful submission without model-side id bookkeeping", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-finish-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "林岐来到前厅。\n");
     const tools = createCompilerProposalTools(root);
     const entity = tools.find((candidate) => candidate.name === "propose_entity")!;
     const finish = tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    expect(JSON.stringify(finish.parameters)).not.toContain("proposal_ids");
     const input = {
       proposal_id: "entity-linqi",
       payload: {
@@ -293,18 +294,16 @@ describe("compiler proposal tools", () => {
     };
     await entity.execute("proposal", input as never, undefined, undefined, {} as ExtensionContext);
     await expect(finish.execute("bad-finish", {
-      outcome: "complete",
-      proposal_ids: [],
+      outcome: "no-artifacts",
       reviewed_segments: [],
       summary: "done",
-    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("exactly match");
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("no-artifacts cannot be used");
     await expect(finish.execute("finish", {
       outcome: "complete",
-      proposal_ids: ["entity-linqi"],
       reviewed_segments: [],
       summary: "done",
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
-      details: { compilerBatchFinished: true, outcome: "complete" },
+      details: { compilerBatchFinished: true, outcome: "complete", proposalIds: ["entity-linqi"] },
     });
     await expect(entity.execute("late-proposal", input as never, undefined, undefined, {} as ExtensionContext))
       .rejects.toThrow("already finished");
@@ -328,14 +327,13 @@ describe("compiler proposal tools", () => {
       },
     } as never, undefined, undefined, {} as ExtensionContext);
     const invalidFinish = {
-      outcome: "complete",
-      proposal_ids: [],
+      outcome: "no-artifacts",
       reviewed_segments: [],
       summary: "done",
     };
 
     await expect(finish.execute("first-failure", invalidFinish as never, undefined, undefined, {} as ExtensionContext))
-      .rejects.toThrow("exactly match active successful submissions");
+      .rejects.toThrow("no-artifacts cannot be used");
     await expect(finish.execute("repeated-failure", invalidFinish as never, undefined, undefined, {} as ExtensionContext))
       .resolves.toMatchObject({
         terminate: true,
@@ -349,6 +347,7 @@ describe("compiler proposal tools", () => {
     const fixture = await createEvidenceFixture(root, "众人来到前厅。\n");
     const tools = createCompilerProposalTools(root);
     const entity = tools.find((candidate) => candidate.name === "propose_entity")!;
+    const initial = tools.find((candidate) => candidate.name === "propose_initial_world")!;
     const finish = tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
     for (let index = 1; index <= 5; index += 1) {
       await entity.execute(`proposal-${index}`, {
@@ -361,13 +360,23 @@ describe("compiler proposal tools", () => {
           evidence: fixture.evidence("众人来到前厅。"),
         },
       } as never, undefined, undefined, {} as ExtensionContext);
+      await initial.execute(`opening-${index}`, {
+        proposal_id: `opening-${index}`,
+        payload: {
+          version: 1,
+          delta: {
+            version: 1,
+            operations: [{ op: "set", entityId: `person-${index}`, field: "character.location", value: `missing-location-${index}` }],
+          },
+          evidence: fixture.evidence("众人来到前厅。"),
+        },
+      } as never, undefined, undefined, {} as ExtensionContext);
       const attempt = finish.execute(`finish-${index}`, {
         outcome: "complete",
-        proposal_ids: [],
         reviewed_segments: [],
         summary: "incomplete",
       } as never, undefined, undefined, {} as ExtensionContext);
-      if (index < 5) await expect(attempt).rejects.toThrow("exactly match active successful submissions");
+      if (index < 5) await expect(attempt).rejects.toThrow("proposal graph is incomplete");
       else {
         await expect(attempt).resolves.toMatchObject({
           terminate: true,
@@ -385,7 +394,7 @@ describe("compiler proposal tools", () => {
     const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
     const initial = toolset.tools.find((candidate) => candidate.name === "propose_initial_world")!;
     const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
-    toolset.beginBatch([fixture.segmentId]);
+    await toolset.beginBatch([fixture.segmentId]);
     await entity.execute("lin-qi", {
       proposal_id: "entity-lin-qi",
       payload: {
@@ -443,7 +452,7 @@ describe("compiler proposal tools", () => {
     const initial = toolset.tools.find((candidate) => candidate.name === "propose_initial_world")!;
     const withdraw = toolset.tools.find((candidate) => candidate.name === "withdraw_compiler_proposal")!;
     const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
-    toolset.beginBatch([fixture.segmentId]);
+    await toolset.beginBatch([fixture.segmentId]);
     await entity.execute("linqi", {
       proposal_id: "entity-linqi",
       payload: {
@@ -491,6 +500,54 @@ describe("compiler proposal tools", () => {
       .resolves.toContainEqual(expect.objectContaining({ id: "opening-world-broken" }));
   });
 
+  it("recovers active proposals after a failed batch process restarts", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-recovery-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "林岐站在钟楼下。\n");
+    const batchId = "batch-source-00001-retry";
+    const first = createCompilerProposalToolset(root);
+    await first.beginBatch([fixture.segmentId], batchId, fixture.source.id);
+    const firstEntity = first.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const firstInitial = first.tools.find((candidate) => candidate.name === "propose_initial_world")!;
+    await firstEntity.execute("linqi", {
+      proposal_id: "recovered-linqi",
+      payload: {
+        id: "linqi",
+        kind: "character",
+        canonicalName: "林岐",
+        aliases: [],
+        evidence: fixture.evidence("林岐"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await firstInitial.execute("bad-opening", {
+      proposal_id: "recovered-bad-opening",
+      payload: {
+        version: 1,
+        delta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "linqi", field: "character.location", value: "unsupported-place" }],
+        },
+        evidence: fixture.evidence("林岐站在钟楼下。"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const retry = createCompilerProposalToolset(root);
+    await retry.beginBatch([fixture.segmentId], batchId, fixture.source.id);
+    const withdraw = retry.tools.find((candidate) => candidate.name === "withdraw_compiler_proposal")!;
+    const finish = retry.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    await withdraw.execute("withdraw-recovered", {
+      proposal_id: "recovered-bad-opening",
+      reason: "The failed attempt referenced an unsupported location.",
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await expect(finish.execute("finish-retry", {
+      outcome: "complete",
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Recovered the valid entity proposal." }],
+      summary: "Recovered and finished.",
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true, proposalIds: ["recovered-linqi"] },
+    });
+  });
+
   it("resets finish state only when the host starts a new compiler batch", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-batches-"));
     roots.push(root);
@@ -509,7 +566,7 @@ describe("compiler proposal tools", () => {
       },
     };
 
-    toolset.beginBatch(["segment-1"]);
+    await toolset.beginBatch(["segment-1"]);
     await entity.execute("batch-1-proposal", input as never, undefined, undefined, {} as ExtensionContext);
     await expect(finish.execute("missing-segment-review", {
       outcome: "complete",
@@ -526,7 +583,7 @@ describe("compiler proposal tools", () => {
     await expect(entity.execute("same-batch-late", input as never, undefined, undefined, {} as ExtensionContext))
       .rejects.toThrow("already finished");
 
-    toolset.beginBatch(["segment-2"]);
+    await toolset.beginBatch(["segment-2"]);
     await expect(entity.execute("batch-2-proposal", {
       ...input,
       proposal_id: "entity-linqi-second-pass",

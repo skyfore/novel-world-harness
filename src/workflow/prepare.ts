@@ -51,7 +51,7 @@ export async function inspectPreparation(
     };
   }
 
-  const pending = await new ProposalStore(workspaceRoot).list("pending");
+  const pending = await new ProposalStore(workspaceRoot).list("pending", source.id);
   const earlyAudit = await auditCompiler(workspaceRoot);
   if (earlyAudit.sources.changedSinceIngest.length > 0) {
     return {
@@ -95,7 +95,8 @@ export async function inspectPreparation(
   ) {
     return { ...shared, audit, stage: "repair", next: "nwh audit" };
   }
-  if (!(await new InitialWorldStore(workspaceRoot).get())) {
+  const initialWorld = await new InitialWorldStore(workspaceRoot).get();
+  if (!initialWorld || !initialWorld.evidence.some((reference) => reference.span.sourceId === source.id)) {
     return {
       ...shared,
       audit,

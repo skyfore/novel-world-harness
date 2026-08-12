@@ -22,7 +22,7 @@ export type NwhExtensionOptions = {
   saveSession: boolean;
   mode: NwhInteractionMode;
   onSessionShutdown?: () => Promise<void>;
-  resetCompilerProposalTools?: () => void;
+  resetCompilerProposalTools?: (segmentIds?: readonly string[]) => void;
 };
 
 const COMMAND_HELP = `NWH commands:
@@ -66,8 +66,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let registeredCompilerToolset: CompilerProposalToolset | undefined;
 
     const beginTurn = (turn: SourceLoopTurn) => {
-      registeredCompilerToolset?.beginBatch();
-      options.resetCompilerProposalTools?.();
+      registeredCompilerToolset?.beginBatch(turn.batch.segmentIds);
+      options.resetCompilerProposalTools?.(turn.batch.segmentIds);
       pendingTurn = turn;
       pendingRunMessages = [];
     };

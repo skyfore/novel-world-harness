@@ -318,7 +318,14 @@ describe("NWH TUI extension", () => {
       ctx as unknown as ExtensionContext,
     );
     const finish = registeredToolDefinitions.get("finish_compiler_batch")!;
-    const finishInput = { outcome: "no-artifacts", proposal_ids: [], summary: "No supported facts." };
+    const firstPrompt = await events.get("before_agent_start")?.({ type: "before_agent_start", prompt: "compile", systemPrompt: "system", systemPromptOptions: {} });
+    const firstSegmentIds = [...String((firstPrompt as { message?: { content?: string } } | undefined)?.message?.content).matchAll(/<source-segment id="([^"]+)">/g)].map((match) => match[1]!);
+    const finishInput = {
+      outcome: "no-artifacts",
+      proposal_ids: [],
+      reviewed_segments: firstSegmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No supported facts." })),
+      summary: "No supported facts.",
+    };
     await expect(finish.execute("finish-first", finishInput as never, undefined, undefined, ctx))
       .resolves.toMatchObject({ details: { compilerBatchFinished: true, outcome: "no-artifacts" } });
     await events.get("agent_end")?.({
@@ -332,7 +339,13 @@ describe("NWH TUI extension", () => {
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
     await commands.get("compile-next")?.handler("", ctx);
 
-    await expect(finish.execute("finish-second", finishInput as never, undefined, undefined, ctx))
+    const secondPrompt = await events.get("before_agent_start")?.({ type: "before_agent_start", prompt: "compile", systemPrompt: "system", systemPromptOptions: {} });
+    const secondSegmentIds = [...String((secondPrompt as { message?: { content?: string } } | undefined)?.message?.content).matchAll(/<source-segment id="([^"]+)">/g)].map((match) => match[1]!);
+    const secondFinishInput = {
+      ...finishInput,
+      reviewed_segments: secondSegmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No supported facts." })),
+    };
+    await expect(finish.execute("finish-second", secondFinishInput as never, undefined, undefined, ctx))
       .resolves.toMatchObject({ details: { compilerBatchFinished: true, outcome: "no-artifacts" } });
   });
 

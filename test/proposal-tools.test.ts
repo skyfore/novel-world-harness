@@ -156,11 +156,13 @@ describe("compiler proposal tools", () => {
     await expect(finish.execute("bad-finish", {
       outcome: "complete",
       proposal_ids: [],
+      reviewed_segments: [],
       summary: "done",
     } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("exactly match");
     await expect(finish.execute("finish", {
       outcome: "complete",
       proposal_ids: ["entity-linqi"],
+      reviewed_segments: [],
       summary: "done",
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { compilerBatchFinished: true, outcome: "complete" },
@@ -187,21 +189,37 @@ describe("compiler proposal tools", () => {
       },
     };
 
+    toolset.beginBatch(["segment-1"]);
     await entity.execute("batch-1-proposal", input as never, undefined, undefined, {} as ExtensionContext);
+    await expect(finish.execute("missing-segment-review", {
+      outcome: "complete",
+      proposal_ids: ["entity-linqi"],
+      reviewed_segments: [],
+      summary: "first batch",
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("account exactly once");
     await finish.execute("batch-1-finish", {
       outcome: "complete",
       proposal_ids: ["entity-linqi"],
+      reviewed_segments: [{ segment_id: "segment-1", disposition: "proposed", summary: "Recorded Lin Qi." }],
       summary: "first batch",
     } as never, undefined, undefined, {} as ExtensionContext);
     await expect(entity.execute("same-batch-late", input as never, undefined, undefined, {} as ExtensionContext))
       .rejects.toThrow("already finished");
 
-    toolset.beginBatch();
+    toolset.beginBatch(["segment-2"]);
     await expect(entity.execute("batch-2-proposal", {
       ...input,
       proposal_id: "entity-linqi-second-pass",
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { proposalId: "entity-linqi-second-pass", kind: "entity" },
+    });
+    await expect(finish.execute("batch-2-finish", {
+      outcome: "complete",
+      proposal_ids: ["entity-linqi-second-pass"],
+      reviewed_segments: [{ segment_id: "segment-2", disposition: "proposed", summary: "Reviewed the second segment." }],
+      summary: "second batch",
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { reviewedSegmentIds: ["segment-2"] },
     });
   });
 });

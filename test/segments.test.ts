@@ -45,6 +45,16 @@ describe("source segmentation", () => {
     await expect(new SegmentStore(root).readManifest(source.id)).resolves.toEqual(manifest);
   });
 
+  it("recognizes Chinese act headings with punctuation as structural sections", async () => {
+    const { root, source } = await fixture("标题\n\n第一幕：开端\n人物登场。\n\n第二幕：转折\n人物行动。\n");
+    const manifest = await segmentSource(root, source);
+    expect(manifest.segments.map((segment) => segment.title)).toEqual([
+      "标题",
+      "第一幕：开端",
+      "第二幕：转折",
+    ]);
+  });
+
   it("detects source mutation after ingest before producing evidence spans", async () => {
     const { root, source } = await fixture("Chapter 1\nOriginal\n");
     await fs.writeFile(path.join(root, source.sourcePath), "Chapter 1\nChanged\n", "utf8");
@@ -60,4 +70,3 @@ describe("source segmentation", () => {
     expect(manifest.segments.every((segment) => segment.endLine - segment.startLine + 1 <= 160)).toBe(true);
   });
 });
-

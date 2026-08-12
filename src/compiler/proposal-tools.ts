@@ -91,7 +91,7 @@ function constrainCompilerStateFields(value: unknown): void {
 
 export type CompilerProposalToolset = {
   tools: ToolDefinition[];
-  beginBatch(): void;
+  beginBatch(segmentIds?: readonly string[]): void;
 };
 
 export function createCompilerProposalToolset(
@@ -100,6 +100,7 @@ export function createCompilerProposalToolset(
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const successfulProposalIds = new Set<string>();
+  let expectedSegmentIds: string[] = [];
   let finished = false;
   const proposalTools = (Object.keys(labels) as CompilerProposalKind[]).map((kind) => {
     const metadata = labels[kind];
@@ -126,6 +127,11 @@ export function createCompilerProposalToolset(
   const finishParameters = Type.Object({
     outcome: Type.Union([Type.Literal("complete"), Type.Literal("no-artifacts")]),
     proposal_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), { uniqueItems: true }),
+    reviewed_segments: Type.Array(Type.Object({
+      segment_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+      disposition: Type.Union([Type.Literal("proposed"), Type.Literal("no-artifacts")]),
+      summary: Type.String({ minLength: 1, maxLength: 500 }),
+    }, { additionalProperties: false })),
     summary: Type.String({ minLength: 1, maxLength: 2_000 }),
   }, { additionalProperties: false });
   const finishTool = defineTool({
@@ -153,17 +159,27 @@ export function createCompilerProposalToolset(
       if (expected.length !== listed.length || expected.some((id, index) => id !== listed[index])) {
         throw new Error(`proposal_ids must exactly match successful submissions: ${expected.join(", ") || "(none)"}`);
       }
+      const reviewedIds = input.reviewed_segments.map((review) => review.segment_id).sort();
+      const uniqueReviewedIds = [...new Set(reviewedIds)];
+      if (
+        uniqueReviewedIds.length !== expectedSegmentIds.length
+        || expectedSegmentIds.some((id, index) => id !== uniqueReviewedIds[index])
+        || reviewedIds.length !== uniqueReviewedIds.length
+      ) {
+        throw new Error(`reviewed_segments must account exactly once for: ${expectedSegmentIds.join(", ") || "(none)"}`);
+      }
       finished = true;
       return {
         content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}).` }],
-        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: listed },
+        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: listed, reviewedSegmentIds: reviewedIds },
       };
     },
   });
   return {
     tools: [...proposalTools, finishTool],
-    beginBatch() {
+    beginBatch(segmentIds = []) {
       successfulProposalIds.clear();
+      expectedSegmentIds = [...new Set(segmentIds)].sort();
       finished = false;
     },
   };

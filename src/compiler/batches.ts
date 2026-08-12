@@ -131,7 +131,7 @@ export async function prepareCompilerBatches(workspaceRoot: string, source: Sour
       startLine: Math.min(...segments.map((segment) => segment.startLine)),
       endLine: Math.max(...segments.map((segment) => segment.endLine)),
       characters: characterCount,
-      prompt: buildBatchPrompt(source, id, pieces),
+      prompt: buildBatchPrompt(source, id, segmentIds, pieces),
     });
   }
   return batches;
@@ -173,7 +173,7 @@ export async function runCompilerBatches(options: {
   return { total: batches.length, completed, skipped, remaining };
 }
 
-function buildBatchPrompt(source: SourceDocument, batchId: string, pieces: string[]): string {
+function buildBatchPrompt(source: SourceDocument, batchId: string, segmentIds: string[], pieces: string[]): string {
   return `You are processing compiler batch ${batchId} for source ${source.sourcePath} (${source.id}).\n\n` +
     `Analyze only the supplied evidence slices. Produce small typed pending proposals with the available propose_* tools. ` +
     `Do not commit truth. Reuse stable entity IDs when the evidence clearly refers to the same identity. ` +
@@ -185,7 +185,8 @@ function buildBatchPrompt(source: SourceDocument, batchId: string, pieces: strin
     `Use kind=canon-analogue only for a possibility linked to an existing canonicalEventId. Use player-choice for an explicitly described choice that only the player may take; the background scheduler never auto-commits player-choice. Use generated or causal-consequence only for developments the world may autonomously schedule. A refusal or alternate choice needs a concrete effect or blocker that keeps canon from immediately reasserting itself. ` +
     `Pending proposals are immutable. If a successful proposal needs correction, submit the corrected candidate under a new proposal_id such as -v2 and leave the earlier candidate for explicit human rejection; never pretend that reusing the old ID overwrote it. ` +
     `Never install later canon in the initial world, leak it into opening character knowledge, or treat it as already committed branch history. Do not infer developments absent from the source. If evidence is insufficient, make fewer proposals rather than inventing facts. ` +
-    `After every proposal call has succeeded, call finish_compiler_batch exactly once with all successful proposal IDs. Use no-artifacts only when this slice supports no proposal. Without that explicit finish, the batch remains retryable.\n\n` +
+    `This is the only compiler pass guaranteed to contain these evidence segments: ${segmentIds.join(", ")}. Process every supplied section now; never defer a supplied act, chapter, or later-canonical paragraph to a hypothetical future batch. ` +
+    `After every proposal call has succeeded, call finish_compiler_batch exactly once with all successful proposal IDs and one reviewed_segments entry for each of those exact segment IDs. Each segment review must briefly state what was proposed or why it supports no artifact. Use no-artifacts only when every slice supports no proposal. Without that explicit finish, the batch remains retryable.\n\n` +
     pieces.join("\n\n");
 }
 

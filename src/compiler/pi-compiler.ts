@@ -11,6 +11,7 @@ export type PiCompilerOptions = {
   onText?: (delta: string) => void;
   onTool?: (name: string, input: unknown) => void;
   liveTest?: PiLiveTestOptions;
+  segmentIds?: readonly string[];
 };
 
 export async function createPiCompilerSession(options: PiCompilerOptions): Promise<PiAgentSession> {
@@ -19,6 +20,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
   if (options.profile?.provider) generatedBy.provider = options.profile.provider;
   if (options.model ?? options.profile?.model) generatedBy.model = options.model ?? options.profile?.model;
   const proposalToolset = createCompilerProposalToolset(workspace.root, generatedBy);
+  proposalToolset.beginBatch(options.segmentIds);
   return PiAgentSession.create({
     workspace,
     ...(options.profile ? { profile: options.profile } : {}),

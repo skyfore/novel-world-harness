@@ -33,7 +33,7 @@ type Span = { start: number; end: number; kind: "section" | "block"; title?: str
 
 const HEADING_PATTERNS = [
   /^\s{0,3}#{1,6}\s+\S/,
-  /^\s*第[零〇一二三四五六七八九十百千万两\d]+[章节卷回部篇](?:\s|$)/u,
+  /^\s*第[零〇一二三四五六七八九十百千万两\d]+[章节卷回部篇幕](?:\s|$|[：:])/u,
   /^\s*(?:chapter|book|part|volume)\s+[\divxlcdm]+\b/i,
 ];
 const MAX_BLOCK_LINES = 160;
@@ -230,4 +230,3 @@ function safeId(value: string): string {
 function sha256(value: Buffer): string {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
-

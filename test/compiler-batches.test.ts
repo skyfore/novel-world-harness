@@ -49,7 +49,7 @@ describe("compiler batches", () => {
       { role: "toolResult", toolCallId: "bad", toolName: "propose_claim", isError: true, content: [] },
       { role: "assistant", content: [{ type: "toolCall", id: "fixed", name: "propose_claim", arguments: { proposal_id: "claim-1", payload: JSON.stringify({ id: "claim-1" }) } }], stopReason: "toolUse" },
       { role: "toolResult", toolCallId: "fixed", toolName: "propose_claim", isError: false, content: [] },
-      { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["claim-1"], summary: "done" } }], stopReason: "toolUse" },
+      { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["claim-1"], reviewed_segments: [], summary: "done" } }], stopReason: "toolUse" },
       { role: "toolResult", toolCallId: "finish", toolName: "finish_compiler_batch", isError: false, content: [] },
       { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
     ]);
@@ -87,6 +87,8 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("Use player-choice"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Copy a supplied whole-segment EvidenceRef exactly"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("finish_compiler_batch"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("only compiler pass guaranteed"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("reviewed_segments"))).toBe(true);
   });
 
   it("marks successful batches and resumes after an interrupted run", async () => {

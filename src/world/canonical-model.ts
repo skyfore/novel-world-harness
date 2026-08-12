@@ -166,7 +166,15 @@ export class ProposalStore {
   constructor(workspaceRoot: string) { this.root = path.join(workspaceRoot, ".novel-harness", "world", "v1", "proposals"); }
   async writePending<T>(proposal: ArtifactProposal<T>, payloadSchema: z.ZodType<T>): Promise<void> {
     const parsed = artifactProposalSchema(payloadSchema).parse(proposal);
-    await writeImmutable(this.proposalPath("pending", parsed.id), parsed);
+    const filePath = this.proposalPath("pending", parsed.id);
+    try {
+      const existing = artifactProposalSchema(payloadSchema).parse(JSON.parse(await fs.readFile(filePath, "utf8")));
+      if (canonicalJson(proposalIdentity(existing)) === canonicalJson(proposalIdentity(parsed))) return;
+      throw new Error(`Pending proposal ${parsed.id} already exists with different content; submit the correction under a new proposal id.`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    await writeImmutable(filePath, parsed);
   }
   async read<T>(status: ProposalStatus, id: string, payloadSchema: z.ZodType<T>): Promise<ArtifactProposal<T>> {
     return artifactProposalSchema(payloadSchema).parse(JSON.parse(await fs.readFile(this.proposalPath(status, id), "utf8"))) as ArtifactProposal<T>;
@@ -200,6 +208,11 @@ export class ProposalStore {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`Proposal not found: ${id}`); throw error; }
   }
   private proposalPath(status: ProposalStatus, id: string): string { return path.join(this.root, status, `${safeId(id)}.json`); }
+}
+
+function proposalIdentity<T>(proposal: ArtifactProposal<T>): Omit<ArtifactProposal<T>, "createdAt"> {
+  const { createdAt: _createdAt, ...identity } = proposal;
+  return identity;
 }
 
 export class CanonicalCompiler {

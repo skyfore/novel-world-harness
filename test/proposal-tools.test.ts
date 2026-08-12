@@ -222,4 +222,31 @@ describe("compiler proposal tools", () => {
       details: { reviewedSegmentIds: ["segment-2"] },
     });
   });
+
+  it("treats an identical partial-batch retry as idempotent but rejects changed content", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-idempotent-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "林岐来到前厅。\n");
+    const input = {
+      proposal_id: "entity-linqi",
+      payload: {
+        id: "linqi",
+        kind: "character",
+        canonicalName: "林岐",
+        aliases: [],
+        evidence: fixture.evidence("林岐来到前厅。"),
+      },
+    };
+    const first = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_entity")!;
+    await first.execute("first-run", input as never, undefined, undefined, {} as ExtensionContext);
+    const second = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_entity")!;
+    await expect(second.execute("retry-run", input as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { proposalId: "entity-linqi" },
+    });
+    await expect(second.execute("changed-run", {
+      ...input,
+      payload: { ...input.payload, canonicalName: "另一个林岐" },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("different content");
+    await expect(new CompilerProposalService(root).store.list("pending")).resolves.toHaveLength(1);
+  });
 });

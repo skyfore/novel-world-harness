@@ -12,6 +12,7 @@ import {
   type LiveTokenUsage,
   wrapLiveStreamFunction,
 } from "../src/agent/live-token-ledger.js";
+import { compilerLiveTestOptions, DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS, DEFAULT_COMPILER_LIVE_MAX_REQUESTS } from "../src/compiler/pi-compiler.js";
 
 const roots: string[] = [];
 
@@ -47,6 +48,19 @@ function usage(overrides: Partial<LiveTokenUsage> = {}): LiveTokenUsage {
     ...overrides,
   };
 }
+
+describe("compiler live-test defaults", () => {
+  it("uses compiler-sized request and output caps while preserving explicit lower limits", () => {
+    expect(compilerLiveTestOptions({ ledgerPath: "/tmp/ledger.json" })).toMatchObject({
+      maxRequests: DEFAULT_COMPILER_LIVE_MAX_REQUESTS,
+      maxOutputTokens: DEFAULT_COMPILER_LIVE_MAX_OUTPUT_TOKENS,
+    });
+    expect(compilerLiveTestOptions({ ledgerPath: "/tmp/ledger.json", maxRequests: 7, maxOutputTokens: 2048 })).toMatchObject({
+      maxRequests: 7,
+      maxOutputTokens: 2048,
+    });
+  });
+});
 
 describe("LiveTokenLedger", () => {
   it("atomically reserves a request and reconciles exact provider usage", async () => {

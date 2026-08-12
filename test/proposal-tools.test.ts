@@ -386,6 +386,46 @@ describe("compiler proposal tools", () => {
     }
   });
 
+  it("terminates a compiler batch that exceeds its total tool-call budget", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-call-budget-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "众人来到前厅。\n");
+    const entity = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_entity")!;
+
+    for (let index = 1; index <= 40; index += 1) {
+      await expect(entity.execute(`proposal-${index}`, {
+        proposal_id: `entity-${index}`,
+        payload: {
+          id: `person-${index}`,
+          kind: "character",
+          canonicalName: `人物${index}`,
+          aliases: [],
+          evidence: fixture.evidence("众人来到前厅。"),
+        },
+      } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+        details: { proposalId: `entity-${index}` },
+      });
+    }
+
+    await expect(entity.execute("over-budget", {
+      proposal_id: "entity-over-budget",
+      payload: {
+        id: "person-over-budget",
+        kind: "character",
+        canonicalName: "额外人物",
+        aliases: [],
+        evidence: fixture.evidence("众人来到前厅。"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      terminate: true,
+      details: {
+        compilerBatchBlocked: true,
+        finishFailureCount: 0,
+        toolCallCount: 41,
+      },
+    });
+  });
+
   it("does not checkpoint proposals until their logical references form a closed graph", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-closure-"));
     roots.push(root);

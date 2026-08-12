@@ -180,12 +180,12 @@ describe("NWH TUI extension", () => {
     const ctx = {} as ExtensionContext;
     expect(events.get("tool_result")?.({
       type: "tool_result",
-      toolName: "finish_compiler_batch",
-      toolCallId: "finish-blocked",
+      toolName: "propose_entity",
+      toolCallId: "proposal-blocked",
       input: {},
       content: [],
       isError: false,
-      details: { compilerBatchBlocked: true, reason: "same finish error", finishFailureCount: 2 },
+      details: { compilerBatchBlocked: true, reason: "tool-call budget exceeded", finishFailureCount: 0, toolCallCount: 41 },
     }, ctx)).toEqual({ isError: true });
     expect(events.get("tool_call")?.({
       type: "tool_call",
@@ -353,17 +353,13 @@ describe("NWH TUI extension", () => {
     expect(questions).toEqual(["Complete novel compilation?"]);
     expect(sentHiddenMessages).toHaveLength(1);
 
-    const before = await events.get("before_agent_start")?.({
-      type: "before_agent_start",
-      prompt: sentHiddenMessages[0],
-      systemPrompt: "system",
-      systemPromptOptions: {},
-    });
-    const hiddenContext = String((before as { message?: { content?: string } } | undefined)?.message?.content);
+    const hiddenContext = sentHiddenMessages[0]!;
+    expect(hiddenContext).toContain("EvidenceRef");
+    expect(hiddenContext).toContain("人物1进入城池");
     const segmentIds = [...hiddenContext.matchAll(/<source-segment id="([^"]+)">/g)].map((match) => match[1]!);
+    expect(segmentIds.length).toBeGreaterThan(0);
     const finishInput = {
       outcome: "no-artifacts",
-      proposal_ids: [],
       reviewed_segments: segmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No supported facts." })),
       summary: "No supported facts.",
     };
@@ -378,6 +374,8 @@ describe("NWH TUI extension", () => {
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
     expect(sentHiddenMessages).toHaveLength(2);
+    expect(sentHiddenMessages[1]).toContain("<source-segment");
+    expect(sentHiddenMessages[1]).toContain("EvidenceRef");
     expect(notifications.some((message) => message.includes("starting compiler batch 2/"))).toBe(true);
   });
 

@@ -28,8 +28,12 @@ Source compiler proposals carry a stable compiler-batch ID. A retry reloads the
 batch's pending proposals, so it can withdraw a defective draft instead of losing
 control of it across sessions. `finish_compiler_batch` derives the active proposal
 set on the host and only asks the model to account for supplied evidence segments;
-this keeps the handshake bounded even for dense chapters. Automated source turns
+this keeps the handshake bounded even for dense chapters. A total compiler-tool
+budget also terminates proposal loops that keep changing just enough to evade an
+identical-failure detector. Automated source turns
 also omit raw staging-only state deltas, and supplemental opening-state turns are
 given the real opening segment and exact EvidenceRef rather than an ungrounded prompt.
+Hidden `/prepare-all` continuation turns carry their complete evidence payload
+directly because Pi custom-message turns do not run ordinary user-prompt hooks.
 Artifact catalogs are source-scoped, size-bounded, and hydrated only for the
 currently executing batch, so a full-book run does not pre-expand every future prompt.

@@ -53,14 +53,14 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     if (message.role !== "toolResult" || typeof message.toolCallId !== "string") continue;
     const call = calls.get(message.toolCallId);
     const toolName = call?.toolName ?? (typeof message.toolName === "string" ? message.toolName : "");
+    const details = message.details && typeof message.details === "object" && !Array.isArray(message.details)
+      ? message.details as Record<string, unknown>
+      : undefined;
+    if (details?.compilerBatchBlocked === true) {
+      blockedReason = typeof details.reason === "string" ? details.reason : "compiler circuit breaker opened";
+      continue;
+    }
     if (toolName === "finish_compiler_batch") {
-      const details = message.details && typeof message.details === "object" && !Array.isArray(message.details)
-        ? message.details as Record<string, unknown>
-        : undefined;
-      if (details?.compilerBatchBlocked === true) {
-        blockedReason = typeof details.reason === "string" ? details.reason : "finish circuit breaker opened";
-        continue;
-      }
       if (message.isError !== true && call?.finishOutcome) {
         completionOutcome = call.finishOutcome;
         if (Array.isArray(details?.proposalIds)) {
@@ -135,7 +135,7 @@ function proposalEnvelopeIdentity(argsValue: unknown): string | undefined {
 }
 
 export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | undefined {
-  if (outcome.blockedReason) return `finish circuit breaker stopped the batch: ${outcome.blockedReason}`;
+  if (outcome.blockedReason) return `compiler circuit breaker stopped the batch: ${outcome.blockedReason}`;
   if (outcome.assistantStopReason !== "stop") {
     return `model ended with ${outcome.assistantStopReason ?? "no final assistant response"}`;
   }

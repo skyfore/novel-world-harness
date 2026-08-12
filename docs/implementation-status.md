@@ -12,8 +12,8 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | --- | --- | --- |
 | Local file assistant | Implemented | Claude Code-style TUI, streaming/tool rendering, local lexical discovery, bounded reads, Pi sessions; model tools are read-only |
 | Source ingest | Implemented | Content hash, source manifest, deterministic evidence segments |
-| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals, recover drafts across retries, allow narrow withdrawal, and use a host-owned circuit-broken finish handshake |
-| Canonical acceptance | Implemented | Structural and cryptographic evidence validation; dependency-ordered acceptance |
+| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals, recover drafts across retries, allow narrow withdrawal, and use host-owned finish and total-tool-call circuit breakers |
+| Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
 | Canon replay and branching | Implemented vertical slice | Predicate checkpoints, fork, diff, divergent possibility eligibility |
@@ -31,10 +31,10 @@ The branch now implements a constrained end-to-end path from a local novel throu
 
 - Source files remain in the workspace and are registered by path, size, and SHA-256.
 - Segments preserve source line and byte ranges.
-- `compile-source` processes bounded batches and checkpoints only after active proposal calls form a closed graph, the model stops cleanly, and `finish_compiler_batch` succeeds. Stable batch provenance recovers pending drafts after process/session failure; the host owns the active proposal set, and repeated unchanged finish failures terminate without checkpointing.
+- `compile-source` processes bounded batches and checkpoints only after active proposal calls form a closed graph, the model stops cleanly, and `finish_compiler_batch` succeeds. Stable batch provenance recovers pending drafts after process/session failure; the host owns the active proposal set, and finish failures or an excessive compiler tool loop terminate without checkpointing.
 - Pi compiler sessions expose read-only file tools plus narrow `propose_*` tools.
 - Proposals remain pending until explicit acceptance.
-- Acceptance verifies that the registered source still has its ingest hash and that evidence byte/line ranges and quote hashes match.
+- Acceptance verifies that the registered source still has its ingest hash, that evidence byte/line ranges and quote hashes match, and that every canonical entity name and alias occurs in its verified evidence excerpt. Empty alias lists are valid.
 - Canonical entities, claims, events, and rules use logical refs over immutable revisions.
 - `proposals accept-all` accepts dependency-valid canonical artifacts and valid generic possibility templates; unsupported `state-delta` proposals remain staging artifacts.
 - Automated source preparation does not expose the staging-only raw `state-delta` tool. Its catalogs, review barrier, and convergence are scoped to the selected source.

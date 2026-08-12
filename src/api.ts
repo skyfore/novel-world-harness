@@ -1,7 +1,7 @@
 export { auditCompiler, type CompilerAuditReport } from "./compiler/audit.js";
 export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
 export { convergeWorldProposals, type WorldProposalConvergence } from "./compiler/converge.js";
-export { EvidenceVerifier, type EvidenceVerification } from "./compiler/evidence.js";
+export { EvidenceVerifier, type EvidenceInspection, type EvidenceVerification } from "./compiler/evidence.js";
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
 export { CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
 export { CompilerCommitService, CompilerValidator, type CompilerValidation } from "./compiler/validator.js";

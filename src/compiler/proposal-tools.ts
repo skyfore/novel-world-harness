@@ -98,10 +98,26 @@ export type CompilerProposalToolset = {
 const MAX_CONSECUTIVE_FINISH_FAILURES = 3;
 const MAX_IDENTICAL_FINISH_FAILURES = 2;
 const MAX_TOTAL_FINISH_FAILURES = 5;
+const MAX_COMPILER_TOOL_CALLS = 40;
+
+type CompilerBatchBlockedDetails = {
+  compilerBatchBlocked: true;
+  reason: string;
+  finishFailureCount: number;
+  toolCallCount: number;
+};
 
 type CompilerFinishDetails =
-  | { compilerBatchBlocked: true; reason: string; finishFailureCount: number }
+  | CompilerBatchBlockedDetails
   | { compilerBatchFinished: true; outcome: "complete" | "no-artifacts"; proposalIds: string[]; reviewedSegmentIds: string[] };
+
+type CompilerProposalDetails =
+  | CompilerBatchBlockedDetails
+  | { proposalId: string; kind: CompilerProposalKind };
+
+type CompilerWithdrawDetails =
+  | CompilerBatchBlockedDetails
+  | { compilerProposalWithdrawn: true; proposalId: string; reason: string };
 
 export function createCompilerProposalToolset(
   workspaceRoot: string,
@@ -116,16 +132,25 @@ export function createCompilerProposalToolset(
   let circuitBreak: { reason: string; failureCount: number } | undefined;
   let totalFinishFailures = 0;
   let consecutiveFinishFailures = 0;
+  let totalToolCalls = 0;
   const finishFailureCounts = new Map<string, number>();
 
   const circuitBreakResult = (reason: string, failureCount: number) => ({
     content: [{
       type: "text" as const,
-      text: `Compiler batch stopped by its finish circuit breaker after ${failureCount} failed finish attempt(s). The batch was not checkpointed. Last error: ${reason}`,
+      text: `Compiler batch stopped by its circuit breaker after ${totalToolCalls} compiler tool call(s) and ${failureCount} failed finish attempt(s). The batch was not checkpointed. Reason: ${reason}`,
     }],
-    details: { compilerBatchBlocked: true as const, reason, finishFailureCount: failureCount },
+    details: { compilerBatchBlocked: true as const, reason, finishFailureCount: failureCount, toolCallCount: totalToolCalls },
     terminate: true,
   });
+  const beginToolCall = () => {
+    if (circuitBreak) return circuitBreakResult(circuitBreak.reason, circuitBreak.failureCount);
+    totalToolCalls += 1;
+    if (totalToolCalls <= MAX_COMPILER_TOOL_CALLS) return undefined;
+    const reason = `compiler tool-call budget exceeded its ${MAX_COMPILER_TOOL_CALLS}-call limit`;
+    circuitBreak = { reason, failureCount: totalFinishFailures };
+    return circuitBreakResult(reason, totalFinishFailures);
+  };
   const failFinish = (reason: string) => {
     totalFinishFailures += 1;
     consecutiveFinishFailures += 1;
@@ -146,21 +171,24 @@ export function createCompilerProposalToolset(
   };
   const assertBatchWritable = () => {
     if (finished) throw new Error("Compiler batch was already finished; no more proposals may be submitted in this turn.");
-    if (circuitBreak) throw new Error("Compiler batch was stopped by its finish circuit breaker; start a new batch turn to retry.");
+    if (circuitBreak) throw new Error("Compiler batch was stopped by its compiler circuit breaker; start a new batch turn to retry.");
   };
 
   const proposalTools = (Object.keys(labels) as CompilerProposalKind[]).map((kind) => {
     const metadata = labels[kind];
-    return defineTool({
+    const parameters = proposalToolParameters(kind);
+    return defineTool<typeof parameters, CompilerProposalDetails>({
       name: metadata.name,
       label: metadata.label,
       description: metadata.description,
       promptSnippet: metadata.description,
-      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and include precise evidence in the payload where the schema requires it.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
-      parameters: proposalToolParameters(kind),
+      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and include precise evidence in the payload where the schema requires it.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
+      parameters,
       prepareArguments: prepareProposalToolArguments,
       async execute(_id, input, signal) {
         signal?.throwIfAborted();
+        const blocked = beginToolCall();
+        if (blocked) return blocked;
         assertBatchWritable();
         const accepted = await service.submit(kind, {
           proposalId: input.proposal_id,
@@ -185,7 +213,7 @@ export function createCompilerProposalToolset(
     proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
     reason: Type.String({ minLength: 1, maxLength: 500 }),
   }, { additionalProperties: false });
-  const withdrawTool = defineTool({
+  const withdrawTool = defineTool<typeof withdrawParameters, CompilerWithdrawDetails>({
     name: "withdraw_compiler_proposal",
     label: "Withdraw compiler proposal",
     description: "Withdraw an invalid proposal successfully submitted in the current compiler batch. The immutable candidate moves to rejected history and is removed from the finish handshake; submit any corrected replacement under a new proposal ID first.",
@@ -198,6 +226,8 @@ export function createCompilerProposalToolset(
     parameters: withdrawParameters,
     async execute(_id, input, signal) {
       signal?.throwIfAborted();
+      const blocked = beginToolCall();
+      if (blocked) return blocked;
       assertBatchWritable();
       if (!successfulProposalIds.has(input.proposal_id)) {
         throw new Error(`Cannot withdraw ${input.proposal_id}: it is not an active successful submission in this compiler batch.`);
@@ -207,7 +237,7 @@ export function createCompilerProposalToolset(
       recordProposalProgress();
       return {
         content: [{ type: "text" as const, text: `Compiler proposal ${input.proposal_id} withdrawn to rejected history: ${input.reason}` }],
-        details: { compilerProposalWithdrawn: true, proposalId: input.proposal_id, reason: input.reason },
+        details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
       };
     },
   });
@@ -235,7 +265,8 @@ export function createCompilerProposalToolset(
     async execute(_id, input, signal) {
       signal?.throwIfAborted();
       if (finished) throw new Error("Compiler batch was already finished.");
-      if (circuitBreak) return circuitBreakResult(circuitBreak.reason, circuitBreak.failureCount);
+      const blocked = beginToolCall();
+      if (blocked) return blocked;
       const expected = [...successfulProposalIds].sort();
       const listed = expected;
       if (input.outcome === "no-artifacts" && expected.length > 0) {
@@ -275,6 +306,7 @@ export function createCompilerProposalToolset(
       circuitBreak = undefined;
       totalFinishFailures = 0;
       consecutiveFinishFailures = 0;
+      totalToolCalls = 0;
       finishFailureCounts.clear();
       if (!compilerBatchId) return;
       for (const summary of await service.store.list("pending")) {

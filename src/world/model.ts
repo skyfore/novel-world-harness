@@ -40,7 +40,7 @@ export type EvidenceRef = z.infer<typeof evidenceRefSchema>;
 export const entityKindSchema = z.enum(["character", "location", "faction", "artifact", "institution", "concept", "other"]);
 export type EntityKind = z.infer<typeof entityKindSchema>;
 
-export const entitySchema = z.object({ id: idSchema, kind: entityKindSchema, canonicalName: z.string().min(1), aliases: z.array(z.string()), evidence: z.array(evidenceRefSchema) }).strict();
+export const entitySchema = z.object({ id: idSchema, kind: entityKindSchema, canonicalName: z.string().min(1), aliases: z.array(z.string().min(1)), evidence: z.array(evidenceRefSchema) }).strict();
 export type Entity = z.infer<typeof entitySchema>;
 
 export const claimSchema = z

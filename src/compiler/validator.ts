@@ -45,7 +45,7 @@ export class CompilerValidator {
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
-    if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors, warnings);
+    if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors);
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
     if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, claims, events, rules, errors);
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
@@ -55,9 +55,8 @@ export class CompilerValidator {
     return { accepted: errors.length === 0, errors, warnings };
   }
 
-  private validateEntity(entity: Entity, errors: ValidationIssue[], warnings: ValidationIssue[]): void {
+  private validateEntity(entity: Entity, errors: ValidationIssue[]): void {
     if (!entity.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Entity ${entity.id} has no source evidence`, "evidence"));
-    if (!entity.aliases.length) warnings.push(issue("NO_ALIASES", `Entity ${entity.id} has no aliases; this may be valid`));
   }
 
   private validateClaim(claim: Claim, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
@@ -261,8 +260,11 @@ export class CompilerCommitService {
   private async validateProposal(kind: CanonicalProposalKind, payload: unknown, envelopeEvidence: readonly EvidenceRef[]): Promise<CompilerValidation> {
     const validation = await this.validator.validate(kind, payload);
     const payloadEvidence = (payload as { evidence?: EvidenceRef[] }).evidence ?? [];
-    const verified = await this.evidence.verifyAll([...payloadEvidence, ...envelopeEvidence]);
-    const errors = [...validation.errors, ...verified.issues];
+    const inspected = await this.evidence.inspectAll([...payloadEvidence, ...envelopeEvidence]);
+    const groundingIssues = kind === "entity" && inspected.valid
+      ? validateEntityNameEvidence(entitySchema.parse(payload), inspected.excerpts)
+      : [];
+    const errors = [...validation.errors, ...inspected.issues, ...groundingIssues];
     return { accepted: errors.length === 0, errors, warnings: validation.warnings };
   }
 }
@@ -280,3 +282,40 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   return worldRuleSchema;
 }
 function issue(code: string, message: string, path?: string): ValidationIssue { return path ? { code, message, path } : { code, message }; }
+
+function validateEntityNameEvidence(entity: Entity, excerpts: readonly string[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!excerpts.some((excerpt) => containsEvidenceName(excerpt, entity.canonicalName))) {
+    issues.push(issue(
+      "UNSUPPORTED_ENTITY_CANONICAL_NAME",
+      `Entity ${entity.id} canonical name '${entity.canonicalName}' does not occur in its verified source evidence`,
+      "canonicalName",
+    ));
+  }
+  entity.aliases.forEach((alias, index) => {
+    if (excerpts.some((excerpt) => containsEvidenceName(excerpt, alias))) return;
+    issues.push(issue(
+      "UNSUPPORTED_ENTITY_ALIAS",
+      `Entity ${entity.id} alias '${alias}' does not occur in its verified source evidence`,
+      `aliases.${index}`,
+    ));
+  });
+  return issues;
+}
+
+function containsEvidenceName(excerpt: string, name: string): boolean {
+  const haystack = excerpt.normalize("NFKC").toLowerCase();
+  const needle = name.normalize("NFKC").toLowerCase();
+  if (!needle) return false;
+  const asciiWord = /[a-z0-9]/i;
+  let offset = haystack.indexOf(needle);
+  while (offset >= 0) {
+    const before = offset > 0 ? haystack[offset - 1] : undefined;
+    const after = haystack[offset + needle.length];
+    const startBound = !asciiWord.test(needle[0]!) || before === undefined || !asciiWord.test(before);
+    const endBound = !asciiWord.test(needle.at(-1)!) || after === undefined || !asciiWord.test(after);
+    if (startBound && endBound) return true;
+    offset = haystack.indexOf(needle, offset + 1);
+  }
+  return false;
+}

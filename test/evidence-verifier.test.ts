@@ -40,4 +40,15 @@ describe("compiler evidence verification", () => {
     expect(changed.valid).toBe(false);
     expect(changed.issues.some((error) => error.code === "EVIDENCE_SOURCE_CHANGED")).toBe(true);
   });
+
+  it("returns only text backed by verified evidence spans", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-evidence-inspection-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "曹操，字孟德。\n");
+    const verifier = new EvidenceVerifier(root);
+
+    const inspected = await verifier.inspectAll(fixture.evidence("曹操，字孟德"));
+
+    expect(inspected).toMatchObject({ valid: true, issues: [], excerpts: ["曹操，字孟德"] });
+  });
 });

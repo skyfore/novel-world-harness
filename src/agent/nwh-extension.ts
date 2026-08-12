@@ -131,8 +131,27 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       ctx.ui.notify(message, level);
     };
 
-    const sendHiddenPreparationTurn = (content: string, customType: string) => {
+    const sendHiddenPreparationTurn = (
+      ctx: ExtensionContext,
+      content: string,
+      customType: string,
+      expectedSegmentIds: readonly string[],
+    ): boolean => {
+      const missingSegmentIds = expectedSegmentIds.filter((segmentId) =>
+        !content.includes(`<source-segment id="${segmentId}">`));
+      if (missingSegmentIds.length) {
+        pendingTurn = undefined;
+        pendingRunMessages = [];
+        compilerCircuitBroken = false;
+        stopPrepareAll(
+          ctx,
+          `Full preparation stopped before the model turn because compiler evidence was missing for: ${missingSegmentIds.join(", ")}.`,
+          "error",
+        );
+        return false;
+      }
       pi.sendMessage({ customType, content, display: false }, { triggerTurn: true });
+      return true;
     };
 
     const advancePrepareAll = async (ctx: ExtensionContext): Promise<void> => {
@@ -164,7 +183,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         await beginTurn(preparation);
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Preparing · batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`));
         ctx.ui.notify(`Full preparation: starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches}.`, "info");
-        sendHiddenPreparationTurn(compilerPromptForTurn(preparation), "nwh-prepare-all-batch");
+        sendHiddenPreparationTurn(
+          ctx,
+          `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
+          "nwh-prepare-all-batch",
+          preparation.batch.segmentIds,
+        );
         return;
       }
       if (inspection.stage === "review") {
@@ -221,7 +245,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         state.initialWorldAttempted = true;
         state.initialWorldBatchId = openingBatch.id;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing · opening world"));
-        sendHiddenPreparationTurn(`${INITIAL_WORLD_PROMPT}\n\n${openingBatch.prompt}`, "nwh-prepare-all-initial-world");
+        sendHiddenPreparationTurn(
+          ctx,
+          `${INITIAL_WORLD_PROMPT}\n\n${openingBatch.prompt}`,
+          "nwh-prepare-all-initial-world",
+          openingBatch.segmentIds,
+        );
         return;
       }
       if (inspection.stage === "create-branch") {
@@ -256,7 +285,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (compilerCircuitBroken) {
         return {
           block: true,
-          reason: "The compiler finish circuit breaker opened; this batch turn is stopping without a checkpoint.",
+          reason: "The compiler circuit breaker opened; this batch turn is stopping without a checkpoint.",
           terminate: true,
         };
       }
@@ -268,7 +297,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     });
 
     pi.on("tool_result", (event) => {
-      if (event.toolName !== "finish_compiler_batch") return;
       const details = event.details && typeof event.details === "object" && !Array.isArray(event.details)
         ? event.details as Record<string, unknown>
         : undefined;

@@ -24,7 +24,7 @@ describe("canonical initial world", () => {
   it("requires canonical entities before accepting the seed and replays it as genesis", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-initial-"));
     roots.push(root);
-    const source = await createEvidenceFixture(root, "opening\n");
+    const source = await createEvidenceFixture(root, "Hero (H) waits at the opening.\n");
     const proposals = new CompilerProposalService(root);
     const commits = new CompilerCommitService(root);
 
@@ -37,7 +37,7 @@ describe("canonical initial world", () => {
           version: 1,
           operations: [{ op: "learn", actorId: "hero", claimId: "opening-claim", status: "knows", confidence: 1 }],
         },
-        evidence: source.evidence("opening"),
+        evidence: source.evidence("Hero (H) waits at the opening."),
       },
       generatedBy: { worker: "test" },
     });
@@ -46,7 +46,7 @@ describe("canonical initial world", () => {
 
     await proposals.submit("entity", {
       proposalId: "hero-entity",
-      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: ["H"], evidence: source.evidence("opening") },
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: ["H"], evidence: source.evidence("Hero (H)") },
       generatedBy: { worker: "test" },
     });
     expect((await commits.accept("entity", "hero-entity")).accepted).toBe(true);
@@ -58,7 +58,7 @@ describe("canonical initial world", () => {
         predicate: "is present at the opening",
         object: true,
         epistemicType: "explicit-fact",
-        evidence: source.evidence("opening"),
+        evidence: source.evidence("Hero (H) waits at the opening."),
       },
       generatedBy: { worker: "test" },
     });

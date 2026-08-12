@@ -99,7 +99,8 @@ one batch per user action so importing a long novel cannot silently trigger an
 unbounded sequence of model requests. Generated artifacts remain pending proposals
 until deterministic validation and explicit acceptance. A defective proposal can
 be withdrawn to rejected history within its originating batch, and repeated
-unchanged finish failures trip a circuit breaker instead of extending the Pi tool loop.
+unchanged finish failures or a 40-call compiler-tool budget trip a circuit breaker
+instead of extending the Pi tool loop.
 Batch identity is persisted on each proposal, so retrying an interrupted batch
 recovers its active drafts and can withdraw them. The finish handshake is host-owned:
 the model reviews segment IDs but no longer has to echo an ever-growing proposal-ID list.
@@ -107,7 +108,8 @@ the model reviews segment IDs but no longer has to echo an ever-growing proposal
 Run `/prepare-all [source-id] [branch-id]` inside the TUI to finish the remaining
 batches in the current session, review guided acceptance choices, generate a
 missing opening state, and create a playable branch. Its internal continuation
-messages stay hidden from the visible transcript.
+messages stay hidden from the visible transcript and carry their complete evidence
+slice directly rather than depending on user-prompt hooks.
 
 `nwh` and `nwh play` open the TUI in `regular` mode by default, preserving terminal scrollback. `--tui-mode fullscreen` uses an alternate-screen layout. `-p` remains the non-interactive path for scripts and pipelines.
 

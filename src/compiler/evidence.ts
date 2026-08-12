@@ -9,6 +9,10 @@ export type EvidenceVerification = {
   issues: ValidationIssue[];
 };
 
+export type EvidenceInspection = EvidenceVerification & {
+  excerpts: string[];
+};
+
 type CachedSource = {
   source: SourceDocument;
   buffer: Buffer;
@@ -21,29 +25,41 @@ export class EvidenceVerifier {
   constructor(private readonly workspaceRoot: string) {}
 
   async verifyAll(evidence: readonly EvidenceRef[]): Promise<EvidenceVerification> {
+    const { excerpts: _excerpts, ...verification } = await this.inspectAll(evidence);
+    return verification;
+  }
+
+  async inspectAll(evidence: readonly EvidenceRef[]): Promise<EvidenceInspection> {
     this.cache = undefined;
     const issues: ValidationIssue[] = [];
+    const excerpts: string[] = [];
     try {
       for (let index = 0; index < evidence.length; index += 1) {
-        const result = await this.verifyCached(evidence[index]!);
+        const result = await this.inspectCached(evidence[index]!);
         for (const issue of result.issues) issues.push({ ...issue, path: issue.path ? `evidence.${index}.${issue.path}` : `evidence.${index}` });
+        if (result.excerpt !== undefined) excerpts.push(result.excerpt);
       }
-      return { valid: issues.length === 0, issues };
+      return { valid: issues.length === 0, issues, excerpts };
     } finally {
       this.cache = undefined;
     }
   }
 
   async verify(reference: EvidenceRef): Promise<EvidenceVerification> {
+    const { excerpt: _excerpt, ...verification } = await this.inspect(reference);
+    return verification;
+  }
+
+  async inspect(reference: EvidenceRef): Promise<EvidenceVerification & { excerpt?: string }> {
     this.cache = undefined;
     try {
-      return await this.verifyCached(reference);
+      return await this.inspectCached(reference);
     } finally {
       this.cache = undefined;
     }
   }
 
-  private async verifyCached(reference: EvidenceRef): Promise<EvidenceVerification> {
+  private async inspectCached(reference: EvidenceRef): Promise<EvidenceVerification & { excerpt?: string }> {
     const span = reference.span;
     const cached = await this.getSource(span.sourceId);
     if (!cached) {
@@ -82,7 +98,7 @@ export class EvidenceVerifier {
         issues: [issue("EVIDENCE_HASH_MISMATCH", `Evidence hash mismatch; expected ${span.quoteHash}, found ${actualHash}`)],
       };
     }
-    return { valid: true, issues: [] };
+    return { valid: true, issues: [], excerpt: cached.buffer.subarray(startByte, endByte).toString("utf8") };
   }
 
   private async getSource(sourceId: string): Promise<CachedSource | undefined> {

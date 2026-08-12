@@ -115,7 +115,7 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure(outcome)).toBeUndefined();
   });
 
-  it("reports a terminating finish circuit breaker as a batch failure", () => {
+  it("reports a terminating compiler circuit breaker as a batch failure", () => {
     const outcome = compilerBatchOutcomeFromMessages([
       { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["claim-draft"], reviewed_segments: [], summary: "done" } }], stopReason: "toolUse" },
       {
@@ -128,7 +128,24 @@ describe("compiler batches", () => {
       },
     ]);
     expect(outcome).toMatchObject({ completionSignaled: false, blockedReason: "graph remains incomplete" });
-    expect(compilerBatchFailure(outcome)).toContain("finish circuit breaker");
+    expect(compilerBatchFailure(outcome)).toContain("compiler circuit breaker");
+  });
+
+  it("reports a tool-budget circuit breaker from a proposal call as a batch failure", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "proposal", name: "propose_entity", arguments: { proposal_id: "entity-over-budget" } }], stopReason: "toolUse" },
+      {
+        role: "toolResult",
+        toolCallId: "proposal",
+        toolName: "propose_entity",
+        isError: true,
+        content: [],
+        details: { compilerBatchBlocked: true, reason: "compiler tool-call budget exceeded", finishFailureCount: 0, toolCallCount: 41 },
+      },
+    ]);
+
+    expect(outcome).toMatchObject({ completionSignaled: false, blockedReason: "compiler tool-call budget exceeded" });
+    expect(compilerBatchFailure(outcome)).toContain("compiler circuit breaker");
   });
 
   it("builds bounded prompts with explicit evidence refs", async () => {
@@ -139,6 +156,8 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.segmentIds.length === 1)).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("EvidenceRef"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("at most 24 high-leverage active proposals"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("empty aliases are valid"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("after 40 compiler tool calls"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("ASCII logical entity ID"))).toBe(true);

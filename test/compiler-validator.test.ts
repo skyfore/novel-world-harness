@@ -15,7 +15,7 @@ afterEach(async () => {
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-compiler-"));
   roots.push(root);
-  const source = await createEvidenceFixture(root, "曹操\nUnknown person appears\n");
+  const source = await createEvidenceFixture(root, "曹操，字孟德\n北门\nUnknown person appears\n");
   return { proposals: new CompilerProposalService(root), commits: new CompilerCommitService(root), evidence: source.evidence };
 }
 
@@ -24,12 +24,42 @@ describe("CompilerCommitService", () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {
       proposalId: "entity-cao",
-      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: ["孟德"], evidence: evidence("曹操") },
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: ["孟德"], evidence: evidence("曹操，字孟德") },
       generatedBy: { worker: "test" },
     });
     const validation = await commits.accept("entity", "entity-cao");
     expect(validation.accepted).toBe(true);
     await expect(commits.canon.getEntity("cao-cao")).resolves.toMatchObject({ canonicalName: "曹操" });
+  });
+
+  it("keeps entity names and aliases pending when they are absent from verified evidence", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-inferred-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: ["孟德"], evidence: evidence("Unknown person appears") },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("entity", "entity-inferred-cao");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "UNSUPPORTED_ENTITY_CANONICAL_NAME", path: "canonicalName" }),
+      expect.objectContaining({ code: "UNSUPPORTED_ENTITY_ALIAS", path: "aliases.0" }),
+    ]));
+    await expect(commits.canon.getEntity("cao-cao")).rejects.toThrow();
+  });
+
+  it("accepts an evidence-backed entity without inventing aliases", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-no-alias",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("entity", "entity-no-alias");
+    expect(validation.accepted).toBe(true);
+    expect(validation.warnings).toEqual([]);
   });
 
   it("keeps an invalid event pending when it references an unknown participant", async () => {
@@ -104,7 +134,7 @@ describe("CompilerCommitService", () => {
     const { proposals, evidence } = await fixture();
     await proposals.submit("entity", {
       proposalId: "place",
-      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("曹操") },
+      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("北门") },
       generatedBy: { worker: "test" },
     });
     await proposals.submit("world-rule", {
@@ -132,7 +162,7 @@ describe("CompilerCommitService", () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {
       proposalId: "gate",
-      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("曹操") },
+      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("北门") },
       generatedBy: { worker: "test" },
     });
     expect((await commits.accept("entity", "gate")).accepted).toBe(true);

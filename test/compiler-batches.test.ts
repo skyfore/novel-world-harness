@@ -101,6 +101,7 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("location.open"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("artifact.delivered"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("one explicitly narrated transition at a time"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Every explicitly narrated character movement"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("never use a chapter number, bell count"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Pending proposals are immutable"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("kind=canon-analogue"))).toBe(true);

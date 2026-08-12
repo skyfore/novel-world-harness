@@ -1,6 +1,7 @@
 import { stderr, stdout } from "node:process";
 import type { TuiMode } from "@earendil-works/pi-coding-agent";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
+import { compilerBatchFailure } from "../compiler/batch-outcome.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import type { PiLiveTestOptions } from "../agent/pi-session.js";
 
@@ -48,7 +49,9 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
   });
   try {
     if (options.prompt !== undefined) {
-      await session.prompt(options.prompt.trim() || DEFAULT_COMPILER_PROMPT);
+      const report = await session.promptWithReport(options.prompt.trim() || DEFAULT_COMPILER_PROMPT);
+      const failure = compilerBatchFailure(report);
+      if (failure) throw new Error(`Compiler prompt was not completed: ${failure}.`);
       if (wroteText) stdout.write("\n");
       return;
     }

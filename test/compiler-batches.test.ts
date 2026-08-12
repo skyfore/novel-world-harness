@@ -91,6 +91,18 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("reviewed_segments"))).toBe(true);
   });
 
+  it("rebuilds a stale segmenter manifest even when source bytes are unchanged", async () => {
+    const { root, source } = await fixture();
+    const store = new SegmentStore(root);
+    const stale = await store.readManifest(source.id);
+    expect(stale).not.toBeNull();
+    await store.write({ ...stale!, segmenterVersion: 1 });
+
+    await prepareCompilerBatches(root, source);
+
+    await expect(store.readManifest(source.id)).resolves.toMatchObject({ segmenterVersion: 2 });
+  });
+
   it("marks successful batches and resumes after an interrupted run", async () => {
     const { root, source } = await fixture();
     const firstSeen: string[] = [];

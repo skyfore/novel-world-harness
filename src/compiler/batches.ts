@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { SegmentStore, readSegmentText, segmentSource, type SourceSegment } from "./segments.js";
+import { SEGMENTER_VERSION, SegmentStore, readSegmentText, segmentSource, type SourceSegment } from "./segments.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
 
 export type CompilerBatch = {
@@ -73,7 +73,7 @@ export class CompilerBatchStore {
 export async function prepareCompilerBatches(workspaceRoot: string, source: SourceDocument): Promise<CompilerBatch[]> {
   const segmentStore = new SegmentStore(workspaceRoot);
   let manifest = await segmentStore.readManifest(source.id);
-  if (!manifest || manifest.sourceSha256 !== source.contentSha256) {
+  if (!manifest || manifest.sourceSha256 !== source.contentSha256 || manifest.segmenterVersion !== SEGMENTER_VERSION) {
     manifest = await segmentSource(workspaceRoot, source);
     await segmentStore.write(manifest);
   }

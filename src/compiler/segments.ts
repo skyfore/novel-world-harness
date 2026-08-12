@@ -24,7 +24,7 @@ export type SegmentManifest = {
   sourceId: string;
   sourcePath: string;
   sourceSha256: string;
-  segmenterVersion: 1;
+  segmenterVersion: number;
   segments: SourceSegment[];
 };
 
@@ -38,6 +38,7 @@ const HEADING_PATTERNS = [
 ];
 const MAX_BLOCK_LINES = 160;
 const MAX_BLOCK_BYTES = 24 * 1024;
+export const SEGMENTER_VERSION = 2 as const;
 
 export class SegmentStore {
   readonly root: string;
@@ -97,7 +98,7 @@ export async function segmentSource(workspaceRoot: string, source: SourceDocumen
     sourceId: source.id,
     sourcePath: source.sourcePath,
     sourceSha256,
-    segmenterVersion: 1,
+    segmenterVersion: SEGMENTER_VERSION,
     segments,
   };
 }

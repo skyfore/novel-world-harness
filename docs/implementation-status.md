@@ -31,7 +31,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 
 - Source files remain in the workspace and are registered by path, size, and SHA-256.
 - Segments preserve source line and byte ranges.
-- `compile-source` processes bounded batches and checkpoints only after active proposal calls form a closed graph, the model stops cleanly, and `finish_compiler_batch` succeeds. Stable batch provenance recovers pending drafts after process/session failure; the host owns the active proposal set, and finish failures or an excessive compiler tool loop terminate without checkpointing.
+- `compile-source` processes bounded batches and checkpoints only after active proposal calls form a closed graph, the model stops cleanly, and `finish_compiler_batch` succeeds. Stable batch provenance supplies exact active proposal IDs to recovery turns; ordinary source passes defer genesis to the dedicated opening pass. The host owns the active proposal set, executes proposal writes sequentially, caps it at 24, reserves the final finish handshake, rejects concurrent CLI compiler writers, and terminates finish failures or excessive compiler tool loops without checkpointing.
 - Pi compiler sessions expose read-only file tools plus narrow `propose_*` tools.
 - Proposals remain pending until explicit acceptance.
 - Acceptance verifies that the registered source still has its ingest hash, that evidence byte/line ranges and quote hashes match, and that every canonical entity name and alias occurs in its verified evidence excerpt. Empty alias lists are valid.

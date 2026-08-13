@@ -99,10 +99,17 @@ one batch per user action so importing a long novel cannot silently trigger an
 unbounded sequence of model requests. Generated artifacts remain pending proposals
 until deterministic validation and explicit acceptance. A defective proposal can
 be withdrawn to rejected history within its originating batch, and repeated
-unchanged finish failures or a 40-call compiler-tool budget trip a circuit breaker
+unchanged finish failures or a 40-call general compiler-tool budget trip a circuit breaker
 instead of extending the Pi tool loop.
+One additional final `finish_compiler_batch` call is reserved for the required
+checkpoint handshake. Concurrent CLI compiler writers are rejected by a
+workspace lock instead of racing proposal files.
+Non-interactive compiler turns also have a ten-minute wall-clock deadline; a
+timed-out turn is aborted without checkpointing and resumes from durable progress.
 Batch identity is persisted on each proposal, so retrying an interrupted batch
-recovers its active drafts and can withdraw them. The finish handshake is host-owned:
+recovers its active drafts, supplies their exact proposal IDs to the retry turn,
+and can withdraw them without re-extracting duplicate logical artifacts. Ordinary
+source batches leave the initial world to the dedicated opening pass. The finish handshake is host-owned:
 the model reviews segment IDs but no longer has to echo an ever-growing proposal-ID list.
 
 Run `/prepare-all [source-id] [branch-id]` inside the TUI to finish the remaining

@@ -5,6 +5,7 @@ import { compilerBatchFailure } from "../compiler/batch-outcome.js";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
 export type CompileSourceOptions = {
   root: string;
@@ -14,7 +15,11 @@ export type CompileSourceOptions = {
   model?: string;
   maxBatches?: number;
   resume?: boolean;
+  acquireLock?: boolean;
+  promptTimeoutMs?: number;
 };
+
+const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
 
 async function optionalConfig(options: CompileSourceOptions) {
   try {
@@ -26,6 +31,10 @@ async function optionalConfig(options: CompileSourceOptions) {
 }
 
 export async function compileSourceCommand(options: CompileSourceOptions): Promise<void> {
+  if (options.acquireLock !== false) {
+    return withWorkspaceOperationLock(options.root, "compiler", () =>
+      compileSourceCommand({ ...options, acquireLock: false }));
+  }
   const store = await WorkspaceStore.create(options.root);
   const sources = await store.listSources();
   if (!sources.length) throw new Error("No ingested sources. Run nwh ingest first.");
@@ -60,6 +69,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         segmentIds: batch.segmentIds,
         compilerBatchId: batch.id,
         sourceId: batch.sourceId,
+        disabledProposalTools: ["propose_initial_world"],
         onRetry(event) {
           stderr.write(`${formatRetryNotice(event)}\n`);
         },
@@ -73,7 +83,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         },
       });
       try {
-        const report = await session.promptWithReport(batch.prompt);
+        const report = await session.promptWithReport(batch.prompt, {
+          timeoutMs: options.promptTimeoutMs ?? COMPILER_PROMPT_TIMEOUT_MS,
+        });
         const failure = compilerBatchFailure(report);
         if (failure) throw new Error(`Compiler batch ${batch.ordinal + 1} was not checkpointed: ${failure}.`);
         if (wroteText) stdout.write("\n");

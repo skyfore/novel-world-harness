@@ -36,6 +36,7 @@ describe("compiler proposal tools", () => {
     expect(tools).toHaveLength(11);
     for (const tool of tools.filter((candidate) => candidate.name.startsWith("propose_"))) {
       const validator = Compile(tool.parameters);
+      expect(tool.executionMode).toBe("sequential");
       expect(validator.Check({ proposal_id: "valid-id", payload: "{}" }), tool.name).toBe(false);
       expect(JSON.stringify(tool.parameters), tool.name).not.toContain('"payload":{}');
     }
@@ -225,6 +226,18 @@ describe("compiler proposal tools", () => {
       },
     } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("KnowledgeDelta");
 
+    await expect(claim.execute("natural-language-meta-claim", {
+      proposal_id: "natural-language-meta-claim",
+      payload: {
+        id: "natural-language-meta-claim",
+        subject: "mo-yan",
+        predicate: "knows both the key and its owner",
+        object: null,
+        epistemicType: "explicit-fact",
+        evidence: fixture.evidence("墨砚不知道银钥在林岐手里。"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("KnowledgeDelta");
+
     const possibility = tools.find((candidate) => candidate.name === "propose_possibility")!;
     await expect(possibility.execute("inert-choice", {
       proposal_id: "inert-choice",
@@ -390,9 +403,11 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-call-budget-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "众人来到前厅。\n");
-    const entity = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_entity")!;
+    const tools = createCompilerProposalTools(root);
+    const entity = tools.find((candidate) => candidate.name === "propose_entity")!;
+    const withdraw = tools.find((candidate) => candidate.name === "withdraw_compiler_proposal")!;
 
-    for (let index = 1; index <= 40; index += 1) {
+    for (let index = 1; index <= 20; index += 1) {
       await expect(entity.execute(`proposal-${index}`, {
         proposal_id: `entity-${index}`,
         payload: {
@@ -402,6 +417,16 @@ describe("compiler proposal tools", () => {
           aliases: [],
           evidence: fixture.evidence("众人来到前厅。"),
         },
+      } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+        details: {
+          proposalId: `entity-${index}`,
+          activeProposalCount: 1,
+          remainingToolCalls: 40 - (index * 2 - 1),
+        },
+      });
+      await expect(withdraw.execute(`withdraw-${index}`, {
+        proposal_id: `entity-${index}`,
+        reason: "Exercise the bounded total-call circuit breaker.",
       } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
         details: { proposalId: `entity-${index}` },
       });
@@ -424,6 +449,69 @@ describe("compiler proposal tools", () => {
         toolCallCount: 41,
       },
     });
+  });
+
+  it("reserves one final finish call after the general tool-call budget", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-finish-grace-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "人物来到前厅。\n");
+    const toolset = createCompilerProposalToolset(root);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    await toolset.beginBatch([], "finish-grace-batch", fixture.source.id);
+    const input = {
+      proposal_id: "entity-person",
+      payload: {
+        id: "person",
+        kind: "character",
+        canonicalName: "人物",
+        aliases: [],
+        evidence: fixture.evidence("人物"),
+      },
+    };
+
+    for (let index = 1; index <= 40; index += 1) {
+      await entity.execute(`proposal-${index}`, input as never, undefined, undefined, {} as ExtensionContext);
+    }
+
+    await expect(finish.execute("reserved-finish", {
+      outcome: "complete",
+      reviewed_segments: [],
+      summary: "Finished using the reserved protocol call.",
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true, proposalIds: ["entity-person"] },
+    });
+  });
+
+  it("rejects a 25th active proposal before a dense batch can crowd out finish", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-active-budget-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "众人来到前厅。\n");
+    const entity = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_entity")!;
+
+    for (let index = 1; index <= 24; index += 1) {
+      await entity.execute(`proposal-${index}`, {
+        proposal_id: `entity-${index}`,
+        payload: {
+          id: `person-${index}`,
+          kind: "character",
+          canonicalName: `人物${index}`,
+          aliases: [],
+          evidence: fixture.evidence("众人来到前厅。"),
+        },
+      } as never, undefined, undefined, {} as ExtensionContext);
+    }
+
+    await expect(entity.execute("proposal-25", {
+      proposal_id: "entity-25",
+      payload: {
+        id: "person-25",
+        kind: "character",
+        canonicalName: "人物25",
+        aliases: [],
+        evidence: fixture.evidence("众人来到前厅。"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("already has 24 active proposals");
   });
 
   it("does not checkpoint proposals until their logical references form a closed graph", async () => {
@@ -686,5 +774,55 @@ describe("compiler proposal tools", () => {
     await service.submit("entity", input);
     await service.withdraw(input.proposalId);
     await expect(service.submit("entity", input)).rejects.toThrow("already exists in rejected history");
+  });
+
+  it("versions only the proposal envelope when correcting a stable logical artifact", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-stable-revision-id-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "林岐来到前厅。\n");
+    const toolset = createCompilerProposalToolset(root);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const withdraw = toolset.tools.find((candidate) => candidate.name === "withdraw_compiler_proposal")!;
+    await toolset.beginBatch([], "stable-revision-batch", fixture.source.id);
+    const payload = {
+      id: "linqi",
+      kind: "character",
+      canonicalName: "林岐",
+      aliases: [],
+      evidence: fixture.evidence("林岐"),
+    };
+
+    await entity.execute("base", { proposal_id: "entity-linqi", payload } as never, undefined, undefined, {} as ExtensionContext);
+    await withdraw.execute("withdraw-base", {
+      proposal_id: "entity-linqi",
+      reason: "The candidate needs a corrected envelope revision.",
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    await expect(entity.execute("bad-revision", {
+      proposal_id: "entity-linqi-v2",
+      payload: { ...payload, id: "linqi-v2" },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("Keep payload.id='linqi'");
+
+    await expect(entity.execute("good-revision", {
+      proposal_id: "entity-linqi-v2",
+      payload,
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { proposalId: "entity-linqi-v2" },
+    });
+
+    const chainedPayload = { ...payload, id: "linqi-alternate-v2" };
+    await entity.execute("first-chained-revision", {
+      proposal_id: "entity-linqi-alternate-v2",
+      payload: chainedPayload,
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await withdraw.execute("withdraw-chained-revision", {
+      proposal_id: "entity-linqi-alternate-v2",
+      reason: "The first successful logical identity already carries a revision-looking suffix.",
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    await expect(entity.execute("bad-chained-revision", {
+      proposal_id: "entity-linqi-alternate-v3",
+      payload: { ...chainedPayload, id: "linqi-alternate-v3" },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("Keep payload.id='linqi-alternate-v2'");
   });
 });

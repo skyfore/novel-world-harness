@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { prepareCompilerBatches, runCompilerBatches } from "../src/compiler/batches.js";
+import { hydrateCompilerBatch, prepareCompilerBatches, prepareOpeningWorldCompilerBatch, runCompilerBatches } from "../src/compiler/batches.js";
 import { compilerBatchFailure, compilerBatchOutcomeFromMessages } from "../src/compiler/batch-outcome.js";
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import type { SourceDocument } from "../src/storage/workspace-store.js";
@@ -155,9 +155,13 @@ describe("compiler batches", () => {
     expect(batches).toHaveLength(12);
     expect(batches.every((batch) => batch.segmentIds.length === 1)).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("EvidenceRef"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("at most 24 high-leverage active proposals"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Target at most 20 high-leverage active proposals"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("rejects a 25th active proposal"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Ordinary source-review batches must not propose an initial-world"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("A failed propose_* tool call never enters the active set"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("empty aliases are valid"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("after 40 compiler tool calls"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("40 general compiler tool calls"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Preserve the payload's stable logical id"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("ASCII logical entity ID"))).toBe(true);
@@ -176,6 +180,42 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("finish_compiler_batch"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("only compiler pass guaranteed"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("reviewed_segments"))).toBe(true);
+  });
+
+  it("gives retry turns the exact active proposal ids and a recovery-first instruction", async () => {
+    const { root, source } = await fixture();
+    const batch = (await prepareCompilerBatches(root, source))[0]!;
+    await new ProposalStore(root).writePending({
+      id: "entity-person-recovered",
+      kind: "entity",
+      schemaVersion: 1,
+      payload: {
+        id: "person-recovered",
+        kind: "character",
+        canonicalName: "人物",
+        aliases: [],
+        evidence: batch.evidence,
+      },
+      evidence: [],
+      generatedBy: { worker: "test", compilerBatchId: batch.id },
+      createdAt: new Date(0).toISOString(),
+    }, entitySchema);
+
+    const hydrated = await hydrateCompilerBatch(root, batch);
+
+    expect(hydrated.prompt).toContain('"proposalId":"entity-person-recovered"');
+    expect(hydrated.prompt).toContain('"logicalId":"person-recovered"');
+    expect(hydrated.prompt).toContain("this is a recovery attempt");
+    expect(hydrated.prompt).toContain("Start recovery by calling finish_compiler_batch once");
+  });
+
+  it("replaces the ordinary initial-world restriction for the dedicated opening pass", async () => {
+    const { root, source } = await fixture();
+
+    const opening = await prepareOpeningWorldCompilerBatch(root, source);
+
+    expect(opening.prompt).toContain("may propose exactly one initial-world");
+    expect(opening.prompt).not.toContain("Ordinary source-review batches must not propose an initial-world");
   });
 
   it("rebuilds a stale segmenter manifest even when source bytes are unchanged", async () => {

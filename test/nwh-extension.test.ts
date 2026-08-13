@@ -173,6 +173,8 @@ describe("NWH TUI extension", () => {
 
     expect(events.get("tool_call")?.({ type: "tool_call", toolName: "read_file", toolCallId: "read-1", input: {} }, ctx))
       .toMatchObject({ block: true, reason: expect.stringContaining("evidence slice") });
+    expect(events.get("tool_call")?.({ type: "tool_call", toolName: "propose_initial_world", toolCallId: "opening-too-early", input: {} }, ctx))
+      .toMatchObject({ block: true, reason: expect.stringContaining("dedicated opening-world pass") });
   });
 
   it("blocks every subsequent tool call until a circuit-broken agent run settles", async () => {

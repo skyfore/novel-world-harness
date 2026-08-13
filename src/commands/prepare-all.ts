@@ -10,6 +10,7 @@ import { prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld } from "..
 import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { ingestWorkspaceSource } from "./ingest.js";
 import { worldCreateCommand } from "./world.js";
+import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
 export type PrepareAllCommandOptions = {
   root: string;
@@ -19,6 +20,7 @@ export type PrepareAllCommandOptions = {
   branchId?: string;
   model?: string;
   yes?: boolean;
+  acquireLock?: boolean;
 };
 
 type PrepareAllDependencies = {
@@ -43,8 +45,12 @@ export async function prepareAllCommand(
   options: PrepareAllCommandOptions,
   dependencyOverrides: Partial<PrepareAllDependencies> = {},
 ): Promise<PreparationInspection> {
-  const dependencies = { ...defaultDependencies, ...dependencyOverrides };
   const root = path.resolve(options.root);
+  if (options.acquireLock !== false) {
+    return withWorkspaceOperationLock(root, "compiler", () =>
+      prepareAllCommand({ ...options, root, acquireLock: false }, dependencyOverrides));
+  }
+  const dependencies = { ...defaultDependencies, ...dependencyOverrides };
   const configPath = options.configPath ?? path.join(root, "novel-harness.yaml");
   const branchId = options.branchId ?? "main";
   const ask = options.yes ? recommendedAnswer() : dependencies.ask;
@@ -95,6 +101,7 @@ export async function prepareAllCommand(
       sourceId,
       ...(options.model ? { model: options.model } : {}),
       resume: true,
+      acquireLock: false,
     });
   }
 
@@ -138,6 +145,7 @@ export async function prepareAllCommand(
         sourceId,
         includeLocalTools: false,
         disabledProposalTools: ["propose_state_delta"],
+        acquireLock: false,
       });
     } catch (error) {
       stdout.write(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}\n`);

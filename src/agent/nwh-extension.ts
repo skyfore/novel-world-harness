@@ -289,6 +289,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           terminate: true,
         };
       }
+      if (pendingTurn && event.toolName === "propose_initial_world") {
+        return {
+          block: true,
+          reason: "Ordinary source-review batches cannot propose the initial world; NWH runs a dedicated opening-world pass after source compilation.",
+        };
+      }
       if (!pendingTurn || !LOCAL_EVIDENCE_TOOL_NAMES.has(event.toolName)) return;
       return {
         block: true,

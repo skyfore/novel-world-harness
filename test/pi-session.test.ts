@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { formatRetryNotice, PiAgentSession } from "../src/agent/pi-session.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { formatRetryNotice, PiAgentSession, runPromptWithTimeout } from "../src/agent/pi-session.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 
 const temporaryDirectories: string[] = [];
@@ -93,6 +93,16 @@ describe("PiAgentSession", () => {
       delayMs: 2_000,
       errorMessage: "provider unavailable",
     })).toBe("LLM API call failed; retrying 1/3 in 2s: provider unavailable");
+  });
+
+  it("aborts a model turn that exceeds its wall-clock deadline", async () => {
+    let rejectOperation: ((error: Error) => void) | undefined;
+    const abort = vi.fn(async () => rejectOperation?.(new Error("aborted")));
+    const operation = new Promise<void>((_resolve, reject) => { rejectOperation = reject; });
+
+    await expect(runPromptWithTimeout(() => operation, abort, 10))
+      .rejects.toThrow("exceeded its 10ms wall-clock limit");
+    expect(abort).toHaveBeenCalledOnce();
   });
 
   it("restores the model selected in a previous workspace session", async () => {

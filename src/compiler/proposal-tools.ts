@@ -10,13 +10,13 @@ import {
   type CompilerProposalKind,
 } from "./proposals.js";
 
-function proposalResult(text: string, details: { proposalId: string; kind: CompilerProposalKind }) {
+function proposalResult(text: string, details: CompilerProposalRecordedDetails) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
 const labels: Record<CompilerProposalKind, { name: string; label: string; description: string }> = {
   entity: { name: "propose_entity", label: "Propose entity", description: "Submit a typed entity candidate backed by source evidence. This creates a pending proposal only." },
-  claim: { name: "propose_claim", label: "Propose claim", description: "Submit an evidence-backed claim candidate. This does not commit canonical truth." },
+  claim: { name: "propose_claim", label: "Propose claim", description: "Submit an evidence-backed base-world claim candidate. Character knowledge or ignorance is never a claim predicate; represent learning only in a KnowledgeDelta. This does not commit canonical truth." },
   "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Later canon remains a candidate until runtime commitment." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed StateDelta used to create a runtime genesis branch." },
@@ -99,6 +99,8 @@ const MAX_CONSECUTIVE_FINISH_FAILURES = 3;
 const MAX_IDENTICAL_FINISH_FAILURES = 2;
 const MAX_TOTAL_FINISH_FAILURES = 5;
 const MAX_COMPILER_TOOL_CALLS = 40;
+const MAX_ACTIVE_COMPILER_PROPOSALS = 24;
+const MAX_FINISH_GRACE_CALLS = 1;
 
 type CompilerBatchBlockedDetails = {
   compilerBatchBlocked: true;
@@ -111,9 +113,17 @@ type CompilerFinishDetails =
   | CompilerBatchBlockedDetails
   | { compilerBatchFinished: true; outcome: "complete" | "no-artifacts"; proposalIds: string[]; reviewedSegmentIds: string[] };
 
+type CompilerProposalRecordedDetails = {
+  proposalId: string;
+  kind: CompilerProposalKind;
+  activeProposalCount: number;
+  toolCallCount: number;
+  remainingToolCalls: number;
+};
+
 type CompilerProposalDetails =
   | CompilerBatchBlockedDetails
-  | { proposalId: string; kind: CompilerProposalKind };
+  | CompilerProposalRecordedDetails;
 
 type CompilerWithdrawDetails =
   | CompilerBatchBlockedDetails
@@ -133,6 +143,7 @@ export function createCompilerProposalToolset(
   let totalFinishFailures = 0;
   let consecutiveFinishFailures = 0;
   let totalToolCalls = 0;
+  let finishGraceCalls = 0;
   const finishFailureCounts = new Map<string, number>();
 
   const circuitBreakResult = (reason: string, failureCount: number) => ({
@@ -143,10 +154,14 @@ export function createCompilerProposalToolset(
     details: { compilerBatchBlocked: true as const, reason, finishFailureCount: failureCount, toolCallCount: totalToolCalls },
     terminate: true,
   });
-  const beginToolCall = () => {
+  const beginToolCall = (kind: "mutation" | "finish") => {
     if (circuitBreak) return circuitBreakResult(circuitBreak.reason, circuitBreak.failureCount);
     totalToolCalls += 1;
     if (totalToolCalls <= MAX_COMPILER_TOOL_CALLS) return undefined;
+    if (kind === "finish" && finishGraceCalls < MAX_FINISH_GRACE_CALLS) {
+      finishGraceCalls += 1;
+      return undefined;
+    }
     const reason = `compiler tool-call budget exceeded its ${MAX_COMPILER_TOOL_CALLS}-call limit`;
     circuitBreak = { reason, failureCount: totalFinishFailures };
     return circuitBreakResult(reason, totalFinishFailures);
@@ -183,13 +198,18 @@ export function createCompilerProposalToolset(
       description: metadata.description,
       promptSnippet: metadata.description,
       promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and include precise evidence in the payload where the schema requires it.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
+      executionMode: "sequential",
       parameters,
       prepareArguments: prepareProposalToolArguments,
       async execute(_id, input, signal) {
         signal?.throwIfAborted();
-        const blocked = beginToolCall();
+        const blocked = beginToolCall("mutation");
         if (blocked) return blocked;
         assertBatchWritable();
+        await assertStableLogicalRevision(service, kind, input.payload, compilerBatchId);
+        if (!successfulProposalIds.has(input.proposal_id) && successfulProposalIds.size >= MAX_ACTIVE_COMPILER_PROPOSALS) {
+          throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+        }
         const accepted = await service.submit(kind, {
           proposalId: input.proposal_id,
           payload: input.payload,
@@ -203,8 +223,13 @@ export function createCompilerProposalToolset(
         successfulProposalIds.add(accepted.proposalId);
         recordProposalProgress();
         return proposalResult(
-          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth.`,
-          accepted,
+          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth. Active proposals: ${successfulProposalIds.size}/${MAX_ACTIVE_COMPILER_PROPOSALS}. General compiler calls remaining: ${Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls)}; one final finish call remains reserved after that budget.`,
+          {
+            ...accepted,
+            activeProposalCount: successfulProposalIds.size,
+            toolCallCount: totalToolCalls,
+            remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+          },
         );
       },
     });
@@ -226,7 +251,7 @@ export function createCompilerProposalToolset(
     parameters: withdrawParameters,
     async execute(_id, input, signal) {
       signal?.throwIfAborted();
-      const blocked = beginToolCall();
+      const blocked = beginToolCall("mutation");
       if (blocked) return blocked;
       assertBatchWritable();
       if (!successfulProposalIds.has(input.proposal_id)) {
@@ -265,7 +290,7 @@ export function createCompilerProposalToolset(
     async execute(_id, input, signal) {
       signal?.throwIfAborted();
       if (finished) throw new Error("Compiler batch was already finished.");
-      const blocked = beginToolCall();
+      const blocked = beginToolCall("finish");
       if (blocked) return blocked;
       const expected = [...successfulProposalIds].sort();
       const listed = expected;
@@ -307,6 +332,7 @@ export function createCompilerProposalToolset(
       totalFinishFailures = 0;
       consecutiveFinishFailures = 0;
       totalToolCalls = 0;
+      finishGraceCalls = 0;
       finishFailureCounts.clear();
       if (!compilerBatchId) return;
       for (const summary of await service.store.list("pending")) {
@@ -323,6 +349,47 @@ export function createCompilerProposalToolset(
       }
     },
   };
+}
+
+async function assertStableLogicalRevision(
+  service: CompilerProposalService,
+  kind: CompilerProposalKind,
+  payload: unknown,
+  compilerBatchId?: string,
+): Promise<void> {
+  if (!compilerBatchId || !payload || typeof payload !== "object" || Array.isArray(payload)) return;
+  const logicalId = (payload as Record<string, unknown>).id;
+  if (typeof logicalId !== "string") return;
+  const baseId = logicalRevisionBase(logicalId);
+  if (!baseId) return;
+  for (const status of ["pending", "rejected"] as const) {
+    for (const summary of await service.store.list(status)) {
+      if (summary.kind !== kind) continue;
+      const envelope = await service.store.readEnvelope(status, summary.id);
+      const origin = envelope.generatedBy;
+      const priorPayload = envelope.payload;
+      const priorLogicalId = priorPayload && typeof priorPayload === "object" && !Array.isArray(priorPayload)
+        ? (priorPayload as Record<string, unknown>).id
+        : undefined;
+      if (
+        origin
+        && typeof origin === "object"
+        && !Array.isArray(origin)
+        && (origin as Record<string, unknown>).compilerBatchId === compilerBatchId
+        && typeof priorLogicalId === "string"
+        && priorLogicalId !== logicalId
+        && (logicalRevisionBase(priorLogicalId) ?? priorLogicalId) === baseId
+      ) {
+        throw new Error(
+          `Correction payload id '${logicalId}' versions the existing logical id '${priorLogicalId}'. Keep payload.id='${priorLogicalId}' and version only proposal_id so existing logical references remain valid.`,
+        );
+      }
+    }
+  }
+}
+
+function logicalRevisionBase(id: string): string | undefined {
+  return id.match(/^(.*)-v[1-9]\d*$/i)?.[1];
 }
 
 export function createCompilerProposalTools(

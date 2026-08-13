@@ -54,6 +54,7 @@ export type PiInteractiveOptions = {
 };
 
 export type PiPromptReport = CompilerBatchOutcome & { text: string };
+export type PiPromptOptions = { timeoutMs?: number };
 
 export function formatRetryNotice(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): string {
   const delaySeconds = Math.max(0, Math.ceil(event.delayMs / 1_000));
@@ -269,11 +270,15 @@ export class PiAgentSession {
   async prompt(input: string): Promise<string> {
     return (await this.promptWithReport(input)).text;
   }
-  async promptWithReport(input: string): Promise<PiPromptReport> {
+  async promptWithReport(input: string, options: PiPromptOptions = {}): Promise<PiPromptReport> {
     this.activeText = "";
     this.lastAssistantStopReason = undefined;
     const messageCountBeforePrompt = this.session.messages.length;
-    await this.session.prompt(input, { source: "interactive" });
+    await runPromptWithTimeout(
+      () => this.session.prompt(input, { source: "interactive" }),
+      () => this.session.abort(),
+      options.timeoutMs,
+    );
     const promptMessages = this.session.messages.slice(messageCountBeforePrompt);
     const latest = [...promptMessages].reverse().find((message) => message.role === "assistant");
     if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) throw new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
@@ -406,5 +411,37 @@ export class PiAgentSession {
         this.options.onRetry?.(event);
       } else if (event.type === "tool_execution_start") this.onTool?.(event.toolName, event.args);
     });
+  }
+}
+
+export async function runPromptWithTimeout(
+  run: () => Promise<void>,
+  abort: () => Promise<void>,
+  timeoutMs?: number,
+): Promise<void> {
+  if (timeoutMs === undefined) return run();
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new Error("Prompt timeout must be a positive integer.");
+  let timer: NodeJS.Timeout | undefined;
+  const operation = run();
+  const timeoutError = new Error(`Model turn exceeded its ${timeoutMs}ms wall-clock limit.`);
+  try {
+    await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          reject(timeoutError);
+        }, timeoutMs);
+        timer.unref();
+      }),
+    ]);
+  } catch (error) {
+    if (error !== timeoutError) throw error;
+    // Do not release the workspace lock until Pi confirms the agent is idle;
+    // otherwise a timed-out tool call could keep writing after a retry starts.
+    await abort().catch(() => undefined);
+    await operation.catch(() => undefined);
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }

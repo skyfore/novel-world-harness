@@ -43,6 +43,8 @@ import type { UserQuestionCustomInput } from "../util/ask-user-question.js";
 import { auditCompiler } from "../compiler/audit.js";
 import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { NwhHistoryEditor } from "./nwh-history-editor.js";
+import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -74,6 +76,7 @@ const COMMAND_HELP = `NWH commands:
   /compile-next              process the next evidence batch for the active novel
   /prepare-all [source]      finish compilation and create a playable world
   /reparse [--source id] (--chapters 2,37 | --all) rebuild selected novel evidence
+  /tasks                    show or foreground the current long-running task
   /audit [--source id]       audit novel evidence and canonical consistency
   /prepared-cache [list|activate] inspect or activate prepared revisions
   /status                    show workspace, model and session
@@ -88,6 +91,7 @@ Provider and model:
 
 TUI shortcuts:
   Enter send · Shift+Enter newline · Esc interrupt · Ctrl+O expand tools
+  ↑/↓ prompt history · ← backgrounds the focused NWH task panel · /tasks restores it
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
 const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
@@ -145,6 +149,29 @@ export function parseTuiReparseArguments(value: string): TuiReparseArguments {
   return parsed;
 }
 
+export function sessionPromptHistory(entries: readonly unknown[]): string[] {
+  const history: string[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as { type?: unknown; message?: { role?: unknown; content?: unknown } };
+    if (candidate.type !== "message" || candidate.message?.role !== "user") continue;
+    const content = candidate.message.content;
+    const text = typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+          .filter((part): part is { type: "text"; text: string } => Boolean(
+            part && typeof part === "object" && (part as { type?: unknown }).type === "text"
+            && typeof (part as { text?: unknown }).text === "string",
+          ))
+          .map((part) => part.text)
+          .join("\n")
+        : "";
+    if (text.trim()) history.push(text);
+  }
+  return history;
+}
+
 function modelLabel(model: { provider: string; id: string } | undefined): string {
   return model ? `${model.provider}/${model.id}` : "unresolved";
 }
@@ -161,8 +188,36 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let compilerCircuitBroken = false;
     let playerMode = false;
     let selectedPlay: SelectedPlayExperience | undefined;
+    let activeTask: NwhTask | undefined;
+    let taskForeground = false;
     const preparedCache = new PreparedNovelCache(workspace.root, options.preparedCacheRoot);
     const runReparse = options.runReparse ?? reparseCommand;
+    const taskRunning = () => activeTask?.snapshot.status === "running";
+
+    const syncTaskChrome = (ctx: ExtensionContext, task: NwhTask) => {
+      if (task.snapshot.status !== "running") {
+        ctx.ui.setStatus("nwh-task", undefined);
+        ctx.ui.setWidget("nwh-task", undefined, { placement: "belowEditor" });
+        return;
+      }
+      ctx.ui.setStatus("nwh-task", ctx.ui.theme.fg("dim", taskSummary(task)));
+      ctx.ui.setWidget(
+        "nwh-task",
+        taskForeground ? undefined : [ctx.ui.theme.fg("dim", `↳ ${taskSummary(task)} · /tasks to foreground`)],
+        { placement: "belowEditor" },
+      );
+    };
+
+    const foregroundTask = async (ctx: ExtensionContext, task: NwhTask) => {
+      taskForeground = true;
+      syncTaskChrome(ctx, task);
+      const outcome = await showNwhTask(ctx.ui, task);
+      taskForeground = false;
+      syncTaskChrome(ctx, task);
+      if (outcome === "background" && task.snapshot.status === "running") {
+        ctx.ui.notify(`${task.snapshot.title} continues in the background; use /tasks to foreground it.`, "info");
+      }
+    };
 
     const setPlayerStatus = (ctx: ExtensionContext, selection: SelectedPlayExperience) => {
       if (ctx.mode !== "tui") return;
@@ -729,6 +784,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       ctx.ui.setWorkingMessage(mode === "compiler" ? "Building evidence-backed proposals..." : "Consulting local evidence...");
       ctx.ui.setWorkingIndicator({ frames: NWH_WORKING_FRAMES, intervalMs: 180 });
       ctx.ui.setHiddenThinkingLabel("Reasoning");
+      if (!ctx.ui.getEditorComponent()) {
+        const initialHistory = sessionPromptHistory(ctx.sessionManager.getEntries());
+        ctx.ui.setEditorComponent((tui, theme, keybindings) =>
+          new NwhHistoryEditor(tui, theme, keybindings, initialHistory));
+      }
       ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
       const freshConversation = isFreshConversation(ctx.sessionManager.getEntries());
       ctx.ui.setHeader((tui, theme) => createNwhWelcomeHeader(tui, theme, { mode, freshConversation }));
@@ -874,7 +934,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("prepare-content", {
       description: "Archive pasted novel text and start its compiler loop",
       handler: async (args, ctx) => {
-        if (pendingTurn || prepareAllState) {
+        if (pendingTurn || prepareAllState || taskRunning()) {
           ctx.ui.notify("A novel preparation run is already active.", "warning");
           return;
         }
@@ -908,7 +968,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("compile-next", {
       description: "Process the next evidence batch for the active novel",
       handler: async (_args, ctx) => {
-        if (pendingTurn || prepareAllState) {
+        if (pendingTurn || prepareAllState || taskRunning()) {
           ctx.ui.notify("A novel preparation run is already active.", "warning");
           return;
         }
@@ -938,7 +998,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("prepare-all", {
       description: "Complete compilation, accept validated proposals and create a playable branch",
       handler: async (args, ctx) => {
-        if (pendingTurn || prepareAllState) {
+        if (pendingTurn || prepareAllState || taskRunning()) {
           ctx.ui.notify("A compiler or full-preparation run is already active.", "warning");
           return;
         }
@@ -1014,7 +1074,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("reparse", {
       description: "Rebuild selected chapters or an entire novel into a new prepared revision",
       handler: async (args, ctx) => {
-        if (pendingTurn || prepareAllState) {
+        if (activeTask?.snapshot.status === "running") {
+          ctx.ui.notify(`${activeTask.snapshot.title} is already running; bringing it to the foreground.`, "info");
+          await foregroundTask(ctx, activeTask);
+          return;
+        }
+        if (pendingTurn || prepareAllState || taskRunning()) {
           ctx.ui.notify("A compiler or full-preparation run is already active.", "warning");
           return;
         }
@@ -1110,9 +1175,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activeSourceId = sourceId;
-        ctx.ui.setStatus("nwh-reparse", ctx.ui.theme.fg("dim", `Reparsing ${source.title}`));
         ctx.ui.notify(`Starting reparse for ${source.title}: chapter(s) ${selectedChapters.join(", ")}.`, "info");
-        try {
+        const task = new NwhTask(
+          `reparse-${source.id}`,
+          `Reparse ${source.title} · chapters ${selectedChapters.join(",")}`,
+          "Preparing compiler request",
+        );
+        activeTask = task;
+        const unsubscribe = task.subscribe(() => syncTaskChrome(ctx, task));
+        task.start(async () => {
           const selectedModel = parsed.model ?? (ctx.model ? modelLabel(ctx.model) : undefined);
           const result = await runReparse({
             root: workspace.root,
@@ -1121,21 +1192,38 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             ...(all ? { all: true } : { chapters }),
             ...(selectedModel ? { model: selectedModel } : {}),
             cacheRoot: options.preparedCacheRoot,
-            onProgress: (message) => ctx.ui.notify(message, "info"),
-            onStatus: (message) => ctx.ui.setStatus(
-              "nwh-reparse",
-              ctx.ui.theme.fg("dim", `Reparsing ${source.title} · ${message}`),
-            ),
+            onProgress: (message) => task.log(message),
+            onStatus: (message) => task.update(message),
           });
-          ctx.ui.notify(
-            `Reparse complete for chapter(s) ${result.chapters.join(", ")}. Active revision: ${result.activeBundleHash}.`,
-            "info",
-          );
-        } catch (error) {
-          ctx.ui.notify(`Reparse stopped: ${error instanceof Error ? error.message : String(error)}`, "error");
-        } finally {
-          ctx.ui.setStatus("nwh-reparse", undefined);
+          task.log(`Active revision: ${result.activeBundleHash}`);
+        });
+        void task.completion.then(() => {
+          unsubscribe();
+          syncTaskChrome(ctx, task);
+          if (task.snapshot.status === "completed") {
+            ctx.ui.notify(`Reparse complete for chapter(s) ${selectedChapters.join(", ")}.`, "info");
+          } else {
+            ctx.ui.notify(`Reparse stopped: ${task.snapshot.error ?? "unknown error"}`, "error");
+          }
+        });
+        syncTaskChrome(ctx, task);
+        await foregroundTask(ctx, task);
+      },
+    });
+
+    pi.registerCommand("tasks", {
+      description: "Show or foreground the current NWH long-running task",
+      handler: async (_args, ctx) => {
+        if (!activeTask) {
+          ctx.ui.notify("No NWH task has been started in this session.", "info");
+          return;
         }
+        if (activeTask.snapshot.status !== "running") {
+          const detail = activeTask.snapshot.error ?? activeTask.snapshot.logs.at(-1) ?? activeTask.snapshot.activity;
+          ctx.ui.notify(`${taskSummary(activeTask)}\n${detail}`, activeTask.snapshot.status === "failed" ? "error" : "info");
+          return;
+        }
+        await foregroundTask(ctx, activeTask);
       },
     });
 
@@ -1159,7 +1247,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("prepared-cache", {
       description: "List or activate prepared novel revisions",
       handler: async (args, ctx) => {
-        if (pendingTurn || prepareAllState) {
+        if (pendingTurn || prepareAllState || taskRunning()) {
           ctx.ui.notify("A compiler or full-preparation run is already active.", "warning");
           return;
         }
@@ -1239,6 +1327,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           `session: ${ctx.sessionManager.getSessionId()}`,
           `entries: ${ctx.sessionManager.getEntries().length}`,
           `persistence: ${saveSession ? "on" : "off"}`,
+          `task: ${activeTask ? taskSummary(activeTask) : "none"}`,
         ].join("\n"), "info");
       },
     });
@@ -1246,7 +1335,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("clear", {
       description: "Start a new NWH conversation",
       handler: async (_args, ctx) => {
-        if (pendingTurn || prepareAllState) {
+        if (pendingTurn || prepareAllState || taskRunning()) {
           ctx.ui.notify("Wait for the active preparation run to finish before clearing the conversation.", "warning");
           return;
         }

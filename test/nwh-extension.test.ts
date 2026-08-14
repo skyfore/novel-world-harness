@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import { createNwhExtension, parseTuiReparseArguments, splitCommandArguments, type NwhExtensionOptions } from "../src/agent/nwh-extension.js";
+import { createNwhExtension, parseTuiReparseArguments, sessionPromptHistory, splitCommandArguments, type NwhExtensionOptions } from "../src/agent/nwh-extension.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
@@ -97,6 +97,7 @@ function preparationContext(notifications: string[], questions: string[]): Exten
         return choices[0];
       },
       setStatus: () => undefined,
+      setWidget: () => undefined,
       theme: { fg: (_color: string, text: string) => text },
     },
   } as unknown as ExtensionCommandContext;
@@ -105,7 +106,7 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 describe("NWH TUI extension", () => {
   it("registers local commands and keeps their output in the transcript", async () => {
     const { commands, sentUserMessages } = await fixture();
-    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
+    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
     const ctx = commandContext(notifications, actions);
@@ -152,6 +153,7 @@ describe("NWH TUI extension", () => {
     const ctx = preparationContext(notifications, questions);
 
     await commands.get("reparse")?.handler(`--chapters 2-3 --source ${evidence.source.id}`, ctx);
+    await commands.get("tasks")?.handler("", ctx);
 
     expect(questions).toEqual(["Start novel reparse?"]);
     expect(calls).toHaveLength(1);
@@ -163,8 +165,15 @@ describe("NWH TUI extension", () => {
     });
     expect(typeof calls[0]?.onProgress).toBe("function");
     expect(typeof calls[0]?.onStatus).toBe("function");
-    expect(notifications).toContain("compiler progress");
     expect(notifications).toContainEqual(expect.stringContaining(`Active revision: ${"b".repeat(64)}`));
+  });
+
+  it("extracts prior user prompts for arrow-key history without including assistant output", () => {
+    expect(sessionPromptHistory([
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "/novels" }] } },
+      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "result" }] } },
+      { type: "message", message: { role: "user", content: [{ type: "text", text: "/reparse --chapters 2" }] } },
+    ])).toEqual(["/novels", "/reparse --chapters 2"]);
   });
 
   it("exposes novel audit and prepared-revision inspection in the TUI", async () => {

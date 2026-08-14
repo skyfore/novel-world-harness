@@ -21,13 +21,14 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `/prepare-content <text>` archives exact pasted text and starts its compiler loop;
 - `/prepare-all [source-id] [branch-id]` completes guided preparation in the current TUI;
 - `/reparse --chapters 2,37 --source <id>` (or `/reparse --all`) runs the same revision-safe rebuild service as the CLI, with native novel/chapter selection when flags are omitted;
+- `/tasks` brings the current long-running NWH task back to its live foreground panel. A reparse opens there first; `←` or `Esc` collapses the panel without cancelling the request, leaving a compact progress widget below the editor;
 - `/audit [--source <id>]` and `/prepared-cache [list|activate]` expose the same novel diagnostics and prepared-revision lifecycle in the TUI;
 - `/novels`, `/instances`, `/characters`, and `/progress` inspect compiled content without a model request;
 - `/play [character] [instance] [novel]` selects the novel first, then opens height-aware, natively scrolling and filterable instance/character selection (with free-form id/name/alias input); `/world-resume` restores the durable novel/instance/character selection;
 - `NOVEL.md` provides checked-in project instructions;
 - `.novel-harness/instructions.md` provides local additions.
 
-The TUI has a transcript, incremental assistant rendering, explicit tool-call/result rows, a multiline editor, working state, queued messages, a footer, slash-command completion, and keyboard shortcuts. Claude Code is an interaction reference, not a runtime dependency. NWH uses Pi's public `AgentSessionRuntime` and `InteractiveMode` instead of maintaining terminal control sequences itself.
+The TUI has a transcript, incremental assistant rendering, explicit tool-call/result rows, a multiline editor, working state, queued messages, a footer, slash-command completion, and keyboard shortcuts. `↑`/`↓` browse the current session's submitted prompt history when the editor is empty. Claude Code is an interaction reference, not a runtime dependency. NWH uses Pi's public `AgentSessionRuntime` and `InteractiveMode` instead of maintaining terminal control sequences itself.
 
 NWH loads a hidden inline extension to supply its header, working/status labels,
 safe local commands, and invisible `@path` context attachment. User input is kept

@@ -150,7 +150,7 @@ receives committed character context only. Inside the TUI:
 /exit
 ```
 
-The TUI also supports multiline editing, interrupt/queue shortcuts, session navigation, and expandable tool output; use `/hotkeys` for the current key map. A leading `!` is an explicit user-run shell command provided by the terminal UI. It is not exposed to the model as a tool.
+The TUI also supports multiline editing, `↑`/`↓` prompt history, interrupt/queue shortcuts, session navigation, and expandable tool output; use `/hotkeys` for the current key map. Long NWH operations such as `/reparse` open in a live task panel: `←` or `Esc` returns it to a compact background widget without cancelling it, and `/tasks` brings it back to the foreground. A leading `!` is an explicit user-run shell command provided by the terminal UI. It is not exposed to the model as a tool.
 
 Selected excerpts are sent to the configured model provider. “Local-first” describes discovery, access control, and persistence; it is not an offline-model guarantee.
 

@@ -29,6 +29,10 @@ export type PrepareAllCommandOptions = {
   restoreCache?: boolean;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
+  onModelText?: (delta: string) => void;
+  onModelThinking?: (delta: string) => void;
+  onModelToolCall?: (name: string, input: unknown) => void;
+  onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
 };
 
 type PrepareAllDependencies = {
@@ -140,6 +144,10 @@ export async function prepareAllCommand(
       acquireLock: false,
       onProgress: report,
       onStatus: options.onStatus,
+      onModelText: options.onModelText,
+      onModelThinking: options.onModelThinking,
+      onModelToolCall: options.onModelToolCall,
+      onModelToolResult: options.onModelToolResult,
     });
   }
 
@@ -186,6 +194,10 @@ export async function prepareAllCommand(
         acquireLock: false,
         onProgress: report,
         onStatus: options.onStatus,
+        onModelText: options.onModelText,
+        onModelThinking: options.onModelThinking,
+        onModelToolCall: options.onModelToolCall,
+        onModelToolResult: options.onModelToolResult,
       });
     } catch (error) {
       report(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}`);

@@ -23,6 +23,10 @@ export type CompileSourceOptions = {
   promptTimeoutMs?: number;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
+  onModelText?: (delta: string) => void;
+  onModelThinking?: (delta: string) => void;
+  onModelToolCall?: (name: string, input: unknown) => void;
+  onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
 };
 
 const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -71,6 +75,8 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
       const label = `Compiler batch ${batch.ordinal + 1}/${context.totalBatches}`;
       options.onStatus?.(`${label} · creating model session`);
       let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
+      let modelTextStreamed = false;
+      let reasoningStreamed = false;
       const session = await createPiCompilerSession({
         root: options.root,
         ...(profile ? { profile } : {}),
@@ -87,9 +93,26 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           if (options.onProgress) options.onProgress(message);
           else stderr.write(`${message}\n`);
         },
-        onText() {
-          // Batch prose is model-authored and may not describe persisted state
-          // accurately. The host prints a derived checkpoint result below.
+        onText(delta) {
+          if (!modelTextStreamed) {
+            modelTextStreamed = true;
+            const message = `${label} model text stream started (unverified; not committed world truth).`;
+            if (options.onProgress) options.onProgress(message);
+            else stderr.write(`${message}\n`);
+          }
+          elapsed?.update("receiving unverified model text");
+          if (options.onModelText) options.onModelText(delta);
+          else stdout.write(delta);
+        },
+        onThinking(delta) {
+          if (!reasoningStreamed) {
+            reasoningStreamed = true;
+            const message = `${label} provider reasoning stream started (content hidden).`;
+            if (options.onProgress) options.onProgress(message);
+            else stderr.write(`${message}\n`);
+          }
+          elapsed?.update("receiving model reasoning stream");
+          options.onModelThinking?.(delta);
         },
         onTool(name, input) {
           const details = input as Record<string, unknown>;
@@ -97,6 +120,10 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           elapsed?.update(`last tool call ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`);
           if (options.onProgress) options.onProgress(message);
           else stderr.write(`${message}\n`);
+          options.onModelToolCall?.(name, input);
+        },
+        onToolResult(name, result, isError) {
+          options.onModelToolResult?.(name, result, isError);
         },
       });
       try {
@@ -110,6 +137,12 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           timeoutMs: options.promptTimeoutMs ?? COMPILER_PROMPT_TIMEOUT_MS,
         });
         elapsed.stop("model response received; verifying finish handshake");
+        if (!modelTextStreamed && report.text) {
+          if (options.onModelText) options.onModelText(report.text);
+          else stdout.write(report.text);
+          modelTextStreamed = true;
+        }
+        if (!options.onModelText && report.text && !report.text.endsWith("\n")) stdout.write("\n");
         const failure = compilerBatchFailure(report);
         if (failure) throw new Error(`Compiler batch ${batch.ordinal + 1} was not checkpointed: ${failure}.`);
         const message = `Compiler batch ${batch.ordinal + 1} finish handshake verified; `

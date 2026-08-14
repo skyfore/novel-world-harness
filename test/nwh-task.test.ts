@@ -12,16 +12,31 @@ describe("NWH long-running tasks", () => {
     task.start(async () => {
       task.update("Compiler batch 2/148");
       task.log("↳ propose_entity liubei");
+      task.appendReasoning("private reasoning");
+      task.appendModelOutput("Reviewing evidence\x1b[31m now.");
+      task.appendToolEvent("call", "propose_entity", { proposal_id: "liubei" });
       await gate;
     });
 
     expect(task.snapshot.status).toBe("running");
     expect(task.snapshot.logs).toEqual(["↳ propose_entity liubei"]);
+    expect(task.snapshot.reasoningCharacters).toBe("private reasoning".length);
+    expect(task.snapshot.modelOutput).toContain("Reviewing evidence␛[31m now.");
+    expect(task.snapshot.modelOutput).toContain("[tool call] propose_entity");
+    expect(task.snapshot.modelOutput).toContain('"proposal_id": "liubei"');
     release();
     await task.completion;
     expect(task.snapshot.status).toBe("completed");
     expect(states).toContain("Compiler batch 2/148");
     expect(taskSummary(task, task.snapshot.startedAt + 3_000)).toContain("3s");
+  });
+
+  it("does not duplicate elapsed time already supplied by a live compiler heartbeat", () => {
+    const task = new NwhTask("reparse-source", "Reparse Novel");
+    task.update("Compiler batch 2/148 · waiting · elapsed 48s");
+    expect(taskSummary(task, task.snapshot.startedAt + 49_000)).toBe(
+      "Reparse Novel · running · Compiler batch 2/148 · waiting · elapsed 48s",
+    );
   });
 
   it("retains task errors for /tasks inspection", async () => {
@@ -35,6 +50,9 @@ describe("NWH long-running tasks", () => {
   it("moves a focused running task to the background with left arrow", async () => {
     const task = new NwhTask("reparse-source", "Reparse Novel");
     task.start(() => new Promise<void>(() => {}));
+    task.appendReasoning("summary");
+    task.appendModelOutput("I am reviewing chapter evidence now.");
+    let rendered: string[] = [];
     const ui = {
       custom: async (factory: (...args: unknown[]) => unknown) => new Promise<"background">((resolve) => {
         const component = factory(
@@ -45,12 +63,16 @@ describe("NWH long-running tasks", () => {
           },
           {},
           resolve,
-        ) as { handleInput?: (data: string) => void };
+        ) as { render: (width: number) => string[]; handleInput?: (data: string) => void };
+        rendered = component.render(100);
         component.handleInput?.("\x1b[D");
       }),
     } as unknown as ExtensionUIContext;
 
     await expect(showNwhTask(ui, task)).resolves.toBe("background");
     expect(task.snapshot.status).toBe("running");
+    expect(rendered.join("\n")).toContain("Model output · unverified proposal commentary");
+    expect(rendered.join("\n")).toContain("I am reviewing chapter evidence now.");
+    expect(rendered.join("\n")).toContain("Provider reasoning stream received: 7 characters");
   });
 });

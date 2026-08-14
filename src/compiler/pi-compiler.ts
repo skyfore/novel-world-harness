@@ -11,7 +11,9 @@ export type PiCompilerOptions = {
   model?: string;
   saveSession?: boolean;
   onText?: (delta: string) => void;
+  onThinking?: (delta: string) => void;
   onTool?: (name: string, input: unknown) => void;
+  onToolResult?: (name: string, result: unknown, isError: boolean) => void;
   onRetry?: PiAgentSessionOptions["onRetry"];
   segmentIds?: readonly string[];
   compilerBatchId?: string;
@@ -38,7 +40,9 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     ...(options.model ? { model: options.model } : {}),
     saveSession: options.saveSession ?? true,
     ...(options.onText ? { onText: options.onText } : {}),
+    ...(options.onThinking ? { onThinking: options.onThinking } : {}),
     ...(options.onTool ? { onTool: options.onTool } : {}),
+    ...(options.onToolResult ? { onToolResult: options.onToolResult } : {}),
     ...(options.onRetry ? { onRetry: options.onRetry } : {}),
     interactionMode: "compiler",
     includeLocalTools,

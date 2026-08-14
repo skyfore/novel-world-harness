@@ -34,7 +34,9 @@ export type PiAgentSessionOptions = {
   continueSession?: boolean;
   saveSession?: boolean;
   onText?: (delta: string) => void;
+  onThinking?: (delta: string) => void;
   onTool?: (name: string, input: unknown) => void;
+  onToolResult?: (name: string, result: unknown, isError: boolean) => void;
   onRetry?: (event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>) => void;
   additionalTools?: ToolDefinition[];
   systemPromptAppendix?: string;
@@ -236,7 +238,9 @@ export class PiAgentSession {
   private readonly stateDir: string;
   private readonly saveSession: boolean;
   private readonly onText?: (delta: string) => void;
+  private readonly onThinking?: (delta: string) => void;
   private readonly onTool?: (name: string, input: unknown) => void;
+  private readonly onToolResult?: (name: string, result: unknown, isError: boolean) => void;
   private readonly runtime: ModelRuntime;
   private readonly resolvedModel?: NonNullable<ReturnType<ModelRuntime["getModel"]>>;
   private activeText = "";
@@ -252,7 +256,9 @@ export class PiAgentSession {
     this.stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
     this.saveSession = options.saveSession ?? true;
     this.onText = options.onText;
+    this.onThinking = options.onThinking;
     this.onTool = options.onTool;
+    this.onToolResult = options.onToolResult;
     this.runtime = runtime;
     this.resolvedModel = model;
   }
@@ -419,6 +425,8 @@ export class PiAgentSession {
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         this.activeText += event.assistantMessageEvent.delta;
         this.onText?.(event.assistantMessageEvent.delta);
+      } else if (event.type === "message_update" && event.assistantMessageEvent.type === "thinking_delta") {
+        this.onThinking?.(event.assistantMessageEvent.delta);
       } else if (event.type === "message_end" && event.message.role === "assistant") {
         this.lastAssistantStopReason = event.message.stopReason;
       } else if (event.type === "message_end" && event.message.role === "custom" && event.message.display) {
@@ -428,6 +436,7 @@ export class PiAgentSession {
       } else if (event.type === "auto_retry_start") {
         this.options.onRetry?.(event);
       } else if (event.type === "tool_execution_start") this.onTool?.(event.toolName, event.args);
+      else if (event.type === "tool_execution_end") this.onToolResult?.(event.toolName, event.result, event.isError);
     });
   }
 }

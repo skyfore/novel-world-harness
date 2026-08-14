@@ -24,6 +24,10 @@ export type CompileCommandOptions = {
   promptTimeoutMs?: number;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
+  onModelText?: (delta: string) => void;
+  onModelThinking?: (delta: string) => void;
+  onModelToolCall?: (name: string, input: unknown) => void;
+  onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
 };
 
 const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -48,6 +52,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
   const profile = config ? profileForRole(config, "controller").profile : undefined;
   const printMode = options.prompt !== undefined;
   let wroteText = false;
+  let reasoningStreamed = false;
   let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
   const session = await createPiCompilerSession({
     root: options.root,
@@ -66,8 +71,25 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
       else stderr.write(`\n${message}\n`);
     } } : {}),
     ...(printMode ? { onText(delta: string) {
+      if (!wroteText) {
+        const message = "Compiler prompt model text stream started (unverified; not committed world truth).";
+        if (options.onProgress) options.onProgress(message);
+        else stderr.write(`${message}\n`);
+      }
       wroteText = true;
-      if (!options.onProgress) stdout.write(delta);
+      elapsed?.update("receiving unverified model text");
+      if (options.onModelText) options.onModelText(delta);
+      else stdout.write(delta);
+    } } : {}),
+    ...(printMode ? { onThinking(delta: string) {
+      if (!reasoningStreamed) {
+        reasoningStreamed = true;
+        const message = "Compiler prompt provider reasoning stream started (content hidden).";
+        if (options.onProgress) options.onProgress(message);
+        else stderr.write(`${message}\n`);
+      }
+      elapsed?.update("receiving model reasoning stream");
+      options.onModelThinking?.(delta);
     } } : {}),
     ...(printMode ? { onTool(name: string, input: unknown) {
       const details = input as Record<string, unknown>;
@@ -75,6 +97,10 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
       elapsed?.update(`last tool call ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`);
       if (options.onProgress) options.onProgress(message);
       else stderr.write(`\n${message}\n`);
+      options.onModelToolCall?.(name, input);
+    } } : {}),
+    ...(printMode ? { onToolResult(name: string, result: unknown, isError: boolean) {
+      options.onModelToolResult?.(name, result, isError);
     } } : {}),
   });
   try {
@@ -89,9 +115,14 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
         timeoutMs: options.promptTimeoutMs ?? COMPILER_PROMPT_TIMEOUT_MS,
       });
       elapsed.stop("model response received; verifying finish handshake");
+      if (!wroteText && report.text) {
+        if (options.onModelText) options.onModelText(report.text);
+        else stdout.write(report.text);
+        wroteText = true;
+      }
       const failure = compilerBatchFailure(report);
       if (failure) throw new Error(`Compiler prompt was not completed: ${failure}.`);
-      if (wroteText && !options.onProgress) stdout.write("\n");
+      if (wroteText && !options.onModelText) stdout.write("\n");
       return;
     }
     await session.runInteractive({ tuiMode: options.tuiMode, initialMessage: DEFAULT_COMPILER_PROMPT });

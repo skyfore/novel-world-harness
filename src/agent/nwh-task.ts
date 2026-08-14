@@ -10,18 +10,30 @@ export type NwhTaskSnapshot = {
   status: NwhTaskStatus;
   activity: string;
   logs: readonly string[];
+  modelOutput: string;
+  reasoningCharacters: number;
   startedAt: number;
   error?: string;
 };
 
 export class NwhTask {
+  private static readonly MAX_MODEL_OUTPUT_CHARACTERS = 100_000;
   private readonly listeners = new Set<() => void>();
   private readonly logLines: string[] = [];
   private state: NwhTaskSnapshot;
   private completionPromise: Promise<void> = Promise.resolve();
 
   constructor(id: string, title: string, activity = "Starting") {
-    this.state = { id, title, status: "running", activity, logs: this.logLines, startedAt: Date.now() };
+    this.state = {
+      id,
+      title,
+      status: "running",
+      activity,
+      logs: this.logLines,
+      modelOutput: "",
+      reasoningCharacters: 0,
+      startedAt: Date.now(),
+    };
   }
 
   get snapshot(): NwhTaskSnapshot {
@@ -51,6 +63,29 @@ export class NwhTask {
     this.emit();
   }
 
+  appendModelOutput(delta: string): void {
+    if (!delta || this.state.status !== "running") return;
+    const combined = this.state.modelOutput + sanitizeModelOutput(delta);
+    this.state = {
+      ...this.state,
+      modelOutput: combined.length > NwhTask.MAX_MODEL_OUTPUT_CHARACTERS
+        ? `[earlier model output truncated]\n${combined.slice(-NwhTask.MAX_MODEL_OUTPUT_CHARACTERS)}`
+        : combined,
+    };
+    this.emit();
+  }
+
+  appendReasoning(delta: string): void {
+    if (!delta || this.state.status !== "running") return;
+    this.state = { ...this.state, reasoningCharacters: this.state.reasoningCharacters + delta.length };
+    this.emit();
+  }
+
+  appendToolEvent(kind: "call" | "result" | "error", name: string, value: unknown): void {
+    const serialized = safeSerialize(value, 12_000);
+    this.appendModelOutput(`\n[tool ${kind}] ${name}\n${serialized}\n`);
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -69,7 +104,26 @@ export class NwhTask {
 
 export function taskSummary(task: NwhTask, now = Date.now()): string {
   const snapshot = task.snapshot;
-  return `${snapshot.title} · ${snapshot.status} · ${snapshot.activity} · ${formatElapsed(now - snapshot.startedAt)}`;
+  const elapsed = snapshot.activity.includes("· elapsed ") ? "" : ` · elapsed ${formatElapsed(now - snapshot.startedAt)}`;
+  return `${snapshot.title} · ${snapshot.status} · ${snapshot.activity}${elapsed}`;
+}
+
+function sanitizeModelOutput(value: string): string {
+  return value
+    .replaceAll("\x1b", "␛")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+}
+
+function safeSerialize(value: unknown, maxCharacters: number): string {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    serialized = String(value);
+  }
+  return serialized.length > maxCharacters
+    ? `${serialized.slice(0, maxCharacters)}\n[tool payload truncated]`
+    : serialized;
 }
 
 export async function showNwhTask(ui: ExtensionUIContext, task: NwhTask): Promise<"background" | "settled"> {
@@ -135,11 +189,25 @@ class NwhTaskView implements Component {
       : snapshot.status === "failed"
         ? this.style.error("failed")
         : this.style.muted("running");
+    const activityElapsed = snapshot.activity.includes("· elapsed ")
+      ? ""
+      : ` · elapsed ${formatElapsed(Date.now() - snapshot.startedAt)}`;
+    const modelLines = snapshot.modelOutput
+      ? snapshot.modelOutput.split("\n").slice(-14)
+      : [];
     const lines = [
       this.style.title(`NWH task · ${snapshot.title}`),
-      `${state} · ${snapshot.activity} · elapsed ${formatElapsed(Date.now() - snapshot.startedAt)}`,
+      `${state} · ${snapshot.activity}${activityElapsed}`,
+      snapshot.reasoningCharacters
+        ? this.style.muted(`Provider reasoning stream received: ${snapshot.reasoningCharacters} characters (hidden)`)
+        : this.style.muted("Provider reasoning stream: no event received yet"),
       "",
       ...snapshot.logs.slice(-10).flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width - 2)).map((part) => `  ${part}`)),
+      ...(modelLines.length ? [
+        "",
+        this.style.title("Model output · unverified proposal commentary, not world truth"),
+        ...modelLines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width - 2)).map((part) => `  ${part}`)),
+      ] : []),
       "",
       this.style.muted("← or Esc: send to background · /tasks: bring to foreground · ↑/↓: prompt history in editor"),
     ];

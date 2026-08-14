@@ -140,6 +140,10 @@ describe("NWH TUI extension", () => {
       calls.push(options as unknown as Record<string, unknown>);
       options.onProgress?.("compiler progress");
       options.onStatus?.("Compiler batch 2/148 · waiting · elapsed 3s");
+      options.onModelThinking?.("reasoning summary");
+      options.onModelText?.("Analyzing supplied chapter evidence.");
+      options.onModelToolCall?.("propose_entity", { proposal_id: "liubei" });
+      options.onModelToolResult?.("propose_entity", { recorded: true }, false);
       return {
         sourceId: options.sourceId!,
         chapters: [2, 3],
@@ -165,6 +169,10 @@ describe("NWH TUI extension", () => {
     });
     expect(typeof calls[0]?.onProgress).toBe("function");
     expect(typeof calls[0]?.onStatus).toBe("function");
+    expect(typeof calls[0]?.onModelThinking).toBe("function");
+    expect(typeof calls[0]?.onModelText).toBe("function");
+    expect(typeof calls[0]?.onModelToolCall).toBe("function");
+    expect(typeof calls[0]?.onModelToolResult).toBe("function");
     expect(notifications).toContainEqual(expect.stringContaining(`Active revision: ${"b".repeat(64)}`));
   });
 

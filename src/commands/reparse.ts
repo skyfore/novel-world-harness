@@ -26,6 +26,10 @@ export type ReparseCommandOptions = {
   acquireLock?: boolean;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
+  onModelText?: (delta: string) => void;
+  onModelThinking?: (delta: string) => void;
+  onModelToolCall?: (name: string, input: unknown) => void;
+  onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
 };
 
 type ReparseDependencies = {
@@ -95,6 +99,10 @@ export async function reparseCommand(
       promptTransform: (prompt, batch) => reparsePrompt(prompt, batch, runId, Boolean(options.all)),
       onProgress: report,
       onStatus: options.onStatus,
+      onModelText: options.onModelText,
+      onModelThinking: options.onModelThinking,
+      onModelToolCall: options.onModelToolCall,
+      onModelToolResult: options.onModelToolResult,
     });
     options.onStatus?.("Converging validated compiler proposals");
     const convergence = await convergeWorldProposals(root, source.id, {
@@ -120,6 +128,10 @@ export async function reparseCommand(
       cacheRoot: options.cacheRoot,
       onProgress: report,
       onStatus: options.onStatus,
+      onModelText: options.onModelText,
+      onModelThinking: options.onModelThinking,
+      onModelToolCall: options.onModelToolCall,
+      onModelToolResult: options.onModelToolResult,
     });
     const active = await cache.lookup(source);
     if (!active.bundleHash) throw new Error("Reparse completed without an active prepared-cache revision.");

@@ -1194,6 +1194,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             cacheRoot: options.preparedCacheRoot,
             onProgress: (message) => task.log(message),
             onStatus: (message) => task.update(message),
+            onModelText: (delta) => task.appendModelOutput(delta),
+            onModelThinking: (delta) => task.appendReasoning(delta),
+            onModelToolCall: (name, input) => task.appendToolEvent("call", name, input),
+            onModelToolResult: (name, result, isError) => task.appendToolEvent(isError ? "error" : "result", name, result),
           });
           task.log(`Active revision: ${result.activeBundleHash}`);
         });

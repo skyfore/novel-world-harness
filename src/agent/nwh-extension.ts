@@ -45,6 +45,7 @@ import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { NwhHistoryEditor } from "./nwh-history-editor.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
+import { styleNwhThinkingMarkdown } from "./nwh-tui-style.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -59,6 +60,7 @@ export type NwhExtensionOptions = {
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
   preparedCacheRoot?: string;
   runReparse?: typeof reparseCommand;
+  initialThinkingHidden?: boolean;
 };
 
 const COMMAND_HELP = `NWH commands:
@@ -90,7 +92,8 @@ Provider and model:
   /model                     select a model after signing in
 
 TUI shortcuts:
-  Enter send · Shift+Enter newline · Esc interrupt · Ctrl+O expand tools
+  Enter send · Shift+Enter newline · Esc interrupt · Ctrl+O toggle details
+  Ctrl+T toggle reasoning only · PgUp/PgDn scroll transcript · Ctrl+Shift+F search
   ↑/↓ prompt history · ← backgrounds the focused NWH task panel · /tasks restores it
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
@@ -179,6 +182,7 @@ function modelLabel(model: { provider: string; id: string } | undefined): string
 export function createNwhExtension(options: NwhExtensionOptions): ExtensionFactory {
   const { workspace, saveSession, mode } = options;
   return (pi: ExtensionAPI) => {
+    pi.registerMarkdownTransformer(styleNwhThinkingMarkdown);
     let compilerToolsActive = mode === "compiler";
     let activeSourceId: string | undefined;
     let pendingTurn: SourceLoopTurn | undefined;
@@ -783,11 +787,18 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       titleTimer.unref();
       ctx.ui.setWorkingMessage(mode === "compiler" ? "Building evidence-backed proposals..." : "Consulting local evidence...");
       ctx.ui.setWorkingIndicator({ frames: NWH_WORKING_FRAMES, intervalMs: 180 });
-      ctx.ui.setHiddenThinkingLabel("Reasoning");
+      ctx.ui.setHiddenThinkingLabel("Thinking hidden · Ctrl+O to show details");
       if (!ctx.ui.getEditorComponent()) {
         const initialHistory = sessionPromptHistory(ctx.sessionManager.getEntries());
         ctx.ui.setEditorComponent((tui, theme, keybindings) =>
-          new NwhHistoryEditor(tui, theme, keybindings, initialHistory));
+          new NwhHistoryEditor(
+            tui,
+            theme,
+            keybindings,
+            initialHistory,
+            undefined,
+            options.initialThinkingHidden ?? false,
+          ));
       }
       ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
       const freshConversation = isFreshConversation(ctx.sessionManager.getEntries());

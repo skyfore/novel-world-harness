@@ -8,6 +8,7 @@ import {
   getAgentDir,
   initTheme,
   InteractiveMode,
+  type InteractiveModeOptions,
   ModelRuntime,
   SessionManager,
   SettingsManager,
@@ -15,6 +16,7 @@ import {
   type AgentSessionRuntime,
   type CreateAgentSessionRuntimeFactory,
   type TuiMode,
+  type FullscreenExitOutput,
   type AgentSessionEvent,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -57,6 +59,28 @@ export type PiInteractiveOptions = {
 
 export type PiPromptReport = CompilerBatchOutcome & { text: string };
 export type PiPromptOptions = { timeoutMs?: number };
+
+export function resolveNwhTuiMode(requested: TuiMode | undefined, configured: TuiMode | undefined): TuiMode {
+  return requested ?? configured ?? "fullscreen";
+}
+
+export function resolveNwhFullscreenExitOutput(configured: FullscreenExitOutput | undefined): FullscreenExitOutput {
+  return configured ?? "resume-hint";
+}
+
+class NwhInteractiveMode extends InteractiveMode {
+  constructor(
+    runtimeHost: AgentSessionRuntime,
+    options: InteractiveModeOptions,
+    private readonly getDefaultExitOutput: () => FullscreenExitOutput,
+  ) {
+    super(runtimeHost, options);
+  }
+
+  override stop(fullscreenExitOutput = this.getDefaultExitOutput()): void {
+    super.stop(fullscreenExitOutput);
+  }
+}
 
 export function formatRetryNotice(event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>): string {
   const delaySeconds = Math.max(0, Math.ceil(event.delayMs / 1_000));
@@ -316,11 +340,18 @@ export class PiAgentSession {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     initTheme(this.runtimeHost.services.settingsManager.getTheme(), true);
-    const mode = new InteractiveMode(this.runtimeHost, {
-      modelFallbackMessage: this.runtimeHost.modelFallbackMessage,
-      tuiMode: options.tuiMode ?? "regular",
-      ...(options.initialMessage ? { initialMessage: options.initialMessage } : {}),
-    });
+    const configuredTuiMode = this.runtimeHost.services.settingsManager.getGlobalSettings().tuiMode;
+    const mode = new NwhInteractiveMode(
+      this.runtimeHost,
+      {
+        modelFallbackMessage: this.runtimeHost.modelFallbackMessage,
+        tuiMode: resolveNwhTuiMode(options.tuiMode, configuredTuiMode),
+        ...(options.initialMessage ? { initialMessage: options.initialMessage } : {}),
+      },
+      () => resolveNwhFullscreenExitOutput(
+        this.runtimeHost.services.settingsManager.getGlobalSettings().fullscreenExitOutput,
+      ),
+    );
     // NWH embeds Pi as an SDK, so Pi's self-update instruction targets the
     // wrong installation. Dependency updates are managed by NWH instead.
     await withPiVersionCheckSuppressed(() => mode.run());
@@ -344,12 +375,12 @@ export class PiAgentSession {
         throw new Error(`NWH cannot switch this session to another workspace (${cwd}). Start a new process with --root instead.`);
       }
       const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-      settingsManager.applyOverrides({
+      const configuredSettings = settingsManager.getGlobalSettings();
+      const nwhSettingsOverrides = {
         quietStartup: true,
-        tuiMode: "regular",
         enableInstallTelemetry: false,
         enableAnalytics: false,
-      });
+      };
       const savedProvider = settingsManager.getDefaultProvider();
       const savedModelId = settingsManager.getDefaultModel();
       const savedModel = !this.options.profile && savedProvider && savedModelId
@@ -385,6 +416,7 @@ export class PiAgentSession {
               saveSession: this.saveSession,
               mode: this.options.interactionMode ?? "assistant",
               ...(this.options.profile ? { profile: this.options.profile } : {}),
+              initialThinkingHidden: configuredSettings.hideThinkingBlock ?? false,
               onSessionShutdown: () => flushSettings(settingsManager),
               ...(this.options.resetCompilerProposalTools
                 ? { resetCompilerProposalTools: this.options.resetCompilerProposalTools }
@@ -393,6 +425,9 @@ export class PiAgentSession {
           }],
         },
       });
+      // Resource discovery reloads Pi settings. Apply NWH's embedding defaults
+      // afterwards so the reload cannot silently restore Pi's CLI defaults.
+      settingsManager.applyOverrides(nwhSettingsOverrides);
       const created = await createAgentSessionFromServices({
           services,
           sessionManager: nextSessionManager,

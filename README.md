@@ -121,7 +121,7 @@ missing opening state, and create a playable branch. Its internal continuation
 messages stay hidden from the visible transcript and carry their complete evidence
 slice directly rather than depending on user-prompt hooks.
 
-`nwh` and `nwh play` open the TUI in `regular` mode by default, preserving terminal scrollback. `--tui-mode fullscreen` uses an alternate-screen layout. `-p` remains the non-interactive path for scripts and pipelines.
+`nwh` and `nwh play` open Pi's viewport-based `fullscreen` TUI by default. It enters at the newest transcript content while keeping the editor, task status, and footer fixed; PageUp/PageDown scroll, Ctrl+Shift+Up/Down jump between prompts, and Ctrl+Shift+F searches the transcript. Ctrl+O toggles reasoning and tool details together, while Ctrl+T controls reasoning alone. Fullscreen exits with only a resume hint instead of dumping the entire transcript. Use `--tui-mode regular` for terminal-native scrollback or terminal compatibility, and `-p` for non-interactive scripts and pipelines. An explicit Pi TUI preference saved through `/settings` is honored when the CLI flag is absent.
 
 Ordinary conversation starts with read-only discovery tools. Starting a source
 compiler loop adds only the narrow typed tools that can create pending proposals,

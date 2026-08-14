@@ -3,8 +3,10 @@ import { Key, matchesKey, type EditorOptions, type EditorTheme, type TUI } from 
 
 export class NwhHistoryEditor extends CustomEditor {
   private readonly entries: string[] = [];
+  private readonly nwhKeybindings: KeybindingsManager;
   private historyCursor = -1;
   private nwhHistoryDraft = "";
+  private toolsExpanded = false;
 
   constructor(
     tui: TUI,
@@ -12,8 +14,10 @@ export class NwhHistoryEditor extends CustomEditor {
     keybindings: KeybindingsManager,
     initialHistory: readonly string[] = [],
     options?: EditorOptions,
+    private thinkingHidden = false,
   ) {
     super(tui, theme, keybindings, options);
+    this.nwhKeybindings = keybindings;
     for (const item of initialHistory) this.addToHistory(item);
   }
 
@@ -28,6 +32,18 @@ export class NwhHistoryEditor extends CustomEditor {
   }
 
   override handleInput(data: string): void {
+    // Pi assigns Ctrl+O to tool expansion and Ctrl+T to thinking visibility.
+    // NWH treats the former as a Claude-style details toggle while preserving
+    // Ctrl+T as an independent reasoning-only control.
+    if (this.nwhKeybindings.matches(data, "app.tools.expand")) {
+      this.toggleDetails();
+      return;
+    }
+    if (this.nwhKeybindings.matches(data, "app.thinking.toggle")) {
+      this.actionHandlers.get("app.thinking.toggle")?.();
+      this.thinkingHidden = !this.thinkingHidden;
+      return;
+    }
     if (matchesKey(data, Key.up) && (this.getText() === "" || this.historyCursor >= 0)) {
       this.navigateNwhHistory(-1);
       return;
@@ -38,6 +54,21 @@ export class NwhHistoryEditor extends CustomEditor {
     }
     if (this.historyCursor >= 0) this.historyCursor = -1;
     super.handleInput(data);
+  }
+
+  private toggleDetails(): void {
+    const showDetails = !this.toolsExpanded;
+    const toolHandler = this.actionHandlers.get("app.tools.expand");
+    if (toolHandler) {
+      toolHandler();
+      this.toolsExpanded = showDetails;
+    }
+
+    const thinkingVisible = !this.thinkingHidden;
+    if (thinkingVisible !== showDetails) {
+      this.actionHandlers.get("app.thinking.toggle")?.();
+      this.thinkingHidden = !this.thinkingHidden;
+    }
   }
 
   private navigateNwhHistory(direction: -1 | 1): void {

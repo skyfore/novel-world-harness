@@ -13,7 +13,7 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `nwh` opens a continuously rendered TUI in the current directory;
 - `nwh -p "..."` runs one prompt and exits;
 - `nwh --continue` resumes the latest workspace-local Pi session;
-- `--tui-mode regular|fullscreen` selects scrollback-friendly or alternate-screen layout;
+- Pi's viewport-based `fullscreen` layout is the default; it opens at the newest transcript content with a fixed editor/status dock, while `--tui-mode regular` remains the terminal-native scrollback fallback;
 - `@path` attaches local file context without changing the displayed user message;
 - a standalone quoted, unquoted, absolute, or workspace-relative novel path starts
   the durable source compiler loop;
@@ -28,7 +28,7 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `NOVEL.md` provides checked-in project instructions;
 - `.novel-harness/instructions.md` provides local additions.
 
-The TUI has a transcript, incremental assistant rendering, explicit tool-call/result rows, a multiline editor, working state, queued messages, a footer, slash-command completion, and keyboard shortcuts. `↑`/`↓` browse the current session's submitted prompt history when the editor is empty. Claude Code is an interaction reference, not a runtime dependency. NWH uses Pi's public `AgentSessionRuntime` and `InteractiveMode` instead of maintaining terminal control sequences itself.
+The TUI has a transcript, incremental assistant rendering, explicit tool-call/result rows, a multiline editor, working state, queued messages, a footer, slash-command completion, and keyboard shortcuts. In fullscreen, PageUp/PageDown scroll the transcript, Ctrl+Shift+Up/Down jump between prompts, and Ctrl+Shift+F searches. `↑`/`↓` still browse submitted prompt history when the editor is empty because overlays and viewport navigation are routed before the focused editor. Provider thinking is rendered in a labeled quote block and respects Pi's saved visibility preference; Ctrl+O toggles thinking and tool details together and Ctrl+T retains Pi's reasoning-only control. Claude Code is an interaction reference, not a runtime dependency. NWH uses Pi's public `AgentSessionRuntime` and `InteractiveMode` instead of maintaining terminal control sequences itself.
 
 NWH loads a hidden inline extension to supply its header, working/status labels,
 safe local commands, and invisible `@path` context attachment. User input is kept

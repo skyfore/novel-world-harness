@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatRetryNotice, PiAgentSession, runPromptWithTimeout, withPiVersionCheckSuppressed } from "../src/agent/pi-session.js";
+import { formatRetryNotice, PiAgentSession, resolveNwhFullscreenExitOutput, resolveNwhTuiMode, runPromptWithTimeout, withPiVersionCheckSuppressed } from "../src/agent/pi-session.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 
 const temporaryDirectories: string[] = [];
@@ -12,6 +12,15 @@ afterEach(async () => {
 });
 
 describe("PiAgentSession", () => {
+  it("defaults to fullscreen while honoring saved and command-line choices", () => {
+    expect(resolveNwhTuiMode(undefined, undefined)).toBe("fullscreen");
+    expect(resolveNwhTuiMode(undefined, "regular")).toBe("regular");
+    expect(resolveNwhTuiMode("fullscreen", "regular")).toBe("fullscreen");
+    expect(resolveNwhTuiMode("regular", "fullscreen")).toBe("regular");
+    expect(resolveNwhFullscreenExitOutput(undefined)).toBe("resume-hint");
+    expect(resolveNwhFullscreenExitOutput("transcript")).toBe("transcript");
+  });
+
   it("suppresses Pi's CLI update check only while the embedded TUI is running", async () => {
     const previous = process.env.PI_SKIP_VERSION_CHECK;
     delete process.env.PI_SKIP_VERSION_CHECK;
@@ -50,6 +59,11 @@ describe("PiAgentSession", () => {
     expect(session.model).toBe("anthropic/claude-sonnet-5");
     expect(session.messageCount).toBe(0);
     expect(session.sessionFile).toBeUndefined();
+    const settings = (session as unknown as {
+      runtimeHost: { services: { settingsManager: { getHideThinkingBlock(): boolean; getFullscreenExitOutput(): string } } };
+    }).runtimeHost.services.settingsManager;
+    expect(settings.getHideThinkingBlock()).toBe(false);
+    expect(settings.getFullscreenExitOutput()).toBe("transcript");
     await session.dispose();
   });
 

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNwhExtension, parseTuiReparseArguments, sessionPromptHistory, splitCommandArguments, type NwhExtensionOptions } from "../src/agent/nwh-extension.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
@@ -38,7 +38,11 @@ async function fixture(
   const sentUserMessages: string[] = [];
   const sentHiddenMessages: string[] = [];
   const sentVisibleMessages: string[] = [];
+  const markdownTransformers: MarkdownTransformer[] = [];
   const pi = {
+    registerMarkdownTransformer(transformer: MarkdownTransformer) {
+      markdownTransformers.push(transformer);
+    },
     registerCommand(name: string, command: { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> | void }) {
       commands.set(name, command);
     },
@@ -67,7 +71,7 @@ async function fixture(
     ...(runReparse ? { runReparse } : {}),
     preparedCacheRoot: path.join(root, "prepared-cache"),
   })(pi);
-  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages, sentVisibleMessages };
+  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages, sentVisibleMessages, markdownTransformers };
 }
 
 function commandContext(notifications: string[], actions: { cleared: boolean; shutdown: boolean }): ExtensionCommandContext {
@@ -105,7 +109,13 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 
 describe("NWH TUI extension", () => {
   it("registers local commands and keeps their output in the transcript", async () => {
-    const { commands, sentUserMessages } = await fixture();
+    const { commands, sentUserMessages, markdownTransformers } = await fixture();
+    expect(markdownTransformers).toHaveLength(1);
+    expect(markdownTransformers[0]?.("reasoning", {
+      messageType: "assistant-thinking",
+      isStreaming: false,
+      availableWidth: 80,
+    })).toContain("**Thinking**");
     expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };

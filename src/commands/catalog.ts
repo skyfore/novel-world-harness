@@ -6,6 +6,8 @@ import {
   type PlayableCharacter,
   type PlayInstanceSummary,
 } from "../world/play-experience.js";
+import { choosePlayInstance, type AskPlayQuestion } from "../world/play-choice.js";
+import { askUserQuestion } from "../util/ask-user-question.js";
 
 export async function novelsCommand(root: string): Promise<void> {
   const catalog = await inspectPlayExperience(root);
@@ -17,21 +19,28 @@ export async function instancesCommand(root: string): Promise<void> {
   stdout.write(`${formatInstances(catalog.instances)}\n`);
 }
 
-export async function charactersCommand(root: string, branchId?: string, source?: string): Promise<void> {
-  const result = await listPlayableCharacters(root, { ...(branchId ? { branchId } : {}), ...(source ? { source } : {}) });
+export async function charactersCommand(
+  root: string,
+  branchId?: string,
+  source?: string,
+  ask: AskPlayQuestion = askUserQuestion,
+): Promise<void> {
+  const selectedBranchId = await choosePlayInstance(root, branchId, ask);
+  if (!selectedBranchId) return;
+  const result = await listPlayableCharacters(root, { branchId: selectedBranchId, ...(source ? { source } : {}) });
   stdout.write(`${formatCharacters(result.characters, result.branchId, result.source?.title)}\n`);
 }
 
-export async function progressCommand(root: string, branchId?: string): Promise<void> {
+export async function progressCommand(
+  root: string,
+  branchId?: string,
+  ask: AskPlayQuestion = askUserQuestion,
+): Promise<void> {
   const catalog = await inspectPlayExperience(root);
-  const instance = branchId
-    ? catalog.instances.find((candidate) => candidate.branchId === branchId)
-    : catalog.instances.find((candidate) => candidate.active)
-      ?? (catalog.instances.length === 1 ? catalog.instances[0] : undefined);
-  if (!instance) {
-    if (branchId) throw new Error(`Unknown instance '${branchId}'. Use nwh instances.`);
-    throw new Error("No unambiguous current instance. Use nwh progress <instance> or nwh instances.");
-  }
+  const selectedBranchId = await choosePlayInstance(root, branchId, ask, catalog);
+  if (!selectedBranchId) return;
+  const instance = catalog.instances.find((candidate) => candidate.branchId === selectedBranchId);
+  if (!instance) throw new Error(`Unknown instance '${selectedBranchId}'. Use nwh instances.`);
   stdout.write(`${formatProgress(instance)}\n`);
 }
 

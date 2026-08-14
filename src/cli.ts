@@ -35,7 +35,8 @@ import {
   worldSnapshotCommand,
   worldValidateCommand,
 } from "./commands/world.js";
-import { selectPlayExperience } from "./world/play-experience.js";
+import { choosePlayExperience } from "./world/play-choice.js";
+import { askUserQuestion } from "./util/ask-user-question.js";
 
 const program = new Command();
 program
@@ -338,10 +339,10 @@ program
   .action(async (options) => {
     const globalOptions = program.opts();
     if (options.branch || options.character) {
-      await selectPlayExperience(rootFor(options), {
+      await choosePlayExperience(rootFor(options), {
         ...(options.branch ? { branchId: options.branch } : {}),
         ...(options.character ? { character: options.character } : {}),
-      });
+      }, askUserQuestion);
     }
     await playCommand({
       configPath: configFor(options),

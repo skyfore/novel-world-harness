@@ -6,9 +6,10 @@ import type { PlayerActionTranslator, PlayerTurnResult } from "../world/player-a
 import {
   listPlayableCharacters,
   performPlayTurn,
-  selectPlayExperience,
   type SelectedPlayExperience,
 } from "../world/play-experience.js";
+import { choosePlayExperience, choosePlayInstance, type AskPlayQuestion } from "../world/play-choice.js";
+import { askUserQuestion } from "../util/ask-user-question.js";
 import { formatCharacters } from "./catalog.js";
 
 export type PlayWorldCommandOptions = {
@@ -21,18 +22,24 @@ export type PlayWorldCommandOptions = {
   model?: string;
   translator?: PlayerActionTranslator;
   advanceBackground?: number;
+  ask?: AskPlayQuestion;
 };
 
 export async function playWorldCommand(options: PlayWorldCommandOptions): Promise<PlayerTurnResult | undefined> {
+  const ask = options.ask ?? askUserQuestion;
+  let branchId = options.branchId;
   if (options.listCharacters) {
-    const listed = await listPlayableCharacters(options.root, options.branchId ? { branchId: options.branchId } : {});
+    branchId = await choosePlayInstance(options.root, branchId, ask);
+    if (!branchId) return undefined;
+    const listed = await listPlayableCharacters(options.root, { branchId });
     stdout.write(`${formatCharacters(listed.characters, listed.branchId)}\n`);
     if (!options.action) return undefined;
   }
-  const selection = await selectPlayExperience(options.root, {
-    ...(options.branchId ? { branchId: options.branchId } : {}),
+  const selection = await choosePlayExperience(options.root, {
+    ...(branchId ? { branchId } : {}),
     ...(options.character ? { character: options.character } : {}),
-  });
+  }, ask);
+  if (!selection) return undefined;
 
   const config = await loadOptionalConfig(options.configPath);
   const profile = config ? profileForRole(config, "narrator").profile : undefined;

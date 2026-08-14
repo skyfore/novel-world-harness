@@ -1,5 +1,6 @@
 import type { TuiMode } from "@earendil-works/pi-coding-agent";
-import { selectPlayExperience } from "../world/play-experience.js";
+import { choosePlayExperience, type AskPlayQuestion } from "../world/play-choice.js";
+import { askUserQuestion } from "../util/ask-user-question.js";
 import { playCommand } from "./play.js";
 
 export type ResumeCommandOptions = {
@@ -11,13 +12,15 @@ export type ResumeCommandOptions = {
   tuiMode?: TuiMode;
   continueSession?: boolean;
   saveSession?: boolean;
+  ask?: AskPlayQuestion;
 };
 
 export async function resumeCommand(options: ResumeCommandOptions): Promise<void> {
-  await selectPlayExperience(options.root, {
+  const selection = await choosePlayExperience(options.root, {
     ...(options.branchId ? { branchId: options.branchId } : {}),
     ...(options.character ? { character: options.character } : {}),
-  });
+  }, options.ask ?? askUserQuestion);
+  if (!selection) return;
   await playCommand({
     root: options.root,
     configPath: options.configPath,

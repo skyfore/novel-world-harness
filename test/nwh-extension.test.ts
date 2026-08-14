@@ -345,6 +345,47 @@ describe("NWH TUI extension", () => {
     expect(statuses).toContain("NWH · 林岐@main · step 1");
   });
 
+  it("opens a structured character question with a free-form alias path for /play", async () => {
+    const { commands, root, sentVisibleMessages } = await fixture();
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: [], evidence: [] });
+    await canon.putEntity({ id: "rival", kind: "character", canonicalName: "宿敌", aliases: ["对手"], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "rival", field: "character.alive", value: true },
+      ],
+    });
+    const questions: string[] = [];
+    const inputs: string[] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        async select(title: string, choices: string[]) {
+          questions.push(title);
+          return choices.find((choice) => choice.startsWith("Enter a character"));
+        },
+        async input(title: string) {
+          inputs.push(title);
+          return "对手";
+        },
+        setStatus: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")?.handler("", ctx);
+
+    expect(questions).toEqual(["Who do you want to play on 'main'?"]);
+    expect(inputs).toEqual(["Character id, name, or alias"]);
+    await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ branchId: "main", actorId: "rival" });
+    expect(sentVisibleMessages.join("\n")).toContain("Entered **宿敌**");
+  });
+
   it("handles a natural character-list request without invoking the local-file assistant", async () => {
     const { events, root } = await fixture();
     const canon = new CanonicalModelStore(root);

@@ -12,6 +12,8 @@ import { ingestWorkspaceSource } from "./ingest.js";
 import { worldCreateCommand } from "./world.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
+import { resolveNovelSource } from "../world/play-experience.js";
 
 export type PrepareAllCommandOptions = {
   root: string;
@@ -73,6 +75,7 @@ export async function prepareAllCommand(
     throw new Error("No novel source is registered. Pass a novel path to `nwh prepare-all <novel-path>`.");
   }
   if (inspection.stage === "choose-source") {
+    const store = await WorkspaceStore.create(root);
     sourceId = await ask({
       header: "Source",
       question: "Multiple novels are registered. Which source should be prepared?",
@@ -82,6 +85,20 @@ export async function prepareAllCommand(
         description: `${source.sourcePath} (${source.id})`,
         recommended: index === 0,
       })),
+      customInput: {
+        label: "Enter a source",
+        description: "Type a registered source id, title, or path.",
+        prompt: "Source id, title, or path",
+        placeholder: inspection.sources[0]?.id,
+        invalidMessage: "No unique registered novel matches that value.",
+        resolve: async (value) => {
+          try {
+            return (await resolveNovelSource(store, value)).id;
+          } catch {
+            return undefined;
+          }
+        },
+      },
     });
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }

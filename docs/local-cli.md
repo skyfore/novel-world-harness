@@ -21,7 +21,7 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `/prepare-content <text>` archives exact pasted text and starts its compiler loop;
 - `/prepare-all [source-id] [branch-id]` completes guided preparation in the current TUI;
 - `/novels`, `/instances`, `/characters`, and `/progress` inspect compiled content without a model request;
-- `/play <character> [instance]` enters player mode and `/world-resume` restores its durable selection;
+- `/play [character] [instance]` opens structured character/instance selection (with free-form id/name/alias input) and `/world-resume` restores its durable selection;
 - `NOVEL.md` provides checked-in project instructions;
 - `.novel-harness/instructions.md` provides local additions.
 

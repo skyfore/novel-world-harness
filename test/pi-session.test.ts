@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatRetryNotice, PiAgentSession, runPromptWithTimeout } from "../src/agent/pi-session.js";
+import { formatRetryNotice, PiAgentSession, runPromptWithTimeout, withPiVersionCheckSuppressed } from "../src/agent/pi-session.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 
 const temporaryDirectories: string[] = [];
@@ -12,6 +12,25 @@ afterEach(async () => {
 });
 
 describe("PiAgentSession", () => {
+  it("suppresses Pi's CLI update check only while the embedded TUI is running", async () => {
+    const previous = process.env.PI_SKIP_VERSION_CHECK;
+    delete process.env.PI_SKIP_VERSION_CHECK;
+    try {
+      await expect(withPiVersionCheckSuppressed(async () => {
+        expect(process.env.PI_SKIP_VERSION_CHECK).toBe("1");
+        return "done";
+      })).resolves.toBe("done");
+      expect(process.env.PI_SKIP_VERSION_CHECK).toBeUndefined();
+      await expect(withPiVersionCheckSuppressed(async () => {
+        throw new Error("TUI stopped");
+      })).rejects.toThrow("TUI stopped");
+      expect(process.env.PI_SKIP_VERSION_CHECK).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PI_SKIP_VERSION_CHECK;
+      else process.env.PI_SKIP_VERSION_CHECK = previous;
+    }
+  });
+
   it("uses Pi with an in-memory session without making a model request", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-"));
     temporaryDirectories.push(root);

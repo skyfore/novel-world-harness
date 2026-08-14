@@ -61,6 +61,17 @@ export function formatRetryNotice(event: Extract<AgentSessionEvent, { type: "aut
   return `LLM API call failed; retrying ${event.attempt}/${event.maxAttempts} in ${delaySeconds}s: ${event.errorMessage}`;
 }
 
+export async function withPiVersionCheckSuppressed<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = process.env.PI_SKIP_VERSION_CHECK;
+  process.env.PI_SKIP_VERSION_CHECK = "1";
+  try {
+    return await operation();
+  } finally {
+    if (previous === undefined) delete process.env.PI_SKIP_VERSION_CHECK;
+    else process.env.PI_SKIP_VERSION_CHECK = previous;
+  }
+}
+
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: undefined };
 }
@@ -304,7 +315,9 @@ export class PiAgentSession {
       tuiMode: options.tuiMode ?? "regular",
       ...(options.initialMessage ? { initialMessage: options.initialMessage } : {}),
     });
-    await mode.run();
+    // NWH embeds Pi as an SDK, so Pi's self-update instruction targets the
+    // wrong installation. Dependency updates are managed by NWH instead.
+    await withPiVersionCheckSuppressed(() => mode.run());
   }
   async dispose(): Promise<void> {
     this.unsubscribe?.();

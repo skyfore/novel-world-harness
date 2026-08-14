@@ -138,6 +138,7 @@ describe("NWH TUI extension", () => {
     const { commands, root } = await fixture(undefined, undefined, async (options) => {
       calls.push(options as unknown as Record<string, unknown>);
       options.onProgress?.("compiler progress");
+      options.onStatus?.("Compiler batch 2/148 · waiting · elapsed 3s");
       return {
         sourceId: options.sourceId!,
         chapters: [2, 3],
@@ -161,6 +162,7 @@ describe("NWH TUI extension", () => {
       model: "anthropic/claude-sonnet-5",
     });
     expect(typeof calls[0]?.onProgress).toBe("function");
+    expect(typeof calls[0]?.onStatus).toBe("function");
     expect(notifications).toContain("compiler progress");
     expect(notifications).toContainEqual(expect.stringContaining(`Active revision: ${"b".repeat(64)}`));
   });

@@ -32,7 +32,7 @@ export type BatchProgress = {
   updatedAt: string;
 };
 
-export type BatchRunner = (batch: CompilerBatch) => Promise<void>;
+export type BatchRunner = (batch: CompilerBatch, context: { totalBatches: number }) => Promise<void>;
 
 type CompilerEntityIdentity = Pick<Entity, "id" | "kind" | "canonicalName" | "aliases"> & {
   status: "canonical" | "pending";
@@ -323,7 +323,10 @@ export async function runCompilerBatches(options: {
     if (completed >= maxBatches) break;
     options.onProgress?.(`compiler batch ${batch.ordinal + 1}/${batches.length}: ${batch.startLine}-${batch.endLine}`);
     const hydrated = await hydrateCompilerBatch(options.workspaceRoot, batch);
-    await options.runner(options.promptTransform ? { ...hydrated, prompt: options.promptTransform(hydrated.prompt, hydrated) } : hydrated);
+    await options.runner(
+      options.promptTransform ? { ...hydrated, prompt: options.promptTransform(hydrated.prompt, hydrated) } : hydrated,
+      { totalBatches: batches.length },
+    );
     await store.markComplete(options.source.id, batch.id);
     completedIds.add(batch.id);
     completed += 1;

@@ -1122,6 +1122,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             ...(selectedModel ? { model: selectedModel } : {}),
             cacheRoot: options.preparedCacheRoot,
             onProgress: (message) => ctx.ui.notify(message, "info"),
+            onStatus: (message) => ctx.ui.setStatus(
+              "nwh-reparse",
+              ctx.ui.theme.fg("dim", `Reparsing ${source.title} · ${message}`),
+            ),
           });
           ctx.ui.notify(
             `Reparse complete for chapter(s) ${result.chapters.join(", ")}. Active revision: ${result.activeBundleHash}.`,

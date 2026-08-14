@@ -6,6 +6,7 @@ import { compilerBatchFailure } from "../compiler/batch-outcome.js";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import { startElapsedStatus } from "../util/elapsed-status.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
 export type CompileSourceOptions = {
@@ -21,6 +22,7 @@ export type CompileSourceOptions = {
   acquireLock?: boolean;
   promptTimeoutMs?: number;
   onProgress?: (message: string) => void;
+  onStatus?: (message: string) => void;
 };
 
 const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -65,7 +67,10 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
       if (options.onProgress) options.onProgress(message);
       else stderr.write(`${message}\n`);
     },
-    async runner(batch) {
+    async runner(batch, context) {
+      const label = `Compiler batch ${batch.ordinal + 1}/${context.totalBatches}`;
+      options.onStatus?.(`${label} · creating model session`);
+      let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
       const session = await createPiCompilerSession({
         root: options.root,
         ...(profile ? { profile } : {}),
@@ -78,6 +83,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         disabledProposalTools: ["propose_initial_world"],
         onRetry(event) {
           const message = formatRetryNotice(event);
+          elapsed?.update(`retrying model request: ${message}`);
           if (options.onProgress) options.onProgress(message);
           else stderr.write(`${message}\n`);
         },
@@ -88,14 +94,22 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         onTool(name, input) {
           const details = input as Record<string, unknown>;
           const message = `↳ ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`;
+          elapsed?.update(`last tool call ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`);
           if (options.onProgress) options.onProgress(message);
           else stderr.write(`${message}\n`);
         },
       });
       try {
+        elapsed = startElapsedStatus({
+          label,
+          activity: "waiting for model response or tool call",
+          onStatus: options.onStatus,
+          onHeartbeat: options.onProgress ?? ((message) => stderr.write(`${message}\n`)),
+        });
         const report = await session.promptWithReport(batch.prompt, {
           timeoutMs: options.promptTimeoutMs ?? COMPILER_PROMPT_TIMEOUT_MS,
         });
+        elapsed.stop("model response received; verifying finish handshake");
         const failure = compilerBatchFailure(report);
         if (failure) throw new Error(`Compiler batch ${batch.ordinal + 1} was not checkpointed: ${failure}.`);
         const message = `Compiler batch ${batch.ordinal + 1} finish handshake verified; `
@@ -103,6 +117,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         if (options.onProgress) options.onProgress(message);
         else stdout.write(`${message}\n`);
       } finally {
+        elapsed?.stop();
         await session.dispose();
       }
     },

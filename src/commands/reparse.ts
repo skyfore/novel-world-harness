@@ -25,6 +25,7 @@ export type ReparseCommandOptions = {
   cacheRoot?: string;
   acquireLock?: boolean;
   onProgress?: (message: string) => void;
+  onStatus?: (message: string) => void;
 };
 
 type ReparseDependencies = {
@@ -62,6 +63,7 @@ export async function reparseCommand(
 
   const cache = new PreparedNovelCache(root, options.cacheRoot);
   const selectedBatchIds = selected.map((batch) => batch.id);
+  options.onStatus?.("Checking active revision and rollback baseline");
   report("Checking the active prepared revision and rollback baseline.");
   await recoverInterruptedReparse(root, source, batches, selectedBatchIds, cache, report);
   const baseline = await cache.publish(source);
@@ -75,6 +77,7 @@ export async function reparseCommand(
   );
 
   try {
+    options.onStatus?.("Invalidating selected preparation artifacts");
     await new CompilerBatchStore(root).markIncomplete(source.id, selectedBatchIds);
     const invalidated = await invalidatePreparationArtifacts(root, source.id, selected, Boolean(options.all));
     for (const batchId of selectedBatchIds) await rejectPendingCompilerBatchProposals(root, batchId);
@@ -91,13 +94,20 @@ export async function reparseCommand(
       acquireLock: false,
       promptTransform: (prompt, batch) => reparsePrompt(prompt, batch, runId, Boolean(options.all)),
       onProgress: report,
+      onStatus: options.onStatus,
     });
-    const convergence = await convergeWorldProposals(root, source.id);
+    options.onStatus?.("Converging validated compiler proposals");
+    const convergence = await convergeWorldProposals(root, source.id, {
+      onProgress: (progress) => options.onStatus?.(
+        `Converging proposals · ${progress.phase} ${progress.processed}/${progress.total}`,
+      ),
+    });
     const quarantined = await quarantineUncommittableProposals(root, convergence);
     report(
       `Reparse convergence accepted ${convergence.canonical.accepted.length + convergence.possibilities.accepted.length} proposal(s)`
       + ` and quarantined ${quarantined.length} uncommittable draft(s).`,
     );
+    options.onStatus?.("Finalizing prepared revision");
     await dependencies.finishPreparation({
       root,
       configPath: options.configPath,
@@ -109,14 +119,17 @@ export async function reparseCommand(
       acquireLock: false,
       cacheRoot: options.cacheRoot,
       onProgress: report,
+      onStatus: options.onStatus,
     });
     const active = await cache.lookup(source);
     if (!active.bundleHash) throw new Error("Reparse completed without an active prepared-cache revision.");
     report(active.bundleHash === previousBundleHash
       ? `Reparse reproduced and reactivated the existing content-identical revision ${active.bundleHash}.`
       : `Activated prepared revision ${active.bundleHash}; previous revision ${previousBundleHash} remains available.`);
+    options.onStatus?.("Reparse complete");
     return { sourceId: source.id, chapters: selectedChapters, previousBundleHash, activeBundleHash: active.bundleHash };
   } catch (error) {
+    options.onStatus?.(`Reparse failed; restoring revision ${previousBundleHash}`);
     for (const batchId of [...selectedBatchIds, `opening-${batches[0]!.id}`]) {
       await rejectPendingCompilerBatchProposals(root, batchId);
     }

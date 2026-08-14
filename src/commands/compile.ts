@@ -4,6 +4,7 @@ import type { TuiMode } from "@earendil-works/pi-coding-agent";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
 import { compilerBatchFailure } from "../compiler/batch-outcome.js";
 import { loadConfig, profileForRole } from "../config/load.js";
+import { startElapsedStatus } from "../util/elapsed-status.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
 export type CompileCommandOptions = {
@@ -22,6 +23,7 @@ export type CompileCommandOptions = {
   acquireLock?: boolean;
   promptTimeoutMs?: number;
   onProgress?: (message: string) => void;
+  onStatus?: (message: string) => void;
 };
 
 const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -46,6 +48,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
   const profile = config ? profileForRole(config, "controller").profile : undefined;
   const printMode = options.prompt !== undefined;
   let wroteText = false;
+  let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
   const session = await createPiCompilerSession({
     root: options.root,
     ...(profile ? { profile } : {}),
@@ -58,6 +61,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     ...(options.disabledProposalTools ? { disabledProposalTools: options.disabledProposalTools } : {}),
     ...(printMode ? { onRetry(event) {
       const message = formatRetryNotice(event);
+      elapsed?.update(`retrying model request: ${message}`);
       if (options.onProgress) options.onProgress(message);
       else stderr.write(`\n${message}\n`);
     } } : {}),
@@ -68,15 +72,23 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     ...(printMode ? { onTool(name: string, input: unknown) {
       const details = input as Record<string, unknown>;
       const message = `↳ ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`;
+      elapsed?.update(`last tool call ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`);
       if (options.onProgress) options.onProgress(message);
       else stderr.write(`\n${message}\n`);
     } } : {}),
   });
   try {
     if (options.prompt !== undefined) {
+      elapsed = startElapsedStatus({
+        label: "Compiler prompt",
+        activity: "waiting for model response or tool call",
+        onStatus: options.onStatus,
+        onHeartbeat: options.onProgress ?? ((message) => stderr.write(`${message}\n`)),
+      });
       const report = await session.promptWithReport(options.prompt.trim() || DEFAULT_COMPILER_PROMPT, {
         timeoutMs: options.promptTimeoutMs ?? COMPILER_PROMPT_TIMEOUT_MS,
       });
+      elapsed.stop("model response received; verifying finish handshake");
       const failure = compilerBatchFailure(report);
       if (failure) throw new Error(`Compiler prompt was not completed: ${failure}.`);
       if (wroteText && !options.onProgress) stdout.write("\n");
@@ -84,6 +96,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     }
     await session.runInteractive({ tuiMode: options.tuiMode, initialMessage: DEFAULT_COMPILER_PROMPT });
   } finally {
+    elapsed?.stop();
     await session.dispose();
   }
 }

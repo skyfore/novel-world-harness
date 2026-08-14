@@ -28,6 +28,7 @@ export type PrepareAllCommandOptions = {
   createBranch?: boolean;
   restoreCache?: boolean;
   onProgress?: (message: string) => void;
+  onStatus?: (message: string) => void;
 };
 
 type PrepareAllDependencies = {
@@ -138,6 +139,7 @@ export async function prepareAllCommand(
       resume: true,
       acquireLock: false,
       onProgress: report,
+      onStatus: options.onStatus,
     });
   }
 
@@ -183,6 +185,7 @@ export async function prepareAllCommand(
         disabledProposalTools: ["propose_state_delta"],
         acquireLock: false,
         onProgress: report,
+        onStatus: options.onStatus,
       });
     } catch (error) {
       report(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}`);

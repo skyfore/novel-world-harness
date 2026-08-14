@@ -3,7 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { nwhRuntimeDir } from "../agent/runtime-paths.js";
-import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
+import { readSourceMaterial, sourceMaterialIdentity } from "../storage/source-material-store.js";
+import type { SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
@@ -519,13 +520,8 @@ async function currentCanonical(workspaceRoot: string) {
 }
 
 async function sourceIdentity(workspaceRoot: string, source: SourceDocument): Promise<{ contentMd5: string; contentSha256: string }> {
-  const store = await WorkspaceStore.create(workspaceRoot);
-  const absolute = path.resolve(store.root, source.sourcePath);
-  const relative = path.relative(store.root, absolute);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Source escaped the workspace: ${source.sourcePath}`);
-  const content = await fs.readFile(absolute);
-  const contentSha256 = crypto.createHash("sha256").update(content).digest("hex");
-  const contentMd5 = crypto.createHash("md5").update(content).digest("hex");
+  const content = await readSourceMaterial(workspaceRoot, source);
+  const { contentSha256, contentMd5 } = sourceMaterialIdentity(content);
   if (contentSha256 !== source.contentSha256) throw new Error(`Source ${source.sourcePath} changed after ingest; prepared cache access is denied.`);
   if (source.contentMd5 && source.contentMd5 !== contentMd5) throw new Error(`Source ${source.sourcePath} has inconsistent MD5 metadata.`);
   return { contentMd5, contentSha256 };

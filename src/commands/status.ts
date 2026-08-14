@@ -56,8 +56,9 @@ export async function statusCommand(configPath: string): Promise<void> {
   ]);
 
   if (project) console.log(`Project: ${project.name} (${project.id})`);
-  else if (config) console.log(`Project: ${config.project.name} (no local harness state)`);
-  else console.log(`Project: ${path.basename(root) || "novel-world"} (no config or local harness state)`);
+  else if (config) console.log(`Project: ${config.project.name} (no NWH state)`);
+  else console.log(`Project: ${path.basename(root) || "novel-world"} (no config or NWH state)`);
+  console.log(`State: ${store.stateDir}`);
   console.table(sourceRows);
   console.table([
     { area: "proposals", pending: pending.length, accepted: accepted.length, rejected: rejected.length },

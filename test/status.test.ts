@@ -21,7 +21,8 @@ describe("status command", () => {
 
     await expect(statusCommand(path.join(root, "novel-harness.yaml"))).resolves.toBeUndefined();
 
-    expect(lines.join("\n")).toContain("no config or local harness state");
+    expect(lines.join("\n")).toContain("no config or NWH state");
+    expect(lines.join("\n")).toContain("State:");
     expect(lines.join("\n")).toContain("readiness is not inferred");
     expect(lines.join("\n")).toContain("Preparation: needs-source");
     expect(lines.join("\n")).toContain("Next: nwh prepare <novel-path>");

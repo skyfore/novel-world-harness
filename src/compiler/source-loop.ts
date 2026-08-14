@@ -72,6 +72,22 @@ export async function prepareSourceLoopFromInput(
     : preparation;
 }
 
+export async function prepareSourceLoopFromContent(
+  workspaceRoot: string,
+  content: string | Uint8Array,
+  options: { title?: string; cacheRoot?: string } = {},
+): Promise<SourceLoopPreparation> {
+  const store = await WorkspaceStore.create(workspaceRoot);
+  const config = await loadOptionalConfig(path.join(workspaceRoot, "novel-harness.yaml"));
+  await store.ensureProject(config?.project);
+  const source = await store.registerSourceContent(options.title ?? "pasted-novel.txt", content);
+  const preparedCache = await new PreparedNovelCache(workspaceRoot, options.cacheRoot).restore(source);
+  const preparation = await prepareSourceLoopForSource(workspaceRoot, source);
+  return preparation.status === "complete" && preparedCache.status !== "miss"
+    ? { ...preparation, preparedCache }
+    : preparation;
+}
+
 export async function prepareNextSourceLoopTurn(
   workspaceRoot: string,
   sourceId?: string,

@@ -27,7 +27,7 @@ See `docs/adr/0001-world-truth-history-and-possibility-space.md` for the governi
 ## Engineering defaults
 
 - TypeScript, ESM, Node >= 22.19.
-- Phase 0 state is stored as human-readable local files under `.novel-harness/`; do not add an external database without an explicit architecture decision.
+- Phase 0 state is stored as human-readable user-level files under `$NWH_HOME` (default `~/.novel-harness/`); source bytes are immutable content-addressed objects and workspace/world state is isolated below `workspaces/v1/`. Do not add an external database without an explicit architecture decision.
 - Pi is the agent runtime boundary for model providers, streaming, tool calls, and sessions. Novel Harness owns domain prompts, access policy, and compiler/runtime semantics.
 - Prefer deterministic code for event commitment, state reduction, time ordering, identity, locations, resources, active-rule resolution, knowledge visibility, and invariants.
 - Discover, search, and read workspace files locally. Prefer lexical file search (`rg` with a safe fallback), not embeddings, vector databases, or RAG.

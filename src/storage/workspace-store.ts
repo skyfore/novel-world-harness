@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ensureWorkspaceState, workspaceStateDir } from "../agent/runtime-paths.js";
 import type { HarnessConfig } from "../config/schema.js";
+import { SourceMaterialStore, sourceMaterialIdentity } from "./source-material-store.js";
 
 const STATE_VERSION = 1;
+const sourceArchiveMigrations = new Map<string, Promise<void>>();
 
 export type StoredProject = {
   version: 1;
@@ -59,7 +62,7 @@ async function readJson<T>(filePath: string): Promise<T | null> {
 }
 
 async function atomicJson(filePath: string, value: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
   const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
   await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
     encoding: "utf8",
@@ -75,15 +78,40 @@ export class WorkspaceStore {
 
   private constructor(root: string) {
     this.root = root;
-    this.stateDir = path.join(root, ".novel-harness");
+    this.stateDir = workspaceStateDir(root);
     this.sourcesDir = path.join(this.stateDir, "sources");
   }
 
   static async create(root = process.cwd()): Promise<WorkspaceStore> {
-    const realRoot = await fs.realpath(path.resolve(root));
-    const stat = await fs.stat(realRoot);
-    if (!stat.isDirectory()) throw new Error(`Workspace root is not a directory: ${root}`);
-    return new WorkspaceStore(realRoot);
+    const resolvedRoot = path.resolve(root);
+    let realRoot: string;
+    try {
+      realRoot = await fs.realpath(resolvedRoot);
+      const stat = await fs.stat(realRoot);
+      if (!stat.isDirectory()) throw new Error(`Workspace root is not a directory: ${root}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      try {
+        if (!(await fs.stat(workspaceStateDir(resolvedRoot))).isDirectory()) throw error;
+      } catch {
+        throw new Error(`Workspace root is not a directory and has no global NWH state: ${root}`);
+      }
+      realRoot = resolvedRoot;
+    }
+    await ensureWorkspaceState(realRoot);
+    const store = new WorkspaceStore(realRoot);
+    let migration = sourceArchiveMigrations.get(store.stateDir);
+    if (!migration) {
+      migration = store.archiveExistingSources();
+      sourceArchiveMigrations.set(store.stateDir, migration);
+    }
+    try {
+      await migration;
+    } catch (error) {
+      sourceArchiveMigrations.delete(store.stateDir);
+      throw error;
+    }
+    return store;
   }
 
   async ensureProject(project: HarnessConfig["project"] = defaultProjectForRoot(this.root)): Promise<StoredProject> {
@@ -118,26 +146,13 @@ export class WorkspaceStore {
     const stat = await fs.stat(absolute);
     if (!stat.isFile()) throw new Error(`Source is not a file: ${inputPath}`);
     const content = await fs.readFile(absolute);
-    if (content.subarray(0, 8_000).includes(0)) throw new Error(`Source must be UTF-8 text: ${inputPath}`);
-    const sha = crypto.createHash("sha256").update(content).digest("hex");
-    const md5 = crypto.createHash("md5").update(content).digest("hex");
-    const id = sha.slice(0, 20);
-    const filePath = path.join(this.sourcesDir, stateFileName(id));
-    const existing = await readJson<SourceDocument>(filePath);
-    const now = new Date().toISOString();
-    const source: SourceDocument = {
-      version: STATE_VERSION,
-      id,
-      title: path.basename(absolute),
-      sourcePath: relative.split(path.sep).join("/"),
-      contentMd5: md5,
-      contentSha256: sha,
-      bytes: content.byteLength,
-      registeredAt: existing?.registeredAt ?? now,
-      updatedAt: now,
-    };
-    await atomicJson(filePath, source);
-    return source;
+    return this.registerSourceBytes(path.basename(absolute), content, relative.split(path.sep).join("/"));
+  }
+
+  async registerSourceContent(title: string, content: string | Uint8Array): Promise<SourceDocument> {
+    const normalizedTitle = title.trim() || "pasted-novel.txt";
+    if (normalizedTitle.length > 200 || /[\r\n]/.test(normalizedTitle)) throw new Error("Content source title must be one line of at most 200 characters.");
+    return this.registerSourceBytes(normalizedTitle, typeof content === "string" ? Buffer.from(content, "utf8") : content, `content:${normalizedTitle}`);
   }
 
   async getSource(id: string): Promise<SourceDocument | null> {
@@ -148,6 +163,47 @@ export class WorkspaceStore {
     return this.readDirectory<SourceDocument>(this.sourcesDir, (left, right) =>
       left.sourcePath.localeCompare(right.sourcePath),
     );
+  }
+
+  private async registerSourceBytes(title: string, content: Uint8Array, sourcePath: string): Promise<SourceDocument> {
+    const identity = await new SourceMaterialStore().put(content, title);
+    const id = identity.contentSha256.slice(0, 20);
+    const filePath = path.join(this.sourcesDir, stateFileName(id));
+    const existing = await readJson<SourceDocument>(filePath);
+    const now = new Date().toISOString();
+    const source: SourceDocument = {
+      version: STATE_VERSION,
+      id,
+      title,
+      sourcePath,
+      contentMd5: identity.contentMd5,
+      contentSha256: identity.contentSha256,
+      bytes: identity.bytes,
+      registeredAt: existing?.registeredAt ?? now,
+      updatedAt: now,
+    };
+    await atomicJson(filePath, source);
+    return source;
+  }
+
+  private async archiveExistingSources(): Promise<void> {
+    const materials = new SourceMaterialStore();
+    for (const source of await this.listSources()) {
+      if (await materials.read(source)) continue;
+      if (source.sourcePath.startsWith("content:")) continue;
+      const absolute = path.resolve(this.root, source.sourcePath);
+      try {
+        const content = await fs.readFile(absolute);
+        const identity = sourceMaterialIdentity(content);
+        if (identity.contentSha256 !== source.contentSha256) continue;
+        await materials.put(content, source.title);
+        if (!source.contentMd5) {
+          await atomicJson(path.join(this.sourcesDir, stateFileName(source.id)), { ...source, contentMd5: identity.contentMd5 });
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
   }
 
   private async readDirectory<T>(

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
@@ -55,7 +56,7 @@ type StoredActorRef = { version: 1; id: string; hash: string; updatedAt: string 
 export class ActorModelStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", "v1", "canon", "actors");
+    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "canon", "actors");
   }
 
   async putGoal(input: CharacterGoal): Promise<void> {

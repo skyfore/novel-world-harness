@@ -62,6 +62,7 @@ describe("explicit prepared-novel reparsing", () => {
     if (!initial) throw new Error("missing test initial world");
     const before = await openWorkspaceWorld(root);
     const oldHead = await before.engine.createBranch("old", "old", initial.delta, initial.knowledge);
+    await fs.rm(path.join(root, fixture.source.sourcePath));
 
     const result = await reparseCommand({
       root,

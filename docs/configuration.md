@@ -5,8 +5,8 @@ The interactive TUI can start without a configuration file. Defaults are:
 - workspace: current directory;
 - Pi provider/model: the user's Pi selection, otherwise Pi's first available authenticated model;
 - authentication: Pi `/login`, a Pi-managed credential, or an optional profile environment variable;
-- world data: the workspace's `.novel-harness/` directory;
-- terminal sessions: the user's `~/.novel-harness/` directory.
+- source, compiler, world, and session data: the user's `~/.novel-harness/` directory;
+- workspace files: read-only inputs and optional checked-in configuration/instructions.
 
 The TUI can open without credentials. NWH directly uses Pi's native user-level
 authentication, model catalog, and default model settings from `~/.pi/agent/` (or
@@ -76,29 +76,31 @@ variables or the private Pi auth store and must not be committed to YAML.
 NWH does not lower Pi catalog output limits. `maxTokens` is required only as
 model metadata for a custom model that Pi does not already know.
 
-## Local workspace state
+## User-level local state
 
-There is no database configuration. Current state is stored locally:
+There is no database configuration. Current state is stored in the private user directory:
 
 ```text
-.novel-harness/
-├── project.json
-├── sources/<content-id>.json
-├── segments/<source-id>.json
-├── instructions.md
-└── world/v1/
-    ├── compiler/batches/<source-id>.json
-    ├── proposals/{pending,accepted,rejected}/
-    ├── canon/
-    ├── objects/
-    ├── branches/
-    ├── play/active.json
-    ├── frontier/
-    └── snapshots/
+$NWH_HOME/
+├── sources/v1/<sha256>/{manifest.json,source.utf8}
+├── prepared-novels/v1/<content-md5>/
+├── sessions/<workspace-id>/
+└── workspaces/v1/<workspace-id>/
+    ├── project.json
+    ├── sources/<content-id>.json
+    └── world/v1/
+        ├── compiler/batches/<source-id>.json
+        ├── proposals/{pending,accepted,rejected}/
+        ├── canon/
+        ├── objects/
+        ├── branches/
+        ├── play/active.json
+        ├── frontier/
+        └── snapshots/
 ```
 
-JSON control files use a temporary file plus atomic rename. Source manifests record the workspace-relative path, hash, size, and registration time; source content remains in its original file.
+JSON control files use a temporary file plus atomic rename. Source manifests retain the origin label for provenance, but exact source bytes are copied once into the immutable SHA-256 material store. The origin file is no longer an authority after successful ingest.
 
-`.novel-harness/` is excluded from normal model file discovery. Only `.novel-harness/instructions.md` is loaded explicitly as trusted project guidance. Retrieved source excerpts may appear in persisted Pi transcripts.
+Legacy `.novel-harness/` is excluded from normal model file discovery. Only an existing `.novel-harness/instructions.md` is loaded explicitly as trusted project guidance. Retrieved source excerpts may appear in persisted Pi transcripts.
 
 Synthetic readiness thresholds and unused runtime tuning fields are intentionally not configuration. Inventory is reported by `nwh status`; evidence and consistency are checked by `nwh audit`; semantic quality must be measured against an explicit annotated corpus.

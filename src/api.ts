@@ -8,6 +8,9 @@ export { CompilerProposalService, type CompilerProposalKind } from "./compiler/p
 export { CompilerCommitService, CompilerValidator, type CompilerConvergenceProgress, type CompilerValidation } from "./compiler/validator.js";
 export { evaluateCompilerAgainstGold, compilerGoldSchema, type CompilerEvaluationReport, type CompilerGold, type SetMetric } from "./eval/compiler-eval.js";
 export { inspectPreparation, type PreparationInspection, type PreparationStage } from "./workflow/prepare.js";
+export { ingestWorkspaceContent, ingestWorkspaceSource } from "./commands/ingest.js";
+export { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore, type SourceMaterialIdentity } from "./storage/source-material-store.js";
+export { WorkspaceStore, type SourceDocument, type StoredProject } from "./storage/workspace-store.js";
 
 export { ActorModelStore, deterministicActorProposalSource, type CharacterGoal, type CharacterModel } from "./world/actors.js";
 export { commitKnowledgeAwareAction, knowledgeAwareActionSchema, validateActionKnowledge, type ActionGateReport, type KnowledgeAwareAction } from "./world/action-gate.js";

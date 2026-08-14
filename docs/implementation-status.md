@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-13
+Date: 2026-08-14
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
@@ -11,7 +11,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Area | Status | What is actually usable |
 | --- | --- | --- |
 | Local file assistant | Implemented | Claude Code-style TUI, streaming/tool rendering, local lexical discovery, bounded reads, Pi sessions; model tools are read-only |
-| Source ingest | Implemented | Content hash, source manifest, deterministic evidence segments |
+| Source ingest | Implemented | Exact file/stdin/inline bytes archived globally by SHA-256, source manifest, deterministic evidence segments |
 | Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals, recover drafts across retries, allow narrow withdrawal, and use host-owned finish and total-tool-call circuit breakers |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
@@ -20,7 +20,8 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Actor behavior | Partial | Deterministic goal actions are connected; model reasoner exists only as an adapter/API |
 | Narrative | Partial | Immutable narrative frames and deterministic text exist; no Pi narration adapter is connected |
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
-| Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, whole/selected-chapter reparse, rollback and explicit activation |
+| Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation |
+| Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
 | Player experience | Implemented vertical slice | Restricted Pi translation of natural language into a host-owned validated player event |
 | Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, durable branch and resume selection |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
@@ -30,12 +31,12 @@ The branch now implements a constrained end-to-end path from a local novel throu
 
 ### Evidence and compilation
 
-- Source files remain in the workspace and are registered by path, size, and SHA-256.
+- Exact source bytes are copied to the private user-level material store and registered by origin label, size, MD5, and SHA-256; the origin may be deleted after ingest.
 - Segments preserve source line and byte ranges.
 - `compile-source` processes bounded batches and checkpoints only after active proposal calls form a closed graph, the model stops cleanly, and `finish_compiler_batch` succeeds. Stable batch provenance supplies exact active proposal IDs to recovery turns; ordinary source passes defer genesis to the dedicated opening pass. The host owns the active proposal set, executes proposal writes sequentially, caps it at 24, reserves the final finish handshake, rejects concurrent CLI compiler writers, and terminates finish failures or excessive compiler tool loops without checkpointing.
 - Pi compiler sessions expose read-only file tools plus narrow `propose_*` tools.
 - Proposals remain pending until explicit acceptance.
-- Acceptance verifies that the registered source still has its ingest hash, that evidence byte/line ranges and quote hashes match, and that every canonical entity name and alias occurs in its verified evidence excerpt. Empty alias lists are valid.
+- Acceptance verifies the immutable archived source hash, evidence byte/line ranges and quote hashes, and that every canonical entity name and alias occurs in its verified evidence excerpt. Empty alias lists are valid.
 - Canonical entities, claims, events, and rules use logical refs over immutable revisions.
 - `proposals accept-all` accepts dependency-valid canonical artifacts and valid generic possibility templates; unsupported `state-delta` proposals remain staging artifacts.
 - Automated source preparation does not expose the staging-only raw `state-delta` tool. Its catalogs, review barrier, and convergence are scoped to the selected source.
@@ -62,6 +63,7 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 
 ```text
 nwh ingest <novel>
+nwh ingest --stdin|--content <text>
 nwh prepare [novel]
 nwh compile-source
 nwh reparse --all|--chapters <selection>

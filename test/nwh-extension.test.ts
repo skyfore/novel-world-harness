@@ -9,6 +9,7 @@ import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batc
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { BranchStore } from "../src/world/store.js";
+import { SourceMaterialStore } from "../src/storage/source-material-store.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -92,7 +93,7 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 describe("NWH TUI extension", () => {
   it("registers local commands and keeps their output in the transcript", async () => {
     const { commands, sentUserMessages } = await fixture();
-    expect([...commands.keys()]).toEqual(["files", "search", "read", "compile-next", "prepare-all", "status", "clear", "help", "exit"]);
+    expect([...commands.keys()]).toEqual(["files", "search", "read", "prepare-content", "compile-next", "prepare-all", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
     const ctx = commandContext(notifications, actions);
@@ -182,6 +183,21 @@ describe("NWH TUI extension", () => {
       .toMatchObject({ block: true, reason: expect.stringContaining("evidence slice") });
     expect(events.get("tool_call")?.({ type: "tool_call", toolName: "propose_initial_world", toolCallId: "opening-too-early", input: {} }, ctx))
       .toMatchObject({ block: true, reason: expect.stringContaining("dedicated opening-world pass") });
+  });
+
+  it("archives /prepare-content text without replacing the visible user command", async () => {
+    const { commands, root, sentUserMessages, sentHiddenMessages } = await fixture();
+    const notifications: string[] = [];
+    const ctx = preparationContext(notifications, []);
+
+    await commands.get("prepare-content")?.handler("第一章\n人物进入城池。", ctx);
+
+    expect(sentUserMessages).toEqual([]);
+    expect(sentHiddenMessages).toHaveLength(1);
+    expect(sentHiddenMessages[0]).toContain("人物进入城池");
+    expect(sentHiddenMessages[0]).toContain("<source-segment");
+    expect(notifications).toContainEqual(expect.stringContaining("Archived pasted content"));
+    await expect(fs.stat(path.join(root, ".novel-harness"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("isolates each compiler batch from earlier transcript context and replaces model-authored completion claims", async () => {
@@ -427,6 +443,9 @@ describe("NWH TUI extension", () => {
     const { commands, root, sentUserMessages } = await fixture();
     const evidence = await createEvidenceFixture(root, "Original opening.\n", "repair-source.txt");
     await prepareCompilerBatches(root, evidence.source);
+    const archived = path.join(new SourceMaterialStore().root, evidence.source.contentSha256);
+    await fs.chmod(archived, 0o700);
+    await fs.rm(archived, { recursive: true, force: true });
     await fs.writeFile(path.join(root, evidence.source.sourcePath), "Changed opening.\n", "utf8");
     const notifications: string[] = [];
     const questions: string[] = [];
@@ -438,7 +457,7 @@ describe("NWH TUI extension", () => {
 
     expect(questions).toEqual([]);
     expect(sentUserMessages).toEqual([]);
-    expect(notifications).toContainEqual(expect.stringContaining("changed after ingest"));
+    expect(notifications).toContainEqual(expect.stringContaining("Archived source material"));
     expect(notifications).toContainEqual(expect.stringContaining(`nwh audit --source ${evidence.source.id}`));
   });
 

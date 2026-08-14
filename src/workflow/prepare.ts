@@ -123,7 +123,7 @@ export async function inspectPreparation(
 function preparationRepairReasons(audit: CompilerAuditReport): string[] {
   return [
     ...audit.sources.changedSinceIngest.map((sourceId) =>
-      `Source ${sourceId} changed after ingest; re-ingest the changed file as a new content-addressed source before preparing it.`),
+      `Archived source material for ${sourceId} is missing or failed integrity verification; re-ingest the exact source bytes before preparing it.`),
     ...audit.evidence.errors.map((error) =>
       `Evidence ${error.artifact} failed ${error.code}: ${error.message}`),
     ...audit.consistency.causalCycles.map((cycle) =>

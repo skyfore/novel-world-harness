@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ensureWorkspaceState, workspaceStateDir } from "../agent/runtime-paths.js";
 
 type WorkspaceLockOwner = {
   version: 1;
@@ -21,7 +22,8 @@ export class WorkspaceOperationLock {
 
   static async acquire(workspaceRoot: string, operation: string): Promise<WorkspaceOperationLock> {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(operation)) throw new Error(`Unsafe workspace lock name: ${operation}`);
-    const lockPath = path.join(path.resolve(workspaceRoot), ".novel-harness", "locks", `${operation}.lock`);
+    await ensureWorkspaceState(workspaceRoot);
+    const lockPath = path.join(workspaceStateDir(workspaceRoot), "locks", `${operation}.lock`);
     await fs.mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
 
     for (;;) {

@@ -11,7 +11,7 @@ The repository contains a tested, constrained end-to-end novel-player vertical s
 Implemented:
 
 - Claude Code-style TUI with a persistent transcript, streaming responses, rendered tool calls, a multiline editor, status/footer information, and bounded local `list_files`, `search_files`, and `read_file` tools;
-- local state under `.novel-harness/`, with no PostgreSQL, vector database, or RAG service;
+- user-level local state under `$NWH_HOME` (default `~/.novel-harness/`), with no PostgreSQL, vector database, or RAG service;
 - deterministic source registration, hashing, segmentation, and resumable compiler batches;
 - Pi compiler sessions that can only create typed pending proposals;
 - an explicit compiler-batch finish handshake, so failed or partial tool runs remain retryable instead of being checkpointed;
@@ -67,9 +67,9 @@ and GitHub Copilot. `/model` switches models but does not authenticate a provide
 so run `/login` first. NWH reuses Pi's native authentication, model catalog, and
 default model selection in `~/.pi/agent/`; a user who has already configured Pi
 does not need to authenticate again. An explicit `--model` or configured role
-profile overrides Pi's default for that invocation. NWH conversations are stored
-separately under `~/.novel-harness/`, while compiled world data remains in the
-workspace's `.novel-harness/` directory.
+profile overrides Pi's default for that invocation. NWH conversations, archived
+source material, compiler state, and executable world data are stored under
+`~/.novel-harness/`; ordinary runs do not create `.novel-harness/` in the project.
 
 API keys remain supported as an alternative:
 
@@ -93,7 +93,7 @@ compiler batch without first exploring the repository or explaining the CLI:
 /compile-next
 ```
 
-Each successful batch is checkpointed under `.novel-harness/`. `/compile-next`
+Each successful batch is checkpointed under `$NWH_HOME/workspaces/v1/`. `/compile-next`
 continues the active novel from the next unfinished batch. The loop is deliberately
 one batch per user action so importing a long novel cannot silently trigger an
 unbounded sequence of model requests. Generated artifacts remain pending proposals
@@ -190,6 +190,17 @@ nwh play-world --character <id-or-name> --action "我前往藏书楼。"
 
 `ingest` and `compile-source` remain available as lower-level commands. Ingest stores a content-addressed source manifest and deterministic evidence segments; it does not copy the novel into a database. Compiler tools can only write pending typed proposals. `proposals accept-all` remains an automation helper that revalidates dependencies and evidence, but individual `show` plus `accept`/`reject` is the recommended review path.
 
+Ingest copies the exact UTF-8 bytes into the private immutable user material
+store before compilation. The disposable origin file may then be removed. File,
+stdin, inline CLI content, and TUI content use the same identity pipeline:
+
+```bash
+nwh ingest ./novel.txt
+nwh ingest --stdin --title novel.txt < novel.txt
+nwh ingest --content '第一章……' --title novel.txt
+# TUI: /prepare-content 第一章……
+```
+
 Prepared data is explicitly revisable. A full rebuild or a bounded chapter repair
 creates a new prepared revision for the same source bytes:
 
@@ -265,6 +276,10 @@ publishing or activating a revision never mutates an existing revision bundle.
 Branch objects and branch heads are never cached: every new branch captures its
 canonical data, actor policy, and possibility-template revisions and then evolves
 independently from later preparation changes and from every other branch.
+The exact source bytes are stored once under
+`$NWH_HOME/sources/v1/<content-sha256>/source.utf8`; prepared revisions refer to
+that immutable material, so audit, restore, and reparse do not reopen the origin
+path.
 
 ## Architecture
 

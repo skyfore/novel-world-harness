@@ -329,9 +329,9 @@ Promotion/demotion is based on scene relevance, causal impact, active goals, pro
 
 ## 12. Storage
 
-Phase 0 retains human-readable, workspace-local files under `.novel-harness/` for project metadata, source manifests, deterministic evidence segments, compiler batch checkpoints, typed proposals, and Pi sessions.
+Phase 0 retains human-readable, user-level files under `$NWH_HOME` for project metadata, immutable source material, deterministic evidence segments, compiler batch checkpoints, typed proposals, world branches, and Pi sessions. Ordinary operation does not write harness state into the current workspace.
 
-Executable world data should live in a separate `.novel-harness/world/` namespace. Branch truth should use immutable content-addressed event/delta/commit objects plus an atomically replaced branch head pointer. This gives local-file storage a Git-like crash-safe commit boundary without requiring a database.
+Executable world data lives in each isolated `$NWH_HOME/workspaces/v1/<workspace-id>/world/` namespace. Branch truth uses immutable content-addressed event/delta/commit objects plus an atomically replaced branch head pointer. This gives local-file storage a Git-like crash-safe commit boundary without requiring a database.
 
 Snapshots, frontier materializations, indexes, and divergence metrics are caches and may be regenerated.
 

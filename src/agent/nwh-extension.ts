@@ -10,6 +10,7 @@ import { compilerBatchFailure, compilerBatchOutcomeFromMessages } from "../compi
 import {
   markSourceLoopBatchComplete,
   prepareNextSourceLoopTurn,
+  prepareSourceLoopFromContent,
   prepareSourceLoopFromInput,
   type SourceLoopTurn,
 } from "../compiler/source-loop.js";
@@ -23,6 +24,7 @@ import { InitialWorldStore } from "../world/initial.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import { workspaceStateDir } from "./runtime-paths.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -39,6 +41,7 @@ const COMMAND_HELP = `NWH commands:
   /files [path filter]       list safe workspace files
   /search <text>             search local files for fixed text
   /read <path> [start:end]   read a bounded line range
+  /prepare-content <text>    archive and compile pasted novel text
   /compile-next              process the next evidence batch for the active novel
   /prepare-all [source]      finish compilation and create a playable world
   /status                    show workspace, model and session
@@ -517,6 +520,40 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       },
     });
 
+    pi.registerCommand("prepare-content", {
+      description: "Archive pasted novel text and start its compiler loop",
+      handler: async (args, ctx) => {
+        if (pendingTurn || prepareAllState) {
+          ctx.ui.notify("A novel preparation run is already active.", "warning");
+          return;
+        }
+        if (!args.trim()) throw new Error("Usage: /prepare-content <novel text>");
+        const content = args;
+        const preparation = await prepareSourceLoopFromContent(workspace.root, content, {
+          title: "pasted-novel.txt",
+          cacheRoot: options.preparedCacheRoot,
+        });
+        activeSourceId = preparation.source.id;
+        if (preparation.status === "complete") {
+          ctx.ui.notify(
+            preparation.preparedCache?.status === "restored"
+              ? `Restored active prepared revision ${preparation.preparedCache.bundleHash} for pasted content; run /prepare-all to create an independent branch.`
+              : `Pasted content has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`,
+            "info",
+          );
+          return;
+        }
+        activateCompilerTools(ctx);
+        await beginTurn(preparation);
+        ctx.ui.notify(`Archived pasted content as ${preparation.source.id} · starting batch 1/${preparation.totalBatches}.`, "info");
+        pi.sendMessage({
+          customType: "nwh-compiler-batch",
+          content: `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
+          display: false,
+        }, { triggerTurn: true });
+      },
+    });
+
     pi.registerCommand("compile-next", {
       description: "Process the next evidence batch for the active novel",
       handler: async (_args, ctx) => {
@@ -614,6 +651,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       handler: async (_args, ctx) => {
         ctx.ui.notify([
           `workspace: ${workspace.root}`,
+          `state: ${workspaceStateDir(workspace.root)}`,
           `mode: ${compilerToolsActive && mode === "assistant" ? "world-compiler-loop" : mode}`,
           `active source: ${activeSourceId ?? "none"}`,
           `model: ${modelLabel(ctx.model)}`,

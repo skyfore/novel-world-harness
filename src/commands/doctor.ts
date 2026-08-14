@@ -5,6 +5,7 @@ import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { loadOptionalConfig } from "../config/load.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { ok, fail, heading } from "../util/terminal.js";
+import { nwhRuntimeDir } from "../agent/runtime-paths.js";
 
 function nodeVersionOk(): boolean {
   const [major, minor] = process.versions.node.split(".").map(Number);
@@ -26,8 +27,12 @@ export async function doctorCommand(configPath: string, piAgentDir = getAgentDir
   if (config) ok(`Config valid: ${configPath}`);
   else ok(`No config file; using provider-neutral Pi defaults in ${root}`);
 
-  await fs.access(root, fs.constants.R_OK | fs.constants.W_OK);
-  ok(`Local workspace readable and writable: ${root}`);
+  await fs.access(root, fs.constants.R_OK);
+  ok(`Local workspace readable: ${root}`);
+  const runtimeDir = nwhRuntimeDir();
+  await fs.mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+  await fs.access(runtimeDir, fs.constants.R_OK | fs.constants.W_OK);
+  ok(`User runtime readable and writable: ${runtimeDir}`);
 
   try {
     const runtime = await ModelRuntime.create({

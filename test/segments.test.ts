@@ -59,7 +59,7 @@ describe("source segmentation", () => {
   it("detects source mutation after ingest before producing evidence spans", async () => {
     const { root, source } = await fixture("Chapter 1\nOriginal\n");
     await fs.writeFile(path.join(root, source.sourcePath), "Chapter 1\nChanged\n", "utf8");
-    await expect(segmentSource(root, source)).rejects.toThrow("Source changed since ingest");
+    await expect(segmentSource(root, source)).rejects.toThrow("changed after ingest");
   });
 
   it("falls back to bounded blocks when no structural headings exist", async () => {

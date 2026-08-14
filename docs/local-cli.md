@@ -1,10 +1,10 @@
 # Local-first terminal UI design
 
-NWH keeps executable world evidence and committed history in the workspace's
-`.novel-harness/` directory. Process runtime state is separate: saved terminal
-sessions and other NWH runtime files live under `~/.novel-harness/` (or
-`NWH_HOME` when explicitly set), so running the CLI does not add session files
-to the current project.
+NWH keeps source material, compiler state, executable world evidence, committed
+history, and terminal sessions under `~/.novel-harness/` (or `NWH_HOME` when
+explicitly set). Workspace state is isolated by a stable path identity below
+`workspaces/v1/`; exact source bytes are shared by SHA-256 below `sources/v1/`.
+Running the CLI does not create `.novel-harness/` in the current project.
 
 ## Decision
 
@@ -18,6 +18,7 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - a standalone quoted, unquoted, absolute, or workspace-relative novel path starts
   the durable source compiler loop;
 - `/files`, `/search`, and `/read` work without a model request;
+- `/prepare-content <text>` archives exact pasted text and starts its compiler loop;
 - `/prepare-all [source-id] [branch-id]` completes guided preparation in the current TUI;
 - `NOVEL.md` provides checked-in project instructions;
 - `.novel-harness/instructions.md` provides local additions.
@@ -74,6 +75,13 @@ The TUI accepts `!command` as an explicit user action, matching agent-terminal c
 Pi transcripts are stored under `~/.novel-harness/sessions/` unless `--no-save` is used. Because tool results become conversation context, retrieved excerpts can be present in a transcript. `/clear` starts a new Pi runtime session without deleting prior append-only files. Session replacement is owned by `AgentSessionRuntime`, so `/new`, `/resume`, `/fork`, and `/clear` rebind the TUI and tools to the active session instead of leaving stale event subscriptions.
 
 Project manifests, source indexes, compiler batch checkpoints, proposals, and world objects are also local files. These are inspectable implementation state, not model memory. They remain hidden from general model file search.
+
+The origin novel is copied to a mode-`0400`, content-addressed source object
+before segmentation. Evidence verification, cache restore, whole-book reparse,
+chapter reparse, and runtime reopening use that archived object; changing or
+deleting the origin path does not change the registered source. Legacy
+workspace-local `.novel-harness/` state is copied into the user store on first
+open and deliberately left in place for recoverability.
 
 Completed novel preparation is reusable across workspaces. NWH writes immutable
 bundles below `$NWH_HOME/prepared-novels/v1/<content-md5>/revisions/<bundle-hash>/`;

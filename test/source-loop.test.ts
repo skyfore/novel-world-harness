@@ -2,13 +2,16 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 import {
   markSourceLoopBatchComplete,
   parseStandaloneSourcePath,
   prepareNextSourceLoopTurn,
+  prepareSourceLoopFromContent,
   prepareSourceLoopFromInput,
 } from "../src/compiler/source-loop.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
+import { readSourceMaterial } from "../src/storage/source-material-store.js";
 
 const roots: string[] = [];
 
@@ -47,7 +50,7 @@ describe("novel source compiler loop", () => {
     expect(first.prompt).toContain("Execute the novel-world compiler loop now");
     expect(first.prompt).toContain("EvidenceRef");
     expect(first.prompt).toContain("人物1进入城池");
-    await expect(fs.stat(path.join(root, ".novel-harness", "sources", `${first.source.id}.json`))).resolves.toBeDefined();
+    await expect(fs.stat(path.join(workspaceStateDir(root), "sources", `${first.source.id}.json`))).resolves.toBeDefined();
     await expect((await WorkspaceStore.create(root)).readProject()).resolves.toMatchObject({
       name: path.basename(root),
       language: "zh-CN",
@@ -74,6 +77,21 @@ describe("novel source compiler loop", () => {
   it("leaves ordinary conversation input unchanged", async () => {
     const { root } = await fixture();
     await expect(prepareSourceLoopFromInput(root, "请分析刘备的角色目标")).resolves.toBeNull();
+  });
+
+  it("archives direct content and compiles it without creating a source file", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-source-content-"));
+    roots.push(root);
+    const exactContent = "\n第一章\n人物进入城池。\n\n";
+    const preparation = await prepareSourceLoopFromContent(root, exactContent, { title: "inline.txt" });
+
+    expect(preparation.status).toBe("ready");
+    expect(preparation.source).toMatchObject({ title: "inline.txt", sourcePath: "content:inline.txt" });
+    if (preparation.status !== "ready") throw new Error("expected compiler turn");
+    expect(preparation.prompt).toContain("人物进入城池");
+    expect((await readSourceMaterial(root, preparation.source)).toString("utf8")).toBe(exactContent);
+    await expect(fs.stat(path.join(root, "inline.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.stat(path.join(root, ".novel-harness"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("uses configured project metadata when a pasted path initializes local state", async () => {

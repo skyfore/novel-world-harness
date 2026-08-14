@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { SourceDocument } from "../storage/workspace-store.js";
+import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { readSourceMaterial, SourceMaterialStore } from "../storage/source-material-store.js";
+import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 
 export type SourceSegment = {
   version: 1;
@@ -43,7 +45,7 @@ export const SEGMENTER_VERSION = 2 as const;
 export class SegmentStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", "v1", "evidence", "segments");
+    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "evidence", "segments");
   }
 
   async write(manifest: SegmentManifest): Promise<void> {
@@ -78,10 +80,7 @@ export class SegmentStore {
 }
 
 export async function segmentSource(workspaceRoot: string, source: SourceDocument): Promise<SegmentManifest> {
-  const absolute = path.resolve(workspaceRoot, source.sourcePath);
-  const relative = path.relative(workspaceRoot, absolute);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Source escapes workspace: ${source.sourcePath}`);
-  const buffer = await fs.readFile(absolute);
+  const buffer = await readSourceMaterial(workspaceRoot, source);
   const sourceSha256 = sha256(buffer);
   if (sourceSha256 !== source.contentSha256) {
     throw new Error(`Source changed since ingest: ${source.sourcePath}; expected ${source.contentSha256}, found ${sourceSha256}`);
@@ -104,10 +103,11 @@ export async function segmentSource(workspaceRoot: string, source: SourceDocumen
 }
 
 export async function readSegmentText(workspaceRoot: string, segment: SourceSegment): Promise<string> {
-  const absolute = path.resolve(workspaceRoot, segment.sourcePath);
-  const relative = path.relative(workspaceRoot, absolute);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Segment source escapes workspace: ${segment.sourcePath}`);
-  const buffer = await fs.readFile(absolute);
+  const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(segment.sourceId);
+  const buffer = source
+    ? await readSourceMaterial(workspaceRoot, source)
+    : await new SourceMaterialStore().readBySourceId(segment.sourceId);
+  if (!buffer) throw new Error(`Unknown segment source: ${segment.sourceId}`);
   const slice = buffer.subarray(segment.startByte, segment.endByte);
   if (sha256(slice) !== segment.textSha256) throw new Error(`Segment source changed: ${segment.id}`);
   return slice.toString("utf8");

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { idSchema } from "./model.js";
 
@@ -16,7 +17,7 @@ export type ActivePlaySession = z.infer<typeof activePlaySessionSchema>;
 export class PlaySessionStore {
   readonly filePath: string;
   constructor(workspaceRoot: string) {
-    this.filePath = path.join(workspaceRoot, ".novel-harness", "world", "v1", "play", "active.json");
+    this.filePath = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "play", "active.json");
   }
   async read(): Promise<ActivePlaySession | null> {
     try {

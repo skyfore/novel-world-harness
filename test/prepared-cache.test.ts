@@ -55,6 +55,11 @@ describe("versioned prepared novel cache", () => {
     const cachedBundlePath = path.join(published.cachePath, "bundle.json");
     const immutableBaseline = await fs.readFile(cachedBundlePath, "utf8");
     expect((await fs.stat(cachedBundlePath)).mode & 0o222).toBe(0);
+    await fs.rm(path.join(sourceRoot, fixture.source.sourcePath));
+    await expect(sourceCache.lookup(fixture.source)).resolves.toMatchObject({
+      status: "already-cached",
+      bundleHash: published.bundleHash,
+    });
 
     const reusedRoot = await temporaryRoot("nwh-prepared-reuse-");
     const reusedFixture = await createEvidenceFixture(reusedRoot, content, "same-content-different-name.md");

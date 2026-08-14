@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { SEGMENTER_VERSION, SegmentStore, readSegmentText, segmentSource, type SourceSegment } from "./segments.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
@@ -95,7 +96,7 @@ const MAX_SEGMENTS_PER_BATCH = 1;
 export class CompilerBatchStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", "v1", "compiler", "batches");
+    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "compiler", "batches");
   }
 
   async read(sourceId: string): Promise<BatchProgress> {

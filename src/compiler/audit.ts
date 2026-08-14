@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { ActorModelStore } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore } from "../world/initial.js";
@@ -7,6 +5,7 @@ import type { CanonicalEvent, EvidenceRef } from "../world/model.js";
 import { SegmentStore } from "./segments.js";
 import { EvidenceVerifier } from "./evidence.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import { readSourceMaterial } from "../storage/source-material-store.js";
 
 export type CompilerAuditReport = {
   version: 1;
@@ -80,12 +79,8 @@ export async function auditCompiler(
       segmentCount += manifest.segments.length;
       indexedBytes += manifest.segments.reduce((sum, segment) => sum + segment.bytes, 0);
     }
-    const absolute = path.resolve(workspaceRoot, source.sourcePath);
     try {
-      const current = await fs.readFile(absolute);
-      const crypto = await import("node:crypto");
-      const hash = crypto.createHash("sha256").update(current).digest("hex");
-      if (hash !== source.contentSha256) changedSinceIngest.push(source.id);
+      await readSourceMaterial(workspaceRoot, source);
     } catch {
       changedSinceIngest.push(source.id);
     }

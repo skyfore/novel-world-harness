@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { readSourceMaterial } from "../storage/source-material-store.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import type { EvidenceRef, SourceSpan, ValidationIssue } from "../world/model.js";
 
@@ -15,16 +14,13 @@ export type EvidenceInspection = EvidenceVerification & {
 
 type CachedSource = {
   source: SourceDocument;
-  absolutePath: string;
   buffer: Buffer;
   lines: Array<{ startByte: number; endByte: number }>;
-  size: number;
-  mtimeMs: number;
-  ctimeMs: number;
 };
 
 export class EvidenceVerifier {
   private cache?: Map<string, CachedSource>;
+  private sourceErrors?: Map<string, string>;
 
   constructor(private readonly workspaceRoot: string) {}
 
@@ -53,13 +49,23 @@ export class EvidenceVerifier {
     return this.inspectCached(reference);
   }
 
-  clearCache(): void { this.cache = undefined; }
+  clearCache(): void {
+    this.cache = undefined;
+    this.sourceErrors = undefined;
+  }
 
   private async inspectCached(reference: EvidenceRef): Promise<EvidenceVerification & { excerpt?: string }> {
     const span = reference.span;
     const cached = await this.getSource(span.sourceId);
     if (!cached) {
-      return { valid: false, issues: [issue("UNKNOWN_EVIDENCE_SOURCE", `Evidence source ${span.sourceId} is not ingested`)] };
+      const sourceError = this.sourceErrors?.get(span.sourceId);
+      return {
+        valid: false,
+        issues: [issue(
+          sourceError ? "EVIDENCE_SOURCE_MISSING" : "UNKNOWN_EVIDENCE_SOURCE",
+          sourceError ?? `Evidence source ${span.sourceId} is not ingested`,
+        )],
+      };
     }
     const currentHash = sha256(cached.buffer);
     if (currentHash !== cached.source.contentSha256) {
@@ -104,40 +110,21 @@ export class EvidenceVerifier {
       await this.loadSources();
       cached = this.cache!.get(sourceId);
     }
-    if (!cached) return undefined;
-    const stat = await fs.stat(cached.absolutePath);
-    if (stat.size === cached.size && stat.mtimeMs === cached.mtimeMs && stat.ctimeMs === cached.ctimeMs) return cached;
-    const buffer = await fs.readFile(cached.absolutePath);
-    const refreshed = {
-      ...cached,
-      buffer,
-      lines: lineRanges(buffer.toString("utf8")),
-      size: stat.size,
-      mtimeMs: stat.mtimeMs,
-      ctimeMs: stat.ctimeMs,
-    };
-    this.cache!.set(sourceId, refreshed);
-    return refreshed;
+    return cached;
   }
 
   private async loadSources(): Promise<void> {
     const store = await WorkspaceStore.create(this.workspaceRoot);
     const sources = await store.listSources();
     this.cache = new Map();
+    this.sourceErrors = new Map();
     for (const source of sources) {
-      const absolutePath = path.resolve(this.workspaceRoot, source.sourcePath);
-      const relative = path.relative(this.workspaceRoot, absolutePath);
-      if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
-      const [buffer, stat] = await Promise.all([fs.readFile(absolutePath), fs.stat(absolutePath)]);
-      this.cache.set(source.id, {
-        source,
-        absolutePath,
-        buffer,
-        lines: lineRanges(buffer.toString("utf8")),
-        size: stat.size,
-        mtimeMs: stat.mtimeMs,
-        ctimeMs: stat.ctimeMs,
-      });
+      try {
+        const buffer = await readSourceMaterial(this.workspaceRoot, source);
+        this.cache.set(source.id, { source, buffer, lines: lineRanges(buffer.toString("utf8")) });
+      } catch (error) {
+        this.sourceErrors.set(source.id, error instanceof Error ? error.message : String(error));
+      }
     }
   }
 }

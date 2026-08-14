@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
 import { possibilitySchema, type Possibility } from "./model.js";
@@ -14,7 +15,7 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export class PossibilityTemplateStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", "v1", "canon", "possibilities");
+    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "canon", "possibilities");
   }
 
   async put(input: PossibilityTemplate): Promise<void> {

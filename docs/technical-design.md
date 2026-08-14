@@ -435,16 +435,22 @@ Actor proposal generation receives `WorldView(actor, branch, commit)`, not omnis
 
 ## 6. Local storage architecture
 
-Keep the `.novel-harness/` control-plane files for project metadata, sources, deterministic evidence segments, compiler batch checkpoints, proposals, and Pi sessions. World data remains a separate namespace rather than expanding `WorkspaceStore` into a monolith.
+Keep human-readable control-plane and world files below `$NWH_HOME`. Exact
+source bytes are shared immutable objects keyed by SHA-256; each workspace gets
+an isolated state namespace keyed by the resolved workspace-path identity.
+World data remains a separate namespace rather than expanding `WorkspaceStore`
+into a monolith.
 
 ```text
-.novel-harness/
-├── project.json
-├── sources/
-├── segments/
-├── sessions/
-└── world/
-    └── v1/
+$NWH_HOME/
+├── sources/v1/<sha256>/{manifest.json,source.utf8}
+├── prepared-novels/v1/<md5>/
+├── sessions/<workspace-id>/
+└── workspaces/v1/<workspace-id>/
+    ├── project.json
+    ├── sources/
+    └── world/
+      └── v1/
         ├── compiler/batches/
         ├── canon/
         │   ├── entities/{refs,revisions}/
@@ -473,6 +479,9 @@ Keep the `.novel-harness/` control-plane files for project metadata, sources, de
         └── frontier/
             └── <branch-id>/<commit-sha>.json
 ```
+
+Legacy workspace-local `.novel-harness/` trees are copied atomically on first
+open and retained as a recovery source. New writes target only the user store.
 
 ### 6.1 Immutable-object commit protocol
 

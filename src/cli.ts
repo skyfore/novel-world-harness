@@ -6,7 +6,7 @@ import { resolveConfigPath } from "./config/load.js";
 import { auditCommand } from "./commands/audit.js";
 import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
-import { ingestCommand } from "./commands/ingest.js";
+import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
 import { playCommand } from "./commands/play.js";
 import { compileCommand } from "./commands/compile.js";
@@ -62,13 +62,36 @@ function parseTuiMode(value: string): TuiMode {
   return value;
 }
 
+async function readStandardInput(): Promise<Buffer> {
+  if (process.stdin.isTTY) throw new Error("--stdin requires piped UTF-8 novel content.");
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  const content = Buffer.concat(chunks);
+  if (!content.length) throw new Error("--stdin received no novel content.");
+  return content;
+}
+
 program.command("init")
   .argument("[directory]", "target directory")
   .option("--root <path>", "local novel workspace")
   .description("create starter novel-harness.yaml and NOVEL.md files")
   .action(async (directory, options) => initCommand(directory ?? rootFor(options)));
 program.command("doctor").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("validate runtime, credentials and local file tooling").action(async (options) => doctorCommand(configFor(options)));
-program.command("ingest").argument("<novel>", "UTF-8 source novel path").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("register a novel and build its deterministic evidence index").action(async (novel, options) => ingestCommand(novel, configFor(options)));
+program.command("ingest")
+  .argument("[novel]", "UTF-8 source novel path")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--stdin", "read exact UTF-8 novel content from standard input")
+  .option("--content <text>", "use exact inline UTF-8 novel content")
+  .option("--title <name>", "title for stdin or inline content", "pasted-novel.txt")
+  .description("archive a novel in the user-level material store and build its evidence index")
+  .action(async (novel, options) => {
+    const selected = Number(Boolean(novel)) + Number(Boolean(options.stdin)) + Number(options.content !== undefined);
+    if (selected !== 1) throw new Error("Choose exactly one source: [novel], --stdin, or --content <text>.");
+    if (novel) return ingestCommand(novel, configFor(options));
+    const content = options.stdin ? await readStandardInput() : options.content;
+    return ingestContentCommand(content, options.title, configFor(options));
+  });
 program.command("status").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("show inventory and the next safe preparation step").action(async (options) => statusCommand(configFor(options)));
 program.command("audit")
   .option("--root <path>", "local novel workspace")

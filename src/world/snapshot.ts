@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
 import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, worldStateSchema, type CommitId, type WorldState } from "./model.js";
 
@@ -16,7 +17,7 @@ export type WorldSnapshot = {
 export class WorldSnapshotStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", "v1", "cache", "snapshots");
+    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "cache", "snapshots");
   }
 
   async write(commitId: CommitId, state: WorldState): Promise<WorldSnapshot> {
@@ -62,4 +63,3 @@ export class WorldSnapshotStore {
     return path.join(this.root, `${commitId}.json`);
   }
 }
-

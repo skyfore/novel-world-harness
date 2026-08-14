@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { workspaceStateDir } from "../agent/runtime-paths.js";
 import type { z } from "zod";
 import { canonicalJson, assertContentHash, contentHash } from "./canonical.js";
 import {
@@ -53,7 +54,7 @@ async function writeImmutable(filePath: string, content: string): Promise<void> 
 export class WorldObjectStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", WORLD_STORAGE_VERSION);
+    this.root = path.join(workspaceStateDir(workspaceRoot), "world", WORLD_STORAGE_VERSION);
   }
   putDelta(delta: StateDelta): Promise<ObjectHash> {
     return this.put("deltas", stateDeltaSchema, delta);
@@ -100,7 +101,7 @@ export class WorldObjectStore {
 export class BranchStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", WORLD_STORAGE_VERSION, "branches");
+    this.root = path.join(workspaceStateDir(workspaceRoot), "world", WORLD_STORAGE_VERSION, "branches");
   }
   async create(input: Branch): Promise<Branch> {
     const branch = branchSchema.parse(input);

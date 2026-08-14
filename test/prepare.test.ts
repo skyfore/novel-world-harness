@@ -11,6 +11,7 @@ import { WorldEngine } from "../src/world/engine.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { StateSchemaRegistry, DEFAULT_STATE_FIELDS } from "../src/world/state.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { SourceMaterialStore } from "../src/storage/source-material-store.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -108,12 +109,15 @@ describe("preparation workflow inspection", () => {
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "Original opening.\n", "selected.txt");
     await prepareCompilerBatches(root, fixture.source);
+    const archived = path.join(new SourceMaterialStore().root, fixture.source.contentSha256);
+    await fs.chmod(archived, 0o700);
+    await fs.rm(archived, { recursive: true, force: true });
     await fs.writeFile(path.join(root, fixture.source.sourcePath), "Changed opening.\n", "utf8");
 
     await expect(inspectPreparation(root, { sourceId: fixture.source.id })).resolves.toMatchObject({
       stage: "repair",
       next: `nwh audit --source ${fixture.source.id}`,
-      repairReasons: [expect.stringContaining("changed after ingest")],
+      repairReasons: [expect.stringContaining("Archived source material")],
       audit: { sources: { registered: 1, changedSinceIngest: [fixture.source.id] } },
     });
   });

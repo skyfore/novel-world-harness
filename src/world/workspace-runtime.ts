@@ -1,4 +1,5 @@
 import { ActorModelStore, deterministicActorProposalSource } from "./actors.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
 import { canonicalEventToPossibility } from "./canon-runtime.js";
 import { loadWorldContext } from "./context.js";
 import { WorldEngine } from "./engine.js";
@@ -13,6 +14,7 @@ export type WorkspaceWorld = {
 };
 
 export async function openWorkspaceWorld(workspaceRoot: string, render?: NarrativeRender): Promise<WorkspaceWorld> {
+  await WorkspaceStore.create(workspaceRoot);
   const { context, contexts } = await loadWorldContext(workspaceRoot);
   const engine = new WorldEngine(workspaceRoot, context, (snapshotHash) => contexts.load(snapshotHash));
   const actorModels = new ActorModelStore(workspaceRoot);

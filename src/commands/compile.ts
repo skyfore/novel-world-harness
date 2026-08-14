@@ -21,6 +21,7 @@ export type CompileCommandOptions = {
   disabledProposalTools?: readonly string[];
   acquireLock?: boolean;
   promptTimeoutMs?: number;
+  onProgress?: (message: string) => void;
 };
 
 const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -56,15 +57,19 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     ...(options.includeLocalTools !== undefined ? { includeLocalTools: options.includeLocalTools } : {}),
     ...(options.disabledProposalTools ? { disabledProposalTools: options.disabledProposalTools } : {}),
     ...(printMode ? { onRetry(event) {
-      stderr.write(`\n${formatRetryNotice(event)}\n`);
+      const message = formatRetryNotice(event);
+      if (options.onProgress) options.onProgress(message);
+      else stderr.write(`\n${message}\n`);
     } } : {}),
     ...(printMode ? { onText(delta: string) {
       wroteText = true;
-      stdout.write(delta);
+      if (!options.onProgress) stdout.write(delta);
     } } : {}),
     ...(printMode ? { onTool(name: string, input: unknown) {
       const details = input as Record<string, unknown>;
-      stderr.write(`\n↳ ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}\n`);
+      const message = `↳ ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`;
+      if (options.onProgress) options.onProgress(message);
+      else stderr.write(`\n${message}\n`);
     } } : {}),
   });
   try {
@@ -74,7 +79,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
       });
       const failure = compilerBatchFailure(report);
       if (failure) throw new Error(`Compiler prompt was not completed: ${failure}.`);
-      if (wroteText) stdout.write("\n");
+      if (wroteText && !options.onProgress) stdout.write("\n");
       return;
     }
     await session.runInteractive({ tuiMode: options.tuiMode, initialMessage: DEFAULT_COMPILER_PROMPT });

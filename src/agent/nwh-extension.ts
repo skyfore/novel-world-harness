@@ -16,7 +16,7 @@ import {
 } from "../compiler/source-loop.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS } from "../compiler/pi-compiler.js";
-import { prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld } from "../compiler/batches.js";
+import { prepareCompilerBatches, prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld } from "../compiler/batches.js";
 import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
 import { inspectPreparation } from "../workflow/prepare.js";
@@ -40,6 +40,9 @@ import { choosePlayExperience, choosePlayInstance, choosePlayNovel } from "../wo
 import { formatCharacters, formatInstances, formatNovels, formatProgress } from "../commands/catalog.js";
 import { createTuiUserQuestion } from "../util/tui-user-question.js";
 import type { UserQuestionCustomInput } from "../util/ask-user-question.js";
+import { auditCompiler } from "../compiler/audit.js";
+import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
+import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -53,6 +56,7 @@ export type NwhExtensionOptions = {
   onSessionShutdown?: () => Promise<void>;
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
   preparedCacheRoot?: string;
+  runReparse?: typeof reparseCommand;
 };
 
 const COMMAND_HELP = `NWH commands:
@@ -69,6 +73,9 @@ const COMMAND_HELP = `NWH commands:
   /prepare-content <text>    archive and compile pasted novel text
   /compile-next              process the next evidence batch for the active novel
   /prepare-all [source]      finish compilation and create a playable world
+  /reparse [--source id] (--chapters 2,37 | --all) rebuild selected novel evidence
+  /audit [--source id]       audit novel evidence and canonical consistency
+  /prepared-cache [list|activate] inspect or activate prepared revisions
   /status                    show workspace, model and session
   /clear                     start a new conversation
   /help                      show this help
@@ -107,6 +114,37 @@ export function splitCommandArguments(value: string): string[] {
   return tokens;
 }
 
+export type TuiReparseArguments = {
+  source?: string;
+  chapters?: string;
+  all: boolean;
+  model?: string;
+};
+
+export function parseTuiReparseArguments(value: string): TuiReparseArguments {
+  const tokens = splitCommandArguments(value);
+  const parsed: TuiReparseArguments = { all: false };
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token === "--all") {
+      parsed.all = true;
+      continue;
+    }
+    if (token === "--source" || token === "--chapters" || token === "--model") {
+      const next = tokens[index + 1];
+      if (!next || next.startsWith("--")) throw new Error(`${token} requires a value.`);
+      index += 1;
+      if (token === "--source") parsed.source = next;
+      else if (token === "--chapters") parsed.chapters = next;
+      else parsed.model = next;
+      continue;
+    }
+    throw new Error(`Unknown /reparse argument '${token}'. Use --source, --chapters, --all, or --model.`);
+  }
+  if (parsed.all && parsed.chapters) throw new Error("Choose only one reparse scope: --all or --chapters <selection>.");
+  return parsed;
+}
+
 function modelLabel(model: { provider: string; id: string } | undefined): string {
   return model ? `${model.provider}/${model.id}` : "unresolved";
 }
@@ -124,6 +162,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let playerMode = false;
     let selectedPlay: SelectedPlayExperience | undefined;
     const preparedCache = new PreparedNovelCache(workspace.root, options.preparedCacheRoot);
+    const runReparse = options.runReparse ?? reparseCommand;
 
     const setPlayerStatus = (ctx: ExtensionContext, selection: SelectedPlayExperience) => {
       if (ctx.mode !== "tui") return;
@@ -287,6 +326,37 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         question: title,
         options: choices,
         ...(customInput ? { customInput } : {}),
+      });
+    };
+
+    const chooseNovelSourceId = async (
+      ctx: ExtensionContext,
+      requested?: string,
+      question = "Choose a novel source",
+    ): Promise<string | undefined> => {
+      const store = await WorkspaceStore.create(workspace.root);
+      const sources = await store.listSources();
+      if (!sources.length) throw new Error("No novel source is registered. Ingest or prepare a novel first.");
+      if (requested) return (await resolveNovelSource(store, requested)).id;
+      if (sources.length === 1) return sources[0]!.id;
+      return choose(ctx, question, sources.map((source, index) => ({
+        value: source.id,
+        label: source.title,
+        description: `${source.sourcePath} (${source.id})`,
+        recommended: index === 0,
+      })), {
+        label: "Enter a source",
+        description: "Type a registered source id, title, or path.",
+        prompt: "Source id, title, or path",
+        placeholder: sources[0]?.id,
+        invalidMessage: "No unique registered novel matches that value.",
+        resolve: async (value) => {
+          try {
+            return (await resolveNovelSource(store, value)).id;
+          } catch {
+            return undefined;
+          }
+        },
       });
     };
 
@@ -938,6 +1008,211 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         };
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing world"));
         await advancePrepareAll(ctx);
+      },
+    });
+
+    pi.registerCommand("reparse", {
+      description: "Rebuild selected chapters or an entire novel into a new prepared revision",
+      handler: async (args, ctx) => {
+        if (pendingTurn || prepareAllState) {
+          ctx.ui.notify("A compiler or full-preparation run is already active.", "warning");
+          return;
+        }
+        const parsed = parseTuiReparseArguments(args);
+        const sourceId = await chooseNovelSourceId(ctx, parsed.source, "Choose a novel to reparse");
+        if (!sourceId) {
+          ctx.ui.notify("Reparse cancelled.", "info");
+          return;
+        }
+        const store = await WorkspaceStore.create(workspace.root);
+        const source = await store.getSource(sourceId);
+        if (!source) throw new Error(`Unknown source '${sourceId}'.`);
+        const batches = await prepareCompilerBatches(workspace.root, source);
+        if (!batches.length) throw new Error(`Source ${source.id} has no compiler batches.`);
+        const chapterMap = new Map<number, { title?: string; batches: number }>();
+        for (const batch of batches) {
+          const current = chapterMap.get(batch.chapterOrdinal);
+          chapterMap.set(batch.chapterOrdinal, {
+            ...(batch.chapterTitle ? { title: batch.chapterTitle } : current?.title ? { title: current.title } : {}),
+            batches: (current?.batches ?? 0) + 1,
+          });
+        }
+        const availableChapters = [...chapterMap.keys()].sort((left, right) => left - right);
+        let all = parsed.all;
+        let chapters = parsed.chapters;
+        if (!all && !chapters) {
+          const scope = await choose(ctx, "Choose reparse scope", [
+            {
+              value: "chapters",
+              label: "Selected chapters",
+              description: "Rebuild one chapter or enter a comma-separated range.",
+              recommended: true,
+            },
+            {
+              value: "all",
+              label: "Entire novel",
+              description: `Rebuild all ${batches.length} compiler batches while retaining the prior revision.`,
+            },
+          ]);
+          if (!scope) {
+            ctx.ui.notify("Reparse cancelled.", "info");
+            return;
+          }
+          all = scope === "all";
+        }
+        if (!all) {
+          if (!chapters) {
+            chapters = await choose(ctx, "Choose chapters to reparse", availableChapters.map((ordinal) => {
+              const chapter = chapterMap.get(ordinal)!;
+              return {
+                value: String(ordinal),
+                label: chapter.title ? `${ordinal}. ${chapter.title}` : `Detected chapter ${ordinal}`,
+                description: `${chapter.batches} compiler batch(es)`,
+              };
+            }), {
+              label: "Enter chapter range",
+              description: "Use comma-separated ordinals or ranges, for example 2,37 or 3-5.",
+              prompt: "Detected chapter ordinals",
+              placeholder: availableChapters.length > 1 ? `${availableChapters[0]},${availableChapters.at(-1)}` : String(availableChapters[0]),
+              invalidMessage: `Use available chapter ordinals: ${availableChapters.join(", ")}`,
+              resolve: (value) => {
+                try {
+                  return parseOrdinalSelection(value, availableChapters, "chapters").join(",");
+                } catch {
+                  return undefined;
+                }
+              },
+            });
+            if (!chapters) {
+              ctx.ui.notify("Reparse cancelled.", "info");
+              return;
+            }
+          }
+          chapters = parseOrdinalSelection(chapters, availableChapters, "--chapters").join(",");
+        }
+        const selectedChapters = all ? availableChapters : parseOrdinalSelection(chapters!, availableChapters, "--chapters");
+        const selectedBatchCount = batches.filter((batch) => selectedChapters.includes(batch.chapterOrdinal)).length;
+        const confirmation = await choose(ctx, "Start novel reparse?", [
+          {
+            value: "start",
+            label: "Start reparse",
+            description: `Rebuild ${selectedBatchCount} batch(es) for ${source.title}; prior revision and branch snapshots are retained.`,
+            recommended: true,
+          },
+          {
+            value: "cancel",
+            label: "Cancel",
+            description: "Keep the current prepared revision unchanged.",
+          },
+        ]);
+        if (confirmation !== "start") {
+          ctx.ui.notify("Reparse cancelled.", "info");
+          return;
+        }
+        activeSourceId = sourceId;
+        ctx.ui.setStatus("nwh-reparse", ctx.ui.theme.fg("dim", `Reparsing ${source.title}`));
+        ctx.ui.notify(`Starting reparse for ${source.title}: chapter(s) ${selectedChapters.join(", ")}.`, "info");
+        try {
+          const selectedModel = parsed.model ?? (ctx.model ? modelLabel(ctx.model) : undefined);
+          const result = await runReparse({
+            root: workspace.root,
+            configPath: path.join(workspace.root, "novel-harness.yaml"),
+            sourceId,
+            ...(all ? { all: true } : { chapters }),
+            ...(selectedModel ? { model: selectedModel } : {}),
+            cacheRoot: options.preparedCacheRoot,
+            onProgress: (message) => ctx.ui.notify(message, "info"),
+          });
+          ctx.ui.notify(
+            `Reparse complete for chapter(s) ${result.chapters.join(", ")}. Active revision: ${result.activeBundleHash}.`,
+            "info",
+          );
+        } finally {
+          ctx.ui.setStatus("nwh-reparse", undefined);
+        }
+      },
+    });
+
+    pi.registerCommand("audit", {
+      description: "Audit novel evidence and canonical consistency",
+      handler: async (args, ctx) => {
+        const tokens = splitCommandArguments(args);
+        let requestedSource: string | undefined;
+        if (tokens.length) {
+          if (tokens[0] === "--source" && tokens.length === 2) requestedSource = tokens[1];
+          else if (tokens.length === 1 && !tokens[0]!.startsWith("--")) requestedSource = tokens[0];
+          else throw new Error("Usage: /audit [--source <id-or-title>]");
+        }
+        const sourceId = await chooseNovelSourceId(ctx, requestedSource, "Choose a novel to audit");
+        if (!sourceId) return;
+        const report = await auditCompiler(workspace.root, { sourceId });
+        ctx.ui.notify(JSON.stringify(report, null, 2), report.sources.changedSinceIngest.length || report.evidence.invalidReferences || report.consistency.causalGraphValid === false ? "warning" : "info");
+      },
+    });
+
+    pi.registerCommand("prepared-cache", {
+      description: "List or activate prepared novel revisions",
+      handler: async (args, ctx) => {
+        if (pendingTurn || prepareAllState) {
+          ctx.ui.notify("A compiler or full-preparation run is already active.", "warning");
+          return;
+        }
+        const tokens = splitCommandArguments(args);
+        let action = tokens.shift();
+        let requestedSource: string | undefined;
+        let bundleHash: string | undefined;
+        for (let index = 0; index < tokens.length; index += 1) {
+          const token = tokens[index]!;
+          if (token === "--source") {
+            requestedSource = tokens[index + 1];
+            if (!requestedSource) throw new Error("--source requires a value.");
+            index += 1;
+          } else if (action === "activate" && !bundleHash && !token.startsWith("--")) bundleHash = token;
+          else throw new Error("Usage: /prepared-cache [list|activate [bundle-hash]] [--source <id-or-title>]");
+        }
+        if (!action) {
+          action = await choose(ctx, "Prepared revision action", [
+            { value: "list", label: "List revisions", description: "Inspect stored and active prepared revisions.", recommended: true },
+            { value: "activate", label: "Activate revision", description: "Switch the baseline for future branches; existing branches stay pinned." },
+          ]);
+        }
+        if (action !== "list" && action !== "activate") throw new Error("Prepared-cache action must be 'list' or 'activate'.");
+        const sourceId = await chooseNovelSourceId(ctx, requestedSource, "Choose a novel revision set");
+        if (!sourceId) return;
+        const source = await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);
+        if (!source) throw new Error(`Unknown source '${sourceId}'.`);
+        const revisions = await preparedCache.listRevisions(source);
+        if (!revisions.length) {
+          ctx.ui.notify(`No prepared revisions exist for ${source.title}.`, "info");
+          return;
+        }
+        if (action === "list") {
+          ctx.ui.notify([
+            `Prepared revisions for ${source.title}:`,
+            ...revisions.map((revision) => `${revision.active ? "* active" : "  stored"}\t${revision.bundleHash}\t${revision.createdAt}`),
+          ].join("\n"), "info");
+          return;
+        }
+        if (bundleHash) {
+          const matches = revisions.filter((revision) => revision.bundleHash === bundleHash || revision.bundleHash.startsWith(bundleHash!));
+          if (matches.length !== 1) throw new Error(`Prepared revision '${bundleHash}' does not uniquely match a stored revision.`);
+          bundleHash = matches[0]!.bundleHash;
+        } else {
+          bundleHash = await choose(ctx, "Choose a prepared revision", revisions.map((revision) => ({
+            value: revision.bundleHash,
+            label: `${revision.active ? "Active" : "Stored"} · ${revision.bundleHash.slice(0, 12)}`,
+            description: revision.createdAt,
+            recommended: revision.active,
+          })));
+        }
+        if (!bundleHash) return;
+        const confirmation = await choose(ctx, "Activate prepared revision?", [
+          { value: "activate", label: "Activate revision", description: `Use ${bundleHash.slice(0, 12)} for future branches; existing branches remain pinned.`, recommended: true },
+          { value: "cancel", label: "Cancel", description: "Keep the current active revision." },
+        ]);
+        if (confirmation !== "activate") return;
+        const result = await withWorkspaceOperationLock(workspace.root, "compiler", () => preparedCache.activate(source, bundleHash!));
+        ctx.ui.notify(`Activated prepared revision ${result.bundleHash} for ${source.title}; existing branches remain pinned.`, "info");
       },
     });
 

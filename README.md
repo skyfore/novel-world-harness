@@ -227,6 +227,17 @@ nwh prepared-cache list --source <source-id>
 nwh prepared-cache activate <bundle-hash> --source <source-id>
 ```
 
+The same lifecycle is available without leaving the TUI. Omit flags to select
+the novel, scope, chapters, or revision through the native question UI:
+
+```text
+/reparse --chapters 3,7-9 --source <source-id>
+/reparse --all --source <source-id>
+/audit --source <source-id>
+/prepared-cache list --source <source-id>
+/prepared-cache activate <bundle-hash> --source <source-id>
+```
+
 Chapter ordinals follow detected heading sections; a heading-free source uses its
 deterministic evidence blocks as the selectable units. Reparse invalidates only
 the selected current artifacts, retains their immutable revisions, and publishes

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import { createNwhExtension, splitCommandArguments } from "../src/agent/nwh-extension.js";
+import { createNwhExtension, parseTuiReparseArguments, splitCommandArguments, type NwhExtensionOptions } from "../src/agent/nwh-extension.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
@@ -21,7 +21,11 @@ afterEach(async () => {
   for (const root of temporaryDirectories.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
-async function fixture(onSessionShutdown?: () => Promise<void>, playerTranslator?: PlayerActionTranslator) {
+async function fixture(
+  onSessionShutdown?: () => Promise<void>,
+  playerTranslator?: PlayerActionTranslator,
+  runReparse?: NwhExtensionOptions["runReparse"],
+) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-tui-extension-"));
   temporaryDirectories.push(root);
   await fs.mkdir(path.join(root, "chapters"));
@@ -60,6 +64,7 @@ async function fixture(onSessionShutdown?: () => Promise<void>, playerTranslator
     mode: "assistant",
     onSessionShutdown,
     playerTranslator,
+    ...(runReparse ? { runReparse } : {}),
     preparedCacheRoot: path.join(root, "prepared-cache"),
   })(pi);
   return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages, sentVisibleMessages };
@@ -100,7 +105,7 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 describe("NWH TUI extension", () => {
   it("registers local commands and keeps their output in the transcript", async () => {
     const { commands, sentUserMessages } = await fixture();
-    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "status", "clear", "help", "exit"]);
+    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
     const ctx = commandContext(notifications, actions);
@@ -117,6 +122,60 @@ describe("NWH TUI extension", () => {
     expect(notifications[2]).toContain("/model");
     expect(actions).toEqual({ cleared: true, shutdown: true });
     expect(sentUserMessages).toEqual([]);
+  });
+
+  it("parses CLI-compatible /reparse flags", () => {
+    expect(parseTuiReparseArguments("--chapters 2,37 --source novel-1 --model provider/model"))
+      .toEqual({ all: false, chapters: "2,37", source: "novel-1", model: "provider/model" });
+    expect(parseTuiReparseArguments("--all --source novel-1"))
+      .toEqual({ all: true, source: "novel-1" });
+    expect(() => parseTuiReparseArguments("--all --chapters 2"))
+      .toThrow("only one reparse scope");
+  });
+
+  it("runs the shared reparse service from the TUI with structured confirmation and progress", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const { commands, root } = await fixture(undefined, undefined, async (options) => {
+      calls.push(options as unknown as Record<string, unknown>);
+      options.onProgress?.("compiler progress");
+      return {
+        sourceId: options.sourceId!,
+        chapters: [2, 3],
+        previousBundleHash: "a".repeat(64),
+        activeBundleHash: "b".repeat(64),
+      };
+    });
+    const evidence = await createEvidenceFixture(root, "# Preface\nIntro.\n# One\nHero.\n# Two\nVillain.\n", "reparse-novel.txt");
+    const notifications: string[] = [];
+    const questions: string[] = [];
+    const ctx = preparationContext(notifications, questions);
+
+    await commands.get("reparse")?.handler(`--chapters 2-3 --source ${evidence.source.id}`, ctx);
+
+    expect(questions).toEqual(["Start novel reparse?"]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      root,
+      sourceId: evidence.source.id,
+      chapters: "2,3",
+      model: "anthropic/claude-sonnet-5",
+    });
+    expect(typeof calls[0]?.onProgress).toBe("function");
+    expect(notifications).toContain("compiler progress");
+    expect(notifications).toContainEqual(expect.stringContaining(`Active revision: ${"b".repeat(64)}`));
+  });
+
+  it("exposes novel audit and prepared-revision inspection in the TUI", async () => {
+    const { commands, root } = await fixture();
+    const evidence = await createEvidenceFixture(root, "# One\nHero waits.\n", "audited-novel.txt");
+    const notifications: string[] = [];
+    const ctx = preparationContext(notifications, []);
+
+    await commands.get("audit")?.handler(`--source ${evidence.source.id}`, ctx);
+    await commands.get("prepared-cache")?.handler(`list --source ${evidence.source.id}`, ctx);
+
+    expect(notifications[0]).toContain('"invalidReferences": 0');
+    expect(notifications[1]).toBe(`No prepared revisions exist for ${evidence.source.title}.`);
   });
 
   it("expands explicit file mentions through the safe workspace reader", async () => {

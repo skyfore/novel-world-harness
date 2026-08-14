@@ -24,6 +24,7 @@ export type ReparseCommandOptions = {
   model?: string;
   cacheRoot?: string;
   acquireLock?: boolean;
+  onProgress?: (message: string) => void;
 };
 
 type ReparseDependencies = {
@@ -48,6 +49,7 @@ export async function reparseCommand(
     throw new Error("Choose exactly one reparse scope: --all or --chapters <selection>.");
   }
   const dependencies = { ...defaultDependencies, ...dependencyOverrides };
+  const report = (message: string) => options.onProgress ? options.onProgress(message) : stdout.write(`${message}\n`);
   const source = await resolveSource(root, options.sourceId);
   const batches = await prepareCompilerBatches(root, source);
   if (!batches.length) throw new Error(`Source ${source.id} has no compiler batches.`);
@@ -65,16 +67,16 @@ export async function reparseCommand(
   await pinBranchPreparationContexts(root);
   const runId = `reparse-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`;
   const selectedBatchIds = selected.map((batch) => batch.id);
-  stdout.write(
+  report(
     `Starting ${options.all ? "whole-novel" : "chapter"} reparse ${runId} for ${source.id}: `
-    + `${selected.length} batch(es), chapter(s) ${selectedChapters.join(", ")}.\n`,
+    + `${selected.length} batch(es), chapter(s) ${selectedChapters.join(", ")}.`,
   );
 
   try {
     const invalidated = await invalidatePreparationArtifacts(root, source.id, selected, Boolean(options.all));
     await new CompilerBatchStore(root).markIncomplete(source.id, selectedBatchIds);
     for (const batchId of selectedBatchIds) await rejectPendingCompilerBatchProposals(root, batchId);
-    stdout.write(`Invalidated ${invalidated} current preparation artifact(s); immutable revisions and branch snapshots were retained.\n`);
+    report(`Invalidated ${invalidated} current preparation artifact(s); immutable revisions and branch snapshots were retained.`);
 
     await dependencies.compileSource({
       root,
@@ -86,12 +88,13 @@ export async function reparseCommand(
       resume: true,
       acquireLock: false,
       promptTransform: (prompt, batch) => reparsePrompt(prompt, batch, runId, Boolean(options.all)),
+      onProgress: report,
     });
     const convergence = await convergeWorldProposals(root, source.id);
     const quarantined = await quarantineUncommittableProposals(root, convergence);
-    stdout.write(
+    report(
       `Reparse convergence accepted ${convergence.canonical.accepted.length + convergence.possibilities.accepted.length} proposal(s)`
-      + ` and quarantined ${quarantined.length} uncommittable draft(s).\n`,
+      + ` and quarantined ${quarantined.length} uncommittable draft(s).`,
     );
     await dependencies.finishPreparation({
       root,
@@ -103,12 +106,13 @@ export async function reparseCommand(
       restoreCache: false,
       acquireLock: false,
       cacheRoot: options.cacheRoot,
+      onProgress: report,
     });
     const active = await cache.lookup(source);
     if (!active.bundleHash) throw new Error("Reparse completed without an active prepared-cache revision.");
-    stdout.write(active.bundleHash === previousBundleHash
-      ? `Reparse reproduced and reactivated the existing content-identical revision ${active.bundleHash}.\n`
-      : `Activated prepared revision ${active.bundleHash}; previous revision ${previousBundleHash} remains available.\n`);
+    report(active.bundleHash === previousBundleHash
+      ? `Reparse reproduced and reactivated the existing content-identical revision ${active.bundleHash}.`
+      : `Activated prepared revision ${active.bundleHash}; previous revision ${previousBundleHash} remains available.`);
     return { sourceId: source.id, chapters: selectedChapters, previousBundleHash, activeBundleHash: active.bundleHash };
   } catch (error) {
     for (const batchId of [...selectedBatchIds, `opening-${batches[0]!.id}`]) {

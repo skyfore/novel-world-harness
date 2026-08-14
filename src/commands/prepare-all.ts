@@ -27,6 +27,7 @@ export type PrepareAllCommandOptions = {
   cacheRoot?: string;
   createBranch?: boolean;
   restoreCache?: boolean;
+  onProgress?: (message: string) => void;
 };
 
 type PrepareAllDependencies = {
@@ -60,6 +61,7 @@ export async function prepareAllCommand(
   const configPath = options.configPath ?? path.join(root, "novel-harness.yaml");
   const branchId = options.branchId ?? "main";
   const ask = options.yes ? recommendedAnswer() : dependencies.ask;
+  const report = (message: string) => options.onProgress ? options.onProgress(message) : stdout.write(`${message}\n`);
   let sourceId = options.sourceId;
   let cacheVerified = false;
 
@@ -67,7 +69,7 @@ export async function prepareAllCommand(
     const config = await loadOptionalConfig(configPath);
     const ingested = await ingestWorkspaceSource(root, options.novelPath, config?.project);
     sourceId = ingested.document.id;
-    stdout.write(`Registered ${ingested.document.sourcePath} as ${sourceId}; indexed ${ingested.manifest.segments.length} segment(s).\n`);
+    report(`Registered ${ingested.document.sourcePath} as ${sourceId}; indexed ${ingested.manifest.segments.length} segment(s).`);
   }
 
   let inspection = await inspectPreparation(root, { sourceId, branchId });
@@ -109,10 +111,10 @@ export async function prepareAllCommand(
   if (options.restoreCache !== false) {
     const restored = await preparedCache.restore(inspection.source!);
     if (restored.status === "restored") {
-      stdout.write(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; model compilation is not required.\n`);
+      report(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; model compilation is not required.`);
       inspection = await inspectPreparation(root, { sourceId, branchId });
     } else if (restored.status === "workspace-not-empty" && restored.reason) {
-      stdout.write(`Prepared cache was not restored: ${restored.reason}\n`);
+      report(`Prepared cache was not restored: ${restored.reason}`);
     }
   }
 
@@ -125,8 +127,8 @@ export async function prepareAllCommand(
         { value: "pause", label: "Pause here", description: "Leave progress unchanged and print the next command." },
       ],
     });
-    if (decision === "pause") return pausePreparation(inspection);
-    stdout.write(`Compiling every unfinished evidence batch for ${sourceId}.\n`);
+    if (decision === "pause") return pausePreparation(inspection, report);
+    report(`Compiling every unfinished evidence batch for ${sourceId}.`);
     await dependencies.compileSource({
       root,
       configPath,
@@ -135,6 +137,7 @@ export async function prepareAllCommand(
       ...(options.model ? { model: options.model } : {}),
       resume: true,
       acquireLock: false,
+      onProgress: report,
     });
   }
 
@@ -148,8 +151,8 @@ export async function prepareAllCommand(
         { value: "review", label: "Review first", description: "Stop at the proposal review barrier without accepting anything." },
       ],
     });
-    if (decision === "review") return pausePreparation(inspection);
-    await convergeForPreparation(root, sourceId, dependencies.converge);
+    if (decision === "review") return pausePreparation(inspection, report);
+    await convergeForPreparation(root, sourceId, dependencies.converge, report);
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
 
@@ -162,8 +165,8 @@ export async function prepareAllCommand(
         { value: "pause", label: "Pause here", description: "Leave the initial world unresolved for manual preparation." },
       ],
     });
-    if (decision === "pause") return pausePreparation(inspection);
-    stdout.write("No accepted initial world exists; compiling an opening-state proposal.\n");
+    if (decision === "pause") return pausePreparation(inspection, report);
+    report("No accepted initial world exists; compiling an opening-state proposal.");
     const openingBatch = await prepareOpeningWorldCompilerBatch(root, inspection.source!);
     try {
       await dependencies.compileInitialWorld({
@@ -179,11 +182,12 @@ export async function prepareAllCommand(
         includeLocalTools: false,
         disabledProposalTools: ["propose_state_delta"],
         acquireLock: false,
+        onProgress: report,
       });
     } catch (error) {
-      stdout.write(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}\n`);
+      report(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}`);
       const rejected = await rejectPendingCompilerBatchProposals(root, openingBatch.id);
-      if (rejected.length) stdout.write(`Rejected ${rejected.length} partial opening-state proposal(s) before fallback.\n`);
+      if (rejected.length) report(`Rejected ${rejected.length} partial opening-state proposal(s) before fallback.`);
     }
     inspection = await inspectPreparation(root, { sourceId, branchId });
     if (inspection.pending.length) {
@@ -195,14 +199,14 @@ export async function prepareAllCommand(
           { value: "review", label: "Review first", description: "Stop before committing the generated proposals." },
         ],
       });
-      if (acceptance === "review") return pausePreparation(inspection);
-      await convergeForPreparation(root, sourceId, dependencies.converge);
+      if (acceptance === "review") return pausePreparation(inspection, report);
+      await convergeForPreparation(root, sourceId, dependencies.converge, report);
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
     if (inspection.stage === "needs-initial-world") {
       const fallbackId = await proposeMinimalOpeningWorld(root, inspection.source!);
-      stdout.write(`No valid model opening state remained; created conservative empty-delta proposal ${fallbackId}.\n`);
-      await convergeForPreparation(root, sourceId, dependencies.converge);
+      report(`No valid model opening state remained; created conservative empty-delta proposal ${fallbackId}.`);
+      await convergeForPreparation(root, sourceId, dependencies.converge, report);
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
   }
@@ -210,9 +214,9 @@ export async function prepareAllCommand(
   if (inspection.stage === "create-branch") {
     const cached = await preparedCache.publish(inspection.source!);
     cacheVerified = true;
-    stdout.write(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.\n`);
+    report(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`);
     if (options.createBranch === false) {
-      stdout.write("Preparation revision is complete; branch creation was intentionally skipped.\n");
+      report("Preparation revision is complete; branch creation was intentionally skipped.");
       return inspection;
     }
     const decision = await ask({
@@ -223,8 +227,8 @@ export async function prepareAllCommand(
         { value: "pause", label: "Pause here", description: "Keep canonical preparation complete without creating a branch." },
       ],
     });
-    if (decision === "pause") return pausePreparation(inspection);
-    stdout.write(`Creating playable branch ${branchId}.\n`);
+    if (decision === "pause") return pausePreparation(inspection, report);
+    report(`Creating playable branch ${branchId}.`);
     await dependencies.createBranch(root, branchId);
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
@@ -232,9 +236,9 @@ export async function prepareAllCommand(
   if (inspection.stage !== "ready") throw preparationFailure(inspection);
   if (!cacheVerified) {
     const cached = await preparedCache.publish(inspection.source!);
-    stdout.write(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.\n`);
+    report(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`);
   }
-  stdout.write(`Preparation complete. Next: ${inspection.next}\n`);
+  report(`Preparation complete. Next: ${inspection.next}`);
   return inspection;
 }
 
@@ -242,35 +246,36 @@ async function convergeForPreparation(
   root: string,
   sourceId: string,
   converge: typeof convergeWorldProposals,
+  report: (message: string) => void,
 ): Promise<void> {
   let lastReported = 0;
   const result = await converge(root, sourceId, {
     onProgress: (progress) => {
       if (progress.phase === "complete" || progress.processed === progress.total || progress.processed - lastReported >= 25) {
-        stdout.write(`Convergence ${progress.phase}: ${progress.processed}/${progress.total} · accepted ${progress.accepted} · blocked ${progress.blocked}.\n`);
+        report(`Convergence ${progress.phase}: ${progress.processed}/${progress.total} · accepted ${progress.accepted} · blocked ${progress.blocked}.`);
         lastReported = progress.processed;
       }
     },
   });
-  printConvergence(result);
+  printConvergence(result, report);
   const quarantined = await quarantineUncommittableProposals(root, result);
   for (const item of quarantined) {
-    stdout.write(`Rejected uncommittable ${item.kind} proposal ${item.id}; preserved in rejected history.\n`);
+    report(`Rejected uncommittable ${item.kind} proposal ${item.id}; preserved in rejected history.`);
   }
 }
 
-function printConvergence(result: WorldProposalConvergence): void {
-  for (const item of result.canonical.accepted) stdout.write(`Accepted ${item.kind} proposal ${item.id}.\n`);
-  for (const id of result.possibilities.accepted) stdout.write(`Accepted possibility proposal ${id}.\n`);
+function printConvergence(result: WorldProposalConvergence, report: (message: string) => void): void {
+  for (const item of result.canonical.accepted) report(`Accepted ${item.kind} proposal ${item.id}.`);
+  for (const id of result.possibilities.accepted) report(`Accepted possibility proposal ${id}.`);
   for (const item of result.canonical.blocked) {
-    stdout.write(`Blocked ${item.kind} proposal ${item.id}.\n`);
-    for (const issue of item.errors) stdout.write(`- ${issue.code}: ${issue.message}\n`);
+    report(`Blocked ${item.kind} proposal ${item.id}.`);
+    for (const issue of item.errors) report(`- ${issue.code}: ${issue.message}`);
   }
   for (const item of result.possibilities.blocked) {
-    stdout.write(`Blocked possibility proposal ${item.id}.\n`);
-    for (const issue of item.errors) stdout.write(`- ${issue.code}: ${issue.message}\n`);
+    report(`Blocked possibility proposal ${item.id}.`);
+    for (const issue of item.errors) report(`- ${issue.code}: ${issue.message}`);
   }
-  for (const item of result.staging) stdout.write(`Staging-only proposal remains: ${item.kind} ${item.id}.\n`);
+  for (const item of result.staging) report(`Staging-only proposal remains: ${item.kind} ${item.id}.`);
 }
 
 function preparationFailure(inspection: PreparationInspection): Error {
@@ -280,7 +285,7 @@ function preparationFailure(inspection: PreparationInspection): Error {
   return new Error(`Automatic preparation stopped at '${inspection.stage}'.${diagnosis} Next diagnostic step: ${inspection.next}`);
 }
 
-function pausePreparation(inspection: PreparationInspection): PreparationInspection {
-  stdout.write(`Preparation paused at ${inspection.stage}. Next: ${inspection.next}\n`);
+function pausePreparation(inspection: PreparationInspection, report: (message: string) => void): PreparationInspection {
+  report(`Preparation paused at ${inspection.stage}. Next: ${inspection.next}`);
   return inspection;
 }

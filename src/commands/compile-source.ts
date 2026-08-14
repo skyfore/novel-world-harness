@@ -20,6 +20,7 @@ export type CompileSourceOptions = {
   promptTransform?: (prompt: string, batch: CompilerBatch) => string;
   acquireLock?: boolean;
   promptTimeoutMs?: number;
+  onProgress?: (message: string) => void;
 };
 
 const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -61,7 +62,8 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
     ...(options.batchIds ? { batchIds: options.batchIds } : {}),
     ...(options.promptTransform ? { promptTransform: options.promptTransform } : {}),
     onProgress(message) {
-      stderr.write(`${message}\n`);
+      if (options.onProgress) options.onProgress(message);
+      else stderr.write(`${message}\n`);
     },
     async runner(batch) {
       const session = await createPiCompilerSession({
@@ -75,7 +77,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         sourceId: batch.sourceId,
         disabledProposalTools: ["propose_initial_world"],
         onRetry(event) {
-          stderr.write(`${formatRetryNotice(event)}\n`);
+          const message = formatRetryNotice(event);
+          if (options.onProgress) options.onProgress(message);
+          else stderr.write(`${message}\n`);
         },
         onText() {
           // Batch prose is model-authored and may not describe persisted state
@@ -83,7 +87,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         },
         onTool(name, input) {
           const details = input as Record<string, unknown>;
-          stderr.write(`↳ ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}\n`);
+          const message = `↳ ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`;
+          if (options.onProgress) options.onProgress(message);
+          else stderr.write(`${message}\n`);
         },
       });
       try {
@@ -92,14 +98,16 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         });
         const failure = compilerBatchFailure(report);
         if (failure) throw new Error(`Compiler batch ${batch.ordinal + 1} was not checkpointed: ${failure}.`);
-        stdout.write(
-          `Compiler batch ${batch.ordinal + 1} finish handshake verified; `
-          + `${report.proposalSucceeded} active proposal(s) remain pending deterministic convergence.\n`,
-        );
+        const message = `Compiler batch ${batch.ordinal + 1} finish handshake verified; `
+          + `${report.proposalSucceeded} active proposal(s) remain pending deterministic convergence.`;
+        if (options.onProgress) options.onProgress(message);
+        else stdout.write(`${message}\n`);
       } finally {
         await session.dispose();
       }
     },
   });
-  stdout.write(`Compiler batches: total=${result.total} completed=${result.completed} skipped=${result.skipped} remaining=${result.remaining}\n`);
+  const summary = `Compiler batches: total=${result.total} completed=${result.completed} skipped=${result.skipped} remaining=${result.remaining}`;
+  if (options.onProgress) options.onProgress(summary);
+  else stdout.write(`${summary}\n`);
 }

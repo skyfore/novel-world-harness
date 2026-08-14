@@ -20,6 +20,8 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `/files`, `/search`, and `/read` work without a model request;
 - `/prepare-content <text>` archives exact pasted text and starts its compiler loop;
 - `/prepare-all [source-id] [branch-id]` completes guided preparation in the current TUI;
+- `/reparse --chapters 2,37 --source <id>` (or `/reparse --all`) runs the same revision-safe rebuild service as the CLI, with native novel/chapter selection when flags are omitted;
+- `/audit [--source <id>]` and `/prepared-cache [list|activate]` expose the same novel diagnostics and prepared-revision lifecycle in the TUI;
 - `/novels`, `/instances`, `/characters`, and `/progress` inspect compiled content without a model request;
 - `/play [character] [instance] [novel]` selects the novel first, then opens height-aware, natively scrolling and filterable instance/character selection (with free-form id/name/alias input); `/world-resume` restores the durable novel/instance/character selection;
 - `NOVEL.md` provides checked-in project instructions;

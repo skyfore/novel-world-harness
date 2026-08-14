@@ -41,5 +41,32 @@ describe("compiler audit", () => {
     expect(report.coverage.majorEventResolution).toBeNull();
     expect(report.coverage.epistemicCoverage).toBeNull();
   });
-});
 
+  it("can audit one source without inheriting another source's changed file or artifacts", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-source-"));
+    roots.push(root);
+    const selected = await createEvidenceFixture(root, "Selected hero appears.\n", "selected.txt");
+    const foreign = await createEvidenceFixture(root, "Foreign hero appears.\n", "foreign.txt");
+    const proposals = new CompilerProposalService(root);
+    const commits = new CompilerCommitService(root);
+    await proposals.submit("entity", {
+      proposalId: "selected-hero",
+      payload: { id: "selected-hero", kind: "character", canonicalName: "Selected Hero", aliases: [], evidence: selected.evidence("Selected hero appears.") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("entity", {
+      proposalId: "foreign-hero",
+      payload: { id: "foreign-hero", kind: "character", canonicalName: "Foreign Hero", aliases: [], evidence: foreign.evidence("Foreign hero appears.") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "selected-hero")).accepted).toBe(true);
+    expect((await commits.accept("entity", "foreign-hero")).accepted).toBe(true);
+    await fs.writeFile(path.join(root, foreign.source.sourcePath), "Foreign source changed.\n", "utf8");
+
+    const report = await auditCompiler(root, { sourceId: selected.source.id });
+    expect(report.sources).toMatchObject({ registered: 1, changedSinceIngest: [] });
+    expect(report.canonical.entities).toBe(1);
+    expect(report.evidence.invalidReferences).toBe(0);
+    expect(report.notes[0]).toContain(`scoped to source ${selected.source.id}`);
+  });
+});

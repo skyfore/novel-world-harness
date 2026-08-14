@@ -257,7 +257,10 @@ function printConvergence(result: WorldProposalConvergence): void {
 }
 
 function preparationFailure(inspection: PreparationInspection): Error {
-  return new Error(`Automatic preparation stopped at '${inspection.stage}'. Next diagnostic step: ${inspection.next}`);
+  const diagnosis = inspection.repairReasons?.length
+    ? ` ${inspection.repairReasons.join(" ")}`
+    : "";
+  return new Error(`Automatic preparation stopped at '${inspection.stage}'.${diagnosis} Next diagnostic step: ${inspection.next}`);
 }
 
 function pausePreparation(inspection: PreparationInspection): PreparationInspection {

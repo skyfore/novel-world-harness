@@ -296,7 +296,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         stopPrepareAll(ctx, `Preparation complete. Run nwh play-world --branch ${state.branchId} --list-characters to enter the world.`, "info");
         return;
       }
-      stopPrepareAll(ctx, `Full preparation stopped at '${inspection.stage}'. Next: ${inspection.next}`, inspection.stage === "repair" ? "error" : "warning");
+      const diagnosis = inspection.repairReasons?.length
+        ? ` ${inspection.repairReasons.join(" ")}`
+        : "";
+      stopPrepareAll(
+        ctx,
+        `Full preparation stopped at '${inspection.stage}'.${diagnosis} Next: ${inspection.next}`,
+        inspection.stage === "repair" ? "error" : "warning",
+      );
     };
 
     pi.on("session_shutdown", async () => options.onSessionShutdown?.());
@@ -530,7 +537,13 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         activateCompilerTools(ctx);
         await beginTurn(preparation);
         ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
-        pi.sendUserMessage(compilerPromptForTurn(preparation));
+        // Host-generated compiler context must never be represented as a user
+        // message: doing so replaces the visible slash-command transcript.
+        pi.sendMessage({
+          customType: "nwh-compiler-batch",
+          content: `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
+          display: false,
+        }, { triggerTurn: true });
       },
     });
 
@@ -572,7 +585,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }
         activeSourceId = sourceId;
         const source = inspection.source ?? await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);
-        if (source) {
+        // A changed source cannot be identified as the immutable cached input.
+        // Preserve the audit diagnosis instead of letting cache lookup throw a
+        // less useful hash-mismatch error before the repair stage is reported.
+        if (source && inspection.stage !== "repair") {
           const restored = await preparedCache.restore(source);
           if (restored.status === "restored") {
             ctx.ui.notify(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; source compilation is skipped.`, "info");

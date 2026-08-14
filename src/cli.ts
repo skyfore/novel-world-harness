@@ -70,7 +70,11 @@ program.command("init")
 program.command("doctor").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("validate runtime, credentials and local file tooling").action(async (options) => doctorCommand(configFor(options)));
 program.command("ingest").argument("<novel>", "UTF-8 source novel path").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("register a novel and build its deterministic evidence index").action(async (novel, options) => ingestCommand(novel, configFor(options)));
 program.command("status").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("show inventory and the next safe preparation step").action(async (options) => statusCommand(configFor(options)));
-program.command("audit").option("--root <path>", "local novel workspace").description("audit compiler sources, evidence and canonical consistency").action(async (options) => auditCommand(rootFor(options)));
+program.command("audit")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "audit only one registered novel source")
+  .description("audit compiler sources, evidence and canonical consistency")
+  .action(async (options) => auditCommand(rootFor(options), options.source));
 
 program
   .command("compile")

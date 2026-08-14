@@ -24,6 +24,7 @@ export type PreparationInspection = {
   completedBatches: number;
   totalBatches: number;
   audit?: CompilerAuditReport;
+  repairReasons?: string[];
   next: string;
 };
 
@@ -52,7 +53,9 @@ export async function inspectPreparation(
   }
 
   const pending = await new ProposalStore(workspaceRoot).list("pending", source.id);
-  const earlyAudit = await auditCompiler(workspaceRoot);
+  // Preparation is source-local. A stale or invalid second novel must not
+  // prevent this source from compiling or becoming playable.
+  const earlyAudit = await auditCompiler(workspaceRoot, { sourceId: source.id });
   if (earlyAudit.sources.changedSinceIngest.length > 0) {
     return {
       branchId,
@@ -62,8 +65,9 @@ export async function inspectPreparation(
       completedBatches: 0,
       totalBatches: 0,
       audit: earlyAudit,
+      repairReasons: preparationRepairReasons(earlyAudit),
       stage: "repair",
-      next: "nwh audit",
+      next: `nwh audit --source ${source.id}`,
     };
   }
 
@@ -93,7 +97,13 @@ export async function inspectPreparation(
     || audit.evidence.invalidReferences > 0
     || audit.consistency.causalGraphValid === false
   ) {
-    return { ...shared, audit, stage: "repair", next: "nwh audit" };
+    return {
+      ...shared,
+      audit,
+      repairReasons: preparationRepairReasons(audit),
+      stage: "repair",
+      next: `nwh audit --source ${source.id}`,
+    };
   }
   const initialWorld = await new InitialWorldStore(workspaceRoot).get();
   if (!initialWorld || !initialWorld.evidence.some((reference) => reference.span.sourceId === source.id)) {
@@ -108,6 +118,19 @@ export async function inspectPreparation(
     return { ...shared, audit, stage: "create-branch", next: `nwh prepare --source ${source.id} --branch ${branchId}` };
   }
   return { ...shared, audit, stage: "ready", next: `nwh play-world --branch ${branchId} --list-characters` };
+}
+
+function preparationRepairReasons(audit: CompilerAuditReport): string[] {
+  return [
+    ...audit.sources.changedSinceIngest.map((sourceId) =>
+      `Source ${sourceId} changed after ingest; re-ingest the changed file as a new content-addressed source before preparing it.`),
+    ...audit.evidence.errors.map((error) =>
+      `Evidence ${error.artifact} failed ${error.code}: ${error.message}`),
+    ...audit.consistency.causalCycles.map((cycle) =>
+      `Causal cycle detected: ${cycle.join(" -> ")}`),
+    ...audit.consistency.missingCausalParents.map(({ eventId, parentId }) =>
+      `Event ${eventId} references missing causal parent ${parentId}.`),
+  ];
 }
 
 async function branchExists(branches: BranchStore, branchId: string): Promise<boolean> {

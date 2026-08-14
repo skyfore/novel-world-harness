@@ -91,7 +91,7 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 
 describe("NWH TUI extension", () => {
   it("registers local commands and keeps their output in the transcript", async () => {
-    const { commands } = await fixture();
+    const { commands, sentUserMessages } = await fixture();
     expect([...commands.keys()]).toEqual(["files", "search", "read", "compile-next", "prepare-all", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
@@ -108,6 +108,7 @@ describe("NWH TUI extension", () => {
     expect(notifications[2]).toContain("/login");
     expect(notifications[2]).toContain("/model");
     expect(actions).toEqual({ cleared: true, shutdown: true });
+    expect(sentUserMessages).toEqual([]);
   });
 
   it("expands explicit file mentions through the safe workspace reader", async () => {
@@ -422,8 +423,27 @@ describe("NWH TUI extension", () => {
     expect(notifications.some((message) => message.includes("starting compiler batch 2/"))).toBe(true);
   });
 
+  it("reports the concrete source repair reason instead of a generic /prepare-all failure", async () => {
+    const { commands, root, sentUserMessages } = await fixture();
+    const evidence = await createEvidenceFixture(root, "Original opening.\n", "repair-source.txt");
+    await prepareCompilerBatches(root, evidence.source);
+    await fs.writeFile(path.join(root, evidence.source.sourcePath), "Changed opening.\n", "utf8");
+    const notifications: string[] = [];
+    const questions: string[] = [];
+
+    await commands.get("prepare-all")?.handler(
+      evidence.source.id,
+      preparationContext(notifications, questions),
+    );
+
+    expect(questions).toEqual([]);
+    expect(sentUserMessages).toEqual([]);
+    expect(notifications).toContainEqual(expect.stringContaining("changed after ingest"));
+    expect(notifications).toContainEqual(expect.stringContaining(`nwh audit --source ${evidence.source.id}`));
+  });
+
   it("checkpoints a successful compiler batch before /compile-next advances", async () => {
-    const { commands, events, root, sentUserMessages } = await fixture();
+    const { commands, events, root, sentUserMessages, sentHiddenMessages } = await fixture();
     const novelPath = path.join(root, "long-novel.txt");
     await fs.writeFile(
       novelPath,
@@ -460,12 +480,14 @@ describe("NWH TUI extension", () => {
     await commands.get("compile-next")?.handler("", ctx);
 
     expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);
-    expect(sentUserMessages).toHaveLength(1);
-    expect(sentUserMessages[0]).toMatch(/batch 2\/\d+/);
+    expect(sentUserMessages).toEqual([]);
+    expect(sentHiddenMessages).toHaveLength(1);
+    expect(sentHiddenMessages[0]).toMatch(/batch 2\/\d+/);
+    expect(sentHiddenMessages[0]).toContain("<source-segment");
   });
 
   it("does not checkpoint a compiler batch when proposal tools fail", async () => {
-    const { commands, events, root, sentUserMessages } = await fixture();
+    const { commands, events, root, sentUserMessages, sentHiddenMessages } = await fixture();
     const novelPath = path.join(root, "failed-novel.txt");
     await fs.writeFile(
       novelPath,
@@ -500,12 +522,14 @@ describe("NWH TUI extension", () => {
     await commands.get("compile-next")?.handler("", ctx);
 
     expect(notifications.some((message) => message.includes("not checkpointed") && message.includes("failed"))).toBe(true);
-    expect(sentUserMessages).toHaveLength(1);
-    expect(sentUserMessages[0]).toMatch(/batch 1\/\d+/);
+    expect(sentUserMessages).toEqual([]);
+    expect(sentHiddenMessages).toHaveLength(1);
+    expect(sentHiddenMessages[0]).toMatch(/batch 1\/\d+/);
+    expect(sentHiddenMessages[0]).toContain("<source-segment");
   });
 
   it("lets a successful finish supersede abandoned drafts after low-level retries settle", async () => {
-    const { commands, events, root, sentUserMessages } = await fixture();
+    const { commands, events, root, sentUserMessages, sentHiddenMessages } = await fixture();
     const novelPath = path.join(root, "retry-novel.txt");
     await fs.writeFile(
       novelPath,
@@ -550,8 +574,10 @@ describe("NWH TUI extension", () => {
     await commands.get("compile-next")?.handler("", ctx);
 
     expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);
-    expect(sentUserMessages).toHaveLength(1);
-    expect(sentUserMessages[0]).toMatch(/batch 2\/\d+/);
+    expect(sentUserMessages).toEqual([]);
+    expect(sentHiddenMessages).toHaveLength(1);
+    expect(sentHiddenMessages[0]).toMatch(/batch 2\/\d+/);
+    expect(sentHiddenMessages[0]).toContain("<source-segment");
   });
 
   it("resets the registered finish handshake before the next TUI compiler batch", async () => {

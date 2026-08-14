@@ -56,9 +56,16 @@ export type CompilerAuditReport = {
   notes: string[];
 };
 
-export async function auditCompiler(workspaceRoot: string): Promise<CompilerAuditReport> {
+export async function auditCompiler(
+  workspaceRoot: string,
+  options: { sourceId?: string } = {},
+): Promise<CompilerAuditReport> {
   const workspace = await WorkspaceStore.create(workspaceRoot);
-  const sources = await workspace.listSources();
+  const registeredSources = await workspace.listSources();
+  const sources = options.sourceId
+    ? registeredSources.filter((source) => source.id === options.sourceId)
+    : registeredSources;
+  if (options.sourceId && !sources.length) throw new Error(`Unknown source id: ${options.sourceId}`);
   const segments = new SegmentStore(workspaceRoot);
   let segmented = 0;
   let segmentCount = 0;
@@ -86,16 +93,16 @@ export async function auditCompiler(workspaceRoot: string): Promise<CompilerAudi
 
   const proposalStore = new ProposalStore(workspaceRoot);
   const [pending, accepted, rejected] = await Promise.all([
-    proposalStore.list("pending"),
-    proposalStore.list("accepted"),
-    proposalStore.list("rejected"),
+    proposalStore.list("pending", options.sourceId),
+    proposalStore.list("accepted", options.sourceId),
+    proposalStore.list("rejected", options.sourceId),
   ]);
   const pendingByKind: Record<string, number> = {};
   for (const proposal of pending) pendingByKind[proposal.kind] = (pendingByKind[proposal.kind] ?? 0) + 1;
 
   const canon = new CanonicalModelStore(workspaceRoot);
   const actorStore = new ActorModelStore(workspaceRoot);
-  const [entities, claims, events, rules, initialWorld, goals, models] = await Promise.all([
+  const [allEntities, allClaims, allEvents, allRules, storedInitialWorld, allGoals, allModels] = await Promise.all([
     canon.listEntities(),
     canon.listClaims(),
     canon.listEvents(),
@@ -104,6 +111,15 @@ export async function auditCompiler(workspaceRoot: string): Promise<CompilerAudi
     actorStore.listGoals(),
     actorStore.listModels(),
   ]);
+  const belongsToSelectedSource = (item: { evidence: readonly EvidenceRef[] }) =>
+    !options.sourceId || item.evidence.some((reference) => reference.span.sourceId === options.sourceId);
+  const entities = allEntities.filter(belongsToSelectedSource);
+  const claims = allClaims.filter(belongsToSelectedSource);
+  const events = allEvents.filter(belongsToSelectedSource);
+  const rules = allRules.filter(belongsToSelectedSource);
+  const initialWorld = storedInitialWorld && belongsToSelectedSource(storedInitialWorld) ? storedInitialWorld : null;
+  const goals = allGoals.filter(belongsToSelectedSource);
+  const models = allModels.filter(belongsToSelectedSource);
 
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
   const evidenceArtifacts: Array<{ name: string; evidence: EvidenceRef[] }> = [
@@ -170,6 +186,7 @@ export async function auditCompiler(workspaceRoot: string): Promise<CompilerAudi
       epistemicCoverage: null,
     },
     notes: [
+      ...(options.sourceId ? [`Audit is scoped to source ${options.sourceId}; unrelated registered sources and artifacts are excluded.`] : []),
       "Null coverage values are intentional: the compiler does not have a trustworthy denominator for those dimensions yet.",
       "Canonical artifact counts are inventory, not full-book semantic coverage.",
       "Source indexing measures indexed source bytes and may be below 1 when blank-only gaps are intentionally omitted.",
@@ -207,4 +224,3 @@ function auditCausalGraph(events: readonly CanonicalEvent[]): {
   for (const event of events) visit(event.id);
   return { cycles, missing };
 }
-

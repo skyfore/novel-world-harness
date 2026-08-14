@@ -94,10 +94,27 @@ describe("preparation workflow inspection", () => {
       },
       generatedBy: { worker: "test" },
     });
+    await fs.writeFile(path.join(root, foreign.source.sourcePath), "Foreign source changed after ingest.\n", "utf8");
 
     await expect(inspectPreparation(root, { sourceId: selected.source.id })).resolves.toMatchObject({
       stage: "needs-initial-world",
       pending: [],
+      audit: { sources: { registered: 1, changedSinceIngest: [] } },
+    });
+  });
+
+  it("reports the selected source's concrete repair reason and scoped audit command", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-repair-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Original opening.\n", "selected.txt");
+    await prepareCompilerBatches(root, fixture.source);
+    await fs.writeFile(path.join(root, fixture.source.sourcePath), "Changed opening.\n", "utf8");
+
+    await expect(inspectPreparation(root, { sourceId: fixture.source.id })).resolves.toMatchObject({
+      stage: "repair",
+      next: `nwh audit --source ${fixture.source.id}`,
+      repairReasons: [expect.stringContaining("changed after ingest")],
+      audit: { sources: { registered: 1, changedSinceIngest: [fixture.source.id] } },
     });
   });
 

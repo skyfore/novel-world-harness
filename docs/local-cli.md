@@ -111,6 +111,12 @@ one explicitly. Existing branches keep their captured canonical, actor-policy,
 and possibility-template revisions; only later branches use the newly active
 preparation.
 
+If a process is interrupted after selected batches are marked incomplete, rerun
+the same reparse scope. NWH restores the active immutable prepared revision,
+rejects partial proposals from those selected batches, and restarts from that
+clean rollback baseline. It will not auto-restore when unfinished batches exist
+outside the requested scope; include them explicitly or resume preparation first.
+
 ## Compiler capability boundary
 
 Compiler mode now adds narrow typed `propose_*` tools. They can create pending candidate artifacts, but cannot accept them, move a branch head, execute a shell, or write arbitrary files. Deterministic code verifies structure and source evidence before explicit acceptance:

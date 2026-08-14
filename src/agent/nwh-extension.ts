@@ -1127,6 +1127,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             `Reparse complete for chapter(s) ${result.chapters.join(", ")}. Active revision: ${result.activeBundleHash}.`,
             "info",
           );
+        } catch (error) {
+          ctx.ui.notify(`Reparse stopped: ${error instanceof Error ? error.message : String(error)}`, "error");
         } finally {
           ctx.ui.setStatus("nwh-reparse", undefined);
         }

@@ -63,6 +63,10 @@ describe("explicit prepared-novel reparsing", () => {
     const before = await openWorkspaceWorld(root);
     const oldHead = await before.engine.createBranch("old", "old", initial.delta, initial.knowledge);
     await fs.rm(path.join(root, fixture.source.sourcePath));
+    await new CanonicalModelStore(root).removeCurrent("entities", "villain");
+    await new ActorModelStore(root).removeGoal("villain-goal");
+    await new CompilerBatchStore(root).markIncomplete(fixture.source.id, [batches[1]!.id]);
+    const progressMessages: string[] = [];
 
     const result = await reparseCommand({
       root,
@@ -70,6 +74,7 @@ describe("explicit prepared-novel reparsing", () => {
       sourceId: fixture.source.id,
       chapters: "2",
       cacheRoot,
+      onProgress: (message) => progressMessages.push(message),
     }, {
       async compileSource(options) {
         expect(options.batchIds).toEqual([batches[1]!.id]);
@@ -89,6 +94,8 @@ describe("explicit prepared-novel reparsing", () => {
     });
 
     expect(result.chapters).toEqual([2]);
+    expect(progressMessages).toContainEqual(expect.stringContaining("Detected an interrupted reparse"));
+    expect(progressMessages).toContainEqual(expect.stringContaining("baseline restored"));
     expect(result.previousBundleHash).toBe(first.bundleHash);
     expect(result.activeBundleHash).not.toBe(first.bundleHash);
     await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ aliases: [] });
@@ -107,6 +114,15 @@ describe("explicit prepared-novel reparsing", () => {
     await cache.activate(fixture.source, first.bundleHash!);
     await expect(new CanonicalModelStore(root).getEntity("villain")).resolves.toMatchObject({ aliases: [] });
     await expect(new ActorModelStore(root).listGoals("villain")).resolves.toEqual([expect.objectContaining({ description: "Wait" })]);
+
+    await new CompilerBatchStore(root).markIncomplete(fixture.source.id, [batches[0]!.id]);
+    await expect(reparseCommand({
+      root,
+      configPath: path.join(root, "missing.yaml"),
+      sourceId: fixture.source.id,
+      chapters: "2",
+      cacheRoot,
+    })).rejects.toThrow("outside the selected scope (chapter(s) 1)");
   });
 
   it("parses ordinal selections strictly", () => {

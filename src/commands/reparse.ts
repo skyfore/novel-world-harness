@@ -61,20 +61,22 @@ export async function reparseCommand(
   if (!selected.length) throw new Error("The chapter selection did not match any compiler batch.");
 
   const cache = new PreparedNovelCache(root, options.cacheRoot);
+  const selectedBatchIds = selected.map((batch) => batch.id);
+  report("Checking the active prepared revision and rollback baseline.");
+  await recoverInterruptedReparse(root, source, batches, selectedBatchIds, cache, report);
   const baseline = await cache.publish(source);
   if (!baseline.bundleHash) throw new Error("Current prepared revision was not published.");
   const previousBundleHash = baseline.bundleHash;
   await pinBranchPreparationContexts(root);
   const runId = `reparse-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`;
-  const selectedBatchIds = selected.map((batch) => batch.id);
   report(
     `Starting ${options.all ? "whole-novel" : "chapter"} reparse ${runId} for ${source.id}: `
     + `${selected.length} batch(es), chapter(s) ${selectedChapters.join(", ")}.`,
   );
 
   try {
-    const invalidated = await invalidatePreparationArtifacts(root, source.id, selected, Boolean(options.all));
     await new CompilerBatchStore(root).markIncomplete(source.id, selectedBatchIds);
+    const invalidated = await invalidatePreparationArtifacts(root, source.id, selected, Boolean(options.all));
     for (const batchId of selectedBatchIds) await rejectPendingCompilerBatchProposals(root, batchId);
     report(`Invalidated ${invalidated} current preparation artifact(s); immutable revisions and branch snapshots were retained.`);
 
@@ -128,6 +130,45 @@ export async function reparseCommand(
       { cause: error },
     );
   }
+}
+
+async function recoverInterruptedReparse(
+  root: string,
+  source: SourceDocument,
+  batches: readonly CompilerBatch[],
+  selectedBatchIds: readonly string[],
+  cache: PreparedNovelCache,
+  report: (message: string) => void,
+): Promise<void> {
+  const progress = await new CompilerBatchStore(root).read(source.id);
+  const completed = new Set(progress.completedBatchIds);
+  const unfinished = batches.filter((batch) => !completed.has(batch.id));
+  if (!unfinished.length) return;
+  const selected = new Set(selectedBatchIds);
+  const outsideSelection = unfinished.filter((batch) => !selected.has(batch.id));
+  if (outsideSelection.length) {
+    const chapters = [...new Set(outsideSelection.map((batch) => batch.chapterOrdinal))].sort((left, right) => left - right);
+    throw new Error(
+      `Cannot start reparse while ${outsideSelection.length} unfinished compiler batch(es) exist outside the selected scope `
+      + `(chapter(s) ${chapters.join(", ")}). Resume preparation first or include those chapters in this reparse.`,
+    );
+  }
+  const active = await cache.lookup(source);
+  if (!active.bundleHash) {
+    throw new Error(
+      `Cannot recover ${unfinished.length} unfinished selected compiler batch(es): no active prepared revision is available as a rollback baseline. `
+      + "Complete preparation before reparsing.",
+    );
+  }
+  report(
+    `Detected an interrupted reparse affecting ${unfinished.length} selected batch(es); `
+    + `restoring active revision ${active.bundleHash} before retrying.`,
+  );
+  for (const batchId of [...selectedBatchIds, `opening-${batches[0]!.id}`]) {
+    await rejectPendingCompilerBatchProposals(root, batchId);
+  }
+  await cache.activate(source, active.bundleHash);
+  report("Interrupted reparse baseline restored; restarting the selected scope from a clean prepared revision.");
 }
 
 export function parseOrdinalSelection(value: string, available: readonly number[], optionName: string): number[] {

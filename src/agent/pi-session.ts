@@ -365,6 +365,7 @@ export class PiAgentSession {
               workspace: this.options.workspace,
               saveSession: this.saveSession,
               mode: this.options.interactionMode ?? "assistant",
+              ...(this.options.profile ? { profile: this.options.profile } : {}),
               onSessionShutdown: () => flushSettings(settingsManager),
               ...(this.options.resetCompilerProposalTools
                 ? { resetCompilerProposalTools: this.options.resetCompilerProposalTools }
@@ -407,6 +408,10 @@ export class PiAgentSession {
         this.onText?.(event.assistantMessageEvent.delta);
       } else if (event.type === "message_end" && event.message.role === "assistant") {
         this.lastAssistantStopReason = event.message.stopReason;
+      } else if (event.type === "message_end" && event.message.role === "custom" && event.message.display) {
+        const rendered = `${event.message.content}\n`;
+        this.activeText += rendered;
+        this.onText?.(rendered);
       } else if (event.type === "auto_retry_start") {
         this.options.onRetry?.(event);
       } else if (event.type === "tool_execution_start") this.onTool?.(event.toolName, event.args);

@@ -117,7 +117,7 @@ export async function inspectPreparation(
   if (!(await branchExists(new BranchStore(workspaceRoot), branchId))) {
     return { ...shared, audit, stage: "create-branch", next: `nwh prepare --source ${source.id} --branch ${branchId}` };
   }
-  return { ...shared, audit, stage: "ready", next: `nwh play-world --branch ${branchId} --list-characters` };
+  return { ...shared, audit, stage: "ready", next: `nwh characters --branch ${branchId}` };
 }
 
 function preparationRepairReasons(audit: CompilerAuditReport): string[] {

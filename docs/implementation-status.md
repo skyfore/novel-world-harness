@@ -10,7 +10,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 
 | Area | Status | What is actually usable |
 | --- | --- | --- |
-| Local file assistant | Implemented | Claude Code-style TUI, streaming/tool rendering, local lexical discovery, bounded reads, Pi sessions; model tools are read-only |
+| Terminal hub | Implemented | Claude Code-style TUI, workspace catalogs, committed progress, durable world resume, local lexical discovery, and bounded reads; general model tools remain read-only |
 | Source ingest | Implemented | Exact file/stdin/inline bytes archived globally by SHA-256, source manifest, deterministic evidence segments |
 | Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce typed pending proposals, recover drafts across retries, allow narrow withdrawal, and use host-owned finish and total-tool-call circuit breakers |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
@@ -23,7 +23,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation |
 | Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
 | Player experience | Implemented vertical slice | Restricted Pi translation of natural language into a host-owned validated player event |
-| Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, durable branch and resume selection |
+| Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, per-instance character memory, and durable active resume |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
 
@@ -71,6 +71,8 @@ nwh prepared-cache list|activate
 nwh proposals list|show|accept|accept-all|reject
 nwh audit
 nwh status
+nwh novels|instances|characters|progress
+nwh resume [instance] --character <id-or-name>
 
 nwh world create|show|history|frontier
 nwh world validate|move
@@ -80,9 +82,7 @@ nwh world snapshot|fsck
 nwh play-world --list-characters|--character|--action
 ```
 
-The ordinary `nwh` / `nwh play` session remains intentionally read-only and does not mutate the world.
-
-Its terminal shell is a real Pi-backed TUI rather than a `readline` loop: regular/fullscreen rendering, transcript history, streaming state, tool rows, multiline editing, command completion, queue/interrupt shortcuts, status/footer data, and session replacement are connected. Character embodiment intentionally uses a separate restricted session boundary so a player action cannot inherit compiler omniscience or source access.
+The general model inside `nwh` / `nwh play` remains read-only. The host TUI can enter player mode through `/play`, a natural character-selection request, `nwh resume`, or a saved active selection. While player mode is active, ordinary input is intercepted before the general agent and delegated to a fresh restricted player-action session; it therefore cannot inherit compiler omniscience, source access, or local-file context. The terminal shell retains regular/fullscreen rendering, transcript history, committed progress/status, command completion, and durable branch/character resume.
 
 ## Removed obsolete scaffold
 
@@ -98,7 +98,7 @@ Readiness is no longer inferred from artifact counts or arbitrary percentages. `
 
 ### 2. Player action semantics are deliberately narrow
 
-`play-world` connects natural language to deterministic commitment, but the current capability closure allows changes only to the selected actor and artifacts the actor owns. Explicitly named entities may be referenced but other characters cannot be directly rewritten. Rich physical affordances, dialogue consequences, combat, and social mechanics need dedicated deterministic rules rather than broader model authority.
+The TUI player mode and `play-world` connect natural language to deterministic commitment, but the current capability closure allows changes only to the selected actor and artifacts the actor owns. Explicitly named entities may be referenced but other characters cannot be directly rewritten. Rich physical affordances, dialogue consequences, combat, and social mechanics need dedicated deterministic rules rather than broader model authority.
 
 ### 3. Model actor policy is not connected to the product CLI
 

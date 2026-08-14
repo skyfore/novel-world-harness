@@ -20,6 +20,8 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `/files`, `/search`, and `/read` work without a model request;
 - `/prepare-content <text>` archives exact pasted text and starts its compiler loop;
 - `/prepare-all [source-id] [branch-id]` completes guided preparation in the current TUI;
+- `/novels`, `/instances`, `/characters`, and `/progress` inspect compiled content without a model request;
+- `/play <character> [instance]` enters player mode and `/world-resume` restores its durable selection;
 - `NOVEL.md` provides checked-in project instructions;
 - `.novel-harness/instructions.md` provides local additions.
 
@@ -76,6 +78,12 @@ Pi transcripts are stored under `~/.novel-harness/sessions/` unless `--no-save` 
 
 Project manifests, source indexes, compiler batch checkpoints, proposals, and world objects are also local files. These are inspectable implementation state, not model memory. They remain hidden from general model file search.
 
+Catalog commands are deliberately scoped to the selected `--root`: `nwh novels`
+lists every registered source in that novel workspace, and instance/character
+commands inspect only branches pinned in the same workspace. The current storage
+format has no authoritative cross-workspace library identity, so the CLI does not
+pretend that scanning unrelated workspace directories is a safe global resume map.
+
 The origin novel is copied to a mode-`0400`, content-addressed source object
 before segmentation. Evidence verification, cache restore, whole-book reparse,
 chapter reparse, and runtime reopening use that archived object; changing or
@@ -109,12 +117,15 @@ Compiler mode now adds narrow typed `propose_*` tools. They can create pending c
 proposal -> validate -> commit -> render
 ```
 
-The ordinary `nwh` / `nwh play` session starts read-only. Supplying a standalone
+The general model in `nwh` / `nwh play` starts read-only. Supplying a standalone
 novel path temporarily adds the same narrow `propose_*` capability for its source
 compiler loop. `nwh prepare` exposes the durable compile/review/audit/branch state
-machine without bypassing explicit acceptance.
+machine without bypassing explicit acceptance. If a saved play selection exists,
+startup enters player mode; ordinary input is intercepted before the general model
+and routed through the restricted boundary below. `/leave` returns to the read-only
+assistant without deleting durable resume state.
 
-`nwh play-world` is a separate character-embodiment boundary. Each natural-language
+`nwh resume`, TUI `/play`, and the compact `nwh play-world` command share a separate character-embodiment boundary. Each natural-language
 action receives only an actor-scoped view plus entities explicitly named by the
 player and artifacts currently owned by that actor. Its fresh Pi session has no
 file tools, project instructions, compiler extension, source text, future canon,

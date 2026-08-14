@@ -73,7 +73,7 @@ describe("preparation workflow inspection", () => {
     await engine.createBranch("main", "main");
     await expect(inspectPreparation(root)).resolves.toMatchObject({
       stage: "ready",
-      next: "nwh play-world --branch main --list-characters",
+      next: "nwh characters --branch main",
     });
   });
 

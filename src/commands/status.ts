@@ -9,6 +9,8 @@ import { InitialWorldStore } from "../world/initial.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { inspectPreparation } from "../workflow/prepare.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { inspectPlayExperience } from "../world/play-experience.js";
+import { formatInstances } from "./catalog.js";
 
 export async function statusCommand(configPath: string): Promise<void> {
   const config = await loadOptionalConfig(configPath);
@@ -69,4 +71,6 @@ export async function statusCommand(configPath: string): Promise<void> {
   const preparation = await inspectPreparation(root);
   console.log(`Preparation: ${preparation.stage}`);
   console.log(`Next: ${preparation.next}`);
+  const experience = await inspectPlayExperience(root);
+  console.log(formatInstances(experience.instances));
 }

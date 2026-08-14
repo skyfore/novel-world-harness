@@ -10,6 +10,10 @@ import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { BranchStore } from "../src/world/store.js";
 import { SourceMaterialStore } from "../src/storage/source-material-store.js";
+import type { PlayerActionTranslator } from "../src/world/player-action.js";
+import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
+import { PlaySessionStore } from "../src/world/play-session.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -17,7 +21,7 @@ afterEach(async () => {
   for (const root of temporaryDirectories.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
-async function fixture(onSessionShutdown?: () => Promise<void>) {
+async function fixture(onSessionShutdown?: () => Promise<void>, playerTranslator?: PlayerActionTranslator) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-tui-extension-"));
   temporaryDirectories.push(root);
   await fs.mkdir(path.join(root, "chapters"));
@@ -29,6 +33,7 @@ async function fixture(onSessionShutdown?: () => Promise<void>) {
   const registeredToolDefinitions = new Map<string, ToolDefinition>();
   const sentUserMessages: string[] = [];
   const sentHiddenMessages: string[] = [];
+  const sentVisibleMessages: string[] = [];
   const pi = {
     registerCommand(name: string, command: { handler: (args: string, ctx: ExtensionCommandContext) => Promise<void> | void }) {
       commands.set(name, command);
@@ -43,8 +48,9 @@ async function fixture(onSessionShutdown?: () => Promise<void>) {
     sendUserMessage(message: string) {
       sentUserMessages.push(message);
     },
-    sendMessage(message: { content: string }, options?: { triggerTurn?: boolean }) {
+    sendMessage(message: { content: string; display?: boolean }, options?: { triggerTurn?: boolean }) {
       if (options?.triggerTurn) sentHiddenMessages.push(message.content);
+      else if (message.display) sentVisibleMessages.push(message.content);
     },
   } as unknown as ExtensionAPI;
   const workspace = await LocalFileWorkspace.create(root);
@@ -53,9 +59,10 @@ async function fixture(onSessionShutdown?: () => Promise<void>) {
     saveSession: true,
     mode: "assistant",
     onSessionShutdown,
+    playerTranslator,
     preparedCacheRoot: path.join(root, "prepared-cache"),
   })(pi);
-  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages };
+  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages, sentVisibleMessages };
 }
 
 function commandContext(notifications: string[], actions: { cleared: boolean; shutdown: boolean }): ExtensionCommandContext {
@@ -93,7 +100,7 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 describe("NWH TUI extension", () => {
   it("registers local commands and keeps their output in the transcript", async () => {
     const { commands, sentUserMessages } = await fixture();
-    expect([...commands.keys()]).toEqual(["files", "search", "read", "prepare-content", "compile-next", "prepare-all", "status", "clear", "help", "exit"]);
+    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
     const ctx = commandContext(notifications, actions);
@@ -133,7 +140,7 @@ describe("NWH TUI extension", () => {
     const notifications: string[] = [];
     const result = await input?.(
       { type: "input", text: "读取 @.env", source: "interactive" } as InputEvent,
-      { ui: { notify: (message: string) => notifications.push(message) } } as unknown as ExtensionContext,
+      { mode: "tui", ui: { notify: (message: string) => notifications.push(message) } } as unknown as ExtensionContext,
     ) as InputEventResult | undefined;
     expect(result).toEqual({ action: "handled" });
     expect(notifications[0]).toContain("Cannot attach local file");
@@ -271,12 +278,102 @@ describe("NWH TUI extension", () => {
     const notifications: string[] = [];
     const result = await input?.(
       { type: "input", text: `@${codePath}`, source: "interactive" } as InputEvent,
-      { ui: { notify: (message: string) => notifications.push(message) } } as unknown as ExtensionContext,
+      { mode: "tui", ui: { notify: (message: string) => notifications.push(message) } } as unknown as ExtensionContext,
     ) as InputEventResult | undefined;
 
     expect(result).toEqual({ action: "continue" });
     expect(registeredTools).toEqual([]);
     expect(notifications).toEqual([]);
+  });
+
+  it("routes natural character selection and subsequent input through committed world play", async () => {
+    const translator: PlayerActionTranslator = ({ utterance }) => ({
+      title: utterance,
+      participants: ["camp"],
+      preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.location", value: "camp" }],
+      },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    });
+    const { events, root, sentVisibleMessages } = await fixture(undefined, translator);
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: ["Lin Qi"], evidence: [] });
+    await canon.putEntity({ id: "hall", kind: "location", canonicalName: "前厅", aliases: [], evidence: [] });
+    await canon.putEntity({ id: "camp", kind: "location", canonicalName: "营地", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+      ],
+    });
+    const notifications: string[] = [];
+    const statuses: Array<string | undefined> = [];
+    const ctx = {
+      mode: "tui",
+      model: { provider: "anthropic", id: "claude-sonnet-5" },
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: (_key: string, value: string | undefined) => statuses.push(value),
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+    const input = events.get("input")!;
+
+    await expect(input(
+      { type: "input", text: "我想体验林岐这个角色", source: "interactive" } as InputEvent,
+      ctx,
+    )).resolves.toEqual({ action: "handled" });
+    await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ branchId: "main", actorId: "hero" });
+    expect(sentVisibleMessages.join("\n")).toContain("Entered **林岐**");
+
+    await expect(input(
+      { type: "input", text: "我离开前厅去营地", source: "interactive" } as InputEvent,
+      ctx,
+    )).resolves.toEqual({ action: "handled" });
+
+    const reopened = await openWorkspaceWorld(root);
+    const head = await reopened.engine.branches.readHead("main");
+    expect((await reopened.engine.projector.project(head)).values.hero?.["character.location"]).toBe("camp");
+    expect(sentVisibleMessages.join("\n")).toContain("Committed at step 1");
+    expect(notifications).toEqual([]);
+    expect(statuses).toContain("NWH · 林岐@main · step 1");
+  });
+
+  it("handles a natural character-list request without invoking the local-file assistant", async () => {
+    const { events, root } = await fixture();
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const notifications: string[] = [];
+    const result = await events.get("input")?.(
+      { type: "input", text: "这部小说有哪些角色？", source: "interactive" } as InputEvent,
+      { mode: "tui", ui: { notify: (message: string) => notifications.push(message) } } as unknown as ExtensionContext,
+    ) as InputEventResult | undefined;
+
+    expect(result).toEqual({ action: "handled" });
+    expect(notifications.join("\n")).toContain("林岐");
+  });
+
+  it("does not fall through to local-file analysis when play is requested before a world exists", async () => {
+    const { events } = await fixture();
+    const notifications: string[] = [];
+    const result = await events.get("input")?.(
+      { type: "input", text: "我想体验林岐这个角色", source: "interactive" } as InputEvent,
+      { mode: "tui", ui: { notify: (message: string) => notifications.push(message) } } as unknown as ExtensionContext,
+    ) as InputEventResult | undefined;
+
+    expect(result).toEqual({ action: "handled" });
+    expect(notifications.join("\n")).toContain("No playable instances exist");
   });
 
   it("offers /prepare-all and completes validated preparation inside the TUI", async () => {

@@ -34,9 +34,21 @@ function copyLines(options: NwhWelcomeOptions): string[] {
     return [
       "NWH  Novel World Harness",
       subtitle,
-      "Welcome back. Continue the conversation or type /status.",
+      options.mode === "compiler"
+        ? "Welcome back. Continue the compiler task or type /status."
+        : "Welcome back. Use /world-resume for the saved world or /status for details.",
       "Use /help whenever you need the command map.",
       "",
+    ];
+  }
+
+  if (options.mode === "compiler") {
+    return [
+      "NWH  Novel World Harness",
+      subtitle,
+      "1  Sign in with /login, then choose with /model",
+      "2  Paste a novel path to start the world compiler loop",
+      "3  Continue with /compile-next; /help shows every command",
     ];
   }
 
@@ -44,8 +56,8 @@ function copyLines(options: NwhWelcomeOptions): string[] {
     "NWH  Novel World Harness",
     subtitle,
     "1  Sign in with /login, then choose with /model",
-    "2  Paste a novel path to start the world compiler loop",
-    "3  Continue with /compile-next; /help shows every command",
+    "2  /novels, /instances and /characters show what is ready",
+    "3  /play <character> enters a world; paste a novel path to compile",
   ];
 }
 
@@ -59,9 +71,11 @@ export function renderNwhWelcome(
   const copy = copyLines(options);
 
   if (width < 48) {
+    const freshHint = options.mode === "compiler" ? "/login -> /model" : "/play or paste a novel";
+    const returningHint = options.mode === "compiler" ? "Continue compiler. /status" : "Welcome back. /world-resume";
     return [
       `${theme.fg("accent", `(${eyes})`)} ${theme.bold("NWH")}`,
-      theme.fg("muted", options.freshConversation ? "/login -> /model" : "Welcome back. /status"),
+      theme.fg("muted", options.freshConversation ? freshHint : returningHint),
       theme.fg("dim", options.freshConversation ? "paste novel path -> compile" : "/help for commands"),
     ];
   }

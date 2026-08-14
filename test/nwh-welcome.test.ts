@@ -16,7 +16,8 @@ describe("NWH welcome header", () => {
     expect(output).toContain("/login");
     expect(output).toContain("/model");
     expect(output).toContain("novel path");
-    expect(output).toContain("/compile-next");
+    expect(output).toContain("/instances");
+    expect(output).toContain("/play");
   });
 
   it("uses a shorter message for an existing conversation and narrow terminals", () => {
@@ -25,6 +26,13 @@ describe("NWH welcome header", () => {
     expect(lines.join("\n")).toContain("(-,-)");
     expect(lines.join("\n")).toContain("Welcome back");
     expect(lines).toHaveLength(3);
+  });
+
+  it("keeps compiler-mode onboarding focused on evidence batches", () => {
+    const output = renderNwhWelcome(theme, { mode: "compiler", freshConversation: true }, 0, 100).join("\n");
+
+    expect(output).toContain("/compile-next");
+    expect(output).not.toContain("/play <character>");
   });
 
   it("uses the mascot as the working animation", () => {

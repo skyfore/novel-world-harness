@@ -20,7 +20,7 @@ Implemented:
 - event-sourced branch history pinned to immutable canonical snapshots, deterministic state projection, temporal rules, knowledge isolation, snapshots, and integrity checks;
 - canonical and non-canonical possibilities, counterfactual branches, checkpoint replay, and deterministic actor-goal policies.
 - a derived `prepare` workflow that guides ingest, bounded compilation, explicit review, audit, and branch creation without automatically accepting model output;
-- `play-world`, which selects a committed character and translates natural-language actions through an actor-scoped, capture-only model tool before deterministic scope, knowledge, engine, and commit gates;
+- a world-aware TUI and catalog commands (`novels`, `instances`, `characters`, `progress`, `resume`) that select a committed character and route play through an actor-scoped, capture-only model boundary before deterministic scope, knowledge, engine, and commit gates;
 
 Still intentionally limited:
 
@@ -76,7 +76,10 @@ API keys remain supported as an alternative:
 ```bash
 export ANTHROPIC_API_KEY=your_key
 pnpm dev
-pnpm dev -p "列出这个工作区中的主要人物资料"
+nwh novels
+nwh instances
+nwh characters
+nwh resume main --character 曹操
 pnpm dev --continue
 pnpm dev --root ./my-novel
 pnpm dev --tui-mode fullscreen
@@ -123,9 +126,19 @@ slice directly rather than depending on user-prompt hooks.
 Ordinary conversation starts with read-only discovery tools. Starting a source
 compiler loop adds only the narrow typed tools that can create pending proposals,
 withdraw defective current-batch drafts, and finish the batch; it still cannot
-commit world truth or write arbitrary files. Inside the TUI:
+commit world truth or write arbitrary files. When a saved character session exists,
+the TUI resumes player mode automatically. In player mode, ordinary input bypasses
+the local-file assistant and is translated in a fresh actor-scoped session that
+receives committed character context only. Inside the TUI:
 
 ```text
+/novels
+/instances
+/characters main
+/play 曹操 main
+/progress
+/leave
+/world-resume main 曹操
 /files chapter
 /search 赤壁
 /read chapters/12.md 40:100
@@ -151,7 +164,8 @@ and open a playable branch:
 
 ```bash
 nwh prepare-all ./books/novel.txt
-nwh play-world --list-characters
+nwh characters
+nwh resume main --character <id-or-name>
 ```
 
 `prepare-all` asks focused multiple-choice questions before running all model
@@ -182,8 +196,10 @@ nwh proposals accept <kind> <proposal-id>   # or: nwh proposals reject <proposal
 nwh audit
 nwh prepare --source <source-id>
 nwh status
-nwh play-world --list-characters
-nwh play-world --character <id-or-name> --action "我前往藏书楼。"
+nwh novels
+nwh instances
+nwh characters <source-id> --branch main
+nwh resume main --character <id-or-name>
 ```
 
 `init` is provider-neutral. Use the TUI's `/login` and `/model`, an existing workspace-local Pi authorization, or an explicit optional `llm` profile. `prepare` derives the next safe stage from durable artifacts, runs at most one unfinished compiler batch by default, and always prints `Next:`. It stops at the review barrier and never accepts model output. Once every proposal is explicitly accepted or rejected and the audit is clean, rerunning `prepare` creates the canonical-initialized branch exactly once.
@@ -239,7 +255,7 @@ nwh world validate ./player-action.json --branch main
 nwh world move --branch main --player ./player-action.json
 ```
 
-The safer natural-language path is `play-world`. Every action uses a fresh Pi session with no novel-file tools, project instructions, compiler extension, future canon, or branch-write capability. The model can only capture one candidate in memory; the host supplies branch/head/source/actor identity and commits only after deterministic validation. Rejections print concrete issue codes and leave the branch head unchanged. Omitting `--action` in a terminal opens a repeatable action prompt, and the active branch/character is persisted locally.
+The primary natural-language path is the full TUI entered by `nwh resume`, `nwh play --branch ... --character ...`, or `/play` inside `nwh`. Every player action uses a fresh Pi session with no novel-file tools, project instructions, compiler extension, future canon, or branch-write capability. The model can only capture one candidate in memory; the host supplies branch/head/source/actor identity and commits only after deterministic validation. Rejections report concrete issue codes and leave the branch head unchanged. Character selection is persisted per instance, with one active pointer that ordinary `nwh` startup resumes automatically. `play-world --action` remains the compact script/legacy readline path.
 
 Branch and integrity workflows:
 

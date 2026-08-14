@@ -8,6 +8,8 @@ import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
+import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
+import { resumeCommand } from "./commands/resume.js";
 import { playCommand } from "./commands/play.js";
 import { compileCommand } from "./commands/compile.js";
 import { compileSourceCommand } from "./commands/compile-source.js";
@@ -33,6 +35,7 @@ import {
   worldSnapshotCommand,
   worldValidateCommand,
 } from "./commands/world.js";
+import { selectPlayExperience } from "./world/play-experience.js";
 
 const program = new Command();
 program
@@ -93,6 +96,48 @@ program.command("ingest")
     return ingestContentCommand(content, options.title, configFor(options));
   });
 program.command("status").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("show inventory and the next safe preparation step").action(async (options) => statusCommand(configFor(options)));
+program.command("novels")
+  .option("--root <path>", "local novel workspace")
+  .description("list registered novels in the current workspace")
+  .action(async (options) => novelsCommand(rootFor(options)));
+program.command("instances")
+  .option("--root <path>", "local novel workspace")
+  .description("list playable world instances and committed progress")
+  .action(async (options) => instancesCommand(rootFor(options)));
+program.command("characters")
+  .argument("[novel]", "registered source id, title or path")
+  .option("--root <path>", "local novel workspace")
+  .option("--branch <id>", "playable instance id")
+  .description("list committed characters for a novel at an instance head")
+  .action(async (novel, options) => charactersCommand(rootFor(options), options.branch, novel));
+program.command("progress")
+  .argument("[instance]", "playable instance id")
+  .option("--root <path>", "local novel workspace")
+  .description("show committed progress for the current or named instance")
+  .action(async (instance, options) => progressCommand(rootFor(options), instance));
+program.command("resume")
+  .argument("[instance]", "playable instance id")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--character <id-or-name>", "character to inhabit")
+  .option("--model <model>", "override the Pi model for player actions")
+  .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
+  .option("--continue", "continue the latest TUI transcript")
+  .option("--no-save", "do not persist the TUI transcript")
+  .description("resume a playable instance in the full TUI")
+  .action(async (instance, options) => {
+    const globalOptions = program.opts();
+    await resumeCommand({
+      root: rootFor(options),
+      configPath: configFor(options),
+      ...(instance ? { branchId: instance } : {}),
+      ...(options.character ? { character: options.character } : {}),
+      model: options.model ?? globalOptions.model,
+      tuiMode: options.tuiMode ?? globalOptions.tuiMode,
+      continueSession: options.continue || globalOptions.continue,
+      saveSession: options.save && globalOptions.save,
+    });
+  });
 program.command("audit")
   .option("--root <path>", "local novel workspace")
   .option("--source <id>", "audit only one registered novel source")
@@ -282,6 +327,8 @@ program
   .command("play")
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
+  .option("--branch <id>", "playable instance to enter")
+  .option("--character <id-or-name>", "character to inhabit")
   .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
@@ -290,6 +337,12 @@ program
   .description("open the local-first terminal session")
   .action(async (options) => {
     const globalOptions = program.opts();
+    if (options.branch || options.character) {
+      await selectPlayExperience(rootFor(options), {
+        ...(options.branch ? { branchId: options.branch } : {}),
+        ...(options.character ? { character: options.character } : {}),
+      });
+    }
     await playCommand({
       configPath: configFor(options),
       allowMissingConfig: !options.config,

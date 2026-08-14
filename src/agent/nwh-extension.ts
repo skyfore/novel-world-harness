@@ -24,7 +24,19 @@ import { InitialWorldStore } from "../world/initial.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import { PlaySessionStore } from "../world/play-session.js";
 import { workspaceStateDir } from "./runtime-paths.js";
+import { createPiPlayerActionTranslator } from "./pi-player-action.js";
+import type { LlmProfile } from "../config/schema.js";
+import type { PlayerActionTranslator } from "../world/player-action.js";
+import {
+  inspectPlayExperience,
+  listPlayableCharacters,
+  performPlayTurn,
+  selectPlayExperience,
+  type SelectedPlayExperience,
+} from "../world/play-experience.js";
+import { formatCharacters, formatInstances, formatNovels, formatProgress } from "../commands/catalog.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -32,12 +44,22 @@ export type NwhExtensionOptions = {
   workspace: LocalFileWorkspace;
   saveSession: boolean;
   mode: NwhInteractionMode;
+  profile?: LlmProfile;
+  playerTranslator?: PlayerActionTranslator;
+  advanceBackground?: number;
   onSessionShutdown?: () => Promise<void>;
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
   preparedCacheRoot?: string;
 };
 
 const COMMAND_HELP = `NWH commands:
+  /novels                   list registered novel sources
+  /instances                list playable branches and committed progress
+  /characters [instance]    list characters at an instance head
+  /play <character> [instance] select a character and enter player mode
+  /world-resume [instance] [character] resume a saved or named instance
+  /progress [instance]      show committed progress for an instance
+  /leave                    leave player mode without deleting resume state
   /files [path filter]       list safe workspace files
   /search <text>             search local files for fixed text
   /read <path> [start:end]   read a bounded line range
@@ -71,6 +93,9 @@ type TuiPrepareAllState = {
   preparedCacheVerified: boolean;
 };
 
+const PLAY_INTENT = /(?:体验|扮演|饰演|想玩|游玩|代入|进入.{0,8}(?:世界|角色)|以.{0,12}(?:身份|视角)|play\s+as|inhabit|resume\s+as)/iu;
+const CHARACTER_LIST_INTENT = /(?:有哪些|列出|查看|显示|选择|什么|哪些).{0,12}(?:人物|角色)|(?:characters|cast|who\s+can\s+i\s+play)/iu;
+
 export function splitCommandArguments(value: string): string[] {
   const tokens: string[] = [];
   const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
@@ -93,7 +118,111 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let registeredCompilerToolset: CompilerProposalToolset | undefined;
     let prepareAllState: TuiPrepareAllState | undefined;
     let compilerCircuitBroken = false;
+    let playerMode = false;
+    let selectedPlay: SelectedPlayExperience | undefined;
     const preparedCache = new PreparedNovelCache(workspace.root, options.preparedCacheRoot);
+
+    const setPlayerStatus = (ctx: ExtensionContext, selection: SelectedPlayExperience) => {
+      if (ctx.mode !== "tui") return;
+      ctx.ui.setStatus(
+        "nwh-mode",
+        ctx.ui.theme.fg("dim", `NWH · ${selection.actor.canonicalName}@${selection.session.branchId} · step ${selection.logicalStep}`),
+      );
+      ctx.ui.setWorkingMessage(`Advancing ${selection.actor.canonicalName}'s world...`);
+    };
+
+    const showPlayMessage = (content: string) => {
+      pi.sendMessage({ customType: "nwh-play", content, display: true });
+    };
+
+    const activatePlayer = async (
+      ctx: ExtensionContext,
+      input: { branchId?: string; character?: string } = {},
+    ): Promise<SelectedPlayExperience> => {
+      const selection = await selectPlayExperience(workspace.root, input);
+      selectedPlay = selection;
+      playerMode = true;
+      setPlayerStatus(ctx, selection);
+      showPlayMessage([
+        `Entered **${selection.actor.canonicalName}** (${selection.actor.id}) on **${selection.session.branchId}** at committed step ${selection.logicalStep}.`,
+        selection.actor.locationName ? `Current location: ${selection.actor.locationName}.` : "",
+        "Your next ordinary message is treated as this character's immediate action. Use /leave to return to compiler/assistant mode.",
+      ].filter(Boolean).join("\n"));
+      return selection;
+    };
+
+    const runPlayerInput = async (utterance: string, ctx: ExtensionContext): Promise<void> => {
+      const selection = selectedPlay ?? await activatePlayer(ctx);
+      showPlayMessage(`**${selection.actor.canonicalName}:** ${utterance}`);
+      const translator = options.playerTranslator ?? createPiPlayerActionTranslator({
+        root: workspace.root,
+        ...(options.profile ? { profile: options.profile } : {}),
+        ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+      });
+      if (ctx.mode === "tui") {
+        ctx.ui.setStatus("nwh-play-turn", ctx.ui.theme.fg("dim", `Validating action · ${selection.actor.canonicalName}`));
+      }
+      try {
+        const outcome = await performPlayTurn({
+          root: workspace.root,
+          branchId: selection.session.branchId,
+          actorId: selection.actor.id,
+          utterance,
+          translator,
+          advanceBackground: options.advanceBackground ?? 1,
+        });
+        if (!outcome.result.accepted) {
+          showPlayMessage([
+            `Action rejected at **${outcome.result.stage}**; committed world truth is unchanged.`,
+            ...outcome.result.issues.map((issue) => `- ${issue.code}: ${issue.message}`),
+          ].join("\n"));
+        } else {
+          showPlayMessage([
+            outcome.result.renderedText,
+            `Committed at step ${outcome.logicalStep} (${outcome.finalHead.slice(0, 12)}).`,
+            ...outcome.backgroundEvents.map((event) => `World advanced: ${event.title}`),
+            ...(outcome.backgroundError ? [`Background advancement stopped: ${outcome.backgroundError}`] : []),
+          ].join("\n\n"));
+        }
+        const persisted = await new PlaySessionStore(workspace.root).read();
+        selectedPlay = {
+          ...selection,
+          ...(persisted ? { session: persisted } : {}),
+          logicalStep: outcome.logicalStep,
+        };
+        setPlayerStatus(ctx, selectedPlay);
+      } finally {
+        if (ctx.mode === "tui") ctx.ui.setStatus("nwh-play-turn", undefined);
+      }
+    };
+
+    const tryNaturalWorldIntent = async (text: string, ctx: ExtensionContext): Promise<boolean> => {
+      if (!PLAY_INTENT.test(text) && !CHARACTER_LIST_INTENT.test(text)) return false;
+      const available = await listPlayableCharacters(workspace.root);
+      if (CHARACTER_LIST_INTENT.test(text) && !PLAY_INTENT.test(text)) {
+        const characters = formatCharacters(available.characters, available.branchId);
+        if (ctx.mode === "tui") ctx.ui.notify(characters, "info");
+        else showPlayMessage(characters);
+        return true;
+      }
+      const matches = available.characters.filter((character) =>
+        [character.canonicalName, ...character.aliases]
+          .some((name) => text.normalize("NFKC").toLocaleLowerCase().includes(name.normalize("NFKC").toLocaleLowerCase())),
+      );
+      const actor = matches.length === 1
+        ? matches[0]
+        : available.characters.length === 1
+          ? available.characters[0]
+          : undefined;
+      if (!actor) {
+        const choices = `${formatCharacters(available.characters, available.branchId)}\nUse /play <character> [instance].`;
+        if (ctx.mode === "tui") ctx.ui.notify(choices, "info");
+        else showPlayMessage(choices);
+        return true;
+      }
+      await activatePlayer(ctx, { branchId: available.branchId, character: actor.id });
+      return true;
+    };
 
     const resetCompilerBatch = async (segmentIds: readonly string[], compilerBatchId: string, sourceId: string) => {
       await registeredCompilerToolset?.beginBatch(segmentIds, compilerBatchId, sourceId);
@@ -296,7 +425,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           const cached = await preparedCache.publish(inspection.source!);
           ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
         }
-        stopPrepareAll(ctx, `Preparation complete. Run nwh play-world --branch ${state.branchId} --list-characters to enter the world.`, "info");
+        stopPrepareAll(ctx, `Preparation complete. Run /characters ${state.branchId}, then /play <character> ${state.branchId}.`, "info");
         return;
       }
       const diagnosis = inspection.repairReasons?.length
@@ -349,6 +478,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return { action: "handled" };
       }
 
+      if (playerMode) {
+        try {
+          await runPlayerInput(event.text, ctx);
+        } catch (error) {
+          ctx.ui.notify(`Cannot perform player action: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+        return { action: "handled" };
+      }
+
       try {
         const preparation = await prepareSourceLoopFromInput(workspace.root, event.text, { cacheRoot: options.preparedCacheRoot });
         if (preparation) {
@@ -372,6 +510,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }
       } catch (error) {
         ctx.ui.notify(`Cannot start novel compiler: ${error instanceof Error ? error.message : String(error)}`, "error");
+        return { action: "handled" };
+      }
+
+      try {
+        if (await tryNaturalWorldIntent(event.text, ctx)) return { action: "handled" };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (ctx.mode === "tui") ctx.ui.notify(`Cannot enter novel world: ${message}`, "error");
+        else showPlayMessage(`Cannot enter novel world: ${message}`);
         return { action: "handled" };
       }
 
@@ -487,6 +634,93 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
       const freshConversation = isFreshConversation(ctx.sessionManager.getEntries());
       ctx.ui.setHeader((tui, theme) => createNwhWelcomeHeader(tui, theme, { mode, freshConversation }));
+      if (mode === "assistant") {
+        const catalog = await inspectPlayExperience(workspace.root);
+        if (catalog.activeSession) {
+          try {
+            await activatePlayer(ctx, {
+              branchId: catalog.activeSession.branchId,
+              character: catalog.activeSession.actorId,
+            });
+          } catch (error) {
+            ctx.ui.notify(`Saved play session is unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
+          }
+        } else if (catalog.instances.length) {
+          ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${catalog.instances.length} world instance(s) ready · /characters`));
+        }
+      }
+    });
+
+    pi.registerCommand("novels", {
+      description: "List registered novels in this workspace",
+      handler: async (_args, ctx) => ctx.ui.notify(formatNovels(await inspectPlayExperience(workspace.root)), "info"),
+    });
+
+    pi.registerCommand("instances", {
+      description: "List playable world instances and progress",
+      handler: async (_args, ctx) => ctx.ui.notify(formatInstances((await inspectPlayExperience(workspace.root)).instances), "info"),
+    });
+
+    pi.registerCommand("characters", {
+      description: "List committed characters at an instance head",
+      handler: async (args, ctx) => {
+        const [branchId, source] = splitCommandArguments(args);
+        const result = await listPlayableCharacters(workspace.root, {
+          ...(branchId ? { branchId } : {}),
+          ...(source ? { source } : {}),
+        });
+        ctx.ui.notify(formatCharacters(result.characters, result.branchId, result.source?.title), "info");
+      },
+    });
+
+    pi.registerCommand("play", {
+      description: "Select a character and enter player mode",
+      handler: async (args, ctx) => {
+        const [character, branchId] = splitCommandArguments(args);
+        if (!character) {
+          const result = await listPlayableCharacters(workspace.root, branchId ? { branchId } : {});
+          ctx.ui.notify(`${formatCharacters(result.characters, result.branchId)}\nUsage: /play <character> [instance]`, "info");
+          return;
+        }
+        await activatePlayer(ctx, { ...(branchId ? { branchId } : {}), character });
+      },
+    });
+
+    pi.registerCommand("world-resume", {
+      description: "Resume the saved or named playable instance",
+      handler: async (args, ctx) => {
+        const [branchId, character] = splitCommandArguments(args);
+        await activatePlayer(ctx, {
+          ...(branchId ? { branchId } : {}),
+          ...(character ? { character } : {}),
+        });
+      },
+    });
+
+    pi.registerCommand("progress", {
+      description: "Show committed progress for a playable instance",
+      handler: async (args, ctx) => {
+        const [branchId] = splitCommandArguments(args);
+        const catalog = await inspectPlayExperience(workspace.root);
+        const instance = branchId
+          ? catalog.instances.find((candidate) => candidate.branchId === branchId)
+          : catalog.instances.find((candidate) => candidate.active)
+            ?? (catalog.instances.length === 1 ? catalog.instances[0] : undefined);
+        if (!instance) throw new Error(branchId ? `Unknown instance '${branchId}'.` : "No unambiguous current instance; use /instances.");
+        ctx.ui.notify(formatProgress(instance), "info");
+      },
+    });
+
+    pi.registerCommand("leave", {
+      description: "Leave player mode while keeping resume state",
+      handler: async (_args, ctx) => {
+        playerMode = false;
+        selectedPlay = undefined;
+        const modeLabel = compilerToolsActive && mode === "assistant" ? "world compiler loop" : "read-only assistant";
+        ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
+        ctx.ui.setWorkingMessage("Consulting local evidence...");
+        ctx.ui.notify("Left player mode. The selected instance and character remain saved; use /world-resume to return.", "info");
+      },
     });
 
     pi.registerCommand("files", {
@@ -649,11 +883,16 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("status", {
       description: "Show NWH workspace and session status",
       handler: async (_args, ctx) => {
+        const catalog = await inspectPlayExperience(workspace.root);
+        const current = catalog.instances.find((instance) => instance.active);
         ctx.ui.notify([
           `workspace: ${workspace.root}`,
           `state: ${workspaceStateDir(workspace.root)}`,
-          `mode: ${compilerToolsActive && mode === "assistant" ? "world-compiler-loop" : mode}`,
+          `mode: ${playerMode ? "player" : compilerToolsActive && mode === "assistant" ? "world-compiler-loop" : mode}`,
           `active source: ${activeSourceId ?? "none"}`,
+          `registered novels: ${catalog.novels.length}`,
+          `playable instances: ${catalog.instances.length}`,
+          `current play: ${current ? `${current.actorName ?? current.actorId ?? "no character"}@${current.branchId} step ${current.logicalStep}` : "none"}`,
           `model: ${modelLabel(ctx.model)}`,
           `session: ${ctx.sessionManager.getSessionId()}`,
           `entries: ${ctx.sessionManager.getEntries().length}`,

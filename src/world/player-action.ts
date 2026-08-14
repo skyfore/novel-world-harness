@@ -15,6 +15,7 @@ import {
   stateFieldSpecSchema,
   stateValueSchema,
   type CommitId,
+  type Entity,
   type EntityId,
   type EventProposal,
   type Predicate,
@@ -95,6 +96,7 @@ export type PlayerActionTranslator = (
 export const playerTurnInputSchema = z
   .object({
     branchId: idSchema,
+    sourceId: idSchema.optional(),
     actorId: idSchema,
     utterance: z.string().trim().min(1).max(20_000),
   })
@@ -140,6 +142,7 @@ export async function buildActorScopedActionContext(
   actorId: EntityId,
   commitId: CommitId,
   utterance?: string,
+  sourceId?: string,
 ): Promise<ActorScopedActionContext> {
   const [context, view, worldState] = await Promise.all([
     engine.contextForCommit(commitId),
@@ -149,25 +152,29 @@ export async function buildActorScopedActionContext(
   const referenceable = new Set<EntityId>([actorId]);
   const writable = new Set<EntityId>([actorId]);
   const ownedEntityState: Record<EntityId, Record<string, StateValue>> = {};
+  const visibleKnowledge = sourceId
+    ? view.knowledge.filter((entry) => entry.claim?.evidence.some((reference) => reference.span.sourceId === sourceId))
+    : view.knowledge;
 
   for (const [field, value] of Object.entries(view.selfState)) {
     const spec = context.stateSchema.get(field);
-    if (spec.valueType === "entity-ref" && typeof value === "string") addExistingEntity(referenceable, value, context.entities);
+    if (spec.valueType === "entity-ref" && typeof value === "string") addExistingEntity(referenceable, value, context.entities, sourceId);
     if (spec.valueType === "entity-ref-set" && Array.isArray(value)) {
-      for (const item of value) addExistingEntity(referenceable, item, context.entities);
+      for (const item of value) addExistingEntity(referenceable, item, context.entities, sourceId);
     }
   }
 
-  for (const entry of view.knowledge) {
-    if (entry.fact.sourceActorId) addExistingEntity(referenceable, entry.fact.sourceActorId, context.entities);
+  for (const entry of visibleKnowledge) {
+    if (entry.fact.sourceActorId) addExistingEntity(referenceable, entry.fact.sourceActorId, context.entities, sourceId);
     if (!entry.claim) continue;
-    addExistingEntity(referenceable, entry.claim.subject, context.entities);
-    if (entry.claim.speaker) addExistingEntity(referenceable, entry.claim.speaker, context.entities);
-    addClaimObjectEntities(referenceable, entry.claim.object, context.entities);
+    addExistingEntity(referenceable, entry.claim.subject, context.entities, sourceId);
+    if (entry.claim.speaker) addExistingEntity(referenceable, entry.claim.speaker, context.entities, sourceId);
+    addClaimObjectEntities(referenceable, entry.claim.object, context.entities, sourceId);
   }
 
   if (utterance) {
     for (const entity of context.entities.values()) {
+      if (!belongsToSource(entity, sourceId)) continue;
       if ([entity.canonicalName, ...entity.aliases].some((name) => explicitlyMentions(utterance, name))) {
         referenceable.add(entity.id);
       }
@@ -176,6 +183,7 @@ export async function buildActorScopedActionContext(
 
   for (const entity of context.entities.values()) {
     if (entity.kind !== "artifact") continue;
+    if (!belongsToSource(entity, sourceId)) continue;
     if (worldState.values[entity.id]?.["artifact.owner"] !== actorId) continue;
     referenceable.add(entity.id);
     writable.add(entity.id);
@@ -195,7 +203,7 @@ export async function buildActorScopedActionContext(
   const writableStateFields = context.stateSchema
     .list()
     .filter((spec) => spec.appliesTo.some((kind) => writableKinds.has(kind)));
-  const knowledge = view.knowledge.map((entry) => ({
+  const knowledge = visibleKnowledge.map((entry) => ({
     claimId: entry.fact.claimId,
     status: entry.fact.status,
     confidence: entry.fact.confidence,
@@ -418,7 +426,7 @@ export class PlayerTurnService {
   async turn(inputValue: PlayerTurnInput): Promise<PlayerTurnResult> {
     const input = playerTurnInputSchema.parse(inputValue);
     const previousHead = await this.engine.branches.readHead(input.branchId);
-    const contextBefore = await buildActorScopedActionContext(this.engine, input.actorId, previousHead, input.utterance);
+    const contextBefore = await buildActorScopedActionContext(this.engine, input.actorId, previousHead, input.utterance, input.sourceId);
     let translated: unknown;
     try {
       translated = await this.translator(deepFreeze({
@@ -516,7 +524,7 @@ export class PlayerTurnService {
     }
 
     const newHead = committed.result.newHead;
-    const contextAfter = await buildActorScopedActionContext(this.engine, input.actorId, newHead);
+    const contextAfter = await buildActorScopedActionContext(this.engine, input.actorId, newHead, undefined, input.sourceId);
     const renderedText = await this.renderAt(input.branchId, input.actorId, newHead);
     return {
       accepted: true,
@@ -554,7 +562,7 @@ export class PlayerTurnService {
     }
     const contextAfter = newHead === previousHead
       ? contextBefore
-      : await buildActorScopedActionContext(this.engine, input.actorId, newHead);
+      : await buildActorScopedActionContext(this.engine, input.actorId, newHead, undefined, input.sourceId);
     const renderedText = await this.renderAt(input.branchId, input.actorId, newHead);
     return {
       accepted: false,
@@ -652,18 +660,26 @@ function requireReferenceable(
 function addExistingEntity(
   target: Set<EntityId>,
   value: unknown,
-  entities: ReadonlyMap<EntityId, unknown>,
+  entities: ReadonlyMap<EntityId, Entity>,
+  sourceId?: string,
 ): void {
-  if (typeof value === "string" && entities.has(value)) target.add(value);
+  if (typeof value !== "string") return;
+  const entity = entities.get(value);
+  if (entity && belongsToSource(entity, sourceId)) target.add(value);
 }
 
 function addClaimObjectEntities(
   target: Set<EntityId>,
   value: unknown,
-  entities: ReadonlyMap<EntityId, unknown>,
+  entities: ReadonlyMap<EntityId, Entity>,
+  sourceId?: string,
 ): void {
-  if (typeof value === "string") addExistingEntity(target, value, entities);
-  else if (Array.isArray(value)) for (const item of value) addExistingEntity(target, item, entities);
+  if (typeof value === "string") addExistingEntity(target, value, entities, sourceId);
+  else if (Array.isArray(value)) for (const item of value) addExistingEntity(target, item, entities, sourceId);
+}
+
+function belongsToSource(entity: Entity, sourceId?: string): boolean {
+  return !sourceId || entity.evidence.some((reference) => reference.span.sourceId === sourceId);
 }
 
 function explicitlyMentions(utterance: string, name: string): boolean {

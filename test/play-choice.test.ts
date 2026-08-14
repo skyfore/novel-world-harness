@@ -6,6 +6,7 @@ import type { UserQuestion } from "../src/util/ask-user-question.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { choosePlayExperience } from "../src/world/play-choice.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
+import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
 
@@ -17,9 +18,11 @@ describe("structured play choices", () => {
   it("asks for ambiguous instances and characters before activating a session", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-choice-"));
     roots.push(root);
+    const heroNovel = await createEvidenceFixture(root, "Hero waits.\n", "hero-novel.txt");
+    const rivalNovel = await createEvidenceFixture(root, "Rival waits.\n", "rival-novel.txt");
     const canon = new CanonicalModelStore(root);
-    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] });
-    await canon.putEntity({ id: "rival", kind: "character", canonicalName: "Rival", aliases: ["Opponent"], evidence: [] });
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: heroNovel.evidence("Hero") });
+    await canon.putEntity({ id: "rival", kind: "character", canonicalName: "Rival", aliases: ["Opponent"], evidence: rivalNovel.evidence("Rival") });
     const { engine, runtime } = await openWorkspaceWorld(root);
     const alphaHead = await engine.createBranch("alpha", "Alpha", {
       version: 1,
@@ -33,19 +36,26 @@ describe("structured play choices", () => {
 
     const selected = await choosePlayExperience(root, {}, async (question) => {
       questions.push(question);
+      if (question.header === "Novel") return rivalNovel.source.id;
       return question.header === "Instance" ? "beta" : "rival";
     });
 
-    expect(questions.map((question) => question.header)).toEqual(["Instance", "Character"]);
-    expect(selected).toMatchObject({ session: { branchId: "beta", actorId: "rival" } });
+    expect(questions.map((question) => question.header)).toEqual(["Novel", "Instance"]);
+    expect(questions[0]?.options.map((option) => option.value)).toEqual([heroNovel.source.id, rivalNovel.source.id]);
+    expect(selected).toMatchObject({
+      source: { id: rivalNovel.source.id },
+      session: { branchId: "beta", sourceId: rivalNovel.source.id, actorId: "rival" },
+    });
   });
 
   it("resolves free-form instance names and character aliases through custom input", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-choice-custom-"));
     roots.push(root);
+    const heroNovel = await createEvidenceFixture(root, "Hero waits.\n", "hero-timeline.txt");
+    const rivalNovel = await createEvidenceFixture(root, "Rival waits.\n", "rival-timeline.txt");
     const canon = new CanonicalModelStore(root);
-    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] });
-    await canon.putEntity({ id: "rival", kind: "character", canonicalName: "Rival", aliases: ["Opponent"], evidence: [] });
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: heroNovel.evidence("Hero") });
+    await canon.putEntity({ id: "rival", kind: "character", canonicalName: "Rival", aliases: ["Opponent"], evidence: rivalNovel.evidence("Rival") });
     const { engine, runtime } = await openWorkspaceWorld(root);
     const alphaHead = await engine.createBranch("alpha", "Alpha Timeline", {
       version: 1,
@@ -57,16 +67,19 @@ describe("structured play choices", () => {
     await runtime.forkBranch("alpha", alphaHead, "beta", "Beta Timeline");
 
     const prompts: string[] = [];
-    const selected = await choosePlayExperience(root, { branchId: "missing", character: "unknown" }, async (question) => {
+    const selected = await choosePlayExperience(root, { source: "missing", branchId: "missing", character: "unknown" }, async (question) => {
       prompts.push(question.question);
-      const input = question.header === "Instance" ? "Beta Timeline" : "Opponent";
+      const input = question.header === "Novel"
+        ? rivalNovel.source.title
+        : question.header === "Instance" ? "Beta Timeline" : "Opponent";
       return question.customInput?.resolve(input);
     });
 
     expect(prompts).toEqual([
+      "No unique novel matches 'missing'. Which novel do you want to enter?",
       "No unique instance matches 'missing'. Which novel-world instance do you want to use?",
       "No unique living character matches 'unknown'. Who do you want to play on 'beta'?",
     ]);
-    expect(selected).toMatchObject({ session: { branchId: "beta", actorId: "rival" } });
+    expect(selected).toMatchObject({ session: { branchId: "beta", sourceId: rivalNovel.source.id, actorId: "rival" } });
   });
 });

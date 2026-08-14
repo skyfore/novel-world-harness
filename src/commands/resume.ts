@@ -8,6 +8,7 @@ export type ResumeCommandOptions = {
   configPath: string;
   branchId?: string;
   character?: string;
+  source?: string;
   model?: string;
   tuiMode?: TuiMode;
   continueSession?: boolean;
@@ -19,6 +20,7 @@ export async function resumeCommand(options: ResumeCommandOptions): Promise<void
   const selection = await choosePlayExperience(options.root, {
     ...(options.branchId ? { branchId: options.branchId } : {}),
     ...(options.character ? { character: options.character } : {}),
+    ...(options.source ? { source: options.source } : {}),
   }, options.ask ?? askUserQuestion);
   if (!selection) return;
   await playCommand({

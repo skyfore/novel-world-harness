@@ -121,11 +121,12 @@ program.command("resume")
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
   .option("--character <id-or-name>", "character to inhabit")
+  .option("--novel <id-or-title>", "registered novel source to enter")
   .option("--model <model>", "override the Pi model for player actions")
   .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
   .option("--continue", "continue the latest TUI transcript")
   .option("--no-save", "do not persist the TUI transcript")
-  .description("resume a playable instance in the full TUI")
+  .description("resume a novel, character and playable instance in the full TUI")
   .action(async (instance, options) => {
     const globalOptions = program.opts();
     await resumeCommand({
@@ -133,6 +134,7 @@ program.command("resume")
       configPath: configFor(options),
       ...(instance ? { branchId: instance } : {}),
       ...(options.character ? { character: options.character } : {}),
+      ...(options.novel ? { source: options.novel } : {}),
       model: options.model ?? globalOptions.model,
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
       continueSession: options.continue || globalOptions.continue,
@@ -305,17 +307,19 @@ program
   .option("--root <path>", "local novel workspace")
   .option("--branch <id>", "playable branch id")
   .option("--character <id-or-name>", "character to inhabit")
+  .option("--novel <id-or-title>", "registered novel source to enter")
   .option("-a, --action <text>", "perform one natural-language action and exit")
   .option("--advance-background <n>", "maximum background/canon events after an accepted action", "1")
   .option("--list-characters", "list committed playable characters")
   .option("--model <model>", "override action translator model; use provider/model when ambiguous")
-  .description("inhabit a committed character and drive a validated alternate timeline")
+  .description("choose a novel, inhabit a committed character and drive a validated alternate timeline")
   .action(async (options) => {
     const result = await playWorldCommand({
       root: rootFor(options),
       configPath: configFor(options),
       ...(options.branch ? { branchId: options.branch } : {}),
       ...(options.character ? { character: options.character } : {}),
+      ...(options.novel ? { source: options.novel } : {}),
       ...(options.action !== undefined ? { action: options.action } : {}),
       advanceBackground: nonNegativeInteger(options.advanceBackground, "--advance-background"),
       listCharacters: Boolean(options.listCharacters),
@@ -330,6 +334,7 @@ program
   .option("--root <path>", "local novel workspace")
   .option("--branch <id>", "playable instance to enter")
   .option("--character <id-or-name>", "character to inhabit")
+  .option("--novel <id-or-title>", "registered novel source to enter")
   .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
@@ -338,10 +343,13 @@ program
   .description("open the local-first terminal session")
   .action(async (options) => {
     const globalOptions = program.opts();
-    if (options.branch || options.character) {
+    if (options.branch || options.character || options.novel) {
       await choosePlayExperience(rootFor(options), {
         ...(options.branch ? { branchId: options.branch } : {}),
         ...(options.character ? { character: options.character } : {}),
+        ...(options.novel ? { source: options.novel } : {}),
+        preferActiveSource: false,
+        preferSavedCharacter: false,
       }, askUserQuestion);
     }
     await playCommand({

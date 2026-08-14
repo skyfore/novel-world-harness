@@ -8,6 +8,7 @@ import { idSchema } from "./model.js";
 export const activePlaySessionSchema = z.object({
   version: z.literal(1),
   branchId: idSchema,
+  sourceId: idSchema.optional(),
   actorId: idSchema,
   lastCommitId: idSchema,
   updatedAt: z.string().datetime({ offset: true }),

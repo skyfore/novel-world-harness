@@ -30,7 +30,7 @@ export { NarrativeRenderer, type ActorNarrativeFrame, type NarrativeAdapter, typ
 export { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "./world/possibility-model.js";
 export { buildActorScopedActionContext, playerActionCandidateSchema, playerActionToKnowledgeAwareAction, playerTurnInputSchema, PlayerTurnService, validatePlayerActionScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionTranslator, type PlayerTurnInput, type PlayerTurnResult } from "./world/player-action.js";
 export { PlaySessionStore, activePlaySessionSchema, type ActivePlaySession } from "./world/play-session.js";
-export { choosePlayExperience, choosePlayInstance, resolvePlayInstance, type AskPlayQuestion } from "./world/play-choice.js";
+export { choosePlayExperience, choosePlayInstance, choosePlayNovel, resolvePlayInstance, resolvePlayNovel, type AskPlayQuestion } from "./world/play-choice.js";
 export { inspectPlayExperience, listPlayableCharacters, performPlayTurn, resolveCharacter, resolveNovelSource, selectPlayExperience, type PlayExperienceCatalog, type PlayableCharacter, type PlayInstanceSummary, type PlayTurnOutcome, type SelectedPlayExperience } from "./world/play-experience.js";
 export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type CanonReplayResult, type IsolatedCanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";
 export { WorldRuntime, adjudicateActorCandidates, type MoveInput, type MoveResult } from "./world/runtime.js";

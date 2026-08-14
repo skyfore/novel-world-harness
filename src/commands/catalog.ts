@@ -6,7 +6,7 @@ import {
   type PlayableCharacter,
   type PlayInstanceSummary,
 } from "../world/play-experience.js";
-import { choosePlayInstance, type AskPlayQuestion } from "../world/play-choice.js";
+import { choosePlayInstance, choosePlayNovel, type AskPlayQuestion } from "../world/play-choice.js";
 import { askUserQuestion } from "../util/ask-user-question.js";
 
 export async function novelsCommand(root: string): Promise<void> {
@@ -25,9 +25,14 @@ export async function charactersCommand(
   source?: string,
   ask: AskPlayQuestion = askUserQuestion,
 ): Promise<void> {
-  const selectedBranchId = await choosePlayInstance(root, branchId, ask);
+  const catalog = await inspectPlayExperience(root);
+  const sourceId = catalog.novels.length || source
+    ? await choosePlayNovel(catalog, source, ask, { preferActive: false })
+    : undefined;
+  if (catalog.novels.length && !sourceId) return;
+  const selectedBranchId = await choosePlayInstance(root, branchId, ask, catalog);
   if (!selectedBranchId) return;
-  const result = await listPlayableCharacters(root, { branchId: selectedBranchId, ...(source ? { source } : {}) });
+  const result = await listPlayableCharacters(root, { branchId: selectedBranchId, ...(sourceId ? { source: sourceId } : {}) });
   stdout.write(`${formatCharacters(result.characters, result.branchId, result.source?.title)}\n`);
 }
 
@@ -59,9 +64,10 @@ export function formatInstances(instances: readonly PlayInstanceSummary[]): stri
     "Playable instances (* current):",
     ...instances.map((instance) => {
       const actor = instance.actorName ? `\tactor=${instance.actorName} (${instance.actorId})` : "";
+      const novel = instance.sourceTitle ? `\tnovel=${instance.sourceTitle} (${instance.sourceId})` : "";
       const sync = instance.sessionAtHead === false ? "\tresume=head-advanced" : "";
       const parent = instance.parentBranchId ? `\tfrom=${instance.parentBranchId}` : "";
-      return `${instance.active ? "*" : " "} ${instance.branchId}\tstep=${instance.logicalStep}\tcommits=${instance.commitCount}\tevents=${instance.eventCount}${actor}${parent}${sync}\thead=${instance.headCommitId.slice(0, 12)}`;
+      return `${instance.active ? "*" : " "} ${instance.branchId}\tstep=${instance.logicalStep}\tcommits=${instance.commitCount}\tevents=${instance.eventCount}${novel}${actor}${parent}${sync}\thead=${instance.headCommitId.slice(0, 12)}`;
     }),
   ].join("\n");
 }
@@ -89,6 +95,7 @@ export function formatProgress(instance: PlayInstanceSummary): string {
     `Instance: ${instance.branchId} (${instance.name})${instance.active ? " [current]" : ""}`,
     `Progress: logical step ${instance.logicalStep}; ${instance.commitCount} commits; ${instance.eventCount} committed events`,
     `Head: ${instance.headCommitId}`,
+    `Novel: ${instance.sourceTitle ? `${instance.sourceTitle} (${instance.sourceId})` : "not selected"}`,
     `Character: ${instance.actorName ? `${instance.actorName} (${instance.actorId})` : "not selected"}`,
     `Last event: ${instance.lastEventTitle ?? "none"}`,
     ...(instance.sessionAtHead === false ? ["Resume state: branch advanced since the last player turn; resume will use the current committed head."] : []),

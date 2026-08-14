@@ -386,6 +386,65 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages.join("\n")).toContain("Entered **宿敌**");
   });
 
+  it("chooses a novel before showing a filtered, bounded character picker for /play", async () => {
+    const { commands, root } = await fixture();
+    const first = await createEvidenceFixture(root, "First Hero waits.\n", "first-world.txt");
+    const secondNames = Array.from({ length: 8 }, (_, index) => `Second ${index + 1}`);
+    const second = await createEvidenceFixture(root, `${secondNames.join(" waits.\n")} waits.\n`, "second-world.txt");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "first-hero", kind: "character", canonicalName: "First Hero", aliases: [], evidence: first.evidence("First Hero") });
+    for (const [index, name] of secondNames.entries()) {
+      await canon.putEntity({ id: `second-${index + 1}`, kind: "character", canonicalName: name, aliases: [], evidence: second.evidence(name) });
+    }
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "first-hero", field: "character.alive", value: true },
+        ...secondNames.map((_name, index) => ({
+          op: "set" as const,
+          entityId: `second-${index + 1}`,
+          field: "character.alive",
+          value: true,
+        })),
+      ],
+    });
+    const questions: string[] = [];
+    const characterPages: string[][] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        async select(title: string, choices: string[]) {
+          questions.push(title);
+          if (title.startsWith("Which novel")) return choices.find((choice) => choice.includes(second.source.title));
+          characterPages.push(choices);
+          if (characterPages.length === 1) return choices.find((choice) => choice.startsWith("Filter choices"));
+          return choices.find((choice) => choice.includes("Second 8"));
+        },
+        async input(title: string) {
+          expect(title).toBe("Filter Character");
+          return "Second 8";
+        },
+        setStatus: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")?.handler("", ctx);
+
+    expect(questions[0]).toBe("Which novel do you want to enter?");
+    expect(questions[1]).toContain("Who do you want to play");
+    expect(characterPages.every((page) => page.length <= 10)).toBe(true);
+    expect(characterPages.flat().join("\n")).not.toContain("First Hero");
+    await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({
+      branchId: "main",
+      sourceId: second.source.id,
+      actorId: "second-8",
+    });
+  });
+
   it("handles a natural character-list request without invoking the local-file assistant", async () => {
     const { events, root } = await fixture();
     const canon = new CanonicalModelStore(root);

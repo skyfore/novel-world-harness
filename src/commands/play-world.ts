@@ -4,11 +4,12 @@ import { createPiPlayerActionTranslator } from "../agent/pi-player-action.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import type { PlayerActionTranslator, PlayerTurnResult } from "../world/player-action.js";
 import {
+  inspectPlayExperience,
   listPlayableCharacters,
   performPlayTurn,
   type SelectedPlayExperience,
 } from "../world/play-experience.js";
-import { choosePlayExperience, choosePlayInstance, type AskPlayQuestion } from "../world/play-choice.js";
+import { choosePlayExperience, choosePlayInstance, choosePlayNovel, type AskPlayQuestion } from "../world/play-choice.js";
 import { askUserQuestion } from "../util/ask-user-question.js";
 import { formatCharacters } from "./catalog.js";
 
@@ -17,6 +18,7 @@ export type PlayWorldCommandOptions = {
   configPath: string;
   branchId?: string;
   character?: string;
+  source?: string;
   action?: string;
   listCharacters?: boolean;
   model?: string;
@@ -28,16 +30,25 @@ export type PlayWorldCommandOptions = {
 export async function playWorldCommand(options: PlayWorldCommandOptions): Promise<PlayerTurnResult | undefined> {
   const ask = options.ask ?? askUserQuestion;
   let branchId = options.branchId;
+  let source = options.source;
   if (options.listCharacters) {
-    branchId = await choosePlayInstance(options.root, branchId, ask);
+    const catalog = await inspectPlayExperience(options.root);
+    source = catalog.novels.length || source
+      ? await choosePlayNovel(catalog, source, ask, { preferActive: false })
+      : undefined;
+    if (catalog.novels.length && !source) return undefined;
+    branchId = await choosePlayInstance(options.root, branchId, ask, catalog);
     if (!branchId) return undefined;
-    const listed = await listPlayableCharacters(options.root, { branchId });
+    const listed = await listPlayableCharacters(options.root, { branchId, ...(source ? { source } : {}) });
     stdout.write(`${formatCharacters(listed.characters, listed.branchId)}\n`);
     if (!options.action) return undefined;
   }
   const selection = await choosePlayExperience(options.root, {
     ...(branchId ? { branchId } : {}),
     ...(options.character ? { character: options.character } : {}),
+    ...(source ? { source } : {}),
+    preferActiveSource: false,
+    preferSavedCharacter: false,
   }, ask);
   if (!selection) return undefined;
 

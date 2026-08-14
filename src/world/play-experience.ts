@@ -26,6 +26,8 @@ export type PlayInstanceSummary = {
   lastEventTitle?: string;
   parentBranchId?: string;
   active: boolean;
+  sourceId?: string;
+  sourceTitle?: string;
   actorId?: string;
   actorName?: string;
   sessionAtHead?: boolean;
@@ -42,6 +44,7 @@ export type PlayExperienceCatalog = {
 export type SelectedPlayExperience = {
   session: ActivePlaySession;
   branchName: string;
+  source?: SourceDocument;
   actor: PlayableCharacter;
   logicalStep: number;
 };
@@ -71,6 +74,7 @@ export async function inspectPlayExperience(root: string): Promise<PlayExperienc
     const history = await inspectHistory(engine, branch.headCommitId);
     const context = await engine.contextForCommit(branch.headCommitId);
     const saved = savedSessions.find((session) => session.branchId === branchId);
+    const source = saved?.sourceId ? novels.find((novel) => novel.id === saved.sourceId) : undefined;
     const actor = saved ? context.entities.get(saved.actorId) : undefined;
     return {
       branchId,
@@ -82,6 +86,7 @@ export async function inspectPlayExperience(root: string): Promise<PlayExperienc
       ...(history.lastEventTitle ? { lastEventTitle: history.lastEventTitle } : {}),
       ...(branch.parentBranchId ? { parentBranchId: branch.parentBranchId } : {}),
       active: activeSession?.branchId === branchId,
+      ...(source ? { sourceId: source.id, sourceTitle: source.title } : {}),
       ...(actor ? { actorId: actor.id, actorName: actor.canonicalName } : {}),
       ...(saved
         ? { sessionAtHead: saved.lastCommitId === branch.headCommitId }
@@ -115,12 +120,16 @@ export async function listPlayableCharacters(
 
 export async function selectPlayExperience(
   root: string,
-  options: { branchId?: string; character?: string } = {},
+  options: { branchId?: string; character?: string; source?: string } = {},
 ): Promise<SelectedPlayExperience> {
   const sessionStore = new PlaySessionStore(root);
   const active = await sessionStore.read();
   const branchId = await resolveBranchId(new BranchStore(root), options.branchId, active?.branchId);
   const saved = await sessionStore.readInstance(branchId);
+  const requestedSource = options.source ?? saved?.sourceId;
+  const source = requestedSource
+    ? await resolveNovelSource(await WorkspaceStore.create(root), requestedSource)
+    : undefined;
   const { engine } = await openWorkspaceWorld(root);
   const branch = await engine.branches.read(branchId);
   const [context, state] = await Promise.all([
@@ -129,6 +138,7 @@ export async function selectPlayExperience(
   ]);
   const characters = [...context.entities.values()]
     .filter((entity) => entity.kind === "character")
+    .filter((entity) => !source || entity.evidence.some((reference) => reference.span.sourceId === source.id))
     .map((entity) => characterSummary(entity, state.values[entity.id] ?? {}, context.entities))
     .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
   const requestedActor = options.character
@@ -144,10 +154,11 @@ export async function selectPlayExperience(
   if (actor.alive === false) throw new Error(`${actor.canonicalName} (${actor.id}) is not alive at branch '${branchId}' head.`);
   const session = await sessionStore.write({
     branchId,
+    ...(source ? { sourceId: source.id } : {}),
     actorId: actor.id,
     lastCommitId: branch.headCommitId,
   });
-  return { session, branchName: branch.name, actor, logicalStep: state.logicalTime.step };
+  return { session, branchName: branch.name, ...(source ? { source } : {}), actor, logicalStep: state.logicalTime.step };
 }
 
 export async function performPlayTurn(options: {
@@ -173,6 +184,8 @@ export async function performPlayTurn(options: {
   if (stateBefore.values[options.actorId]?.["character.alive"] === false) {
     throw new Error(`${actor.canonicalName} (${actor.id}) is not alive at branch '${options.branchId}' head.`);
   }
+  const sessionStore = new PlaySessionStore(options.root);
+  const previousSession = await sessionStore.readInstance(options.branchId);
   const turns = new PlayerTurnService(
     engine,
     options.translator,
@@ -181,6 +194,7 @@ export async function performPlayTurn(options: {
   );
   const result = await turns.turn({
     branchId: options.branchId,
+    ...(previousSession?.sourceId ? { sourceId: previousSession.sourceId } : {}),
     actorId: options.actorId,
     utterance: options.utterance,
   });
@@ -205,8 +219,9 @@ export async function performPlayTurn(options: {
     }
   }
   const finalState = await engine.projector.project(finalHead);
-  await new PlaySessionStore(options.root).write({
+  await sessionStore.write({
     branchId: options.branchId,
+    ...(previousSession?.sourceId ? { sourceId: previousSession.sourceId } : {}),
     actorId: options.actorId,
     lastCommitId: finalHead,
   });

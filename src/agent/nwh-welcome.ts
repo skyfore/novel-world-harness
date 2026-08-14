@@ -57,7 +57,7 @@ function copyLines(options: NwhWelcomeOptions): string[] {
     subtitle,
     "1  Sign in with /login, then choose with /model",
     "2  /novels, /instances and /characters show what is ready",
-    "3  /play opens character selection; paste a novel path to compile",
+    "3  /play chooses a novel, then a character; paste a novel path to compile",
   ];
 }
 

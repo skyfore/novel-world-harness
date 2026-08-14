@@ -36,7 +36,7 @@ import {
   resolveNovelSource,
   type SelectedPlayExperience,
 } from "../world/play-experience.js";
-import { choosePlayExperience, choosePlayInstance } from "../world/play-choice.js";
+import { choosePlayExperience, choosePlayInstance, choosePlayNovel } from "../world/play-choice.js";
 import { formatCharacters, formatInstances, formatNovels, formatProgress } from "../commands/catalog.js";
 import { createTuiUserQuestion } from "../util/tui-user-question.js";
 import type { UserQuestionCustomInput } from "../util/ask-user-question.js";
@@ -58,9 +58,9 @@ export type NwhExtensionOptions = {
 const COMMAND_HELP = `NWH commands:
   /novels                   list registered novel sources
   /instances                list playable branches and committed progress
-  /characters [instance]    list characters at an instance head
-  /play [character] [instance] choose or name a character and enter player mode
-  /world-resume [instance] [character] resume a saved or named instance
+  /characters [instance] [novel] list characters from a novel at an instance head
+  /play [character] [instance] [novel] choose a novel, then a character
+  /world-resume [instance] [character] [novel] resume a saved or named instance
   /progress [instance]      show committed progress for an instance
   /leave                    leave player mode without deleting resume state
   /files [path filter]       list safe workspace files
@@ -140,7 +140,13 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     const activatePlayer = async (
       ctx: ExtensionContext,
-      input: { branchId?: string; character?: string } = {},
+      input: {
+        branchId?: string;
+        character?: string;
+        source?: string;
+        preferActiveSource?: boolean;
+        preferSavedCharacter?: boolean;
+      } = {},
     ): Promise<SelectedPlayExperience | undefined> => {
       const selection = await choosePlayExperience(workspace.root, input, createTuiUserQuestion(ctx.ui));
       if (!selection) {
@@ -152,6 +158,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       setPlayerStatus(ctx, selection);
       showPlayMessage([
         `Entered **${selection.actor.canonicalName}** (${selection.actor.id}) on **${selection.session.branchId}** at committed step ${selection.logicalStep}.`,
+        selection.source ? `Novel: **${selection.source.title}**.` : "",
         selection.actor.locationName ? `Current location: ${selection.actor.locationName}.` : "",
         "Your next ordinary message is treated as this character's immediate action. Use /leave to return to compiler/assistant mode.",
       ].filter(Boolean).join("\n"));
@@ -206,9 +213,17 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     const tryNaturalWorldIntent = async (text: string, ctx: ExtensionContext): Promise<boolean> => {
       if (!PLAY_INTENT.test(text) && !CHARACTER_LIST_INTENT.test(text)) return false;
-      const branchId = await choosePlayInstance(workspace.root, undefined, createTuiUserQuestion(ctx.ui));
+      const catalog = await inspectPlayExperience(workspace.root);
+      const sourceId = catalog.novels.length
+        ? await choosePlayNovel(catalog, undefined, createTuiUserQuestion(ctx.ui), { preferActive: false })
+        : undefined;
+      if (catalog.novels.length && !sourceId) return true;
+      const branchId = await choosePlayInstance(workspace.root, undefined, createTuiUserQuestion(ctx.ui), catalog);
       if (!branchId) return true;
-      const available = await listPlayableCharacters(workspace.root, { branchId });
+      const available = await listPlayableCharacters(workspace.root, {
+        branchId,
+        ...(sourceId ? { source: sourceId } : {}),
+      });
       if (CHARACTER_LIST_INTENT.test(text) && !PLAY_INTENT.test(text)) {
         const characters = formatCharacters(available.characters, available.branchId);
         if (ctx.mode === "tui") ctx.ui.notify(characters, "info");
@@ -226,7 +241,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           : undefined;
       await activatePlayer(ctx, {
         branchId: available.branchId,
+        ...(sourceId ? { source: sourceId } : {}),
         ...(actor ? { character: actor.id } : {}),
+        preferActiveSource: false,
+        preferSavedCharacter: false,
       });
       return true;
     };
@@ -650,6 +668,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           try {
             await activatePlayer(ctx, {
               branchId: catalog.activeSession.branchId,
+              ...(catalog.activeSession.sourceId ? { source: catalog.activeSession.sourceId } : {}),
               character: catalog.activeSession.actorId,
             });
           } catch (error) {
@@ -674,28 +693,37 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("characters", {
       description: "List committed characters at an instance head",
       handler: async (args, ctx) => {
-        const [requestedBranchId, source] = splitCommandArguments(args);
+        const [requestedBranchId, requestedSource] = splitCommandArguments(args);
+        const catalog = await inspectPlayExperience(workspace.root);
+        const sourceId = catalog.novels.length || requestedSource
+          ? await choosePlayNovel(catalog, requestedSource, createTuiUserQuestion(ctx.ui), { preferActive: false })
+          : undefined;
+        if (catalog.novels.length && !sourceId) return;
         const branchId = await choosePlayInstance(
           workspace.root,
           requestedBranchId,
           createTuiUserQuestion(ctx.ui),
+          catalog,
         );
         if (!branchId) return;
         const result = await listPlayableCharacters(workspace.root, {
           branchId,
-          ...(source ? { source } : {}),
+          ...(sourceId ? { source: sourceId } : {}),
         });
         ctx.ui.notify(formatCharacters(result.characters, result.branchId, result.source?.title), "info");
       },
     });
 
     pi.registerCommand("play", {
-      description: "Choose or name a character and enter player mode",
+      description: "Choose a novel, then choose or name a character",
       handler: async (args, ctx) => {
-        const [character, branchId] = splitCommandArguments(args);
+        const [character, branchId, source] = splitCommandArguments(args);
         await activatePlayer(ctx, {
           ...(branchId ? { branchId } : {}),
           ...(character ? { character } : {}),
+          ...(source ? { source } : {}),
+          preferActiveSource: false,
+          preferSavedCharacter: false,
         });
       },
     });
@@ -703,10 +731,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("world-resume", {
       description: "Resume the saved or named playable instance",
       handler: async (args, ctx) => {
-        const [branchId, character] = splitCommandArguments(args);
+        const [branchId, character, source] = splitCommandArguments(args);
         await activatePlayer(ctx, {
           ...(branchId ? { branchId } : {}),
           ...(character ? { character } : {}),
+          ...(source ? { source } : {}),
         });
       },
     });

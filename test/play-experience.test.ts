@@ -50,22 +50,25 @@ describe("play experience catalog", () => {
       characters: [{ id: "hero", canonicalName: "Hero" }],
     });
 
-    const selection = await selectPlayExperience(root, { branchId: "main", character: "Hero" });
-    expect(selection.session).toMatchObject({ branchId: "main", actorId: "hero" });
+    const selection = await selectPlayExperience(root, { branchId: "main", source: first.source.id, character: "Hero" });
+    expect(selection.session).toMatchObject({ branchId: "main", sourceId: first.source.id, actorId: "hero" });
     await performPlayTurn({
       root,
       branchId: "main",
       actorId: "hero",
-      utterance: "I wait.",
+      utterance: "I ask Rival to wait.",
       advanceBackground: 0,
-      translator: () => ({
-        title: "Hero waits",
-        participants: [],
-        preconditions: [],
-        proposedDelta: { version: 1, operations: [] },
-        requiresKnowledge: [],
-        forbidsKnowledge: [],
-      }),
+      translator: (input) => {
+        expect(input.context.referenceableEntities.map((entity) => entity.id)).not.toContain("rival");
+        return {
+          title: "Hero waits",
+          participants: [],
+          preconditions: [],
+          proposedDelta: { version: 1, operations: [] },
+          requiresKnowledge: [],
+          forbidsKnowledge: [],
+        };
+      },
     });
 
     const after = await inspectPlayExperience(root);
@@ -76,6 +79,8 @@ describe("play experience catalog", () => {
         commitCount: 2,
         eventCount: 2,
         active: true,
+        sourceId: first.source.id,
+        sourceTitle: first.source.title,
         actorId: "hero",
         actorName: "Hero",
         sessionAtHead: true,

@@ -8,6 +8,7 @@ import {
   type PlayInstanceSummary,
   type SelectedPlayExperience,
 } from "./play-experience.js";
+import type { SourceDocument } from "../storage/workspace-store.js";
 
 export type AskPlayQuestion = (question: UserQuestion<string>) => Promise<string | undefined>;
 
@@ -56,19 +57,39 @@ export async function choosePlayInstance(
 
 export async function choosePlayExperience(
   root: string,
-  options: { branchId?: string; character?: string },
+  options: {
+    branchId?: string;
+    character?: string;
+    source?: string;
+    preferActiveSource?: boolean;
+    preferSavedCharacter?: boolean;
+  },
   ask: AskPlayQuestion,
 ): Promise<SelectedPlayExperience | undefined> {
   const catalog = await inspectPlayExperience(root);
+  let sourceId: string | undefined;
+  if (catalog.novels.length) {
+    sourceId = await choosePlayNovel(catalog, options.source, ask, {
+      preferActive: options.preferActiveSource ?? true,
+    });
+    if (!sourceId) return undefined;
+  } else if (options.source) {
+    throw new Error(`Unknown novel '${options.source}'. Use nwh novels to list registered sources.`);
+  }
   const branchId = await choosePlayInstance(root, options.branchId, ask, catalog);
   if (!branchId) return undefined;
-  const listed = await listPlayableCharacters(root, { branchId });
+  const listed = await listPlayableCharacters(root, { branchId, ...(sourceId ? { source: sourceId } : {}) });
   const playable = listed.characters.filter((character) => character.alive !== false);
   if (!playable.length) throw new Error(`No living committed characters are playable on '${branchId}'.`);
   const saved = catalog.savedSessions.find((session) => session.branchId === branchId);
   const requestedCharacter = options.character;
   let character = requestedCharacter ? resolveCharacter(playable, requestedCharacter)?.id : undefined;
-  if (!requestedCharacter && saved && playable.some((candidate) => candidate.id === saved.actorId)) character = saved.actorId;
+  if (
+    !requestedCharacter
+    && (options.preferSavedCharacter ?? true)
+    && saved
+    && playable.some((candidate) => candidate.id === saved.actorId)
+  ) character = saved.actorId;
   if (!requestedCharacter && !character && playable.length === 1) character = playable[0]!.id;
   if (!character) {
     character = await ask({
@@ -99,7 +120,55 @@ export async function choosePlayExperience(
     });
   }
   if (!character) return undefined;
-  return selectPlayExperience(root, { branchId, character });
+  return selectPlayExperience(root, { branchId, character, ...(sourceId ? { source: sourceId } : {}) });
+}
+
+export async function choosePlayNovel(
+  catalog: Pick<PlayExperienceCatalog, "novels" | "activeSession">,
+  requested: string | undefined,
+  ask: AskPlayQuestion,
+  options: { preferActive?: boolean } = {},
+): Promise<string | undefined> {
+  if (!catalog.novels.length) {
+    if (requested) throw new Error(`Unknown novel '${requested}'. No novel sources are registered.`);
+    return undefined;
+  }
+  if (requested) {
+    const resolved = resolvePlayNovel(catalog.novels, requested);
+    if (resolved) return resolved.id;
+  }
+  if (!requested) {
+    if (catalog.novels.length === 1) return catalog.novels[0]!.id;
+    if (options.preferActive ?? true) {
+      const active = catalog.activeSession?.sourceId
+        ? catalog.novels.find((novel) => novel.id === catalog.activeSession?.sourceId)
+        : undefined;
+      if (active) return active.id;
+    }
+  }
+  return ask({
+    header: "Novel",
+    question: requested
+      ? `No unique novel matches '${requested}'. Which novel do you want to enter?`
+      : "Which novel do you want to enter?",
+    options: catalog.novels.map((novel, index) => ({
+      value: novel.id,
+      label: novel.title,
+      description: `${novel.sourcePath} (${novel.id})`,
+      recommended: index === 0,
+    })),
+    customInput: {
+      label: "Enter a novel",
+      description: "Type a registered source id, title, or path.",
+      prompt: "Novel id, title, or path",
+      placeholder: catalog.novels[0]?.title,
+      invalidMessage: "No unique registered novel matches that value.",
+      resolve: (value) => resolvePlayNovel(catalog.novels, value)?.id,
+    },
+    nonInteractiveHint: requested
+      ? `Novel '${requested}' is not registered uniquely. Pass a valid --novel <id-or-title>.`
+      : "Multiple novels are registered. Pass --novel <id-or-title> explicitly.",
+  });
 }
 
 export function resolvePlayInstance(
@@ -111,6 +180,18 @@ export function resolvePlayInstance(
   const normalized = normalize(value);
   const matches = instances.filter((instance) =>
     normalize(instance.branchId) === normalized || normalize(instance.name) === normalized);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+export function resolvePlayNovel(
+  novels: readonly SourceDocument[],
+  value: string,
+): SourceDocument | undefined {
+  const exact = novels.find((novel) => novel.id === value);
+  if (exact) return exact;
+  const normalized = normalize(value);
+  const matches = novels.filter((novel) =>
+    normalize(novel.title) === normalized || normalize(novel.sourcePath) === normalized);
   return matches.length === 1 ? matches[0] : undefined;
 }
 

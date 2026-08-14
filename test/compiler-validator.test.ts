@@ -62,6 +62,29 @@ describe("CompilerCommitService", () => {
     expect(validation.warnings).toEqual([]);
   });
 
+  it("accepts a Chinese personal name explicitly composed from surname and given name", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-compiler-composed-name-"));
+    roots.push(root);
+    const source = await createEvidenceFixture(root, "此人复姓诸葛，名亮，字孔明，号卧龙先生。\n");
+    const proposals = new CompilerProposalService(root);
+    const commits = new CompilerCommitService(root);
+    await proposals.submit("entity", {
+      proposalId: "entity-zhuge-liang",
+      payload: {
+        id: "zhuge-liang",
+        kind: "character",
+        canonicalName: "诸葛亮",
+        aliases: ["孔明", "卧龙先生"],
+        evidence: source.evidence("此人复姓诸葛，名亮，字孔明，号卧龙先生。"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("entity", "entity-zhuge-liang");
+    expect(validation.accepted).toBe(true);
+    await expect(commits.canon.getEntity("zhuge-liang")).resolves.toMatchObject({ canonicalName: "诸葛亮" });
+  });
+
   it("keeps an invalid event pending when it references an unknown participant", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("canonical-event", {

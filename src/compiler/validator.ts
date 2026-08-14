@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { EvidenceVerifier } from "./evidence.js";
+import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
 import { CanonicalCompiler, CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
@@ -489,40 +489,3 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   return worldRuleSchema;
 }
 function issue(code: string, message: string, path?: string): ValidationIssue { return path ? { code, message, path } : { code, message }; }
-
-function validateEntityNameEvidence(entity: Entity, excerpts: readonly string[]): ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  if (!excerpts.some((excerpt) => containsEvidenceName(excerpt, entity.canonicalName))) {
-    issues.push(issue(
-      "UNSUPPORTED_ENTITY_CANONICAL_NAME",
-      `Entity ${entity.id} canonical name '${entity.canonicalName}' does not occur in its verified source evidence`,
-      "canonicalName",
-    ));
-  }
-  entity.aliases.forEach((alias, index) => {
-    if (excerpts.some((excerpt) => containsEvidenceName(excerpt, alias))) return;
-    issues.push(issue(
-      "UNSUPPORTED_ENTITY_ALIAS",
-      `Entity ${entity.id} alias '${alias}' does not occur in its verified source evidence`,
-      `aliases.${index}`,
-    ));
-  });
-  return issues;
-}
-
-function containsEvidenceName(excerpt: string, name: string): boolean {
-  const haystack = excerpt.normalize("NFKC").toLowerCase();
-  const needle = name.normalize("NFKC").toLowerCase();
-  if (!needle) return false;
-  const asciiWord = /[a-z0-9]/i;
-  let offset = haystack.indexOf(needle);
-  while (offset >= 0) {
-    const before = offset > 0 ? haystack[offset - 1] : undefined;
-    const after = haystack[offset + needle.length];
-    const startBound = !asciiWord.test(needle[0]!) || before === undefined || !asciiWord.test(before);
-    const endBound = !asciiWord.test(needle.at(-1)!) || after === undefined || !asciiWord.test(after);
-    if (startBound && endBound) return true;
-    offset = haystack.indexOf(needle, offset + 1);
-  }
-  return false;
-}

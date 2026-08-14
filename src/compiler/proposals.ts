@@ -26,6 +26,7 @@ import {
 import { PossibilityTemplateStore, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { hasExecutablePossibilityEffect, isMetaKnowledgePredicate } from "./semantics.js";
+import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 
 const possibilityTemplateSchema = possibilitySchema.omit({ branchId: true, evaluatedAtCommit: true });
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
@@ -148,7 +149,7 @@ type ProposalClosureCatalog = {
   possibilities: Set<string>;
 };
 
-type StagedProposal = { kind: CompilerProposalKind; payload: unknown };
+type StagedProposal = { kind: CompilerProposalKind; payload: unknown; evidence: EvidenceRef[] };
 
 /**
  * Checks that every logical artifact referenced by this batch is supplied by
@@ -165,6 +166,7 @@ export async function validateCompilerProposalClosure(
   const proposals = new ProposalStore(workspaceRoot);
   const canon = new CanonicalModelStore(workspaceRoot);
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
+  const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
   const [canonicalEntities, canonicalClaims, canonicalEvents, canonicalRules, canonicalPossibilities, pending] = await Promise.all([
     canon.listEntities(),
     canon.listClaims(),
@@ -193,7 +195,11 @@ export async function validateCompilerProposalClosure(
     if (!isCompilerProposalKind(summary.kind)) continue;
     const envelope = await proposals.readEnvelope("pending", summary.id);
     const payload = compilerProposalSchemas[summary.kind].parse(envelope.payload);
-    staged.set(summary.id, { kind: summary.kind, payload });
+    staged.set(summary.id, {
+      kind: summary.kind,
+      payload,
+      evidence: evidenceRefSchema.array().parse(envelope.evidence),
+    });
     const logicalIdentity = compilerProposalLogicalIdentity(summary.kind, payload);
     if (logicalIdentity) proposalsByLogicalIdentity.set(logicalIdentity, [...(proposalsByLogicalIdentity.get(logicalIdentity) ?? []), summary.id]);
     if (summary.kind === "entity") {
@@ -219,10 +225,24 @@ export async function validateCompilerProposalClosure(
     if (duplicates.length > 1) {
       issues.add(`${proposalId}: logical artifact '${logicalIdentity}' also has active proposal(s) ${duplicates.filter((id) => id !== proposalId).join(", ")}`);
     }
+    const payloadEvidence = (proposal.payload as { evidence?: EvidenceRef[] }).evidence ?? [];
+    const inspected = await evidenceVerifier.inspectAll([...payloadEvidence, ...proposal.evidence]);
+    for (const evidenceIssue of inspected.issues) {
+      issues.add(`${proposalId}: ${formatGroundingIssue(evidenceIssue)}`);
+    }
+    if (proposal.kind === "entity" && inspected.valid) {
+      for (const nameIssue of validateEntityNameEvidence(entitySchema.parse(proposal.payload), inspected.excerpts)) {
+        issues.add(`${proposalId}: ${formatGroundingIssue(nameIssue)}`);
+      }
+    }
     collectProposalClosureIssues(proposalId, proposal, catalog, issues);
   }
   collectEventDependencyCycles(staged, new Set(proposalIds), issues);
   return [...issues].sort();
+}
+
+function formatGroundingIssue(issue: { code: string; message: string; path?: string }): string {
+  return `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`;
 }
 
 function collectProposalClosureIssues(

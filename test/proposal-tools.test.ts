@@ -322,6 +322,32 @@ describe("compiler proposal tools", () => {
       .rejects.toThrow("already finished");
   });
 
+  it("refuses to finish a batch whose entity names are not grounded in verified evidence", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-grounding-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "刘备来到涿县。\n");
+    const toolset = createCompilerProposalToolset(root);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    await toolset.beginBatch([fixture.segmentId], "grounding-batch", fixture.source.id);
+    await entity.execute("liu-bei", {
+      proposal_id: "entity-liu-bei",
+      payload: {
+        id: "liu-bei",
+        kind: "character",
+        canonicalName: "刘备",
+        aliases: ["刘玄德", "刘皇叔"],
+        evidence: fixture.evidence("刘备来到涿县。"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    await expect(finish.execute("finish", {
+      outcome: "complete",
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Recorded Liu Bei." }],
+      summary: "done",
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("UNSUPPORTED_ENTITY_ALIAS at aliases.0");
+  });
+
   it("stops an unchanged finish-error loop with a terminating circuit-breaker result", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-circuit-breaker-"));
     roots.push(root);

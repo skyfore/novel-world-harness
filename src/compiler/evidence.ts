@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
-import type { EvidenceRef, SourceSpan, ValidationIssue } from "../world/model.js";
+import type { Entity, EvidenceRef, SourceSpan, ValidationIssue } from "../world/model.js";
 
 export type EvidenceVerification = {
   valid: boolean;
@@ -127,6 +127,59 @@ export class EvidenceVerifier {
       }
     }
   }
+}
+
+export function validateEntityNameEvidence(entity: Entity, excerpts: readonly string[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!excerpts.some((excerpt) => containsEvidenceName(excerpt, entity.canonicalName, entity.kind === "character"))) {
+    issues.push({
+      code: "UNSUPPORTED_ENTITY_CANONICAL_NAME",
+      message: `Entity ${entity.id} canonical name '${entity.canonicalName}' does not occur in its verified source evidence`,
+      path: "canonicalName",
+    });
+  }
+  entity.aliases.forEach((alias, index) => {
+    if (excerpts.some((excerpt) => containsEvidenceName(excerpt, alias, false))) return;
+    issues.push({
+      code: "UNSUPPORTED_ENTITY_ALIAS",
+      message: `Entity ${entity.id} alias '${alias}' does not occur in its verified source evidence`,
+      path: `aliases.${index}`,
+    });
+  });
+  return issues;
+}
+
+function containsEvidenceName(excerpt: string, name: string, allowExplicitPersonalName = false): boolean {
+  const haystack = excerpt.normalize("NFKC").toLowerCase();
+  const needle = name.normalize("NFKC").toLowerCase();
+  if (!needle) return false;
+  const asciiWord = /[a-z0-9]/i;
+  let offset = haystack.indexOf(needle);
+  while (offset >= 0) {
+    const before = offset > 0 ? haystack[offset - 1] : undefined;
+    const after = haystack[offset + needle.length];
+    const startBound = !asciiWord.test(needle[0]!) || before === undefined || !asciiWord.test(before);
+    const endBound = !asciiWord.test(needle.at(-1)!) || after === undefined || !asciiWord.test(after);
+    if (startBound && endBound) return true;
+    offset = haystack.indexOf(needle, offset + 1);
+  }
+  return allowExplicitPersonalName && containsExplicitChinesePersonalName(haystack, needle);
+}
+
+function containsExplicitChinesePersonalName(excerpt: string, name: string): boolean {
+  if (!/^\p{Script=Han}{2,4}$/u.test(name)) return false;
+  for (const surnameLength of [1, 2]) {
+    if (surnameLength >= name.length) continue;
+    const surname = escapeRegExp(name.slice(0, surnameLength));
+    const givenName = escapeRegExp(name.slice(surnameLength));
+    const pattern = new RegExp(`(?:复姓|覆姓|姓)\\s*${surname}\\s*[，,、；;：:\\s]*名\\s*${givenName}`, "u");
+    if (pattern.test(excerpt)) return true;
+  }
+  return false;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function lineRanges(text: string): Array<{ startByte: number; endByte: number }> {

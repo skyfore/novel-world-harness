@@ -1,4 +1,4 @@
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { getSelectListTheme, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { Container, SelectList, Spacer, Text, type SelectItem } from "@earendil-works/pi-tui";
 import type { UserQuestion } from "./ask-user-question.js";
 
@@ -66,13 +66,11 @@ async function askWithNativeSelectList<T extends string>(
       )), 1, 0));
       container.addChild(new Spacer(1));
       const availableRows = Math.max(1, tui.terminal.rows - RESERVED_DIALOG_ROWS);
-      const selectList = new SelectList(items, Math.min(items.length, availableRows, MAX_VISIBLE_CHOICES), {
-        selectedPrefix: (text) => theme.fg("accent", text),
-        selectedText: (text) => theme.fg("accent", text),
-        description: (text) => theme.fg("muted", text),
-        scrollInfo: (text) => theme.fg("dim", text),
-        noMatch: (text) => theme.fg("warning", text),
-      });
+      const selectList = new SelectList(
+        items,
+        Math.min(items.length, availableRows, MAX_VISIBLE_CHOICES),
+        getSelectListTheme(),
+      );
       selectList.onSelect = (item) => {
         if (item.value === "control:filter") return done({ kind: "filter" });
         if (item.value === "control:custom") return done({ kind: "custom" });

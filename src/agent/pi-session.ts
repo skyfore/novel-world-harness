@@ -39,6 +39,7 @@ export type PiAgentSessionOptions = {
   onThinking?: (delta: string) => void;
   onTool?: (name: string, input: unknown) => void;
   onToolResult?: (name: string, result: unknown, isError: boolean) => void;
+  onEvent?: (event: AgentSessionEvent) => void;
   onRetry?: (event: Extract<AgentSessionEvent, { type: "auto_retry_start" }>) => void;
   additionalTools?: ToolDefinition[];
   systemPromptAppendix?: string;
@@ -375,7 +376,6 @@ export class PiAgentSession {
         throw new Error(`NWH cannot switch this session to another workspace (${cwd}). Start a new process with --root instead.`);
       }
       const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: false });
-      const configuredSettings = settingsManager.getGlobalSettings();
       const nwhSettingsOverrides = {
         quietStartup: true,
         enableInstallTelemetry: false,
@@ -416,7 +416,6 @@ export class PiAgentSession {
               saveSession: this.saveSession,
               mode: this.options.interactionMode ?? "assistant",
               ...(this.options.profile ? { profile: this.options.profile } : {}),
-              initialThinkingHidden: configuredSettings.hideThinkingBlock ?? false,
               onSessionShutdown: () => flushSettings(settingsManager),
               ...(this.options.resetCompilerProposalTools
                 ? { resetCompilerProposalTools: this.options.resetCompilerProposalTools }
@@ -457,6 +456,7 @@ export class PiAgentSession {
   private bindSessionEvents(): void {
     this.unsubscribe?.();
     this.unsubscribe = this.session.subscribe((event) => {
+      this.options.onEvent?.(event);
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         this.activeText += event.assistantMessageEvent.delta;
         this.onText?.(event.assistantMessageEvent.delta);

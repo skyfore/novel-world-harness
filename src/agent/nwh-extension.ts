@@ -43,9 +43,7 @@ import type { UserQuestionCustomInput } from "../util/ask-user-question.js";
 import { auditCompiler } from "../compiler/audit.js";
 import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
-import { NwhHistoryEditor } from "./nwh-history-editor.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
-import { styleNwhThinkingMarkdown } from "./nwh-tui-style.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -60,7 +58,6 @@ export type NwhExtensionOptions = {
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
   preparedCacheRoot?: string;
   runReparse?: typeof reparseCommand;
-  initialThinkingHidden?: boolean;
 };
 
 const COMMAND_HELP = `NWH commands:
@@ -92,8 +89,8 @@ Provider and model:
   /model                     select a model after signing in
 
 TUI shortcuts:
-  Enter send · Shift+Enter newline · Esc interrupt · Ctrl+O toggle details
-  Ctrl+T toggle reasoning only · PgUp/PgDn scroll transcript · Ctrl+Shift+F search
+  Enter send · Shift+Enter newline · Esc interrupt · Ctrl+O toggle tool details
+  Ctrl+T toggle reasoning · PgUp/PgDn scroll transcript · Ctrl+Shift+F search
   ↑/↓ prompt history · ← backgrounds the focused NWH task panel · /tasks restores it
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
@@ -152,29 +149,6 @@ export function parseTuiReparseArguments(value: string): TuiReparseArguments {
   return parsed;
 }
 
-export function sessionPromptHistory(entries: readonly unknown[]): string[] {
-  const history: string[] = [];
-  for (const entry of entries) {
-    if (!entry || typeof entry !== "object") continue;
-    const candidate = entry as { type?: unknown; message?: { role?: unknown; content?: unknown } };
-    if (candidate.type !== "message" || candidate.message?.role !== "user") continue;
-    const content = candidate.message.content;
-    const text = typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content
-          .filter((part): part is { type: "text"; text: string } => Boolean(
-            part && typeof part === "object" && (part as { type?: unknown }).type === "text"
-            && typeof (part as { text?: unknown }).text === "string",
-          ))
-          .map((part) => part.text)
-          .join("\n")
-        : "";
-    if (text.trim()) history.push(text);
-  }
-  return history;
-}
-
 function modelLabel(model: { provider: string; id: string } | undefined): string {
   return model ? `${model.provider}/${model.id}` : "unresolved";
 }
@@ -182,7 +156,6 @@ function modelLabel(model: { provider: string; id: string } | undefined): string
 export function createNwhExtension(options: NwhExtensionOptions): ExtensionFactory {
   const { workspace, saveSession, mode } = options;
   return (pi: ExtensionAPI) => {
-    pi.registerMarkdownTransformer(styleNwhThinkingMarkdown);
     let compilerToolsActive = mode === "compiler";
     let activeSourceId: string | undefined;
     let pendingTurn: SourceLoopTurn | undefined;
@@ -215,7 +188,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     const foregroundTask = async (ctx: ExtensionContext, task: NwhTask) => {
       taskForeground = true;
       syncTaskChrome(ctx, task);
-      const outcome = await showNwhTask(ctx.ui, task);
+      const outcome = await showNwhTask(ctx.ui, task, ctx.cwd);
       taskForeground = false;
       syncTaskChrome(ctx, task);
       if (outcome === "background" && task.snapshot.status === "running") {
@@ -787,19 +760,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       titleTimer.unref();
       ctx.ui.setWorkingMessage(mode === "compiler" ? "Building evidence-backed proposals..." : "Consulting local evidence...");
       ctx.ui.setWorkingIndicator({ frames: NWH_WORKING_FRAMES, intervalMs: 180 });
-      ctx.ui.setHiddenThinkingLabel("Thinking hidden · Ctrl+O to show details");
-      if (!ctx.ui.getEditorComponent()) {
-        const initialHistory = sessionPromptHistory(ctx.sessionManager.getEntries());
-        ctx.ui.setEditorComponent((tui, theme, keybindings) =>
-          new NwhHistoryEditor(
-            tui,
-            theme,
-            keybindings,
-            initialHistory,
-            undefined,
-            options.initialThinkingHidden ?? false,
-          ));
-      }
+      ctx.ui.setHiddenThinkingLabel("Thinking hidden · Ctrl+T to show");
       ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
       const freshConversation = isFreshConversation(ctx.sessionManager.getEntries());
       ctx.ui.setHeader((tui, theme) => createNwhWelcomeHeader(tui, theme, { mode, freshConversation }));
@@ -1205,10 +1166,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             cacheRoot: options.preparedCacheRoot,
             onProgress: (message) => task.log(message),
             onStatus: (message) => task.update(message),
-            onModelText: (delta) => task.appendModelOutput(delta),
-            onModelThinking: (delta) => task.appendReasoning(delta),
-            onModelToolCall: (name, input) => task.appendToolEvent("call", name, input),
-            onModelToolResult: (name, result, isError) => task.appendToolEvent(isError ? "error" : "result", name, result),
+            onModelEvent: (event) => task.appendAgentEvent(event),
           });
           task.log(`Active revision: ${result.activeBundleHash}`);
         });
@@ -1231,11 +1189,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       handler: async (_args, ctx) => {
         if (!activeTask) {
           ctx.ui.notify("No NWH task has been started in this session.", "info");
-          return;
-        }
-        if (activeTask.snapshot.status !== "running") {
-          const detail = activeTask.snapshot.error ?? activeTask.snapshot.logs.at(-1) ?? activeTask.snapshot.activity;
-          ctx.ui.notify(`${taskSummary(activeTask)}\n${detail}`, activeTask.snapshot.status === "failed" ? "error" : "info");
           return;
         }
         await foregroundTask(ctx, activeTask);

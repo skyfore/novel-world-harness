@@ -1,5 +1,5 @@
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { initTheme, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createTuiUserQuestion } from "../src/util/tui-user-question.js";
 
 const options = Array.from({ length: 14 }, (_, index) => ({
@@ -7,6 +7,8 @@ const options = Array.from({ length: 14 }, (_, index) => ({
   label: `Character ${index + 1}`,
   description: `Playable character ${index + 1}`,
 }));
+
+beforeAll(() => initTheme("dark", false));
 
 describe("TUI user questions", () => {
   it("uses Pi's native scrolling window for long TUI selections", async () => {

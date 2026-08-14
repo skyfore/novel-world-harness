@@ -1,6 +1,6 @@
 import { stderr, stdout } from "node:process";
 import { formatRetryNotice } from "../agent/pi-session.js";
-import type { TuiMode } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent, TuiMode } from "@earendil-works/pi-coding-agent";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
 import { compilerBatchFailure } from "../compiler/batch-outcome.js";
 import { loadConfig, profileForRole } from "../config/load.js";
@@ -28,6 +28,7 @@ export type CompileCommandOptions = {
   onModelThinking?: (delta: string) => void;
   onModelToolCall?: (name: string, input: unknown) => void;
   onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
+  onModelEvent?: (event: AgentSessionEvent) => void;
 };
 
 const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -72,9 +73,11 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     } } : {}),
     ...(printMode ? { onText(delta: string) {
       if (!wroteText) {
-        const message = "Compiler prompt model text stream started (unverified; not committed world truth).";
-        if (options.onProgress) options.onProgress(message);
-        else stderr.write(`${message}\n`);
+        if (!options.onModelEvent) {
+          const message = "Compiler prompt model text stream started (unverified; not committed world truth).";
+          if (options.onProgress) options.onProgress(message);
+          else stderr.write(`${message}\n`);
+        }
       }
       wroteText = true;
       elapsed?.update("receiving unverified model text");
@@ -84,9 +87,11 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     ...(printMode ? { onThinking(delta: string) {
       if (!reasoningStreamed) {
         reasoningStreamed = true;
-        const message = "Compiler prompt provider reasoning stream started (content hidden).";
-        if (options.onProgress) options.onProgress(message);
-        else stderr.write(`${message}\n`);
+        if (!options.onModelEvent) {
+          const message = "Compiler prompt provider reasoning stream started (content hidden).";
+          if (options.onProgress) options.onProgress(message);
+          else stderr.write(`${message}\n`);
+        }
       }
       elapsed?.update("receiving model reasoning stream");
       options.onModelThinking?.(delta);
@@ -95,13 +100,16 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
       const details = input as Record<string, unknown>;
       const message = `↳ ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`;
       elapsed?.update(`last tool call ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`);
-      if (options.onProgress) options.onProgress(message);
-      else stderr.write(`\n${message}\n`);
+      if (!options.onModelEvent) {
+        if (options.onProgress) options.onProgress(message);
+        else stderr.write(`\n${message}\n`);
+      }
       options.onModelToolCall?.(name, input);
     } } : {}),
     ...(printMode ? { onToolResult(name: string, result: unknown, isError: boolean) {
       options.onModelToolResult?.(name, result, isError);
     } } : {}),
+    ...(options.onModelEvent ? { onEvent: options.onModelEvent } : {}),
   });
   try {
     if (options.prompt !== undefined) {
@@ -117,12 +125,12 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
       elapsed.stop("model response received; verifying finish handshake");
       if (!wroteText && report.text) {
         if (options.onModelText) options.onModelText(report.text);
-        else stdout.write(report.text);
+        else if (!options.onModelEvent) stdout.write(report.text);
         wroteText = true;
       }
       const failure = compilerBatchFailure(report);
       if (failure) throw new Error(`Compiler prompt was not completed: ${failure}.`);
-      if (wroteText && !options.onModelText) stdout.write("\n");
+      if (wroteText && !options.onModelText && !options.onModelEvent) stdout.write("\n");
       return;
     }
     await session.runInteractive({ tuiMode: options.tuiMode, initialMessage: DEFAULT_COMPILER_PROMPT });

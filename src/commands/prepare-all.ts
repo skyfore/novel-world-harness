@@ -1,5 +1,6 @@
 import path from "node:path";
 import { stdout } from "node:process";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { convergeWorldProposals, quarantineUncommittableProposals, type WorldProposalConvergence } from "../compiler/converge.js";
 import { loadOptionalConfig } from "../config/load.js";
 import { inspectPreparation, type PreparationInspection } from "../workflow/prepare.js";
@@ -33,6 +34,7 @@ export type PrepareAllCommandOptions = {
   onModelThinking?: (delta: string) => void;
   onModelToolCall?: (name: string, input: unknown) => void;
   onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
+  onModelEvent?: (event: AgentSessionEvent) => void;
 };
 
 type PrepareAllDependencies = {
@@ -148,6 +150,7 @@ export async function prepareAllCommand(
       onModelThinking: options.onModelThinking,
       onModelToolCall: options.onModelToolCall,
       onModelToolResult: options.onModelToolResult,
+      onModelEvent: options.onModelEvent,
     });
   }
 
@@ -198,6 +201,7 @@ export async function prepareAllCommand(
         onModelThinking: options.onModelThinking,
         onModelToolCall: options.onModelToolCall,
         onModelToolResult: options.onModelToolResult,
+        onModelEvent: options.onModelEvent,
       });
     } catch (error) {
       report(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}`);

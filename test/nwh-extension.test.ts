@@ -2,8 +2,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { createNwhExtension, parseTuiReparseArguments, sessionPromptHistory, splitCommandArguments, type NwhExtensionOptions } from "../src/agent/nwh-extension.js";
+import { createNwhExtension, parseTuiReparseArguments, splitCommandArguments, type NwhExtensionOptions } from "../src/agent/nwh-extension.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
@@ -108,14 +109,9 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 }
 
 describe("NWH TUI extension", () => {
-  it("registers local commands and keeps their output in the transcript", async () => {
+  it("registers local commands and leaves assistant/thinking rendering to Pi", async () => {
     const { commands, sentUserMessages, markdownTransformers } = await fixture();
-    expect(markdownTransformers).toHaveLength(1);
-    expect(markdownTransformers[0]?.("reasoning", {
-      messageType: "assistant-thinking",
-      isStreaming: false,
-      availableWidth: 80,
-    })).toContain("**Thinking**");
+    expect(markdownTransformers).toHaveLength(0);
     expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
@@ -150,10 +146,12 @@ describe("NWH TUI extension", () => {
       calls.push(options as unknown as Record<string, unknown>);
       options.onProgress?.("compiler progress");
       options.onStatus?.("Compiler batch 2/148 · waiting · elapsed 3s");
-      options.onModelThinking?.("reasoning summary");
-      options.onModelText?.("Analyzing supplied chapter evidence.");
-      options.onModelToolCall?.("propose_entity", { proposal_id: "liubei" });
-      options.onModelToolResult?.("propose_entity", { recorded: true }, false);
+      const message = fauxAssistantMessage([
+        fauxThinking("reasoning summary"),
+        fauxText("Analyzing supplied chapter evidence."),
+      ]);
+      options.onModelEvent?.({ type: "message_start", message });
+      options.onModelEvent?.({ type: "message_end", message });
       return {
         sourceId: options.sourceId!,
         chapters: [2, 3],
@@ -179,19 +177,12 @@ describe("NWH TUI extension", () => {
     });
     expect(typeof calls[0]?.onProgress).toBe("function");
     expect(typeof calls[0]?.onStatus).toBe("function");
-    expect(typeof calls[0]?.onModelThinking).toBe("function");
-    expect(typeof calls[0]?.onModelText).toBe("function");
-    expect(typeof calls[0]?.onModelToolCall).toBe("function");
-    expect(typeof calls[0]?.onModelToolResult).toBe("function");
-    expect(notifications).toContainEqual(expect.stringContaining(`Active revision: ${"b".repeat(64)}`));
-  });
-
-  it("extracts prior user prompts for arrow-key history without including assistant output", () => {
-    expect(sessionPromptHistory([
-      { type: "message", message: { role: "user", content: [{ type: "text", text: "/novels" }] } },
-      { type: "message", message: { role: "assistant", content: [{ type: "text", text: "result" }] } },
-      { type: "message", message: { role: "user", content: [{ type: "text", text: "/reparse --chapters 2" }] } },
-    ])).toEqual(["/novels", "/reparse --chapters 2"]);
+    expect(typeof calls[0]?.onModelEvent).toBe("function");
+    expect(calls[0]?.onModelThinking).toBeUndefined();
+    expect(calls[0]?.onModelText).toBeUndefined();
+    expect(calls[0]?.onModelToolCall).toBeUndefined();
+    expect(calls[0]?.onModelToolResult).toBeUndefined();
+    expect(notifications).toContainEqual("Reparse complete for chapter(s) 2, 3.");
   });
 
   it("exposes novel audit and prepared-revision inspection in the TUI", async () => {

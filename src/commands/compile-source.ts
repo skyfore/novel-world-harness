@@ -1,4 +1,5 @@
 import { stderr, stdout } from "node:process";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { formatRetryNotice } from "../agent/pi-session.js";
 import { runCompilerBatches } from "../compiler/batches.js";
 import type { CompilerBatch } from "../compiler/batches.js";
@@ -27,6 +28,7 @@ export type CompileSourceOptions = {
   onModelThinking?: (delta: string) => void;
   onModelToolCall?: (name: string, input: unknown) => void;
   onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
+  onModelEvent?: (event: AgentSessionEvent) => void;
 };
 
 const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -96,9 +98,11 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         onText(delta) {
           if (!modelTextStreamed) {
             modelTextStreamed = true;
-            const message = `${label} model text stream started (unverified; not committed world truth).`;
-            if (options.onProgress) options.onProgress(message);
-            else stderr.write(`${message}\n`);
+            if (!options.onModelEvent) {
+              const message = `${label} model text stream started (unverified; not committed world truth).`;
+              if (options.onProgress) options.onProgress(message);
+              else stderr.write(`${message}\n`);
+            }
           }
           elapsed?.update("receiving unverified model text");
           if (options.onModelText) options.onModelText(delta);
@@ -107,9 +111,11 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         onThinking(delta) {
           if (!reasoningStreamed) {
             reasoningStreamed = true;
-            const message = `${label} provider reasoning stream started (content hidden).`;
-            if (options.onProgress) options.onProgress(message);
-            else stderr.write(`${message}\n`);
+            if (!options.onModelEvent) {
+              const message = `${label} provider reasoning stream started (content hidden).`;
+              if (options.onProgress) options.onProgress(message);
+              else stderr.write(`${message}\n`);
+            }
           }
           elapsed?.update("receiving model reasoning stream");
           options.onModelThinking?.(delta);
@@ -118,13 +124,16 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           const details = input as Record<string, unknown>;
           const message = `↳ ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`;
           elapsed?.update(`last tool call ${name}${details.proposal_id ? ` ${String(details.proposal_id)}` : ""}`);
-          if (options.onProgress) options.onProgress(message);
-          else stderr.write(`${message}\n`);
+          if (!options.onModelEvent) {
+            if (options.onProgress) options.onProgress(message);
+            else stderr.write(`${message}\n`);
+          }
           options.onModelToolCall?.(name, input);
         },
         onToolResult(name, result, isError) {
           options.onModelToolResult?.(name, result, isError);
         },
+        onEvent: options.onModelEvent,
       });
       try {
         elapsed = startElapsedStatus({
@@ -139,10 +148,10 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         elapsed.stop("model response received; verifying finish handshake");
         if (!modelTextStreamed && report.text) {
           if (options.onModelText) options.onModelText(report.text);
-          else stdout.write(report.text);
+          else if (!options.onModelEvent) stdout.write(report.text);
           modelTextStreamed = true;
         }
-        if (!options.onModelText && report.text && !report.text.endsWith("\n")) stdout.write("\n");
+        if (!options.onModelText && !options.onModelEvent && report.text && !report.text.endsWith("\n")) stdout.write("\n");
         const failure = compilerBatchFailure(report);
         if (failure) throw new Error(`Compiler batch ${batch.ordinal + 1} was not checkpointed: ${failure}.`);
         const message = `Compiler batch ${batch.ordinal + 1} finish handshake verified; `

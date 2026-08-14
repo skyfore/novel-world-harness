@@ -1,29 +1,64 @@
-import { describe, expect, it } from "vitest";
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import {
+  initTheme,
+  type ExtensionUIContext,
+  type KeybindingsManager,
+} from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
+import { beforeAll, describe, expect, it } from "vitest";
 import { NwhTask, showNwhTask, taskSummary } from "../src/agent/nwh-task.js";
 
+beforeAll(() => initTheme("dark", false));
+
 describe("NWH long-running tasks", () => {
-  it("publishes progress and settles without rejecting its observable completion", async () => {
+  it("preserves Pi assistant and tool events as a structured transcript", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const task = new NwhTask("reparse-source", "Reparse Novel", "Starting");
     const states: string[] = [];
     task.subscribe(() => states.push(task.snapshot.activity));
+    const message = fauxAssistantMessage([
+      fauxThinking("private reasoning"),
+      fauxText("Reviewing evidence\x1b[31m now."),
+      fauxToolCall("propose_entity", { proposal_id: "liubei" }, { id: "tool-1" }),
+    ], { stopReason: "toolUse" });
+
     task.start(async () => {
       task.update("Compiler batch 2/148");
-      task.log("↳ propose_entity liubei");
-      task.appendReasoning("private reasoning");
-      task.appendModelOutput("Reviewing evidence\x1b[31m now.");
-      task.appendToolEvent("call", "propose_entity", { proposal_id: "liubei" });
+      task.log("Checking evidence boundaries.");
+      task.appendAgentEvent({ type: "message_start", message });
+      task.appendAgentEvent({ type: "message_end", message });
+      task.appendAgentEvent({
+        type: "tool_execution_start",
+        toolCallId: "tool-1",
+        toolName: "propose_entity",
+        args: { proposal_id: "liubei" },
+      });
+      task.appendAgentEvent({
+        type: "tool_execution_end",
+        toolCallId: "tool-1",
+        toolName: "propose_entity",
+        result: { content: [{ type: "text", text: "recorded" }], details: { recorded: true } },
+        isError: false,
+      });
       await gate;
     });
 
     expect(task.snapshot.status).toBe("running");
-    expect(task.snapshot.logs).toEqual(["↳ propose_entity liubei"]);
-    expect(task.snapshot.reasoningCharacters).toBe("private reasoning".length);
-    expect(task.snapshot.modelOutput).toContain("Reviewing evidence␛[31m now.");
-    expect(task.snapshot.modelOutput).toContain("[tool call] propose_entity");
-    expect(task.snapshot.modelOutput).toContain('"proposal_id": "liubei"');
+    expect(task.snapshot.logs).toEqual(["Checking evidence boundaries."]);
+    expect(task.snapshot.transcript.map((entry) => entry.kind)).toEqual(["progress", "assistant", "tool"]);
+    const assistant = task.snapshot.transcript.find((entry) => entry.kind === "assistant");
+    expect(assistant?.kind === "assistant" && assistant.message.content).toContainEqual(
+      expect.objectContaining({ type: "text", text: "Reviewing evidence␛[31m now." }),
+    );
+    const tool = task.snapshot.transcript.find((entry) => entry.kind === "tool");
+    expect(tool).toMatchObject({
+      kind: "tool",
+      toolCallId: "tool-1",
+      toolName: "propose_entity",
+      args: { proposal_id: "liubei" },
+      result: { content: [{ type: "text", text: "recorded" }], isError: false },
+      isPartial: false,
+    });
     release();
     await task.completion;
     expect(task.snapshot.status).toBe("completed");
@@ -45,34 +80,118 @@ describe("NWH long-running tasks", () => {
     await task.completion;
     expect(task.snapshot).toMatchObject({ status: "failed", error: "provider unavailable" });
     expect(task.snapshot.logs.at(-1)).toBe("Error: provider unavailable");
+    expect(task.snapshot.transcript.at(-1)).toMatchObject({ kind: "progress", message: "Error: provider unavailable" });
   });
 
-  it("moves a focused running task to the background with left arrow", async () => {
+  it("renders live model output and tools with Pi components, then backgrounds with left arrow", async () => {
     const task = new NwhTask("reparse-source", "Reparse Novel");
     task.start(() => new Promise<void>(() => {}));
-    task.appendReasoning("summary");
-    task.appendModelOutput("I am reviewing chapter evidence now.");
+    const message = fauxAssistantMessage([
+      fauxThinking("checking chapter evidence"),
+      fauxText("I am reviewing chapter evidence now."),
+    ]);
+    task.appendAgentEvent({ type: "message_start", message });
+    task.appendAgentEvent({
+      type: "tool_execution_start",
+      toolCallId: "tool-live",
+      toolName: "propose_entity",
+      args: { proposal_id: "liubei" },
+    });
     let rendered: string[] = [];
-    const ui = {
-      custom: async (factory: (...args: unknown[]) => unknown) => new Promise<"background">((resolve) => {
-        const component = factory(
-          { requestRender() {} },
-          {
-            fg: (_color: string, text: string) => text,
-            bold: (text: string) => text,
-          },
-          {},
-          resolve,
-        ) as { render: (width: number) => string[]; handleInput?: (data: string) => void };
-        rendered = component.render(100);
-        component.handleInput?.("\x1b[D");
-      }),
-    } as unknown as ExtensionUIContext;
+    const ui = taskUi((component, resolve) => {
+      rendered = component.render(100);
+      component.handleInput?.("\x1b[D");
+      return resolve;
+    });
 
-    await expect(showNwhTask(ui, task)).resolves.toBe("background");
+    await expect(showNwhTask(ui, task, "/novel")).resolves.toBe("background");
     expect(task.snapshot.status).toBe("running");
-    expect(rendered.join("\n")).toContain("Model output · unverified proposal commentary");
+    expect(rendered.join("\n")).not.toContain("Model output");
+    expect(rendered.join("\n")).toContain("checking chapter evidence");
     expect(rendered.join("\n")).toContain("I am reviewing chapter evidence now.");
-    expect(rendered.join("\n")).toContain("Provider reasoning stream received: 7 characters");
+    expect(rendered.join("\n")).toContain("propose_entity");
+  });
+
+  it("shows thinking while streaming and collapses it after completion until Pi's thinking key expands it", async () => {
+    const task = new NwhTask("reparse-source", "Reparse Novel");
+    const streaming = fauxAssistantMessage([
+      fauxThinking("inspect private evidence chain"),
+      fauxText("Public answer."),
+    ], { stopReason: "pending" });
+    task.appendAgentEvent({ type: "message_start", message: streaming });
+    expect(task.snapshot.transcript).toContainEqual(expect.objectContaining({ kind: "assistant", streaming: true }));
+    const completed = { ...streaming, stopReason: "stop" as const };
+    task.appendAgentEvent({ type: "message_end", message: completed });
+    task.start(async () => undefined);
+    await task.completion;
+
+    let collapsed = "";
+    let expanded = "";
+    const ui = taskUi((component, resolve) => {
+      collapsed = component.render(100).join("\n");
+      component.handleInput?.("ctrl+t");
+      expanded = component.render(100).join("\n");
+      component.handleInput?.("\x1b[D");
+      return resolve;
+    });
+
+    await expect(showNwhTask(ui, task, "/novel")).resolves.toBe("settled");
+    expect(collapsed).toContain("Thinking complete");
+    expect(collapsed).not.toContain("inspect private evidence chain");
+    expect(expanded).toContain("inspect private evidence chain");
+    expect(expanded).toContain("Public answer.");
+  });
+
+  it("keeps live output at the end and lets the foreground overlay page through earlier task events", async () => {
+    const task = new NwhTask("reparse-source", "Reparse Novel");
+    task.start(() => new Promise<void>(() => {}));
+    for (let index = 1; index <= 40; index += 1) task.log(`progress line ${index}`);
+    let latest = "";
+    let earlier = "";
+    const ui = taskUi((component) => {
+      latest = component.render(100).join("\n");
+      component.handleInput?.("\x1b[5~");
+      earlier = component.render(100).join("\n");
+      component.handleInput?.("\x1b[D");
+    });
+
+    await expect(showNwhTask(ui, task, "/novel")).resolves.toBe("background");
+    const latestLines = latest.split("\n").map((line) => line.trim());
+    const earlierLines = earlier.split("\n").map((line) => line.trim());
+    expect(latestLines).toContain("progress line 40");
+    expect(latestLines).not.toContain("progress line 1");
+    expect(earlierLines).toContain("progress line 1");
+    expect(earlierLines).not.toContain("progress line 40");
   });
 });
+
+type TestTaskComponent = {
+  render(width: number): string[];
+  handleInput?(data: string): void;
+};
+
+function taskUi(
+  inspect: (component: TestTaskComponent, resolve: (value: "background" | "settled") => void) => unknown,
+): ExtensionUIContext {
+  let toolsExpanded = false;
+  return {
+    custom: async (factory: (...args: unknown[]) => unknown) => new Promise<"background" | "settled">((resolve) => {
+      const component = factory(
+        { requestRender() {}, terminal: { rows: 30 } },
+        {
+          fg: (_color: string, text: string) => text,
+          bold: (text: string) => text,
+        },
+        {
+          matches: (data: string, action: string) =>
+            (action === "app.tools.expand" && data === "ctrl+o")
+            || (action === "app.thinking.toggle" && data === "ctrl+t"),
+        } as KeybindingsManager,
+        resolve,
+      ) as TestTaskComponent;
+      inspect(component, resolve);
+    }),
+    getToolsExpanded: () => toolsExpanded,
+    setToolsExpanded: (expanded: boolean) => { toolsExpanded = expanded; },
+  } as unknown as ExtensionUIContext;
+}

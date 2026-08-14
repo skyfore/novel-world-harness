@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { stdout } from "node:process";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { CompilerBatchStore, prepareCompilerBatches, type CompilerBatch } from "../compiler/batches.js";
 import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
@@ -30,6 +31,7 @@ export type ReparseCommandOptions = {
   onModelThinking?: (delta: string) => void;
   onModelToolCall?: (name: string, input: unknown) => void;
   onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
+  onModelEvent?: (event: AgentSessionEvent) => void;
 };
 
 type ReparseDependencies = {
@@ -103,6 +105,7 @@ export async function reparseCommand(
       onModelThinking: options.onModelThinking,
       onModelToolCall: options.onModelToolCall,
       onModelToolResult: options.onModelToolResult,
+      onModelEvent: options.onModelEvent,
     });
     options.onStatus?.("Converging validated compiler proposals");
     const convergence = await convergeWorldProposals(root, source.id, {
@@ -132,6 +135,7 @@ export async function reparseCommand(
       onModelThinking: options.onModelThinking,
       onModelToolCall: options.onModelToolCall,
       onModelToolResult: options.onModelToolResult,
+      onModelEvent: options.onModelEvent,
     });
     const active = await cache.lookup(source);
     if (!active.bundleHash) throw new Error("Reparse completed without an active prepared-cache revision.");

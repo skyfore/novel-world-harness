@@ -14,6 +14,7 @@ export type PiCompilerOptions = {
   onThinking?: (delta: string) => void;
   onTool?: (name: string, input: unknown) => void;
   onToolResult?: (name: string, result: unknown, isError: boolean) => void;
+  onEvent?: PiAgentSessionOptions["onEvent"];
   onRetry?: PiAgentSessionOptions["onRetry"];
   segmentIds?: readonly string[];
   compilerBatchId?: string;
@@ -43,6 +44,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     ...(options.onThinking ? { onThinking: options.onThinking } : {}),
     ...(options.onTool ? { onTool: options.onTool } : {}),
     ...(options.onToolResult ? { onToolResult: options.onToolResult } : {}),
+    ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     ...(options.onRetry ? { onRetry: options.onRetry } : {}),
     interactionMode: "compiler",
     includeLocalTools,

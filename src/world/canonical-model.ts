@@ -86,6 +86,15 @@ export class CanonicalModelStore {
     if (legacy !== null) hashes.add(contentHash(legacy));
     return [...hashes].sort().map((hash) => ({ id, hash }));
   }
+  async removeCurrent(kind: CanonicalKind, idInput: string): Promise<void> {
+    const id = safeId(idInput);
+    const legacy = await this.readLegacy(kind, id);
+    if (legacy !== null) {
+      await writeImmutable(this.revisionPath(kind, id, contentHash(legacy)), legacy);
+      await fs.rm(this.legacyPath(kind, id), { force: true });
+    }
+    await fs.rm(this.refPath(kind, id), { force: true });
+  }
   private async put(kind: CanonicalKind, idInput: string, value: unknown): Promise<void> {
     const id = safeId(idInput);
     const legacy = await this.readLegacy(kind, id);

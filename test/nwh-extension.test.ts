@@ -47,7 +47,13 @@ async function fixture(onSessionShutdown?: () => Promise<void>) {
     },
   } as unknown as ExtensionAPI;
   const workspace = await LocalFileWorkspace.create(root);
-  await createNwhExtension({ workspace, saveSession: true, mode: "assistant", onSessionShutdown })(pi);
+  await createNwhExtension({
+    workspace,
+    saveSession: true,
+    mode: "assistant",
+    onSessionShutdown,
+    preparedCacheRoot: path.join(root, "prepared-cache"),
+  })(pi);
   return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages };
 }
 
@@ -175,6 +181,41 @@ describe("NWH TUI extension", () => {
       .toMatchObject({ block: true, reason: expect.stringContaining("evidence slice") });
     expect(events.get("tool_call")?.({ type: "tool_call", toolName: "propose_initial_world", toolCallId: "opening-too-early", input: {} }, ctx))
       .toMatchObject({ block: true, reason: expect.stringContaining("dedicated opening-world pass") });
+  });
+
+  it("isolates each compiler batch from earlier transcript context and replaces model-authored completion claims", async () => {
+    const { events, root } = await fixture();
+    const ctx = {
+      mode: "tui",
+      model: { provider: "anthropic", id: "claude-sonnet-5" },
+      ui: {
+        notify: () => undefined,
+        setStatus: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+    await events.get("input")?.(
+      { type: "input", text: `'${path.join(root, "chapters", "chapter one.md")}'`, source: "interactive" } as InputEvent,
+      ctx,
+    );
+
+    const contextResult = events.get("context")?.({
+      type: "context",
+      messages: [
+        { role: "assistant", content: [{ type: "text", text: "old batch claims" }] },
+        { role: "custom", customType: "nwh-compiler-batch", content: "current evidence", display: false },
+        { role: "assistant", content: [{ type: "text", text: "current batch" }] },
+      ],
+    }, ctx) as { messages?: Array<{ role: string; customType?: string }> } | undefined;
+    expect(contextResult?.messages).toHaveLength(2);
+    expect(contextResult?.messages?.[0]).toMatchObject({ role: "custom", customType: "nwh-compiler-batch" });
+
+    const messageResult = events.get("message_end")?.({
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "Everything is canonical and complete." }] },
+    }, ctx) as { message?: { content?: Array<{ type: string; text?: string }> } } | undefined;
+    expect(messageResult?.message?.content?.[0]?.text).toContain("host state");
+    expect(messageResult?.message?.content?.[0]?.text).toContain("pending proposals");
   });
 
   it("blocks every subsequent tool call until a circuit-broken agent run settles", async () => {

@@ -36,7 +36,7 @@ describe("prepare-all command", () => {
     });
     const asked: string[] = [];
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id }, {
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, cacheRoot: path.join(root, "prepared-cache") }, {
       ask: async (question) => {
         asked.push(question.header);
         return "review" as never;
@@ -57,7 +57,7 @@ describe("prepare-all command", () => {
     const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
     let compileCalls = 0;
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true }, {
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
       compileSource: async (options) => {
         compileCalls += 1;
         expect(options.maxBatches).toBeUndefined();
@@ -114,7 +114,7 @@ describe("prepare-all command", () => {
       generatedBy: { worker: "test" },
     });
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true }, {
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },
       compileInitialWorld: async () => { throw new Error("compileInitialWorld should not run"); },
       converge: convergeWorldProposals,
@@ -147,7 +147,7 @@ describe("prepare-all command", () => {
       generatedBy: { worker: "test" },
     });
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true }, {
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },
       compileInitialWorld: async () => {
         await proposals.submit("initial-world", {
@@ -179,7 +179,7 @@ describe("prepare-all command", () => {
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
     let initialCompilerCalls = 0;
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true }, {
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },
       compileInitialWorld: async (options) => {
         initialCompilerCalls += 1;
@@ -215,7 +215,7 @@ describe("prepare-all command", () => {
     const batches = await prepareCompilerBatches(root, fixture.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true }, {
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },
       compileInitialWorld: async (options) => {
         await new CompilerProposalService(root).submit("initial-world", {
@@ -249,7 +249,7 @@ describe("prepare-all command", () => {
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
     const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
 
-    await expect(prepareAllCommand({ root, sourceId: fixture.source.id }))
+    await expect(prepareAllCommand({ root, sourceId: fixture.source.id, cacheRoot: path.join(root, "prepared-cache") }))
       .rejects.toThrow("Re-run with --yes");
   });
 });

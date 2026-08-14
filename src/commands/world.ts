@@ -79,9 +79,10 @@ export async function worldKnowledgeCommand(root: string, branchId: string, acto
 export async function worldActorCommand(root: string, branchId: string, actorId: string): Promise<void> {
   const { engine, actors } = await openWorld(root);
   const head = await engine.branches.readHead(branchId);
+  const context = await engine.contextForCommit(head);
   const [model, goals, view] = await Promise.all([
-    actors.getModel(actorId),
-    actors.listGoals(actorId),
+    context.actorModels?.get(actorId) ?? actors.getModel(actorId),
+    context.actorGoals?.filter((goal) => goal.actorId === actorId) ?? actors.listGoals(actorId),
     new KnowledgeProjector(engine).view(actorId, head),
   ]);
   stdout.write(`${JSON.stringify({ actorId, model, goals, view }, null, 2)}\n`);

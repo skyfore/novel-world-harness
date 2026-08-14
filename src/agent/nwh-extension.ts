@@ -21,6 +21,8 @@ import { convergeWorldProposals, quarantineUncommittableProposals } from "../com
 import { inspectPreparation } from "../workflow/prepare.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -30,6 +32,7 @@ export type NwhExtensionOptions = {
   mode: NwhInteractionMode;
   onSessionShutdown?: () => Promise<void>;
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
+  preparedCacheRoot?: string;
 };
 
 const COMMAND_HELP = `NWH commands:
@@ -62,6 +65,7 @@ type TuiPrepareAllState = {
   initialWorldRequestRunning: boolean;
   initialWorldAttempted: boolean;
   initialWorldBatchId?: string;
+  preparedCacheVerified: boolean;
 };
 
 export function splitCommandArguments(value: string): string[] {
@@ -86,6 +90,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let registeredCompilerToolset: CompilerProposalToolset | undefined;
     let prepareAllState: TuiPrepareAllState | undefined;
     let compilerCircuitBroken = false;
+    const preparedCache = new PreparedNovelCache(workspace.root, options.preparedCacheRoot);
 
     const resetCompilerBatch = async (segmentIds: readonly string[], compilerBatchId: string, sourceId: string) => {
       await registeredCompilerToolset?.beginBatch(segmentIds, compilerBatchId, sourceId);
@@ -200,7 +205,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           stopPrepareAll(ctx, `Full preparation paused for proposal review. Next: ${inspection.next}`, "info");
           return;
         }
-        const result = await convergeWorldProposals(workspace.root, state.sourceId);
+        let lastReported = 0;
+        const result = await convergeWorldProposals(workspace.root, state.sourceId, {
+          onProgress: (progress) => {
+            if (progress.phase === "complete" || progress.processed === progress.total || progress.processed - lastReported >= 50) {
+              ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Converging · ${progress.phase} ${progress.processed}/${progress.total}`));
+              lastReported = progress.processed;
+            }
+          },
+        });
         const blocked = result.canonical.blocked.length + result.possibilities.blocked.length;
         const quarantined = await quarantineUncommittableProposals(workspace.root, result);
         if (quarantined.length) {
@@ -254,6 +267,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return;
       }
       if (inspection.stage === "create-branch") {
+        const cached = await preparedCache.publish(inspection.source!);
+        state.preparedCacheVerified = true;
+        ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
         const decision = await choose(ctx, "Create playable branch?", [
           { value: "create", label: "Create branch", description: `Commit genesis for branch '${state.branchId}'.`, recommended: true },
           { value: "pause", label: "Pause", description: "Keep canonical preparation complete without creating a branch." },
@@ -273,6 +289,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return;
       }
       if (inspection.stage === "ready") {
+        if (!state.preparedCacheVerified) {
+          const cached = await preparedCache.publish(inspection.source!);
+          ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
+        }
         stopPrepareAll(ctx, `Preparation complete. Run nwh play-world --branch ${state.branchId} --list-characters to enter the world.`, "info");
         return;
       }
@@ -320,11 +340,16 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
 
       try {
-        const preparation = await prepareSourceLoopFromInput(workspace.root, event.text);
+        const preparation = await prepareSourceLoopFromInput(workspace.root, event.text, { cacheRoot: options.preparedCacheRoot });
         if (preparation) {
           activeSourceId = preparation.source.id;
           if (preparation.status === "complete") {
-            ctx.ui.notify(`${preparation.source.title} is already fully processed (${preparation.totalBatches} batches).`, "info");
+            ctx.ui.notify(
+              preparation.preparedCache?.status === "restored"
+                ? `Restored active prepared revision ${preparation.preparedCache.bundleHash} for ${preparation.source.title}; run /prepare-all to create an independent branch.`
+                : `${preparation.source.title} has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`,
+              "info",
+            );
             return { action: "handled" };
           }
           activateCompilerTools(ctx);
@@ -360,6 +385,32 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           customType: pendingTurn ? "nwh-compiler-batch" : "nwh-file-context",
           content: context.join("\n\n"),
           display: false,
+        },
+      };
+    });
+
+    pi.on("context", (event) => {
+      if (!pendingTurn && !prepareAllState?.initialWorldRequestRunning) return;
+      const boundary = event.messages.findLastIndex((message) =>
+        message.role === "custom" && (
+          message.customType === "nwh-compiler-batch"
+          || message.customType === "nwh-prepare-all-batch"
+          || message.customType === "nwh-prepare-all-initial-world"
+        ));
+      if (boundary <= 0) return;
+      return { messages: event.messages.slice(boundary) };
+    });
+
+    pi.on("message_end", (event) => {
+      if ((!pendingTurn && !prepareAllState?.initialWorldRequestRunning) || event.message.role !== "assistant") return;
+      if (event.message.content.some((content) => content.type === "toolCall")) return;
+      return {
+        message: {
+          ...event.message,
+          content: [{
+            type: "text",
+            text: "Model batch output ended. NWH is verifying the finish handshake and deriving checkpoint status from host state. All submitted artifacts remain pending proposals until deterministic convergence accepts them.",
+          }],
         },
       };
     });
@@ -473,7 +524,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }
         activeSourceId = preparation.source.id;
         if (preparation.status === "complete") {
-          ctx.ui.notify(`${preparation.source.title} is already fully processed (${preparation.totalBatches} batches).`, "info");
+          ctx.ui.notify(`${preparation.source.title} has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`, "info");
           return;
         }
         activateCompilerTools(ctx);
@@ -520,12 +571,22 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activeSourceId = sourceId;
+        const source = inspection.source ?? await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);
+        if (source) {
+          const restored = await preparedCache.restore(source);
+          if (restored.status === "restored") {
+            ctx.ui.notify(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; source compilation is skipped.`, "info");
+          } else if (restored.status === "workspace-not-empty" && restored.reason) {
+            ctx.ui.notify(`Prepared cache was not restored: ${restored.reason}`, "warning");
+          }
+        }
         prepareAllState = {
           sourceId,
           branchId,
           compileAllApproved: false,
           initialWorldRequestRunning: false,
           initialWorldAttempted: false,
+          preparedCacheVerified: false,
         };
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing world"));
         await advancePrepareAll(ctx);

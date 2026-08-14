@@ -18,10 +18,9 @@ export async function openWorkspaceWorld(workspaceRoot: string, render?: Narrati
   const actorModels = new ActorModelStore(workspaceRoot);
   const possibilityTemplates = new PossibilityTemplateStore(workspaceRoot);
   const possibilitySource: PossibilitySource = async ({ branchId, commitId }) => {
-    const [commitContext, templates] = await Promise.all([
-      engine.contextForCommit(commitId),
-      possibilityTemplates.materialize(branchId, commitId),
-    ]);
+    const commitContext = await engine.contextForCommit(commitId);
+    const templates = (commitContext.possibilityTemplates ?? await possibilityTemplates.list())
+      .map((template) => ({ ...template, branchId, evaluatedAtCommit: commitId }));
     const events = [...(commitContext.events?.values() ?? [])];
     const canonical = events.map((event) => canonicalEventToPossibility(event, branchId, commitId));
     const byId = new Map([...canonical, ...templates].map((possibility) => [possibility.id, possibility]));
@@ -35,4 +34,3 @@ export async function openWorkspaceWorld(workspaceRoot: string, render?: Narrati
   );
   return { engine, runtime, actorModels, possibilityTemplates };
 }
-

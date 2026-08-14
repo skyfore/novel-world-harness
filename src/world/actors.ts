@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -47,6 +48,9 @@ export const characterModelSchema = z
 export type CharacterModel = z.infer<typeof characterModelSchema>;
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export type ActorArtifactKind = "goals" | "models";
+export type ActorRevisionRef = { id: string; hash: string };
+type StoredActorRef = { version: 1; id: string; hash: string; updatedAt: string };
 
 export class ActorModelStore {
   readonly root: string;
@@ -56,22 +60,22 @@ export class ActorModelStore {
 
   async putGoal(input: CharacterGoal): Promise<void> {
     const goal = characterGoalSchema.parse(input);
-    await this.writeImmutable(path.join(this.root, "goals", `${safeId(goal.id)}.json`), goal);
+    await this.put("goals", goal.id, goal);
   }
 
   async putModel(input: CharacterModel): Promise<void> {
     const model = characterModelSchema.parse(input);
-    await this.writeImmutable(path.join(this.root, "models", `${safeId(model.actorId)}.json`), model);
+    await this.put("models", model.actorId, model);
   }
 
   async listGoals(actorId?: string): Promise<CharacterGoal[]> {
-    const all = await this.list(path.join(this.root, "goals"), characterGoalSchema);
+    const all = await this.list("goals", characterGoalSchema);
     return actorId ? all.filter((goal) => goal.actorId === actorId) : all;
   }
 
   async getModel(actorId: string): Promise<CharacterModel | null> {
     try {
-      return characterModelSchema.parse(JSON.parse(await fs.readFile(path.join(this.root, "models", `${safeId(actorId)}.json`), "utf8")));
+      return await this.get("models", actorId, characterModelSchema);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -79,32 +83,130 @@ export class ActorModelStore {
   }
 
   async listModels(): Promise<CharacterModel[]> {
-    return this.list(path.join(this.root, "models"), characterModelSchema);
+    return this.list("models", characterModelSchema);
   }
 
-  private async writeImmutable(filePath: string, value: unknown): Promise<void> {
-    const serialized = `${canonicalJson(value)}\n`;
-    await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  getGoalRevision(id: string, hash: string): Promise<CharacterGoal> {
+    return this.getRevision("goals", id, hash, characterGoalSchema);
+  }
+
+  getModelRevision(id: string, hash: string): Promise<CharacterModel> {
+    return this.getRevision("models", id, hash, characterModelSchema);
+  }
+
+  async currentRevision(kind: ActorArtifactKind, idInput: string): Promise<ActorRevisionRef | null> {
+    const id = safeId(idInput);
+    const ref = await this.readRef(kind, id);
+    if (ref) return { id, hash: ref.hash };
+    const legacy = await this.readLegacy(kind, id);
+    return legacy === null ? null : { id, hash: contentHash(legacy) };
+  }
+
+  async removeGoal(id: string): Promise<void> { await this.removeCurrent("goals", id); }
+  async removeModel(actorId: string): Promise<void> { await this.removeCurrent("models", actorId); }
+
+  private async put(kind: ActorArtifactKind, idInput: string, value: unknown): Promise<void> {
+    const id = safeId(idInput);
+    await this.migrateLegacy(kind, id);
+    const hash = contentHash(value);
+    await writeImmutable(this.revisionPath(kind, id, hash), value);
+    await atomicJson(this.refPath(kind, id), { version: 1, id, hash, updatedAt: new Date().toISOString() } satisfies StoredActorRef);
+  }
+
+  private async get<T>(kind: ActorArtifactKind, idInput: string, schema: z.ZodType<T>): Promise<T> {
+    const id = safeId(idInput);
+    const ref = await this.readRef(kind, id);
+    if (ref) return this.getRevision(kind, id, ref.hash, schema);
+    const legacy = await this.readLegacy(kind, id);
+    if (legacy === null) throw Object.assign(new Error(`Actor ${kind} artifact not found: ${id}`), { code: "ENOENT" });
+    return schema.parse(legacy);
+  }
+
+  private async getRevision<T>(kind: ActorArtifactKind, idInput: string, hash: string, schema: z.ZodType<T>): Promise<T> {
+    const id = safeId(idInput);
+    if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error(`Invalid actor artifact revision hash: ${hash}`);
+    let raw: unknown;
     try {
-      await fs.writeFile(filePath, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      raw = JSON.parse(await fs.readFile(this.revisionPath(kind, id, hash), "utf8")) as unknown;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if ((await fs.readFile(filePath, "utf8")) !== serialized) throw new Error(`Actor model artifact already exists with different content: ${filePath}`);
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const legacy = await this.readLegacy(kind, id);
+      if (legacy === null || contentHash(legacy) !== hash) {
+        throw Object.assign(new Error(`Actor ${kind} revision not found: ${id}@${hash}`), { code: "ENOENT" });
+      }
+      raw = legacy;
     }
+    const value = schema.parse(raw);
+    if (contentHash(value) !== hash) throw new Error(`Corrupt actor ${kind} revision ${id}@${hash}`);
+    return value;
   }
 
-  private async list<T>(directory: string, schema: z.ZodType<T>): Promise<T[]> {
-    let names: string[];
-    try {
-      names = (await fs.readdir(directory)).filter((name) => name.endsWith(".json")).sort();
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
+  private async list<T>(kind: ActorArtifactKind, schema: z.ZodType<T>): Promise<T[]> {
+    const ids = new Set<string>();
+    for (const directory of [path.join(this.root, kind, "refs"), path.join(this.root, kind)]) {
+      try {
+        for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+          if (entry.isFile() && entry.name.endsWith(".json")) ids.add(entry.name.slice(0, -5));
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
     const values: T[] = [];
-    for (const name of names) values.push(schema.parse(JSON.parse(await fs.readFile(path.join(directory, name), "utf8"))));
+    for (const id of [...ids].sort()) values.push(await this.get(kind, id, schema));
     return values;
   }
+
+  private async removeCurrent(kind: ActorArtifactKind, idInput: string): Promise<void> {
+    const id = safeId(idInput);
+    await this.migrateLegacy(kind, id);
+    await fs.rm(this.refPath(kind, id), { force: true });
+  }
+
+  private async migrateLegacy(kind: ActorArtifactKind, id: string): Promise<void> {
+    const legacy = await this.readLegacy(kind, id);
+    if (legacy === null) return;
+    await writeImmutable(this.revisionPath(kind, id, contentHash(legacy)), legacy);
+    await fs.rm(this.legacyPath(kind, id), { force: true });
+  }
+
+  private refPath(kind: ActorArtifactKind, id: string): string { return path.join(this.root, kind, "refs", `${id}.json`); }
+  private revisionPath(kind: ActorArtifactKind, id: string, hash: string): string { return path.join(this.root, kind, "revisions", id, `${hash}.json`); }
+  private legacyPath(kind: ActorArtifactKind, id: string): string { return path.join(this.root, kind, `${id}.json`); }
+
+  private async readRef(kind: ActorArtifactKind, id: string): Promise<StoredActorRef | null> {
+    try {
+      const value = JSON.parse(await fs.readFile(this.refPath(kind, id), "utf8")) as StoredActorRef;
+      if (value.version !== 1 || value.id !== id || !/^[a-f0-9]{64}$/.test(value.hash)) throw new Error(`Invalid actor artifact ref: ${kind}/${id}`);
+      return value;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  private async readLegacy(kind: ActorArtifactKind, id: string): Promise<unknown | null> {
+    try { return JSON.parse(await fs.readFile(this.legacyPath(kind, id), "utf8")) as unknown; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+  }
+}
+
+async function writeImmutable(filePath: string, value: unknown): Promise<void> {
+  const serialized = `${canonicalJson(value)}\n`;
+  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  try {
+    await fs.writeFile(filePath, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if ((await fs.readFile(filePath, "utf8")) !== serialized) throw new Error(`Actor artifact revision collision: ${filePath}`);
+  }
+}
+
+async function atomicJson(filePath: string, value: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(temporary, `${canonicalJson(value)}\n`, { encoding: "utf8", mode: 0o600 });
+  await fs.rename(temporary, filePath);
 }
 
 export type ActorProposalCandidate = {
@@ -122,8 +224,8 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
   const knowledge = new KnowledgeProjector(engine);
   return async ({ branchId, commitId }) => {
     const candidates: ActorProposalCandidate[] = [];
-    const goals = await actors.listGoals();
     const context = await engine.contextForCommit(commitId);
+    const goals = context.actorGoals ?? await actors.listGoals();
     for (const goal of goals) {
       if (!goal.candidateAction) continue;
       const entity = context.entities.get(goal.actorId);

@@ -3,6 +3,7 @@ import { SegmentStore, segmentSource } from "../compiler/segments.js";
 import { loadOptionalConfig } from "../config/load.js";
 import type { HarnessConfig } from "../config/schema.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 
 export async function ingestWorkspaceSource(
   root: string,
@@ -17,7 +18,7 @@ export async function ingestWorkspaceSource(
   return { project: storedProject, document, manifest };
 }
 
-export async function ingestCommand(filePath: string, configPath: string): Promise<void> {
+export async function ingestCommand(filePath: string, configPath: string, cacheRoot?: string): Promise<void> {
   const config = await loadOptionalConfig(configPath);
   const { project, document, manifest } = await ingestWorkspaceSource(
     path.dirname(path.resolve(configPath)),
@@ -25,5 +26,10 @@ export async function ingestCommand(filePath: string, configPath: string): Promi
     config?.project,
   );
   console.log(`Registered source ${document.title} for project ${project.id}.`);
-  console.log(`Indexed ${manifest.segments.length} evidence segment(s); run nwh compile-source to create pending proposals.`);
+  const restored = await new PreparedNovelCache(path.dirname(path.resolve(configPath)), cacheRoot).restore(document);
+  if (restored.status === "restored") {
+    console.log(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; model compilation is not required.`);
+  } else {
+    console.log(`Indexed ${manifest.segments.length} evidence segment(s); run nwh compile-source to create pending proposals.`);
+  }
 }

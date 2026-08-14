@@ -14,6 +14,8 @@ export type CompilerBatch = {
   id: string;
   sourceId: string;
   ordinal: number;
+  chapterOrdinal: number;
+  chapterTitle?: string;
   segmentIds: string[];
   startLine: number;
   endLine: number;
@@ -123,6 +125,21 @@ export class CompilerBatchStore {
     } satisfies BatchProgress);
   }
 
+  async replaceCompleted(sourceId: string, batchIds: readonly string[]): Promise<void> {
+    await atomicJson(this.filePath(sourceId), {
+      version: 1,
+      sourceId,
+      completedBatchIds: [...new Set(batchIds)].sort(),
+      updatedAt: new Date().toISOString(),
+    } satisfies BatchProgress);
+  }
+
+  async markIncomplete(sourceId: string, batchIds: readonly string[]): Promise<void> {
+    const selected = new Set(batchIds);
+    const current = await this.read(sourceId);
+    await this.replaceCompleted(sourceId, current.completedBatchIds.filter((id) => !selected.has(id)));
+  }
+
   async reset(sourceId: string): Promise<void> {
     await fs.rm(this.filePath(sourceId), { force: true });
   }
@@ -157,6 +174,7 @@ export async function prepareCompilerBatches(workspaceRoot: string, source: Sour
   if (current.length) groups.push(current);
 
   const artifactCatalog = emptyCompilerArtifactCatalog();
+  const chapterMetadata = chapterMetadataForSegments(manifest.segments);
   const batches: CompilerBatch[] = [];
   for (let ordinal = 0; ordinal < groups.length; ordinal += 1) {
     const segments = groups[ordinal]!;
@@ -188,11 +206,14 @@ export async function prepareCompilerBatches(workspaceRoot: string, source: Sour
       );
     }
     const segmentIds = segments.map((segment) => segment.id);
+    const chapter = chapterMetadata.get(segments[0]!.id)!;
     const id = `batch-${source.id}-${String(ordinal + 1).padStart(5, "0")}-${hash(segmentIds.join("\n")).slice(0, 12)}`;
     batches.push({
       id,
       sourceId: source.id,
       ordinal,
+      chapterOrdinal: chapter.ordinal,
+      ...(chapter.title ? { chapterTitle: chapter.title } : {}),
       segmentIds,
       startLine: Math.min(...segments.map((segment) => segment.startLine)),
       endLine: Math.max(...segments.map((segment) => segment.endLine)),
@@ -270,9 +291,18 @@ export async function runCompilerBatches(options: {
   runner: BatchRunner;
   maxBatches?: number;
   resume?: boolean;
+  batchIds?: readonly string[];
+  promptTransform?: (prompt: string, batch: CompilerBatch) => string;
   onProgress?: (message: string) => void;
 }): Promise<{ total: number; completed: number; skipped: number; remaining: number }> {
   const batches = await prepareCompilerBatches(options.workspaceRoot, options.source);
+  const requested = options.batchIds ? new Set(options.batchIds) : null;
+  if (requested) {
+    const known = new Set(batches.map((batch) => batch.id));
+    const unknown = [...requested].filter((id) => !known.has(id));
+    if (unknown.length) throw new Error(`Unknown compiler batch id(s): ${unknown.join(", ")}`);
+  }
+  const selectedBatches = requested ? batches.filter((batch) => requested.has(batch.id)) : batches;
   const store = new CompilerBatchStore(options.workspaceRoot);
   if (options.resume === false) await store.reset(options.source.id);
   const progress = await store.read(options.source.id);
@@ -284,20 +314,33 @@ export async function runCompilerBatches(options: {
 
   let completed = 0;
   let skipped = 0;
-  for (const batch of batches) {
+  for (const batch of selectedBatches) {
     if (completedIds.has(batch.id)) {
       skipped += 1;
       continue;
     }
     if (completed >= maxBatches) break;
     options.onProgress?.(`compiler batch ${batch.ordinal + 1}/${batches.length}: ${batch.startLine}-${batch.endLine}`);
-    await options.runner(await hydrateCompilerBatch(options.workspaceRoot, batch));
+    const hydrated = await hydrateCompilerBatch(options.workspaceRoot, batch);
+    await options.runner(options.promptTransform ? { ...hydrated, prompt: options.promptTransform(hydrated.prompt, hydrated) } : hydrated);
     await store.markComplete(options.source.id, batch.id);
     completedIds.add(batch.id);
     completed += 1;
   }
-  const remaining = batches.filter((batch) => !completedIds.has(batch.id)).length;
-  return { total: batches.length, completed, skipped, remaining };
+  const remaining = selectedBatches.filter((batch) => !completedIds.has(batch.id)).length;
+  return { total: selectedBatches.length, completed, skipped, remaining };
+}
+
+function chapterMetadataForSegments(segments: readonly SourceSegment[]): Map<string, { ordinal: number; title?: string }> {
+  const result = new Map<string, { ordinal: number; title?: string }>();
+  let ordinal = 0;
+  for (const segment of segments) {
+    const continuation = segment.kind === "section" && / \[\d+\]$/.test(segment.title ?? "");
+    if (!continuation || ordinal === 0) ordinal += 1;
+    const title = segment.title?.replace(/ \[\d+\]$/, "");
+    result.set(segment.id, { ordinal, ...(title ? { title } : {}) });
+  }
+  return result;
 }
 
 function buildBatchPrompt(

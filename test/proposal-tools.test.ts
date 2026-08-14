@@ -679,7 +679,7 @@ describe("compiler proposal tools", () => {
   it("resets finish state only when the host starts a new compiler batch", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-batches-"));
     roots.push(root);
-    const fixture = await createEvidenceFixture(root, "林岐来到前厅。\n");
+    const fixture = await createEvidenceFixture(root, "林岐来到前厅。王安随后到达。\n");
     const toolset = createCompilerProposalToolset(root);
     const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
     const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
@@ -713,14 +713,20 @@ describe("compiler proposal tools", () => {
 
     await toolset.beginBatch(["segment-2"]);
     await expect(entity.execute("batch-2-proposal", {
-      ...input,
-      proposal_id: "entity-linqi-second-pass",
+      proposal_id: "entity-wangan",
+      payload: {
+        id: "wangan",
+        kind: "character",
+        canonicalName: "王安",
+        aliases: [],
+        evidence: fixture.evidence("王安随后到达。"),
+      },
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
-      details: { proposalId: "entity-linqi-second-pass", kind: "entity" },
+      details: { proposalId: "entity-wangan", kind: "entity" },
     });
     await expect(finish.execute("batch-2-finish", {
       outcome: "complete",
-      proposal_ids: ["entity-linqi-second-pass"],
+      proposal_ids: ["entity-wangan"],
       reviewed_segments: [{ segment_id: "segment-2", disposition: "proposed", summary: "Reviewed the second segment." }],
       summary: "second batch",
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({

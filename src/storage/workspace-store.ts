@@ -19,6 +19,7 @@ export type SourceDocument = {
   id: string;
   title: string;
   sourcePath: string;
+  contentMd5?: string;
   contentSha256: string;
   bytes: number;
   registeredAt: string;
@@ -119,6 +120,7 @@ export class WorkspaceStore {
     const content = await fs.readFile(absolute);
     if (content.subarray(0, 8_000).includes(0)) throw new Error(`Source must be UTF-8 text: ${inputPath}`);
     const sha = crypto.createHash("sha256").update(content).digest("hex");
+    const md5 = crypto.createHash("md5").update(content).digest("hex");
     const id = sha.slice(0, 20);
     const filePath = path.join(this.sourcesDir, stateFileName(id));
     const existing = await readJson<SourceDocument>(filePath);
@@ -128,6 +130,7 @@ export class WorkspaceStore {
       id,
       title: path.basename(absolute),
       sourcePath: relative.split(path.sep).join("/"),
+      contentMd5: md5,
       contentSha256: sha,
       bytes: content.byteLength,
       registeredAt: existing?.registeredAt ?? now,

@@ -19,9 +19,24 @@ import {
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { canonicalJson } from "../world/canonical.js";
 import { isMetaKnowledgePredicate } from "./semantics.js";
+import { compilerProposalLogicalIdentity } from "./proposals.js";
 
 export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
+export type CompilerValidationCatalog = {
+  entities: Map<string, Entity>;
+  claims: Map<string, Claim>;
+  events: Map<string, CanonicalEvent>;
+  rules: Map<string, WorldRule>;
+};
+export type CompilerConvergenceProgress = {
+  phase: "load" | "canonical" | "complete";
+  processed: number;
+  total: number;
+  accepted: number;
+  blocked: number;
+  proposalId?: string;
+};
 export type BatchAcceptResult = {
   accepted: Array<{ id: string; kind: CanonicalProposalKind }>;
   blocked: Array<{ id: string; kind: CanonicalProposalKind; errors: ValidationIssue[] }>;
@@ -32,16 +47,26 @@ export class CompilerValidator {
   constructor(private readonly canon: CanonicalModelStore, private readonly stateSchema = new StateSchemaRegistry(DEFAULT_STATE_FIELDS)) {}
 
   async validate(kind: CanonicalProposalKind, payload: unknown): Promise<CompilerValidation> {
+    return this.validateWithCatalog(kind, payload, await this.loadCatalog());
+  }
+
+  async loadCatalog(): Promise<CompilerValidationCatalog> {
     const [entityList, claimList, eventList, ruleList] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listClaims(),
       this.canon.listEvents(),
       this.canon.listRules(),
     ]);
-    const entities = new Map(entityList.map((entity) => [entity.id, entity]));
-    const claims = new Map(claimList.map((claim) => [claim.id, claim]));
-    const events = new Map(eventList.map((event) => [event.id, event]));
-    const rules = new Map(ruleList.map((rule) => [rule.id, rule]));
+    return {
+      entities: new Map(entityList.map((entity) => [entity.id, entity])),
+      claims: new Map(claimList.map((claim) => [claim.id, claim])),
+      events: new Map(eventList.map((event) => [event.id, event])),
+      rules: new Map(ruleList.map((rule) => [rule.id, rule])),
+    };
+  }
+
+  validateWithCatalog(kind: CanonicalProposalKind, payload: unknown, catalog: CompilerValidationCatalog): CompilerValidation {
+    const { entities, claims, events, rules } = catalog;
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
@@ -82,6 +107,9 @@ export class CompilerValidator {
     }
     for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
     for (const parent of event.causalParents) if (!events.has(parent)) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parent}`, "causalParents"));
+    if (event.storyTime.kind === "relative" && !events.has(event.storyTime.anchorEventId)) {
+      errors.push(issue("UNKNOWN_TIME_ANCHOR", `Unknown story-time anchor ${event.storyTime.anchorEventId}`, "storyTime.anchorEventId"));
+    }
     for (const predicate of event.preconditions) this.validatePredicate(predicate, entities, rules, errors);
     this.validateOperations(event.observedOutcome.operations, entities, rules, errors, "observedOutcome.operations");
     for (let index = 0; index < (event.observedKnowledge?.operations.length ?? 0); index += 1) {
@@ -230,35 +258,105 @@ export class CompilerCommitService {
     return validation;
   }
 
-  async acceptAllValid(sourceId?: string): Promise<BatchAcceptResult> {
-    const order: CanonicalProposalKind[] = ["entity", "claim", "world-rule", "initial-world", "character-model", "character-goal", "canonical-event"];
+  async acceptAllValid(
+    sourceId?: string,
+    onProgress?: (progress: CompilerConvergenceProgress) => void,
+  ): Promise<BatchAcceptResult> {
     const accepted: BatchAcceptResult["accepted"] = [];
-    let changed = true;
-    while (changed) {
-      changed = false;
-      const pending = await this.proposals.list("pending", sourceId);
-      for (const kind of order) {
-        for (const proposal of pending.filter((item) => item.kind === kind)) {
-          const validation = await this.accept(kind, proposal.id);
-          if (validation.accepted) { accepted.push({ id: proposal.id, kind }); changed = true; }
-        }
-      }
-    }
-    const remaining = await this.proposals.list("pending", sourceId);
     const blocked: BatchAcceptResult["blocked"] = [];
     const staging: BatchAcceptResult["staging"] = [];
-    for (const proposal of remaining) {
-      if (!isCanonicalKind(proposal.kind)) { staging.push({ id: proposal.id, kind: proposal.kind }); continue; }
+    const candidates: PendingCanonicalProposal[] = [];
+    for (const proposal of await this.proposals.list("pending", sourceId)) {
+      if (!isCanonicalKind(proposal.kind)) {
+        staging.push({ id: proposal.id, kind: proposal.kind });
+        continue;
+      }
       const schema = schemaFor(proposal.kind);
       const envelope = await this.proposals.read("pending", proposal.id, schema);
-      const validation = await this.validateProposal(proposal.kind, envelope.payload, envelope.evidence);
-      blocked.push({ id: proposal.id, kind: proposal.kind, errors: validation.errors });
+      candidates.push({ id: proposal.id, kind: proposal.kind, payload: envelope.payload, evidence: envelope.evidence, createdAt: proposal.createdAt });
     }
+
+    const total = candidates.length;
+    let processed = 0;
+    onProgress?.({ phase: "load", processed, total, accepted: 0, blocked: 0 });
+    const deduplicated = selectLogicalCandidates(candidates);
+    const eligible = deduplicated.selected;
+    for (const { candidate, selectedId, identity } of deduplicated.superseded) {
+      await this.proposals.transition(candidate.id, "pending", "rejected");
+      blocked.push({
+        id: candidate.id,
+        kind: candidate.kind,
+        errors: [issue("SUPERSEDED_LOGICAL_PROPOSAL", `Proposal is superseded by newer active proposal '${selectedId}' for ${identity}.`)],
+      });
+      processed += 1;
+      onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length, proposalId: candidate.id });
+    }
+
+    const catalog = await this.validator.loadCatalog();
+    const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
+      const validation = await this.validateProposal(candidate.kind, candidate.payload, candidate.evidence, catalog);
+      if (!validation.accepted) {
+        blocked.push({ id: candidate.id, kind: candidate.kind, errors: validation.errors });
+      } else {
+        try {
+          await this.commitParsed(candidate);
+          addToCatalog(catalog, candidate.kind, candidate.payload);
+          accepted.push({ id: candidate.id, kind: candidate.kind });
+        } catch (error) {
+          blocked.push({
+            id: candidate.id,
+            kind: candidate.kind,
+            errors: [issue("COMMIT_CONFLICT", error instanceof Error ? error.message : String(error))],
+          });
+        }
+      }
+      processed += 1;
+      onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length, proposalId: candidate.id });
+    };
+
+    for (const kind of ["entity", "claim"] as const) {
+      for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
+    }
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "world-rule"),
+      catalog.rules,
+      ruleDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "RULE_DEPENDENCY_CYCLE",
+    );
+    for (const kind of ["initial-world", "character-model", "character-goal"] as const) {
+      for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
+    }
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "canonical-event"),
+      catalog.events,
+      eventDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "CAUSAL_CYCLE",
+    );
+    onProgress?.({ phase: "complete", processed, total, accepted: accepted.length, blocked: blocked.length });
     return { accepted, blocked, staging };
   }
 
-  private async validateProposal(kind: CanonicalProposalKind, payload: unknown, envelopeEvidence: readonly EvidenceRef[]): Promise<CompilerValidation> {
-    const validation = await this.validator.validate(kind, payload);
+  private async validateProposal(
+    kind: CanonicalProposalKind,
+    payload: unknown,
+    envelopeEvidence: readonly EvidenceRef[],
+    catalog?: CompilerValidationCatalog,
+  ): Promise<CompilerValidation> {
+    const validation = catalog
+      ? this.validator.validateWithCatalog(kind, payload, catalog)
+      : await this.validator.validate(kind, payload);
     const payloadEvidence = (payload as { evidence?: EvidenceRef[] }).evidence ?? [];
     const inspected = await this.evidence.inspectAll([...payloadEvidence, ...envelopeEvidence]);
     const groundingIssues = kind === "entity" && inspected.valid
@@ -267,6 +365,115 @@ export class CompilerCommitService {
     const errors = [...validation.errors, ...inspected.issues, ...groundingIssues];
     return { accepted: errors.length === 0, errors, warnings: validation.warnings };
   }
+
+  private async commitParsed(candidate: PendingCanonicalProposal): Promise<void> {
+    const { kind, id, payload } = candidate;
+    if (kind === "entity") await this.canon.putEntity(entitySchema.parse(payload));
+    else if (kind === "claim") await this.canon.putClaim(claimSchema.parse(payload));
+    else if (kind === "canonical-event") await this.canon.putEvent(canonicalEventSchema.parse(payload));
+    else if (kind === "world-rule") await this.canon.putRule(worldRuleSchema.parse(payload));
+    else if (kind === "initial-world") await this.initialWorld.put(initialWorldSchema.parse(payload));
+    else if (kind === "character-goal") await this.actorModels.putGoal(characterGoalSchema.parse(payload));
+    else await this.actorModels.putModel(characterModelSchema.parse(payload));
+    await this.proposals.transition(id, "pending", "accepted");
+  }
+}
+
+type PendingCanonicalProposal = {
+  id: string;
+  kind: CanonicalProposalKind;
+  payload: unknown;
+  evidence: EvidenceRef[];
+  createdAt: string;
+};
+
+function selectLogicalCandidates(candidates: readonly PendingCanonicalProposal[]): {
+  selected: PendingCanonicalProposal[];
+  superseded: Array<{ candidate: PendingCanonicalProposal; selectedId: string; identity: string }>;
+} {
+  const byIdentity = new Map<string, PendingCanonicalProposal[]>();
+  const selected: PendingCanonicalProposal[] = [];
+  const superseded: Array<{ candidate: PendingCanonicalProposal; selectedId: string; identity: string }> = [];
+  for (const candidate of candidates) {
+    const identity = compilerProposalLogicalIdentity(candidate.kind, candidate.payload);
+    if (!identity) {
+      selected.push(candidate);
+      continue;
+    }
+    byIdentity.set(identity, [...(byIdentity.get(identity) ?? []), candidate]);
+  }
+  for (const [identity, group] of byIdentity) {
+    const ranked = [...group].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    const winner = ranked.at(-1)!;
+    selected.push(winner);
+    for (const candidate of ranked.slice(0, -1)) superseded.push({ candidate, selectedId: winner.id, identity });
+  }
+  return {
+    selected: selected.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)),
+    superseded,
+  };
+}
+
+async function processDependencyKind<T extends CanonicalEvent | WorldRule>(
+  candidates: readonly PendingCanonicalProposal[],
+  canonical: ReadonlyMap<string, T>,
+  dependencies: (payload: T) => string[],
+  process: (candidate: PendingCanonicalProposal) => Promise<void>,
+  blocked: BatchAcceptResult["blocked"],
+  recordCycle: () => void,
+  cycleCode: string,
+): Promise<void> {
+  const byLogicalId = new Map(candidates.map((candidate) => [(candidate.payload as T).id, candidate]));
+  const indegree = new Map<string, number>();
+  const children = new Map<string, string[]>();
+  for (const [id, candidate] of byLogicalId) {
+    const localDependencies = [...new Set(dependencies(candidate.payload as T).filter((dependency) => byLogicalId.has(dependency) && !canonical.has(dependency)))];
+    indegree.set(id, localDependencies.length);
+    for (const dependency of localDependencies) children.set(dependency, [...(children.get(dependency) ?? []), id]);
+  }
+  const ready = [...indegree].filter(([, count]) => count === 0).map(([id]) => id).sort();
+  const visited = new Set<string>();
+  while (ready.length) {
+    const id = ready.shift()!;
+    visited.add(id);
+    await process(byLogicalId.get(id)!);
+    for (const child of (children.get(id) ?? []).sort()) {
+      const next = (indegree.get(child) ?? 1) - 1;
+      indegree.set(child, next);
+      if (next === 0) {
+        ready.push(child);
+        ready.sort();
+      }
+    }
+  }
+  for (const [id, candidate] of byLogicalId) {
+    if (visited.has(id)) continue;
+    blocked.push({ id: candidate.id, kind: candidate.kind, errors: [issue(cycleCode, `Dependency cycle prevents committing logical artifact ${id}.`)] });
+    recordCycle();
+  }
+}
+
+function ruleDependencies(rule: WorldRule): string[] {
+  const dependencies: string[] = [];
+  for (const predicate of [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]) collectRuleDependencies(predicate, dependencies);
+  return dependencies;
+}
+
+function collectRuleDependencies(predicate: Predicate, dependencies: string[]): void {
+  if (predicate.op === "rule-active") dependencies.push(predicate.ruleId);
+  else if (predicate.op === "all" || predicate.op === "any") predicate.items.forEach((item) => collectRuleDependencies(item, dependencies));
+  else if (predicate.op === "not") collectRuleDependencies(predicate.item, dependencies);
+}
+
+function eventDependencies(event: CanonicalEvent): string[] {
+  return [...event.causalParents, ...(event.storyTime.kind === "relative" ? [event.storyTime.anchorEventId] : [])];
+}
+
+function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposalKind, payload: unknown): void {
+  if (kind === "entity") { const value = entitySchema.parse(payload); catalog.entities.set(value.id, value); }
+  if (kind === "claim") { const value = claimSchema.parse(payload); catalog.claims.set(value.id, value); }
+  if (kind === "canonical-event") { const value = canonicalEventSchema.parse(payload); catalog.events.set(value.id, value); }
+  if (kind === "world-rule") { const value = worldRuleSchema.parse(payload); catalog.rules.set(value.id, value); }
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {

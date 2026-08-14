@@ -75,6 +75,24 @@ Pi transcripts are stored under `~/.novel-harness/sessions/` unless `--no-save` 
 
 Project manifests, source indexes, compiler batch checkpoints, proposals, and world objects are also local files. These are inspectable implementation state, not model memory. They remain hidden from general model file search.
 
+Completed novel preparation is reusable across workspaces. NWH writes immutable
+bundles below `$NWH_HOME/prepared-novels/v1/<content-md5>/revisions/<bundle-hash>/`;
+the manifest also binds the full SHA-256 source digest. `active.json` is an atomic
+pointer to the revision restored by default. An existing revision is verified and
+never updated in place. Restore is allowed only before the target workspace has
+pending proposals or branches, and it materializes independent local copies. It
+never copies branch commits, branch heads, or play-session state.
+
+Preparation is not permanently frozen. `nwh reparse --all` rebuilds every
+detected chapter, while `nwh reparse --chapters 1,4-6` invalidates and recompiles
+only those heading sections (or deterministic blocks for heading-free text). A
+successful run publishes and activates a new revision; a failed run rolls the
+current workspace back to its prior active revision. `nwh prepared-cache list`
+shows retained revisions and `nwh prepared-cache activate <bundle-hash>` selects
+one explicitly. Existing branches keep their captured canonical, actor-policy,
+and possibility-template revisions; only later branches use the newly active
+preparation.
+
 ## Compiler capability boundary
 
 Compiler mode now adds narrow typed `propose_*` tools. They can create pending candidate artifacts, but cannot accept them, move a branch head, execute a shell, or write arbitrary files. Deterministic code verifies structure and source evidence before explicit acceptance:
@@ -114,6 +132,11 @@ delta, which asserts no unsupported facts but still permits genesis.
 
 The TUI `/prepare-all` command presents the same decisions with Pi-native
 selection dialogs. Remaining compiler batches execute sequentially in the current
-session; internal continuation instructions are hidden, so they do not replace or
-masquerade as user input. Other prompts, `/compile-next`, and `/clear` are held
+session, but each model request sees only the current compiler-batch boundary and
+its evidence/tool exchange. Earlier batch transcripts remain available to the
+human UI without being replayed into later model context. Model-written completion
+claims are replaced with a neutral host-verification message; only the successful
+finish handshake and persisted batch checkpoint determine completion. Internal
+continuation instructions are hidden, so they do not replace or masquerade as
+user input. Other prompts, `/compile-next`, and `/clear` are held
 back while full preparation is active to prevent interleaved state machines.

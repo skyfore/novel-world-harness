@@ -7,6 +7,7 @@ import { possibilitySchema, type Possibility } from "./model.js";
 export const possibilityTemplateSchema = possibilitySchema.omit({ branchId: true, evaluatedAtCommit: true });
 export type PossibilityTemplate = z.infer<typeof possibilityTemplateSchema>;
 type TemplateRef = { version: 1; id: string; hash: string; updatedAt: string };
+export type PossibilityRevisionRef = { id: string; hash: string };
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -28,9 +29,31 @@ export class PossibilityTemplateStore {
   async get(idInput: string): Promise<PossibilityTemplate> {
     const id = safeId(idInput);
     const ref = await this.readRef(id);
-    const value = possibilityTemplateSchema.parse(JSON.parse(await fs.readFile(path.join(this.root, "revisions", id, `${ref.hash}.json`), "utf8")));
-    if (contentHash(value) !== ref.hash) throw new Error(`Corrupt possibility template ${id}@${ref.hash}`);
+    return this.getRevision(id, ref.hash);
+  }
+
+  async getRevision(idInput: string, hash: string): Promise<PossibilityTemplate> {
+    const id = safeId(idInput);
+    if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error(`Invalid possibility revision hash: ${hash}`);
+    const value = possibilityTemplateSchema.parse(JSON.parse(await fs.readFile(path.join(this.root, "revisions", id, `${hash}.json`), "utf8")));
+    if (contentHash(value) !== hash) throw new Error(`Corrupt possibility template ${id}@${hash}`);
     return value;
+  }
+
+  async currentRevision(idInput: string): Promise<PossibilityRevisionRef | null> {
+    const id = safeId(idInput);
+    try {
+      const ref = await this.readRef(id);
+      return { id, hash: ref.hash };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  async remove(idInput: string): Promise<void> {
+    const id = safeId(idInput);
+    await fs.rm(path.join(this.root, "refs", `${id}.json`), { force: true });
   }
 
   async list(): Promise<PossibilityTemplate[]> {
@@ -80,4 +103,3 @@ function safeId(value: string): string {
   if (!SAFE_ID.test(value)) throw new Error(`Unsafe possibility id: ${value}`);
   return value;
 }
-

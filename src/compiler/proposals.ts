@@ -85,6 +85,14 @@ export const compilerProposalSchemas = {
   possibility: compilerPossibilitySchema,
 } satisfies Record<CompilerProposalKind, z.ZodTypeAny>;
 
+export function compilerProposalLogicalIdentity(kind: CompilerProposalKind, payload: unknown): string | undefined {
+  if (kind === "initial-world") return "initial-world:singleton";
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const record = payload as Record<string, unknown>;
+  const logicalId = kind === "character-model" ? record.actorId : record.id;
+  return typeof logicalId === "string" ? `${kind}:${logicalId}` : undefined;
+}
+
 export class CompilerProposalService {
   readonly store: ProposalStore;
   constructor(workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
@@ -133,6 +141,7 @@ export async function rejectPendingCompilerBatchProposals(
 
 type ProposalClosureCatalog = {
   entities: Set<string>;
+  entityKinds: Map<string, string>;
   claims: Set<string>;
   events: Set<string>;
   rules: Set<string>;
@@ -168,12 +177,14 @@ export async function validateCompilerProposalClosure(
     !sourceId || item.evidence?.some((reference) => reference.span.sourceId === sourceId);
   const catalog: ProposalClosureCatalog = {
     entities: new Set(canonicalEntities.filter(fromActiveSource).map((item) => item.id)),
+    entityKinds: new Map(canonicalEntities.filter(fromActiveSource).map((item) => [item.id, item.kind])),
     claims: new Set(canonicalClaims.filter(fromActiveSource).map((item) => item.id)),
     events: new Set(canonicalEvents.filter(fromActiveSource).map((item) => item.id)),
     rules: new Set(canonicalRules.filter(fromActiveSource).map((item) => item.id)),
     possibilities: new Set(canonicalPossibilities.filter(fromActiveSource).map((item) => item.id)),
   };
   const staged = new Map<string, StagedProposal>();
+  const proposalsByLogicalIdentity = new Map<string, string[]>();
   const activePendingIds = sourceId
     ? new Set((await proposals.list("pending", sourceId)).map((summary) => summary.id))
     : undefined;
@@ -183,7 +194,13 @@ export async function validateCompilerProposalClosure(
     const envelope = await proposals.readEnvelope("pending", summary.id);
     const payload = compilerProposalSchemas[summary.kind].parse(envelope.payload);
     staged.set(summary.id, { kind: summary.kind, payload });
-    if (summary.kind === "entity") catalog.entities.add((payload as { id: string }).id);
+    const logicalIdentity = compilerProposalLogicalIdentity(summary.kind, payload);
+    if (logicalIdentity) proposalsByLogicalIdentity.set(logicalIdentity, [...(proposalsByLogicalIdentity.get(logicalIdentity) ?? []), summary.id]);
+    if (summary.kind === "entity") {
+      const entity = payload as { id: string; kind: string };
+      catalog.entities.add(entity.id);
+      catalog.entityKinds.set(entity.id, entity.kind);
+    }
     if (summary.kind === "claim") catalog.claims.add((payload as { id: string }).id);
     if (summary.kind === "canonical-event") catalog.events.add((payload as { id: string }).id);
     if (summary.kind === "world-rule") catalog.rules.add((payload as { id: string }).id);
@@ -197,8 +214,14 @@ export async function validateCompilerProposalClosure(
       issues.add(`${proposalId}: pending proposal is missing`);
       continue;
     }
+    const logicalIdentity = compilerProposalLogicalIdentity(proposal.kind, proposal.payload);
+    const duplicates = logicalIdentity ? proposalsByLogicalIdentity.get(logicalIdentity) ?? [] : [];
+    if (duplicates.length > 1) {
+      issues.add(`${proposalId}: logical artifact '${logicalIdentity}' also has active proposal(s) ${duplicates.filter((id) => id !== proposalId).join(", ")}`);
+    }
     collectProposalClosureIssues(proposalId, proposal, catalog, issues);
   }
+  collectEventDependencyCycles(staged, new Set(proposalIds), issues);
   return [...issues].sort();
 }
 
@@ -208,8 +231,15 @@ function collectProposalClosureIssues(
   catalog: ProposalClosureCatalog,
   issues: Set<string>,
 ): void {
-  const missing = (kind: keyof ProposalClosureCatalog, id: string, path: string) => {
+  const missing = (kind: Exclude<keyof ProposalClosureCatalog, "entityKinds">, id: string, path: string) => {
     if (!catalog[kind].has(id)) issues.add(`${proposalId}: ${path} references unknown ${singular(kind)} '${id}'`);
+  };
+  const fieldReference = (entityId: string, field: string, path: string) => {
+    const kind = catalog.entityKinds.get(entityId);
+    const spec = DEFAULT_STATE_FIELDS.find((candidate) => candidate.key === field);
+    if (kind && spec && !spec.appliesTo.includes(kind as never)) {
+      issues.add(`${proposalId}: ${path} field '${field}' does not apply to entity '${entityId}' of kind '${kind}'`);
+    }
   };
   const payload = proposal.payload;
   if (proposal.kind === "entity") return;
@@ -224,20 +254,20 @@ function collectProposalClosureIssues(
     event.participants.forEach((id, index) => missing("entities", id, `participants.${index}`));
     event.causalParents.forEach((id, index) => missing("events", id, `causalParents.${index}`));
     collectStoryTimeIssues(event.storyTime, "storyTime", missing);
-    event.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `preconditions.${index}`, missing));
-    collectStateDeltaIssues(event.observedOutcome, "observedOutcome", missing);
+    event.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `preconditions.${index}`, missing, fieldReference));
+    collectStateDeltaIssues(event.observedOutcome, "observedOutcome", missing, fieldReference);
     if (event.observedKnowledge) collectKnowledgeDeltaIssues(event.observedKnowledge, "observedKnowledge", missing);
     return;
   }
   if (proposal.kind === "world-rule") {
     const rule = payload as WorldRule;
     [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]
-      .forEach((predicate, index) => collectPredicateIssues(predicate, `predicates.${index}`, missing));
+      .forEach((predicate, index) => collectPredicateIssues(predicate, `predicates.${index}`, missing, fieldReference));
     return;
   }
   if (proposal.kind === "initial-world") {
     const initial = payload as z.infer<typeof initialWorldSchema>;
-    collectStateDeltaIssues(initial.delta, "delta", missing);
+    collectStateDeltaIssues(initial.delta, "delta", missing, fieldReference);
     if (initial.knowledge) collectKnowledgeDeltaIssues(initial.knowledge, "knowledge", missing);
     return;
   }
@@ -248,8 +278,8 @@ function collectProposalClosureIssues(
     goal.blockedByKnowledge?.forEach((id, index) => missing("claims", id, `blockedByKnowledge.${index}`));
     const action = goal.candidateAction;
     action?.participants?.forEach((id, index) => missing("entities", id, `candidateAction.participants.${index}`));
-    action?.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `candidateAction.preconditions.${index}`, missing));
-    if (action) collectStateDeltaIssues(action.proposedDelta, "candidateAction.proposedDelta", missing);
+    action?.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `candidateAction.preconditions.${index}`, missing, fieldReference));
+    if (action) collectStateDeltaIssues(action.proposedDelta, "candidateAction.proposedDelta", missing, fieldReference);
     if (action?.proposedKnowledge) collectKnowledgeDeltaIssues(action.proposedKnowledge, "candidateAction.proposedKnowledge", missing);
     return;
   }
@@ -258,7 +288,7 @@ function collectProposalClosureIssues(
     return;
   }
   if (proposal.kind === "state-delta") {
-    collectStateDeltaIssues(payload as StateDelta, "stateDelta", missing);
+    collectStateDeltaIssues(payload as StateDelta, "stateDelta", missing, fieldReference);
     return;
   }
   const possibility = payload as PossibilityTemplate;
@@ -271,24 +301,25 @@ function collectProposalClosureIssues(
   if (possibility.canonicalEventId) missing("events", possibility.canonicalEventId, "canonicalEventId");
   if (possibility.candidateWindow) collectStoryTimeIssues(possibility.candidateWindow, "candidateWindow", missing);
   [...possibility.preconditions, ...possibility.blockers, ...(possibility.expiry ?? [])]
-    .forEach((predicate, index) => collectPredicateIssues(predicate, `predicates.${index}`, missing));
-  if (possibility.proposedDelta) collectStateDeltaIssues(possibility.proposedDelta, "proposedDelta", missing);
+    .forEach((predicate, index) => collectPredicateIssues(predicate, `predicates.${index}`, missing, fieldReference));
+  if (possibility.proposedDelta) collectStateDeltaIssues(possibility.proposedDelta, "proposedDelta", missing, fieldReference);
   if (possibility.proposedKnowledge) collectKnowledgeDeltaIssues(possibility.proposedKnowledge, "proposedKnowledge", missing);
 }
 
-type MissingReference = (kind: keyof ProposalClosureCatalog, id: string, path: string) => void;
+type MissingReference = (kind: Exclude<keyof ProposalClosureCatalog, "entityKinds">, id: string, path: string) => void;
+type FieldReference = (entityId: string, field: string, path: string) => void;
 
 function collectStoryTimeIssues(storyTime: StoryTime, path: string, missing: MissingReference): void {
   if (storyTime.kind === "relative") missing("events", storyTime.anchorEventId, `${path}.anchorEventId`);
 }
 
-function collectPredicateIssues(predicate: Predicate, path: string, missing: MissingReference): void {
+function collectPredicateIssues(predicate: Predicate, path: string, missing: MissingReference, fieldReference: FieldReference): void {
   if (predicate.op === "all" || predicate.op === "any") {
-    predicate.items.forEach((item, index) => collectPredicateIssues(item, `${path}.items.${index}`, missing));
+    predicate.items.forEach((item, index) => collectPredicateIssues(item, `${path}.items.${index}`, missing, fieldReference));
     return;
   }
   if (predicate.op === "not") {
-    collectPredicateIssues(predicate.item, `${path}.item`, missing);
+    collectPredicateIssues(predicate.item, `${path}.item`, missing, fieldReference);
     return;
   }
   if (predicate.op === "rule-active") {
@@ -297,11 +328,12 @@ function collectPredicateIssues(predicate: Predicate, path: string, missing: Mis
   }
   if (predicate.op === "after-step" || predicate.op === "before-step") return;
   missing("entities", predicate.entityId, `${path}.entityId`);
+  fieldReference(predicate.entityId, predicate.field, `${path}.field`);
   if (predicate.op === "entity-in") missing("entities", predicate.member, `${path}.member`);
   if (predicate.op === "fact-equals") collectStateValueReferences(predicate.field, predicate.value, `${path}.value`, missing);
 }
 
-function collectStateDeltaIssues(delta: StateDelta, path: string, missing: MissingReference): void {
+function collectStateDeltaIssues(delta: StateDelta, path: string, missing: MissingReference, fieldReference: FieldReference): void {
   delta.operations.forEach((operation, index) => {
     const operationPath = `${path}.operations.${index}`;
     if (operation.op === "activate-rule" || operation.op === "deactivate-rule") {
@@ -309,6 +341,7 @@ function collectStateDeltaIssues(delta: StateDelta, path: string, missing: Missi
       return;
     }
     missing("entities", operation.entityId, `${operationPath}.entityId`);
+    fieldReference(operation.entityId, operation.field, `${operationPath}.field`);
     if (operation.op === "add-member" || operation.op === "remove-member") {
       missing("entities", operation.member, `${operationPath}.member`);
     }
@@ -333,11 +366,49 @@ function collectKnowledgeDeltaIssues(delta: KnowledgeDelta, path: string, missin
   });
 }
 
+function collectEventDependencyCycles(
+  staged: ReadonlyMap<string, StagedProposal>,
+  activeProposalIds: ReadonlySet<string>,
+  issues: Set<string>,
+): void {
+  const events = new Map<string, { proposalId: string; event: CanonicalEvent }>();
+  for (const [proposalId, proposal] of staged) {
+    if (!activeProposalIds.has(proposalId) || proposal.kind !== "canonical-event") continue;
+    const event = proposal.payload as CanonicalEvent;
+    events.set(event.id, { proposalId, event });
+  }
+  const state = new Map<string, "visiting" | "visited">();
+  const stack: string[] = [];
+  const visit = (eventId: string) => {
+    if (state.get(eventId) === "visited") return;
+    if (state.get(eventId) === "visiting") {
+      const cycleStart = stack.indexOf(eventId);
+      for (const member of stack.slice(Math.max(0, cycleStart))) {
+        const proposalId = events.get(member)?.proposalId;
+        if (proposalId) issues.add(`${proposalId}: canonical-event dependency cycle includes '${member}'`);
+      }
+      return;
+    }
+    const candidate = events.get(eventId);
+    if (!candidate) return;
+    state.set(eventId, "visiting");
+    stack.push(eventId);
+    const dependencies = [
+      ...candidate.event.causalParents,
+      ...(candidate.event.storyTime.kind === "relative" ? [candidate.event.storyTime.anchorEventId] : []),
+    ];
+    dependencies.filter((dependency) => events.has(dependency)).forEach(visit);
+    stack.pop();
+    state.set(eventId, "visited");
+  };
+  [...events.keys()].sort().forEach(visit);
+}
+
 function isCompilerProposalKind(kind: string): kind is CompilerProposalKind {
   return Object.prototype.hasOwnProperty.call(compilerProposalSchemas, kind);
 }
 
-function singular(kind: keyof ProposalClosureCatalog): string {
+function singular(kind: Exclude<keyof ProposalClosureCatalog, "entityKinds">): string {
   if (kind === "entities") return "entity";
   if (kind === "possibilities") return "possibility";
   return kind.slice(0, -1);

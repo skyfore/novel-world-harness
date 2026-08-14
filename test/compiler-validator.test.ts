@@ -184,4 +184,97 @@ describe("CompilerCommitService", () => {
     expect(validation.accepted).toBe(false);
     expect(validation.errors).toContainEqual(expect.objectContaining({ code: "SELF_FORBIDDING_WORLD_RULE" }));
   });
+
+  it("deterministically selects the newest active proposal for one logical artifact", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const proposalId of ["entity-cao-first", "entity-cao-second"]) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+    expect(result.accepted).toEqual([{ id: "entity-cao-second", kind: "entity" }]);
+    expect(result.blocked).toHaveLength(1);
+    expect(result.blocked[0]?.errors).toContainEqual(expect.objectContaining({ code: "SUPERSEDED_LOGICAL_PROPOSAL" }));
+    await expect(commits.canon.getEntity("cao-cao")).resolves.toMatchObject({ id: "cao-cao" });
+    await expect(commits.acceptAllValid()).resolves.toMatchObject({ accepted: [], blocked: [] });
+    await expect(commits.proposals.list("rejected")).resolves.toContainEqual(expect.objectContaining({ id: "entity-cao-first" }));
+  });
+
+  it("commits event dependencies in topological order with observable progress", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "child-submitted-first",
+      payload: {
+        id: "event-child",
+        title: "Second event",
+        participants: ["cao-cao"],
+        storyTime: { kind: "relative", anchorEventId: "event-parent", relation: "after" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: ["event-parent"],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "parent-submitted-second",
+      payload: {
+        id: "event-parent",
+        title: "First event",
+        participants: ["cao-cao"],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    const progress: number[] = [];
+
+    const result = await commits.acceptAllValid(undefined, (item) => progress.push(item.processed));
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.id)).toEqual(["entity-cao", "parent-submitted-second", "child-submitted-first"]);
+    expect(progress.at(-1)).toBe(3);
+    await expect(commits.canon.getEvent("event-child")).resolves.toMatchObject({ causalParents: ["event-parent"] });
+  });
+
+  it("reports causal cycles without repeatedly rescanning pending events", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [proposalId, id, parent] of [
+      ["cycle-a", "event-a", "event-b"],
+      ["cycle-b", "event-b", "event-a"],
+    ] as const) {
+      await proposals.submit("canonical-event", {
+        proposalId,
+        payload: {
+          id,
+          title: id,
+          participants: [],
+          storyTime: { kind: "unknown" },
+          preconditions: [],
+          observedOutcome: { version: 1, operations: [] },
+          evidence: evidence("曹操"),
+          causalParents: [parent],
+          confidence: 1,
+        },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+    expect(result.blocked).toHaveLength(2);
+    expect(result.blocked.every((item) => item.errors.some((error) => error.code === "CAUSAL_CYCLE"))).toBe(true);
+  });
 });

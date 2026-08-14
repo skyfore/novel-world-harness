@@ -122,6 +122,15 @@ export class BranchStore {
     const branch = branchSchema.parse(await readJson<unknown>(path.join(this.branchDirectory(id), "branch.json")));
     return { ...branch, headCommitId: await this.readHead(id) };
   }
+  async listIds(): Promise<string[]> {
+    try {
+      const entries = await fs.readdir(this.root, { withFileTypes: true });
+      return entries.filter((entry) => entry.isDirectory() && BRANCH_ID.test(entry.name)).map((entry) => entry.name).sort();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
   async readHead(id: BranchId): Promise<CommitId> {
     assertBranchId(id);
     const head = await readJson<BranchHead>(path.join(this.branchDirectory(id), "head.json"));
@@ -217,4 +226,3 @@ export class BranchStore {
     return path.join(this.root, id);
   }
 }
-

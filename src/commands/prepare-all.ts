@@ -11,6 +11,7 @@ import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { ingestWorkspaceSource } from "./ingest.js";
 import { worldCreateCommand } from "./world.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 
 export type PrepareAllCommandOptions = {
   root: string;
@@ -21,6 +22,9 @@ export type PrepareAllCommandOptions = {
   model?: string;
   yes?: boolean;
   acquireLock?: boolean;
+  cacheRoot?: string;
+  createBranch?: boolean;
+  restoreCache?: boolean;
 };
 
 type PrepareAllDependencies = {
@@ -55,6 +59,7 @@ export async function prepareAllCommand(
   const branchId = options.branchId ?? "main";
   const ask = options.yes ? recommendedAnswer() : dependencies.ask;
   let sourceId = options.sourceId;
+  let cacheVerified = false;
 
   if (options.novelPath) {
     const config = await loadOptionalConfig(configPath);
@@ -82,6 +87,17 @@ export async function prepareAllCommand(
   }
   if (inspection.stage === "repair") throw preparationFailure(inspection);
   sourceId = inspection.source!.id;
+
+  const preparedCache = new PreparedNovelCache(root, options.cacheRoot);
+  if (options.restoreCache !== false) {
+    const restored = await preparedCache.restore(inspection.source!);
+    if (restored.status === "restored") {
+      stdout.write(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; model compilation is not required.\n`);
+      inspection = await inspectPreparation(root, { sourceId, branchId });
+    } else if (restored.status === "workspace-not-empty" && restored.reason) {
+      stdout.write(`Prepared cache was not restored: ${restored.reason}\n`);
+    }
+  }
 
   if (inspection.stage === "compile") {
     const decision = await ask({
@@ -175,6 +191,13 @@ export async function prepareAllCommand(
   }
 
   if (inspection.stage === "create-branch") {
+    const cached = await preparedCache.publish(inspection.source!);
+    cacheVerified = true;
+    stdout.write(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.\n`);
+    if (options.createBranch === false) {
+      stdout.write("Preparation revision is complete; branch creation was intentionally skipped.\n");
+      return inspection;
+    }
     const decision = await ask({
       header: "Playable branch",
       question: `Create the playable branch '${branchId}' from the accepted opening world?`,
@@ -190,6 +213,10 @@ export async function prepareAllCommand(
   }
 
   if (inspection.stage !== "ready") throw preparationFailure(inspection);
+  if (!cacheVerified) {
+    const cached = await preparedCache.publish(inspection.source!);
+    stdout.write(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.\n`);
+  }
   stdout.write(`Preparation complete. Next: ${inspection.next}\n`);
   return inspection;
 }
@@ -199,7 +226,15 @@ async function convergeForPreparation(
   sourceId: string,
   converge: typeof convergeWorldProposals,
 ): Promise<void> {
-  const result = await converge(root, sourceId);
+  let lastReported = 0;
+  const result = await converge(root, sourceId, {
+    onProgress: (progress) => {
+      if (progress.phase === "complete" || progress.processed === progress.total || progress.processed - lastReported >= 25) {
+        stdout.write(`Convergence ${progress.phase}: ${progress.processed}/${progress.total} · accepted ${progress.accepted} · blocked ${progress.blocked}.\n`);
+        lastReported = progress.processed;
+      }
+    },
+  });
   printConvergence(result);
   const quarantined = await quarantineUncommittableProposals(root, result);
   for (const item of quarantined) {

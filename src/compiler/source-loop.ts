@@ -5,6 +5,7 @@ import { loadOptionalConfig } from "../config/load.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
+import { PreparedNovelCache, type PreparedCacheResult } from "./prepared-cache.js";
 
 const AUTO_SOURCE_EXTENSIONS = new Set([".txt", ".text", ".novel", ".md", ".markdown"]);
 
@@ -22,6 +23,7 @@ export type SourceLoopComplete = {
   status: "complete";
   source: SourceDocument;
   totalBatches: number;
+  preparedCache?: PreparedCacheResult;
 };
 
 export type SourceLoopPreparation = SourceLoopTurn | SourceLoopComplete;
@@ -42,6 +44,7 @@ export function parseStandaloneSourcePath(input: string): string | undefined {
 export async function prepareSourceLoopFromInput(
   workspaceRoot: string,
   input: string,
+  options: { cacheRoot?: string } = {},
 ): Promise<SourceLoopPreparation | null> {
   const candidate = parseStandaloneSourcePath(input);
   if (!candidate) return null;
@@ -62,7 +65,11 @@ export async function prepareSourceLoopFromInput(
   const config = await loadOptionalConfig(path.join(workspaceRoot, "novel-harness.yaml"));
   await store.ensureProject(config?.project);
   const source = await store.registerSource(absolute);
-  return prepareSourceLoopForSource(workspaceRoot, source);
+  const preparedCache = await new PreparedNovelCache(workspaceRoot, options.cacheRoot).restore(source);
+  const preparation = await prepareSourceLoopForSource(workspaceRoot, source);
+  return preparation.status === "complete" && preparedCache.status !== "miss"
+    ? { ...preparation, preparedCache }
+    : preparation;
 }
 
 export async function prepareNextSourceLoopTurn(

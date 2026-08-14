@@ -1,10 +1,11 @@
 export { auditCompiler, type CompilerAuditReport } from "./compiler/audit.js";
 export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
-export { convergeWorldProposals, type WorldProposalConvergence } from "./compiler/converge.js";
+export { convergeWorldProposals, type WorldConvergenceProgress, type WorldProposalConvergence } from "./compiler/converge.js";
 export { EvidenceVerifier, type EvidenceInspection, type EvidenceVerification } from "./compiler/evidence.js";
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
+export { PreparedNovelCache, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
 export { CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
-export { CompilerCommitService, CompilerValidator, type CompilerValidation } from "./compiler/validator.js";
+export { CompilerCommitService, CompilerValidator, type CompilerConvergenceProgress, type CompilerValidation } from "./compiler/validator.js";
 export { evaluateCompilerAgainstGold, compilerGoldSchema, type CompilerEvaluationReport, type CompilerGold, type SetMetric } from "./eval/compiler-eval.js";
 export { inspectPreparation, type PreparationInspection, type PreparationStage } from "./workflow/prepare.js";
 
@@ -12,7 +13,7 @@ export { ActorModelStore, deterministicActorProposalSource, type CharacterGoal, 
 export { commitKnowledgeAwareAction, knowledgeAwareActionSchema, validateActionKnowledge, type ActionGateReport, type KnowledgeAwareAction } from "./world/action-gate.js";
 export { CanonicalModelStore, ProposalStore, type CanonicalKind, type CanonicalRevisionRef } from "./world/canonical-model.js";
 export { canonicalEventToPossibility } from "./world/canon-runtime.js";
-export { loadWorldContext, WorldContextStore, type CanonicalSnapshot } from "./world/context.js";
+export { loadWorldContext, pinBranchPreparationContexts, WorldContextStore, type CanonicalSnapshot } from "./world/context.js";
 export { diffWorldBranches, diffWorldStates, type HistoryDifference, type KnowledgeDifference, type StateDifference, type WorldBranchDiff } from "./world/diff.js";
 export { WorldEngine, WorldProjector, validateEventProposal, type ResolvedWorldModelContext, type WorldContextResolver, type WorldModelContext } from "./world/engine.js";
 export { fsckWorld, type FsckIssue, type WorldFsckReport } from "./world/fsck.js";

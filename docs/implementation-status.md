@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-12
+Date: 2026-08-13
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
@@ -20,9 +20,10 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Actor behavior | Partial | Deterministic goal actions are connected; model reasoner exists only as an adapter/API |
 | Narrative | Partial | Immutable narrative frames and deterministic text exist; no Pi narration adapter is connected |
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
+| Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, whole/selected-chapter reparse, rollback and explicit activation |
 | Player experience | Implemented vertical slice | Restricted Pi translation of natural language into a host-owned validated player event |
 | Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, durable branch and resume selection |
-| Live-test budget | Implemented | Persistent pre-request reservation and usage reconciliation under a 100M hard ceiling |
+| Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
 
 ## Verified architecture
@@ -46,7 +47,7 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 ### Runtime authority
 
 - Branch truth is an immutable commit chain.
-- Every new branch pins the exact canonical entity, claim, event, rule, and state-schema revisions used by its commits; later canonical edits do not change historical replay or actor views.
+- Every new branch pins the exact canonical entity, claim, event, rule, state-schema, actor-policy, and possibility-template revisions used by its commits; later preparation edits do not change historical replay, actor behavior, or frontier inputs. Reparse pins a supplemental policy snapshot for legacy branch snapshots before changing current refs.
 - State is deterministically projected from committed deltas.
 - Branch heads use expected-parent checks and a local exclusive mutation lock; dead same-host lock owners are recovered and `world fsck` reports stale or active locks.
 - Temporal world rules are evaluated against pre-state and proposed post-state.
@@ -63,6 +64,8 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 nwh ingest <novel>
 nwh prepare [novel]
 nwh compile-source
+nwh reparse --all|--chapters <selection>
+nwh prepared-cache list|activate
 nwh proposals list|show|accept|accept-all|reject
 nwh audit
 nwh status

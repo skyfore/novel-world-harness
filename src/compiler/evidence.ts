@@ -15,8 +15,12 @@ export type EvidenceInspection = EvidenceVerification & {
 
 type CachedSource = {
   source: SourceDocument;
+  absolutePath: string;
   buffer: Buffer;
   lines: Array<{ startByte: number; endByte: number }>;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
 };
 
 export class EvidenceVerifier {
@@ -30,19 +34,14 @@ export class EvidenceVerifier {
   }
 
   async inspectAll(evidence: readonly EvidenceRef[]): Promise<EvidenceInspection> {
-    this.cache = undefined;
     const issues: ValidationIssue[] = [];
     const excerpts: string[] = [];
-    try {
-      for (let index = 0; index < evidence.length; index += 1) {
-        const result = await this.inspectCached(evidence[index]!);
-        for (const issue of result.issues) issues.push({ ...issue, path: issue.path ? `evidence.${index}.${issue.path}` : `evidence.${index}` });
-        if (result.excerpt !== undefined) excerpts.push(result.excerpt);
-      }
-      return { valid: issues.length === 0, issues, excerpts };
-    } finally {
-      this.cache = undefined;
+    for (let index = 0; index < evidence.length; index += 1) {
+      const result = await this.inspectCached(evidence[index]!);
+      for (const issue of result.issues) issues.push({ ...issue, path: issue.path ? `evidence.${index}.${issue.path}` : `evidence.${index}` });
+      if (result.excerpt !== undefined) excerpts.push(result.excerpt);
     }
+    return { valid: issues.length === 0, issues, excerpts };
   }
 
   async verify(reference: EvidenceRef): Promise<EvidenceVerification> {
@@ -51,13 +50,10 @@ export class EvidenceVerifier {
   }
 
   async inspect(reference: EvidenceRef): Promise<EvidenceVerification & { excerpt?: string }> {
-    this.cache = undefined;
-    try {
-      return await this.inspectCached(reference);
-    } finally {
-      this.cache = undefined;
-    }
+    return this.inspectCached(reference);
   }
+
+  clearCache(): void { this.cache = undefined; }
 
   private async inspectCached(reference: EvidenceRef): Promise<EvidenceVerification & { excerpt?: string }> {
     const span = reference.span;
@@ -102,19 +98,47 @@ export class EvidenceVerifier {
   }
 
   private async getSource(sourceId: string): Promise<CachedSource | undefined> {
-    if (!this.cache) {
-      const store = await WorkspaceStore.create(this.workspaceRoot);
-      const sources = await store.listSources();
-      this.cache = new Map();
-      for (const source of sources) {
-        const absolute = path.resolve(this.workspaceRoot, source.sourcePath);
-        const relative = path.relative(this.workspaceRoot, absolute);
-        if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
-        const buffer = await fs.readFile(absolute);
-        this.cache.set(source.id, { source, buffer, lines: lineRanges(buffer.toString("utf8")) });
-      }
+    if (!this.cache) await this.loadSources();
+    let cached = this.cache!.get(sourceId);
+    if (!cached) {
+      await this.loadSources();
+      cached = this.cache!.get(sourceId);
     }
-    return this.cache.get(sourceId);
+    if (!cached) return undefined;
+    const stat = await fs.stat(cached.absolutePath);
+    if (stat.size === cached.size && stat.mtimeMs === cached.mtimeMs && stat.ctimeMs === cached.ctimeMs) return cached;
+    const buffer = await fs.readFile(cached.absolutePath);
+    const refreshed = {
+      ...cached,
+      buffer,
+      lines: lineRanges(buffer.toString("utf8")),
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      ctimeMs: stat.ctimeMs,
+    };
+    this.cache!.set(sourceId, refreshed);
+    return refreshed;
+  }
+
+  private async loadSources(): Promise<void> {
+    const store = await WorkspaceStore.create(this.workspaceRoot);
+    const sources = await store.listSources();
+    this.cache = new Map();
+    for (const source of sources) {
+      const absolutePath = path.resolve(this.workspaceRoot, source.sourcePath);
+      const relative = path.relative(this.workspaceRoot, absolutePath);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+      const [buffer, stat] = await Promise.all([fs.readFile(absolutePath), fs.stat(absolutePath)]);
+      this.cache.set(source.id, {
+        source,
+        absolutePath,
+        buffer,
+        lines: lineRanges(buffer.toString("utf8")),
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ctimeMs: stat.ctimeMs,
+      });
+    }
   }
 }
 

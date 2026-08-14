@@ -190,6 +190,24 @@ nwh play-world --character <id-or-name> --action "我前往藏书楼。"
 
 `ingest` and `compile-source` remain available as lower-level commands. Ingest stores a content-addressed source manifest and deterministic evidence segments; it does not copy the novel into a database. Compiler tools can only write pending typed proposals. `proposals accept-all` remains an automation helper that revalidates dependencies and evidence, but individual `show` plus `accept`/`reject` is the recommended review path.
 
+Prepared data is explicitly revisable. A full rebuild or a bounded chapter repair
+creates a new prepared revision for the same source bytes:
+
+```bash
+nwh reparse --all --source <source-id>
+nwh reparse --chapters 3,7-9 --source <source-id>
+nwh prepared-cache list --source <source-id>
+nwh prepared-cache activate <bundle-hash> --source <source-id>
+```
+
+Chapter ordinals follow detected heading sections; a heading-free source uses its
+deterministic evidence blocks as the selectable units. Reparse invalidates only
+the selected current artifacts, retains their immutable revisions, and publishes
+the result only after compilation, convergence, opening-state preparation, and
+cache validation succeed. A failed run restores the previous active revision.
+Activating an older revision changes the baseline used by future branches but
+does not rewrite any existing branch.
+
 For guided compiler work, `nwh compile` opens the same TUI in compiler mode and starts a small evidence-backed proposal batch. `nwh compile "<instruction>"` preserves the one-shot form.
 
 ## Execute a compiled world
@@ -236,6 +254,18 @@ on Pi model calls. Transient provider failures use Pi's automatic retry policy;
 the CLI reports retry progress and only returns a failure after retries are
 exhausted.
 
+Successful full preparation publishes an immutable reusable revision under
+`$NWH_HOME/prepared-novels/v1/<content-md5>/revisions/<bundle-hash>/` (default
+`~/.novel-harness/prepared-novels/`). The MD5 is the lookup key for the exact
+novel bytes; SHA-256 and a canonical bundle hash are verified before reuse, so
+an MD5 collision cannot select another source. Reusing the same bytes in a new
+workspace restores canonical artifacts and compiler checkpoints without another
+model pass. A small atomic `active.json` pointer chooses the default revision;
+publishing or activating a revision never mutates an existing revision bundle.
+Branch objects and branch heads are never cached: every new branch captures its
+canonical data, actor policy, and possibility-template revisions and then evolves
+independently from later preparation changes and from every other branch.
+
 ## Architecture
 
 ```text
@@ -244,6 +274,7 @@ Novel files
   -> bounded Pi compiler batches
   -> typed pending proposals
   -> evidence + structural validation
+  -> versioned content-keyed preparation revisions + active pointer
   -> revisioned canonical model / possibility templates
   -> immutable branch events and StateDelta objects
   -> WorldState(branch, t) projection

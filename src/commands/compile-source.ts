@@ -1,6 +1,7 @@
 import { stderr, stdout } from "node:process";
 import { formatRetryNotice } from "../agent/pi-session.js";
 import { runCompilerBatches } from "../compiler/batches.js";
+import type { CompilerBatch } from "../compiler/batches.js";
 import { compilerBatchFailure } from "../compiler/batch-outcome.js";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
 import { loadConfig, profileForRole } from "../config/load.js";
@@ -15,6 +16,8 @@ export type CompileSourceOptions = {
   model?: string;
   maxBatches?: number;
   resume?: boolean;
+  batchIds?: readonly string[];
+  promptTransform?: (prompt: string, batch: CompilerBatch) => string;
   acquireLock?: boolean;
   promptTimeoutMs?: number;
 };
@@ -55,11 +58,12 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
     source,
     ...(options.maxBatches !== undefined ? { maxBatches: options.maxBatches } : {}),
     resume: options.resume ?? true,
+    ...(options.batchIds ? { batchIds: options.batchIds } : {}),
+    ...(options.promptTransform ? { promptTransform: options.promptTransform } : {}),
     onProgress(message) {
       stderr.write(`${message}\n`);
     },
     async runner(batch) {
-      let wroteText = false;
       const session = await createPiCompilerSession({
         root: options.root,
         ...(profile ? { profile } : {}),
@@ -73,9 +77,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         onRetry(event) {
           stderr.write(`${formatRetryNotice(event)}\n`);
         },
-        onText(delta) {
-          wroteText = true;
-          stdout.write(delta);
+        onText() {
+          // Batch prose is model-authored and may not describe persisted state
+          // accurately. The host prints a derived checkpoint result below.
         },
         onTool(name, input) {
           const details = input as Record<string, unknown>;
@@ -88,7 +92,10 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         });
         const failure = compilerBatchFailure(report);
         if (failure) throw new Error(`Compiler batch ${batch.ordinal + 1} was not checkpointed: ${failure}.`);
-        if (wroteText) stdout.write("\n");
+        stdout.write(
+          `Compiler batch ${batch.ordinal + 1} finish handshake verified; `
+          + `${report.proposalSucceeded} active proposal(s) remain pending deterministic convergence.\n`,
+        );
       } finally {
         await session.dispose();
       }

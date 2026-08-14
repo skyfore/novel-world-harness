@@ -13,6 +13,8 @@ import { compileCommand } from "./commands/compile.js";
 import { compileSourceCommand } from "./commands/compile-source.js";
 import { prepareCommand } from "./commands/prepare.js";
 import { prepareAllCommand } from "./commands/prepare-all.js";
+import { reparseCommand } from "./commands/reparse.js";
+import { activatePreparedCacheRevisionCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
 import { playWorldCommand } from "./commands/play-world.js";
 import { acceptAllValidProposalsCommand, acceptProposalCommand, listProposalsCommand, rejectProposalCommand, showProposalCommand } from "./commands/proposals.js";
 import {
@@ -114,6 +116,38 @@ program
       resume: options.resume,
     });
   });
+
+program
+  .command("reparse")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id; required when more than one source exists")
+  .option("--all", "reparse the entire novel into a new prepared revision")
+  .option("--chapters <selection>", "reparse detected chapter ordinals, for example 1,3-5")
+  .option("--model <model>", "override compiler model")
+  .description("explicitly rebuild all or selected chapters while retaining prior prepared revisions")
+  .action(async (options) => {
+    const globalOptions = program.opts();
+    await reparseCommand({
+      root: rootFor(options),
+      configPath: configFor(options),
+      sourceId: options.source,
+      all: Boolean(options.all),
+      chapters: options.chapters,
+      model: options.model ?? globalOptions.model,
+    });
+  });
+
+const preparedCache = program.command("prepared-cache").description("inspect or activate versioned prepared-novel revisions");
+preparedCache.command("list")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id")
+  .action(async (options) => listPreparedCacheRevisionsCommand(rootFor(options), options.source));
+preparedCache.command("activate")
+  .argument("<bundle-hash>", "prepared revision bundle hash")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id")
+  .action(async (bundleHash, options) => activatePreparedCacheRevisionCommand(rootFor(options), bundleHash, options.source));
 
 const proposals = program.command("proposals").description("review compiler proposals before canonical commit");
 proposals.command("list").option("--root <path>", "local novel workspace").option("--status <status>", "pending, accepted or rejected", "pending").action(async (options) => {

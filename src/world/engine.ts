@@ -1,4 +1,5 @@
 import { contentHash } from "./canonical.js";
+import type { CharacterGoal, CharacterModel } from "./actors.js";
 import {
   WORLD_ENGINE_VERSION,
   WORLD_SCHEMA_VERSION,
@@ -21,6 +22,7 @@ import {
   type WorldRule,
   type WorldState,
 } from "./model.js";
+import type { PossibilityTemplate } from "./possibility-model.js";
 import { StateSchemaRegistry, applyStateDelta, emptyWorldState, evaluatePredicate, validateEngineInvariants } from "./state.js";
 import { BranchStore, WorldObjectStore } from "./store.js";
 
@@ -31,6 +33,9 @@ export type WorldModelContext = {
   stateSchema: StateSchemaRegistry;
   claims?: ReadonlyMap<string, Claim>;
   events?: ReadonlyMap<string, CanonicalEvent>;
+  actorGoals?: readonly CharacterGoal[];
+  actorModels?: ReadonlyMap<string, CharacterModel>;
+  possibilityTemplates?: readonly PossibilityTemplate[];
 };
 
 export type ResolvedWorldModelContext = WorldModelContext & { canonicalSnapshotHash: ObjectHash };

@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { hydrateCompilerBatch, prepareCompilerBatches, prepareOpeningWorldCompilerBatch, runCompilerBatches } from "../src/compiler/batches.js";
-import { compilerBatchFailure, compilerBatchOutcomeFromMessages } from "../src/compiler/batch-outcome.js";
+import {
+  compilerBatchFailure,
+  compilerBatchOutcomeFromMessages,
+  isRetryableCompilerBatchInterruption,
+} from "../src/compiler/batch-outcome.js";
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import type { SourceDocument } from "../src/storage/workspace-store.js";
 import { ProposalStore } from "../src/world/canonical-model.js";
@@ -46,6 +50,23 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 2, proposalFailed: 1, completionSignaled: true, completionOutcome: "complete" })).toBeUndefined();
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 1, completionSignaled: true, completionOutcome: "no-artifacts" })).toContain("failed");
     expect(compilerBatchFailure({ assistantStopReason: "length", proposalSucceeded: 2, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("length");
+  });
+
+  it("preserves provider error diagnostics and classifies a provider interruption as retryable", () => {
+    const outcome = compilerBatchOutcomeFromMessages([{
+      role: "assistant",
+      content: [{ type: "text", text: "request stopped" }],
+      stopReason: "error",
+      errorMessage: "Provider finish_reason: content_filter",
+    }]);
+
+    expect(outcome).toMatchObject({
+      assistantStopReason: "error",
+      assistantErrorMessage: "Provider finish_reason: content_filter",
+    });
+    expect(compilerBatchFailure(outcome)).toContain("content_filter");
+    expect(isRetryableCompilerBatchInterruption(outcome)).toBe(true);
+    expect(isRetryableCompilerBatchInterruption({ ...outcome, blockedReason: "tool budget" })).toBe(false);
   });
 
   it("treats a successful retry of the same proposal id as resolving its earlier tool error", () => {
@@ -176,7 +197,11 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("withdraw_compiler_proposal"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("kind=canon-analogue"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Use player-choice"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("Copy a supplied whole-segment EvidenceRef exactly"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Copy only a supplied whole-segment EvidenceRef JSON object exactly"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("do not call list_files, search_files, or read_file"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("never invent a narrower range"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("at most one state operation"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("summary must be at most 500 characters"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("finish_compiler_batch"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("only compiler pass guaranteed"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("reviewed_segments"))).toBe(true);

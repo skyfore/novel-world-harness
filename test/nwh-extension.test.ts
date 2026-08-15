@@ -4,7 +4,13 @@ import path from "node:path";
 import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { createNwhExtension, parseTuiReparseArguments, splitCommandArguments, type NwhExtensionOptions } from "../src/agent/nwh-extension.js";
+import {
+  compilerBatchTerminalText,
+  createNwhExtension,
+  parseTuiReparseArguments,
+  splitCommandArguments,
+  type NwhExtensionOptions,
+} from "../src/agent/nwh-extension.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
@@ -319,6 +325,14 @@ describe("NWH TUI extension", () => {
     }, ctx) as { message?: { content?: Array<{ type: string; text?: string }> } } | undefined;
     expect(messageResult?.message?.content?.[0]?.text).toContain("host state");
     expect(messageResult?.message?.content?.[0]?.text).toContain("pending proposals");
+    expect(compilerBatchTerminalText({
+      stopReason: "error",
+      errorMessage: "Provider finish_reason: content_filter",
+    })).toContain("content_filter");
+    expect(compilerBatchTerminalText({
+      stopReason: "error",
+      errorMessage: "Provider finish_reason: content_filter",
+    })).toContain("did not checkpoint");
   });
 
   it("blocks every subsequent tool call until a circuit-broken agent run settles", async () => {
@@ -713,6 +727,40 @@ describe("NWH TUI extension", () => {
     expect(sentHiddenMessages[1]).toContain("<source-segment");
     expect(sentHiddenMessages[1]).toContain("EvidenceRef");
     expect(notifications.some((message) => message.includes("starting compiler batch 2/"))).toBe(true);
+  });
+
+  it("retries one provider-interrupted /prepare-all batch with recovery guidance, then stops with the concrete error", async () => {
+    const { commands, events, root, sentHiddenMessages } = await fixture();
+    const content = Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n");
+    const evidence = await createEvidenceFixture(root, content, "provider-retry.txt");
+    const notifications: string[] = [];
+    const ctx = preparationContext(notifications, []);
+
+    await commands.get("prepare-all")?.handler(evidence.source.id, ctx);
+    expect(sentHiddenMessages).toHaveLength(1);
+
+    const providerError = {
+      role: "assistant",
+      content: [{ type: "text", text: "request stopped" }],
+      stopReason: "error",
+      errorMessage: "Provider finish_reason: content_filter",
+    };
+    await events.get("agent_end")?.({ type: "agent_end", messages: [providerError] }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+
+    expect(sentHiddenMessages).toHaveLength(2);
+    expect(sentHiddenMessages[1]).toContain("provider-recovery attempt 1/1");
+    expect(sentHiddenMessages[1]).toContain("batch 1/");
+    expect(notifications).toContainEqual(expect.stringContaining("retrying automatically 1/1"));
+
+    await events.get("agent_end")?.({ type: "agent_end", messages: [providerError] }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+
+    expect(sentHiddenMessages).toHaveLength(2);
+    expect(notifications).toContainEqual(expect.stringContaining("content_filter"));
+    expect(notifications).toContainEqual(expect.stringContaining("Retry /prepare-all to resume"));
+    const progress = await new CompilerBatchStore(root).read(evidence.source.id);
+    expect(progress.completedBatchIds).toEqual([]);
   });
 
   it("reports the concrete source repair reason instead of a generic /prepare-all failure", async () => {

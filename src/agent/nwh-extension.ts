@@ -6,7 +6,11 @@ import {
   createCompilerProposalToolset,
   type CompilerProposalToolset,
 } from "../compiler/proposal-tools.js";
-import { compilerBatchFailure, compilerBatchOutcomeFromMessages } from "../compiler/batch-outcome.js";
+import {
+  compilerBatchFailure,
+  compilerBatchOutcomeFromMessages,
+  isRetryableCompilerBatchInterruption,
+} from "../compiler/batch-outcome.js";
 import {
   markSourceLoopBatchComplete,
   prepareNextSourceLoopTurn,
@@ -105,7 +109,10 @@ type TuiPrepareAllState = {
   initialWorldAttempted: boolean;
   initialWorldBatchId?: string;
   preparedCacheVerified: boolean;
+  providerRetryCounts: Map<string, number>;
 };
+
+const MAX_PREPARE_ALL_PROVIDER_RETRIES = 1;
 
 const PLAY_INTENT = /(?:体验|扮演|饰演|想玩|游玩|代入|(?:选择|挑选|切换).{0,8}(?:人物|角色)|进入.{0,8}(?:世界|角色)|以.{0,12}(?:身份|视角)|play\s+as|inhabit|resume\s+as)/iu;
 const CHARACTER_LIST_INTENT = /(?:有哪些|列出|查看|显示|选择|什么|哪些).{0,12}(?:人物|角色)|(?:characters|cast|who\s+can\s+i\s+play)/iu;
@@ -116,6 +123,14 @@ export function splitCommandArguments(value: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(value)) !== null) tokens.push(match[1] ?? match[2] ?? match[3] ?? "");
   return tokens;
+}
+
+export function compilerBatchTerminalText(message: { stopReason?: string; errorMessage?: string }): string {
+  if (message.stopReason === "error" || message.stopReason === "aborted") {
+    const detail = message.errorMessage?.replace(/\s+/g, " ").trim().slice(0, 500);
+    return `Model batch ended with ${message.stopReason}${detail ? `: ${detail}` : ""}. NWH did not checkpoint the batch or commit world truth; the host is deciding whether it can be retried.`;
+  }
+  return "Model batch output ended. NWH is verifying the finish handshake and deriving checkpoint status from host state. All submitted artifacts remain pending proposals until deterministic convergence accepts them.";
 }
 
 export type TuiReparseArguments = {
@@ -344,8 +359,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (ctx.mode === "tui") ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · world compiler loop"));
     };
 
-    const compilerPromptForTurn = (turn: SourceLoopTurn) =>
-      `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for ${turn.source.sourcePath}. Analyze the supplied evidence now and record typed pending proposals.`;
+    const compilerPromptForTurn = (turn: SourceLoopTurn, retryAttempt = 0) => [
+      `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for ${turn.source.sourcePath}. Analyze the supplied evidence now and record typed pending proposals.`,
+      ...(retryAttempt > 0 ? [
+        `This is provider-recovery attempt ${retryAttempt}/${MAX_PREPARE_ALL_PROVIDER_RETRIES}. Use neutral, concise literary-analysis language; do not reproduce or embellish narrative passages in prose. Prefer typed tool calls and short clinical summaries. Recover active current-batch proposals instead of duplicating them.`,
+      ] : []),
+    ].join("\n\n");
 
     const choose = async <T extends string>(
       ctx: ExtensionContext,
@@ -448,11 +467,17 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         activeSourceId = preparation.source.id;
         activateCompilerTools(ctx);
         await beginTurn(preparation);
+        const retryAttempt = state.providerRetryCounts.get(preparation.batch.id) ?? 0;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Preparing · batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`));
-        ctx.ui.notify(`Full preparation: starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches}.`, "info");
+        ctx.ui.notify(
+          retryAttempt > 0
+            ? `Full preparation: retrying compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} after a provider interruption.`
+            : `Full preparation: starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches}.`,
+          "info",
+        );
         sendHiddenPreparationTurn(
           ctx,
-          `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
+          `${compilerPromptForTurn(preparation, retryAttempt)}\n\n${preparation.prompt}`,
           "nwh-prepare-all-batch",
           preparation.batch.segmentIds,
         );
@@ -696,7 +721,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...event.message,
           content: [{
             type: "text",
-            text: "Model batch output ended. NWH is verifying the finish handshake and deriving checkpoint status from host state. All submitted artifacts remain pending proposals until deterministic convergence accepts them.",
+            text: compilerBatchTerminalText(event.message),
           }],
         },
       };
@@ -730,17 +755,34 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         await advancePrepareAll(ctx);
         return;
       }
-      pendingTurn = undefined;
       const failure = compilerBatchFailure(outcome);
       if (failure) {
-        const wasPreparingAll = Boolean(prepareAllState);
+        const preparation = prepareAllState;
+        if (preparation && isRetryableCompilerBatchInterruption(outcome)) {
+          const retries = preparation.providerRetryCounts.get(completedTurn.batch.id) ?? 0;
+          if (retries < MAX_PREPARE_ALL_PROVIDER_RETRIES) {
+            preparation.providerRetryCounts.set(completedTurn.batch.id, retries + 1);
+            pendingTurn = undefined;
+            ctx.ui.notify(
+              `Compiler batch ${completedTurn.batch.ordinal + 1} was interrupted by the provider (${failure}); retrying automatically ${retries + 1}/${MAX_PREPARE_ALL_PROVIDER_RETRIES}.`,
+              "warning",
+            );
+            await advancePrepareAll(ctx);
+            return;
+          }
+        }
+        pendingTurn = undefined;
+        const wasPreparingAll = Boolean(preparation);
         ctx.ui.notify(
           `Compiler batch ${completedTurn.batch.ordinal + 1} was not checkpointed (${failure}); /compile-next retries the same evidence.`,
           "warning",
         );
-        if (wasPreparingAll) stopPrepareAll(ctx, "Full preparation stopped because the compiler batch did not complete. Retry /prepare-all to resume.");
+        if (wasPreparingAll) {
+          stopPrepareAll(ctx, `Full preparation stopped because the compiler batch did not complete (${failure}). Retry /prepare-all to resume.`);
+        }
         return;
       }
+      pendingTurn = undefined;
       await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id);
       ctx.ui.notify(
         completedTurn.remainingAfterBatch > 0
@@ -1037,6 +1079,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           initialWorldRequestRunning: false,
           initialWorldAttempted: false,
           preparedCacheVerified: false,
+          providerRetryCounts: new Map(),
         };
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing world"));
         await advancePrepareAll(ctx);

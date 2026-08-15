@@ -1,5 +1,6 @@
 export type CompilerBatchOutcome = {
   assistantStopReason?: string;
+  assistantErrorMessage?: string;
   proposalSucceeded: number;
   proposalFailed: number;
   completionSignaled: boolean;
@@ -16,6 +17,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
   const failed = new Set<string>();
   const succeeded = new Set<string>();
   let assistantStopReason: string | undefined;
+  let assistantErrorMessage: string | undefined;
   let completionOutcome: "complete" | "no-artifacts" | undefined;
   let blockedReason: string | undefined;
 
@@ -23,7 +25,10 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     if (!value || typeof value !== "object") continue;
     const message = value as Record<string, unknown>;
     if (message.role === "assistant") {
-      if (typeof message.stopReason === "string") assistantStopReason = message.stopReason;
+      if (typeof message.stopReason === "string") {
+        assistantStopReason = message.stopReason;
+        assistantErrorMessage = typeof message.errorMessage === "string" ? message.errorMessage : undefined;
+      }
       if (!Array.isArray(message.content)) continue;
       for (const contentValue of message.content) {
         if (!contentValue || typeof contentValue !== "object") continue;
@@ -92,6 +97,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
 
   return {
     assistantStopReason,
+    ...(assistantErrorMessage ? { assistantErrorMessage } : {}),
     proposalSucceeded: succeeded.size,
     proposalFailed: failed.size,
     completionSignaled: completionOutcome !== undefined,
@@ -137,7 +143,8 @@ function proposalEnvelopeIdentity(argsValue: unknown): string | undefined {
 export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | undefined {
   if (outcome.blockedReason) return `compiler circuit breaker stopped the batch: ${outcome.blockedReason}`;
   if (outcome.assistantStopReason !== "stop") {
-    return `model ended with ${outcome.assistantStopReason ?? "no final assistant response"}`;
+    const detail = outcome.assistantErrorMessage ? `: ${outcome.assistantErrorMessage}` : "";
+    return `model ended with ${outcome.assistantStopReason ?? "no final assistant response"}${detail}`;
   }
   if (!outcome.completionSignaled) {
     if (outcome.proposalFailed > 0) return `${outcome.proposalFailed} proposal tool call(s) failed`;
@@ -153,4 +160,8 @@ export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | un
     return `${outcome.proposalFailed} proposal tool call(s) failed before the model declared no artifacts`;
   }
   return undefined;
+}
+
+export function isRetryableCompilerBatchInterruption(outcome: CompilerBatchOutcome): boolean {
+  return !outcome.blockedReason && outcome.assistantStopReason === "error";
 }

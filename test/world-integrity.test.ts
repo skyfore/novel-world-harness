@@ -81,5 +81,20 @@ describe("world fsck", () => {
     expect(report.ok).toBe(false);
     expect(report.issues.some((issue) => issue.code === "BRANCH_REPLAY_FAILED")).toBe(true);
   });
-});
 
+  it("isolates an incomplete branch and continues checking healthy branches", async () => {
+    const { engine } = await fixture();
+    const broken = path.join(engine.branches.root, "broken");
+    await fs.mkdir(broken, { recursive: true });
+    await fs.writeFile(path.join(broken, "branch.json"), JSON.stringify({
+      id: "broken",
+      name: "Broken",
+      headCommitId: "0".repeat(64),
+    }), "utf8");
+
+    const report = await fsckWorld(engine);
+    expect(report.ok).toBe(false);
+    expect(report.reachableCommits).toBe(2);
+    expect(report.issues).toContainEqual(expect.objectContaining({ code: "INCOMPLETE_BRANCH", branchId: "broken" }));
+  });
+});

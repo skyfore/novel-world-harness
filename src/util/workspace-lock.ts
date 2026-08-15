@@ -26,47 +26,46 @@ export class WorkspaceOperationLock {
     const lockPath = path.join(workspaceStateDir(workspaceRoot), "locks", `${operation}.lock`);
     await fs.mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
 
-    for (;;) {
-      const owner: WorkspaceLockOwner = {
-        version: 1,
-        pid: process.pid,
-        token: crypto.randomUUID(),
-        startedAt: new Date().toISOString(),
-      };
-      try {
-        await fs.mkdir(lockPath, { mode: 0o700 });
-        await fs.writeFile(path.join(lockPath, "owner.json"), `${JSON.stringify(owner, null, 2)}\n`, {
-          encoding: "utf8",
-          mode: 0o600,
-          flag: "wx",
-        });
-        return new WorkspaceOperationLock(lockPath, owner);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
-
-      const existing = await readOwner(lockPath);
-      if (existing && processIsAlive(existing.pid)) {
-        throw new Error(
-          `Another compiler operation is already active in this workspace (pid ${existing.pid}, started ${existing.startedAt}). Wait for it to finish before retrying.`,
-        );
-      }
-      if (!existing) {
-        const stat = await fs.stat(lockPath).catch(() => undefined);
-        if (stat && Date.now() - stat.mtimeMs < INITIALIZING_GRACE_MS) {
-          throw new Error("Another compiler operation is initializing in this workspace. Wait briefly before retrying.");
-        }
-      }
-
-      const stalePath = `${lockPath}.stale-${crypto.randomUUID()}`;
-      try {
-        await fs.rename(lockPath, stalePath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw error;
-      }
-      await fs.rm(stalePath, { recursive: true, force: true });
+    const owner: WorkspaceLockOwner = {
+      version: 1,
+      pid: process.pid,
+      token: crypto.randomUUID(),
+      startedAt: new Date().toISOString(),
+    };
+    try {
+      await fs.mkdir(lockPath, { mode: 0o700 });
+      await fs.writeFile(path.join(lockPath, "owner.json"), `${JSON.stringify(owner, null, 2)}\n`, {
+        encoding: "utf8",
+        mode: 0o600,
+        flag: "wx",
+      });
+      return new WorkspaceOperationLock(lockPath, owner);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
+
+    const existing = await readOwner(lockPath);
+    if (existing && processIsAlive(existing.pid)) {
+      throw new Error(
+        `Another compiler operation is already active in this workspace (pid ${existing.pid}, started ${existing.startedAt}). Wait for it to finish before retrying.`,
+      );
+    }
+    if (!existing) {
+      const stat = await fs.stat(lockPath).catch(() => undefined);
+      if (stat && Date.now() - stat.mtimeMs < INITIALIZING_GRACE_MS) {
+        throw new Error("Another compiler operation is initializing in this workspace. Wait briefly before retrying.");
+      }
+    }
+
+    // Filesystem rename/delete does not provide a portable compare-and-delete primitive.
+    // Never steal a lock automatically: a contender that observed a stale owner could
+    // otherwise rename a replacement lock created by another process after that read.
+    const detail = existing
+      ? `pid ${existing.pid}, started ${existing.startedAt}`
+      : "owner metadata is missing or invalid";
+    throw new Error(
+      `Workspace has a stale compiler lock (${detail}). Recover it explicitly only after confirming no NWH process owns this workspace.`,
+    );
   }
 
   async release(): Promise<void> {

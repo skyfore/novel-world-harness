@@ -26,7 +26,7 @@ describe("workspace operation lock", () => {
       .resolves.toBe("completed");
   });
 
-  it("recovers a lock owned by a process that no longer exists", async () => {
+  it("does not automatically steal a lock owned by a process that no longer exists", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-workspace-stale-lock-"));
     roots.push(root);
     const lockPath = path.join(workspaceStateDir(root), "locks", "compiler.lock");
@@ -38,10 +38,9 @@ describe("workspace operation lock", () => {
       startedAt: new Date(0).toISOString(),
     }));
 
-    const recovered = await WorkspaceOperationLock.acquire(root, "compiler");
-    await recovered.release();
-
-    await expect(fs.stat(lockPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(WorkspaceOperationLock.acquire(root, "compiler"))
+      .rejects.toThrow("stale compiler lock");
+    await expect(fs.stat(lockPath)).resolves.toBeDefined();
   });
 
   it("migrates legacy state before the first global compiler lock is created", async () => {

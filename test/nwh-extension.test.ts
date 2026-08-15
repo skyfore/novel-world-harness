@@ -605,6 +605,13 @@ describe("NWH TUI extension", () => {
     const evidence = await createEvidenceFixture(root, "Hero waits at the opening.\n", "opening-novel.txt");
     const batches = await prepareCompilerBatches(root, evidence.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(evidence.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: evidence.evidence("Hero"),
+    });
     const notifications: string[] = [];
     const questions: string[] = [];
     const ctx = preparationContext(notifications, questions);
@@ -657,6 +664,13 @@ describe("NWH TUI extension", () => {
     const evidence = await createEvidenceFixture(root, "Hero waits at the opening.\n", "unfinished-opening.txt");
     const batches = await prepareCompilerBatches(root, evidence.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(evidence.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: evidence.evidence("Hero"),
+    });
     const notifications: string[] = [];
     const questions: string[] = [];
     const ctx = preparationContext(notifications, questions);

@@ -8,9 +8,7 @@ import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batc
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { inspectPreparation } from "../src/workflow/prepare.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
-import { WorldEngine } from "../src/world/engine.js";
 import { InitialWorldStore } from "../src/world/initial.js";
-import { StateSchemaRegistry, DEFAULT_STATE_FIELDS } from "../src/world/state.js";
 import { BranchStore } from "../src/world/store.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
@@ -106,6 +104,12 @@ describe("preparation workflow inspection", () => {
     const fixture = await createEvidenceFixture(root, "Hero waits.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+
+    // Simulate a branch produced by the old preparation path: its persisted
+    // canonical snapshot contains no characters even though current canon is later repaired.
+    const { engine: legacy } = await openWorkspaceWorld(root);
+    await legacy.createBranch("legacy", "legacy");
+
     await new CanonicalModelStore(root).putEntity({
       id: "hero",
       kind: "character",
@@ -118,13 +122,6 @@ describe("preparation workflow inspection", () => {
       delta: { version: 1, operations: [] },
       evidence: fixture.evidence("Hero waits."),
     });
-
-    const legacy = new WorldEngine(root, {
-      entities: new Map(),
-      rules: new Map(),
-      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
-    });
-    await legacy.createBranch("legacy", "legacy");
 
     await expect(inspectPreparation(root, { sourceId: fixture.source.id, branchId: "legacy" })).resolves.toMatchObject({
       stage: "repair",

@@ -1,20 +1,31 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  push:
+    branches:
+      - main
+      - "agent/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22.19.0'
-          cache: npm
-      - run: npm ci
-      - run: npm run check
-      - run: npm test
-
+          node-version: "22.19.0"
+      - run: corepack enable
+      - run: corepack prepare pnpm@11.21.0 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+      - run: pnpm test
+      - run: pnpm run build

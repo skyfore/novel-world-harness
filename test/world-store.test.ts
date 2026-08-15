@@ -79,7 +79,26 @@ describe("BranchStore", () => {
     await expect(branches.updateHead("main", genesis, next)).rejects.toThrow("Stale branch head");
   });
 
-  it("recovers a lock left by a dead process", async () => {
+  it("publishes a new branch only after branch metadata and head are complete", async () => {
+    const root = await tempRoot();
+    const objects = new WorldObjectStore(root);
+    const branches = new BranchStore(root);
+    const genesis = await objects.putCommit({
+      version: 1,
+      branchId: "main",
+      logicalTime: { step: 0 },
+      eventHashes: [],
+      engineVersion: WORLD_ENGINE_VERSION,
+      schemaVersion: WORLD_SCHEMA_VERSION,
+    });
+
+    await branches.create({ id: "main", name: "Main", headCommitId: genesis });
+    await expect(fs.access(path.join(branches.root, "main", "branch.json"))).resolves.toBeUndefined();
+    await expect(fs.access(path.join(branches.root, "main", "head.json"))).resolves.toBeUndefined();
+    expect((await fs.readdir(branches.root)).some((name) => name.startsWith(".staging-main-"))).toBe(false);
+  });
+
+  it("does not automatically steal a stale branch lock", async () => {
     const root = await tempRoot();
     const objects = new WorldObjectStore(root);
     const branches = new BranchStore(root);
@@ -97,8 +116,42 @@ describe("BranchStore", () => {
       JSON.stringify({ version: 1, pid: 2_147_483_647, hostname: os.hostname(), createdAt: new Date(0).toISOString() }),
       "utf8",
     );
-    await expect(branches.withLock("main", async () => "recovered")).resolves.toBe("recovered");
-    expect((await branches.inspectLock("main")).present).toBe(false);
+
+    await expect(branches.withLock("main", async () => "recovered")).rejects.toThrow("stale lock");
+    const status = await branches.inspectLock("main");
+    expect(status.present).toBe(true);
+    expect(status.stale).toBe(true);
+  });
+
+  it("does not delete a replacement lock when the old holder releases", async () => {
+    const root = await tempRoot();
+    const objects = new WorldObjectStore(root);
+    const branches = new BranchStore(root);
+    const genesis = await objects.putCommit({
+      version: 1,
+      branchId: "main",
+      logicalTime: { step: 0 },
+      eventHashes: [],
+      engineVersion: WORLD_ENGINE_VERSION,
+      schemaVersion: WORLD_SCHEMA_VERSION,
+    });
+    await branches.create({ id: "main", name: "Main", headCommitId: genesis });
+    const lockPath = path.join(branches.root, "main", "lock");
+    const replacementToken = "replacement-token";
+
+    await branches.withLock("main", async () => {
+      await fs.rm(lockPath);
+      await fs.writeFile(
+        lockPath,
+        `${JSON.stringify({ version: 2, pid: process.pid, hostname: os.hostname(), createdAt: new Date().toISOString(), token: replacementToken })}\n`,
+        "utf8",
+      );
+    });
+
+    const status = await branches.inspectLock("main");
+    expect(status.present).toBe(true);
+    expect(status.metadata?.version).toBe(2);
+    expect(status.metadata?.version === 2 ? status.metadata.token : undefined).toBe(replacementToken);
   });
 
   it("serializes mutations with an exclusive branch lock", async () => {
@@ -120,4 +173,3 @@ describe("BranchStore", () => {
     });
   });
 });
-

@@ -1,8 +1,9 @@
 import { auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../compiler/batches.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
-import { ProposalStore, type ProposalSummary } from "../world/canonical-model.js";
-import { InitialWorldStore } from "../world/initial.js";
+import { CanonicalModelStore, ProposalStore, type ProposalSummary } from "../world/canonical-model.js";
+import { InitialWorldStore, type InitialWorld } from "../world/initial.js";
+import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import { BranchStore } from "../world/store.js";
 
 export type PreparationStage =
@@ -114,8 +115,46 @@ export async function inspectPreparation(
       next: "nwh compile \"Propose an evidence-backed initial world for the opening state\"",
     };
   }
+
+  const sourceCharacters = (await new CanonicalModelStore(workspaceRoot).listEntities())
+    .filter((entity) => entity.kind === "character")
+    .filter((entity) => entity.evidence.some((reference) => reference.span.sourceId === source.id));
+  if (!sourceCharacters.length) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: [
+        `No committed character entities from source ${source.id} are available for player selection; a playable branch cannot be created. Reparse the source so at least one evidence-backed character is accepted.`,
+      ],
+      next: `nwh reparse --source ${source.id} --all`,
+    };
+  }
+  if (!sourceCharacters.some((character) => characterPlayableAtGenesis(initialWorld, character.id))) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: [
+        `Every committed character from source ${source.id} is explicitly dead in the accepted initial world; a playable branch cannot be created. Rebuild the opening state before preparing a branch.`,
+      ],
+      next: `nwh reparse --source ${source.id} --all`,
+    };
+  }
+
   if (!(await branchExists(new BranchStore(workspaceRoot), branchId))) {
     return { ...shared, audit, stage: "create-branch", next: `nwh prepare --source ${source.id} --branch ${branchId}` };
+  }
+  if (!(await branchGenesisHasPlayableCharacter(workspaceRoot, branchId, source.id))) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: [
+        `Branch '${branchId}' was created without a living committed character from source ${source.id}. Its pinned genesis snapshot is immutable; prepare a new branch after repairing the source/opening state instead of treating this branch as playable.`,
+      ],
+      next: `nwh prepare --source ${source.id} --branch <new-branch-id>`,
+    };
   }
   return { ...shared, audit, stage: "ready", next: `nwh characters --branch ${branchId}` };
 }
@@ -131,6 +170,39 @@ function preparationRepairReasons(audit: CompilerAuditReport): string[] {
     ...audit.consistency.missingCausalParents.map(({ eventId, parentId }) =>
       `Event ${eventId} references missing causal parent ${parentId}.`),
   ];
+}
+
+function characterPlayableAtGenesis(initialWorld: InitialWorld, characterId: string): boolean {
+  let alive: boolean | undefined;
+  for (const operation of initialWorld.delta.operations) {
+    if (!("entityId" in operation) || !("field" in operation)) continue;
+    if (operation.entityId !== characterId || operation.field !== "character.alive") continue;
+    if (operation.op === "unset") alive = undefined;
+    else if (operation.op === "set" && typeof operation.value === "boolean") alive = operation.value;
+  }
+  return alive !== false;
+}
+
+async function branchGenesisHasPlayableCharacter(
+  workspaceRoot: string,
+  branchId: string,
+  sourceId: string,
+): Promise<boolean> {
+  const { engine } = await openWorkspaceWorld(workspaceRoot);
+  let genesisId = await engine.branches.readHead(branchId);
+  for (;;) {
+    const commit = await engine.objects.getCommit(genesisId);
+    if (!commit.parentCommitId) break;
+    genesisId = commit.parentCommitId;
+  }
+  const [context, state] = await Promise.all([
+    engine.contextForCommit(genesisId),
+    engine.projector.project(genesisId),
+  ]);
+  return [...context.entities.values()].some((entity) =>
+    entity.kind === "character"
+    && entity.evidence.some((reference) => reference.span.sourceId === sourceId)
+    && state.values[entity.id]?.["character.alive"] !== false);
 }
 
 async function branchExists(branches: BranchStore, branchId: string): Promise<boolean> {

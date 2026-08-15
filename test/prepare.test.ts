@@ -7,9 +7,12 @@ import { prepareCommand } from "../src/commands/prepare.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { inspectPreparation } from "../src/workflow/prepare.js";
+import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { WorldEngine } from "../src/world/engine.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { StateSchemaRegistry, DEFAULT_STATE_FIELDS } from "../src/world/state.js";
+import { BranchStore } from "../src/world/store.js";
+import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { SourceMaterialStore } from "../src/storage/source-material-store.js";
 
@@ -52,28 +55,81 @@ describe("preparation workflow inspection", () => {
     });
   });
 
-  it("requires an accepted initial world, creates no branch itself, and detects an existing branch", async () => {
+  it("requires a committed source character before creating a playable branch", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-ready-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
-    await new InitialWorldStore(root).put({
+    const initial = new InitialWorldStore(root);
+    await initial.put({
       version: 1,
       delta: { version: 1, operations: [] },
       evidence: fixture.evidence("The world begins quietly."),
     });
 
+    await expect(inspectPreparation(root)).resolves.toMatchObject({
+      stage: "repair",
+      branchId: "main",
+      repairReasons: [expect.stringContaining("No committed character entities")],
+    });
+
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("The world begins quietly."),
+    });
+    await initial.put({
+      version: 1,
+      delta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+      },
+      evidence: fixture.evidence("The world begins quietly."),
+    });
+
     await expect(inspectPreparation(root)).resolves.toMatchObject({ stage: "create-branch", branchId: "main" });
-    const engine = new WorldEngine(root, {
+    const { engine } = await openWorkspaceWorld(root);
+    const opening = await initial.get();
+    await engine.createBranch("main", "main", opening!.delta, opening?.knowledge);
+    await expect(inspectPreparation(root)).resolves.toMatchObject({
+      stage: "ready",
+      next: "nwh characters --branch main",
+    });
+  });
+
+  it("detects a legacy genesis whose pinned snapshot contains no playable source character", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-legacy-branch-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero waits.\n");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("Hero waits."),
+    });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      delta: { version: 1, operations: [] },
+      evidence: fixture.evidence("Hero waits."),
+    });
+
+    const legacy = new WorldEngine(root, {
       entities: new Map(),
       rules: new Map(),
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
     });
-    await engine.createBranch("main", "main");
-    await expect(inspectPreparation(root)).resolves.toMatchObject({
-      stage: "ready",
-      next: "nwh characters --branch main",
+    await legacy.createBranch("legacy", "legacy");
+
+    await expect(inspectPreparation(root, { sourceId: fixture.source.id, branchId: "legacy" })).resolves.toMatchObject({
+      stage: "repair",
+      repairReasons: [expect.stringContaining("pinned genesis snapshot")],
+      next: `nwh prepare --source ${fixture.source.id} --branch <new-branch-id>`,
     });
   });
 
@@ -122,7 +178,7 @@ describe("preparation workflow inspection", () => {
     });
   });
 
-  it("the command never accepts pending proposals and only auto-creates a branch after deterministic gates", async () => {
+  it("the command never accepts pending proposals and refuses an unplayable auto-created branch", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-command-"));
     roots.push(root);
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
@@ -148,12 +204,9 @@ describe("preparation workflow inspection", () => {
       delta: { version: 1, operations: [] },
       evidence: fixture.evidence("A quiet opening."),
     });
-    const ready = await prepareCommand({ root, sourceId: fixture.source.id, maxBatches: 0 });
-    expect(ready.stage).toBe("ready");
-    await expect(new WorldEngine(root, {
-      entities: new Map(),
-      rules: new Map(),
-      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
-    }).branches.read("main")).resolves.toMatchObject({ id: "main" });
+    const blocked = await prepareCommand({ root, sourceId: fixture.source.id, maxBatches: 0 });
+    expect(blocked.stage).toBe("repair");
+    expect(blocked.repairReasons).toContainEqual(expect.stringContaining("No committed character entities"));
+    await expect(new BranchStore(root).read("main")).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

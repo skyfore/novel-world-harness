@@ -66,5 +66,6 @@ function printInspection(inspection: PreparationInspection): void {
     stdout.write(`Pending review: ${[...byKind.entries()].sort().map(([kind, count]) => `${kind}=${count}`).join(", ")}\n`);
     stdout.write("Nothing was accepted automatically. Inspect each proposal before accepting or rejecting it.\n");
   }
+  for (const reason of inspection.repairReasons ?? []) stdout.write(`Repair: ${reason}\n`);
   stdout.write(`Next: ${inspection.next}\n`);
 }

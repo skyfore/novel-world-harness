@@ -7,6 +7,7 @@ import { prepareAllCommand } from "../src/commands/prepare-all.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { WorldEngine } from "../src/world/engine.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 import { worldCreateCommand } from "../src/commands/world.js";
@@ -63,11 +64,21 @@ describe("prepare-all command", () => {
         expect(options.maxBatches).toBeUndefined();
         const batches = await prepareCompilerBatches(root, fixture.source);
         for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+        await new CanonicalModelStore(root).putEntity({
+          id: "hero",
+          kind: "character",
+          canonicalName: "Hero",
+          aliases: [],
+          evidence: fixture.evidence("The world begins quietly."),
+        });
         await new CompilerProposalService(root).submit("initial-world", {
           proposalId: "compiled-initial-world",
           payload: {
             version: 1,
-            delta: { version: 1, operations: [] },
+            delta: {
+              version: 1,
+              operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+            },
             evidence: fixture.evidence("The world begins quietly."),
           },
           generatedBy: { worker: "test" },
@@ -138,6 +149,13 @@ describe("prepare-all command", () => {
     const fixture = await createEvidenceFixture(root, "Hero waits.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "playable-hero",
+      kind: "character",
+      canonicalName: "Playable Hero",
+      aliases: [],
+      evidence: fixture.evidence("Hero waits."),
+    });
     const proposals = new CompilerProposalService(root);
     const invalidEvidence = fixture.evidence("Hero");
     invalidEvidence[0]!.span.quoteHash = "0".repeat(64);
@@ -177,6 +195,13 @@ describe("prepare-all command", () => {
     const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("The world begins quietly."),
+    });
     let initialCompilerCalls = 0;
 
     const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
@@ -214,6 +239,13 @@ describe("prepare-all command", () => {
     const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("The world begins quietly."),
+    });
 
     const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },

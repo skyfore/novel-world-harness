@@ -42,6 +42,9 @@ export class PossibilityCommitService {
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
+    if (template.id.startsWith("canon-")) {
+      errors.push(issue("RESERVED_POSSIBILITY_ID", `Possibility template ${template.id} uses the reserved canonical-derived namespace`, "id"));
+    }
     if (!template.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Possibility ${template.id} has no evidence`, "evidence"));
     const verified = await this.evidence.verifyAll([...template.evidence, ...envelopeEvidence]);
     errors.push(...verified.issues);

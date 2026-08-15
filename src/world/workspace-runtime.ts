@@ -25,7 +25,16 @@ export async function openWorkspaceWorld(workspaceRoot: string, render?: Narrati
       .map((template) => ({ ...template, branchId, evaluatedAtCommit: commitId }));
     const events = [...(commitContext.events?.values() ?? [])];
     const canonical = events.map((event) => canonicalEventToPossibility(event, branchId, commitId));
-    const byId = new Map([...canonical, ...templates].map((possibility) => [possibility.id, possibility]));
+    const byId = new Map(canonical.map((possibility) => [possibility.id, possibility]));
+    for (const template of templates) {
+      if (template.id.startsWith("canon-")) {
+        throw new Error(`Possibility template ${template.id} uses the reserved canonical-derived namespace`);
+      }
+      if (byId.has(template.id)) {
+        throw new Error(`Duplicate possibility id ${template.id} would shadow a canonical-derived possibility`);
+      }
+      byId.set(template.id, template);
+    }
     return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
   };
   const runtime = new WorldRuntime(

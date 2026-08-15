@@ -56,7 +56,7 @@ describe("PossibilityCommitService", () => {
     ]));
 
     const valid = await service.validate({
-      id: "canon-give-key",
+      id: "alternate-give-key",
       kind: "canon-analogue",
       title: "Hero gives the key",
       preconditions: [],
@@ -71,6 +71,25 @@ describe("PossibilityCommitService", () => {
       evidence,
     });
     expect(valid.accepted).toBe(true);
+  });
+
+  it("reserves canon-* ids for canonical-derived possibilities", async () => {
+    const { service, evidence } = await fixture();
+    const validation = await service.validate({
+      id: "canon-manual-shadow",
+      kind: "generated",
+      title: "Manual shadow",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      causalParents: [],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence,
+    });
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "RESERVED_POSSIBILITY_ID" }));
   });
 
   it("rejects actor-plan templates and unknown causal parents", async () => {

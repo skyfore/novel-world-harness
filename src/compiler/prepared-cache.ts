@@ -161,7 +161,9 @@ export class PreparedNovelCache {
     try {
       await fs.writeFile(path.join(staging, "bundle.json"), `${canonicalJson(bundle)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
       await fs.writeFile(path.join(staging, "manifest.json"), `${canonicalJson(manifest)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
-      await fs.chmod(staging, 0o500);
+      // Immutable revision files remain read-only. The generation directory stays owner-writable
+      // so cache GC/teardown can unlink the files without first mutating directory permissions.
+      await fs.chmod(staging, 0o700);
       try {
         await fs.rename(staging, cachePath);
         published = true;
@@ -415,7 +417,7 @@ export class PreparedNovelCache {
     try {
       await fs.writeFile(path.join(staging, "bundle.json"), `${canonicalJson(bundle)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
       await fs.writeFile(path.join(staging, "manifest.json"), `${canonicalJson(manifest)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
-      await fs.chmod(staging, 0o500);
+      await fs.chmod(staging, 0o700);
       try { await fs.rename(staging, target); }
       catch (error) {
         if (!isAlreadyExists(error)) throw error;

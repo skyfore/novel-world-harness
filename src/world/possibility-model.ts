@@ -11,6 +11,7 @@ type TemplateRef = { version: 1; id: string; hash: string; updatedAt: string };
 export type PossibilityRevisionRef = { id: string; hash: string };
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const RESERVED_CANONICAL_PREFIX = "canon-";
 
 export class PossibilityTemplateStore {
   readonly root: string;
@@ -20,7 +21,7 @@ export class PossibilityTemplateStore {
 
   async put(input: PossibilityTemplate): Promise<void> {
     const value = possibilityTemplateSchema.parse(input);
-    const id = safeId(value.id);
+    const id = safeTemplateId(value.id);
     const hash = contentHash(value);
     const revisionPath = path.join(this.root, "revisions", id, `${hash}.json`);
     await writeImmutable(revisionPath, value);
@@ -98,6 +99,14 @@ async function atomicJson(filePath: string, value: unknown): Promise<void> {
   const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   await fs.rename(temporary, filePath);
+}
+
+function safeTemplateId(value: string): string {
+  const id = safeId(value);
+  if (id.startsWith(RESERVED_CANONICAL_PREFIX)) {
+    throw new Error(`Possibility template id uses reserved canonical namespace: ${id}`);
+  }
+  return id;
 }
 
 function safeId(value: string): string {

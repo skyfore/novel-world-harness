@@ -47,7 +47,9 @@ export class SourceMaterialStore {
     try {
       await fs.writeFile(path.join(staging, "source.utf8"), buffer, { mode: 0o400, flag: "wx" });
       await fs.writeFile(path.join(staging, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
-      await fs.chmod(staging, 0o500);
+      // Keep the immutable files read-only, but leave the containing directory owner-writable
+      // so cache cleanup and test teardown can remove the generation without chmod races.
+      await fs.chmod(staging, 0o700);
       try {
         await fs.rename(staging, directory);
       } catch (error) {

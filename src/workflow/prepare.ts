@@ -1,5 +1,5 @@
 import { auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
-import { CompilerBatchStore, prepareCompilerBatches } from "../compiler/batches.js";
+import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatch } from "../compiler/batches.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { CanonicalModelStore, ProposalStore, type ProposalSummary } from "../world/canonical-model.js";
 import { InitialWorldStore, type InitialWorld } from "../world/initial.js";
@@ -115,6 +115,19 @@ export async function inspectPreparation(
       next: "nwh compile \"Propose an evidence-backed initial world for the opening state\"",
     };
   }
+  const openingBatch = selectOpeningCompilerBatch(batches);
+  if (openingBatch && !initialWorld.evidence.some((reference) =>
+    openingBatch.evidence.some((opening) => evidenceSpansOverlap(reference, opening)))) {
+    return {
+      ...shared,
+      audit,
+      stage: "needs-initial-world",
+      repairReasons: [
+        `The accepted initial world for source ${source.id} is grounded outside the selected narrative opening (lines ${openingBatch.startLine}-${openingBatch.endLine}); replace it before creating another branch.`,
+      ],
+      next: "nwh compile \"Propose an evidence-backed replacement initial world for the opening state\"",
+    };
+  }
 
   const sourceCharacters = (await new CanonicalModelStore(workspaceRoot).listEntities())
     .filter((entity) => entity.kind === "character")
@@ -157,6 +170,12 @@ export async function inspectPreparation(
     };
   }
   return { ...shared, audit, stage: "ready", next: `nwh characters --branch ${branchId}` };
+}
+
+function evidenceSpansOverlap(left: InitialWorld["evidence"][number], right: InitialWorld["evidence"][number]): boolean {
+  return left.span.sourceId === right.span.sourceId
+    && left.span.startLine <= right.span.endLine
+    && left.span.endLine >= right.span.startLine;
 }
 
 function preparationRepairReasons(audit: CompilerAuditReport): string[] {

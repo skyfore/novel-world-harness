@@ -98,6 +98,41 @@ describe("preparation workflow inspection", () => {
     });
   });
 
+  it("requires replacement when an accepted initial world is grounded in front matter", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-front-matter-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, [
+      "# Collected edition",
+      "Publication metadata.",
+      "",
+      "# Preface",
+      "The author discusses writing.",
+      "",
+      "# Chapter 1",
+      "Hero waits at the village gate.",
+    ].join("\n"));
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: batches[2]!.evidence,
+    });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      delta: { version: 1, operations: [] },
+      evidence: batches[1]!.evidence,
+    });
+
+    await expect(inspectPreparation(root, { sourceId: fixture.source.id })).resolves.toMatchObject({
+      stage: "needs-initial-world",
+      repairReasons: [expect.stringContaining("grounded outside the selected narrative opening")],
+      next: "nwh compile \"Propose an evidence-backed replacement initial world for the opening state\"",
+    });
+  });
+
   it("detects a legacy genesis whose pinned snapshot contains no playable source character", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-legacy-branch-"));
     roots.push(root);

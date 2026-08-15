@@ -20,9 +20,13 @@ const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
 async function fixture(): Promise<{ root: string; source: SourceDocument }> {
+  const content = Array.from({ length: 12 }, (_, index) => `第${index + 1}章\n人物在第${index + 1}章行动。\n`).join("\n");
+  return fixtureWithContent(content);
+}
+
+async function fixtureWithContent(content: string): Promise<{ root: string; source: SourceDocument }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-batches-"));
   roots.push(root);
-  const content = Array.from({ length: 12 }, (_, index) => `第${index + 1}章\n人物在第${index + 1}章行动。\n`).join("\n");
   const buffer = Buffer.from(content, "utf8");
   await fs.writeFile(path.join(root, "novel.txt"), buffer);
   const sha = crypto.createHash("sha256").update(buffer).digest("hex");
@@ -241,6 +245,30 @@ describe("compiler batches", () => {
 
     expect(opening.prompt).toContain("may propose exactly one initial-world");
     expect(opening.prompt).not.toContain("Ordinary source-review batches must not propose an initial-world");
+  });
+
+  it("uses the first narrative chapter instead of publication front matter for the opening world", async () => {
+    const { root, source } = await fixtureWithContent([
+      "# Collected edition",
+      "Author and publication metadata.",
+      "",
+      "# Preface",
+      "The author discusses writing the novel.",
+      "",
+      "# Chapter 1",
+      "The traveler reaches the village at dawn.",
+      "",
+      "# Chapter 2",
+      "The traveler leaves after sunset.",
+    ].join("\n"));
+    const batches = await prepareCompilerBatches(root, source);
+
+    const opening = await prepareOpeningWorldCompilerBatch(root, source);
+
+    expect(opening.segmentIds).toEqual(batches[2]!.segmentIds);
+    expect(opening.startLine).toBe(7);
+    expect(opening.prompt).toContain("The traveler reaches the village at dawn.");
+    expect(opening.prompt).not.toContain("The author discusses writing the novel.");
   });
 
   it("rebuilds a stale segmenter manifest even when source bytes are unchanged", async () => {

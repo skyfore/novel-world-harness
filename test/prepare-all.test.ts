@@ -232,6 +232,60 @@ describe("prepare-all command", () => {
     expect(result.stage).toBe("ready");
   });
 
+  it("replaces a cached front-matter opening with a narrative-opening revision", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-opening-replacement-"));
+    roots.push(root);
+    vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
+    const fixture = await createEvidenceFixture(root, [
+      "# Collected edition",
+      "Publication metadata.",
+      "",
+      "# Preface",
+      "The author discusses writing.",
+      "",
+      "# Chapter 1",
+      "Hero waits at the village gate.",
+    ].join("\n"));
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: batches[2]!.evidence,
+    });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      delta: { version: 1, operations: [] },
+      evidence: batches[1]!.evidence,
+    });
+
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
+      compileSource: async () => { throw new Error("compileSource should not run"); },
+      compileInitialWorld: async (options) => {
+        expect(options.prompt).toContain("Hero waits at the village gate.");
+        expect(options.prompt).not.toContain("The author discusses writing.");
+        await new CompilerProposalService(root).submit("initial-world", {
+          proposalId: "replacement-initial-world",
+          payload: {
+            version: 1,
+            delta: { version: 1, operations: [] },
+            evidence: batches[2]!.evidence,
+          },
+          generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
+        });
+      },
+      converge: convergeWorldProposals,
+      createBranch: worldCreateCommand,
+    });
+
+    expect(result.stage).toBe("ready");
+    await expect(new InitialWorldStore(root).get()).resolves.toMatchObject({
+      evidence: [expect.objectContaining({ span: expect.objectContaining({ startLine: 7 }) })],
+    });
+  });
+
   it("uses a conservative evidence-backed opening fallback when the model pass fails", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-initial-fallback-"));
     roots.push(root);

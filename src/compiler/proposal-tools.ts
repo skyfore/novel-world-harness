@@ -41,12 +41,25 @@ function parseJsonArgument(value: unknown, field: string): unknown {
   }
 }
 
-export function prepareProposalToolArguments(args: unknown): ProposalToolInput {
+export function prepareProposalToolArguments(
+  args: unknown,
+  kind?: CompilerProposalKind,
+): ProposalToolInput {
   const parsed = parseJsonArgument(args, "Tool arguments");
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return parsed as ProposalToolInput;
   const normalized = { ...(parsed as Record<string, unknown>) };
   if ("payload" in normalized) normalized.payload = parseJsonArgument(normalized.payload, "payload");
   if ("evidence" in normalized) normalized.evidence = parseJsonArgument(normalized.evidence, "evidence");
+  if (
+    kind !== "state-delta"
+    && Array.isArray(normalized.evidence)
+    && normalized.payload
+    && typeof normalized.payload === "object"
+    && !Array.isArray(normalized.payload)
+    && !("evidence" in normalized.payload)
+  ) {
+    normalized.payload = { ...(normalized.payload as Record<string, unknown>), evidence: normalized.evidence };
+  }
   return normalized as ProposalToolInput;
 }
 
@@ -200,7 +213,7 @@ export function createCompilerProposalToolset(
       promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and include precise evidence in the payload where the schema requires it.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
       executionMode: "sequential",
       parameters,
-      prepareArguments: prepareProposalToolArguments,
+      prepareArguments: (args) => prepareProposalToolArguments(args, kind),
       async execute(_id, input, signal) {
         signal?.throwIfAborted();
         const blocked = beginToolCall("mutation");

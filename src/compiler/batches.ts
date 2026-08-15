@@ -256,7 +256,8 @@ export async function prepareOpeningWorldCompilerBatch(
   workspaceRoot: string,
   source: SourceDocument,
 ): Promise<CompilerBatch> {
-  const opening = (await prepareCompilerBatches(workspaceRoot, source))[0];
+  const batches = await prepareCompilerBatches(workspaceRoot, source);
+  const opening = selectOpeningCompilerBatch(batches);
   if (!opening) throw new Error(`Source ${source.id} has no opening evidence segment.`);
   const hydrated = await hydrateCompilerBatch(workspaceRoot, opening);
   const id = `opening-${opening.id}`;
@@ -265,14 +266,26 @@ export async function prepareOpeningWorldCompilerBatch(
     id,
     prompt:
       `This is a supplemental opening-world pass for source ${source.sourcePath}. ` +
-      `Use the supplied opening evidence and existing artifact catalog to propose exactly one missing initial-world plus only the entities or claims it directly references. ` +
+      `Use the supplied opening evidence and existing artifact catalog to propose exactly one missing or replacement initial-world plus only the entities or claims it directly references. ` +
       `Do not repeat unrelated extraction from the already reviewed opening segment, and do not include later canonical developments. ` +
       `Finish the supplemental batch explicitly; the host tracks its active proposal set across retries.\n\n` +
       replaceInitialWorldPolicy(
         hydrated.prompt,
-        `This supplemental opening-world pass may propose exactly one initial-world. Propose only entities or base-world claims directly referenced by that opening seed, and reuse every existing catalog identity.`,
+        `This supplemental opening-world pass may propose exactly one initial-world, replacing the catalog revision when it is grounded outside this narrative opening. Propose only entities or base-world claims directly referenced by that opening seed, and reuse every existing catalog identity.`,
       ),
   };
+}
+
+export function selectOpeningCompilerBatch(batches: readonly CompilerBatch[]): CompilerBatch | undefined {
+  return batches.find((batch) => isNarrativeOpeningHeading(batch.chapterTitle)) ?? batches[0];
+}
+
+function isNarrativeOpeningHeading(title: string | undefined): boolean {
+  if (!title) return false;
+  const normalized = title.trim().replace(/^#{1,6}\s+/, "");
+  return /^第[零〇一二三四五六七八九十百千万两\d]+[章节卷回部篇幕](?:\s|$|[：:])/u.test(normalized)
+    || /^(?:chapter|book|part|volume)\s+[\divxlcdm]+\b/i.test(normalized)
+    || /^(?:prologue|序章|楔子)(?:\s|$|[：:])/iu.test(normalized);
 }
 
 export async function hydrateCompilerBatch(workspaceRoot: string, batch: CompilerBatch): Promise<CompilerBatch> {

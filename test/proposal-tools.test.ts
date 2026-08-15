@@ -6,6 +6,7 @@ import { Compile } from "typebox/compile";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCompilerProposalTools, createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { ProposalStore } from "../src/world/canonical-model.js";
 import { entitySchema } from "../src/world/model.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
@@ -255,6 +256,64 @@ describe("compiler proposal tools", () => {
         evidence: fixture.evidence("墨砚不知道银钥在林岐手里。"),
       },
     } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("concrete state or knowledge effect");
+  });
+
+  it("accepts quoted knowledge words in observable behavior claims", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-quoted-speech-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "苦根回答‘知道了’，继续向水塘里扔石子。\n");
+    const claim = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_claim")!;
+    const evidence = fixture.evidence("苦根回答‘知道了’，继续向水塘里扔石子。");
+
+    await expect(claim.execute("observable-claim", {
+      proposal_id: "observable-claim",
+      payload: {
+        id: "observable-reaction",
+        subject: "kugen",
+        predicate: "answers ‘知道了’ and continues throwing stones into the pond",
+        object: null,
+        epistemicType: "explicit-fact",
+        evidence,
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { proposalId: "observable-claim", kind: "claim" },
+    });
+
+    await expect(claim.execute("cognitive-claim", {
+      proposal_id: "cognitive-claim",
+      payload: {
+        id: "cognitive-reaction",
+        subject: "kugen",
+        predicate: "thinks his father will return",
+        object: null,
+        epistemicType: "interpretation",
+        evidence,
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("KnowledgeDelta");
+  });
+
+  it("copies top-level evidence into evidence-backed payloads before validation", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-evidence-normalization-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero enters the village.\n");
+    const claim = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_claim")!;
+    const evidence = fixture.evidence("Hero enters the village.");
+    const prepared = claim.prepareArguments?.({
+      proposal_id: "hero-arrival",
+      payload: {
+        id: "hero-arrival",
+        subject: "hero",
+        predicate: "enters the village",
+        object: null,
+        epistemicType: "explicit-fact",
+      },
+      evidence,
+    });
+
+    await expect(claim.execute("hero-arrival", prepared as never, undefined, undefined, {} as ExtensionContext))
+      .resolves.toMatchObject({ details: { proposalId: "hero-arrival", kind: "claim" } });
+    await expect(new ProposalStore(root).readEnvelope("pending", "hero-arrival"))
+      .resolves.toMatchObject({ payload: { evidence } });
   });
 
   it("requires source compiler events to split independent world-state operations", async () => {

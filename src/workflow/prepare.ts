@@ -1,3 +1,4 @@
+import path from "node:path";
 import { auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
 import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatch } from "../compiler/batches.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
@@ -28,6 +29,41 @@ export type PreparationInspection = {
   repairReasons?: string[];
   next: string;
 };
+
+export async function resolvePreparationBranchId(
+  workspaceRoot: string,
+  source: SourceDocument,
+  requestedBranchId?: string,
+): Promise<string> {
+  if (requestedBranchId) return requestedBranchId;
+  const branches = new BranchStore(workspaceRoot);
+  const ids = await branches.listIds();
+  if (!ids.includes("main")) return "main";
+  if (await preparationBranchMatchesSource(workspaceRoot, branches, "main", source.id)) return "main";
+
+  const sourceStem = path.basename(source.sourcePath, path.extname(source.sourcePath))
+    .normalize("NFKD")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const base = `${sourceStem || "novel"}-${source.id.slice(0, 8)}`;
+  for (let suffix = 1; ; suffix += 1) {
+    const candidate = suffix === 1 ? base : `${base}-${suffix}`;
+    if (!ids.includes(candidate)) return candidate;
+    if (await preparationBranchMatchesSource(workspaceRoot, branches, candidate, source.id)) return candidate;
+  }
+}
+
+async function preparationBranchMatchesSource(
+  workspaceRoot: string,
+  branches: BranchStore,
+  branchId: string,
+  sourceId: string,
+): Promise<boolean> {
+  const branch = await branches.read(branchId);
+  if (branch.sourceId) return branch.sourceId === sourceId;
+  return branchGenesisHasPlayableCharacter(workspaceRoot, branchId, sourceId);
+}
 
 export async function inspectPreparation(
   workspaceRoot: string,
@@ -155,8 +191,21 @@ export async function inspectPreparation(
     };
   }
 
-  if (!(await branchExists(new BranchStore(workspaceRoot), branchId))) {
+  const branches = new BranchStore(workspaceRoot);
+  if (!(await branchExists(branches, branchId))) {
     return { ...shared, audit, stage: "create-branch", next: `nwh prepare --source ${source.id} --branch ${branchId}` };
+  }
+  const branch = await branches.read(branchId);
+  if (branch.sourceId && branch.sourceId !== source.id) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: [
+        `Branch '${branchId}' belongs to source ${branch.sourceId}, not ${source.id}; prepare this novel on a different branch instead of mixing source timelines.`,
+      ],
+      next: `nwh prepare --source ${source.id} --branch <new-branch-id>`,
+    };
   }
   if (!(await branchGenesisHasPlayableCharacter(workspaceRoot, branchId, source.id))) {
     return {

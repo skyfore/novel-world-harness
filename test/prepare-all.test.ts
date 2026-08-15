@@ -12,6 +12,8 @@ import { WorldEngine } from "../src/world/engine.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 import { worldCreateCommand } from "../src/commands/world.js";
 import { InitialWorldStore } from "../src/world/initial.js";
+import { BranchStore } from "../src/world/store.js";
+import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -140,6 +142,65 @@ describe("prepare-all command", () => {
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
     });
     await expect(engine.branches.read("main")).resolves.toMatchObject({ id: "main" });
+  });
+
+  it("creates a source-scoped default branch when main belongs to another novel", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-branch-source-"));
+    roots.push(root);
+    vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
+    const first = await createEvidenceFixture(root, "First Hero waits.\n", "first-novel.txt");
+    const second = await createEvidenceFixture(root, "Second Hero waits.\n", "second-novel.txt");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "first-hero",
+      kind: "character",
+      canonicalName: "First Hero",
+      aliases: [],
+      evidence: first.evidence("First Hero"),
+    });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "first-hero", field: "character.alive", value: true }],
+    }, undefined, first.source.id);
+
+    const batches = await prepareCompilerBatches(root, second.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(second.source.id, batch.id);
+    await canon.putEntity({
+      id: "second-hero",
+      kind: "character",
+      canonicalName: "Second Hero",
+      aliases: [],
+      evidence: second.evidence("Second Hero"),
+    });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      delta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "second-hero", field: "character.alive", value: true }],
+      },
+      evidence: second.evidence("Second Hero waits."),
+    });
+
+    await expect(prepareAllCommand({
+      root,
+      sourceId: second.source.id,
+      branchId: "main",
+      yes: true,
+      cacheRoot: path.join(root, "prepared-cache"),
+    })).rejects.toThrow("belongs to source");
+
+    const result = await prepareAllCommand({ root, sourceId: second.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
+      compileSource: async () => { throw new Error("compileSource should not run"); },
+      compileInitialWorld: async () => { throw new Error("compileInitialWorld should not run"); },
+      converge: convergeWorldProposals,
+      createBranch: worldCreateCommand,
+    });
+
+    const expectedBranchId = `second-novel-${second.source.id.slice(0, 8)}`;
+    expect(result).toMatchObject({ stage: "ready", branchId: expectedBranchId });
+    await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ sourceId: first.source.id });
+    await expect(new BranchStore(root).read(expectedBranchId)).resolves.toMatchObject({ sourceId: second.source.id });
   });
 
   it("quarantines validation-blocked proposals and completes with validated artifacts", async () => {

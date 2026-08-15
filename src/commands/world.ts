@@ -17,7 +17,7 @@ async function openWorld(root: string) {
   return { engine, actors: actorModels, runtime };
 }
 
-export async function worldCreateCommand(root: string, branchId: string, seedPath?: string): Promise<void> {
+export async function worldCreateCommand(root: string, branchId: string, seedPath?: string, sourceId?: string): Promise<void> {
   const { engine } = await openWorld(root);
   const canonicalInitial = seedPath ? null : await new InitialWorldStore(root).get();
   if (!seedPath && !canonicalInitial) {
@@ -26,7 +26,13 @@ export async function worldCreateCommand(root: string, branchId: string, seedPat
   const seed = seedPath
     ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8")))
     : canonicalInitial!.delta;
-  const head = await engine.createBranch(branchId, branchId, seed, seedPath ? undefined : canonicalInitial?.knowledge);
+  const head = await engine.createBranch(
+    branchId,
+    branchId,
+    seed,
+    seedPath ? undefined : canonicalInitial?.knowledge,
+    sourceId,
+  );
   stdout.write(`${branchId}\t${head}${canonicalInitial && !seedPath ? "\t[canonical initial world]" : ""}\n`);
 }
 

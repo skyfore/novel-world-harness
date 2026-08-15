@@ -600,6 +600,64 @@ describe("NWH TUI extension", () => {
     await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
   });
 
+  it("uses an independent source-owned branch when main is pinned to another novel", async () => {
+    const { commands, root } = await fixture();
+    const first = await createEvidenceFixture(root, "First Hero waits.\n", "first-novel.txt");
+    const second = await createEvidenceFixture(root, "Second Hero waits.\n", "second-novel.txt");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "first-hero",
+      kind: "character",
+      canonicalName: "First Hero",
+      aliases: [],
+      evidence: first.evidence("First Hero"),
+    });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "first-hero", field: "character.alive", value: true }],
+    }, undefined, first.source.id);
+
+    const batches = await prepareCompilerBatches(root, second.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(second.source.id, batch.id);
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "second-hero",
+      payload: {
+        id: "second-hero",
+        kind: "character",
+        canonicalName: "Second Hero",
+        aliases: [],
+        evidence: second.evidence("Second Hero"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "second-opening",
+      payload: {
+        version: 1,
+        delta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "second-hero", field: "character.alive", value: true }],
+        },
+        evidence: second.evidence("Second Hero waits."),
+      },
+      generatedBy: { worker: "test" },
+    });
+    const notifications: string[] = [];
+    const questions: string[] = [];
+
+    await commands.get("prepare-all")?.handler(second.source.id, preparationContext(notifications, questions));
+
+    const expectedBranchId = `second-novel-${second.source.id.slice(0, 8)}`;
+    expect(questions).toEqual(["Accept validated proposals?", "Create playable branch?"]);
+    expect(notifications).toContainEqual(expect.stringContaining(`using independent branch '${expectedBranchId}'`));
+    await expect(new BranchStore(root).read(expectedBranchId)).resolves.toMatchObject({
+      id: expectedBranchId,
+      sourceId: second.source.id,
+    });
+  });
+
   it("supplies opening evidence and requires a successful finish before completing /prepare-all", async () => {
     const { commands, events, registeredToolDefinitions, root, sentHiddenMessages } = await fixture();
     const evidence = await createEvidenceFixture(root, "Hero waits at the opening.\n", "opening-novel.txt");

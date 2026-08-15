@@ -3,7 +3,7 @@ import { stdout } from "node:process";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { convergeWorldProposals, quarantineUncommittableProposals, type WorldProposalConvergence } from "../compiler/converge.js";
 import { loadOptionalConfig } from "../config/load.js";
-import { inspectPreparation, type PreparationInspection } from "../workflow/prepare.js";
+import { inspectPreparation, resolvePreparationBranchId, type PreparationInspection } from "../workflow/prepare.js";
 import { askUserQuestion, recommendedAnswer, type AskUserQuestion } from "../util/ask-user-question.js";
 import { compileCommand } from "./compile.js";
 import { compileSourceCommand } from "./compile-source.js";
@@ -66,7 +66,7 @@ export async function prepareAllCommand(
   }
   const dependencies = { ...defaultDependencies, ...dependencyOverrides };
   const configPath = options.configPath ?? path.join(root, "novel-harness.yaml");
-  const branchId = options.branchId ?? "main";
+  let branchId = options.branchId ?? "main";
   const ask = options.yes ? recommendedAnswer() : dependencies.ask;
   const report = (message: string) => options.onProgress ? options.onProgress(message) : stdout.write(`${message}\n`);
   let sourceId = options.sourceId;
@@ -111,8 +111,12 @@ export async function prepareAllCommand(
     });
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
-  if (inspection.stage === "repair") throw preparationFailure(inspection);
   sourceId = inspection.source!.id;
+  if (!options.branchId) {
+    branchId = await resolvePreparationBranchId(root, inspection.source!);
+    if (branchId !== inspection.branchId) inspection = await inspectPreparation(root, { sourceId, branchId });
+  }
+  if (inspection.stage === "repair") throw preparationFailure(inspection);
 
   const preparedCache = new PreparedNovelCache(root, options.cacheRoot);
   if (options.restoreCache !== false) {
@@ -248,7 +252,7 @@ export async function prepareAllCommand(
     });
     if (decision === "pause") return pausePreparation(inspection, report);
     report(`Creating playable branch ${branchId}.`);
-    await dependencies.createBranch(root, branchId);
+    await dependencies.createBranch(root, branchId, undefined, sourceId);
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
 

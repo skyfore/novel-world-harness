@@ -1,7 +1,7 @@
 import path from "node:path";
 import { stdout } from "node:process";
 import { loadOptionalConfig } from "../config/load.js";
-import { inspectPreparation, type PreparationInspection } from "../workflow/prepare.js";
+import { inspectPreparation, resolvePreparationBranchId, type PreparationInspection } from "../workflow/prepare.js";
 import { compileSourceCommand } from "./compile-source.js";
 import { ingestWorkspaceSource } from "./ingest.js";
 import { worldCreateCommand } from "./world.js";
@@ -27,7 +27,12 @@ export async function prepareCommand(options: PrepareCommandOptions): Promise<Pr
     stdout.write(`Registered ${ingested.document.sourcePath} as ${sourceId}; indexed ${ingested.manifest.segments.length} segment(s).\n`);
   }
 
-  let inspection = await inspectPreparation(root, { sourceId, branchId: options.branchId });
+  let branchId = options.branchId;
+  let inspection = await inspectPreparation(root, { sourceId, branchId });
+  if (!branchId && inspection.source) {
+    branchId = await resolvePreparationBranchId(root, inspection.source);
+    if (branchId !== inspection.branchId) inspection = await inspectPreparation(root, { sourceId: inspection.source.id, branchId });
+  }
   if (inspection.stage === "compile" && (options.maxBatches ?? 1) > 0) {
     await compileSourceCommand({
       root,
@@ -40,14 +45,14 @@ export async function prepareCommand(options: PrepareCommandOptions): Promise<Pr
     });
     inspection = await inspectPreparation(root, {
       sourceId: inspection.source!.id,
-      branchId: options.branchId,
+      branchId,
     });
   }
   if (inspection.stage === "create-branch") {
-    await worldCreateCommand(root, inspection.branchId);
+    await worldCreateCommand(root, inspection.branchId, undefined, inspection.source!.id);
     inspection = await inspectPreparation(root, {
       sourceId: inspection.source!.id,
-      branchId: inspection.branchId,
+      branchId,
     });
   }
 

@@ -76,7 +76,19 @@ export async function choosePlayExperience(
   } else if (options.source) {
     throw new Error(`Unknown novel '${options.source}'. Use nwh novels to list registered sources.`);
   }
-  const branchId = await choosePlayInstance(root, options.branchId, ask, catalog);
+  const instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
+  if (!instanceCatalog.instances.length) {
+    const source = catalog.novels.find((novel) => novel.id === sourceId);
+    throw new Error(`No playable instances exist for '${source?.title ?? sourceId}'. Run nwh prepare-all for that novel first.`);
+  }
+  if (options.branchId) {
+    const requested = resolvePlayInstance(catalog.instances, options.branchId);
+    if (requested?.sourceId && requested.sourceId !== sourceId) {
+      const assigned = catalog.novels.find((novel) => novel.id === requested.sourceId);
+      throw new Error(`Instance '${requested.branchId}' belongs to '${assigned?.title ?? requested.sourceId}', not the selected novel.`);
+    }
+  }
+  const branchId = await choosePlayInstance(root, options.branchId, ask, instanceCatalog);
   if (!branchId) return undefined;
   const listed = await listPlayableCharacters(root, { branchId, ...(sourceId ? { source: sourceId } : {}) });
   const playable = listed.characters.filter((character) => character.alive !== false);
@@ -121,6 +133,16 @@ export async function choosePlayExperience(
   }
   if (!character) return undefined;
   return selectPlayExperience(root, { branchId, character, ...(sourceId ? { source: sourceId } : {}) });
+}
+
+export function catalogForSource(catalog: PlayExperienceCatalog, sourceId: string): PlayExperienceCatalog {
+  const matching = catalog.instances.filter((instance) => instance.sourceId === sourceId);
+  return {
+    ...catalog,
+    instances: matching.length
+      ? matching
+      : catalog.instances.filter((instance) => !instance.sourceId),
+  };
 }
 
 export async function choosePlayNovel(

@@ -179,6 +179,7 @@ export class WorldEngine {
     name: string,
     initialDelta: StateDelta = { version: 1, operations: [] },
     initialKnowledge?: KnowledgeDelta,
+    sourceId?: string,
   ): Promise<CommitId> {
     stateDeltaSchema.parse(initialDelta);
     const knowledge = initialKnowledge ? knowledgeDeltaSchema.parse(initialKnowledge) : undefined;
@@ -208,7 +209,7 @@ export class WorldEngine {
     };
     const eventHash = await this.objects.putEvent(event);
     const commitHash = await this.objects.putCommit({ version: 1, branchId, logicalTime: { step: 0 }, eventHashes: [eventHash], canonicalSnapshotHash: this.context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
-    await this.branches.create({ id: branchId, name, headCommitId: commitHash });
+    await this.branches.create({ id: branchId, name, ...(sourceId ? { sourceId } : {}), headCommitId: commitHash });
     return commitHash;
   }
   async commitProposal(proposal: EventProposal): Promise<CommitProposalResult> {

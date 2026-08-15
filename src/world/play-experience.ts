@@ -74,7 +74,8 @@ export async function inspectPlayExperience(root: string): Promise<PlayExperienc
     const history = await inspectHistory(engine, branch.headCommitId);
     const context = await engine.contextForCommit(branch.headCommitId);
     const saved = savedSessions.find((session) => session.branchId === branchId);
-    const source = saved?.sourceId ? novels.find((novel) => novel.id === saved.sourceId) : undefined;
+    const sourceId = branch.sourceId ?? saved?.sourceId ?? await inferLegacyBranchSourceId(engine, branch.headCommitId);
+    const source = sourceId ? novels.find((novel) => novel.id === sourceId) : undefined;
     const actor = saved ? context.entities.get(saved.actorId) : undefined;
     return {
       branchId,
@@ -86,7 +87,8 @@ export async function inspectPlayExperience(root: string): Promise<PlayExperienc
       ...(history.lastEventTitle ? { lastEventTitle: history.lastEventTitle } : {}),
       ...(branch.parentBranchId ? { parentBranchId: branch.parentBranchId } : {}),
       active: activeSession?.branchId === branchId,
-      ...(source ? { sourceId: source.id, sourceTitle: source.title } : {}),
+      ...(sourceId ? { sourceId } : {}),
+      ...(source ? { sourceTitle: source.title } : {}),
       ...(actor ? { actorId: actor.id, actorName: actor.canonicalName } : {}),
       ...(saved
         ? { sessionAtHead: saved.lastCommitId === branch.headCommitId }
@@ -94,6 +96,40 @@ export async function inspectPlayExperience(root: string): Promise<PlayExperienc
     };
   }));
   return { project, novels, instances, activeSession, savedSessions };
+}
+
+async function inferLegacyBranchSourceId(
+  engine: Awaited<ReturnType<typeof openWorkspaceWorld>>["engine"],
+  headCommitId: string,
+): Promise<string | undefined> {
+  let genesisId = headCommitId;
+  for (;;) {
+    const commit = await engine.objects.getCommit(genesisId);
+    if (!commit.parentCommitId) break;
+    genesisId = commit.parentCommitId;
+  }
+  const [genesis, context] = await Promise.all([
+    engine.objects.getCommit(genesisId),
+    engine.contextForCommit(genesisId),
+  ]);
+  const participantSourceIds = new Set<string>();
+  for (const eventHash of genesis.eventHashes) {
+    const event = await engine.objects.getEvent(eventHash);
+    for (const participant of event.participants) {
+      for (const evidence of context.entities.get(participant)?.evidence ?? []) {
+        participantSourceIds.add(evidence.span.sourceId);
+      }
+    }
+  }
+  if (participantSourceIds.size === 1) return [...participantSourceIds][0];
+  if (participantSourceIds.size > 1) return undefined;
+
+  const contextSourceIds = new Set(
+    [...context.entities.values()]
+      .filter((entity) => entity.kind === "character")
+      .flatMap((entity) => entity.evidence.map((evidence) => evidence.span.sourceId)),
+  );
+  return contextSourceIds.size === 1 ? [...contextSourceIds][0] : undefined;
 }
 
 export async function listPlayableCharacters(

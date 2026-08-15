@@ -23,7 +23,7 @@ import { SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS } from "../compiler/pi-compiler.js
 import { prepareCompilerBatches, prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld } from "../compiler/batches.js";
 import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
-import { inspectPreparation } from "../workflow/prepare.js";
+import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prepare.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
@@ -40,7 +40,7 @@ import {
   resolveNovelSource,
   type SelectedPlayExperience,
 } from "../world/play-experience.js";
-import { choosePlayExperience, choosePlayInstance, choosePlayNovel } from "../world/play-choice.js";
+import { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayNovel } from "../world/play-choice.js";
 import { formatCharacters, formatInstances, formatNovels, formatProgress } from "../commands/catalog.js";
 import { createTuiUserQuestion } from "../util/tui-user-question.js";
 import type { UserQuestionCustomInput } from "../util/ask-user-question.js";
@@ -304,7 +304,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ? await choosePlayNovel(catalog, undefined, createTuiUserQuestion(ctx.ui), { preferActive: false })
         : undefined;
       if (catalog.novels.length && !sourceId) return true;
-      const branchId = await choosePlayInstance(workspace.root, undefined, createTuiUserQuestion(ctx.ui), catalog);
+      const instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
+      if (!instanceCatalog.instances.length) {
+        const source = catalog.novels.find((novel) => novel.id === sourceId);
+        throw new Error(`No playable instances exist for '${source?.title ?? sourceId}'. Run /prepare-all for that novel first.`);
+      }
+      const branchId = await choosePlayInstance(workspace.root, undefined, createTuiUserQuestion(ctx.ui), instanceCatalog);
       if (!branchId) return true;
       const available = await listPlayableCharacters(workspace.root, {
         branchId,
@@ -571,7 +576,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         const { engine } = await openWorkspaceWorld(workspace.root);
-        await engine.createBranch(state.branchId, state.branchId, initial.delta, initial.knowledge);
+        await engine.createBranch(state.branchId, state.branchId, initial.delta, initial.knowledge, state.sourceId);
         await advancePrepareAll(ctx);
         return;
       }
@@ -1017,7 +1022,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         const [requestedSourceId, requestedBranchId] = splitCommandArguments(args);
-        const branchId = requestedBranchId || "main";
+        let branchId = requestedBranchId || "main";
         let inspection = await inspectPreparation(workspace.root, {
           sourceId: requestedSourceId || activeSourceId,
           branchId,
@@ -1058,6 +1063,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (!sourceId) {
           ctx.ui.notify(`Cannot start full preparation at '${inspection.stage}'.`, "error");
           return;
+        }
+        if (!requestedBranchId) {
+          const resolvedBranchId = await resolvePreparationBranchId(workspace.root, inspection.source!, undefined);
+          if (resolvedBranchId !== branchId) {
+            branchId = resolvedBranchId;
+            inspection = await inspectPreparation(workspace.root, { sourceId, branchId });
+            ctx.ui.notify(`The default 'main' instance belongs to another novel revision; using independent branch '${branchId}'.`, "info");
+          }
         }
         activeSourceId = sourceId;
         const source = inspection.source ?? await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);

@@ -114,4 +114,29 @@ describe("play experience catalog", () => {
     expect(catalog.instances.find((instance) => instance.branchId === "alpha")).toMatchObject({ actorId: "hero", active: true });
     expect(catalog.instances.find((instance) => instance.branchId === "beta")).toMatchObject({ actorId: "rival", active: false });
   });
+
+  it("reports persisted novel ownership and preserves it across forks", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-experience-source-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero waits.\n", "owned-novel.txt");
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("Hero"),
+    });
+    const { engine, runtime } = await openWorkspaceWorld(root);
+    const head = await engine.createBranch("owned", "Owned", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    }, undefined, fixture.source.id);
+    await runtime.forkBranch("owned", head, "forked", "Forked");
+
+    const catalog = await inspectPlayExperience(root);
+    expect(catalog.instances).toEqual(expect.arrayContaining([
+      expect.objectContaining({ branchId: "owned", sourceId: fixture.source.id, sourceTitle: fixture.source.title }),
+      expect.objectContaining({ branchId: "forked", sourceId: fixture.source.id, sourceTitle: fixture.source.title }),
+    ]));
+  });
 });

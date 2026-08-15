@@ -59,11 +59,19 @@ export class WorldRuntime {
   }
 
   async forkBranch(parentBranchId: BranchId, forkCommitId: CommitId, newBranchId: BranchId, name: string): Promise<void> {
-    const parentHead = await this.engine.branches.readHead(parentBranchId);
+    const parent = await this.engine.branches.read(parentBranchId);
+    const parentHead = parent.headCommitId;
     if (!(await this.isAncestor(forkCommitId, parentHead))) {
       throw new Error(`Commit ${forkCommitId} is not an ancestor of branch ${parentBranchId}`);
     }
-    await this.engine.branches.create({ id: newBranchId, name, parentBranchId, forkCommitId, headCommitId: forkCommitId });
+    await this.engine.branches.create({
+      id: newBranchId,
+      name,
+      ...(parent.sourceId ? { sourceId: parent.sourceId } : {}),
+      parentBranchId,
+      forkCommitId,
+      headCommitId: forkCommitId,
+    });
   }
 
   async move(input: MoveInput): Promise<MoveResult> {

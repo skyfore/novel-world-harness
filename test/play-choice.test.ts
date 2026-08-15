@@ -82,4 +82,38 @@ describe("structured play choices", () => {
     ]);
     expect(selected).toMatchObject({ session: { branchId: "beta", sourceId: rivalNovel.source.id, actorId: "rival" } });
   });
+
+  it("filters instances by their pinned novel before selecting the only branch", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-choice-source-"));
+    roots.push(root);
+    const first = await createEvidenceFixture(root, "Hero waits.\n", "first.txt");
+    const second = await createEvidenceFixture(root, "Rival waits.\n", "second.txt");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: first.evidence("Hero") });
+    let world = await openWorkspaceWorld(root);
+    await world.engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    }, undefined, first.source.id);
+    await canon.putEntity({ id: "rival", kind: "character", canonicalName: "Rival", aliases: [], evidence: second.evidence("Rival") });
+    world = await openWorkspaceWorld(root);
+    await world.engine.createBranch("second", "Second", {
+      version: 1,
+      operations: [{ op: "set", entityId: "rival", field: "character.alive", value: true }],
+    }, undefined, second.source.id);
+
+    const selected = await choosePlayExperience(root, { source: second.source.id }, async () => {
+      throw new Error("source-scoped single branch and character should not prompt");
+    });
+
+    expect(selected).toMatchObject({
+      source: { id: second.source.id },
+      session: { branchId: "second", sourceId: second.source.id, actorId: "rival" },
+    });
+    await expect(choosePlayExperience(root, {
+      source: second.source.id,
+      branchId: "main",
+      character: "rival",
+    }, async () => undefined)).rejects.toThrow("belongs to");
+  });
 });

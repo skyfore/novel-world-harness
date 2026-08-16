@@ -20,7 +20,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { formatElapsed } from "../util/elapsed-status.js";
 
-export type NwhTaskStatus = "running" | "completed" | "failed";
+export type NwhTaskStatus = "running" | "cancelling" | "completed" | "failed" | "cancelled";
 
 type NwhTaskTranscriptBase = {
   id: number;
@@ -58,17 +58,22 @@ export type NwhTaskSnapshot = {
   logs: readonly string[];
   transcript: readonly NwhTaskTranscriptEntry[];
   startedAt: number;
+  settledAt?: number;
   error?: string;
 };
 
 export class NwhTask {
   private static readonly MAX_TRANSCRIPT_ENTRIES = 2_000;
+  private static readonly STREAM_UPDATE_INTERVAL_MS = 32;
   private readonly listeners = new Set<() => void>();
   private readonly logLines: string[] = [];
   private readonly transcriptEntries: NwhTaskTranscriptEntry[] = [];
+  private readonly controller = new AbortController();
   private state: NwhTaskSnapshot;
   private completionPromise: Promise<void> = Promise.resolve();
   private nextTranscriptId = 1;
+  private pendingAssistantMessage?: AssistantMessage;
+  private assistantUpdateTimer?: NodeJS.Timeout;
 
   constructor(id: string, title: string, activity = "Starting") {
     this.state = {
@@ -90,15 +95,38 @@ export class NwhTask {
     return this.completionPromise;
   }
 
-  start(operation: () => Promise<void>): void {
-    this.completionPromise = operation().then(
-      () => this.settle("completed", "Complete"),
-      (error) => this.settle("failed", "Stopped", error instanceof Error ? error.message : String(error)),
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  start(operation: (signal: AbortSignal) => Promise<void>): void {
+    let operationPromise: Promise<void>;
+    try {
+      operationPromise = operation(this.controller.signal);
+    } catch (error) {
+      operationPromise = Promise.reject(error);
+    }
+    this.completionPromise = operationPromise.then(
+      () => this.controller.signal.aborted
+        ? this.settle("cancelled", "Cancelled")
+        : this.settle("completed", "Complete"),
+      (error) => this.controller.signal.aborted || isAbortError(error)
+        ? this.settle("cancelled", "Cancelled")
+        : this.settle("failed", "Stopped", error instanceof Error ? error.message : String(error)),
     );
+  }
+
+  cancel(): boolean {
+    if (this.state.status !== "running") return false;
+    this.state = { ...this.state, status: "cancelling", activity: "Cancelling" };
+    this.controller.abort();
+    this.emit();
+    return true;
   }
 
   update(activity: string): void {
     if (this.state.status !== "running") return;
+    if (this.state.activity === activity) return;
     this.state = { ...this.state, activity };
     this.emit();
   }
@@ -111,19 +139,27 @@ export class NwhTask {
   }
 
   appendAgentEvent(event: AgentSessionEvent): void {
-    if (this.state.status !== "running") return;
+    if (this.state.status !== "running" && this.state.status !== "cancelling") return;
     if (event.type === "message_start" && event.message.role === "assistant") {
+      this.flushAssistantUpdate();
       this.appendTranscript({ kind: "assistant", message: sanitizeAssistantMessage(event.message), streaming: true });
       return;
     }
     if (event.type === "message_update" && event.message.role === "assistant") {
-      const entry = this.findStreamingAssistant();
-      const message = sanitizeAssistantMessage(event.message);
-      if (entry) this.replaceTranscript(entry, { ...entry, revision: entry.revision + 1, message });
-      else this.appendTranscript({ kind: "assistant", message, streaming: true });
+      this.pendingAssistantMessage = event.message;
+      if (!this.assistantUpdateTimer) {
+        this.assistantUpdateTimer = setTimeout(
+          () => this.flushAssistantUpdate(),
+          NwhTask.STREAM_UPDATE_INTERVAL_MS,
+        );
+        this.assistantUpdateTimer.unref();
+      }
       return;
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
+      this.pendingAssistantMessage = undefined;
+      if (this.assistantUpdateTimer) clearTimeout(this.assistantUpdateTimer);
+      this.assistantUpdateTimer = undefined;
       const entry = this.findStreamingAssistant();
       const message = sanitizeAssistantMessage(event.message);
       if (entry) this.replaceTranscript(entry, { ...entry, revision: entry.revision + 1, message, streaming: false });
@@ -194,6 +230,18 @@ export class NwhTask {
     );
   }
 
+  private flushAssistantUpdate(): void {
+    if (this.assistantUpdateTimer) clearTimeout(this.assistantUpdateTimer);
+    this.assistantUpdateTimer = undefined;
+    const pending = this.pendingAssistantMessage;
+    this.pendingAssistantMessage = undefined;
+    if (!pending) return;
+    const entry = this.findStreamingAssistant();
+    const message = sanitizeAssistantMessage(pending);
+    if (entry) this.replaceTranscript(entry, { ...entry, revision: entry.revision + 1, message });
+    else this.appendTranscript({ kind: "assistant", message, streaming: true });
+  }
+
   private appendTranscript(entry: NewNwhTaskTranscriptEntry): void {
     this.transcriptEntries.push({ ...entry, id: this.nextTranscriptId++, revision: 0 } as NwhTaskTranscriptEntry);
     if (this.transcriptEntries.length > NwhTask.MAX_TRANSCRIPT_ENTRIES) {
@@ -211,8 +259,9 @@ export class NwhTask {
     this.emit();
   }
 
-  private settle(status: Exclude<NwhTaskStatus, "running">, activity: string, error?: string): void {
-    this.state = { ...this.state, status, activity, ...(error ? { error } : {}) };
+  private settle(status: "completed" | "failed" | "cancelled", activity: string, error?: string): void {
+    this.flushAssistantUpdate();
+    this.state = { ...this.state, status, activity, settledAt: Date.now(), ...(error ? { error } : {}) };
     if (error) this.log(`Error: ${error}`);
     else this.emit();
   }
@@ -224,7 +273,9 @@ export class NwhTask {
 
 export function taskSummary(task: NwhTask, now = Date.now()): string {
   const snapshot = task.snapshot;
-  const elapsed = snapshot.activity.includes("· elapsed ") ? "" : ` · elapsed ${formatElapsed(now - snapshot.startedAt)}`;
+  const elapsed = snapshot.activity.includes("· elapsed ")
+    ? ""
+    : ` · elapsed ${formatElapsed((snapshot.settledAt ?? now) - snapshot.startedAt)}`;
   return `${snapshot.title} · ${snapshot.status} · ${snapshot.activity}${elapsed}`;
 }
 
@@ -238,7 +289,7 @@ export async function showNwhTask(ui: ExtensionUIContext, task: NwhTask, cwd = p
     const close = () => {
       if (closed) return;
       closed = true;
-      done(task.snapshot.status === "running" ? "background" : "settled");
+      done(task.snapshot.status === "running" || task.snapshot.status === "cancelling" ? "background" : "settled");
     };
     const view = new NwhTaskView(
       tui,
@@ -293,7 +344,7 @@ class NwhTaskView implements Component {
     this.titleText = new Text("", 1, 0);
     this.statusText = new Text("", 1, 0);
     this.footerText = new Text(
-      theme.fg("dim", `←/Esc background · PgUp/PgDn scroll · ${keyHint("app.tools.expand", "tools")} · ${keyHint("app.thinking.toggle", "thinking")}`),
+      "",
       1,
       0,
     );
@@ -302,6 +353,11 @@ class NwhTaskView implements Component {
   handleInput(data: string): void {
     if (matchesKey(data, Key.left) || matchesKey(data, Key.escape)) {
       this.dismiss();
+      return;
+    }
+    if (this.keybindings.matches(data, "app.clear")) {
+      this.task.cancel();
+      this.tui.requestRender();
       return;
     }
     if (this.keybindings.matches(data, "app.tools.expand")) {
@@ -384,14 +440,23 @@ class NwhTaskView implements Component {
     const snapshot = this.task.snapshot;
     const state = snapshot.status === "completed"
       ? this.theme.fg("success", "completed")
+      : snapshot.status === "cancelled"
+        ? this.theme.fg("warning", "cancelled")
+        : snapshot.status === "cancelling"
+          ? this.theme.fg("warning", "cancelling")
       : snapshot.status === "failed"
         ? this.theme.fg("error", "failed")
         : this.theme.fg("dim", "running");
     const activityElapsed = snapshot.activity.includes("· elapsed ")
       ? ""
-      : ` · elapsed ${formatElapsed(Date.now() - snapshot.startedAt)}`;
+      : ` · elapsed ${formatElapsed((snapshot.settledAt ?? Date.now()) - snapshot.startedAt)}`;
     this.titleText.setText(this.theme.fg("accent", this.theme.bold(`NWH task · ${snapshot.title}`)));
     this.statusText.setText(`${state} · ${snapshot.activity}${activityElapsed}`);
+    this.footerText.setText(snapshot.status === "running"
+      ? this.theme.fg("dim", `←/Esc background · ${keyHint("app.clear", "cancel")} · PgUp/PgDn scroll · ${keyHint("app.tools.expand", "tools")} · ${keyHint("app.thinking.toggle", "thinking")}`)
+      : snapshot.status === "cancelling"
+        ? this.theme.fg("dim", "Cancelling safely… · ←/Esc background")
+        : this.theme.fg("dim", `←/Esc close · PgUp/PgDn scroll · ${keyHint("app.tools.expand", "tools")} · ${keyHint("app.thinking.toggle", "thinking")}`));
   }
 
   private syncTranscript(): void {
@@ -532,4 +597,8 @@ function safeSerialize(value: unknown, maxCharacters: number): string {
   }
   const safe = sanitizeText(serialized);
   return safe.length > maxCharacters ? `${safe.slice(0, maxCharacters)}\n[tool payload truncated]` : safe;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === "AbortError" || /\babort(?:ed|ing)?\b/i.test(error.message));
 }

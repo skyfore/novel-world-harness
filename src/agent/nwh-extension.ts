@@ -1,5 +1,6 @@
 import path from "node:path";
-import type { ExtensionAPI, ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme, type ExtensionAPI, type ExtensionContext, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { Key, Markdown, Text, matchesKey } from "@earendil-works/pi-tui";
 import { expandFileMentions } from "./file-mentions.js";
 import { createNwhWelcomeHeader, isFreshConversation, NWH_WORKING_FRAMES } from "./nwh-welcome.js";
 import {
@@ -13,6 +14,7 @@ import {
 } from "../compiler/batch-outcome.js";
 import {
   markSourceLoopBatchComplete,
+  parseStandaloneSourcePath,
   prepareNextSourceLoopTurn,
   prepareSourceLoopFromContent,
   prepareSourceLoopFromInput,
@@ -62,7 +64,12 @@ import {
   type PlayScenePurpose,
   type PlaySceneRequest,
 } from "../world/play-opening.js";
-import { createPiPlayerOpeningNarrator, type PlayerOpeningNarrator } from "./pi-player-opening.js";
+import {
+  createPiPlayerOpeningNarrator,
+  type PlayerOpeningNarrator,
+  type PlayerSceneNarrationObserver,
+} from "./pi-player-opening.js";
+import { formatElapsed } from "../util/elapsed-status.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -117,6 +124,7 @@ TUI shortcuts:
   Enter send · Shift+Enter newline · Esc interrupt · Ctrl+O toggle tool details
   Ctrl+T toggle reasoning · PgUp/PgDn scroll transcript · Ctrl+Shift+F search
   ↑/↓ prompt history · ← backgrounds the focused NWH task panel · /tasks restores it
+  Ctrl+C cancels the focused NWH task safely; completed task output remains under /tasks
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
 const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
@@ -144,14 +152,6 @@ export function splitCommandArguments(value: string): string[] {
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(value)) !== null) tokens.push(match[1] ?? match[2] ?? match[3] ?? "");
   return tokens;
-}
-
-export function compilerBatchTerminalText(message: { stopReason?: string; errorMessage?: string }): string {
-  if (message.stopReason === "error" || message.stopReason === "aborted") {
-    const detail = message.errorMessage?.replace(/\s+/g, " ").trim().slice(0, 500);
-    return `Model batch ended with ${message.stopReason}${detail ? `: ${detail}` : ""}. NWH did not checkpoint the batch or commit world truth; the host is deciding whether it can be retried.`;
-  }
-  return "Model batch output ended. NWH is verifying the finish handshake and deriving checkpoint status from host state. All submitted artifacts remain pending proposals until deterministic convergence accepts them.";
 }
 
 export type TuiReparseArguments = {
@@ -189,28 +189,178 @@ function modelLabel(model: { provider: string; id: string } | undefined): string
   return model ? `${model.provider}/${model.id}` : "unresolved";
 }
 
+async function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  let abortHandler: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        abortHandler = () => reject(signal.reason ?? new DOMException("Operation aborted", "AbortError"));
+        signal.addEventListener("abort", abortHandler, { once: true });
+      }),
+    ]);
+  } finally {
+    if (abortHandler) signal.removeEventListener("abort", abortHandler);
+  }
+}
+
+const COMPILER_CONTEXT_TYPES = new Set([
+  "nwh-compiler-batch",
+  "nwh-prepare-all-batch",
+  "nwh-prepare-all-initial-world",
+]);
+
+type ContextMessage = { role: string; customType?: string; details?: unknown };
+
+/**
+ * Compiler turns stay visible in the transcript, but completed compiler
+ * prompts/answers must not silently become context for a later assistant turn.
+ */
+export function filterNwhModelContext<T extends ContextMessage>(
+  messages: readonly T[],
+  compilerTurnActive: boolean,
+): T[] {
+  const isBoundary = (message: T) => message.role === "custom"
+    && Boolean(message.customType && COMPILER_CONTEXT_TYPES.has(message.customType));
+  if (compilerTurnActive) {
+    const boundary = messages.findLastIndex(isBoundary);
+    return boundary < 0 ? [...messages] : messages.slice(boundary);
+  }
+  let compilerSpan = false;
+  const filtered: T[] = [];
+  for (const message of messages) {
+    if (isBoundary(message)) {
+      const details = message.details && typeof message.details === "object" ? message.details as Record<string, unknown> : undefined;
+      if (details?.excludePreviousUser === true && filtered.at(-1)?.role === "user") filtered.pop();
+      compilerSpan = true;
+      continue;
+    }
+    if (compilerSpan && (message.role === "assistant" || message.role === "toolResult")) continue;
+    compilerSpan = false;
+    filtered.push(message);
+  }
+  return filtered;
+}
+
 export function createNwhExtension(options: NwhExtensionOptions): ExtensionFactory {
   const { workspace, saveSession, mode } = options;
   return (pi: ExtensionAPI) => {
+    const customMessageText = (content: string | Array<{ type: string; text?: string }>) => typeof content === "string"
+      ? content
+      : content.flatMap((item) => item.type === "text" && item.text ? [item.text] : []).join("\n");
+    pi.registerMessageRenderer("nwh-narrator", (message) =>
+      new Markdown(customMessageText(message.content), 1, 0, getMarkdownTheme()));
+    pi.registerMessageRenderer("nwh-play", (message) => {
+      const content = customMessageText(message.content);
+      return /^Entered \*\*.+committed step \d+\./m.test(content)
+        ? new Text("", 0, 0)
+        : new Markdown(content, 1, 0, getMarkdownTheme());
+    });
     let compilerToolsActive = mode === "compiler";
     let activeSourceId: string | undefined;
     let pendingTurn: SourceLoopTurn | undefined;
+    let pendingTurnInitiatedByUserInput = false;
     let pendingRunMessages: unknown[] = [];
     let registeredCompilerToolset: CompilerProposalToolset | undefined;
     let prepareAllState: TuiPrepareAllState | undefined;
     let compilerCircuitBroken = false;
     let playerMode = false;
     let selectedPlay: SelectedPlayExperience | undefined;
+    let activePlayerScene: {
+      controller: AbortController;
+      promise: Promise<void>;
+    } | undefined;
+    let activePlayerTurn: { controller: AbortController; cancellable: boolean; completion: Promise<void> } | undefined;
+    let stopTerminalInput: (() => void) | undefined;
+    let startupRestorePromise: Promise<void> | undefined;
+    let shuttingDown = false;
     let activeTask: NwhTask | undefined;
+    const taskHistory: NwhTask[] = [];
     let taskForeground = false;
+    let prepareAllHostActivity: { update(message: string): void; close(): void } | undefined;
+    const hostActivities = new Map<string, symbol>();
     const preparedCache = new PreparedNovelCache(workspace.root, options.preparedCacheRoot);
     const runReparse = options.runReparse ?? reparseCommand;
-    const taskRunning = () => activeTask?.snapshot.status === "running";
+    const taskRunning = () => activeTask?.snapshot.status === "running"
+      || activeTask?.snapshot.status === "cancelling";
+
+    const beginHostActivity = (ctx: ExtensionContext, key: string, initial: string) => {
+      const token = Symbol(key);
+      const startedAt = Date.now();
+      let message = initial;
+      hostActivities.set(key, token);
+      const render = () => {
+        if (hostActivities.get(key) !== token || ctx.mode !== "tui") return;
+        const text = `${message} · elapsed ${formatElapsed(Date.now() - startedAt)}`;
+        const styled = ctx.ui.theme?.fg?.("dim", text) ?? text;
+        ctx.ui.setStatus?.(`nwh-host-${key}`, styled);
+        if (typeof ctx.ui.setWidget === "function") {
+          ctx.ui.setWidget(
+            `nwh-host-${key}`,
+            [ctx.ui.theme?.fg?.("dim", `⟳ ${text}`) ?? `⟳ ${text}`],
+            { placement: "belowEditor" },
+          );
+        }
+      };
+      render();
+      const timer = setInterval(render, 1_000);
+      timer.unref();
+      return {
+        update(next: string) {
+          message = next;
+          render();
+        },
+        close() {
+          clearInterval(timer);
+          if (hostActivities.get(key) !== token) return;
+          hostActivities.delete(key);
+          if (ctx.mode === "tui") {
+            ctx.ui.setStatus?.(`nwh-host-${key}`, undefined);
+            ctx.ui.setWidget?.(`nwh-host-${key}`, undefined, { placement: "belowEditor" });
+          }
+        },
+      };
+    };
+
+    const guardForegroundIdle = (
+      ctx: ExtensionContext,
+      action: string,
+      options: { includeTask?: boolean } = {},
+    ): boolean => {
+      if (typeof ctx.isIdle === "function" && ctx.isIdle() === false) {
+        ctx.ui.notify(`Cannot ${action} while the current model response is streaming. Press Esc to interrupt it, or wait for it to finish.`, "warning");
+        return false;
+      }
+      if (pendingTurn || prepareAllState) {
+        ctx.ui.notify(`Cannot ${action} while novel preparation is active. Its model output remains in the foreground.`, "warning");
+        return false;
+      }
+      if (activePlayerTurn) {
+        ctx.ui.notify(`Cannot ${action} while a player action is being resolved. Press Esc to cancel it before commitment, or wait for the committed result.`, "warning");
+        return false;
+      }
+      if (activePlayerScene) {
+        ctx.ui.notify(`Cannot ${action} while scene narration is streaming. Press Esc to stop the narration first.`, "warning");
+        return false;
+      }
+      if (options.includeTask !== false && taskRunning()) {
+        ctx.ui.notify(`Cannot ${action} while ${activeTask!.snapshot.title} is ${activeTask!.snapshot.status}. Use /tasks to inspect or cancel it.`, "warning");
+        return false;
+      }
+      return true;
+    };
 
     const syncTaskChrome = (ctx: ExtensionContext, task: NwhTask) => {
-      if (task.snapshot.status !== "running") {
+      const running = task.snapshot.status === "running" || task.snapshot.status === "cancelling";
+      if (!running) {
         ctx.ui.setStatus("nwh-task", undefined);
-        ctx.ui.setWidget("nwh-task", undefined, { placement: "belowEditor" });
+        const glyph = task.snapshot.status === "completed" ? "✓" : task.snapshot.status === "cancelled" ? "⊘" : "!";
+        ctx.ui.setWidget(
+          "nwh-task",
+          [ctx.ui.theme.fg("dim", `${glyph} ${taskSummary(task)} · /tasks to inspect`) ],
+          { placement: "belowEditor" },
+        );
         return;
       }
       ctx.ui.setStatus("nwh-task", ctx.ui.theme.fg("dim", taskSummary(task)));
@@ -222,12 +372,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     };
 
     const foregroundTask = async (ctx: ExtensionContext, task: NwhTask) => {
-      taskForeground = true;
-      syncTaskChrome(ctx, task);
+      const isActiveTask = task === activeTask;
+      if (isActiveTask) {
+        taskForeground = true;
+        syncTaskChrome(ctx, task);
+      }
       const outcome = await showNwhTask(ctx.ui, task, ctx.cwd);
-      taskForeground = false;
-      syncTaskChrome(ctx, task);
-      if (outcome === "background" && task.snapshot.status === "running") {
+      if (isActiveTask) taskForeground = false;
+      if (activeTask) syncTaskChrome(ctx, activeTask);
+      if (outcome === "background" && (task.snapshot.status === "running" || task.snapshot.status === "cancelling")) {
         ctx.ui.notify(`${task.snapshot.title} continues in the background; use /tasks to foreground it.`, "info");
       }
     };
@@ -245,10 +398,74 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       pi.sendMessage({ customType: "nwh-play", content, display: true });
     };
 
-    const narratePlayerScene = async (
+    const showNarratorMessage = (content: string) => {
+      pi.sendMessage({ customType: "nwh-narrator", content, display: true });
+    };
+
+    const createPlayerSceneObserver = (
+      ctx: ExtensionContext,
+      purpose: PlayScenePurpose,
+      signal: AbortSignal,
+    ): { observer: PlayerSceneNarrationObserver; close: () => void } => {
+      const widgetAvailable = ctx.mode === "tui" && typeof ctx.ui.setWidget === "function";
+      let content = "";
+      let retryNotice = "";
+      let renderTimer: NodeJS.Timeout | undefined;
+      const render = () => {
+        renderTimer = undefined;
+        if (!widgetAvailable || signal.aborted) return;
+        const title = purpose === "opening"
+          ? "✦ 故事正在展开"
+          : purpose === "turn"
+            ? "✦ 世界正在回应"
+            : "✦ 正在进入当前场景";
+        ctx.ui.setWidget(
+          "nwh-player-scene-stream",
+          [
+            ctx.ui.theme.fg("accent", title),
+            content || ctx.ui.theme.fg("dim", "叙事模型正在组织眼前这一刻…"),
+            ...(retryNotice ? [ctx.ui.theme.fg("dim", retryNotice)] : []),
+          ],
+          { placement: "aboveEditor" },
+        );
+      };
+      const renderSoon = () => {
+        if (!widgetAvailable || renderTimer) return;
+        renderTimer = setTimeout(render, 32);
+        renderTimer.unref();
+      };
+      const observer: PlayerSceneNarrationObserver = {
+        signal,
+        onAttempt(attempt) {
+          content = "";
+          retryNotice = attempt === 2 ? "首稿过短，正在即时重写…" : "";
+          render();
+        },
+        onText(delta) {
+          const firstDelta = content.length === 0;
+          content += delta;
+          if (firstDelta) render();
+          else renderSoon();
+        },
+        onRetry(message) {
+          retryNotice = message;
+          render();
+        },
+      };
+      return {
+        observer,
+        close() {
+          if (renderTimer) clearTimeout(renderTimer);
+          if (widgetAvailable) ctx.ui.setWidget("nwh-player-scene-stream", undefined, { placement: "aboveEditor" });
+        },
+      };
+    };
+
+    const runPlayerScene = async (
       ctx: ExtensionContext,
       selection: SelectedPlayExperience,
       purpose: PlayScenePurpose,
+      controller: AbortController,
     ): Promise<void> => {
       let frame: Awaited<ReturnType<typeof buildPlayOpeningFrame>> = {
         branchId: selection.session.branchId,
@@ -261,6 +478,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         visibleEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
         recentVisibleEvents: [],
       };
+      const stream = createPlayerSceneObserver(ctx, purpose, controller.signal);
       try {
         frame = await buildPlayOpeningFrame(
           workspace.root,
@@ -271,7 +489,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (ctx.mode === "tui") {
           ctx.ui.setStatus(
             "nwh-play-opening",
-            ctx.ui.theme.fg("dim", purpose === "opening" ? "Opening story..." : "Establishing scene..."),
+            ctx.ui.theme.fg(
+              "dim",
+              purpose === "opening" ? "Opening story..." : purpose === "turn" ? "Rendering outcome..." : "Establishing scene...",
+            ),
           );
         }
         const narrator = options.playerOpeningNarrator ?? createPiPlayerOpeningNarrator({
@@ -279,13 +500,40 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(options.profile ? { profile: options.profile } : {}),
           ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
         });
-        showPlayMessage(await narrator(frame, purpose));
+        const narration = await narrator(frame, purpose, stream.observer);
+        if (controller.signal.aborted) return;
+        const stillSelected = playerMode
+          && selectedPlay?.session.branchId === selection.session.branchId
+          && selectedPlay.actor.id === selection.actor.id;
+        if (stillSelected) showNarratorMessage(narration);
       } catch (error) {
-        showPlayMessage(renderPlaySceneFailure(frame));
+        if (controller.signal.aborted) return;
+        showPlayMessage(renderPlaySceneFailure(frame, purpose));
         ctx.ui.notify(`Scene narration failed: ${error instanceof Error ? error.message : String(error)}`, "error");
       } finally {
+        stream.close();
         if (ctx.mode === "tui") ctx.ui.setStatus("nwh-play-opening", undefined);
       }
+    };
+
+    const narratePlayerScene = async (
+      ctx: ExtensionContext,
+      selection: SelectedPlayExperience,
+      purpose: PlayScenePurpose,
+    ): Promise<void> => {
+      const previous = activePlayerScene;
+      if (previous) {
+        previous.controller.abort();
+        await previous.promise;
+      }
+      const controller = new AbortController();
+      const promise = runPlayerScene(ctx, selection, purpose, controller);
+      const active = { controller, promise };
+      activePlayerScene = active;
+      void promise.finally(() => {
+        if (activePlayerScene === active) activePlayerScene = undefined;
+      });
+      await promise;
     };
 
     const activatePlayer = async (
@@ -302,6 +550,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     ): Promise<SelectedPlayExperience | undefined> => {
       const previousSelection = selectedPlay;
       let selection: SelectedPlayExperience | undefined;
+      const activity = beginHostActivity(ctx, "player-select", "Resolving novel, instance, and character");
       try {
         selection = await choosePlayExperience(workspace.root, {
           ...input,
@@ -318,6 +567,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       } catch (error) {
         ctx.ui.notify(`Cannot enter novel world: ${error instanceof Error ? error.message : String(error)}`, "error");
         return undefined;
+      } finally {
+        activity.close();
       }
       if (!selection) {
         ctx.ui.notify("Player selection cancelled; the current mode is unchanged.", "info");
@@ -335,30 +586,49 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         selectionChanged,
         hadPreviousSelection: Boolean(previousSelection),
       });
-      if (selectionChanged && purpose) {
-        ctx.ui.notify(
-          `Playing ${selection.actor.canonicalName} in ${selection.source?.title ?? selection.branchName} · ordinary messages are character actions · /leave exits player mode.`,
-          "info",
-        );
-      }
       if (purpose) await narratePlayerScene(ctx, selection, purpose);
       return selection;
     };
 
     const runPlayerInput = async (utterance: string, ctx: ExtensionContext): Promise<void> => {
+      if (shuttingDown) return;
       const selection = selectedPlay ?? await activatePlayer(ctx);
       if (!selection) return;
+      const pendingScene = activePlayerScene;
+      if (pendingScene) await pendingScene.promise;
+      if (shuttingDown) return;
       showPlayMessage(`**${selection.actor.canonicalName}:** ${utterance}`);
-      const translator = options.playerTranslator ?? createPiPlayerActionTranslator({
+      const showTurnActivity = (message: string) => {
+        if (ctx.mode !== "tui") return;
+        ctx.ui.setStatus("nwh-play-turn", ctx.ui.theme.fg("dim", `${message} · ${selection.actor.canonicalName}`));
+        ctx.ui.setWidget(
+          "nwh-player-turn",
+          [ctx.ui.theme.fg("dim", `✦ ${message}`)],
+          { placement: "aboveEditor" },
+        );
+      };
+      const controller = new AbortController();
+      let completeTurn!: () => void;
+      const completion = new Promise<void>((resolve) => { completeTurn = resolve; });
+      const activeTurn = { controller, cancellable: true, completion };
+      activePlayerTurn = activeTurn;
+      const baseTranslator = options.playerTranslator ?? createPiPlayerActionTranslator({
         root: workspace.root,
         ...(options.profile ? { profile: options.profile } : {}),
         ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+        onStatus: showTurnActivity,
+        signal: controller.signal,
       });
-      if (ctx.mode === "tui") {
-        ctx.ui.setStatus("nwh-play-turn", ctx.ui.theme.fg("dim", `Validating action · ${selection.actor.canonicalName}`));
-      }
+      const translator: PlayerActionTranslator = async (input) => {
+        const candidate = await raceWithAbort(Promise.resolve(baseTranslator(input)), controller.signal);
+        controller.signal.throwIfAborted();
+        activeTurn.cancellable = false;
+        return candidate;
+      };
+      showTurnActivity("正在理解你的行动…");
+      let outcome: Awaited<ReturnType<typeof performPlayTurn>>;
       try {
-        const outcome = await performPlayTurn({
+        outcome = await performPlayTurn({
           root: workspace.root,
           branchId: selection.session.branchId,
           actorId: selection.actor.id,
@@ -366,78 +636,99 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           translator,
           advanceBackground: options.advanceBackground ?? 1,
         });
-        if (!outcome.result.accepted) {
-          showPlayMessage([
-            `Action rejected at **${outcome.result.stage}**; committed world truth is unchanged.`,
-            ...outcome.result.issues.map((issue) => `- ${issue.code}: ${issue.message}`),
-          ].join("\n"));
-        } else {
-          showPlayMessage([
-            outcome.result.renderedText,
-            `Committed at step ${outcome.logicalStep} (${outcome.finalHead.slice(0, 12)}).`,
-            ...outcome.backgroundEvents.map((event) => `World advanced: ${event.title}`),
-            ...(outcome.backgroundError ? [`Background advancement stopped: ${outcome.backgroundError}`] : []),
-          ].join("\n\n"));
+      } catch (error) {
+        if (controller.signal.aborted) {
+          showPlayMessage("行动已取消；候选尚未进入确定性提交，世界状态没有改变。");
+          return;
         }
-        const persisted = await new PlaySessionStore(workspace.root).read();
-        selectedPlay = {
-          ...selection,
-          ...(persisted ? { session: persisted } : {}),
-          logicalStep: outcome.logicalStep,
-        };
-        setPlayerStatus(ctx, selectedPlay);
+        throw error;
       } finally {
-        if (ctx.mode === "tui") ctx.ui.setStatus("nwh-play-turn", undefined);
+        if (activePlayerTurn === activeTurn) activePlayerTurn = undefined;
+        completeTurn();
+        if (ctx.mode === "tui") {
+          ctx.ui.setStatus("nwh-play-turn", undefined);
+          ctx.ui.setWidget("nwh-player-turn", undefined, { placement: "aboveEditor" });
+        }
       }
+      if (controller.signal.aborted) {
+        showPlayMessage("行动已取消；候选尚未进入确定性提交，世界状态没有改变。");
+        return;
+      }
+      const persisted = await new PlaySessionStore(workspace.root).read();
+      selectedPlay = {
+        ...selection,
+        ...(persisted ? { session: persisted } : {}),
+        logicalStep: outcome.logicalStep,
+      };
+      setPlayerStatus(ctx, selectedPlay);
+      if (!outcome.result.accepted) {
+        showPlayMessage([
+          `Action rejected at **${outcome.result.stage}**; committed world truth is unchanged.`,
+          ...outcome.result.issues.map((issue) => `- ${issue.code}: ${issue.message}`),
+        ].join("\n"));
+        return;
+      }
+      if (outcome.backgroundError) {
+        ctx.ui.notify(`Background advancement stopped: ${outcome.backgroundError}`, "warning");
+      }
+      await narratePlayerScene(ctx, selectedPlay, "turn");
     };
 
     const tryNaturalWorldIntent = async (text: string, ctx: ExtensionContext): Promise<boolean> => {
       if (!PLAY_INTENT.test(text) && !CHARACTER_LIST_INTENT.test(text)) return false;
-      const catalog = await inspectPlayExperience(workspace.root);
-      const sourceId = catalog.novels.length
-        ? await choosePlayNovel(catalog, undefined, createTuiUserQuestion(ctx.ui), { preferActive: false })
-        : undefined;
-      if (catalog.novels.length && !sourceId) return true;
-      let instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
-      if (sourceId && !instanceCatalog.instances.length) {
-        await createSourcePlayInstance(workspace.root, catalog, sourceId, {
-          ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}),
-        });
-        instanceCatalog = catalogForSource(await inspectPlayExperience(workspace.root), sourceId);
-        const source = catalog.novels.find((novel) => novel.id === sourceId);
-        ctx.ui.notify(`Created the first playable instance for ${source?.title ?? sourceId}.`, "info");
-      }
-      const branchId = await choosePlayInstance(workspace.root, undefined, createTuiUserQuestion(ctx.ui), instanceCatalog);
-      if (!branchId) return true;
-      const available = await listPlayableCharacters(workspace.root, {
-        branchId,
-        ...(sourceId ? { source: sourceId } : {}),
-      });
-      if (CHARACTER_LIST_INTENT.test(text) && !PLAY_INTENT.test(text)) {
-        const characters = formatCharacters(available.characters, available.branchId);
-        if (ctx.mode === "tui") ctx.ui.notify(characters, "info");
-        else showPlayMessage(characters);
-        return true;
-      }
-      const matches = available.characters.filter((character) =>
-        [character.canonicalName, ...character.aliases]
-          .some((name) => text.normalize("NFKC").toLocaleLowerCase().includes(name.normalize("NFKC").toLocaleLowerCase())),
-      );
-      const actor = matches.length === 1
-        ? matches[0]
-        : available.characters.length === 1
-          ? available.characters[0]
+      const activity = beginHostActivity(ctx, "play-intent", "Finding the requested novel world");
+      try {
+        const catalog = await inspectPlayExperience(workspace.root);
+        const sourceId = catalog.novels.length
+          ? await choosePlayNovel(catalog, undefined, createTuiUserQuestion(ctx.ui), { preferActive: false })
           : undefined;
-      await activatePlayer(ctx, {
-        branchId: available.branchId,
-        ...(sourceId ? { source: sourceId } : {}),
-        ...(actor ? { character: actor.id } : {}),
-        preferActiveSource: false,
-        preferSavedCharacter: false,
-        instanceMode: "continue",
-        scene: playSceneRequestForEntry("play"),
-      });
-      return true;
+        if (catalog.novels.length && !sourceId) return true;
+        let instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
+        if (sourceId && !instanceCatalog.instances.length) {
+          activity.update("Creating the first playable instance");
+          await createSourcePlayInstance(workspace.root, catalog, sourceId, {
+            ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}),
+          });
+          instanceCatalog = catalogForSource(await inspectPlayExperience(workspace.root), sourceId);
+          const source = catalog.novels.find((novel) => novel.id === sourceId);
+          ctx.ui.notify(`Created the first playable instance for ${source?.title ?? sourceId}.`, "info");
+        }
+        const branchId = await choosePlayInstance(workspace.root, undefined, createTuiUserQuestion(ctx.ui), instanceCatalog);
+        if (!branchId) return true;
+        activity.update("Loading playable characters");
+        const available = await listPlayableCharacters(workspace.root, {
+          branchId,
+          ...(sourceId ? { source: sourceId } : {}),
+        });
+        if (CHARACTER_LIST_INTENT.test(text) && !PLAY_INTENT.test(text)) {
+          const characters = formatCharacters(available.characters, available.branchId);
+          if (ctx.mode === "tui") ctx.ui.notify(characters, "info");
+          else showPlayMessage(characters);
+          return true;
+        }
+        const matches = available.characters.filter((character) =>
+          [character.canonicalName, ...character.aliases]
+            .some((name) => text.normalize("NFKC").toLocaleLowerCase().includes(name.normalize("NFKC").toLocaleLowerCase())),
+        );
+        const actor = matches.length === 1
+          ? matches[0]
+          : available.characters.length === 1
+            ? available.characters[0]
+            : undefined;
+        activity.update("Entering the selected character");
+        await activatePlayer(ctx, {
+          branchId: available.branchId,
+          ...(sourceId ? { source: sourceId } : {}),
+          ...(actor ? { character: actor.id } : {}),
+          preferActiveSource: false,
+          preferSavedCharacter: false,
+          instanceMode: "continue",
+          scene: playSceneRequestForEntry("play"),
+        });
+        return true;
+      } finally {
+        activity.close();
+      }
     };
 
     const resetCompilerBatch = async (segmentIds: readonly string[], compilerBatchId: string, sourceId: string) => {
@@ -447,9 +738,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       pendingRunMessages = [];
     };
 
-    const beginTurn = async (turn: SourceLoopTurn) => {
+    const beginTurn = async (turn: SourceLoopTurn, initiatedByUserInput = false) => {
       await resetCompilerBatch(turn.batch.segmentIds, turn.batch.id, turn.source.id);
       pendingTurn = turn;
+      pendingTurnInitiatedByUserInput = initiatedByUserInput;
     };
 
     const activateCompilerTools = (ctx: ExtensionContext) => {
@@ -518,7 +810,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     const stopPrepareAll = (ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "warning") => {
       prepareAllState = undefined;
+      pendingTurn = undefined;
+      pendingTurnInitiatedByUserInput = false;
+      pendingRunMessages = [];
+      compilerCircuitBroken = false;
+      prepareAllHostActivity?.close();
+      prepareAllHostActivity = undefined;
       ctx.ui.setStatus("nwh-prepare-all", undefined);
+      ctx.ui.setWidget("nwh-prepare-all", undefined, { placement: "belowEditor" });
       ctx.ui.notify(message, level);
     };
 
@@ -532,6 +831,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         !content.includes(`<source-segment id="${segmentId}">`));
       if (missingSegmentIds.length) {
         pendingTurn = undefined;
+        pendingTurnInitiatedByUserInput = false;
         pendingRunMessages = [];
         compilerCircuitBroken = false;
         stopPrepareAll(
@@ -548,11 +848,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     const advancePrepareAll = async (ctx: ExtensionContext): Promise<void> => {
       const state = prepareAllState;
       if (!state) return;
+      try {
+      prepareAllHostActivity?.update("Checking deterministic preparation state");
       const inspection = await inspectPreparation(workspace.root, {
         sourceId: state.sourceId,
         branchId: state.branchId,
       });
       if (inspection.stage === "compile") {
+        prepareAllHostActivity?.update(`Preparing evidence batch ${inspection.completedBatches + 1}/${inspection.totalBatches}`);
         if (!state.compileAllApproved) {
           const decision = await choose(ctx, "Complete novel compilation?", [
             { value: "continue", label: "Compile all", description: `Run all ${inspection.totalBatches - inspection.completedBatches} remaining evidence batches.`, recommended: true },
@@ -589,6 +892,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return;
       }
       if (inspection.stage === "review") {
+        prepareAllHostActivity?.update(`Reviewing ${inspection.pending.length} pending proposal(s)`);
         const decision = await choose(ctx, "Accept validated proposals?", [
           { value: "accept", label: "Converge safely", description: `Commit valid proposals and preserve uncommittable drafts in rejected history (${inspection.pending.length} pending).`, recommended: true },
           { value: "review", label: "Review first", description: "Stop before accepting anything; use proposal CLI commands." },
@@ -598,10 +902,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         let lastReported = 0;
+        prepareAllHostActivity?.update("Converging validated proposals");
         const result = await convergeWorldProposals(workspace.root, state.sourceId, {
           onProgress: (progress) => {
-            if (progress.phase === "complete" || progress.processed === progress.total || progress.processed - lastReported >= 50) {
+            if (progress.phase === "complete" || progress.processed === progress.total || progress.processed - lastReported >= 10) {
               ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Converging · ${progress.phase} ${progress.processed}/${progress.total}`));
+              prepareAllHostActivity?.update(`Converging ${progress.phase} ${progress.processed}/${progress.total}`);
               lastReported = progress.processed;
             }
           },
@@ -619,6 +925,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return;
       }
       if (inspection.stage === "needs-initial-world") {
+        prepareAllHostActivity?.update("Preparing the opening world state");
         if (state.initialWorldAttempted) {
           const fallbackId = await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
           const result = await convergeWorldProposals(workspace.root, state.sourceId);
@@ -659,6 +966,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return;
       }
       if (inspection.stage === "create-branch") {
+        prepareAllHostActivity?.update("Publishing the prepared revision");
         const cached = await preparedCache.publish(inspection.source!);
         state.preparedCacheVerified = true;
         ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
@@ -675,6 +983,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return;
       }
       if (inspection.stage === "ready") {
+        prepareAllHostActivity?.update("Verifying the playable revision");
         if (!state.preparedCacheVerified) {
           const cached = await preparedCache.publish(inspection.source!);
           ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
@@ -690,9 +999,36 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         `Full preparation stopped at '${inspection.stage}'.${diagnosis} Next: ${inspection.next}`,
         inspection.stage === "repair" ? "error" : "warning",
       );
+      } catch (error) {
+        if (prepareAllState === state) {
+          stopPrepareAll(
+            ctx,
+            `Full preparation stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}. Progress already checkpointed remains resumable with /prepare-all.`,
+            "error",
+          );
+        }
+      }
     };
 
-    pi.on("session_shutdown", async () => options.onSessionShutdown?.());
+    pi.on("session_shutdown", async () => {
+      shuttingDown = true;
+      stopTerminalInput?.();
+      stopTerminalInput = undefined;
+      prepareAllHostActivity?.close();
+      prepareAllHostActivity = undefined;
+      if (startupRestorePromise) await startupRestorePromise;
+      const pendingPlayerTurn = activePlayerTurn;
+      if (pendingPlayerTurn?.cancellable) pendingPlayerTurn.controller.abort();
+      if (taskRunning()) activeTask!.cancel();
+      const pendingScene = activePlayerScene;
+      if (pendingScene) {
+        pendingScene.controller.abort();
+        await pendingScene.promise;
+      }
+      if (pendingPlayerTurn) await pendingPlayerTurn.completion;
+      if (activeTask) await activeTask.completion;
+      await options.onSessionShutdown?.();
+    });
 
     pi.on("tool_call", (event) => {
       if (playerMode) {
@@ -733,8 +1069,23 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     pi.on("input", async (event, ctx) => {
       if (event.source === "extension") return { action: "continue" };
+      if (shuttingDown) return { action: "handled" };
+      if (startupRestorePromise) await startupRestorePromise;
       if (pendingTurn || prepareAllState) {
         ctx.ui.notify("Novel preparation is already running. Wait for it to finish before sending another message.", "warning");
+        return { action: "handled" };
+      }
+      const sourceCandidate = parseStandaloneSourcePath(event.text);
+      const sourceLike = Boolean(sourceCandidate && /\.(?:txt|text|novel|md|markdown)$/iu.test(sourceCandidate));
+      if (
+        taskRunning()
+        && !playerMode
+        && (sourceLike || PLAY_INTENT.test(event.text) || CHARACTER_LIST_INTENT.test(event.text))
+      ) {
+        ctx.ui.notify(
+          `${activeTask!.snapshot.title} is ${activeTask!.snapshot.status}. Use /tasks to inspect or cancel it before starting another compiler or world-selection flow.`,
+          "warning",
+        );
         return { action: "handled" };
       }
 
@@ -747,6 +1098,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return { action: "handled" };
       }
 
+      const sourceActivity = sourceLike ? beginHostActivity(ctx, "source-ingest", "Reading and indexing the novel source") : undefined;
       try {
         const preparation = await prepareSourceLoopFromInput(workspace.root, event.text, { cacheRoot: options.preparedCacheRoot });
         if (preparation) {
@@ -760,8 +1112,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             );
             return { action: "handled" };
           }
+          sourceActivity?.update("Preparing the foreground compiler turn");
           activateCompilerTools(ctx);
-          await beginTurn(preparation);
+          await beginTurn(preparation, true);
           ctx.ui.notify(
             `Novel indexed: ${preparation.source.sourcePath} · starting batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`,
             "info",
@@ -771,6 +1124,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       } catch (error) {
         ctx.ui.notify(`Cannot start novel compiler: ${error instanceof Error ? error.message : String(error)}`, "error");
         return { action: "handled" };
+      } finally {
+        sourceActivity?.close();
       }
 
       try {
@@ -802,34 +1157,18 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           customType: pendingTurn ? "nwh-compiler-batch" : "nwh-file-context",
           content: context.join("\n\n"),
           display: false,
+          ...(pendingTurnInitiatedByUserInput ? { details: { excludePreviousUser: true } } : {}),
         },
       };
     });
 
     pi.on("context", (event) => {
-      if (!pendingTurn && !prepareAllState?.initialWorldRequestRunning) return;
-      const boundary = event.messages.findLastIndex((message) =>
-        message.role === "custom" && (
-          message.customType === "nwh-compiler-batch"
-          || message.customType === "nwh-prepare-all-batch"
-          || message.customType === "nwh-prepare-all-initial-world"
-        ));
-      if (boundary <= 0) return;
-      return { messages: event.messages.slice(boundary) };
-    });
-
-    pi.on("message_end", (event) => {
-      if ((!pendingTurn && !prepareAllState?.initialWorldRequestRunning) || event.message.role !== "assistant") return;
-      if (event.message.content.some((content) => content.type === "toolCall")) return;
-      return {
-        message: {
-          ...event.message,
-          content: [{
-            type: "text",
-            text: compilerBatchTerminalText(event.message),
-          }],
-        },
-      };
+      const messages = filterNwhModelContext(
+        event.messages,
+        Boolean(pendingTurn || prepareAllState?.initialWorldRequestRunning),
+      );
+      if (messages.length === event.messages.length && messages.every((message, index) => message === event.messages[index])) return;
+      return { messages };
     });
 
     pi.on("agent_end", (event) => {
@@ -868,6 +1207,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           if (retries < MAX_PREPARE_ALL_PROVIDER_RETRIES) {
             preparation.providerRetryCounts.set(completedTurn.batch.id, retries + 1);
             pendingTurn = undefined;
+            pendingTurnInitiatedByUserInput = false;
             ctx.ui.notify(
               `Compiler batch ${completedTurn.batch.ordinal + 1} was interrupted by the provider (${failure}); retrying automatically ${retries + 1}/${MAX_PREPARE_ALL_PROVIDER_RETRIES}.`,
               "warning",
@@ -877,6 +1217,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           }
         }
         pendingTurn = undefined;
+        pendingTurnInitiatedByUserInput = false;
         const wasPreparingAll = Boolean(preparation);
         ctx.ui.notify(
           `Compiler batch ${completedTurn.batch.ordinal + 1} was not checkpointed (${failure}); /compile-next retries the same evidence.`,
@@ -888,6 +1229,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         return;
       }
       pendingTurn = undefined;
+      pendingTurnInitiatedByUserInput = false;
       await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id);
       ctx.ui.notify(
         completedTurn.remainingAfterBatch > 0
@@ -898,7 +1240,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (prepareAllState) await advancePrepareAll(ctx);
     });
 
-    pi.on("session_start", async (_event, ctx) => {
+    pi.on("session_start", (_event, ctx) => {
       if (ctx.mode !== "tui") return;
       const modeLabel = mode === "compiler" ? "compiler proposals" : "read-only assistant";
       const terminalTitle = `NWH — ${path.basename(workspace.root)}`;
@@ -909,41 +1251,95 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       ctx.ui.setWorkingIndicator({ frames: NWH_WORKING_FRAMES, intervalMs: 180 });
       ctx.ui.setHiddenThinkingLabel("Thinking hidden · Ctrl+T to show");
       ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
+      if (!stopTerminalInput && typeof ctx.ui.onTerminalInput === "function") {
+        stopTerminalInput = ctx.ui.onTerminalInput((data) => {
+          if (!matchesKey(data, Key.escape)) return undefined;
+          if (activePlayerTurn?.cancellable) {
+            activePlayerTurn.controller.abort();
+            return { consume: true };
+          }
+          if (activePlayerScene) {
+            activePlayerScene.controller.abort();
+            return { consume: true };
+          }
+          return undefined;
+        });
+      }
       const freshConversation = isFreshConversation(ctx.sessionManager.getEntries());
       ctx.ui.setHeader((tui, theme) => createNwhWelcomeHeader(tui, theme, { mode, freshConversation }));
       if (mode === "assistant") {
-        const catalog = await inspectPlayExperience(workspace.root);
-        if (catalog.activeSession) {
+        const restore = async () => {
+          if (shuttingDown) return;
+          const activity = beginHostActivity(ctx, "startup", "Restoring the previous novel world");
           try {
-            await activatePlayer(ctx, {
-              branchId: catalog.activeSession.branchId,
-              ...(catalog.activeSession.sourceId ? { source: catalog.activeSession.sourceId } : {}),
-              character: catalog.activeSession.actorId,
-              instanceMode: "continue",
-              scene: options.activeWorldScene ?? playSceneRequestForEntry("startup", freshConversation),
-            });
+            const saved = await new PlaySessionStore(workspace.root).read();
+            if (saved) {
+              activity.update("Opening the saved character and instance");
+              const requestedScene = options.activeWorldScene ?? playSceneRequestForEntry("startup", freshConversation);
+              const selection = await activatePlayer(ctx, {
+                branchId: saved.branchId,
+                ...(saved.sourceId ? { source: saved.sourceId } : {}),
+                character: saved.actorId,
+                instanceMode: "continue",
+                scene: "none",
+              });
+              const purpose = selection ? resolvePlayScenePurpose(requestedScene, {
+                logicalStep: selection.logicalStep,
+                selectionChanged: true,
+                hadPreviousSelection: false,
+              }) : undefined;
+              if (selection && purpose && !shuttingDown) void narratePlayerScene(ctx, selection, purpose);
+              return;
+            }
+            ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · ready · /play to choose a novel world"));
           } catch (error) {
             ctx.ui.notify(`Saved play session is unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
+          } finally {
+            activity.close();
           }
-        } else if (catalog.instances.length) {
-          ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${catalog.instances.length} world instance(s) ready · /play to choose`));
-        }
+        };
+        startupRestorePromise = new Promise<void>((resolve) => {
+          const timer = setTimeout(() => { void restore().finally(resolve); }, 0);
+          timer.unref();
+        });
+        void startupRestorePromise.finally(() => {
+          startupRestorePromise = undefined;
+        });
       }
     });
 
     pi.registerCommand("novels", {
       description: "List registered novels in this workspace",
-      handler: async (_args, ctx) => ctx.ui.notify(formatNovels(await inspectPlayExperience(workspace.root)), "info"),
+      handler: async (_args, ctx) => {
+        if (!guardForegroundIdle(ctx, "inspect novels", { includeTask: false })) return;
+        const activity = beginHostActivity(ctx, "catalog", "Scanning registered novels");
+        try {
+          ctx.ui.notify(formatNovels(await inspectPlayExperience(workspace.root)), "info");
+        } finally {
+          activity.close();
+        }
+      },
     });
 
     pi.registerCommand("instances", {
       description: "List playable world instances and progress",
-      handler: async (_args, ctx) => ctx.ui.notify(formatInstances((await inspectPlayExperience(workspace.root)).instances), "info"),
+      handler: async (_args, ctx) => {
+        if (!guardForegroundIdle(ctx, "inspect instances", { includeTask: false })) return;
+        const activity = beginHostActivity(ctx, "catalog", "Scanning playable instances");
+        try {
+          ctx.ui.notify(formatInstances((await inspectPlayExperience(workspace.root)).instances), "info");
+        } finally {
+          activity.close();
+        }
+      },
     });
 
     pi.registerCommand("characters", {
       description: "List committed characters at an instance head",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "inspect characters", { includeTask: false })) return;
+        const activity = beginHostActivity(ctx, "catalog", "Loading playable characters");
+        try {
         const [requestedBranchId, requestedSource] = splitCommandArguments(args);
         const catalog = await inspectPlayExperience(workspace.root);
         const sourceId = catalog.novels.length || requestedSource
@@ -970,12 +1366,16 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(sourceId ? { source: sourceId } : {}),
         });
         ctx.ui.notify(formatCharacters(result.characters, result.branchId, result.source?.title), "info");
+        } finally {
+          activity.close();
+        }
       },
     });
 
     pi.registerCommand("play", {
       description: "Choose a novel, then choose or name a character",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "enter player mode")) return;
         const [character, branchId, source] = splitCommandArguments(args);
         await activatePlayer(ctx, {
           ...(branchId ? { branchId } : {}),
@@ -992,6 +1392,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("world-resume", {
       description: "Resume the saved or named playable instance",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "resume a world")) return;
         const [branchId, character, source] = splitCommandArguments(args);
         await activatePlayer(ctx, {
           ...(branchId ? { branchId } : {}),
@@ -1006,6 +1407,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("continue", {
       description: "Continue the latest saved instance for a novel",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "continue a world")) return;
         const [source, character] = splitCommandArguments(args);
         await activatePlayer(ctx, {
           ...(source ? { source } : {}),
@@ -1019,6 +1421,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("switch", {
       description: "Switch to another novel, instance, or character",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "switch worlds")) return;
         const [source, branchId, character] = splitCommandArguments(args);
         await activatePlayer(ctx, {
           ...(source ? { source } : {}),
@@ -1035,6 +1438,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("create-instance", {
       description: "Create a fresh instance for a novel revision",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "create an instance")) return;
         const [source, branchId, character] = splitCommandArguments(args);
         await activatePlayer(ctx, {
           ...(source ? { source } : {}),
@@ -1051,6 +1455,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("scene", {
       description: "Render the current character scene without advancing the world",
       handler: async (_args, ctx) => {
+        if (!guardForegroundIdle(ctx, "render a scene")) return;
         const selection = selectedPlay ?? await activatePlayer(ctx, { instanceMode: "continue", scene: "none" });
         if (!selection) return;
         await narratePlayerScene(ctx, selection, selection.logicalStep === 0 ? "opening" : "orientation");
@@ -1060,6 +1465,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("progress", {
       description: "Show committed progress for a playable instance",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "inspect world progress", { includeTask: false })) return;
+        const activity = beginHostActivity(ctx, "catalog", "Reading committed world progress");
+        try {
         const [requestedBranchId] = splitCommandArguments(args);
         const catalog = await inspectPlayExperience(workspace.root);
         const branchId = await choosePlayInstance(
@@ -1072,12 +1480,23 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         const instance = catalog.instances.find((candidate) => candidate.branchId === branchId);
         if (!instance) throw new Error(`Unknown instance '${branchId}'.`);
         ctx.ui.notify(formatProgress(instance), "info");
+        } finally {
+          activity.close();
+        }
       },
     });
 
     pi.registerCommand("leave", {
       description: "Leave player mode while keeping resume state",
       handler: async (_args, ctx) => {
+        const pendingPlayerTurn = activePlayerTurn;
+        if (pendingPlayerTurn?.cancellable) pendingPlayerTurn.controller.abort();
+        if (pendingPlayerTurn) await pendingPlayerTurn.completion;
+        const pendingScene = activePlayerScene;
+        if (pendingScene) {
+          pendingScene.controller.abort();
+          await pendingScene.promise;
+        }
         playerMode = false;
         selectedPlay = undefined;
         const modeLabel = compilerToolsActive && mode === "assistant" ? "world compiler loop" : "read-only assistant";
@@ -1090,6 +1509,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("files", {
       description: "List safe local workspace files",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "list files", { includeTask: false })) return;
         const files = await workspace.listFiles({ pattern: args.trim() || undefined });
         ctx.ui.notify(files.length ? files.join("\n") : "No matching files.", "info");
       },
@@ -1098,6 +1518,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("search", {
       description: "Search local files for fixed text",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "search files", { includeTask: false })) return;
         const query = args.trim();
         if (!query) throw new Error("Usage: /search <text>");
         const matches = await workspace.searchFiles({ query });
@@ -1108,6 +1529,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("read", {
       description: "Read a bounded local file range",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "read a file", { includeTask: false })) return;
         const [filePath, range] = splitCommandArguments(args);
         if (!filePath) throw new Error("Usage: /read <path> [start:end]");
         const rangeMatch = range?.match(/^(\d+)(?::(\d+))?$/);
@@ -1121,74 +1543,80 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("prepare-content", {
       description: "Archive pasted novel text and start its compiler loop",
       handler: async (args, ctx) => {
-        if (pendingTurn || prepareAllState || taskRunning()) {
-          ctx.ui.notify("A novel preparation run is already active.", "warning");
-          return;
-        }
+        if (!guardForegroundIdle(ctx, "prepare pasted content")) return;
         if (!args.trim()) throw new Error("Usage: /prepare-content <novel text>");
         const content = args;
-        const preparation = await prepareSourceLoopFromContent(workspace.root, content, {
-          title: "pasted-novel.txt",
-          cacheRoot: options.preparedCacheRoot,
-        });
-        activeSourceId = preparation.source.id;
-        if (preparation.status === "complete") {
-          ctx.ui.notify(
-            preparation.preparedCache?.status === "restored"
-              ? `Restored active prepared revision ${preparation.preparedCache.bundleHash} for pasted content; run /prepare-all to create an independent branch.`
-              : `Pasted content has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`,
-            "info",
-          );
-          return;
+        const activity = beginHostActivity(ctx, "compiler-preflight", "Archiving and indexing pasted novel content");
+        try {
+          const preparation = await prepareSourceLoopFromContent(workspace.root, content, {
+            title: "pasted-novel.txt",
+            cacheRoot: options.preparedCacheRoot,
+          });
+          activeSourceId = preparation.source.id;
+          if (preparation.status === "complete") {
+            ctx.ui.notify(
+              preparation.preparedCache?.status === "restored"
+                ? `Restored active prepared revision ${preparation.preparedCache.bundleHash} for pasted content; run /prepare-all to create an independent branch.`
+                : `Pasted content has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`,
+              "info",
+            );
+            return;
+          }
+          activity.update("Preparing the foreground compiler turn");
+          activateCompilerTools(ctx);
+          await beginTurn(preparation);
+          ctx.ui.notify(`Archived pasted content as ${preparation.source.id} · starting batch 1/${preparation.totalBatches}.`, "info");
+          pi.sendMessage({
+            customType: "nwh-compiler-batch",
+            content: `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
+            display: false,
+          }, { triggerTurn: true });
+        } finally {
+          activity.close();
         }
-        activateCompilerTools(ctx);
-        await beginTurn(preparation);
-        ctx.ui.notify(`Archived pasted content as ${preparation.source.id} · starting batch 1/${preparation.totalBatches}.`, "info");
-        pi.sendMessage({
-          customType: "nwh-compiler-batch",
-          content: `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
-          display: false,
-        }, { triggerTurn: true });
       },
     });
 
     pi.registerCommand("compile-next", {
       description: "Process the next evidence batch for the active novel",
       handler: async (_args, ctx) => {
-        if (pendingTurn || prepareAllState || taskRunning()) {
-          ctx.ui.notify("A novel preparation run is already active.", "warning");
-          return;
+        if (!guardForegroundIdle(ctx, "compile the next evidence batch")) return;
+        const activity = beginHostActivity(ctx, "compiler-preflight", "Loading the next evidence batch");
+        try {
+          const preparation = await prepareNextSourceLoopTurn(workspace.root, activeSourceId);
+          if (!preparation) {
+            ctx.ui.notify("No novel source is registered. Paste or drag a novel file path into the TUI first.", "warning");
+            return;
+          }
+          activeSourceId = preparation.source.id;
+          if (preparation.status === "complete") {
+            ctx.ui.notify(`${preparation.source.title} has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`, "info");
+            return;
+          }
+          activity.update("Preparing the foreground compiler turn");
+          activateCompilerTools(ctx);
+          await beginTurn(preparation);
+          ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
+          // Host-generated compiler context must never be represented as a user
+          // message: doing so replaces the visible slash-command transcript.
+          pi.sendMessage({
+            customType: "nwh-compiler-batch",
+            content: `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
+            display: false,
+          }, { triggerTurn: true });
+        } finally {
+          activity.close();
         }
-        const preparation = await prepareNextSourceLoopTurn(workspace.root, activeSourceId);
-        if (!preparation) {
-          ctx.ui.notify("No novel source is registered. Paste or drag a novel file path into the TUI first.", "warning");
-          return;
-        }
-        activeSourceId = preparation.source.id;
-        if (preparation.status === "complete") {
-          ctx.ui.notify(`${preparation.source.title} has all ${preparation.totalBatches} source batches checkpointed; run /prepare-all to verify canonical readiness.`, "info");
-          return;
-        }
-        activateCompilerTools(ctx);
-        await beginTurn(preparation);
-        ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
-        // Host-generated compiler context must never be represented as a user
-        // message: doing so replaces the visible slash-command transcript.
-        pi.sendMessage({
-          customType: "nwh-compiler-batch",
-          content: `${compilerPromptForTurn(preparation)}\n\n${preparation.prompt}`,
-          display: false,
-        }, { triggerTurn: true });
       },
     });
 
     pi.registerCommand("prepare-all", {
       description: "Complete compilation, accept validated proposals and create a playable branch",
       handler: async (args, ctx) => {
-        if (pendingTurn || prepareAllState || taskRunning()) {
-          ctx.ui.notify("A compiler or full-preparation run is already active.", "warning");
-          return;
-        }
+        if (!guardForegroundIdle(ctx, "prepare the complete novel world")) return;
+        const activity = beginHostActivity(ctx, "prepare-all", "Inspecting novel readiness");
+        let handedOff = false;
+        try {
         const [requestedSourceId, requestedBranchId] = splitCommandArguments(args);
         let branchId = requestedBranchId || "main";
         let inspection = await inspectPreparation(workspace.root, {
@@ -1246,6 +1674,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         // Preserve the audit diagnosis instead of letting cache lookup throw a
         // less useful hash-mismatch error before the repair stage is reported.
         if (source && inspection.stage !== "repair") {
+          activity.update("Checking the prepared revision cache");
           const restored = await preparedCache.restore(source);
           if (restored.status === "restored") {
             ctx.ui.notify(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; source compilation is skipped.`, "info");
@@ -1262,33 +1691,49 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           preparedCacheVerified: false,
           providerRetryCounts: new Map(),
         };
+        prepareAllHostActivity = activity;
+        handedOff = true;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing world"));
         await advancePrepareAll(ctx);
+        } finally {
+          if (!handedOff) activity.close();
+        }
       },
     });
 
     pi.registerCommand("reparse", {
       description: "Rebuild selected chapters or an entire novel into a new prepared revision",
       handler: async (args, ctx) => {
-        if (activeTask?.snapshot.status === "running") {
-          ctx.ui.notify(`${activeTask.snapshot.title} is already running; bringing it to the foreground.`, "info");
-          await foregroundTask(ctx, activeTask);
+        const runningTask = taskRunning() ? activeTask : undefined;
+        if (runningTask) {
+          ctx.ui.notify(`${runningTask.snapshot.title} is already running; bringing it to the foreground.`, "info");
+          await foregroundTask(ctx, runningTask);
           return;
         }
-        if (pendingTurn || prepareAllState || taskRunning()) {
-          ctx.ui.notify("A compiler or full-preparation run is already active.", "warning");
-          return;
-        }
+        if (!guardForegroundIdle(ctx, "start a reparse")) return;
         const parsed = parseTuiReparseArguments(args);
-        const sourceId = await chooseNovelSourceId(ctx, parsed.source, "Choose a novel to reparse");
+        const preflight = beginHostActivity(ctx, "reparse-preflight", "Loading novel chapters and compiler batches");
+        let sourceId: string | undefined;
+        let source: Awaited<ReturnType<WorkspaceStore["getSource"]>>;
+        let batches: Awaited<ReturnType<typeof prepareCompilerBatches>>;
+        try {
+          sourceId = await chooseNovelSourceId(ctx, parsed.source, "Choose a novel to reparse");
+          if (!sourceId) {
+            ctx.ui.notify("Reparse cancelled.", "info");
+            return;
+          }
+          const store = await WorkspaceStore.create(workspace.root);
+          source = await store.getSource(sourceId);
+          if (!source) throw new Error(`Unknown source '${sourceId}'.`);
+          batches = await prepareCompilerBatches(workspace.root, source);
+        } finally {
+          preflight.close();
+        }
         if (!sourceId) {
           ctx.ui.notify("Reparse cancelled.", "info");
           return;
         }
-        const store = await WorkspaceStore.create(workspace.root);
-        const source = await store.getSource(sourceId);
         if (!source) throw new Error(`Unknown source '${sourceId}'.`);
-        const batches = await prepareCompilerBatches(workspace.root, source);
         if (!batches.length) throw new Error(`Source ${source.id} has no compiler batches.`);
         const chapterMap = new Map<number, { title?: string; batches: number }>();
         for (const batch of batches) {
@@ -1378,8 +1823,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           "Preparing compiler request",
         );
         activeTask = task;
+        taskHistory.push(task);
         const unsubscribe = task.subscribe(() => syncTaskChrome(ctx, task));
-        task.start(async () => {
+        task.start(async (signal) => {
           const selectedModel = parsed.model ?? (ctx.model ? modelLabel(ctx.model) : undefined);
           const result = await runReparse({
             root: workspace.root,
@@ -1388,6 +1834,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             ...(all ? { all: true } : { chapters }),
             ...(selectedModel ? { model: selectedModel } : {}),
             cacheRoot: options.preparedCacheRoot,
+            signal,
             onProgress: (message) => task.log(message),
             onStatus: (message) => task.update(message),
             onModelEvent: (event) => task.appendAgentEvent(event),
@@ -1399,6 +1846,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           syncTaskChrome(ctx, task);
           if (task.snapshot.status === "completed") {
             ctx.ui.notify(`Reparse complete for chapter(s) ${selectedChapters.join(", ")}.`, "info");
+          } else if (task.snapshot.status === "cancelled") {
+            ctx.ui.notify(`Reparse cancelled safely; the prior prepared revision remains active.`, "info");
           } else {
             ctx.ui.notify(`Reparse stopped: ${task.snapshot.error ?? "unknown error"}`, "error");
           }
@@ -1411,17 +1860,31 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.registerCommand("tasks", {
       description: "Show or foreground the current NWH long-running task",
       handler: async (_args, ctx) => {
-        if (!activeTask) {
+        if (!taskHistory.length) {
           ctx.ui.notify("No NWH task has been started in this session.", "info");
           return;
         }
-        await foregroundTask(ctx, activeTask);
+        let task = activeTask ?? taskHistory.at(-1)!;
+        if (taskHistory.length > 1) {
+          const selected = await choose(ctx, "Choose an NWH task", taskHistory.map((candidate, index) => ({
+            value: String(index),
+            label: `${candidate.snapshot.status} · ${candidate.snapshot.title}`,
+            description: taskSummary(candidate),
+            recommended: candidate === activeTask,
+          })));
+          if (selected === undefined) return;
+          task = taskHistory[Number(selected)]!;
+        }
+        await foregroundTask(ctx, task);
       },
     });
 
     pi.registerCommand("audit", {
       description: "Audit novel evidence and canonical consistency",
       handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "audit compiler state")) return;
+        const activity = beginHostActivity(ctx, "audit", "Auditing evidence and canonical consistency");
+        try {
         const tokens = splitCommandArguments(args);
         let requestedSource: string | undefined;
         if (tokens.length) {
@@ -1433,16 +1896,18 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (!sourceId) return;
         const report = await auditCompiler(workspace.root, { sourceId });
         ctx.ui.notify(JSON.stringify(report, null, 2), report.sources.changedSinceIngest.length || report.evidence.invalidReferences || report.consistency.causalGraphValid === false ? "warning" : "info");
+        } finally {
+          activity.close();
+        }
       },
     });
 
     pi.registerCommand("prepared-cache", {
       description: "List or activate prepared novel revisions",
       handler: async (args, ctx) => {
-        if (pendingTurn || prepareAllState || taskRunning()) {
-          ctx.ui.notify("A compiler or full-preparation run is already active.", "warning");
-          return;
-        }
+        if (!guardForegroundIdle(ctx, "inspect or activate prepared revisions")) return;
+        const activity = beginHostActivity(ctx, "prepared-cache", "Loading prepared novel revisions");
+        try {
         const tokens = splitCommandArguments(args);
         let action = tokens.shift();
         let requestedSource: string | undefined;
@@ -1497,14 +1962,21 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           { value: "cancel", label: "Cancel", description: "Keep the current active revision." },
         ]);
         if (confirmation !== "activate") return;
+        activity.update("Activating the selected prepared revision");
         const result = await withWorkspaceOperationLock(workspace.root, "compiler", () => preparedCache.activate(source, bundleHash!));
         ctx.ui.notify(`Activated prepared revision ${result.bundleHash} for ${source.title}; existing branches remain pinned.`, "info");
+        } finally {
+          activity.close();
+        }
       },
     });
 
     pi.registerCommand("status", {
       description: "Show NWH workspace and session status",
       handler: async (_args, ctx) => {
+        if (!guardForegroundIdle(ctx, "inspect status", { includeTask: false })) return;
+        const activity = beginHostActivity(ctx, "catalog", "Reading workspace and session status");
+        try {
         const catalog = await inspectPlayExperience(workspace.root);
         const current = catalog.instances.find((instance) => instance.active);
         ctx.ui.notify([
@@ -1521,16 +1993,16 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           `persistence: ${saveSession ? "on" : "off"}`,
           `task: ${activeTask ? taskSummary(activeTask) : "none"}`,
         ].join("\n"), "info");
+        } finally {
+          activity.close();
+        }
       },
     });
 
     pi.registerCommand("clear", {
       description: "Start a new NWH conversation",
       handler: async (_args, ctx) => {
-        if (pendingTurn || prepareAllState || taskRunning()) {
-          ctx.ui.notify("Wait for the active preparation run to finish before clearing the conversation.", "warning");
-          return;
-        }
+        if (!guardForegroundIdle(ctx, "clear the conversation")) return;
         const result = await ctx.newSession();
         if (!result.cancelled) ctx.ui.notify("Conversation history cleared.", "info");
       },
@@ -1543,7 +2015,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     pi.registerCommand("exit", {
       description: "Exit NWH",
-      handler: async (_args, ctx) => ctx.shutdown(),
+      handler: async (_args, ctx) => {
+        if (taskRunning()) {
+          ctx.ui.notify(`Cancelling ${activeTask!.snapshot.title} safely before exit...`, "info");
+          activeTask!.cancel();
+          await activeTask!.completion;
+        }
+        ctx.shutdown();
+      },
     });
   };
 }

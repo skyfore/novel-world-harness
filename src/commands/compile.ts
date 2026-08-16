@@ -22,6 +22,7 @@ export type CompileCommandOptions = {
   disabledProposalTools?: readonly string[];
   acquireLock?: boolean;
   promptTimeoutMs?: number;
+  signal?: AbortSignal;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
   onModelText?: (delta: string) => void;
@@ -45,6 +46,7 @@ async function optionalConfig(options: CompileCommandOptions) {
 }
 
 export async function compileCommand(options: CompileCommandOptions): Promise<void> {
+  options.signal?.throwIfAborted();
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(options.root, "compiler", () =>
       compileCommand({ ...options, acquireLock: false }));
@@ -111,7 +113,10 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     } } : {}),
     ...(options.onModelEvent ? { onEvent: options.onModelEvent } : {}),
   });
+  const abortSession = () => { void session.abort(); };
+  options.signal?.addEventListener("abort", abortSession, { once: true });
   try {
+    options.signal?.throwIfAborted();
     if (options.prompt !== undefined) {
       elapsed = startElapsedStatus({
         label: "Compiler prompt",
@@ -135,6 +140,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     }
     await session.runInteractive({ tuiMode: options.tuiMode, initialMessage: DEFAULT_COMPILER_PROMPT });
   } finally {
+    options.signal?.removeEventListener("abort", abortSession);
     elapsed?.stop();
     await session.dispose();
   }

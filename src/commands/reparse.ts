@@ -25,6 +25,7 @@ export type ReparseCommandOptions = {
   model?: string;
   cacheRoot?: string;
   acquireLock?: boolean;
+  signal?: AbortSignal;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
   onModelText?: (delta: string) => void;
@@ -48,6 +49,7 @@ export async function reparseCommand(
   options: ReparseCommandOptions,
   dependencyOverrides: Partial<ReparseDependencies> = {},
 ): Promise<{ sourceId: string; chapters: number[]; previousBundleHash: string; activeBundleHash: string }> {
+  options.signal?.throwIfAborted();
   const root = path.resolve(options.root);
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(root, "compiler", () => reparseCommand({ ...options, root, acquireLock: false }, dependencyOverrides));
@@ -59,6 +61,7 @@ export async function reparseCommand(
   const report = (message: string) => options.onProgress ? options.onProgress(message) : stdout.write(`${message}\n`);
   const source = await resolveSource(root, options.sourceId);
   const batches = await prepareCompilerBatches(root, source);
+  options.signal?.throwIfAborted();
   if (!batches.length) throw new Error(`Source ${source.id} has no compiler batches.`);
   const availableChapters = [...new Set(batches.map((batch) => batch.chapterOrdinal))].sort((left, right) => left - right);
   const selectedChapters = options.all
@@ -72,6 +75,7 @@ export async function reparseCommand(
   options.onStatus?.("Checking active revision and rollback baseline");
   report("Checking the active prepared revision and rollback baseline.");
   await recoverInterruptedReparse(root, source, batches, selectedBatchIds, cache, report);
+  options.signal?.throwIfAborted();
   const baseline = await cache.publish(source);
   if (!baseline.bundleHash) throw new Error("Current prepared revision was not published.");
   const previousBundleHash = baseline.bundleHash;
@@ -88,6 +92,7 @@ export async function reparseCommand(
     const invalidated = await invalidatePreparationArtifacts(root, source.id, selected, Boolean(options.all));
     for (const batchId of selectedBatchIds) await rejectPendingCompilerBatchProposals(root, batchId);
     report(`Invalidated ${invalidated} current preparation artifact(s); immutable revisions and branch snapshots were retained.`);
+    options.signal?.throwIfAborted();
 
     await dependencies.compileSource({
       root,
@@ -98,6 +103,7 @@ export async function reparseCommand(
       batchIds: selectedBatchIds,
       resume: true,
       acquireLock: false,
+      signal: options.signal,
       promptTransform: (prompt, batch) => reparsePrompt(prompt, batch, runId, Boolean(options.all)),
       onProgress: report,
       onStatus: options.onStatus,
@@ -107,6 +113,7 @@ export async function reparseCommand(
       onModelToolResult: options.onModelToolResult,
       onModelEvent: options.onModelEvent,
     });
+    options.signal?.throwIfAborted();
     options.onStatus?.("Converging validated compiler proposals");
     const convergence = await convergeWorldProposals(root, source.id, {
       onProgress: (progress) => options.onStatus?.(
@@ -114,6 +121,7 @@ export async function reparseCommand(
       ),
     });
     const quarantined = await quarantineUncommittableProposals(root, convergence);
+    options.signal?.throwIfAborted();
     report(
       `Reparse convergence accepted ${convergence.canonical.accepted.length + convergence.possibilities.accepted.length} proposal(s)`
       + ` and quarantined ${quarantined.length} uncommittable draft(s).`,
@@ -128,6 +136,7 @@ export async function reparseCommand(
       createBranch: false,
       restoreCache: false,
       acquireLock: false,
+      signal: options.signal,
       cacheRoot: options.cacheRoot,
       onProgress: report,
       onStatus: options.onStatus,
@@ -137,6 +146,7 @@ export async function reparseCommand(
       onModelToolResult: options.onModelToolResult,
       onModelEvent: options.onModelEvent,
     });
+    options.signal?.throwIfAborted();
     const active = await cache.lookup(source);
     if (!active.bundleHash) throw new Error("Reparse completed without an active prepared-cache revision.");
     report(active.bundleHash === previousBundleHash

@@ -21,7 +21,7 @@ export type PlayOpeningFrame = {
   }>;
 };
 
-export type PlayScenePurpose = "opening" | "orientation";
+export type PlayScenePurpose = "opening" | "orientation" | "turn";
 export type PlaySceneRequest = PlayScenePurpose | "auto" | "continue" | "none";
 export type PlayEntryIntent = "play" | "create" | "switch" | "continue" | "resume" | "startup";
 
@@ -42,7 +42,7 @@ export function resolvePlayScenePurpose(
     return context.hadPreviousSelection && context.selectionChanged ? "orientation" : undefined;
   }
   if (request === "orientation") return context.selectionChanged ? "orientation" : undefined;
-  return request === "opening" ? "opening" : undefined;
+  return request === "opening" || request === "turn" ? request : undefined;
 }
 
 export async function buildPlayOpeningFrame(
@@ -86,7 +86,9 @@ export async function buildPlayOpeningFrame(
 export function playScenePrompt(frame: PlayOpeningFrame, purpose: PlayScenePurpose): string {
   const direction = purpose === "opening"
     ? `Open the playable story at its committed beginning. The player has just chosen this character and the narrator must speak first.`
-    : `Re-establish the immediate present after the player deliberately switched into this world or character. This is not necessarily the beginning; orient from the current committed head and recent visible events.`;
+    : purpose === "orientation"
+      ? `Re-establish the immediate present after the player deliberately switched into this world or character. This is not necessarily the beginning; orient from the current committed head and recent visible events.`
+      : `Render the character's immediate experience after the player's action was accepted and committed. Treat the newest actor-visible event and state as the result to dramatize, then stop before choosing another action for the player.`;
   return `<player-scene-narration purpose="${purpose}">
 ${direction}
 
@@ -112,16 +114,23 @@ ${JSON.stringify(frame)}
 export function assertPlaySceneNarration(text: string): string {
   const narration = text.trim();
   if (!narration) throw new Error("Scene narrator returned no text.");
-  if (Array.from(narration).length < 80) {
-    throw new Error("Scene narrator returned an underspecified opening instead of a rendered scene.");
-  }
+  if (Array.from(narration).length < 80) throw new Error("Scene narrator returned an underspecified response instead of a rendered scene.");
   if (Array.from(narration).length > 4_000) throw new Error("Scene narrator returned an excessively long scene.");
   return narration;
 }
 
-export function renderPlaySceneFailure(frame: PlayOpeningFrame): string {
+export function renderPlaySceneFailure(
+  frame: PlayOpeningFrame,
+  purpose: PlayScenePurpose = frame.logicalStep === 0 ? "opening" : "orientation",
+): string {
+  if (purpose === "turn") {
+    return [
+      "你的行动已经提交，但这一次没有成功生成叙事响应。世界停在已提交的结果上，没有继续推进。",
+      "输入 **/scene** 可重新渲染当前时刻；不必重复刚才的行动。若仍失败，请用 **/login** 检查登录状态，或用 **/model** 选择可用模型。",
+    ].join("\n\n");
+  }
   return [
-    `没有成功生成${frame.logicalStep === 0 ? "故事开场" : "当前场景"}，世界仍停在进入前的时间点，尚未推进。`,
+    `没有成功生成${purpose === "opening" ? "故事开场" : "当前场景"}；场景渲染没有推进世界。`,
     "输入 **/scene** 可立即重试。若仍失败，请先用 **/login** 检查登录状态，或用 **/model** 选择可用模型。",
   ].join("\n\n");
 }

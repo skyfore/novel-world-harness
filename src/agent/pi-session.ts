@@ -359,6 +359,9 @@ export class PiAgentSession {
     // wrong installation. Dependency updates are managed by NWH instead.
     await withPiVersionCheckSuppressed(() => mode.run());
   }
+  async abort(): Promise<void> {
+    await this.session.abort();
+  }
   async dispose(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = undefined;

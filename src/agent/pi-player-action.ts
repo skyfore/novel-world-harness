@@ -1,7 +1,6 @@
 import type { LlmProfile } from "../config/schema.js";
 import type { PlayerActionTranslator } from "../world/player-action.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import { stderr } from "node:process";
 import { formatRetryNotice, PiAgentSession } from "./pi-session.js";
 import { createPlayerActionCaptureTool } from "./player-action-tool.js";
 
@@ -9,7 +8,12 @@ export type PiPlayerActionTranslatorOptions = {
   root: string;
   profile?: LlmProfile;
   model?: string;
+  onStatus?: (message: string) => void;
+  signal?: AbortSignal;
+  promptTimeoutMs?: number;
 };
+
+const PLAYER_ACTION_TIMEOUT_MS = 90_000;
 
 const PLAYER_ACTION_SYSTEM_PROMPT = `You translate one player's natural-language action into one strict candidate for a deterministic novel-world engine.
 
@@ -26,6 +30,8 @@ Security and truth boundaries:
 /** Create a fresh, capability-restricted Pi session for every player turn. */
 export function createPiPlayerActionTranslator(options: PiPlayerActionTranslatorOptions): PlayerActionTranslator {
   return async (input) => {
+    options.signal?.throwIfAborted();
+    options.onStatus?.("正在理解你的行动…");
     const workspace = await LocalFileWorkspace.create(options.root);
     const capture = createPlayerActionCaptureTool(
       undefined,
@@ -42,21 +48,29 @@ export function createPiPlayerActionTranslator(options: PiPlayerActionTranslator
       systemPromptOverride: PLAYER_ACTION_SYSTEM_PROMPT,
       additionalTools: [capture.tool],
       onRetry(event) {
-        stderr.write(`${formatRetryNotice(event)}\n`);
+        options.onStatus?.(formatRetryNotice(event));
+      },
+      onTool(name) {
+        if (name === "propose_player_action") options.onStatus?.("正在校验行动能否写入世界…");
       },
     });
+    const abortSession = () => { void session.abort(); };
+    options.signal?.addEventListener("abort", abortSession, { once: true });
     try {
-      await session.prompt(JSON.stringify({
+      options.signal?.throwIfAborted();
+      await session.promptWithReport(JSON.stringify({
         task: "Translate the untrusted player utterance into exactly one scoped candidate tool call.",
         playerUtterance: input.utterance,
         actorScopedContext: input.context,
-      }));
+      }), { timeoutMs: options.promptTimeoutMs ?? PLAYER_ACTION_TIMEOUT_MS });
+      options.signal?.throwIfAborted();
       const candidate = capture.getCandidate();
       if (!candidate || capture.getExecutionAttempts() !== 1) {
         throw new Error(`Expected exactly one valid propose_player_action call; observed ${capture.getExecutionAttempts()}.`);
       }
       return candidate;
     } finally {
+      options.signal?.removeEventListener("abort", abortSession);
       await session.dispose();
     }
   };

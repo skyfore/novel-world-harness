@@ -28,6 +28,7 @@ export type PrepareAllCommandOptions = {
   cacheRoot?: string;
   createBranch?: boolean;
   restoreCache?: boolean;
+  signal?: AbortSignal;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
   onModelText?: (delta: string) => void;
@@ -59,6 +60,7 @@ export async function prepareAllCommand(
   options: PrepareAllCommandOptions,
   dependencyOverrides: Partial<PrepareAllDependencies> = {},
 ): Promise<PreparationInspection> {
+  options.signal?.throwIfAborted();
   const root = path.resolve(options.root);
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(root, "compiler", () =>
@@ -80,6 +82,7 @@ export async function prepareAllCommand(
   }
 
   let inspection = await inspectPreparation(root, { sourceId, branchId });
+  options.signal?.throwIfAborted();
   if (inspection.stage === "needs-source") {
     throw new Error("No novel source is registered. Pass a novel path to `nwh prepare-all <novel-path>`.");
   }
@@ -130,6 +133,7 @@ export async function prepareAllCommand(
   }
 
   if (inspection.stage === "compile") {
+    options.signal?.throwIfAborted();
     const decision = await ask({
       header: "Compile",
       question: `Compile all ${inspection.totalBatches - inspection.completedBatches} unfinished evidence batch(es) for ${inspection.source!.title}?`,
@@ -148,6 +152,7 @@ export async function prepareAllCommand(
       ...(options.model ? { model: options.model } : {}),
       resume: true,
       acquireLock: false,
+      signal: options.signal,
       onProgress: report,
       onStatus: options.onStatus,
       onModelText: options.onModelText,
@@ -159,6 +164,7 @@ export async function prepareAllCommand(
   }
 
   inspection = await inspectPreparation(root, { sourceId, branchId });
+  options.signal?.throwIfAborted();
   if (inspection.pending.length) {
     const decision = await ask({
       header: "Proposals",
@@ -170,6 +176,7 @@ export async function prepareAllCommand(
     });
     if (decision === "review") return pausePreparation(inspection, report);
     await convergeForPreparation(root, sourceId, dependencies.converge, report);
+    options.signal?.throwIfAborted();
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
 
@@ -199,6 +206,7 @@ export async function prepareAllCommand(
         includeLocalTools: false,
         disabledProposalTools: ["propose_state_delta"],
         acquireLock: false,
+        signal: options.signal,
         onProgress: report,
         onStatus: options.onStatus,
         onModelText: options.onModelText,
@@ -208,12 +216,14 @@ export async function prepareAllCommand(
         onModelEvent: options.onModelEvent,
       });
     } catch (error) {
+      options.signal?.throwIfAborted();
       report(`Opening-state model pass did not complete: ${error instanceof Error ? error.message : String(error)}`);
       const rejected = await rejectPendingCompilerBatchProposals(root, openingBatch.id);
       if (rejected.length) report(`Rejected ${rejected.length} partial opening-state proposal(s) before fallback.`);
     }
     inspection = await inspectPreparation(root, { sourceId, branchId });
     if (inspection.pending.length) {
+      options.signal?.throwIfAborted();
       const acceptance = await ask({
         header: "Opening proposal",
         question: `Accept the ${inspection.pending.length} new proposal(s) that pass deterministic validation?`,
@@ -224,6 +234,7 @@ export async function prepareAllCommand(
       });
       if (acceptance === "review") return pausePreparation(inspection, report);
       await convergeForPreparation(root, sourceId, dependencies.converge, report);
+      options.signal?.throwIfAborted();
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
     if (inspection.stage === "needs-initial-world") {
@@ -253,6 +264,7 @@ export async function prepareAllCommand(
     if (decision === "pause") return pausePreparation(inspection, report);
     report(`Creating playable branch ${branchId}.`);
     await dependencies.createBranch(root, branchId, undefined, sourceId, options.cacheRoot);
+    options.signal?.throwIfAborted();
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
 

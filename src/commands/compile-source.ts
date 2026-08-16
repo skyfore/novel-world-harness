@@ -22,6 +22,7 @@ export type CompileSourceOptions = {
   promptTransform?: (prompt: string, batch: CompilerBatch) => string;
   acquireLock?: boolean;
   promptTimeoutMs?: number;
+  signal?: AbortSignal;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
   onModelText?: (delta: string) => void;
@@ -43,6 +44,7 @@ async function optionalConfig(options: CompileSourceOptions) {
 }
 
 export async function compileSourceCommand(options: CompileSourceOptions): Promise<void> {
+  options.signal?.throwIfAborted();
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(options.root, "compiler", () =>
       compileSourceCommand({ ...options, acquireLock: false }));
@@ -74,6 +76,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
       else stderr.write(`${message}\n`);
     },
     async runner(batch, context) {
+      options.signal?.throwIfAborted();
       const label = `Compiler batch ${batch.ordinal + 1}/${context.totalBatches}`;
       options.onStatus?.(`${label} · creating model session`);
       let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
@@ -135,7 +138,10 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         },
         onEvent: options.onModelEvent,
       });
+      const abortSession = () => { void session.abort(); };
+      options.signal?.addEventListener("abort", abortSession, { once: true });
       try {
+        options.signal?.throwIfAborted();
         elapsed = startElapsedStatus({
           label,
           activity: "waiting for model response or tool call",
@@ -159,11 +165,13 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         if (options.onProgress) options.onProgress(message);
         else stdout.write(`${message}\n`);
       } finally {
+        options.signal?.removeEventListener("abort", abortSession);
         elapsed?.stop();
         await session.dispose();
       }
     },
   });
+  options.signal?.throwIfAborted();
   const summary = `Compiler batches: total=${result.total} completed=${result.completed} skipped=${result.skipped} remaining=${result.remaining}`;
   if (options.onProgress) options.onProgress(summary);
   else stdout.write(`${summary}\n`);

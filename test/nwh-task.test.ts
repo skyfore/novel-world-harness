@@ -63,7 +63,8 @@ describe("NWH long-running tasks", () => {
     await task.completion;
     expect(task.snapshot.status).toBe("completed");
     expect(states).toContain("Compiler batch 2/148");
-    expect(taskSummary(task, task.snapshot.startedAt + 3_000)).toContain("3s");
+    expect(taskSummary(task, task.snapshot.startedAt + 3_000)).toContain("completed");
+    expect(task.snapshot.settledAt).toBeDefined();
   });
 
   it("does not duplicate elapsed time already supplied by a live compiler heartbeat", () => {
@@ -81,6 +82,39 @@ describe("NWH long-running tasks", () => {
     expect(task.snapshot).toMatchObject({ status: "failed", error: "provider unavailable" });
     expect(task.snapshot.logs.at(-1)).toBe("Error: provider unavailable");
     expect(task.snapshot.transcript.at(-1)).toMatchObject({ kind: "progress", message: "Error: provider unavailable" });
+  });
+
+  it("coalesces high-frequency assistant stream updates and flushes the final message", () => {
+    const task = new NwhTask("stream", "Streaming task");
+    const started = fauxAssistantMessage([fauxText("")], { stopReason: "pending" });
+    task.appendAgentEvent({ type: "message_start", message: started });
+    for (let index = 1; index <= 100; index += 1) {
+      task.appendAgentEvent({
+        type: "message_update",
+        message: fauxAssistantMessage([fauxText(`token ${index}`)], { stopReason: "pending" }),
+        assistantMessageEvent: { type: "text_delta", delta: String(index) },
+      });
+    }
+    expect(task.snapshot.transcript).toHaveLength(1);
+    expect(task.snapshot.transcript[0]?.revision).toBe(0);
+    const completed = fauxAssistantMessage([fauxText("final model answer")], { stopReason: "stop" });
+    task.appendAgentEvent({ type: "message_end", message: completed });
+    expect(task.snapshot.transcript[0]).toMatchObject({
+      kind: "assistant",
+      streaming: false,
+      message: { content: [{ type: "text", text: "final model answer" }] },
+    });
+  });
+
+  it("exposes cancellation to the operation and settles as cancelled", async () => {
+    const task = new NwhTask("cancel", "Cancelable task");
+    task.start((signal) => new Promise<void>((resolve) => {
+      signal.addEventListener("abort", () => resolve(), { once: true });
+    }));
+    expect(task.cancel()).toBe(true);
+    expect(task.snapshot.status).toBe("cancelling");
+    await task.completion;
+    expect(task.snapshot.status).toBe("cancelled");
   });
 
   it("renders live model output and tools with Pi components, then backgrounds with left arrow", async () => {
@@ -185,7 +219,8 @@ function taskUi(
         {
           matches: (data: string, action: string) =>
             (action === "app.tools.expand" && data === "ctrl+o")
-            || (action === "app.thinking.toggle" && data === "ctrl+t"),
+            || (action === "app.thinking.toggle" && data === "ctrl+t")
+            || (action === "app.clear" && data === "ctrl+c"),
         } as KeybindingsManager,
         resolve,
       ) as TestTaskComponent;

@@ -1,12 +1,12 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, MessageRenderer, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  compilerBatchTerminalText,
   createNwhExtension,
+  filterNwhModelContext,
   parseTuiReparseArguments,
   splitCommandArguments,
   type NwhExtensionOptions,
@@ -23,6 +23,12 @@ import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { PlaySessionStore } from "../src/world/play-session.js";
 
 const temporaryDirectories: string[] = [];
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 afterEach(async () => {
   for (const root of temporaryDirectories.splice(0)) await fs.rm(root, { recursive: true, force: true });
@@ -46,8 +52,13 @@ async function fixture(
   const sentUserMessages: string[] = [];
   const sentHiddenMessages: string[] = [];
   const sentVisibleMessages: string[] = [];
+  const sentMessages: Array<{ customType?: string; content: string; display?: boolean }> = [];
   const markdownTransformers: MarkdownTransformer[] = [];
+  const messageRenderers = new Map<string, MessageRenderer>();
   const pi = {
+    registerMessageRenderer(customType: string, renderer: MessageRenderer) {
+      messageRenderers.set(customType, renderer);
+    },
     registerMarkdownTransformer(transformer: MarkdownTransformer) {
       markdownTransformers.push(transformer);
     },
@@ -65,6 +76,7 @@ async function fixture(
       sentUserMessages.push(message);
     },
     sendMessage(message: { content: string; display?: boolean }, options?: { triggerTurn?: boolean }) {
+      sentMessages.push(message);
       if (options?.triggerTurn) sentHiddenMessages.push(message.content);
       else if (message.display) sentVisibleMessages.push(message.content);
     },
@@ -78,11 +90,13 @@ async function fixture(
     playerTranslator,
     playerOpeningNarrator: playerOpeningNarrator ?? (async (frame, purpose) => purpose === "opening"
       ? `门外的风声忽远忽近，你的意识落回此刻。${frame.actor.name}所能确认的一切都在眼前，而尚未发生的命运仍旧沉默。周围没有谁替你作出决定，只有这个等待被打破的瞬间。你可以先观察近处，梳理自己的念头，或者立刻尝试心中浮现的行动——故事会从你的选择继续。`
-      : `方才的余波还停在感官里，你重新看清自己所处的这一刻。${frame.actor.name}所知道的事情没有凭空增减，世界也没有趁你离开时替你作出选择。你可以先确认周围的变化，回想刚刚发生的事，或者直接采取此刻最重要的行动——接下来由你决定。`),
+      : purpose === "turn"
+        ? `脚下的路已经把你带离原处，新的位置与刚才的决定一起成为无法抹去的事实。${frame.actor.name}能感到行动留下的余波，却没有谁替你安排下一步。眼前的世界正从这个结果继续展开，你可以观察抵达之处，也可以立即应对最迫近的变化。`
+        : `方才的余波还停在感官里，你重新看清自己所处的这一刻。${frame.actor.name}所知道的事情没有凭空增减，世界也没有趁你离开时替你作出选择。你可以先确认周围的变化，回想刚刚发生的事，或者直接采取此刻最重要的行动——接下来由你决定。`),
     ...(runReparse ? { runReparse } : {}),
     preparedCacheRoot: path.join(root, "prepared-cache"),
   })(pi);
-  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages, sentVisibleMessages, markdownTransformers };
+  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages, sentVisibleMessages, sentMessages, markdownTransformers, messageRenderers };
 }
 
 function commandContext(notifications: string[], actions: { cleared: boolean; shutdown: boolean }): ExtensionCommandContext {
@@ -120,8 +134,9 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 
 describe("NWH TUI extension", () => {
   it("registers local commands and leaves assistant/thinking rendering to Pi", async () => {
-    const { commands, sentUserMessages, markdownTransformers } = await fixture();
+    const { commands, sentUserMessages, markdownTransformers, messageRenderers } = await fixture();
     expect(markdownTransformers).toHaveLength(0);
+    expect([...messageRenderers.keys()]).toEqual(["nwh-narrator", "nwh-play"]);
     expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "continue", "switch", "create-instance", "scene", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
@@ -148,6 +163,20 @@ describe("NWH TUI extension", () => {
       .toEqual({ all: true, source: "novel-1" });
     expect(() => parseTuiReparseArguments("--all --chapters 2"))
       .toThrow("only one reparse scope");
+  });
+
+  it("blocks world-changing slash commands while Pi is streaming a foreground response", async () => {
+    const { commands, sentMessages } = await fixture();
+    const notifications: string[] = [];
+    const ctx = {
+      ...commandContext(notifications, { cleared: false, shutdown: false }),
+      isIdle: () => false,
+    } as ExtensionCommandContext;
+
+    await commands.get("play")?.handler("hero main", ctx);
+
+    expect(notifications).toContainEqual(expect.stringContaining("current model response is streaming"));
+    expect(sentMessages).toEqual([]);
   });
 
   it("runs the shared reparse service from the TUI with structured confirmation and progress", async () => {
@@ -188,11 +217,68 @@ describe("NWH TUI extension", () => {
     expect(typeof calls[0]?.onProgress).toBe("function");
     expect(typeof calls[0]?.onStatus).toBe("function");
     expect(typeof calls[0]?.onModelEvent).toBe("function");
+    expect(calls[0]?.signal).toBeInstanceOf(AbortSignal);
     expect(calls[0]?.onModelThinking).toBeUndefined();
     expect(calls[0]?.onModelText).toBeUndefined();
     expect(calls[0]?.onModelToolCall).toBeUndefined();
     expect(calls[0]?.onModelToolResult).toBeUndefined();
     expect(notifications).toContainEqual("Reparse complete for chapter(s) 2, 3.");
+  });
+
+  it("cancels and joins a background reparse before session shutdown completes", async () => {
+    const started = deferred();
+    let aborted = false;
+    const { commands, events, root } = await fixture(undefined, undefined, async (options) => {
+      started.resolve();
+      await new Promise<void>((_resolve, reject) => {
+        options.signal!.addEventListener("abort", () => {
+          aborted = true;
+          reject(new DOMException("Reparse cancelled", "AbortError"));
+        }, { once: true });
+      });
+      throw new Error("unreachable");
+    });
+    const evidence = await createEvidenceFixture(root, "# One\nHero waits.\n", "cancel-reparse.txt");
+    const notifications: string[] = [];
+    const ctx = preparationContext(notifications, []);
+    const command = commands.get("reparse")!.handler(
+      `--all --source ${evidence.source.id}`,
+      ctx,
+    );
+    await started.promise;
+
+    await expect(events.get("input")?.(
+      { type: "input", text: `'${path.join(root, evidence.source.sourcePath)}'`, source: "interactive" } as InputEvent,
+      ctx,
+    )).resolves.toEqual({ action: "handled" });
+    expect(notifications).toContainEqual(expect.stringContaining("before starting another compiler"));
+
+    await events.get("session_shutdown")?.();
+    await command;
+
+    expect(aborted).toBe(true);
+    expect(notifications).toContainEqual(expect.stringContaining("Reparse cancelled safely"));
+  });
+
+  it("keeps settled task transcripts selectable after a later task finishes", async () => {
+    const { commands, root } = await fixture(undefined, undefined, async (options) => ({
+      sourceId: options.sourceId!,
+      chapters: [1],
+      previousBundleHash: "a".repeat(64),
+      activeBundleHash: "b".repeat(64),
+    }));
+    const evidence = await createEvidenceFixture(root, "# One\nHero waits.\n", "task-history.txt");
+    const notifications: string[] = [];
+    const questions: string[] = [];
+    const ctx = preparationContext(notifications, questions);
+
+    await commands.get("reparse")!.handler(`--all --source ${evidence.source.id}`, ctx);
+    await commands.get("reparse")!.handler(`--all --source ${evidence.source.id}`, ctx);
+    await commands.get("tasks")!.handler("", ctx);
+
+    expect(questions.filter((question) => question === "Start novel reparse?")).toHaveLength(2);
+    expect(questions).toContain("Choose an NWH task");
+    expect(notifications.filter((message) => message.includes("Reparse complete"))).toHaveLength(2);
   });
 
   it("exposes novel audit and prepared-revision inspection in the TUI", async () => {
@@ -296,7 +382,7 @@ describe("NWH TUI extension", () => {
     await expect(fs.stat(path.join(root, ".novel-harness"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("isolates each compiler batch from earlier transcript context and replaces model-authored completion claims", async () => {
+  it("isolates compiler context without replacing the model text that was streamed to the user", async () => {
     const { events, root } = await fixture();
     const ctx = {
       mode: "tui",
@@ -323,20 +409,29 @@ describe("NWH TUI extension", () => {
     expect(contextResult?.messages).toHaveLength(2);
     expect(contextResult?.messages?.[0]).toMatchObject({ role: "custom", customType: "nwh-compiler-batch" });
 
-    const messageResult = events.get("message_end")?.({
-      type: "message_end",
-      message: { role: "assistant", content: [{ type: "text", text: "Everything is canonical and complete." }] },
-    }, ctx) as { message?: { content?: Array<{ type: string; text?: string }> } } | undefined;
-    expect(messageResult?.message?.content?.[0]?.text).toContain("host state");
-    expect(messageResult?.message?.content?.[0]?.text).toContain("pending proposals");
-    expect(compilerBatchTerminalText({
-      stopReason: "error",
-      errorMessage: "Provider finish_reason: content_filter",
-    })).toContain("content_filter");
-    expect(compilerBatchTerminalText({
-      stopReason: "error",
-      errorMessage: "Provider finish_reason: content_filter",
-    })).toContain("did not checkpoint");
+    expect(events.has("message_end")).toBe(false);
+  });
+
+  it("removes completed compiler spans from later ordinary assistant context", () => {
+    const ordinaryBefore = { role: "user", content: "question before compiler" };
+    const ordinaryAfter = { role: "user", content: "question after compiler" };
+    const answerAfter = { role: "assistant", content: "ordinary answer" };
+    const messages = filterNwhModelContext([
+      ordinaryBefore,
+      { role: "custom", customType: "nwh-compiler-batch", content: "evidence" },
+      { role: "assistant", content: "large compiler response" },
+      { role: "toolResult", content: "proposal result" },
+      ordinaryAfter,
+      answerAfter,
+    ], false);
+    expect(messages).toEqual([ordinaryBefore, ordinaryAfter, answerAfter]);
+
+    expect(filterNwhModelContext([
+      { role: "user", content: "'novel.txt'" },
+      { role: "custom", customType: "nwh-compiler-batch", details: { excludePreviousUser: true } },
+      { role: "assistant", content: "compiler output" },
+      ordinaryAfter,
+    ], false)).toEqual([ordinaryAfter]);
   });
 
   it("blocks every subsequent tool call until a circuit-broken agent run settles", async () => {
@@ -410,12 +505,14 @@ describe("NWH TUI extension", () => {
     });
     const notifications: string[] = [];
     const statuses: Array<string | undefined> = [];
+    const widgets: Array<string[] | undefined> = [];
     const ctx = {
       mode: "tui",
       model: { provider: "anthropic", id: "claude-sonnet-5" },
       ui: {
         notify: (message: string) => notifications.push(message),
         setStatus: (_key: string, value: string | undefined) => statuses.push(value),
+        setWidget: (_key: string, value: string[] | undefined) => widgets.push(value),
         setWorkingMessage: () => undefined,
         theme: { fg: (_color: string, text: string) => text },
       },
@@ -449,9 +546,68 @@ describe("NWH TUI extension", () => {
     const reopened = await openWorkspaceWorld(root);
     const head = await reopened.engine.branches.readHead("main");
     expect((await reopened.engine.projector.project(head)).values.hero?.["character.location"]).toBe("camp");
-    expect(sentVisibleMessages.join("\n")).toContain("Committed at step 1");
-    expect(notifications).toContainEqual(expect.stringContaining("Playing 林岐"));
+    expect(sentVisibleMessages.join("\n")).toContain("脚下的路已经把你带离原处");
+    expect(sentVisibleMessages.join("\n")).not.toContain("Committed at step 1");
+    expect(widgets.flatMap((widget) => widget ?? []).join("\n")).toContain("正在理解你的行动");
+    expect(notifications).toEqual([]);
     expect(statuses).toContain("NWH · 林岐@main · step 1");
+  });
+
+  it("cancels a player translation before commitment and leaves world truth unchanged", async () => {
+    const started = deferred();
+    const release = deferred();
+    const translator: PlayerActionTranslator = async () => {
+      started.resolve();
+      await release.promise;
+      return {
+        title: "leave",
+        participants: ["camp"],
+        preconditions: [],
+        proposedDelta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.location", value: "camp" }],
+        },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      };
+    };
+    const { commands, events, root, sentVisibleMessages } = await fixture(undefined, translator);
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: [], evidence: [] });
+    await canon.putEntity({ id: "hall", kind: "location", canonicalName: "前厅", aliases: [], evidence: [] });
+    await canon.putEntity({ id: "camp", kind: "location", canonicalName: "营地", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+      ],
+    });
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+    await commands.get("play")!.handler("hero main", ctx as unknown as ExtensionCommandContext);
+
+    const action = events.get("input")!(
+      { type: "input", text: "我去营地", source: "interactive" } as InputEvent,
+      ctx,
+    ) as Promise<InputEventResult>;
+    await started.promise;
+    const leaving = commands.get("leave")!.handler("", ctx as unknown as ExtensionCommandContext);
+    await leaving;
+    await action;
+    release.resolve();
+
+    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
+    expect(sentVisibleMessages).toContainEqual(expect.stringContaining("世界状态没有改变"));
   });
 
   it("reports narrator failure without presenting canned prose as a story opening", async () => {
@@ -487,6 +643,111 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages[0]).not.toContain("故事正从已提交的起点开始");
     expect(notifications).toContainEqual(expect.stringContaining("Scene narration failed: provider unavailable"));
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
+  });
+
+  it("bridges isolated narrator deltas into the active TUI before persisting the final scene", async () => {
+    const started = deferred();
+    const release = deferred();
+    const finalNarration = "黄昏的微光沿着门边慢慢退去，你听见近处的风声在停顿之间改变方向。眼前这一刻还没有被任何行动推动，熟悉与陌生的感觉却同时压在心口。你可以先观察周围留下的痕迹，也可以整理脑中最迫切的念头，或者立即尝试自己的选择——下一步正等待你亲手落下。";
+    const { commands, root, sentMessages } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async (_frame, _purpose, observer) => {
+        observer?.onAttempt?.(1);
+        observer?.onText?.("黄昏的微光沿着门边慢慢退去");
+        started.resolve();
+        await release.promise;
+        observer?.onText?.("，你听见近处的风声。");
+        return finalNarration;
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const widgets: Array<string[] | undefined> = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        setStatus: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWidget: (_key: string, content: string[] | undefined) => widgets.push(content),
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    const entering = commands.get("play")!.handler("hero main", ctx);
+    await started.promise;
+
+    expect(widgets.flatMap((content) => content ?? []).join("\n")).toContain("黄昏的微光沿着门边慢慢退去");
+    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
+
+    release.resolve();
+    await entering;
+
+    expect(sentMessages).toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: finalNarration, display: true }));
+    expect(widgets.at(-1)).toBeUndefined();
+  });
+
+  it("returns from session_start before generating a restored world's scene", async () => {
+    const started = deferred();
+    const release = deferred();
+    const completed = deferred();
+    const finalNarration = "风声从看不见的地方穿过来，你重新意识到脚下的世界仍停在原处。没有事件替你越过这一刻，也没有旁人为你决定方向。你可以先确认眼前能够感知的细节，回想自己已经知道的事情，或者直接尝试最迫切的行动——这个世界会等你的选择真正发生后才继续。";
+    const { events, root, sentMessages } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async (_frame, _purpose, observer) => {
+        observer?.onAttempt?.(1);
+        observer?.onText?.("风声从看不见的地方穿过来");
+        started.resolve();
+        await release.promise;
+        completed.resolve();
+        return finalNarration;
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
+    const ctx = {
+      mode: "tui",
+      model: { provider: "anthropic", id: "claude-sonnet-5" },
+      sessionManager: { getEntries: () => [] },
+      ui: {
+        notify: () => undefined,
+        setTitle: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: () => undefined,
+        setHeader: () => undefined,
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("session_start")?.({ type: "session_start" }, ctx);
+
+    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
+    await started.promise;
+    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
+
+    release.resolve();
+    await completed.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(sentMessages).toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: finalNarration, display: true }));
   });
 
   it("opens a structured character question with a free-form alias path for /play", async () => {

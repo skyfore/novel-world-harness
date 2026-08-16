@@ -16,6 +16,7 @@ type ConversationEntry = {
   type: string;
   message?: { role?: string; customType?: string; display?: boolean };
   customType?: string;
+  data?: unknown;
   display?: boolean;
 };
 
@@ -26,6 +27,7 @@ export function isFreshConversation(entries: readonly ConversationEntry[]): bool
       return entry.message?.role === "custom" && entry.message.display !== false;
     }
     if (entry.type === "custom_message") return entry.display !== false;
+    if (entry.type === "custom" && entry.customType === "nwh-narrator") return true;
     return entry.type === "compaction" || entry.type === "branch_summary";
   });
 }
@@ -39,7 +41,9 @@ export function isFreshConversation(entries: readonly ConversationEntry[]): bool
  */
 export function hasPlayerConversation(entries: readonly ConversationEntry[]): boolean {
   return entries.some((entry) => {
-    const customType = entry.type === "custom_message" ? entry.customType : entry.message?.customType;
+    const customType = entry.type === "custom_message" || entry.type === "custom"
+      ? entry.customType
+      : entry.message?.customType;
     return customType === "nwh-play" || customType === "nwh-narrator";
   });
 }

@@ -1,5 +1,5 @@
 diff --git a/dist/core/extensions/index.d.ts b/dist/core/extensions/index.d.ts
-index 901326b015de4617b3a61b008e290e353b0c7142..410f9480786682e8befd181942a1b7ece21a73f3 100644
+index 901326b015de4617b3a61b008e290e353b0c7142..bf0cba438625606f55116ae23dc8b017b2128376 100644
 --- a/dist/core/extensions/index.d.ts
 +++ b/dist/core/extensions/index.d.ts
 @@ -6,7 +6,7 @@ export type { SourceInfo } from "../source-info.ts";
@@ -11,8 +11,9 @@ index 901326b015de4617b3a61b008e290e353b0c7142..410f9480786682e8befd181942a1b7ec
  export { defineTool, isBashToolResult, isEditToolResult, isFindToolResult, isGrepToolResult, isLsToolResult, isReadToolResult, isToolCallEventType, isWriteToolResult, } from "./types.ts";
  export { wrapRegisteredTool, wrapRegisteredTools } from "./wrapper.ts";
  //# sourceMappingURL=index.d.ts.map
+\ No newline at end of file
 diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
-index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..b5ddd7af16283249cbed022f7ebb670491d9aaa9 100644
+index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..f8b47612b337ad684caaa952b6246b706f60bec1 100644
 --- a/dist/core/extensions/types.d.ts
 +++ b/dist/core/extensions/types.d.ts
 @@ -8,7 +8,7 @@
@@ -32,7 +33,7 @@ index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..b5ddd7af16283249cbed022f7ebb6704
  import type { BuildSystemPromptOptions } from "../system-prompt.ts";
  import type { BashOperations } from "../tools/bash.ts";
  import type { EditToolDetails } from "../tools/edit.ts";
-@@ -58,6 +59,20 @@ export interface WorkingIndicatorOptions {
+@@ -58,6 +59,22 @@ export interface WorkingIndicatorOptions {
      /** Frame interval in milliseconds for animated indicators. */
      intervalMs?: number;
  }
@@ -44,16 +45,18 @@ index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..b5ddd7af16283249cbed022f7ebb6704
 +    /** Label used after an auto-collapsed thinking block completes. */
 +    completedThinkingLabel?: string;
 +}
-+/** A TUI-only assistant message mounted in Pi's scrollable transcript. */
++/** An extension-owned assistant message mounted in Pi's scrollable transcript. */
 +export interface TransientAssistantStream {
 +    update(message: AssistantMessage, event?: AssistantMessageEvent): void;
 +    complete(message: AssistantMessage): void;
++    /** Persist this component as one native-rendered, model-context-excluded session entry. */
++    commit(customType: string, details?: unknown): void;
 +    dispose(): void;
 +}
  /** Wrap the current autocomplete provider with additional behavior. */
  export type AutocompleteProviderFactory = (current: AutocompleteProvider) => AutocompleteProvider;
  export type EditorFactory = (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => EditorComponent;
-@@ -93,6 +108,8 @@ export interface ExtensionUIContext {
+@@ -93,6 +110,8 @@ export interface ExtensionUIContext {
      setWorkingIndicator(options?: WorkingIndicatorOptions): void;
      /** Set the label shown for hidden thinking blocks. Call with no argument to restore default. */
      setHiddenThinkingLabel(label?: string): void;
@@ -62,8 +65,22 @@ index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..b5ddd7af16283249cbed022f7ebb6704
      /** Set a widget to display above or below the editor. Accepts string array or component factory. */
      setWidget(key: string, content: string[] | undefined, options?: ExtensionWidgetOptions): void;
      setWidget(key: string, content: ((tui: TUI, theme: Theme) => Component & {
+diff --git a/dist/core/session-manager.js b/dist/core/session-manager.js
+index 92e8070ce1c60e7780aba7a4a0ea8b1d1652156f..32cd58631bcdfbf3db57c2a3c9914223dfcb7f9c 100644
+--- a/dist/core/session-manager.js
++++ b/dist/core/session-manager.js
+@@ -724,7 +724,8 @@ export class SessionManager {
+     _persist(entry) {
+         if (!this.persist || !this.sessionFile)
+             return;
+-        const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
++        const hasAssistant = this.fileEntries.some((e) => (e.type === "message" && e.message.role === "assistant")
++            || (e.type === "custom" && e.data?.__piAssistantStream === 1 && e.data.message?.role === "assistant"));
+         if (!hasAssistant) {
+             if (this.flushed) {
+                 appendFileSync(this.sessionFile, `${JSON.stringify(entry)}\n`);
 diff --git a/dist/core/settings-manager.d.ts b/dist/core/settings-manager.d.ts
-index 494157a038b5fd6b4d9ccf30d331983d84755d2a..bafc294194b59883a6492854cce040e9bfc1bb2d 100644
+index 494157a038b5fd6b4d9ccf30d331983d84755d2a..5bf302cd63e7201c8e4d8e015db7914f7ec64205 100644
 --- a/dist/core/settings-manager.d.ts
 +++ b/dist/core/settings-manager.d.ts
 @@ -63,6 +63,7 @@ export type PackageSource = string | {
@@ -95,7 +112,7 @@ index 494157a038b5fd6b4d9ccf30d331983d84755d2a..bafc294194b59883a6492854cce040e9
      getShellPath(): string | undefined;
      setShellPath(path: string | undefined): void;
 diff --git a/dist/core/settings-manager.js b/dist/core/settings-manager.js
-index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..616ffe73c226254ce5b5111a85c3d668fa590fa6 100644
+index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..687bfb1f88065e75bd6461fda5d868c15b10fd42 100644
 --- a/dist/core/settings-manager.js
 +++ b/dist/core/settings-manager.js
 @@ -196,6 +196,12 @@ export class SettingsManager {
@@ -148,7 +165,7 @@ index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..616ffe73c226254ce5b5111a85c3d668
          this.save();
      }
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index f43bc9620f36d198d75abeeb5c84e171de0d5ffe..0e72a3e6f98b4b044b462977350fa2258589326a 100644
+index f43bc9620f36d198d75abeeb5c84e171de0d5ffe..2fc717743b3df0cda1d416f7560c3e987d7eb8da 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -4,7 +4,7 @@ export { AgentSession, type AgentSessionConfig, type AgentSessionEvent, type Age
@@ -170,7 +187,7 @@ index f43bc9620f36d198d75abeeb5c84e171de0d5ffe..0e72a3e6f98b4b044b462977350fa225
  export { createSyntheticSourceInfo } from "./core/source-info.ts";
  export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 diff --git a/dist/modes/interactive/components/assistant-message.d.ts b/dist/modes/interactive/components/assistant-message.d.ts
-index 3eb9e0bf570a79398fb3b81fc88eca79b286201e..06e04c0d36b24b886e0d63b579a6c2b4d42fa232 100644
+index 3eb9e0bf570a79398fb3b81fc88eca79b286201e..a84da5f36d7bf9c1226a8619f27f11cb7b8d913e 100644
 --- a/dist/modes/interactive/components/assistant-message.d.ts
 +++ b/dist/modes/interactive/components/assistant-message.d.ts
 @@ -1,23 +1,32 @@
@@ -208,7 +225,7 @@ index 3eb9e0bf570a79398fb3b81fc88eca79b286201e..06e04c0d36b24b886e0d63b579a6c2b4
      render(width: number): string[];
      updateContent(message: AssistantMessage, isStreaming?: boolean): void;
 diff --git a/dist/modes/interactive/components/assistant-message.js b/dist/modes/interactive/components/assistant-message.js
-index 56061b12694b1fa89862fa21dd15b76c254d8e77..ef2301ba0162ce8495fb0bb020ce52e8b882bd3a 100644
+index 56061b12694b1fa89862fa21dd15b76c254d8e77..a60680d4340df10540fc63eb2df8d575f1889f7c 100644
 --- a/dist/modes/interactive/components/assistant-message.js
 +++ b/dist/modes/interactive/components/assistant-message.js
 @@ -10,18 +10,23 @@ const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
@@ -330,7 +347,7 @@ index 56061b12694b1fa89862fa21dd15b76c254d8e77..ef2301ba0162ce8495fb0bb020ce52e8
                  else {
                      // Render each run of thinking blocks as one Markdown section.
 diff --git a/dist/modes/interactive/components/settings-selector.d.ts b/dist/modes/interactive/components/settings-selector.d.ts
-index c1cffed8fef4a1937d87559821f82df42bfdf662..3e5e1efe72efc893bd1aa0f78a412b663a2fb70f 100644
+index c1cffed8fef4a1937d87559821f82df42bfdf662..23e45d1d2e995e824ce14a6439ed12229e51558f 100644
 --- a/dist/modes/interactive/components/settings-selector.d.ts
 +++ b/dist/modes/interactive/components/settings-selector.d.ts
 @@ -1,7 +1,7 @@
@@ -365,7 +382,7 @@ index c1cffed8fef4a1937d87559821f82df42bfdf662..3e5e1efe72efc893bd1aa0f78a412b66
      onShowCacheMissNoticesChange: (shown: boolean) => void;
      onCollapseChangelogChange: (collapsed: boolean) => void;
 diff --git a/dist/modes/interactive/components/settings-selector.js b/dist/modes/interactive/components/settings-selector.js
-index b9f1dd947eadefb119095fe7702c81d56e81ce39..46da416d1a96f81271ebe29b73c50b5c11433a01 100644
+index b9f1dd947eadefb119095fe7702c81d56e81ce39..21d82e673c149a0928e21137f53509ba691e2fd9 100644
 --- a/dist/modes/interactive/components/settings-selector.js
 +++ b/dist/modes/interactive/components/settings-selector.js
 @@ -310,10 +310,10 @@ export class SettingsSelectorComponent extends Container {
@@ -398,10 +415,19 @@ index b9f1dd947eadefb119095fe7702c81d56e81ce39..46da416d1a96f81271ebe29b73c50b5c
                  case "mermaid-rendering":
                      callbacks.onMermaidRenderingModeChange(newValue);
 diff --git a/dist/modes/interactive/interactive-mode.d.ts b/dist/modes/interactive/interactive-mode.d.ts
-index 18f66f7a7e28345115069dd63e8ae1ced34dc92b..f8eb6a20c521f692a265f82e56baf3630f68743e 100644
+index 18f66f7a7e28345115069dd63e8ae1ced34dc92b..9e3c2f141ddd59292cada2b81059c7d6de44b0a4 100644
 --- a/dist/modes/interactive/interactive-mode.d.ts
 +++ b/dist/modes/interactive/interactive-mode.d.ts
-@@ -94,6 +94,8 @@ export declare class InteractiveMode {
+@@ -32,6 +32,8 @@ export interface InteractiveModeOptions {
+     tuiMode?: TuiMode;
+     /** Initial interactive theme setting for this invocation. */
+     initialThemeSetting?: string;
++    /** Override the command printed after an interactive shutdown. */
++    resumeCommandFormatter?: (sessionManager: SessionManager) => string | undefined;
+ }
+ interface InteractiveTuiOptions {
+     tuiMode: TuiMode;
+@@ -94,6 +96,8 @@ export declare class InteractiveMode {
      private pendingTools;
      private toolOutputExpanded;
      private hideThinkingBlock;
@@ -410,7 +436,7 @@ index 18f66f7a7e28345115069dd63e8ae1ced34dc92b..f8eb6a20c521f692a265f82e56baf363
      private outputPad;
      private readonly mermaidMarkdownTransformer;
      private skillCommands;
-@@ -202,6 +204,10 @@ export declare class InteractiveMode {
+@@ -202,6 +206,10 @@ export declare class InteractiveMode {
      private setWorkingVisible;
      private setWorkingIndicator;
      private setHiddenThinkingLabel;
@@ -422,7 +448,7 @@ index 18f66f7a7e28345115069dd63e8ae1ced34dc92b..f8eb6a20c521f692a265f82e56baf363
       * Set an extension widget (string array or custom component).
       */
 diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
-index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0d3c4f90e 100644
+index 6a88679e03161d2c048e2abab0041e96d214e67b..61323740e3fc6b5b5eac0d579d5c7678455d0854 100644
 --- a/dist/modes/interactive/interactive-mode.js
 +++ b/dist/modes/interactive/interactive-mode.js
 @@ -276,6 +276,8 @@ export class InteractiveMode {
@@ -457,7 +483,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
          this.outputPad = this.settingsManager.getOutputPad();
          this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
          const clearOnShrink = this.settingsManager.getClearOnShrink();
-@@ -1664,6 +1669,68 @@ export class InteractiveMode {
+@@ -1664,6 +1669,87 @@ export class InteractiveMode {
          }
          this.ui.requestRender();
      }
@@ -482,11 +508,13 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
 +        const displayMode = options?.thinkingDisplayMode ?? this.thinkingDisplayMode;
 +        const component = new AssistantMessageComponent(undefined, displayMode === "hidden", this.getMarkdownThemeWithSettings(), options?.hiddenThinkingLabel ?? this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers(), displayMode, options?.completedThinkingLabel ?? "Thinking complete · Ctrl+T to expand");
 +        let disposed = false;
++        let latestMessage;
 +        const handle = {
 +            component,
 +            update: (message, event) => {
 +                if (disposed)
 +                    return;
++                latestMessage = message;
 +                component.updateContent(message, true);
 +                this.applyAssistantThinkingEvent(component, event);
 +                this.ui.requestRender();
@@ -494,8 +522,25 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
 +            complete: (message) => {
 +                if (disposed)
 +                    return;
++                latestMessage = message;
 +                component.updateContent(message, false);
 +                component.completeAllThinkingBlocks();
++                this.ui.requestRender();
++            },
++            commit: (customType, details) => {
++                if (disposed)
++                    return;
++                if (!latestMessage)
++                    throw new Error("Cannot commit an assistant stream before it has received a message.");
++                this.sessionManager.appendCustomEntry(customType, {
++                    __piAssistantStream: 1,
++                    key,
++                    message: structuredClone(latestMessage),
++                    ...(options ? { options: structuredClone(options) } : {}),
++                    ...(details === undefined ? {} : { details: structuredClone(details) }),
++                });
++                disposed = true;
++                this.transientAssistantStreams.delete(key);
 +                this.ui.requestRender();
 +            },
 +            dispose: () => {
@@ -526,7 +571,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
      /**
       * Set an extension widget (string array or custom component).
       */
-@@ -1724,6 +1791,7 @@ export class InteractiveMode {
+@@ -1724,6 +1810,7 @@ export class InteractiveMode {
          }
          this.ui.hideOverlay();
          this.clearExtensionTerminalInputListeners();
@@ -534,7 +579,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
          this.setExtensionFooter(undefined);
          this.setExtensionHeader(undefined);
          this.clearExtensionWidgets();
-@@ -1884,6 +1952,7 @@ export class InteractiveMode {
+@@ -1884,6 +1971,7 @@ export class InteractiveMode {
              setWorkingVisible: (visible) => this.setWorkingVisible(visible),
              setWorkingIndicator: (options) => this.setWorkingIndicator(options),
              setHiddenThinkingLabel: (label) => this.setHiddenThinkingLabel(label),
@@ -542,7 +587,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
              setWidget: (key, content, options) => this.setExtensionWidget(key, content, options),
              setFooter: (factory) => this.setExtensionFooter(factory),
              setHeader: (factory) => this.setExtensionHeader(factory),
-@@ -2569,7 +2638,7 @@ export class InteractiveMode {
+@@ -2569,7 +2657,7 @@ export class InteractiveMode {
                      this.ui.requestRender();
                  }
                  else if (event.message.role === "assistant") {
@@ -551,7 +596,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
                      this.streamingMessage = event.message;
                      this.chatContainer.addChild(this.streamingComponent);
                      this.streamingComponent.updateContent(this.streamingMessage, true);
-@@ -2580,6 +2649,7 @@ export class InteractiveMode {
+@@ -2580,6 +2668,7 @@ export class InteractiveMode {
                  if (this.streamingComponent && event.message.role === "assistant") {
                      this.streamingMessage = event.message;
                      this.streamingComponent.updateContent(this.streamingMessage, true);
@@ -559,7 +604,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
                      for (const content of this.streamingMessage.content) {
                          if (content.type === "toolCall") {
                              if (!this.pendingTools.has(content.id)) {
-@@ -2617,6 +2687,7 @@ export class InteractiveMode {
+@@ -2617,6 +2706,7 @@ export class InteractiveMode {
                          this.streamingMessage.errorMessage = errorMessage;
                      }
                      this.streamingComponent.updateContent(this.streamingMessage, false);
@@ -567,7 +612,33 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
                      if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
                          if (!errorMessage) {
                              errorMessage = this.streamingMessage.errorMessage || "Error";
-@@ -2918,7 +2989,7 @@ export class InteractiveMode {
+@@ -2836,6 +2926,25 @@ export class InteractiveMode {
+         this.ui.requestRender();
+     }
+     addCustomEntryToChat(entry) {
++        const persistedAssistant = entry.data?.__piAssistantStream === 1
++            && entry.data.message?.role === "assistant"
++            ? entry.data
++            : undefined;
++        if (persistedAssistant) {
++            const streamOptions = persistedAssistant.options;
++            const displayMode = streamOptions?.thinkingDisplayMode ?? this.thinkingDisplayMode;
++            const component = new AssistantMessageComponent(persistedAssistant.message, displayMode === "hidden", this.getMarkdownThemeWithSettings(), streamOptions?.hiddenThinkingLabel ?? this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers(), displayMode, streamOptions?.completedThinkingLabel ?? "Thinking complete · Ctrl+T to expand");
++            component.completeAllThinkingBlocks();
++            if (this.streamingComponent) {
++                const streamingIndex = this.chatContainer.children.indexOf(this.streamingComponent);
++                if (streamingIndex >= 0) {
++                    this.chatContainer.children.splice(streamingIndex, 0, component);
++                    return;
++                }
++            }
++            this.chatContainer.addChild(component);
++            return;
++        }
+         const renderer = this.session.extensionRunner.getEntryRenderer(entry.customType);
+         if (!renderer) {
+             return;
+@@ -2918,7 +3027,7 @@ export class InteractiveMode {
                  break;
              }
              case "assistant": {
@@ -576,7 +647,18 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
                  this.chatContainer.addChild(assistantComponent);
                  break;
              }
-@@ -3369,18 +3440,20 @@ export class InteractiveMode {
+@@ -3141,7 +3250,9 @@ export class InteractiveMode {
+         await this.ui.terminal.drainInput(1000);
+         this.stop();
+         await this.runtimeHost.dispose();
+-        const resumeCommand = formatResumeCommand(this.sessionManager);
++        const resumeCommand = this.options.resumeCommandFormatter
++            ? this.options.resumeCommandFormatter(this.sessionManager)
++            : formatResumeCommand(this.sessionManager);
+         if (resumeCommand) {
+             process.stdout.write(`${chalk.dim("To resume this session:")} ${resumeCommand}\n`);
+         }
+@@ -3369,18 +3480,20 @@ export class InteractiveMode {
          this.showStatus(`Tool output: ${expanded ? "expanded" : "collapsed"}`);
      }
      toggleThinkingBlockVisibility() {
@@ -601,7 +683,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
      }
      async handleOpenExternalEditor() {
          const editorCmd = this.settingsManager.getExternalEditorCommand();
-@@ -3671,7 +3744,7 @@ export class InteractiveMode {
+@@ -3671,7 +3784,7 @@ export class InteractiveMode {
                  currentTheme: this.themeController.getThemeSelection() || "dark",
                  terminalTheme: this.themeController.getTerminalTheme(),
                  availableThemes: getAvailableThemes(),
@@ -610,7 +692,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
                  mermaidRenderingMode: this.settingsManager.getMermaidRenderingMode(),
                  collapseChangelog: this.settingsManager.getCollapseChangelog(),
                  enableInstallTelemetry: this.settingsManager.getEnableInstallTelemetry(),
-@@ -3746,16 +3819,23 @@ export class InteractiveMode {
+@@ -3746,16 +3859,23 @@ export class InteractiveMode {
                      void this.themeController.setThemeSetting(themeSetting);
                  },
                  onThemePreview: (themeName) => this.themeController.preview(themeName),
@@ -638,7 +720,7 @@ index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0
                  },
                  onMermaidRenderingModeChange: (mode) => {
                      this.settingsManager.setMermaidRenderingMode(mode);
-@@ -4827,7 +4907,8 @@ export class InteractiveMode {
+@@ -4827,7 +4947,8 @@ export class InteractiveMode {
              if (chatRestoredBeforeSessionStart) {
                  return;
              }

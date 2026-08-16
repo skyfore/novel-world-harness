@@ -12,6 +12,7 @@ export type CompileCommandOptions = {
   configPath: string;
   allowMissingConfig?: boolean;
   model?: string;
+  sessionId?: string;
   saveSession?: boolean;
   prompt?: string;
   tuiMode?: TuiMode;
@@ -61,6 +62,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
     root: options.root,
     ...(profile ? { profile } : {}),
     ...(options.model ? { model: options.model } : {}),
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
     saveSession: options.saveSession ?? true,
     ...(options.segmentIds ? { segmentIds: options.segmentIds } : {}),
     ...(options.compilerBatchId ? { compilerBatchId: options.compilerBatchId } : {}),
@@ -138,7 +140,10 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
       if (wroteText && !options.onModelText && !options.onModelEvent) stdout.write("\n");
       return;
     }
-    await session.runInteractive({ tuiMode: options.tuiMode, initialMessage: DEFAULT_COMPILER_PROMPT });
+    await session.runInteractive({
+      tuiMode: options.tuiMode,
+      ...(options.sessionId ? {} : { initialMessage: DEFAULT_COMPILER_PROMPT }),
+    });
   } finally {
     options.signal?.removeEventListener("abort", abortSession);
     elapsed?.stop();

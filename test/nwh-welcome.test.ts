@@ -54,6 +54,9 @@ describe("NWH welcome header", () => {
     expect(isFreshConversation([
       { type: "message", message: { role: "custom", customType: "nwh-narrator", display: true } },
     ])).toBe(false);
+    expect(isFreshConversation([
+      { type: "custom", customType: "nwh-narrator", data: { __piAssistantStream: 1 } },
+    ])).toBe(false);
   });
 
   it("recognizes player-only custom transcripts as existing world context", () => {
@@ -67,6 +70,9 @@ describe("NWH welcome header", () => {
     ])).toBe(false);
     expect(hasPlayerConversation([
       { type: "message", message: { role: "custom", customType: "nwh-narrator", display: true } },
+    ])).toBe(true);
+    expect(hasPlayerConversation([
+      { type: "custom", customType: "nwh-narrator", data: { __piAssistantStream: 1 } },
     ])).toBe(true);
   });
 });

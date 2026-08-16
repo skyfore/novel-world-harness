@@ -48,6 +48,7 @@ function sessionActivity(content: string, workspaceRoot: string): { activity: nu
     }
     const isVisibleConversationEntry = entry.type === "message"
       || (entry.type === "custom_message" && entry.display !== false)
+      || (entry.type === "custom" && entry.customType === "nwh-narrator")
       || entry.type === "compaction"
       || entry.type === "branch_summary";
     if (!isVisibleConversationEntry) continue;

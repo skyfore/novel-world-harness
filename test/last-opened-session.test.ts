@@ -63,4 +63,31 @@ describe("last-opened workspace transcript", () => {
 
     await expect(findMostRecentlyActiveSession(root, runtimeDir)).resolves.toBe(actualLatest);
   });
+
+  it("treats a committed native narrator stream as logical conversation activity", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-native-scene-workspace-"));
+    const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-native-scene-runtime-"));
+    temporaryDirectories.push(root, runtimeDir);
+    const sessionDir = workspaceSessionDir(root, runtimeDir);
+    await fs.mkdir(sessionDir, { recursive: true });
+    const sceneSession = path.join(sessionDir, "scene.jsonl");
+    const olderSession = path.join(sessionDir, "older.jsonl");
+    await fs.writeFile(olderSession, [
+      { type: "session", version: 3, id: "older", timestamp: "2026-01-01T00:00:00.000Z", cwd: root },
+      { type: "message", id: "old", parentId: null, timestamp: "2026-01-01T01:00:00.000Z", message: { role: "user", content: "old" } },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+    await fs.writeFile(sceneSession, [
+      { type: "session", version: 3, id: "scene", timestamp: "2026-01-02T00:00:00.000Z", cwd: root },
+      {
+        type: "custom",
+        id: "scene-entry",
+        parentId: null,
+        timestamp: "2026-01-02T01:00:00.000Z",
+        customType: "nwh-narrator",
+        data: { __piAssistantStream: 1 },
+      },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+
+    await expect(findMostRecentlyActiveSession(root, runtimeDir)).resolves.toBe(sceneSession);
+  });
 });

@@ -2,7 +2,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatRetryNotice, PiAgentSession, resolveNwhFullscreenExitOutput, resolveNwhTuiMode, resolveSavedWorldStartupRestore, runPromptWithTimeout, withPiVersionCheckSuppressed } from "../src/agent/pi-session.js";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
+import { formatNwhResumeCommand, formatRetryNotice, PiAgentSession, resolveNwhFullscreenExitOutput, resolveNwhTuiMode, resolveSavedWorldStartupRestore, runPromptWithTimeout, withPiVersionCheckSuppressed } from "../src/agent/pi-session.js";
 import { LocalFileWorkspace } from "../src/workspace/local-files.js";
 import { writeLastOpenedSession } from "../src/agent/last-opened-session.js";
 import { workspaceSessionDir } from "../src/agent/runtime-paths.js";
@@ -27,6 +29,13 @@ describe("PiAgentSession", () => {
     expect(resolveSavedWorldStartupRestore(true, undefined)).toBe(true);
     expect(resolveSavedWorldStartupRestore(false, "opening")).toBe(true);
     expect(resolveSavedWorldStartupRestore(false, undefined)).toBe(false);
+  });
+
+  it("formats an exact NWH resume command for assistant and compiler sessions", () => {
+    expect(formatNwhResumeCommand("/tmp/Novel World", "session-1"))
+      .toBe("nwh --root '/tmp/Novel World' --session session-1");
+    expect(formatNwhResumeCommand("/tmp/Novel World", "compiler-1", "compiler"))
+      .toBe("nwh --root '/tmp/Novel World' compile --session compiler-1");
   });
 
   it("suppresses Pi's CLI update check only while the embedded TUI is running", async () => {
@@ -76,6 +85,30 @@ describe("PiAgentSession", () => {
     await session.dispose();
   });
 
+  it("materializes a new transcript when its first response is a committed assistant stream", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-native-scene-workspace-"));
+    const sessionsDir = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-native-scene-sessions-"));
+    temporaryDirectories.push(root, sessionsDir);
+    const manager = SessionManager.create(root, sessionsDir);
+    const sessionFile = manager.getSessionFile();
+    expect(sessionFile).toBeDefined();
+
+    manager.appendCustomEntry("nwh-narrator", {
+      __piAssistantStream: 1,
+      key: "scene",
+      message: fauxAssistantMessage([
+        fauxThinking("reasoning survives the scene commit"),
+        fauxText("The scene itself is persisted once."),
+      ]),
+      details: { branchId: "main", choices: [] },
+    });
+
+    const persisted = await fs.readFile(sessionFile!, "utf8");
+    expect(persisted).toContain("reasoning survives the scene commit");
+    expect(persisted).toContain("The scene itself is persisted once.");
+    expect(persisted.match(/nwh-narrator/g)).toHaveLength(1);
+  });
+
   it("continues the transcript the interactive user last opened instead of guessing from mtime", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-last-opened-workspace-"));
     const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-last-opened-runtime-"));
@@ -115,6 +148,45 @@ describe("PiAgentSession", () => {
         includeNwhExtension: false,
       });
       expect(session.sessionFile).toBe(selected);
+      await session.dispose();
+    } finally {
+      if (previousApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousApiKey;
+    }
+  });
+
+  it("resumes an explicitly named transcript instead of the last-opened transcript", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-explicit-workspace-"));
+    const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-explicit-runtime-"));
+    temporaryDirectories.push(root, runtimeDir);
+    const sessionDir = workspaceSessionDir(root, runtimeDir);
+    await fs.mkdir(sessionDir, { recursive: true });
+    const lastOpened = path.join(sessionDir, "last-opened-session.jsonl");
+    const explicitlySelected = path.join(sessionDir, "explicit-session.jsonl");
+    for (const [file, id] of [[lastOpened, "last-opened"], [explicitlySelected, "explicit"]] as const) {
+      await fs.writeFile(file, `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: root,
+      })}\n`, "utf8");
+    }
+    await writeLastOpenedSession(root, runtimeDir, lastOpened);
+    const previousApiKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "test-key";
+
+    try {
+      const session = await PiAgentSession.create({
+        workspace: await LocalFileWorkspace.create(root),
+        runtimeDir,
+        piAgentDir: path.join(root, "pi-agent"),
+        sessionId: "explicit",
+        saveSession: true,
+        trackLastOpenedSession: true,
+        includeNwhExtension: false,
+      });
+      expect(session.sessionFile).toBe(explicitlySelected);
       await session.dispose();
     } finally {
       if (previousApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;

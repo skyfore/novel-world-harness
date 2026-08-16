@@ -109,7 +109,12 @@ describe("Pi-native NWH stream rendering", () => {
       chatContainer: Container;
       widgetContainerAbove: Container;
       ui: { requestRender(): void };
-      runtimeHost: { session: { settingsManager: { setThinkingDisplayMode(mode: string): void } } };
+      runtimeHost: {
+        session: {
+          settingsManager: { setThinkingDisplayMode(mode: string): void };
+          sessionManager: { appendCustomEntry(customType: string, data: unknown): string };
+        };
+      };
       hiddenThinkingLabel: string;
       outputPad: number;
       getMarkdownThemeWithSettings(): ReturnType<typeof getMarkdownTheme>;
@@ -120,6 +125,14 @@ describe("Pi-native NWH stream rendering", () => {
       reattachTransientAssistantStreams(): void;
       showStatus(message: string): void;
       toggleThinkingBlockVisibility(): void;
+      addCustomEntryToChat(entry: unknown): void;
+    };
+    const appendedEntries: Array<{ customType: string; data: unknown }> = [];
+    const sessionManager = {
+      appendCustomEntry(customType: string, data: unknown) {
+        appendedEntries.push({ customType, data: structuredClone(data) });
+        return "scene-entry";
+      },
     };
     const mode = Object.create(InteractiveMode.prototype) as InteractiveModeInternals;
     Object.assign(mode, {
@@ -129,7 +142,12 @@ describe("Pi-native NWH stream rendering", () => {
       chatContainer,
       widgetContainerAbove,
       ui: { requestRender },
-      runtimeHost: { session: { settingsManager: { setThinkingDisplayMode: vi.fn() } } },
+      runtimeHost: {
+        session: {
+          settingsManager: { setThinkingDisplayMode: vi.fn() },
+          sessionManager,
+        },
+      },
       hiddenThinkingLabel: "Thinking hidden",
       outputPad: 1,
       getMarkdownThemeWithSettings: () => getMarkdownTheme(),
@@ -159,8 +177,36 @@ describe("Pi-native NWH stream rendering", () => {
     expect(chatContainer.children).toHaveLength(1);
     expect(chatContainer.render(80).join("\n")).toContain("transient child-session reasoning");
 
+    stream.complete(message);
+    stream.commit("nwh-narrator", { branchId: "main", choices: [] });
+    expect(appendedEntries).toHaveLength(1);
+    expect(appendedEntries[0]).toMatchObject({
+      customType: "nwh-narrator",
+      data: {
+        __piAssistantStream: 1,
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "transient child-session reasoning" },
+            { type: "text", text: "The actual scene stream remains visible." },
+          ],
+        },
+        details: { branchId: "main", choices: [] },
+      },
+    });
     stream.dispose();
-    expect(chatContainer.children).toHaveLength(0);
+    expect(chatContainer.children).toHaveLength(1);
+
+    chatContainer.removeChild(stream.component);
+    mode.thinkingDisplayMode = "auto";
+    mode.addCustomEntryToChat({
+      type: "custom",
+      customType: appendedEntries[0]!.customType,
+      data: appendedEntries[0]!.data,
+    });
+    expect(chatContainer.children).toHaveLength(1);
+    expect(chatContainer.render(80).join("\n")).toContain("The actual scene stream remains visible.");
+    expect(chatContainer.render(80).join("\n")).not.toContain("transient child-session reasoning");
     expect(requestRender).toHaveBeenCalled();
   });
 

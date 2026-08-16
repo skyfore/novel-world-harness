@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import {
   createAgentSessionFromServices,
@@ -36,6 +37,7 @@ export type PiAgentSessionOptions = {
   profile?: LlmProfile;
   model?: string;
   continueSession?: boolean;
+  sessionId?: string;
   saveSession?: boolean;
   onText?: (delta: string) => void;
   onThinking?: (delta: string) => void;
@@ -78,6 +80,36 @@ export function resolveSavedWorldStartupRestore(
   activeWorldScene: PlaySceneRequest | undefined,
 ): boolean {
   return continueSession || activeWorldScene !== undefined;
+}
+
+function quoteNwhCliArgument(value: string): string {
+  if (value.length > 0 && !/[^a-zA-Z0-9_\-./~:@]/u.test(value)) return value;
+  return `'${value.replace(/'/gu, `'\\''`)}'`;
+}
+
+export function formatNwhResumeCommand(
+  workspaceRoot: string,
+  sessionId: string,
+  interactionMode: NwhInteractionMode = "assistant",
+): string {
+  const root = quoteNwhCliArgument(path.resolve(workspaceRoot));
+  const id = quoteNwhCliArgument(sessionId);
+  return interactionMode === "compiler"
+    ? `nwh --root ${root} compile --session ${id}`
+    : `nwh --root ${root} --session ${id}`;
+}
+
+async function openWorkspaceSessionById(
+  workspaceRoot: string,
+  sessionsDir: string,
+  sessionId: string,
+): Promise<SessionManager> {
+  const selected = (await SessionManager.list(workspaceRoot, sessionsDir))
+    .find((candidate) => candidate.id === sessionId);
+  if (!selected) {
+    throw new Error(`Session '${sessionId}' does not exist in workspace ${workspaceRoot}.`);
+  }
+  return SessionManager.open(selected.path, sessionsDir);
 }
 
 async function continueWorkspaceSession(
@@ -327,6 +359,9 @@ export class PiAgentSession {
   }
 
   static async create(options: PiAgentSessionOptions): Promise<PiAgentSession> {
+    if (options.sessionId && options.saveSession === false) {
+      throw new Error("An explicit session ID cannot be resumed with session persistence disabled.");
+    }
     const profile = options.profile ? { ...options.profile } : undefined;
     const stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
@@ -385,6 +420,15 @@ export class PiAgentSession {
       {
         modelFallbackMessage: this.runtimeHost.modelFallbackMessage,
         tuiMode: resolveNwhTuiMode(options.tuiMode, configuredTuiMode),
+        resumeCommandFormatter: (sessionManager) => {
+          const sessionFile = sessionManager.getSessionFile();
+          if (!sessionManager.isPersisted() || !sessionFile || !existsSync(sessionFile)) return undefined;
+          return formatNwhResumeCommand(
+            this.options.workspace.root,
+            sessionManager.getSessionId(),
+            this.options.interactionMode ?? "assistant",
+          );
+        },
         ...(options.initialMessage ? { initialMessage: options.initialMessage } : {}),
       },
       () => resolveNwhFullscreenExitOutput(
@@ -409,11 +453,15 @@ export class PiAgentSession {
   private async initialize(continueSession: boolean): Promise<void> {
     const agentDir = path.resolve(this.options.piAgentDir ?? getAgentDir());
     const sessionsDir = workspaceSessionDir(this.options.workspace.root, this.stateDir);
-    const lastOpenedSession = continueSession && this.options.trackLastOpenedSession
+    const resumeSessionId = this.options.sessionId;
+    const restoresTranscript = continueSession || resumeSessionId !== undefined;
+    const lastOpenedSession = continueSession && !resumeSessionId && this.options.trackLastOpenedSession
       ? await readLastOpenedSession(this.options.workspace.root, this.stateDir)
       : undefined;
     const sessionManager = this.saveSession
-      ? continueSession
+      ? resumeSessionId
+        ? await openWorkspaceSessionById(this.options.workspace.root, sessionsDir, resumeSessionId)
+        : continueSession
         ? await continueWorkspaceSession(this.options.workspace.root, sessionsDir, lastOpenedSession, this.stateDir)
         : SessionManager.create(this.options.workspace.root, sessionsDir)
       : SessionManager.inMemory(this.options.workspace.root);
@@ -422,7 +470,7 @@ export class PiAgentSession {
       const isInitialRuntime = initialRuntime;
       const activeWorldScene = isInitialRuntime ? this.options.activeWorldScene : undefined;
       const restoreSavedWorldOnStartup = !isInitialRuntime
-        || resolveSavedWorldStartupRestore(continueSession, activeWorldScene);
+        || resolveSavedWorldStartupRestore(restoresTranscript, activeWorldScene);
       initialRuntime = false;
       if (path.resolve(cwd) !== this.options.workspace.root) {
         throw new Error(`NWH cannot switch this session to another workspace (${cwd}). Start a new process with --root instead.`);

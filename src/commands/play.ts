@@ -11,14 +11,15 @@ export type PlayCommandOptions = {
   root?: string;
   model?: string;
   continueSession?: boolean;
+  sessionId?: string;
   saveSession?: boolean;
   printPrompt?: string;
   tuiMode?: TuiMode;
   activeWorldScene?: PlaySceneRequest;
 };
 
-export function resolvePlaySessionContinuation(options: Pick<PlayCommandOptions, "continueSession" | "printPrompt">): boolean {
-  return options.continueSession ?? options.printPrompt === undefined;
+export function resolvePlaySessionContinuation(options: Pick<PlayCommandOptions, "continueSession" | "printPrompt" | "sessionId">): boolean {
+  return options.sessionId !== undefined || (options.continueSession ?? options.printPrompt === undefined);
 }
 
 async function optionalConfig(options: PlayCommandOptions) {
@@ -31,6 +32,9 @@ async function optionalConfig(options: PlayCommandOptions) {
 }
 
 export async function playCommand(options: PlayCommandOptions): Promise<void> {
+  if (options.sessionId && options.continueSession === false) {
+    throw new Error("Choose either --session or --new-session, not both.");
+  }
   const workspace = await LocalFileWorkspace.create(options.root ?? process.cwd());
   const config = await optionalConfig(options);
   const profile = config ? profileForRole(config, "narrator").profile : undefined;
@@ -44,6 +48,7 @@ export async function playCommand(options: PlayCommandOptions): Promise<void> {
     profile,
     model,
     continueSession,
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
     saveSession,
     trackLastOpenedSession: !printMode,
     ...(options.activeWorldScene !== undefined ? { activeWorldScene: options.activeWorldScene } : {}),

@@ -49,6 +49,7 @@ program
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
   .option("--continue", "continue the latest session in this workspace")
+  .option("--session <id>", "resume an exact saved TUI session in this workspace")
   .option("--new-session", "start a fresh terminal transcript while preserving world progress")
   .option("--no-save", "do not persist the interactive session");
 
@@ -205,6 +206,7 @@ program
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
   .option("--model <model>", "override compiler model")
+  .option("--session <id>", "resume an exact saved compiler session")
   .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
   .option("--no-save", "do not persist compiler session")
   .description("open an explicit compiler session with typed proposal tools")
@@ -215,6 +217,7 @@ program
       configPath: configFor(options),
       allowMissingConfig: !options.config,
       model: options.model ?? globalOptions.model,
+      sessionId: options.session ?? globalOptions.session,
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
       saveSession: options.save && globalOptions.save,
       ...(prompt ? { prompt } : {}),
@@ -391,6 +394,7 @@ program
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
   .option("--continue", "continue the latest session in this workspace")
+  .option("--session <id>", "resume an exact saved TUI session in this workspace")
   .option("--new-session", "start a fresh terminal transcript while preserving world progress")
   .option("--no-save", "do not persist the interactive session")
   .description("open the local-first terminal session")
@@ -415,6 +419,7 @@ program
       printPrompt: options.print ?? globalOptions.print,
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
       continueSession: options.newSession || globalOptions.newSession ? false : options.continue || globalOptions.continue || undefined,
+      sessionId: options.session ?? globalOptions.session,
       saveSession: options.save && globalOptions.save,
       ...(explicitlySelectedWorld ? { activeWorldScene: playSceneRequestForEntry("play") } : {}),
     });
@@ -430,6 +435,7 @@ program.action(async () => {
     printPrompt: options.print,
     tuiMode: options.tuiMode,
     continueSession: options.newSession ? false : options.continue || undefined,
+    sessionId: options.session,
     saveSession: options.save,
   });
 });

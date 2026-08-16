@@ -36,6 +36,7 @@ type RecordedTransientStream = {
   updates: AssistantMessage[];
   events: AssistantMessageEvent[];
   completed?: AssistantMessage;
+  committed?: { customType: string; details?: unknown };
   disposed: boolean;
 };
 
@@ -56,6 +57,12 @@ function transientStreamRecorder(streams: RecordedTransientStream[]) {
       },
       complete(message) {
         recorded.completed = structuredClone(message);
+      },
+      commit(customType, details) {
+        recorded.committed = {
+          customType,
+          ...(details === undefined ? {} : { details: structuredClone(details) }),
+        };
       },
       dispose() {
         recorded.disposed = true;
@@ -268,6 +275,47 @@ describe("NWH TUI extension", () => {
 
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
     expect(widgets.at(-1)).toEqual({ key: "nwh-model-loading", content: undefined, placement: "aboveEditor" });
+  });
+
+  it("shows a first Ctrl+C confirmation and exits only on the second press", async () => {
+    const { events } = await fixture(undefined, undefined, undefined, undefined, undefined, false);
+    const notifications: string[] = [];
+    let terminalInput: ((data: string) => { consume?: boolean } | undefined) | undefined;
+    let editorText = "unfinished input";
+    let shutdown = false;
+    const ctx = {
+      mode: "tui",
+      isIdle: () => true,
+      abort: () => undefined,
+      shutdown: () => { shutdown = true; },
+      sessionManager: { getEntries: () => [] },
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        onTerminalInput: (handler: typeof terminalInput) => {
+          terminalInput = handler;
+          return () => { terminalInput = undefined; };
+        },
+        getEditorText: () => editorText,
+        setEditorText: (value: string) => { editorText = value; },
+        setTitle: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: () => undefined,
+        setHeader: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("session_start")?.({ type: "session_start", reason: "new" }, ctx);
+    expect(terminalInput?.("\x03")).toEqual({ consume: true });
+    expect(editorText).toBe("");
+    expect(shutdown).toBe(false);
+    expect(notifications.at(-1)).toContain("Press Ctrl+C again within 2s to exit");
+
+    expect(terminalInput?.("\x03")).toEqual({ consume: true });
+    expect(shutdown).toBe(true);
+    await events.get("session_shutdown")?.();
   });
 
   it("parses CLI-compatible /reparse flags", () => {
@@ -885,10 +933,11 @@ describe("NWH TUI extension", () => {
     release.resolve();
     await entering;
 
-    expect(sentMessages).toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: finalNarration, display: true }));
+    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
     expect(streams).toHaveLength(1);
     expect(streams[0]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: finalNarration }));
-    expect(streams[0]?.disposed).toBe(true);
+    expect(streams[0]?.committed).toMatchObject({ customType: "nwh-narrator" });
+    expect(streams[0]?.disposed).toBe(false);
   });
 
   it("returns from session_start before generating a restored world's scene", async () => {
@@ -1198,20 +1247,22 @@ describe("NWH TUI extension", () => {
       mode: "tui",
       sessionManager: {
         getEntries: () => [{
-          type: "custom_message",
+          type: "custom",
           customType: "nwh-narrator",
-          content: "旧场景",
-          display: true,
-          details: {
-            version: 1,
-            branchId: "main",
-            actorId: "hero",
-            commitId: genesis,
-            purpose: "opening",
-            choices: [
-              { label: "观察", description: "看看周围。", action: "我先观察周围。" },
-              { label: "等待", description: "等一小会。", action: "我先等待片刻。" },
-            ],
+          data: {
+            __piAssistantStream: 1,
+            message: fauxAssistantMessage([fauxThinking("旧思考"), fauxText("旧场景")]),
+            details: {
+              version: 1,
+              branchId: "main",
+              actorId: "hero",
+              commitId: genesis,
+              purpose: "opening",
+              choices: [
+                { label: "观察", description: "看看周围。", action: "我先观察周围。" },
+                { label: "等待", description: "等一小会。", action: "我先等待片刻。" },
+              ],
+            },
           },
         }],
       },
@@ -1266,6 +1317,29 @@ describe("NWH TUI extension", () => {
           assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: narration, partial: text },
         } as never);
         observer?.onEvent?.({ type: "message_end", message: text } as never);
+        const followUp = fauxAssistantMessage([fauxThinking("工具返回后确认停止，不再重复正文")]);
+        observer?.onEvent?.({ type: "message_start", message: fauxAssistantMessage([]) } as never);
+        observer?.onEvent?.({
+          type: "message_update",
+          message: followUp,
+          assistantMessageEvent: {
+            type: "thinking_delta",
+            contentIndex: 0,
+            delta: "工具返回后确认停止，不再重复正文",
+            partial: followUp,
+          },
+        } as never);
+        observer?.onEvent?.({
+          type: "message_update",
+          message: followUp,
+          assistantMessageEvent: {
+            type: "thinking_end",
+            contentIndex: 0,
+            content: "工具返回后确认停止，不再重复正文",
+            partial: followUp,
+          },
+        } as never);
+        observer?.onEvent?.({ type: "message_end", message: followUp } as never);
         return narration;
       },
     );
@@ -1300,15 +1374,18 @@ describe("NWH TUI extension", () => {
       "thinking_delta",
       "thinking_end",
       "text_delta",
+      "thinking_delta",
+      "thinking_end",
     ]);
     expect(streams[0]?.updates.at(-1)?.content).toContainEqual(expect.objectContaining({ type: "text", text: narration }));
-    expect(streams[0]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: narration }));
-    expect(streams[0]?.disposed).toBe(true);
-    expect(sentMessages).toContainEqual(expect.objectContaining({
-      customType: "nwh-narrator",
-      content: narration,
-      display: true,
+    expect(streams[0]?.completed?.content).toContainEqual(expect.objectContaining({
+      type: "thinking",
+      thinking: "工具返回后确认停止，不再重复正文",
     }));
+    expect(streams[0]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: narration }));
+    expect(streams[0]?.committed).toMatchObject({ customType: "nwh-narrator" });
+    expect(streams[0]?.disposed).toBe(false);
+    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
   });
 
   it("disposes a rejected scene stream before mounting the replacement attempt", async () => {
@@ -1364,9 +1441,10 @@ describe("NWH TUI extension", () => {
 
     expect(streams).toHaveLength(2);
     expect(streams[0]).toMatchObject({ disposed: true });
-    expect(streams[1]).toMatchObject({ disposed: true });
+    expect(streams[1]).toMatchObject({ disposed: false });
     expect(streams[1]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: accepted }));
-    expect(sentMessages).toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: accepted }));
+    expect(streams[1]?.committed).toMatchObject({ customType: "nwh-narrator" });
+    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
     expect(sentMessages).not.toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: rejected }));
   });
 

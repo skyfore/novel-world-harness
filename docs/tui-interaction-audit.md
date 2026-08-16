@@ -81,15 +81,17 @@ that mounts the nested session in the native scrollable transcript without
 adding it to the parent model context. Provider/model, attempt, retry, and the
 capture-only choice-tool lifecycle use compact footer status. Active thinking
 is visible and collapses on `thinking_end`; text-start and message-end provide
-fallbacks. The accepted stream is checked against the settled result, then the
-transient components are replaced by one clean `nwh-narrator` transcript
-message. A scene-validation retry disposes the rejected draft before the
-replacement starts. Opening, orientation, retry, and post-commit narration
-share this path; status never masquerades as prose.
+fallbacks. The accepted stream is checked against the settled result, then that
+same native component is committed in place as the durable `nwh-narrator`
+entry. Its thinking and choice metadata persist outside parent-model context;
+there is no second scene copy. A scene-validation retry disposes the rejected
+attempt before the retry starts. Opening, orientation, retry, and post-commit
+narration share this path; status never masquerades as prose.
 
 **Evidence.** Narrator tests assert provider/model status and native thinking
-and text events in the transient stream, prove that no scene widget is mounted,
-and verify that persisted narration is exactly the accepted streamed text.
+and text events in the stream, prove that no scene widget or duplicate narrator
+message is mounted, and verify that persisted narration and thinking come from
+the accepted native stream.
 
 ### 3a. Restored player transcripts were mistaken for new conversations
 

@@ -40,11 +40,13 @@ prints a result.
 ## Surfaces
 
 - Main Pi turns use Pi's native assistant, thinking, and tool components.
-- Isolated scene sessions bridge Pi assistant events into a TUI-only transient
-  message in Pi's native scrollable transcript. Provider/model, attempt, retry,
-  and capture-tool phases use compact footer status. The accepted text is
-  checked against the live stream before replacing it with a clean narrator
-  message; a rejected first draft is removed before its replacement streams.
+- Isolated scene sessions bridge Pi assistant events into one message in Pi's
+  native scrollable transcript. Provider/model, retry, and capture-tool phases
+  use compact footer status. The accepted text is checked against the live
+  stream before that same native component is committed as a durable,
+  model-context-excluded scene. Thinking and player choices persist with it; no
+  duplicate narrator copy is mounted. A rejected attempt is removed before its
+  one automatic retry streams.
 - Thinking defaults to `auto`: an active block is visible, `thinking_end`
   collapses it, text-start and message-end are fallbacks, and Pi's existing
   Ctrl+T binding expands completed blocks without an NWH key interceptor.

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { getMarkdownTheme, type AgentSessionEvent, type ExtensionAPI, type ExtensionContext, type ExtensionFactory, type TransientAssistantStream } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
 import { Key, Markdown, Text, matchesKey } from "@earendil-works/pi-tui";
 import { expandFileMentions } from "./file-mentions.js";
 import { createNwhWelcomeHeader, hasPlayerConversation, isFreshConversation, NWH_WORKING_FRAMES } from "./nwh-welcome.js";
@@ -74,6 +75,7 @@ import { formatElapsed } from "../util/elapsed-status.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/removal.js";
 import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
 import { createNwhModelLoadingIndicator, type NwhModelLoadingIndicator } from "./nwh-model-loading.js";
+import { NWH_DOUBLE_CTRL_C_WINDOW_MS, NwhDoubleCtrlCExit } from "./nwh-exit.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -130,7 +132,7 @@ TUI shortcuts:
   Enter send · Shift+Enter newline · Esc interrupt · Ctrl+O toggle tool details
   Ctrl+T toggle reasoning · PgUp/PgDn scroll transcript · Ctrl+Shift+F search
   ↑/↓ prompt history · ← backgrounds the focused NWH task panel · /tasks restores it
-  Ctrl+C cancels the focused NWH task safely; completed task output remains under /tasks
+  Ctrl+C stops the current response/task; press it again within 2s to exit
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
 const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
@@ -222,12 +224,22 @@ type ContextMessage = { role: string; customType?: string; details?: unknown };
 type PlayerTranscriptEntry = {
   type: string;
   customType?: string;
+  data?: unknown;
   details?: unknown;
   message?: unknown;
 };
 
 function transcriptCustomMessage(entry: PlayerTranscriptEntry): { customType?: string; details?: unknown } {
   if (entry.type === "custom_message") return { customType: entry.customType, details: entry.details };
+  if (entry.type === "custom" && entry.customType) {
+    const data = entry.data && typeof entry.data === "object" && !Array.isArray(entry.data)
+      ? entry.data as Record<string, unknown>
+      : undefined;
+    return {
+      customType: entry.customType,
+      ...(data?.details !== undefined ? { details: data.details } : {}),
+    };
+  }
   if (!entry.message || typeof entry.message !== "object" || Array.isArray(entry.message)) return {};
   const message = entry.message as Record<string, unknown>;
   return {
@@ -319,6 +331,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let activePlayerTurn: { controller: AbortController; cancellable: boolean; completion: Promise<void> } | undefined;
     let activePlayerChoicePrompt: symbol | undefined;
     let stopTerminalInput: (() => void) | undefined;
+    const doubleCtrlCExit = new NwhDoubleCtrlCExit();
     let startupRestorePromise: Promise<void> | undefined;
     let modelLoadingIndicator: NwhModelLoadingIndicator | undefined;
     let shuttingDown = false;
@@ -475,16 +488,22 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       ctx: ExtensionContext,
       purpose: PlayScenePurpose,
       signal: AbortSignal,
-    ): { observer: PlayerSceneNarrationObserver; verifyFinalText: (text: string) => void; close: () => void } => {
+    ): {
+      observer: PlayerSceneNarrationObserver;
+      verifyFinalText: (text: string) => void;
+      commit: (text: string, details: Record<string, unknown>) => boolean;
+      close: () => void;
+    } => {
       let content = "";
       let retryNotice = "";
       let toolActivity = "";
       let model = "";
       let attempt: 1 | 2 = 1;
       let sawNativeEvents = false;
-      let messageSequence = 0;
       let currentStream: TransientAssistantStream | undefined;
       const streams: TransientAssistantStream[] = [];
+      const completedMessages: AssistantMessage[] = [];
+      let currentMessage: AssistantMessage | undefined;
       const title = () => {
         return purpose === "opening"
           ? "故事正在展开"
@@ -497,7 +516,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         const activity = retryNotice || toolActivity || "实时生成场景";
         ctx.ui.setStatus(
           "nwh-play-opening",
-          ctx.ui.theme.fg("dim", `NWH · ${title()} · ${model || "模型连接中"} · 第 ${attempt}/2 稿 · ${activity}`),
+          ctx.ui.theme.fg("dim", `NWH · ${title()} · ${model || "模型连接中"} · ${activity}`),
         );
       };
       const disposeStreams = () => {
@@ -507,7 +526,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const openStream = () => {
         if (ctx.mode !== "tui" || typeof ctx.ui.openTransientAssistantStream !== "function") return undefined;
         const stream = ctx.ui.openTransientAssistantStream(
-          `nwh-player-scene-${attempt}-${++messageSequence}`,
+          `nwh-player-scene-${attempt}`,
           {
             hiddenThinkingLabel: "思考已隐藏 · Ctrl+T 显示",
             completedThinkingLabel: "思考已完成 · Ctrl+T 展开",
@@ -517,7 +536,27 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         currentStream = stream;
         return stream;
       };
-      const streamForMessage = () => currentStream ?? openStream();
+      const sceneBlocks = (message: AssistantMessage) => message.content.filter(
+        (block) => block.type === "thinking" || block.type === "text",
+      );
+      const mergedMessage = (): AssistantMessage | undefined => {
+        const messages = [...completedMessages, ...(currentMessage ? [currentMessage] : [])];
+        const base = messages.at(-1);
+        if (!base) return undefined;
+        return {
+          ...base,
+          content: messages.flatMap(sceneBlocks),
+        };
+      };
+      const remapAssistantEvent = (event: AssistantMessageEvent): AssistantMessageEvent => {
+        if (!("contentIndex" in event) || typeof event.contentIndex !== "number" || !currentMessage) return event;
+        const completedBlockCount = completedMessages.reduce((sum, message) => sum + sceneBlocks(message).length, 0);
+        const currentBlockOffset = currentMessage.content
+          .slice(0, event.contentIndex)
+          .filter((block) => block.type === "thinking" || block.type === "text")
+          .length;
+        return { ...event, contentIndex: completedBlockCount + currentBlockOffset } as AssistantMessageEvent;
+      };
       const observer: PlayerSceneNarrationObserver = {
         signal,
         onAttempt(nextAttempt) {
@@ -525,6 +564,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           attempt = nextAttempt;
           content = "";
           toolActivity = "";
+          completedMessages.splice(0);
+          currentMessage = undefined;
           retryNotice = nextAttempt === 2 ? "首稿未通过校验，正在重写" : "";
           updateStatus();
         },
@@ -543,15 +584,20 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             model = `${event.message.provider}/${event.message.model}`;
           }
           if (event.type === "message_start" && event.message.role === "assistant") {
-            currentStream = openStream();
-            currentStream?.update(event.message);
+            currentMessage = event.message;
+            currentStream ??= openStream();
+            const merged = mergedMessage();
+            if (merged) currentStream?.update(merged);
             retryNotice = "";
             updateStatus();
             return;
           }
           if (event.type === "message_update" && event.message.role === "assistant") {
             if (event.assistantMessageEvent.type === "text_delta") content += event.assistantMessageEvent.delta;
-            streamForMessage()?.update(event.message, event.assistantMessageEvent);
+            currentMessage = event.message;
+            currentStream ??= openStream();
+            const merged = mergedMessage();
+            if (merged) currentStream?.update(merged, remapAssistantEvent(event.assistantMessageEvent));
             updateStatus();
             return;
           }
@@ -561,8 +607,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
                 .flatMap((block) => block.type === "text" ? [block.text] : [])
                 .join("");
             }
-            streamForMessage()?.complete(event.message);
-            currentStream = undefined;
+            currentMessage = event.message;
+            const merged = mergedMessage();
+            if (merged) currentStream?.complete(merged);
+            completedMessages.push(structuredClone(event.message));
+            currentMessage = undefined;
             updateStatus();
             return;
           }
@@ -596,6 +645,26 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           if (content !== text) {
             throw new Error("Scene narrator settled text did not match the text shown in the live provider stream.");
           }
+        },
+        commit(text, details) {
+          const stream = currentStream;
+          const base = completedMessages.at(-1) ?? currentMessage;
+          if (!sawNativeEvents || !stream || !base) return false;
+          const persistedMessage: AssistantMessage = {
+            ...base,
+            content: [
+              ...[...completedMessages, ...(currentMessage ? [currentMessage] : [])]
+                .flatMap(sceneBlocks)
+                .filter((block) => block.type === "thinking"),
+              { type: "text", text },
+            ],
+          };
+          stream.complete(persistedMessage);
+          stream.commit("nwh-narrator", details);
+          const index = streams.indexOf(stream);
+          if (index >= 0) streams.splice(index, 1);
+          currentStream = undefined;
+          return true;
         },
         close() {
           disposeStreams();
@@ -651,14 +720,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           && selectedPlay?.session.branchId === selection.session.branchId
           && selectedPlay.actor.id === selection.actor.id;
         if (stillSelected) {
-          showNarratorMessage(narration, {
+          const details = {
             version: 1,
             branchId: frame.branchId,
             actorId: frame.actor.id,
             commitId: frame.commitId,
             purpose,
             choices: structuredClone(choices),
-          });
+          } as const;
+          if (!stream.commit(narration, details)) showNarratorMessage(narration, details);
           return choices;
         }
       } catch (error) {
@@ -1494,6 +1564,35 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
       if (!stopTerminalInput && typeof ctx.ui.onTerminalInput === "function") {
         stopTerminalInput = ctx.ui.onTerminalInput((data) => {
+          if (matchesKey(data, Key.ctrl("c"))) {
+            if (doubleCtrlCExit.press() === "exit") {
+              ctx.shutdown();
+              return { consume: true };
+            }
+
+            let firstPressResult = "";
+            if (activePlayerTurn?.cancellable) {
+              activePlayerTurn.controller.abort();
+              firstPressResult = "Stopping the current player action. ";
+            } else if (activePlayerScene) {
+              activePlayerScene.controller.abort();
+              firstPressResult = "Stopping the current scene. ";
+            } else if (taskForeground && taskRunning()) {
+              activeTask!.cancel();
+              firstPressResult = `Cancelling ${activeTask!.snapshot.title} safely. `;
+            } else if (ctx.isIdle() === false) {
+              ctx.abort();
+              firstPressResult = "Stopping the current model response. ";
+            } else if (ctx.ui.getEditorText()) {
+              ctx.ui.setEditorText("");
+              firstPressResult = "Input cleared. ";
+            }
+            ctx.ui.notify(
+              `${firstPressResult}Press Ctrl+C again within ${NWH_DOUBLE_CTRL_C_WINDOW_MS / 1_000}s to exit; this session will remain resumable.`,
+              "info",
+            );
+            return { consume: true };
+          }
           if (!matchesKey(data, Key.escape)) return undefined;
           if (activePlayerTurn?.cancellable) {
             activePlayerTurn.controller.abort();

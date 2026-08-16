@@ -7,5 +7,6 @@ describe("interactive transcript continuation", () => {
     expect(resolvePlaySessionContinuation({ printPrompt: "status" })).toBe(false);
     expect(resolvePlaySessionContinuation({ continueSession: false })).toBe(false);
     expect(resolvePlaySessionContinuation({ continueSession: true, printPrompt: "status" })).toBe(true);
+    expect(resolvePlaySessionContinuation({ sessionId: "exact", printPrompt: "status" })).toBe(true);
   });
 });

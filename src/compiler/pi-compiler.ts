@@ -9,6 +9,7 @@ export type PiCompilerOptions = {
   root: string;
   profile?: LlmProfile;
   model?: string;
+  sessionId?: string;
   saveSession?: boolean;
   onText?: (delta: string) => void;
   onThinking?: (delta: string) => void;
@@ -39,6 +40,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     workspace,
     ...(options.profile ? { profile: options.profile } : {}),
     ...(options.model ? { model: options.model } : {}),
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
     saveSession: options.saveSession ?? true,
     ...(options.onText ? { onText: options.onText } : {}),
     ...(options.onThinking ? { onThinking: options.onThinking } : {}),

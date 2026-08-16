@@ -1,7 +1,7 @@
 import { ActorModelStore } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore } from "../world/initial.js";
-import type { CanonicalEvent, EvidenceRef } from "../world/model.js";
+import type { CanonicalEvent, EvidenceRef, StoryTime } from "../world/model.js";
 import { SegmentStore } from "./segments.js";
 import { EvidenceVerifier } from "./evidence.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -39,8 +39,13 @@ export type CompilerAuditReport = {
   };
   consistency: {
     causalGraphValid: boolean | null;
+    narrativeGraphNavigable: boolean | null;
     causalCycles: string[][];
     missingCausalParents: Array<{ eventId: string; parentId: string }>;
+    temporalRegressions: Array<{ eventId: string; parentId: string }>;
+    causalComponents: number;
+    largestCausalComponent: number;
+    unconditionalRootEvents: string[];
   };
   coverage: {
     sourceIndexing: number | null;
@@ -135,6 +140,7 @@ export async function auditCompiler(
   }
 
   const graph = auditCausalGraph(events);
+  const narrativeGraphNavigable = events.length ? graphNavigable(events, graph) : null;
   const eventsWithExplicitDelta = events.filter((event) => event.observedOutcome.operations.length > 0).length;
   const sourceIndexing = sources.length
     ? changedSinceIngest.length
@@ -166,16 +172,21 @@ export async function auditCompiler(
       errors: evidenceErrors,
     },
     consistency: {
-      causalGraphValid: events.length ? graph.cycles.length === 0 && graph.missing.length === 0 : null,
+      causalGraphValid: events.length ? graph.cycles.length === 0 && graph.missing.length === 0 && graph.temporalRegressions.length === 0 : null,
+      narrativeGraphNavigable,
       causalCycles: graph.cycles,
       missingCausalParents: graph.missing,
+      temporalRegressions: graph.temporalRegressions,
+      causalComponents: graph.components.length,
+      largestCausalComponent: Math.max(0, ...graph.components.map((component) => component.length)),
+      unconditionalRootEvents: graph.unconditionalRoots,
     },
     coverage: {
       sourceIndexing,
       evidenceBinding: validBindingRatio,
-      temporalConsistency: events.length ? (graph.cycles.length ? 0 : 1) : null,
+      temporalConsistency: events.length ? (graph.cycles.length || graph.temporalRegressions.length ? 0 : 1) : null,
       stateDeltaExplicitness: events.length ? eventsWithExplicitDelta / events.length : null,
-      causalityConsistency: events.length ? (graph.cycles.length || graph.missing.length ? 0 : 1) : null,
+      causalityConsistency: events.length ? (graph.cycles.length || graph.missing.length || narrativeGraphNavigable === false ? 0 : 1) : null,
       entityResolution: null,
       majorEventResolution: null,
       epistemicCoverage: null,
@@ -184,6 +195,9 @@ export async function auditCompiler(
       ...(options.sourceId ? [`Audit is scoped to source ${options.sourceId}; unrelated registered sources and artifacts are excluded.`] : []),
       "Null coverage values are intentional: the compiler does not have a trustworthy denominator for those dimensions yet.",
       "Canonical artifact counts are inventory, not full-book semantic coverage.",
+      ...(narrativeGraphNavigable === false
+        ? ["The canonical event graph is dominated by unconditional disconnected roots; recurring characters alone are not enough to make later canon active at the opening."]
+        : []),
       "Source indexing measures indexed source bytes and may be below 1 when blank-only gaps are intentionally omitted.",
     ],
   };
@@ -192,6 +206,9 @@ export async function auditCompiler(
 function auditCausalGraph(events: readonly CanonicalEvent[]): {
   cycles: string[][];
   missing: Array<{ eventId: string; parentId: string }>;
+  temporalRegressions: Array<{ eventId: string; parentId: string }>;
+  components: string[][];
+  unconditionalRoots: string[];
 } {
   const byId = new Map(events.map((event) => [event.id, event]));
   const missing: Array<{ eventId: string; parentId: string }> = [];
@@ -217,5 +234,64 @@ function auditCausalGraph(events: readonly CanonicalEvent[]): {
     active.delete(id);
   };
   for (const event of events) visit(event.id);
-  return { cycles, missing };
+  const temporalRegressions: Array<{ eventId: string; parentId: string }> = [];
+  for (const event of events) {
+    for (const parentId of event.causalParents) {
+      const parent = byId.get(parentId);
+      if (parent && storyTimeDefinitelyBefore(event.storyTime, parent.storyTime)) temporalRegressions.push({ eventId: event.id, parentId });
+    }
+  }
+  const adjacency = new Map(events.map((event) => [event.id, new Set<string>()]));
+  for (const event of events) {
+    for (const parentId of event.causalParents) {
+      if (!byId.has(parentId)) continue;
+      adjacency.get(event.id)!.add(parentId);
+      adjacency.get(parentId)!.add(event.id);
+    }
+  }
+  const components: string[][] = [];
+  const assigned = new Set<string>();
+  for (const eventId of [...byId.keys()].sort()) {
+    if (assigned.has(eventId)) continue;
+    const component: string[] = [];
+    const pending = [eventId];
+    assigned.add(eventId);
+    while (pending.length) {
+      const current = pending.pop()!;
+      component.push(current);
+      for (const neighbor of adjacency.get(current) ?? []) {
+        if (assigned.has(neighbor)) continue;
+        assigned.add(neighbor);
+        pending.push(neighbor);
+      }
+    }
+    components.push(component.sort());
+  }
+  const unconditionalRoots = events
+    .filter((event) => event.causalParents.length === 0 && event.preconditions.length === 0)
+    .map((event) => event.id)
+    .sort();
+  return { cycles, missing, temporalRegressions, components, unconditionalRoots };
+}
+
+function graphNavigable(
+  events: readonly CanonicalEvent[],
+  graph: ReturnType<typeof auditCausalGraph>,
+): boolean {
+  if (events.length <= 8) return true;
+  const rootLimit = Math.max(8, Math.ceil(events.length * 0.4));
+  const largest = Math.max(0, ...graph.components.map((component) => component.length));
+  return graph.unconditionalRoots.length <= rootLimit || largest / events.length >= 0.6;
+}
+
+function storyTimeDefinitelyBefore(left: StoryTime, right: StoryTime): boolean {
+  const comparable = (value: StoryTime): { scale: "year" | "ordinal"; min: number; max: number } | undefined => {
+    if (value.kind === "ordinal" && typeof value.orderHint === "number") return { scale: "ordinal", min: value.orderHint, max: value.orderHint };
+    const values = value.kind === "exact" ? [value.value] : value.kind === "range" ? [value.earliest, value.latest] : [];
+    const years = values.flatMap((entry) => [...entry.matchAll(/(?:^|\D)(\d{3,4})(?:s)?(?=\D|$)/g)].map((match) => Number(match[1])));
+    return years.length ? { scale: "year", min: Math.min(...years), max: Math.max(...years.map((year) => year + 9)) } : undefined;
+  };
+  const leftRange = comparable(left);
+  const rightRange = comparable(right);
+  return Boolean(leftRange && rightRange && leftRange.scale === rightRange.scale && leftRange.max < rightRange.min);
 }

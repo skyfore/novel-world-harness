@@ -69,4 +69,46 @@ describe("compiler audit", () => {
     expect(report.evidence.invalidReferences).toBe(0);
     expect(report.notes[0]).toContain(`scoped to source ${selected.source.id}`);
   });
+
+  it("flags a large canon compiled as disconnected unconditional roots instead of treating every episode as immediately reachable", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-graph-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero crosses ten successive story beats.\n");
+    const proposals = new CompilerProposalService(root);
+    const commits = new CompilerCommitService(root);
+    await proposals.submit("entity", {
+      proposalId: "graph-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "graph-hero")).accepted).toBe(true);
+
+    for (let index = 1; index <= 10; index += 1) {
+      const proposalId = `root-event-${index}`;
+      await proposals.submit("canonical-event", {
+        proposalId,
+        payload: {
+          id: `event-${index}`,
+          title: `Independent story beat ${index}`,
+          participants: ["hero"],
+          storyTime: { kind: "ordinal", label: `beat-${index}`, orderHint: index },
+          preconditions: [],
+          observedOutcome: { version: 1, operations: [] },
+          evidence: fixture.evidence("Hero crosses ten successive story beats."),
+          causalParents: [],
+          confidence: 1,
+        },
+        generatedBy: { worker: "test" },
+      });
+      expect((await commits.accept("canonical-event", proposalId)).accepted).toBe(true);
+    }
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.consistency.causalGraphValid).toBe(true);
+    expect(report.consistency.narrativeGraphNavigable).toBe(false);
+    expect(report.consistency.unconditionalRootEvents).toHaveLength(10);
+    expect(report.consistency.causalComponents).toBe(10);
+    expect(report.coverage.causalityConsistency).toBe(0);
+    expect(report.notes).toContainEqual(expect.stringContaining("dominated by unconditional disconnected roots"));
+  });
 });

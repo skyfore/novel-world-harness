@@ -296,11 +296,28 @@ function collectProposalClosureIssues(
     missing("entities", goal.actorId, "actorId");
     goal.requiresKnowledge.forEach((id, index) => missing("claims", id, `requiresKnowledge.${index}`));
     goal.blockedByKnowledge?.forEach((id, index) => missing("claims", id, `blockedByKnowledge.${index}`));
-    const action = goal.candidateAction;
-    action?.participants?.forEach((id, index) => missing("entities", id, `candidateAction.participants.${index}`));
-    action?.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `candidateAction.preconditions.${index}`, missing, fieldReference));
-    if (action) collectStateDeltaIssues(action.proposedDelta, "candidateAction.proposedDelta", missing, fieldReference);
-    if (action?.proposedKnowledge) collectKnowledgeDeltaIssues(action.proposedKnowledge, "candidateAction.proposedKnowledge", missing);
+    goal.targetIds?.forEach((id, index) => missing("entities", id, `targetIds.${index}`));
+    goal.activation?.preconditions.forEach((predicate, index) =>
+      collectPredicateIssues(predicate, `activation.preconditions.${index}`, missing, fieldReference));
+    goal.activation?.afterCanonicalEventIds.forEach((id, index) =>
+      missing("events", id, `activation.afterCanonicalEventIds.${index}`));
+    if (goal.activation?.storyWindow) collectStoryTimeIssues(goal.activation.storyWindow, "activation.storyWindow", missing);
+    goal.completion?.forEach((predicate, index) =>
+      collectPredicateIssues(predicate, `completion.${index}`, missing, fieldReference));
+    goal.expiry?.forEach((predicate, index) =>
+      collectPredicateIssues(predicate, `expiry.${index}`, missing, fieldReference));
+    goal.milestones?.forEach((milestone, milestoneIndex) => milestone.conditions.forEach((predicate, index) =>
+      collectPredicateIssues(predicate, `milestones.${milestoneIndex}.conditions.${index}`, missing, fieldReference)));
+    const actions = [
+      ...(goal.candidateAction ? [{ path: "candidateAction", value: goal.candidateAction }] : []),
+      ...(goal.actionPatterns ?? []).map((value, index) => ({ path: `actionPatterns.${index}`, value })),
+    ];
+    for (const { path, value } of actions) {
+      value.participants?.forEach((id, index) => missing("entities", id, `${path}.participants.${index}`));
+      value.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `${path}.preconditions.${index}`, missing, fieldReference));
+      collectStateDeltaIssues(value.proposedDelta, `${path}.proposedDelta`, missing, fieldReference);
+      if (value.proposedKnowledge) collectKnowledgeDeltaIssues(value.proposedKnowledge, `${path}.proposedKnowledge`, missing);
+    }
     return;
   }
   if (proposal.kind === "character-model") {

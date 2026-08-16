@@ -121,6 +121,42 @@ describe("WorldRuntime", () => {
     expect(frontier.evaluated[0]?.reasons.join(" ")).toContain("no participant");
   });
 
+  it("does not activate every disconnected canon root merely because the recurring protagonist participates", () => {
+    const state = emptyWorldState("head");
+    const root = (id: string, line: number): Possibility => ({
+      id,
+      branchId: "main",
+      evaluatedAtCommit: "head",
+      kind: "canon-analogue",
+      title: id,
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      causalParents: [],
+      canonicalEventId: id,
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence: [{ span: { sourceId: "novel", startLine: line, endLine: line, quoteHash: `${id}-evidence` }, strength: "explicit" }],
+    });
+    const opening = root("opening-root", 1);
+    const later = root("later-root", 100);
+    const openingEvidence = [{ span: { sourceId: "novel", startLine: 1, endLine: 1, quoteHash: "opening" }, strength: "explicit" as const }];
+
+    const frontier = buildFrontier("main", "head", state, [opening, later], {
+      activeEntityIds: new Set(["hero"]),
+      activeEvidence: openingEvidence,
+    });
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === opening.id)?.status).toBe("eligible");
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === later.id)?.status).toBe("latent");
+
+    const advanced = buildFrontier("main", "head", state, [opening, later], {
+      activeEntityIds: new Set(["hero"]),
+      activeEvidence: [...openingEvidence, later.evidence[0]!],
+    });
+    expect(advanced.evaluated.find((entry) => entry.possibility.id === later.id)?.status).toBe("eligible");
+  });
+
   it("lets a canonical possibility realize once from surviving conditions", async () => {
     const { root, engine, runtime } = await fixture();
     const genesis = await engine.createBranch("main", "Main", {

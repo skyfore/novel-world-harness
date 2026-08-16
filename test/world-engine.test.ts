@@ -94,6 +94,43 @@ describe("WorldEngine", () => {
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
+  it("rejects raw empty player commits and false progress claims", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "cao-cao", field: "character.alive", value: true }],
+    });
+    const proposal = {
+      proposalId: "empty-player-event",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "player" as const,
+      actorId: "cao-cao",
+      title: "Nothing changes",
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" as const },
+      preconditions: [],
+      proposedDelta: { version: 1 as const, operations: [] },
+      causalParents: [],
+      evidence: [],
+    };
+
+    const empty = await engine.commitProposal(proposal);
+    expect(empty.report.errors).toContainEqual(expect.objectContaining({ code: "PLAYER_PROGRESS_REQUIRED" }));
+    const falseState = await engine.commitProposal({
+      ...proposal,
+      proposalId: "false-state-progress",
+      progress: {
+        version: 1,
+        channels: ["state"],
+        threadIds: [],
+        noveltyKey: "false-state",
+      },
+    });
+    expect(falseState.report.errors).toContainEqual(expect.objectContaining({ code: "FALSE_STATE_PROGRESS" }));
+    expect(await engine.branches.readHead("main")).toBe(genesis);
+  });
+
   it("rejects activation of an unknown world rule", async () => {
     const { engine } = await fixture();
     const genesis = await engine.createBranch("main", "Main");
@@ -160,4 +197,3 @@ describe("predicate evaluation", () => {
     ).toBe(true);
   });
 });
-

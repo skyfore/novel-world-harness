@@ -28,8 +28,10 @@ export { isNarrativeInterpretation, NarrativeMetaView, type NarrativeObservation
 export { modelActorProposalSource, actorActionTemplateSchema, type ActorActionTemplate, type ActorReasoner, type ActorReasoningInput } from "./world/model-actor-policy.js";
 export * from "./world/model.js";
 export { NarrativeRenderer, type ActorNarrativeFrame, type NarrativeAdapter, type NarrativeEvent, type NarrativeFrame, type NarrativeStyle, type OmniscientNarrativeFrame } from "./world/narrative.js";
+export { buildNarrativeDirection, publicPlayerAffordance, resolvePlayerAffordance, type NarrativeDirection, type NarrativeThreadView, type PlayerAffordance, type ResolvedPlayerAffordance } from "./world/narrative-director.js";
 export { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "./world/possibility-model.js";
-export { buildActorScopedActionContext, deterministicPlayerIntentCandidate, playerActionCandidateSchema, playerActionToKnowledgeAwareAction, playerTurnInputSchema, PlayerTurnService, validatePlayerActionGrounding, validatePlayerActionScope, validatePlayerActionSpatialScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionTranslator, type PlayerTurnInput, type PlayerTurnResult, type SafePlayerIntent } from "./world/player-action.js";
+export { buildActorScopedActionContext, deterministicPlayerIntentCandidate, playerActionCandidateSchema, playerActionToKnowledgeAwareAction, playerTurnInputSchema, PlayerTurnService, validatePlayerActionGrounding, validatePlayerActionScope, validatePlayerActionSpatialScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionTranslator, type PlayerProgressCertificate, type PlayerTurnAuthority, type PlayerTurnInput, type PlayerTurnResult, type SafePlayerIntent } from "./world/player-action.js";
+export { classifyPlayerInput, renderPlayerMetaResponse, type PlayerInputRoute } from "./world/player-input-route.js";
 export { PlayerTurnAuditStore, type PlayerTurnAudit, type PlayerTurnOrigin } from "./world/player-turn-audit.js";
 export { PlaySessionStore, activePlaySessionSchema, type ActivePlaySession } from "./world/play-session.js";
 export {
@@ -47,6 +49,7 @@ export {
 export { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayNovel, createSourcePlayInstance, resolvePlayInstance, resolvePlayNovel, type AskPlayQuestion, type PlayInstanceLifecycleEvent, type PlayInstanceMode } from "./world/play-choice.js";
 export { inspectPlayExperience, listPlayableCharacters, performPlayTurn, resolveCharacter, resolveNovelSource, selectPlayExperience, type PlayExperienceCatalog, type PlayableCharacter, type PlayInstanceSummary, type PlayTurnOutcome, type SelectedPlayExperience } from "./world/play-experience.js";
 export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type CanonReplayResult, type IsolatedCanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";
+export { committedHistory, projectActorScene, realizedCanonicalEvents, type ActorSceneProjection, type CommittedHistoryEntry, type SceneEventProjection } from "./world/scene.js";
 export { WorldRuntime, adjudicateActorCandidates, type MoveInput, type MoveResult } from "./world/runtime.js";
 export { WorldSnapshotStore, type WorldSnapshot } from "./world/snapshot.js";
 export { StateSchemaRegistry, DEFAULT_STATE_FIELDS, applyStateDelta, evaluatePredicate, validateEngineInvariants } from "./world/state.js";

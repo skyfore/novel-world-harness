@@ -123,6 +123,57 @@ export type KnowledgeOperation = z.infer<typeof knowledgeOperationSchema>;
 export const knowledgeDeltaSchema = z.object({ version: z.literal(1), operations: z.array(knowledgeOperationSchema) }).strict();
 export type KnowledgeDelta = z.infer<typeof knowledgeDeltaSchema>;
 
+/**
+ * A committed event may advance the playable narrative without changing a
+ * canonical state field.  These tags are host-derived authority metadata, not
+ * model-authored prose: they make scene movement, relationships, plans,
+ * pressures, and thread attachment replayable from branch history.
+ */
+export const progressChannelSchema = z.enum([
+  "state",
+  "knowledge",
+  "scene",
+  "relationship",
+  "resource",
+  "plan",
+  "thread",
+  "time-pressure",
+  "consequence",
+]);
+export type ProgressChannel = z.infer<typeof progressChannelSchema>;
+
+export const sceneTransitionSchema = z
+  .object({
+    kind: z.enum(["stay", "depart", "arrive", "explore"]),
+    label: z.string().trim().min(1).max(240).optional(),
+    destinationEntityId: idSchema.optional(),
+    beat: z.number().int().nonnegative(),
+  })
+  .strict();
+export type SceneTransition = z.infer<typeof sceneTransitionSchema>;
+
+export const narrativeProgressSchema = z
+  .object({
+    version: z.literal(1),
+    channels: z.array(progressChannelSchema).min(1),
+    threadIds: z.array(idSchema).default([]),
+    noveltyKey: z.string().trim().min(1).max(500),
+    scene: sceneTransitionSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (new Set(value.channels).size !== value.channels.length) {
+      ctx.addIssue({ code: "custom", message: "Progress channels must be unique", path: ["channels"] });
+    }
+    if (new Set(value.threadIds).size !== value.threadIds.length) {
+      ctx.addIssue({ code: "custom", message: "Progress thread IDs must be unique", path: ["threadIds"] });
+    }
+    if (value.scene && !value.channels.includes("scene")) {
+      ctx.addIssue({ code: "custom", message: "A scene transition requires the scene progress channel", path: ["channels"] });
+    }
+  });
+export type NarrativeProgress = z.infer<typeof narrativeProgressSchema>;
+
 export const canonicalEventSchema = z.object({
   id: idSchema,
   title: z.string().min(1),
@@ -157,6 +208,7 @@ export const eventProposalSchema = z
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     evidence: z.array(evidenceRefSchema),
     possibilityId: idSchema.optional(),
+    progress: narrativeProgressSchema.optional(),
   })
   .strict();
 export type EventProposal = z.infer<typeof eventProposalSchema>;
@@ -177,6 +229,8 @@ export const committedEventSchema = z
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     realizesCanonicalEventIds: z.array(idSchema).optional(),
     possibilityId: idSchema.optional(),
+    actorId: idSchema.optional(),
+    progress: narrativeProgressSchema.optional(),
   })
   .strict();
 export type CommittedEvent = z.infer<typeof committedEventSchema>;

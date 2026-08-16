@@ -239,7 +239,7 @@ export async function prepareAllCommand(
     }
     if (inspection.stage === "needs-initial-world") {
       const fallbackId = await proposeMinimalOpeningWorld(root, inspection.source!);
-      report(`No valid model opening state remained; created conservative empty-delta proposal ${fallbackId}.`);
+      report(`No valid model opening state remained; created conservative evidence-backed opening-cast proposal ${fallbackId}.`);
       await convergeForPreparation(root, sourceId, dependencies.converge, report);
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }

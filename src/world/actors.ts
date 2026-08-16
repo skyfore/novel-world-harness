@@ -11,9 +11,25 @@ import {
   idSchema,
   knowledgeDeltaSchema,
   predicateSchema,
+  storyTimeSchema,
   stateDeltaSchema,
   type EventProposal,
+  type NarrativeProgress,
+  type StoryTime,
+  type WorldState,
 } from "./model.js";
+import { evaluatePredicate } from "./state.js";
+import { committedHistory, projectActorScene, realizedCanonicalEvents } from "./scene.js";
+
+const goalActionSchema = z
+  .object({
+    title: z.string().min(1),
+    participants: z.array(idSchema).optional(),
+    preconditions: z.array(predicateSchema),
+    proposedDelta: stateDeltaSchema,
+    proposedKnowledge: knowledgeDeltaSchema.optional(),
+  })
+  .strict();
 
 export const characterGoalSchema = z
   .object({
@@ -23,16 +39,24 @@ export const characterGoalSchema = z
     priority: z.number().min(0).max(1),
     requiresKnowledge: z.array(idSchema),
     blockedByKnowledge: z.array(idSchema).optional(),
-    candidateAction: z
+    targetIds: z.array(idSchema).optional(),
+    activation: z
       .object({
-        title: z.string().min(1),
-        participants: z.array(idSchema).optional(),
-        preconditions: z.array(predicateSchema),
-        proposedDelta: stateDeltaSchema,
-        proposedKnowledge: knowledgeDeltaSchema.optional(),
+        preconditions: z.array(predicateSchema).default([]),
+        afterCanonicalEventIds: z.array(idSchema).default([]),
+        storyWindow: storyTimeSchema.optional(),
       })
       .strict()
       .optional(),
+    completion: z.array(predicateSchema).optional(),
+    expiry: z.array(predicateSchema).optional(),
+    milestones: z.array(z.object({
+      id: idSchema,
+      description: z.string().min(1),
+      conditions: z.array(predicateSchema),
+    }).strict()).optional(),
+    candidateAction: goalActionSchema.optional(),
+    actionPatterns: z.array(goalActionSchema).optional(),
     evidence: z.array(evidenceRefSchema).min(1),
   })
   .strict();
@@ -47,6 +71,55 @@ export const characterModelSchema = z
   })
   .strict();
 export type CharacterModel = z.infer<typeof characterModelSchema>;
+
+export type GoalActivation = {
+  active: boolean;
+  complete: boolean;
+  expired: boolean;
+  reasons: string[];
+};
+
+export function evaluateCharacterGoal(
+  goal: CharacterGoal,
+  input: {
+    state: WorldState;
+    knownClaimIds: ReadonlySet<string>;
+    realizedCanonicalEventIds?: ReadonlySet<string>;
+    storyTime?: StoryTime;
+  },
+): GoalActivation {
+  const reasons: string[] = [];
+  const complete = Boolean(goal.completion?.length && goal.completion.every((predicate) => evaluatePredicate(input.state, predicate)));
+  const expired = Boolean(goal.expiry?.some((predicate) => evaluatePredicate(input.state, predicate)));
+  if (complete) reasons.push("completion conditions are satisfied");
+  if (expired) reasons.push("an expiry condition is satisfied");
+  const missingKnowledge = goal.requiresKnowledge.filter((claimId) => !input.knownClaimIds.has(claimId));
+  if (missingKnowledge.length) reasons.push(`missing knowledge: ${missingKnowledge.join(", ")}`);
+  const blockedKnowledge = (goal.blockedByKnowledge ?? []).filter((claimId) => input.knownClaimIds.has(claimId));
+  if (blockedKnowledge.length) reasons.push(`blocked by knowledge: ${blockedKnowledge.join(", ")}`);
+  const activationPredicates = goal.activation?.preconditions ?? [];
+  const failedActivation = activationPredicates.filter((predicate) => !evaluatePredicate(input.state, predicate));
+  if (failedActivation.length) reasons.push(`${failedActivation.length} activation condition(s) are false`);
+  const missingParents = (goal.activation?.afterCanonicalEventIds ?? []).filter((eventId) =>
+    !input.realizedCanonicalEventIds?.has(eventId));
+  if (missingParents.length) reasons.push(`waiting for canonical anchor(s): ${missingParents.join(", ")}`);
+  const storyWindowActive = !goal.activation?.storyWindow || goalStoryWindowActive(
+    input.storyTime,
+    goal.activation.storyWindow,
+    input.realizedCanonicalEventIds,
+  );
+  if (!storyWindowActive) {
+    reasons.push("goal story window does not overlap the active scene");
+  }
+  return {
+    active: !complete && !expired && !missingKnowledge.length && !blockedKnowledge.length
+      && !failedActivation.length && !missingParents.length
+      && storyWindowActive,
+    complete,
+    expired,
+    reasons,
+  };
+}
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export type ActorArtifactKind = "goals" | "models";
@@ -235,19 +308,96 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
   const knowledge = new KnowledgeProjector(engine);
   return async ({ branchId, commitId }) => {
     const candidates: ActorProposalCandidate[] = [];
-    const context = await engine.contextForCommit(commitId);
+    const [context, state, history] = await Promise.all([
+      engine.contextForCommit(commitId),
+      engine.projector.project(commitId),
+      committedHistory(engine, commitId),
+    ]);
+    const latestPlayerEvent = [...history].reverse().find((entry) => entry.event.actorId);
+    if (!latestPlayerEvent?.event.actorId) {
+      const goals = context.actorGoals ?? await actors.listGoals();
+      const realizedCanonicalEventIds = realizedCanonicalEvents(history);
+      for (const goal of goals) {
+        const action = goal.candidateAction ?? goal.actionPatterns?.find((pattern) =>
+          pattern.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
+        const entity = context.entities.get(goal.actorId);
+        if (!action || !entity || entity.kind !== "character") continue;
+        const view = await knowledge.view(goal.actorId, commitId);
+        const known = new Set(view.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
+        if (!evaluateCharacterGoal(goal, {
+          state,
+          knownClaimIds: known,
+          realizedCanonicalEventIds,
+          storyTime: state.logicalTime.storyTime,
+        }).active || !goalSupportedInCurrentPhase(goal, history, goal.actorId)) continue;
+        candidates.push({
+          goalId: goal.id,
+          priority: goal.priority,
+          proposal: {
+            proposalId: `goal-${contentHash({ goalId: goal.id, branchId, commitId }).slice(0, 24)}`,
+            branchId,
+            expectedParentCommit: commitId,
+            source: "actor",
+            actorId: goal.actorId,
+            title: action.title,
+            participants: [...new Set([goal.actorId, ...(action.participants ?? [])])],
+            proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
+            preconditions: action.preconditions,
+            proposedDelta: action.proposedDelta,
+            ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+            causalParents: [],
+            evidence: goal.evidence,
+            progress: {
+              version: 1,
+              channels: action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["thread", "consequence"],
+              threadIds: [`goal-${goal.id}`],
+              noveltyKey: `standalone-goal:${goal.id}:${commitId}`,
+            },
+          },
+        });
+      }
+      return candidates.sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId));
+    }
+    const initiatingActorId = latestPlayerEvent.event.actorId;
+    const scene = await projectActorScene(engine, initiatingActorId, commitId, context.sourceId);
+    const localActors = new Set(scene.presentEntityIds);
+    localActors.delete(initiatingActorId);
+    if (!localActors.size) return candidates;
+    const realizedCanonicalEventIds = realizedCanonicalEvents(history);
     const goals = context.actorGoals ?? await actors.listGoals();
+    const goalActors = new Set<string>();
     for (const goal of goals) {
-      if (!goal.candidateAction) continue;
       const entity = context.entities.get(goal.actorId);
-      if (!entity || entity.kind !== "character") continue;
+      if (!entity || entity.kind !== "character" || !localActors.has(goal.actorId)) continue;
       const view = await knowledge.view(goal.actorId, commitId);
       const known = new Set(view.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
-      if (goal.requiresKnowledge.some((claimId) => !known.has(claimId))) continue;
-      if (goal.blockedByKnowledge?.some((claimId) => known.has(claimId))) continue;
-      const action = goal.candidateAction;
-      const participants = [...new Set([goal.actorId, ...(action.participants ?? [])])];
+      const activation = evaluateCharacterGoal(goal, {
+        state,
+        knownClaimIds: known,
+        realizedCanonicalEventIds,
+        storyTime: state.logicalTime.storyTime,
+      });
+      if (!activation.active || !goalSupportedInCurrentPhase(goal, history, goal.actorId)) continue;
+      const proposedAction = goal.candidateAction ?? goal.actionPatterns?.find((pattern) =>
+        pattern.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
+      const action = proposedAction && actorActionIsLocal(
+        proposedAction,
+        goal.actorId,
+        initiatingActorId,
+        localActors,
+        state,
+        context.entities,
+      ) ? proposedAction : undefined;
+      const actionParticipants = action?.participants ?? goal.targetIds ?? [initiatingActorId];
+      const participants = [...new Set([goal.actorId, ...actionParticipants])]
+        .filter((participantId) => participantId === goal.actorId || localActors.has(participantId) || participantId === initiatingActorId);
       const proposalId = `goal-${contentHash({ goalId: goal.id, branchId, commitId }).slice(0, 24)}`;
+      const progress: NarrativeProgress = {
+        version: 1,
+        channels: action && action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["relationship", "thread", "consequence"],
+        threadIds: [`goal-${goal.id}`],
+        noveltyKey: `actor-goal:${goal.id}:${latestPlayerEvent.event.eventId}`,
+      };
       candidates.push({
         goalId: goal.id,
         priority: goal.priority,
@@ -257,19 +407,137 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           expectedParentCommit: commitId,
           source: "actor",
           actorId: goal.actorId,
-          title: action.title,
+          title: action?.title ?? `${entity.canonicalName}回应当前局势`,
           participants,
-          proposedTime: { kind: "unknown" },
-          preconditions: action.preconditions,
-          proposedDelta: action.proposedDelta,
-          ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
-          causalParents: [],
+          proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
+          preconditions: action?.preconditions ?? [],
+          proposedDelta: action?.proposedDelta ?? { version: 1, operations: [] },
+          ...(action?.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+          causalParents: [latestPlayerEvent.event.eventId],
           evidence: goal.evidence,
+          progress,
+        },
+      });
+      goalActors.add(goal.actorId);
+    }
+
+    for (const actorId of [...localActors].sort()) {
+      if (goalActors.has(actorId)) continue;
+      const entity = context.entities.get(actorId);
+      const model = context.actorModels?.get(actorId) ?? await actors.getModel(actorId);
+      if (!entity || entity.kind !== "character" || !model) continue;
+      candidates.push({
+        goalId: `model-${actorId}`,
+        priority: 0.2,
+        proposal: {
+          proposalId: `reaction-${contentHash({ actorId, branchId, commitId }).slice(0, 24)}`,
+          branchId,
+          expectedParentCommit: commitId,
+          source: "actor",
+          actorId,
+          title: `${entity.canonicalName}对当前变化作出回应`,
+          participants: [actorId, initiatingActorId],
+          proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
+          preconditions: [],
+          proposedDelta: { version: 1, operations: [] },
+          causalParents: [latestPlayerEvent.event.eventId],
+          evidence: model.evidence,
+          progress: {
+            version: 1,
+            channels: ["relationship", "consequence"],
+            threadIds: [],
+            noveltyKey: `actor-reaction:${actorId}:${latestPlayerEvent.event.eventId}`,
+          },
         },
       });
     }
     return candidates.sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId));
   };
+}
+
+function goalSupportedInCurrentPhase(
+  goal: CharacterGoal,
+  history: Awaited<ReturnType<typeof committedHistory>>,
+  actorId: string,
+): boolean {
+  if (goal.activation || goal.requiresKnowledge.length > 0) return true;
+  if (history.some((entry) => entry.event.progress?.threadIds.includes(`goal-${goal.id}`))) return true;
+  return [...history].reverse().slice(0, 12).some((entry) =>
+    entry.event.participants.includes(actorId)
+    && entry.event.evidence.some((eventEvidence) => goal.evidence.some((goalEvidence) => evidenceOverlaps(eventEvidence, goalEvidence))));
+}
+
+function evidenceOverlaps(
+  left: CharacterGoal["evidence"][number],
+  right: CharacterGoal["evidence"][number],
+): boolean {
+  return left.span.sourceId === right.span.sourceId
+    && left.span.startLine <= right.span.endLine
+    && left.span.endLine >= right.span.startLine;
+}
+
+function actorActionIsLocal(
+  action: NonNullable<CharacterGoal["candidateAction"]>,
+  actorId: string,
+  initiatingActorId: string,
+  localActors: ReadonlySet<string>,
+  state: WorldState,
+  entities: ReadonlyMap<string, { kind: string }>,
+): boolean {
+  const localCharacters = new Set([actorId, initiatingActorId, ...localActors]);
+  for (const participantId of action.participants ?? []) {
+    if (entities.get(participantId)?.kind === "character" && !localCharacters.has(participantId)) return false;
+  }
+  const actorLocation = state.values[actorId]?.["character.location"];
+  for (const operation of action.proposedDelta.operations) {
+    if (operation.op === "activate-rule" || operation.op === "deactivate-rule") return false;
+    const targetKind = entities.get(operation.entityId)?.kind;
+    if (targetKind === "character" && operation.entityId !== actorId) return false;
+    if (targetKind === "artifact" && state.values[operation.entityId]?.["artifact.owner"] !== actorId) return false;
+    if (targetKind === "location" && operation.entityId !== actorLocation) return false;
+    if (targetKind !== "character" && targetKind !== "artifact" && targetKind !== "location") return false;
+    if (operation.op === "set" && typeof operation.value === "string") {
+      const referencedKind = entities.get(operation.value)?.kind;
+      if (referencedKind === "character" && !localCharacters.has(operation.value)) return false;
+    }
+    if ((operation.op === "add-member" || operation.op === "remove-member")
+      && entities.get(operation.member)?.kind === "character"
+      && !localCharacters.has(operation.member)) return false;
+  }
+  for (const operation of action.proposedKnowledge?.operations ?? []) {
+    if (!localCharacters.has(operation.actorId)) return false;
+    if (operation.op === "learn" && operation.sourceActorId && !localCharacters.has(operation.sourceActorId)) return false;
+  }
+  return true;
+}
+
+function goalStoryWindowActive(
+  current: StoryTime | undefined,
+  candidate: StoryTime,
+  realizedCanonicalEventIds: ReadonlySet<string> | undefined,
+): boolean {
+  if (candidate.kind === "unknown") return true;
+  if (candidate.kind === "relative") {
+    return Boolean(realizedCanonicalEventIds?.has(candidate.anchorEventId));
+  }
+  if (!current || current.kind === "unknown" || current.kind === "relative") return false;
+  const left = storyYears(current);
+  const right = storyYears(candidate);
+  if (!left || !right) {
+    if (current.kind !== "ordinal" || candidate.kind !== "ordinal") return false;
+    if (typeof current.orderHint === "number" && typeof candidate.orderHint === "number") {
+      return current.orderHint === candidate.orderHint;
+    }
+    return current.label.normalize("NFKC").trim().toLocaleLowerCase()
+      === candidate.label.normalize("NFKC").trim().toLocaleLowerCase();
+  }
+  return left.min <= right.max && right.min <= left.max;
+}
+
+function storyYears(time: StoryTime): { min: number; max: number } | undefined {
+  const values = time.kind === "exact" ? [time.value] : time.kind === "range" ? [time.earliest, time.latest] : [];
+  const years = values.flatMap((value) => [...value.matchAll(/(?:^|\D)(\d{3,4})(?:s)?(?=\D|$)/g)].map((match) => Number(match[1])));
+  return years.length ? { min: Math.min(...years), max: Math.max(...years.map((year) => year + 9)) } : undefined;
 }
 
 function safeId(id: string): string {

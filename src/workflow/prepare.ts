@@ -133,6 +133,7 @@ export async function inspectPreparation(
     audit.sources.changedSinceIngest.length > 0
     || audit.evidence.invalidReferences > 0
     || audit.consistency.causalGraphValid === false
+    || audit.consistency.narrativeGraphNavigable === false
   ) {
     return {
       ...shared,
@@ -185,7 +186,7 @@ export async function inspectPreparation(
       audit,
       stage: "repair",
       repairReasons: [
-        `Every committed character from source ${source.id} is explicitly dead in the accepted initial world; a playable branch cannot be created. Rebuild the opening state before preparing a branch.`,
+        `The accepted initial world for source ${source.id} does not represent any living opening character in committed state or knowledge; a playable branch cannot be created. Rebuild the opening state before preparing a branch.`,
       ],
       next: `nwh reparse --source ${source.id} --all`,
     };
@@ -237,18 +238,27 @@ function preparationRepairReasons(audit: CompilerAuditReport): string[] {
       `Causal cycle detected: ${cycle.join(" -> ")}`),
     ...audit.consistency.missingCausalParents.map(({ eventId, parentId }) =>
       `Event ${eventId} references missing causal parent ${parentId}.`),
+    ...audit.consistency.temporalRegressions.map(({ eventId, parentId }) =>
+      `Event ${eventId} is temporally earlier than its causal parent ${parentId}.`),
+    ...(audit.consistency.narrativeGraphNavigable === false
+      ? [`The event graph has ${audit.consistency.unconditionalRootEvents.length} unconditional roots across ${audit.consistency.causalComponents} causal components; reparse with phase gates and evidence-backed causal links so later canon cannot all activate at the opening.`]
+      : []),
   ];
 }
 
 function characterPlayableAtGenesis(initialWorld: InitialWorld, characterId: string): boolean {
   let alive: boolean | undefined;
+  let represented = false;
   for (const operation of initialWorld.delta.operations) {
     if (!("entityId" in operation) || !("field" in operation)) continue;
+    if (operation.entityId === characterId) represented = true;
     if (operation.entityId !== characterId || operation.field !== "character.alive") continue;
     if (operation.op === "unset") alive = undefined;
     else if (operation.op === "set" && typeof operation.value === "boolean") alive = operation.value;
   }
-  return alive !== false;
+  if (initialWorld.knowledge?.operations.some((operation) =>
+    operation.actorId === characterId || (operation.op === "learn" && operation.sourceActorId === characterId))) represented = true;
+  return represented && alive !== false;
 }
 
 async function branchGenesisHasPlayableCharacter(
@@ -263,13 +273,20 @@ async function branchGenesisHasPlayableCharacter(
     if (!commit.parentCommitId) break;
     genesisId = commit.parentCommitId;
   }
-  const [context, state] = await Promise.all([
+  const [context, state, genesis] = await Promise.all([
     engine.contextForCommit(genesisId),
     engine.projector.project(genesisId),
+    engine.objects.getCommit(genesisId),
   ]);
+  const participants = new Set<string>();
+  for (const eventHash of genesis.eventHashes) {
+    const event = await engine.objects.getEvent(eventHash);
+    for (const participant of event.participants) participants.add(participant);
+  }
   return [...context.entities.values()].some((entity) =>
     entity.kind === "character"
     && entity.evidence.some((reference) => reference.span.sourceId === sourceId)
+    && participants.has(entity.id)
     && state.values[entity.id]?.["character.alive"] !== false);
 }
 

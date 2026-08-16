@@ -1,7 +1,8 @@
 import type { ActorProposalCandidate, ActorProposalSource } from "./actors.js";
-import type { BranchId, CommitId, EventProposal, Possibility, StoryTime, WorldState } from "./model.js";
+import type { BranchId, CommitId, EventProposal, EvidenceRef, Possibility, StoryTime, WorldState } from "./model.js";
 import { buildFrontier, FrontierStore, possibilityToProposal, selectEligible, type Frontier, type FrontierTemporalMode } from "./frontier.js";
 import { WorldEngine } from "./engine.js";
+import { committedHistory } from "./scene.js";
 
 export type PossibilitySource = (input: {
   branchId: BranchId;
@@ -36,6 +37,8 @@ export type MoveResult = {
 export type CanonicalChoiceResolution = {
   realizedPossibilityId?: string;
   supersedesCanonicalEventIds: string[];
+  threadIds?: string[];
+  causalParentEventIds?: string[];
 };
 
 export type NarrativeRender = (input: {
@@ -149,10 +152,10 @@ export class WorldRuntime {
     options: { temporalMode?: FrontierTemporalMode } = {},
   ): Promise<Frontier> {
     const head = commitId ?? (await this.engine.branches.readHead(branchId));
-    const [state, temporalAnchor, activeEntityIds] = await Promise.all([
+    const [state, temporalAnchor, activity] = await Promise.all([
       this.engine.projector.project(head),
       this.temporalAnchor(head),
-      this.activeEntityIds(head),
+      this.branchActivity(head),
     ]);
     const templates = await this.possibilitySource({ branchId, commitId: head, state });
     const history = await this.possibilityHistory(head);
@@ -161,7 +164,8 @@ export class WorldRuntime {
       supersededIds: history.supersededIds,
       temporalMode: options.temporalMode ?? "current-window",
       ...(temporalAnchor ? { temporalAnchor } : {}),
-      activeEntityIds,
+      activeEntityIds: activity.entityIds,
+      activeEvidence: activity.evidence,
     });
     await this.frontierStore.write(frontier);
     return frontier;
@@ -187,9 +191,23 @@ export class WorldRuntime {
       .filter((entry) => Boolean(entry.possibility.canonicalEventId) && deltasConflict(proposal.proposedDelta, entry.possibility.proposedDelta))
       .map((entry) => entry.possibility.canonicalEventId!)
       .sort();
+    const attached = eligible
+      .map((entry) => ({ entry, affinity: proposalPossibilityAffinity(proposal, entry.possibility) }))
+      .filter(({ affinity }) => affinity >= 0.35)
+      .sort((left, right) => right.affinity - left.affinity || left.entry.possibility.id.localeCompare(right.entry.possibility.id))
+      .slice(0, 2);
+    const causalParentEventIds: string[] = [];
+    for (const { event } of (await committedHistory(this.engine, proposal.expectedParentCommit)).reverse()) {
+      if (!proposal.actorId || event.participants.includes(proposal.actorId)) {
+        causalParentEventIds.push(event.eventId);
+        break;
+      }
+    }
     return {
       ...(matching.length === 1 ? { realizedPossibilityId: matching[0]!.possibility.id } : {}),
       supersedesCanonicalEventIds,
+      threadIds: attached.map(({ entry }) => entry.possibility.id),
+      causalParentEventIds,
     };
   }
 
@@ -228,14 +246,18 @@ export class WorldRuntime {
     return undefined;
   }
 
-  private async activeEntityIds(commitId: CommitId): Promise<ReadonlySet<string>> {
-    const commit = await this.engine.objects.getCommit(commitId);
+  private async branchActivity(commitId: CommitId): Promise<{ entityIds: ReadonlySet<string>; evidence: EvidenceRef[] }> {
     const active = new Set<string>();
-    for (const eventHash of commit.eventHashes) {
-      const event = await this.engine.objects.getEvent(eventHash);
+    const evidence: EvidenceRef[] = [];
+    // Participation introduces an entity to this branch. It must not vanish
+    // from the possibility frontier merely because the latest committed turn
+    // was a solo plan or scene transition. Future-canon identities still stay
+    // latent because they have never participated in committed history.
+    for (const { event } of await committedHistory(this.engine, commitId)) {
       for (const participant of event.participants) active.add(participant);
+      evidence.push(...event.evidence);
     }
-    return active;
+    return { entityIds: active, evidence };
   }
 
   private async isAncestor(ancestor: CommitId, descendant: CommitId): Promise<boolean> {
@@ -249,6 +271,33 @@ export class WorldRuntime {
     }
     return false;
   }
+}
+
+function proposalPossibilityAffinity(proposal: EventProposal, possibility: Possibility): number {
+  if (effectsEquivalent(proposal, possibility)) return 1;
+  const proposalParticipants = new Set(proposal.participants);
+  const possibilityParticipants = new Set(possibility.participants);
+  const sharedParticipants = [...proposalParticipants].filter((id) => possibilityParticipants.has(id)).length;
+  const participantUnion = new Set([...proposalParticipants, ...possibilityParticipants]).size;
+  const participantScore = participantUnion ? sharedParticipants / participantUnion : 0;
+  const proposalWrites = new Set(finalStateWrites(proposal.proposedDelta).keys());
+  const possibilityWrites = new Set(finalStateWrites(possibility.proposedDelta ?? { version: 1, operations: [] }).keys());
+  const sharedWrites = [...proposalWrites].filter((key) => possibilityWrites.has(key)).length;
+  const writeUnion = new Set([...proposalWrites, ...possibilityWrites]).size;
+  const writeScore = writeUnion ? sharedWrites / writeUnion : 0;
+  const titleScore = lexicalAffinity(proposal.title, possibility.title);
+  return participantScore * 0.35 + writeScore * 0.45 + titleScore * 0.2;
+}
+
+function lexicalAffinity(left: string, right: string): number {
+  const tokens = (value: string) => new Set(
+    value.normalize("NFKC").toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 1),
+  );
+  const leftTokens = tokens(left);
+  const rightTokens = tokens(right);
+  if (!leftTokens.size || !rightTokens.size) return 0;
+  const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  return intersection / new Set([...leftTokens, ...rightTokens]).size;
 }
 
 export function adjudicateActorCandidates(candidates: readonly ActorProposalCandidate[], limit: number): { selected: ActorProposalCandidate[]; conflicts: AdjudicationConflict[] } {

@@ -48,7 +48,13 @@ describe("world branch diff", () => {
       title: "Learns the secret",
       proposedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "secret", status: "knows", confidence: 1 }] },
     };
-    const right: EventProposal = { ...base, proposalId: "right-waits", branchId: "right", title: "Waits" };
+    const right: EventProposal = {
+      ...base,
+      proposalId: "right-waits",
+      branchId: "right",
+      title: "Waits",
+      progress: { version: 1, channels: ["time-pressure"], threadIds: ["thread-wait"], noveltyKey: "wait-once" },
+    };
     expect((await engine.commitProposal(left)).report.accepted).toBe(true);
     expect((await engine.commitProposal(right)).report.accepted).toBe(true);
 

@@ -154,7 +154,7 @@ describe("preparation workflow inspection", () => {
     });
     await new InitialWorldStore(root).put({
       version: 1,
-      delta: { version: 1, operations: [] },
+      delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
       evidence: fixture.evidence("Hero waits."),
     });
 

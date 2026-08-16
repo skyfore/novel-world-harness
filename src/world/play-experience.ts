@@ -6,6 +6,8 @@ import { openWorkspaceWorld } from "./workspace-runtime.js";
 import { BranchStore } from "./store.js";
 import { WorkspaceStore, type SourceDocument, type StoredProject } from "../storage/workspace-store.js";
 import { PlayerTurnAuditStore, type PlayerTurnOrigin } from "./player-turn-audit.js";
+import { resolvePlayerAffordance } from "./narrative-director.js";
+import { committedHistory } from "./scene.js";
 
 export type PlayableCharacter = {
   id: string;
@@ -60,6 +62,7 @@ export type PlayTurnOutcome = {
   finalHead: string;
   logicalStep: number;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
+  reactionEvents: Array<{ eventHash: string; title: string; actorId: string }>;
   backgroundError?: string;
   auditId?: string;
   auditError?: string;
@@ -166,13 +169,15 @@ export async function listPlayableCharacters(
   const branchId = await resolveBranchId(new BranchStore(root), options.branchId, active?.branchId);
   const { engine } = await openWorkspaceWorld(root);
   const head = await engine.branches.readHead(branchId);
-  const [context, state] = await Promise.all([
+  const [context, state, playableIds] = await Promise.all([
     engine.contextForCommit(head),
     engine.projector.project(head),
+    committedPlayableCharacterIds(engine, head),
   ]);
   const characters = [...context.entities.values()]
     .filter((entity) => entity.kind === "character")
     .filter((entity) => !source || entity.evidence.some((reference) => reference.span.sourceId === source.id))
+    .filter((entity) => playableIds.has(entity.id) && state.values[entity.id]?.["character.alive"] !== false)
     .map((entity) => characterSummary(entity, state.values[entity.id] ?? {}, context.entities))
     .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
   return { branchId, ...(source ? { source } : {}), characters };
@@ -188,9 +193,10 @@ export async function selectPlayExperience(
   const saved = await sessionStore.readInstance(branchId);
   const { engine } = await openWorkspaceWorld(root);
   const branch = await engine.branches.read(branchId);
-  const [context, state] = await Promise.all([
+  const [context, state, playableIds] = await Promise.all([
     engine.contextForCommit(branch.headCommitId),
     engine.projector.project(branch.headCommitId),
+    committedPlayableCharacterIds(engine, branch.headCommitId),
   ]);
   const requestedSource = options.source ?? saved?.sourceId ?? branch.sourceId ?? context.sourceId;
   const source = requestedSource
@@ -203,6 +209,7 @@ export async function selectPlayExperience(
   const characters = [...context.entities.values()]
     .filter((entity) => entity.kind === "character")
     .filter((entity) => !source || entity.evidence.some((reference) => reference.span.sourceId === source.id))
+    .filter((entity) => playableIds.has(entity.id) && state.values[entity.id]?.["character.alive"] !== false)
     .map((entity) => characterSummary(entity, state.values[entity.id] ?? {}, context.entities))
     .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
   const requestedActor = options.character
@@ -226,7 +233,7 @@ export async function selectPlayExperience(
   const readinessWarnings: string[] = [];
   if (!Object.keys(actorState).length) {
     readinessWarnings.push(
-      `${branch.preparedRevisionHash ? "当前实例固定的 prepared revision" : "当前实例的 genesis"}没有为 ${actor.canonicalName} 提供初始动态状态；观察、思考和等待仍可继续，但依赖具体位置或持有物的行动会保持保守。`,
+      `${branch.preparedRevisionHash ? "当前实例固定的 prepared revision" : "当前实例的 genesis"}没有为 ${actor.canonicalName} 提供完整动态字段；场景导演只会展示经过预检、且能推进场景、关系、计划或任务线程的行动。`,
     );
   } else if (typeof actorState["character.location"] !== "string") {
     readinessWarnings.push(
@@ -243,6 +250,20 @@ export async function selectPlayExperience(
   };
 }
 
+async function committedPlayableCharacterIds(
+  engine: Awaited<ReturnType<typeof openWorkspaceWorld>>["engine"],
+  headCommitId: string,
+): Promise<ReadonlySet<string>> {
+  const context = await engine.contextForCommit(headCommitId);
+  const active = new Set<string>();
+  for (const entry of await committedHistory(engine, headCommitId)) {
+    for (const participantId of entry.event.participants) {
+      if (context.entities.get(participantId)?.kind === "character") active.add(participantId);
+    }
+  }
+  return active;
+}
+
 export async function performPlayTurn(options: {
   root: string;
   branchId: string;
@@ -252,11 +273,18 @@ export async function performPlayTurn(options: {
   advanceBackground?: number;
   origin?: PlayerTurnOrigin;
   intent?: "act" | "observe" | "reflect" | "wait";
+  affordanceId?: string;
+  advanceActors?: number;
+  beforeCommit?: () => void;
 }): Promise<PlayTurnOutcome> {
   const startedAt = new Date();
   const advanceBackground = options.advanceBackground ?? 0;
+  const advanceActors = options.advanceActors ?? 1;
   if (!Number.isInteger(advanceBackground) || advanceBackground < 0 || advanceBackground > 100) {
     throw new Error("advanceBackground must be an integer between 0 and 100");
+  }
+  if (!Number.isInteger(advanceActors) || advanceActors < 0 || advanceActors > 10) {
+    throw new Error("advanceActors must be an integer between 0 and 10");
   }
   const { engine, runtime } = await openWorkspaceWorld(options.root);
   const previousHead = await engine.branches.readHead(options.branchId);
@@ -271,33 +299,58 @@ export async function performPlayTurn(options: {
   }
   const sessionStore = new PlaySessionStore(options.root);
   const previousSession = await sessionStore.readInstance(options.branchId);
+  const affordance = options.affordanceId
+    ? await resolvePlayerAffordance(
+        engine,
+        runtime,
+        options.actorId,
+        previousHead,
+        options.affordanceId,
+        previousSession?.sourceId,
+      )
+    : undefined;
+  if (options.affordanceId && !affordance) {
+    throw new Error(`Player affordance '${options.affordanceId}' is stale or no longer executable at the current branch head.`);
+  }
   const turns = new PlayerTurnService(
     engine,
-    options.translator,
+    affordance ? () => structuredClone(affordance.candidate) : options.translator,
     undefined,
     (proposal) => runtime.resolveEligibleCanonicalEvents(proposal),
+    options.beforeCommit,
   );
   const result = await turns.turn({
     branchId: options.branchId,
     ...(previousSession?.sourceId ? { sourceId: previousSession.sourceId } : {}),
     actorId: options.actorId,
     utterance: options.utterance,
+  }, {
+    ...(options.intent ? { intent: options.intent } : {}),
+    ...(affordance
+      ? {
+          affordanceId: affordance.id,
+          progress: affordance.progress,
+          authorizedKnowledgeClaimIds: affordance.authorizedKnowledgeClaimIds,
+        }
+      : {}),
   });
   let finalHead = result.newHead;
   const backgroundEvents: PlayTurnOutcome["backgroundEvents"] = [];
+  const reactionEvents: PlayTurnOutcome["reactionEvents"] = [];
   let backgroundError: string | undefined;
-  if (result.accepted && advanceBackground > 0) {
+  if (result.accepted) {
     try {
       const advanced = await runtime.move({
         branchId: options.branchId,
-        maxActorCandidates: 0,
+        maxActorCandidates: advanceActors,
         maxBackgroundCandidates: advanceBackground,
-        temporalMode: "advance",
+        temporalMode: advanceBackground > 0 ? "advance" : "current-window",
       });
       finalHead = advanced.newHead;
       for (const eventHash of advanced.committedEvents) {
         const event = await engine.objects.getEvent(eventHash);
-        backgroundEvents.push({ eventHash, title: event.title });
+        if (event.actorId) reactionEvents.push({ eventHash, title: event.title, actorId: event.actorId });
+        else backgroundEvents.push({ eventHash, title: event.title });
       }
     } catch (error) {
       finalHead = await engine.branches.readHead(options.branchId);
@@ -324,6 +377,7 @@ export async function performPlayTurn(options: {
       utterance: options.utterance,
       origin: options.origin ?? "cli",
       ...(options.intent ? { intent: options.intent } : {}),
+      ...(options.affordanceId ? { affordanceId: options.affordanceId } : {}),
       previousHead: result.previousHead,
       finalHead,
       stage: result.stage,
@@ -333,6 +387,8 @@ export async function performPlayTurn(options: {
       ...(result.proposal ? { proposal: structuredClone(result.proposal) } : {}),
       ...(result.validation ? { validation: structuredClone(result.validation) } : {}),
       ...(result.eventHash ? { eventHash: result.eventHash } : {}),
+      ...(result.progressCertificate ? { progressCertificate: structuredClone(result.progressCertificate) } : {}),
+      reactionEvents: structuredClone(reactionEvents),
       backgroundEvents: structuredClone(backgroundEvents),
       ...(backgroundError ? { backgroundError } : {}),
     });
@@ -345,6 +401,7 @@ export async function performPlayTurn(options: {
     finalHead,
     logicalStep: finalState.logicalTime.step,
     backgroundEvents,
+    reactionEvents,
     ...(backgroundError ? { backgroundError } : {}),
     ...(auditId ? { auditId } : {}),
     ...(auditError ? { auditError } : {}),

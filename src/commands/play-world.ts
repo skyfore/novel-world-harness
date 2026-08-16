@@ -115,6 +115,7 @@ async function runAndPrintTurn(
   }
   stdout.write(`${result.renderedText}\n`);
   stdout.write(`Committed player action at ${result.newHead}.\n`);
+  for (const event of outcome.reactionEvents) stdout.write(`World responded: ${event.title}\n`);
   for (const event of outcome.backgroundEvents) stdout.write(`World advanced: ${event.title}\n`);
   if (outcome.backgroundError) stdout.write(`Background advancement stopped: ${outcome.backgroundError}\n`);
   return result;

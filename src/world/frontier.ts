@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
-import type { BranchId, CommitId, EventProposal, Possibility, StoryTime, WorldState } from "./model.js";
+import type { BranchId, CommitId, EventProposal, EvidenceRef, Possibility, StoryTime, WorldState } from "./model.js";
 import { evaluatePredicate } from "./state.js";
 
 export type PossibilityStatus = "latent" | "eligible" | "blocked" | "expired" | "superseded" | "realized";
@@ -24,6 +24,7 @@ type FrontierEvaluationOptions = {
   temporalMode?: FrontierTemporalMode;
   temporalAnchor?: StoryTime;
   activeEntityIds?: ReadonlySet<string>;
+  rootEvidenceSupported?: boolean;
 };
 
 export function evaluatePossibility(state: WorldState, possibility: Possibility, options: FrontierEvaluationOptions = {}): EvaluatedPossibility {
@@ -42,8 +43,11 @@ export function evaluatePossibility(state: WorldState, possibility: Possibility,
   const rootSceneSupported = !possibility.canonicalEventId
     || possibility.causalParents.length > 0
     || possibility.preconditions.length > 0
-    || options.activeEntityIds === undefined
-    || possibility.participants.some((participant) => options.activeEntityIds!.has(participant));
+    || options.rootEvidenceSupported === true
+    || (options.rootEvidenceSupported === undefined && (
+      options.activeEntityIds === undefined
+      || possibility.participants.some((participant) => options.activeEntityIds!.has(participant))
+    ));
   let status: PossibilityStatus;
   if (options.realizedIds?.has(possibility.id)) {
     status = "realized";
@@ -100,7 +104,9 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
   temporalMode?: FrontierTemporalMode;
   temporalAnchor?: StoryTime;
   activeEntityIds?: ReadonlySet<string>;
+  activeEvidence?: readonly EvidenceRef[];
 } = {}): Frontier {
+  const rootEvidenceSupport = canonicalRootEvidenceSupport(templates, options.activeEvidence);
   const evaluated = templates.map((template) => {
     const possibility: Possibility = { ...template, branchId, evaluatedAtCommit: commitId };
     return evaluatePossibility(state, possibility, {
@@ -110,6 +116,7 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
       temporalMode: options.temporalMode,
       temporalAnchor: options.temporalAnchor,
       activeEntityIds: options.activeEntityIds,
+      rootEvidenceSupported: rootEvidenceSupport.get(possibility.id),
     });
   }).sort((left, right) => {
     if (options.temporalMode === "advance" && left.status === "eligible" && right.status === "eligible") {
@@ -120,6 +127,50 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
     return right.score - left.score || left.possibility.id.localeCompare(right.possibility.id);
   });
   return { version: 1, branchId, commitId, temporalMode: options.temporalMode ?? "current-window", evaluated };
+}
+
+/**
+ * Disconnected root canon must not all become "now" merely because a recurring
+ * protagonist is active.  Anchor root events to committed source evidence; on
+ * legacy branches whose genesis carried no evidence, expose only the earliest
+ * source window. Causally linked and state-gated events are handled separately
+ * by the normal frontier rules.
+ */
+function canonicalRootEvidenceSupport(
+  templates: readonly Possibility[],
+  activeEvidence: readonly EvidenceRef[] | undefined,
+): ReadonlyMap<string, boolean> {
+  const anchors = new Map<string, number>();
+  for (const reference of activeEvidence ?? []) {
+    anchors.set(
+      reference.span.sourceId,
+      Math.max(anchors.get(reference.span.sourceId) ?? Number.NEGATIVE_INFINITY, reference.span.endLine),
+    );
+  }
+  const earliest = new Map<string, number>();
+  for (const possibility of templates) {
+    if (!possibility.canonicalEventId || possibility.causalParents.length || possibility.preconditions.length) continue;
+    for (const reference of possibility.evidence) {
+      earliest.set(
+        reference.span.sourceId,
+        Math.min(earliest.get(reference.span.sourceId) ?? Number.POSITIVE_INFINITY, reference.span.startLine),
+      );
+    }
+  }
+  const result = new Map<string, boolean>();
+  for (const possibility of templates) {
+    if (!possibility.canonicalEventId || possibility.causalParents.length || possibility.preconditions.length) continue;
+    // Hand-built engine contexts and legacy tests may contain ungrounded
+    // canonical fixtures. They cannot participate in source-window ordering,
+    // so preserve the older active-participant gate for those records.
+    if (!possibility.evidence.length) continue;
+    result.set(possibility.id, possibility.evidence.some((reference) => {
+      const anchor = anchors.get(reference.span.sourceId);
+      if (anchor !== undefined) return reference.span.startLine <= anchor;
+      return reference.span.startLine === earliest.get(reference.span.sourceId);
+    }));
+  }
+  return result;
 }
 
 export function selectEligible(frontier: Frontier, limit = 10, options: { includePlayerChoices?: boolean } = {}): EvaluatedPossibility[] {

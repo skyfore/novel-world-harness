@@ -13,6 +13,7 @@ import {
   type CommittedEvent,
   type Entity,
   type EntityId,
+  type EvidenceRef,
   type EventProposal,
   type KnowledgeDelta,
   type ObjectHash,
@@ -114,12 +115,12 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
       const operation = knowledge.operations[index]!;
       const actor = context.entities.get(operation.actorId);
       if (!actor || actor.kind !== "character") errors.push({ code: "INVALID_KNOWLEDGE_ACTOR", message: `Knowledge actor ${operation.actorId} is not a character`, path: `proposedKnowledge.operations.${index}` });
+      if (context.claims && !context.claims.has(operation.claimId)) errors.push({ code: "UNKNOWN_KNOWLEDGE_CLAIM", message: `Unknown claim ${operation.claimId}`, path: `proposedKnowledge.operations.${index}` });
       if (operation.op === "learn") {
         if (operation.sourceActorId) {
           const source = context.entities.get(operation.sourceActorId);
           if (!source || source.kind !== "character") errors.push({ code: "INVALID_KNOWLEDGE_SOURCE", message: `Knowledge source ${operation.sourceActorId} is not a character`, path: `proposedKnowledge.operations.${index}` });
         }
-        if (context.claims && !context.claims.has(operation.claimId)) errors.push({ code: "UNKNOWN_KNOWLEDGE_CLAIM", message: `Unknown claim ${operation.claimId}`, path: `proposedKnowledge.operations.${index}` });
       }
     }
   }
@@ -148,6 +149,21 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
         if (rule.forbids?.length && rule.forbids.every((predicate) => evaluatePredicate(postState!, predicate))) {
           errors.push({ code: "RULE_FORBIDS", message: `Rule ${rule.id} forbids the proposed post-state` });
         }
+      }
+      const stateChanged = contentHash({ values: state.values, activeRuleIds: state.activeRuleIds })
+        !== contentHash({ values: postState.values, activeRuleIds: postState.activeRuleIds });
+      const hasKnowledgeEffect = Boolean(proposal.proposedKnowledge?.operations.length);
+      if (proposal.source === "player" && !stateChanged && !hasKnowledgeEffect && !proposal.progress) {
+        errors.push({
+          code: "PLAYER_PROGRESS_REQUIRED",
+          message: "An otherwise empty player event requires host-derived narrative progress metadata; raw no-op player commits are forbidden.",
+        });
+      }
+      if (proposal.progress?.channels.includes("state") && !stateChanged) {
+        errors.push({ code: "FALSE_STATE_PROGRESS", message: "Progress claims a state change, but the proposed delta leaves projected state unchanged." });
+      }
+      if (proposal.progress?.channels.includes("knowledge") && !hasKnowledgeEffect) {
+        errors.push({ code: "FALSE_KNOWLEDGE_PROGRESS", message: "Progress claims a knowledge change, but the proposal contains no knowledge operation." });
       }
     } catch (error) {
       errors.push({ code: "INVALID_DELTA", message: error instanceof Error ? error.message : String(error) });
@@ -185,6 +201,7 @@ export class WorldEngine {
     initialKnowledge?: KnowledgeDelta,
     sourceId?: string,
     preparedRevisionHash?: string,
+    initialEvidence: readonly EvidenceRef[] = [],
   ): Promise<CommitId> {
     if (sourceId && this.context.sourceId && sourceId !== this.context.sourceId) {
       throw new Error(`Cannot create source '${sourceId}' branch from '${this.context.sourceId}' world context.`);
@@ -206,7 +223,8 @@ export class WorldEngine {
       .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge))
       .map((event) => event.id)
       .sort();
-    const eventId = contentHash({ kind: "genesis", branchId, deltaHash, knowledgeDeltaHash, realizesCanonicalEventIds });
+    const evidence: EvidenceRef[] = structuredClone([...initialEvidence]);
+    const eventId = contentHash({ kind: "genesis", branchId, deltaHash, knowledgeDeltaHash, realizesCanonicalEventIds, evidence });
     const event: CommittedEvent = {
       version: 1,
       eventId,
@@ -216,7 +234,7 @@ export class WorldEngine {
       participants: [...new Set([...touchedEntities(initialDelta), ...touchedKnowledgeEntities(knowledge)])].sort(),
       deltaHash,
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
-      evidence: [],
+      evidence,
       causalParents: [],
       ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
     };
@@ -242,6 +260,12 @@ export class WorldEngine {
     const deltaHash = await this.objects.putDelta(parsed.proposedDelta);
     const knowledgeDeltaHash = parsed.proposedKnowledge ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge) : undefined;
     const logicalTime = { step: state.logicalTime.step + 1, storyTime: parsed.proposedTime } as const;
+    const canonicalPossibilityId = parsed.possibilityId?.startsWith("canon-")
+      ? parsed.possibilityId.slice("canon-".length)
+      : undefined;
+    const realizesCanonicalEventIds = canonicalPossibilityId && context.events?.has(canonicalPossibilityId)
+      ? [canonicalPossibilityId]
+      : [];
     const eventId = contentHash({
       branchId: parsed.branchId,
       parent: head,
@@ -251,6 +275,8 @@ export class WorldEngine {
       knowledgeDeltaHash,
       supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds,
       possibilityId: parsed.possibilityId,
+      realizesCanonicalEventIds,
+      progress: parsed.progress,
     });
     const event: CommittedEvent = {
       version: 1,
@@ -258,6 +284,7 @@ export class WorldEngine {
       branchId: parsed.branchId,
       logicalTime,
       proposalId: parsed.proposalId,
+      ...(parsed.actorId ? { actorId: parsed.actorId } : {}),
       title: parsed.title,
       participants: parsed.participants,
       deltaHash,
@@ -265,7 +292,9 @@ export class WorldEngine {
       evidence: parsed.evidence,
       causalParents: parsed.causalParents,
       ...(parsed.supersedesCanonicalEventIds ? { supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds } : {}),
+      ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
       ...(parsed.possibilityId ? { possibilityId: parsed.possibilityId } : {}),
+      ...(parsed.progress ? { progress: parsed.progress } : {}),
     };
     const eventHash = await this.objects.putEvent(event);
     const commitHash = await this.objects.putCommit({ version: 1, parentCommitId: head, branchId: parsed.branchId, logicalTime, eventHashes: [eventHash], canonicalSnapshotHash: context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });

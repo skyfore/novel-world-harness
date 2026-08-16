@@ -14,6 +14,7 @@ import {
   PlayerTurnService,
   type PlayerActionCandidate,
 } from "../src/world/player-action.js";
+import { projectActorScene } from "../src/world/scene.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 import { WorldRuntime } from "../src/world/runtime.js";
 
@@ -154,8 +155,8 @@ describe("actor-scoped player action context", () => {
       "character.location": "hall",
     });
     expect(context.knowledge.map((entry) => entry.claimId)).toEqual(["known-route"]);
-    expect(context.referenceableEntities.map((entity) => entity.id)).toEqual(["camp", "hall", "hero", "silver-key"]);
-    expect(context.presentEntities.map((entity) => entity.id)).toEqual(["hero"]);
+    expect(context.referenceableEntities.map((entity) => entity.id)).toEqual(["camp", "hall", "hero", "mo-yan", "silver-key"]);
+    expect(context.presentEntities.map((entity) => entity.id)).toEqual(["hero", "mo-yan"]);
     expect(context.writableEntityIds).toEqual(["hero", "silver-key"]);
     expect(context.ownedEntityState).toEqual({ "silver-key": { "artifact.owner": "hero" } });
     expect(serialized).not.toContain("future-secret");
@@ -216,7 +217,7 @@ describe("PlayerTurnService", () => {
     expect(observedContext).not.toContain("future-ambush");
   });
 
-  it("preserves the latest committed story-time anchor across no-op player turns", async () => {
+  it("preserves the story-time anchor but rejects a repeated perception beat that would loop", async () => {
     const { engine, head } = await fixture();
     const anchored = await engine.commitProposal({
       proposalId: "anchor-1950",
@@ -242,6 +243,11 @@ describe("PlayerTurnService", () => {
     }));
     const first = await service.turn({ branchId: "main", actorId: "hero", utterance: "Observe." });
     const second = await service.turn({ branchId: "main", actorId: "hero", utterance: "Observe again." });
+    expect(first.accepted).toBe(true);
+    expect(first.progressCertificate?.channels).toContain("scene");
+    expect(second.accepted).toBe(false);
+    expect(second.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_ACTION_REPEATS_NO_PROGRESS" }));
+    expect(second.newHead).toBe(first.newHead);
     expect(first.proposal?.proposedTime).toEqual({ kind: "exact", value: "1950", precision: "year" });
     expect(second.proposal?.proposedTime).toEqual({ kind: "exact", value: "1950", precision: "year" });
   });
@@ -272,6 +278,33 @@ describe("PlayerTurnService", () => {
     expect(observedContext?.writableEntityIds).not.toContain("library");
     expect(observedContext).not.toHaveProperty("worldState");
     expect((await engine.projector.project(result.newHead)).values.hero?.["character.location"]).toBe("library");
+  });
+
+  it("advances into an open scene when a free-form destination has no stable canonical entity", async () => {
+    const { engine } = await fixture();
+    const service = new PlayerTurnService(engine, () => ({
+      title: "Hero walks out toward the street",
+      participants: ["uncompiled-street"],
+      preconditions: [],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.location", value: "uncompiled-street" }],
+      },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    }));
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "我出门去街上走走。" });
+
+    expect(result.accepted).toBe(true);
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_DESTINATION_GENERALIZED" }));
+    expect(result.proposal?.proposedDelta.operations).toEqual([]);
+    expect(result.progressCertificate).toMatchObject({ sceneChanged: true, effectiveStateOperations: 0 });
+    expect(result.proposal?.progress?.scene).toMatchObject({ kind: "depart", label: "街上" });
+    const scene = await projectActorScene(engine, "hero", result.newHead);
+    expect(scene.locationId).toBeUndefined();
+    expect(scene.label).toBe("街上");
+    expect(scene.presentEntityIds).toEqual(["hero"]);
   });
 
   it("allows an actor-owned artifact to be transferred to an explicitly named character", async () => {

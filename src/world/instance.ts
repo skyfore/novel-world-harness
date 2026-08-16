@@ -19,7 +19,7 @@ export async function createWorldBranch(
   cacheRoot?: string,
 ): Promise<CreatedWorldBranch> {
   const source = sourceId ? await (await WorkspaceStore.create(root)).getSource(sourceId) : undefined;
-  const prepared = source ? await new PreparedNovelCache(root, cacheRoot).loadActive(source) : null;
+  const prepared = source ? await new PreparedNovelCache(root, cacheRoot).loadFreshActive(source) : null;
   const artifacts = prepared ? {
     entities: prepared.bundle.canonical.entities,
     claims: prepared.bundle.canonical.claims,
@@ -45,6 +45,23 @@ export async function createWorldBranch(
   const seed = seedPath
     ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8")))
     : canonicalInitial!.delta;
+  if (!seedPath) {
+    const represented = new Set(seed.operations.flatMap((operation) => "entityId" in operation ? [operation.entityId] : []));
+    const explicitlyDead = new Set<string>();
+    for (const operation of seed.operations) {
+      if (!("entityId" in operation) || operation.field !== "character.alive") continue;
+      if (operation.op === "set" && operation.value === false) explicitlyDead.add(operation.entityId);
+      else explicitlyDead.delete(operation.entityId);
+    }
+    for (const operation of canonicalInitial?.knowledge?.operations ?? []) {
+      represented.add(operation.actorId);
+      if (operation.op === "learn" && operation.sourceActorId) represented.add(operation.sourceActorId);
+    }
+    if (![...represented].some((entityId) =>
+      engine.context.entities.get(entityId)?.kind === "character" && !explicitlyDead.has(entityId))) {
+      throw new Error("The accepted opening world is evidence-backed but semantically unplayable: it represents no non-dead character in committed state or knowledge. Rebuild and publish the opening state before creating a branch.");
+    }
+  }
   const head = await engine.createBranch(
     branchId,
     branchId,
@@ -52,6 +69,7 @@ export async function createWorldBranch(
     seedPath ? undefined : canonicalInitial?.knowledge,
     sourceId,
     prepared?.bundleHash,
+    seedPath ? [] : canonicalInitial?.evidence,
   );
   return {
     head,

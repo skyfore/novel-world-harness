@@ -865,7 +865,7 @@ describe("NWH TUI extension", () => {
     expect(notifications).toContainEqual(expect.stringContaining("scope/PLAYER_PRECONDITION_UNSATISFIED"));
   });
 
-  it("executes the recommended observe option as a host-safe turn without invoking the model translator", async () => {
+  it("executes the recommended preflighted affordance without invoking the model translator", async () => {
     const turnNarrated = deferred();
     let translatorCalls = 0;
     const opening = "冷风从门缝里钻进来，你听见近处细碎的响动，眼前的一切仍停在决定之前。光影落在脚边，已经知道的事没有凭空改变，也没有任何命运替你选择。你可以先观察这个片刻，再决定是否采取更具体的行动。";
@@ -879,13 +879,7 @@ describe("NWH TUI extension", () => {
       undefined,
       async (_frame, purpose) => {
         if (purpose === "opening") {
-          return {
-            narration: opening,
-            choices: [
-              { label: "观察眼前", description: "确认当前可感知的动静。", action: "我先仔细观察眼前。", intent: "observe" },
-              { label: "尝试行动", description: "采取一个具体动作。", action: "我向前走一步。", intent: "act" },
-            ],
-          };
+          return opening;
         }
         turnNarrated.resolve();
         return afterObserve;
@@ -893,18 +887,22 @@ describe("NWH TUI extension", () => {
     );
     await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
     const { engine } = await openWorkspaceWorld(root);
-    await engine.createBranch("main", "Main", { version: 1, operations: [] });
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
     const offered: string[] = [];
+    const widgets: Array<{ key: string; content: string[] | undefined }> = [];
     const ctx = {
       mode: "tui",
       ui: {
         notify: () => undefined,
         async select(_title: string, choices: string[]) {
           offered.push(...choices);
-          return choices.find((choice) => choice.includes("观察眼前"));
+          return choices.find((choice) => choice.includes("(recommended)"));
         },
         setStatus: () => undefined,
-        setWidget: () => undefined,
+        setWidget: (key: string, content: string[] | undefined) => widgets.push({ key, content }),
         setWorkingMessage: () => undefined,
         theme: { fg: (_color: string, text: string) => text },
       },
@@ -913,8 +911,48 @@ describe("NWH TUI extension", () => {
     await commands.get("play")!.handler("hero main", ctx);
     await turnNarrated.promise;
     expect(translatorCalls).toBe(0);
-    expect(offered.some((choice) => choice.includes("观察眼前 (recommended)"))).toBe(true);
+    expect(offered.some((choice) => choice.includes("(recommended)"))).toBe(true);
+    expect(widgets.some((widget) => widget.key === "nwh-model-loading" && widget.content?.join("\n").includes("正在理解你的行动"))).toBe(true);
+    await expect.poll(() => widgets.at(-1), { timeout: 1_000 }).toMatchObject({ key: "nwh-model-loading", content: undefined });
     expect((await engine.projector.project(await engine.branches.readHead("main"))).logicalTime.step).toBe(1);
+  });
+
+  it("answers explicit OOC timeline questions without translating or committing an in-world turn", async () => {
+    let translatorCalls = 0;
+    const { commands, events, root, sentVisibleMessages } = await fixture(
+      undefined,
+      () => {
+        translatorCalls += 1;
+        throw new Error("OOC input must not reach the player translator");
+      },
+    );
+    await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await commands.get("play")!.handler("hero main", ctx as unknown as ExtensionCommandContext);
+    await expect(events.get("input")!(
+      { type: "input", text: "OOC: 当前时间线在哪里？", source: "interactive" } as InputEvent,
+      ctx,
+    )).resolves.toEqual({ action: "handled" });
+
+    expect(translatorCalls).toBe(0);
+    expect(await engine.branches.readHead("main")).toBe(genesis);
+    expect(sentVisibleMessages.join("\n")).toContain("这是场外查询");
+    expect(sentVisibleMessages.join("\n")).toContain("committed step 0");
   });
 
   it("cancels a player translation before commitment and leaves world truth unchanged", async () => {
@@ -1430,7 +1468,8 @@ describe("NWH TUI extension", () => {
     await expect.poll(() => questions, { timeout: 1_000 }).toContain("福贵，你接下来准备怎么做？");
 
     expect(narratorCalls).toBe(0);
-    expect(offered.some((choice) => choice.includes("观察 (recommended)"))).toBe(true);
+    expect(offered.some((choice) => choice.includes("(recommended)"))).toBe(true);
+    expect(offered.some((choice) => choice.includes("观察 (recommended)"))).toBe(false);
   });
 
   it("automatically recovers a legacy transcript that ended on a raw engine rejection", async () => {
@@ -1447,7 +1486,10 @@ describe("NWH TUI extension", () => {
     );
     await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
     const { engine } = await openWorkspaceWorld(root);
-    const genesis = await engine.createBranch("main", "Main", { version: 1, operations: [] });
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
     await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
     const entries = [{
       type: "custom_message",
@@ -1681,7 +1723,7 @@ describe("NWH TUI extension", () => {
     expect(notifications).toContainEqual(expect.stringContaining("did not match the text shown in the live provider stream"));
   });
 
-  it("offers grounded default choices and routes the selected utterance through the normal player gate", async () => {
+  it("keeps free-form input available beside grounded host choices and routes it through the normal player gate", async () => {
     const translated = deferred();
     const utterances: string[] = [];
     const narratorText = "冷风卷过空地，你听见脚边细碎的沙石声，眼前这一刻仍停在你的决定之前。近处的光影和记忆里已经知道的事情彼此交错，却没有替你指出唯一道路。你可以先靠近门边观察，也可以停下来梳理线索，或者选择完全不同的行动。";
@@ -1693,13 +1735,7 @@ describe("NWH TUI extension", () => {
         throw new Error("stop after observing selected utterance");
       },
       undefined,
-      async () => ({
-        narration: narratorText,
-        choices: [
-          { label: "靠近门边", description: "听清门外的声音。", action: "我靠近门边，仔细听外面的声音。" },
-          { label: "整理线索", description: "回想自己知道的事。", action: "我先整理已经知道的线索。" },
-        ],
-      }),
+      async () => narratorText,
     );
     const canon = new CanonicalModelStore(root);
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
@@ -1715,7 +1751,10 @@ describe("NWH TUI extension", () => {
         notify: () => undefined,
         async select(title: string, choices: string[]) {
           questions.push(title);
-          return choices.find((choice) => choice.includes("靠近门边"));
+          return choices.find((choice) => choice.includes("自由输入行动"));
+        },
+        async input() {
+          return "我靠近门边，仔细听外面的声音。";
         },
         setStatus: () => undefined,
         setWidget: () => undefined,
@@ -1766,7 +1805,8 @@ describe("NWH TUI extension", () => {
 
     await commands.get("play")?.handler("", ctx);
 
-    expect(questions).toEqual(["Who do you want to play on 'main'?"]);
+    expect(questions[0]).toBe("Who do you want to play on 'main'?");
+    expect(questions).toContain("宿敌，你接下来准备怎么做？");
     expect(inputs).toEqual(["Character id, name, or alias"]);
     await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ branchId: "main", actorId: "rival" });
     expect(getSessionName()).toBe("Novel world · 宿敌 · main");
@@ -2051,7 +2091,7 @@ describe("NWH TUI extension", () => {
 
     expect(questions).toEqual(["Generate opening world?", "Create playable branch?"]);
     expect(notifications.some((message) => message.includes("Opening-state compiler did not complete") && message.includes("explicitly finish"))).toBe(true);
-    expect(notifications.some((message) => message.includes("conservative empty-delta fallback"))).toBe(true);
+    expect(notifications.some((message) => message.includes("conservative evidence-backed opening-cast fallback"))).toBe(true);
     await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toContainEqual(
       expect.objectContaining({ id: "partial-opening" }),
     );

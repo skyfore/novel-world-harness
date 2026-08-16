@@ -24,6 +24,42 @@ async function temporaryRoot(prefix: string): Promise<string> {
 }
 
 describe("versioned prepared novel cache", () => {
+  it("refuses to create from an active bundle after newer accepted source artifacts make it stale", async () => {
+    const cacheRoot = await temporaryRoot("nwh-prepared-fresh-cache-");
+    const sourceRoot = await temporaryRoot("nwh-prepared-fresh-source-");
+    const fixture = await createEvidenceFixture(sourceRoot, "Hero waits at the opening.\n");
+    const proposals = new CompilerProposalService(sourceRoot);
+    await proposals.submit("entity", {
+      proposalId: "fresh-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "fresh-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        evidence: fixture.evidence("Hero waits at the opening."),
+      },
+      generatedBy: { worker: "test" },
+    });
+    const batches = await prepareCompilerBatches(sourceRoot, fixture.source);
+    await new CompilerBatchStore(sourceRoot).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+    await convergeWorldProposals(sourceRoot, fixture.source.id);
+    const cache = new PreparedNovelCache(sourceRoot, cacheRoot);
+    const published = await cache.publish(fixture.source);
+    await expect(cache.loadFreshActive(fixture.source)).resolves.toMatchObject({ bundleHash: published.bundleHash });
+
+    const canon = new CanonicalModelStore(sourceRoot);
+    const hero = await canon.getEntity("hero");
+    await canon.putEntity({ ...hero, aliases: ["The Hero"] });
+
+    await expect(cache.loadFreshActive(fixture.source)).rejects.toThrow("stale relative to accepted workspace artifacts");
+    await expect(cache.loadFreshActive(fixture.source)).rejects.toThrow("entities differ");
+    const revised = await cache.publish(fixture.source);
+    await expect(cache.loadFreshActive(fixture.source)).resolves.toMatchObject({ bundleHash: revised.bundleHash });
+  });
+
   it("reuses active MD5 revisions while immutable revisions and branches remain independent", async () => {
     const cacheRoot = await temporaryRoot("nwh-prepared-cache-");
     const sourceRoot = await temporaryRoot("nwh-prepared-source-");

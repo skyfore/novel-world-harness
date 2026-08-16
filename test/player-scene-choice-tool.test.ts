@@ -1,19 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { createPlayerSceneChoiceCaptureTool } from "../src/agent/player-scene-choice-tool.js";
-import { defaultPlayerSceneChoices, ensureSafePlayerSceneChoices } from "../src/agent/pi-player-opening.js";
+import { bindPlayerSceneChoices, defaultPlayerSceneChoices } from "../src/agent/pi-player-opening.js";
+import type { PlayerAffordance } from "../src/world/narrative-director.js";
 
 describe("player scene choice capture tool", () => {
   it("captures only bounded suggested utterances and can reset between narration attempts", async () => {
     const capture = createPlayerSceneChoiceCaptureTool();
     const input = {
       choices: [
-        { label: "观察四周", description: "确认眼前的动静。", action: "我先仔细观察四周。" },
-        { label: "整理思绪", description: "回想自己已经知道的事。", action: "我先整理此刻掌握的线索。" },
+        { affordanceId: "aff-observe", label: "观察四周", description: "确认眼前的动静。", action: "我先仔细观察四周。" },
+        { affordanceId: "aff-plan", label: "整理思绪", description: "回想自己已经知道的事。", action: "我先整理此刻掌握的线索。" },
       ],
     };
 
     await capture.tool.execute("choices-1", input, undefined, undefined, {} as never);
-    expect(capture.getChoices()).toEqual(input.choices.map((choice) => ({ ...choice, intent: "act" })));
+    expect(capture.getChoices()).toEqual(input.choices.map((choice) => ({ ...choice, intent: "act", recommended: false })));
     await expect(capture.tool.execute("choices-2", input, undefined, undefined, {} as never))
       .rejects.toThrow("Only one scene-choice set");
 
@@ -22,18 +23,26 @@ describe("player scene choice capture tool", () => {
     expect(capture.getChoices()).toHaveLength(2);
   });
 
-  it("rejects an undersized choice set and supplies bounded host defaults", async () => {
+  it("allows one recovery choice, rejects an empty set, and binds only host affordances", async () => {
     const capture = createPlayerSceneChoiceCaptureTool();
-    await expect(capture.tool.execute("choices-1", {
-      choices: [{ label: "观察", description: "看看四周。", action: "我先观察四周。" }],
-    }, undefined, undefined, {} as never)).rejects.toThrow();
+    await capture.tool.execute("choices-1", {
+      choices: [{ affordanceId: "aff-open", label: "观察", description: "看看四周。", action: "我先观察四周。" }],
+    }, undefined, undefined, {} as never);
+    expect(capture.getChoices()).toHaveLength(1);
+    capture.reset();
+    await expect(capture.tool.execute("choices-2", { choices: [] }, undefined, undefined, {} as never)).rejects.toThrow();
 
-    expect(defaultPlayerSceneChoices()).toHaveLength(3);
-    expect(defaultPlayerSceneChoices().every((choice) => choice.action.length > 0)).toBe(true);
-    expect(defaultPlayerSceneChoices().map((choice) => choice.intent)).toEqual(["observe", "reflect", "wait"]);
-    expect(ensureSafePlayerSceneChoices([
-      { label: "开门", description: "试着打开门。", action: "我试着打开门。", intent: "act" },
-      { label: "敲门", description: "先敲一敲门。", action: "我先敲门。", intent: "act" },
-    ]).map((choice) => choice.intent)).toEqual(["observe", "act", "act"]);
+    const affordances: PlayerAffordance[] = [
+      { id: "aff-open", label: "开门", description: "试着打开门。", action: "我试着打开门。", intent: "act", progressChannels: ["scene"], threadIds: ["thread-a"], recommended: true },
+      { id: "aff-knock", label: "敲门", description: "先敲一敲门。", action: "我先敲门。", intent: "act", progressChannels: ["consequence"], threadIds: ["thread-a"], recommended: false },
+    ];
+    expect(defaultPlayerSceneChoices()).toEqual([]);
+    expect(defaultPlayerSceneChoices(affordances)).toHaveLength(2);
+    expect(bindPlayerSceneChoices([
+      { affordanceId: "aff-knock", label: "篡改", description: "篡改", action: "篡改", intent: "wait", recommended: true },
+    ], affordances)).toEqual([
+      expect.objectContaining({ affordanceId: "aff-knock", label: "敲门", intent: "act", recommended: false }),
+      expect.objectContaining({ affordanceId: "aff-open", label: "开门", recommended: true }),
+    ]);
   });
 });

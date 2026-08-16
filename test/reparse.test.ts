@@ -51,7 +51,7 @@ describe("explicit prepared-novel reparsing", () => {
     });
     await proposals.submit("initial-world", {
       proposalId: "opening-v1",
-      payload: { version: 1, delta: { version: 1, operations: [] }, evidence: batches[0]!.evidence },
+      payload: { version: 1, delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] }, evidence: batches[0]!.evidence },
       generatedBy: { worker: "test", compilerBatchId: `opening-${batches[0]!.id}` },
     });
     await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
@@ -144,7 +144,7 @@ describe("explicit prepared-novel reparsing", () => {
     });
     await proposals.submit("initial-world", {
       proposalId: "opening-all-v1",
-      payload: { version: 1, delta: { version: 1, operations: [] }, evidence: batch.evidence },
+      payload: { version: 1, delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] }, evidence: batch.evidence },
       generatedBy: { worker: "test", compilerBatchId: `opening-${batch.id}` },
     });
     await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
@@ -172,7 +172,7 @@ describe("explicit prepared-novel reparsing", () => {
         await convergeWorldProposals(root, fixture.source.id);
         await proposals.submit("initial-world", {
           proposalId: "opening-all-v2-reparse-test",
-          payload: { version: 1, delta: { version: 1, operations: [] }, evidence: batch.evidence },
+          payload: { version: 1, delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] }, evidence: batch.evidence },
           generatedBy: { worker: "test", compilerBatchId: `opening-${batch.id}` },
         });
         await convergeWorldProposals(root, fixture.source.id);

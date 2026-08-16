@@ -71,6 +71,7 @@ import {
 } from "../world/play-opening.js";
 import {
   createPiPlayerOpeningNarrator,
+  bindPlayerSceneChoices,
   defaultPlayerSceneChoices,
   type PlayerOpeningNarrator,
   type PlayerSceneNarrationObserver,
@@ -81,6 +82,7 @@ import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/
 import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
 import { createNwhModelLoadingIndicator, type NwhModelLoadingIndicator } from "./nwh-model-loading.js";
 import { NWH_DOUBLE_CTRL_C_WINDOW_MS, NwhDoubleCtrlCExit } from "./nwh-exit.js";
+import { classifyPlayerInput, renderPlayerMetaResponse } from "../world/player-input-route.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -756,6 +758,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         referenceableEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
         visibleEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
         recentVisibleEvents: [],
+        scene: { key: "scene:unavailable", beat: 0, signature: "unavailable" },
+        activeThreads: [],
+        affordances: [],
         ...(turnResolution ? { turnResolution } : {}),
       };
       const stream = createPlayerSceneObserver(ctx, purpose, controller.signal);
@@ -766,7 +771,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           selection.actor.id,
           selection.source?.id,
         );
-        if (turnResolution) frame = { ...frame, turnResolution: structuredClone(turnResolution) };
+        if (turnResolution) {
+          const rejectedAction = normalizePlayerUtterance(turnResolution.utterance);
+          frame = {
+            ...frame,
+            turnResolution: structuredClone(turnResolution),
+            affordances: frame.affordances.filter((affordance) => normalizePlayerUtterance(affordance.action) !== rejectedAction),
+          };
+        }
         if (ctx.mode === "tui") {
           ctx.ui.setStatus(
             "nwh-play-opening",
@@ -789,7 +801,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         });
         const output = await narrator(frame, purpose, stream.observer);
         const narration = typeof output === "string" ? output : output.narration;
-        const choices = typeof output === "string" ? [] : output.choices;
+        const rawChoices = typeof output === "string" ? [] : output.choices;
+        const choices = bindPlayerSceneChoices(rawChoices, frame.affordances);
         stream.verifyFinalText(narration);
         if (controller.signal.aborted) return [];
         const stillSelected = playerMode
@@ -811,7 +824,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (controller.signal.aborted) return [];
         showPlayMessage(renderPlaySceneFailure(frame, purpose));
         ctx.ui.notify(`Scene narration failed: ${error instanceof Error ? error.message : String(error)}`, "error");
-        return [...structuredClone(fallbackChoices)];
+        const rejected = turnResolution ? normalizePlayerUtterance(turnResolution.utterance) : undefined;
+        const recoverableChoices = frame.affordances.length
+          ? defaultPlayerSceneChoices(frame.affordances)
+          : structuredClone(fallbackChoices);
+        return recoverableChoices.filter((choice) =>
+          !rejected || normalizePlayerUtterance(choice.action) !== rejected);
       } finally {
         stream.close();
         if (ctx.mode === "tui") ctx.ui.setStatus("nwh-play-opening", undefined);
@@ -907,6 +925,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       ctx: ExtensionContext,
       input: {
         intent?: "act" | SafePlayerIntent;
+        affordanceId?: string;
         origin?: "freeform" | "scene-choice" | "host-safe-choice";
         fallbackChoices?: readonly PlayerSceneChoice[];
       } = {},
@@ -936,7 +955,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const completion = new Promise<void>((resolve) => { completeTurn = resolve; });
       const activeTurn = { controller, cancellable: true, completion };
       activePlayerTurn = activeTurn;
-      const safeIntent = input.intent && input.intent !== "act" ? input.intent : undefined;
+      const safeIntent = !input.affordanceId && input.intent && input.intent !== "act" ? input.intent : undefined;
       const baseTranslator: PlayerActionTranslator = safeIntent
         ? (translationInput) => deterministicPlayerIntentCandidate(safeIntent, translationInput)
         : options.playerTranslator ?? createPiPlayerActionTranslator({
@@ -949,7 +968,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const translator: PlayerActionTranslator = async (input) => {
         const candidate = await raceWithAbort(Promise.resolve(baseTranslator(input)), controller.signal);
         controller.signal.throwIfAborted();
-        activeTurn.cancellable = false;
         return candidate;
       };
       showTurnActivity("正在理解你的行动…");
@@ -963,7 +981,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           translator,
           advanceBackground: options.advanceBackground ?? 0,
           origin: input.origin ?? "freeform",
-          intent: input.intent ?? "act",
+          ...(input.intent ? { intent: input.intent } : {}),
+          ...(input.affordanceId ? { affordanceId: input.affordanceId } : {}),
+          beforeCommit: () => { activeTurn.cancellable = false; },
         });
       } catch (error) {
         if (controller.signal.aborted) {
@@ -993,7 +1013,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (outcome.auditError) ctx.ui.notify(`Player-turn audit could not be persisted: ${outcome.auditError}`, "warning");
       if (!outcome.result.accepted) {
         const issueCode = outcome.result.issues[0]?.code ?? "UNKNOWN";
-        showPlayMessage("刚才请求的效果没有写入世界；当前场景和已提交事实保持不变。你仍然可以观察、思考、等待，或换一种即时行动继续。");
+        showPlayMessage("刚才的请求没有形成可验证的新进展，因此没有写入世界；当前场景和已提交事实保持不变。系统会从同一时刻重新给出可执行且能推进场景、关系、计划或任务线程的行动。");
         ctx.ui.notify(`行动未提交（${outcome.result.stage}/${issueCode}）；正在从同一场景恢复。`, "warning");
         const purpose: PlayScenePurpose = outcome.result.stage === "translation" || outcome.result.stage === "scope"
           ? "recovery"
@@ -1032,7 +1052,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const token = Symbol("player-choice");
       activePlayerChoicePrompt = token;
       const bounded = choices.slice(0, 4);
-      const recommendedIndex = bounded.findIndex((choice) => choice.intent === "observe");
+      const recommendedIndex = bounded.findIndex((choice) => choice.recommended);
       let answer: string | undefined;
       try {
         answer = await createTuiUserQuestion(ctx.ui)({
@@ -1069,11 +1089,13 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const selectedChoice = Number.isInteger(selectedIndex) ? bounded[selectedIndex] : undefined;
       const utterance = selectedChoice?.action ?? (answer.startsWith("custom:") ? answer.slice("custom:".length) : undefined);
       if (!utterance) return;
-      const intent = selectedChoice?.intent ?? "act";
       const timer = setTimeout(() => {
         void runPlayerInput(utterance, ctx, {
-          intent,
-          origin: intent === "act" ? selectedChoice ? "scene-choice" : "freeform" : "host-safe-choice",
+          ...(selectedChoice ? { intent: selectedChoice.intent } : {}),
+          ...(selectedChoice?.affordanceId ? { affordanceId: selectedChoice.affordanceId } : {}),
+          origin: selectedChoice
+            ? selectedChoice.intent === "act" ? "scene-choice" : "host-safe-choice"
+            : "freeform",
           fallbackChoices: bounded,
         }).catch((error) => {
           ctx.ui.notify(`Cannot perform player action: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -1339,7 +1361,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           const fallbackId = await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
           const result = await convergeWorldProposals(workspace.root, state.sourceId);
           await quarantineUncommittableProposals(workspace.root, result);
-          ctx.ui.notify(`The model did not leave a valid opening state; accepted conservative empty-delta fallback ${fallbackId}.`, "warning");
+          ctx.ui.notify(`The model did not leave a valid opening state; accepted a conservative evidence-backed opening-cast fallback ${fallbackId}.`, "warning");
           const afterFallback = await inspectPreparation(workspace.root, {
             sourceId: state.sourceId,
             branchId: state.branchId,
@@ -1502,6 +1524,22 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
       if (playerMode) {
         try {
+          if (classifyPlayerInput(event.text) === "meta" && selectedPlay) {
+            const activity = beginHostActivity(ctx, "player-meta", "Reading the committed actor-visible timeline");
+            try {
+              showPlayMessage(`**场外：** ${event.text}`);
+              const frame = await buildPlayOpeningFrame(
+                workspace.root,
+                selectedPlay.session.branchId,
+                selectedPlay.actor.id,
+                selectedPlay.source?.id,
+              );
+              showPlayMessage(renderPlayerMetaResponse(frame, event.text));
+            } finally {
+              activity.close();
+            }
+            return { action: "handled" };
+          }
           await runPlayerInput(event.text, ctx);
         } catch (error) {
           ctx.ui.notify(`Cannot perform player action: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -1778,7 +1816,17 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
                     defaultPlayerSceneChoices(),
                   );
                 } else {
-                  const choices = restoredPlayerChoices(transcriptEntries, selection);
+                  const persistedChoices = restoredPlayerChoices(transcriptEntries, selection);
+                  const currentFrame = await buildPlayOpeningFrame(
+                    workspace.root,
+                    selection.session.branchId,
+                    selection.actor.id,
+                    selection.source?.id,
+                  );
+                  // IDs are capabilities tied to one commit. Rebind persisted
+                  // choices to a freshly preflighted frame; legacy choices
+                  // without IDs are replaced without replaying narration.
+                  const choices = bindPlayerSceneChoices(persistedChoices, currentFrame.affordances);
                   if (choices.length) {
                     void offerPlayerChoices(ctx, selection, choices).catch((error) => {
                       ctx.ui.notify(`Cannot restore player choices: ${error instanceof Error ? error.message : String(error)}`, "warning");
@@ -2679,4 +2727,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       },
     });
   };
+}
+
+function normalizePlayerUtterance(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/g, "").replace(/[，。！？、,.!?;；:："'“”‘’]/g, "").toLocaleLowerCase();
 }

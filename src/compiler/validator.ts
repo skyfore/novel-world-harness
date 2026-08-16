@@ -13,6 +13,7 @@ import {
   type Entity,
   type EvidenceRef,
   type Predicate,
+  type StoryTime,
   type ValidationIssue,
   type WorldRule,
 } from "../world/model.js";
@@ -75,7 +76,7 @@ export class CompilerValidator {
     if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, claims, events, rules, errors);
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
     if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, claims, rules, errors);
-    if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, claims, rules, errors);
+    if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, claims, events, rules, errors);
     if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, errors);
     return { accepted: errors.length === 0, errors, warnings };
   }
@@ -106,7 +107,13 @@ export class CompilerValidator {
       errors.push(issue("NON_ATOMIC_CANONICAL_EVENT", `Event ${event.id} contains multiple world-state operations; submit one explicitly narrated transition per canonical event`, "observedOutcome.operations"));
     }
     for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
-    for (const parent of event.causalParents) if (!events.has(parent)) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parent}`, "causalParents"));
+    for (const parentId of event.causalParents) {
+      const parent = events.get(parentId);
+      if (!parent) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parentId}`, "causalParents"));
+      else if (storyTimeDefinitelyBefore(event.storyTime, parent.storyTime)) {
+        errors.push(issue("TEMPORAL_CAUSAL_REGRESSION", `Event ${event.id} is temporally earlier than causal parent ${parentId}`, "storyTime"));
+      }
+    }
     if (event.storyTime.kind === "relative" && !events.has(event.storyTime.anchorEventId)) {
       errors.push(issue("UNKNOWN_TIME_ANCHOR", `Unknown story-time anchor ${event.storyTime.anchorEventId}`, "storyTime.anchorEventId"));
     }
@@ -164,22 +171,91 @@ export class CompilerValidator {
         }
       }
     }
+    const representedCharacters = new Set<string>();
+    const explicitlyDead = new Set<string>();
+    for (const operation of initial.delta.operations) {
+      if ("entityId" in operation && entities.get(operation.entityId)?.kind === "character") {
+        representedCharacters.add(operation.entityId);
+        if (operation.field === "character.alive") {
+          if (operation.op === "set" && operation.value === false) explicitlyDead.add(operation.entityId);
+          else explicitlyDead.delete(operation.entityId);
+        }
+      }
+    }
+    for (const operation of initial.knowledge?.operations ?? []) {
+      if (entities.get(operation.actorId)?.kind === "character") representedCharacters.add(operation.actorId);
+      if (operation.op === "learn" && operation.sourceActorId && entities.get(operation.sourceActorId)?.kind === "character") {
+        representedCharacters.add(operation.sourceActorId);
+      }
+    }
+    if (![...representedCharacters].some((characterId) => !explicitlyDead.has(characterId))) {
+      errors.push(issue(
+        "UNPLAYABLE_INITIAL_WORLD",
+        "Initial world must represent at least one non-dead opening character in committed state or knowledge; an evidence-backed empty or all-dead delta cannot create a playable cast.",
+        "delta.operations",
+      ));
+    }
   }
 
-  private validateGoal(goal: CharacterGoal, entities: ReadonlyMap<string, Entity>, claims: ReadonlyMap<string, Claim>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
+  private validateGoal(
+    goal: CharacterGoal,
+    entities: ReadonlyMap<string, Entity>,
+    claims: ReadonlyMap<string, Claim>,
+    events: ReadonlyMap<string, CanonicalEvent>,
+    rules: ReadonlyMap<string, WorldRule>,
+    errors: ValidationIssue[],
+  ): void {
     const actor = entities.get(goal.actorId);
     if (!actor || actor.kind !== "character") errors.push(issue("INVALID_GOAL_ACTOR", `Goal actor ${goal.actorId} is not a canonical character`, "actorId"));
     if (!goal.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Goal ${goal.id} has no source evidence`, "evidence"));
     for (const claimId of [...goal.requiresKnowledge, ...(goal.blockedByKnowledge ?? [])]) {
       if (!claims.has(claimId)) errors.push(issue("UNKNOWN_GOAL_CLAIM", `Goal ${goal.id} references unknown claim ${claimId}`));
     }
-    if (goal.candidateAction) {
-      for (const participant of goal.candidateAction.participants ?? []) if (!entities.has(participant)) errors.push(issue("UNKNOWN_GOAL_PARTICIPANT", `Unknown goal participant ${participant}`));
-      for (const predicate of goal.candidateAction.preconditions) this.validatePredicate(predicate, entities, rules, errors);
-      this.validateOperations(goal.candidateAction.proposedDelta.operations, entities, rules, errors, "candidateAction.proposedDelta.operations");
-      for (const operation of goal.candidateAction.proposedKnowledge?.operations ?? []) {
-        if (!entities.has(operation.actorId)) errors.push(issue("UNKNOWN_KNOWLEDGE_ACTOR", `Unknown knowledge actor ${operation.actorId}`));
-        if (operation.op === "learn" && !claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Unknown knowledge claim ${operation.claimId}`));
+    for (let index = 0; index < (goal.targetIds?.length ?? 0); index += 1) {
+      if (!entities.has(goal.targetIds![index]!)) errors.push(issue("UNKNOWN_GOAL_TARGET", `Unknown goal target ${goal.targetIds![index]}`, `targetIds.${index}`));
+    }
+    for (let index = 0; index < (goal.activation?.preconditions.length ?? 0); index += 1) {
+      this.validatePredicate(goal.activation!.preconditions[index]!, entities, rules, errors);
+    }
+    for (let index = 0; index < (goal.activation?.afterCanonicalEventIds.length ?? 0); index += 1) {
+      const eventId = goal.activation!.afterCanonicalEventIds[index]!;
+      if (!events.has(eventId)) errors.push(issue("UNKNOWN_GOAL_EVENT", `Goal ${goal.id} activates after unknown canonical event ${eventId}`, `activation.afterCanonicalEventIds.${index}`));
+    }
+    if (goal.activation?.storyWindow?.kind === "relative" && !events.has(goal.activation.storyWindow.anchorEventId)) {
+      errors.push(issue("UNKNOWN_GOAL_EVENT", `Goal ${goal.id} story window references unknown canonical event ${goal.activation.storyWindow.anchorEventId}`, "activation.storyWindow.anchorEventId"));
+    }
+    for (const [path, predicates] of [
+      ["completion", goal.completion ?? []],
+      ["expiry", goal.expiry ?? []],
+    ] as const) {
+      predicates.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      if (predicates.length && predicates.some((predicate) => (goal.activation?.preconditions ?? []).some((activation) => canonicalJson(activation) === canonicalJson(predicate)))) {
+        errors.push(issue("GOAL_ACTIVE_AND_COMPLETE", `Goal ${goal.id} uses the same predicate for activation and ${path}`, path));
+      }
+    }
+    for (let milestoneIndex = 0; milestoneIndex < (goal.milestones?.length ?? 0); milestoneIndex += 1) {
+      goal.milestones![milestoneIndex]!.conditions.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+    }
+    const actions = [
+      ...(goal.candidateAction ? [{ path: "candidateAction", value: goal.candidateAction }] : []),
+      ...(goal.actionPatterns ?? []).map((value, index) => ({ path: `actionPatterns.${index}`, value })),
+    ];
+    for (const { path, value } of actions) {
+      for (let index = 0; index < (value.participants?.length ?? 0); index += 1) {
+        const participant = value.participants![index]!;
+        if (!entities.has(participant)) errors.push(issue("UNKNOWN_GOAL_PARTICIPANT", `Unknown goal participant ${participant}`, `${path}.participants.${index}`));
+      }
+      value.preconditions.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      this.validateOperations(value.proposedDelta.operations, entities, rules, errors, `${path}.proposedDelta.operations`);
+      for (let index = 0; index < (value.proposedKnowledge?.operations.length ?? 0); index += 1) {
+        const operation = value.proposedKnowledge!.operations[index]!;
+        const knowledgeActor = entities.get(operation.actorId);
+        if (!knowledgeActor || knowledgeActor.kind !== "character") errors.push(issue("UNKNOWN_KNOWLEDGE_ACTOR", `Unknown knowledge actor ${operation.actorId}`, `${path}.proposedKnowledge.operations.${index}.actorId`));
+        if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Unknown knowledge claim ${operation.claimId}`, `${path}.proposedKnowledge.operations.${index}.claimId`));
+        if (operation.op === "learn" && operation.sourceActorId) {
+          const sourceActor = entities.get(operation.sourceActorId);
+          if (!sourceActor || sourceActor.kind !== "character") errors.push(issue("UNKNOWN_KNOWLEDGE_SOURCE", `Unknown knowledge source ${operation.sourceActorId}`, `${path}.proposedKnowledge.operations.${index}.sourceActorId`));
+        }
       }
     }
   }
@@ -489,3 +565,15 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   return worldRuleSchema;
 }
 function issue(code: string, message: string, path?: string): ValidationIssue { return path ? { code, message, path } : { code, message }; }
+
+function storyTimeDefinitelyBefore(left: StoryTime, right: StoryTime): boolean {
+  const comparable = (value: StoryTime): { scale: "year" | "ordinal"; min: number; max: number } | undefined => {
+    if (value.kind === "ordinal" && typeof value.orderHint === "number") return { scale: "ordinal", min: value.orderHint, max: value.orderHint };
+    const values = value.kind === "exact" ? [value.value] : value.kind === "range" ? [value.earliest, value.latest] : [];
+    const years = values.flatMap((entry) => [...entry.matchAll(/(?:^|\D)(\d{3,4})(?:s)?(?=\D|$)/g)].map((match) => Number(match[1])));
+    return years.length ? { scale: "year", min: Math.min(...years), max: Math.max(...years.map((year) => year + 9)) } : undefined;
+  };
+  const leftRange = comparable(left);
+  const rightRange = comparable(right);
+  return Boolean(leftRange && rightRange && leftRange.scale === rightRange.scale && leftRange.max < rightRange.min);
+}

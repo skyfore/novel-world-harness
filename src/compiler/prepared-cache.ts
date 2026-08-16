@@ -118,6 +118,25 @@ export class PreparedNovelCache {
     };
   }
 
+  /**
+   * Branch creation must not silently prefer an older immutable bundle over
+   * newer accepted compiler artifacts. Explicit revision activation first
+   * materializes that revision, so a deliberate rollback remains fresh while
+   * an un-published accepted opening or goal change is rejected here.
+   */
+  async loadFreshActive(source: SourceDocument): Promise<ActivePreparedNovel | null> {
+    const active = await this.loadActive(source);
+    if (!active) return null;
+    const issue = await this.freshnessIssue(active.bundle);
+    if (issue) {
+      throw new Error(
+        `Active prepared revision ${active.bundleHash} is stale relative to accepted workspace artifacts: ${issue} `
+        + "Run prepare-all to publish a new immutable revision, then create a fresh instance; existing branches remain pinned.",
+      );
+    }
+    return active;
+  }
+
   async restore(source: SourceDocument): Promise<PreparedCacheResult> {
     const identity = await sourceIdentity(this.workspaceRoot, source);
     const cached = await this.readCached(identity.contentMd5);
@@ -365,6 +384,45 @@ export class PreparedNovelCache {
     }
     const empty = !current.initialWorld && groups.every(([, actual]) => actual.length === 0);
     return { compatible: true, empty };
+  }
+
+  private async freshnessIssue(bundle: PreparedNovelBundle): Promise<string | null> {
+    const pending = await new ProposalStore(this.workspaceRoot).list("pending", bundle.source.id);
+    if (pending.length) return `${pending.length} source proposal(s) are pending`;
+    const current = await currentCanonical(this.workspaceRoot);
+    const fromSource = <T extends { evidence: readonly { span: { sourceId: string } }[] }>(items: readonly T[]) =>
+      items.filter((item) => item.evidence.some((reference) => reference.span.sourceId === bundle.source.id));
+    const groups = [
+      ["entities", fromSource(current.entities), bundle.canonical.entities, (item: { id: string }) => item.id],
+      ["claims", fromSource(current.claims), bundle.canonical.claims, (item: { id: string }) => item.id],
+      ["events", fromSource(current.events), bundle.canonical.events, (item: { id: string }) => item.id],
+      ["rules", fromSource(current.rules), bundle.canonical.rules, (item: { id: string }) => item.id],
+      ["goals", fromSource(current.goals), bundle.canonical.goals, (item: { id: string }) => item.id],
+      ["models", fromSource(current.models), bundle.canonical.models, (item: { actorId: string }) => item.actorId],
+      ["possibilities", fromSource(current.possibilities), bundle.canonical.possibilities, (item: { id: string }) => item.id],
+    ] as const;
+    const currentInitialForSource = current.initialWorld?.evidence.some((reference) =>
+      reference.span.sourceId === bundle.source.id)
+      ? current.initialWorld
+      : null;
+    // A shared workspace may contain only another novel's material. In that
+    // case the active immutable bundle is the source of truth for this new
+    // branch, not a "missing" local copy that should be diagnosed as stale.
+    // Once any accepted artifact for this source is present, however, require
+    // the complete source-scoped snapshot to match so newer partial revisions
+    // cannot be silently ignored.
+    const hasMaterializedSource = groups.some(([, actual]) => actual.length > 0) || Boolean(currentInitialForSource);
+    if (!hasMaterializedSource) return null;
+    for (const [label, actual, expected, idOf] of groups) {
+      const normalize = (items: readonly unknown[]) => [...items]
+        .sort((left, right) => idOf(left as never).localeCompare(idOf(right as never)))
+        .map((item) => canonicalJson(item));
+      if (canonicalJson(normalize(actual)) !== canonicalJson(normalize(expected))) return `${label} differ`;
+    }
+    if (!currentInitialForSource || canonicalJson(currentInitialForSource) !== canonicalJson(bundle.canonical.initialWorld)) {
+      return "initial world differs";
+    }
+    return null;
   }
 
   private async materialize(bundle: PreparedNovelBundle, exact: boolean): Promise<void> {

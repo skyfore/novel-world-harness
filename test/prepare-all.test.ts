@@ -244,9 +244,10 @@ describe("prepare-all command", () => {
     });
     expect(result.stage).toBe("ready");
     await expect(proposals.store.list("pending")).resolves.toEqual([]);
-    await expect(proposals.store.list("rejected")).resolves.toEqual([
+    await expect(proposals.store.list("rejected")).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "entity-invalid" }),
-    ]);
+      expect.objectContaining({ id: "fallback-opening" }),
+    ]));
   });
 
   it("requests and accepts an initial world when source batches did not produce one", async () => {
@@ -382,7 +383,7 @@ describe("prepare-all command", () => {
 
     expect(result.stage).toBe("ready");
     await expect(new InitialWorldStore(root).get()).resolves.toMatchObject({
-      delta: { operations: [] },
+      delta: { operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
       evidence: [expect.objectContaining({ span: expect.objectContaining({ sourceId: fixture.source.id }) })],
     });
     await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toContainEqual(

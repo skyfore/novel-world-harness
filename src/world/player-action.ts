@@ -10,6 +10,7 @@ import {
   idSchema,
   knowledgeDeltaSchema,
   knowledgeStatusSchema,
+  narrativeProgressSchema,
   predicateSchema,
   stateDeltaSchema,
   stateFieldSpecSchema,
@@ -18,6 +19,8 @@ import {
   type Entity,
   type EntityId,
   type EventProposal,
+  type NarrativeProgress,
+  type ProgressChannel,
   type Predicate,
   type StoryTime,
   type StateFieldSpec,
@@ -27,6 +30,7 @@ import {
 } from "./model.js";
 import { NarrativeRenderer } from "./narrative.js";
 import type { CanonicalChoiceResolution } from "./runtime.js";
+import { committedHistory, projectActorScene } from "./scene.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -93,9 +97,10 @@ export type PlayerActionTranslationInput = Readonly<{
 export type SafePlayerIntent = "observe" | "reflect" | "wait";
 
 /**
- * Convert the UI's narrow, host-owned intents without asking a model to invent
- * state predicates. These actions can always be represented in a sparse world:
- * they record player agency while writing no unsupported world facts.
+ * Convert a narrow host-owned intent without asking a model to invent state
+ * predicates. The progress gate still decides whether the current scene can
+ * support it; for example, unpressured waiting is rejected instead of becoming
+ * an endless empty commit.
  */
 export function deterministicPlayerIntentCandidate(
   intent: SafePlayerIntent,
@@ -150,7 +155,24 @@ export type PlayerTurnResult = {
   proposal?: EventProposal;
   validation?: ValidationReport;
   eventHash?: string;
+  progressCertificate?: PlayerProgressCertificate;
 };
+
+export type PlayerProgressCertificate = {
+  channels: ProgressChannel[];
+  threadIds: string[];
+  noveltyKey: string;
+  effectiveStateOperations: number;
+  knowledgeOperations: number;
+  sceneChanged: boolean;
+};
+
+export type PlayerTurnAuthority = Readonly<{
+  intent?: "act" | SafePlayerIntent;
+  affordanceId?: string;
+  progress?: NarrativeProgress;
+  authorizedKnowledgeClaimIds?: readonly string[];
+}>;
 
 export type PlayerTurnRender = (input: Readonly<{
   branchId: string;
@@ -174,11 +196,11 @@ export async function buildActorScopedActionContext(
   utterance?: string,
   sourceId?: string,
 ): Promise<ActorScopedActionContext> {
-  const [context, view, worldState, commit] = await Promise.all([
+  const [context, view, worldState, scene] = await Promise.all([
     engine.contextForCommit(commitId),
     new KnowledgeProjector(engine).view(actorId, commitId),
     engine.projector.project(commitId),
-    engine.objects.getCommit(commitId),
+    projectActorScene(engine, actorId, commitId, sourceId),
   ]);
   const referenceable = new Set<EntityId>([actorId]);
   const present = new Set<EntityId>([actorId]);
@@ -188,15 +210,11 @@ export async function buildActorScopedActionContext(
     ? view.knowledge.filter((entry) => entry.claim?.evidence.some((reference) => reference.span.sourceId === sourceId))
     : view.knowledge;
 
-  for (const eventHash of commit.eventHashes) {
-    const event = await engine.objects.getEvent(eventHash);
-    if (event.title === "Genesis" || !event.participants.includes(actorId)) continue;
-    for (const participant of event.participants) {
-      const entity = context.entities.get(participant);
-      if (!entity || !belongsToSource(entity, sourceId)) continue;
-      present.add(participant);
-      referenceable.add(participant);
-    }
+  for (const participant of scene.presentEntityIds) {
+    const entity = context.entities.get(participant);
+    if (!entity || !belongsToSource(entity, sourceId)) continue;
+    present.add(participant);
+    referenceable.add(participant);
   }
 
   for (const [field, value] of Object.entries(view.selfState)) {
@@ -288,6 +306,7 @@ export async function buildActorScopedActionContext(
 export function validatePlayerActionScope(
   candidateInput: PlayerActionCandidate,
   actorContextInput: ActorScopedActionContext,
+  authorizedKnowledgeClaimIds: ReadonlySet<string> = new Set(),
 ): ValidationIssue[] {
   const candidate = playerActionCandidateSchema.parse(candidateInput);
   const actorContext = actorScopedActionContextSchema.parse(actorContextInput);
@@ -336,7 +355,7 @@ export function validatePlayerActionScope(
     if (operation.actorId !== actorContext.actorId) {
       issues.push(issue("PLAYER_KNOWLEDGE_ACTOR_OUT_OF_SCOPE", `Player action cannot mutate knowledge for ${operation.actorId}`, `${operationPath}.actorId`));
     }
-    if (!visibleClaims.has(operation.claimId)) {
+    if (!visibleClaims.has(operation.claimId) && !authorizedKnowledgeClaimIds.has(operation.claimId)) {
       issues.push(issue("PLAYER_KNOWLEDGE_CLAIM_OUT_OF_SCOPE", `Claim ${operation.claimId} is not in the actor view`, `${operationPath}.claimId`));
     }
     if (operation.op === "learn" && operation.sourceActorId) {
@@ -432,13 +451,7 @@ export async function validatePlayerActionSpatialScope(
     }
   }
   const actorLocation = state.values[actorId]?.["character.location"];
-  const currentCommit = await engine.objects.getCommit(commitId);
-  const present = new Set<EntityId>([actorId]);
-  for (const eventHash of currentCommit.eventHashes) {
-    const event = await engine.objects.getEvent(eventHash);
-    if (event.title === "Genesis" || !event.participants.includes(actorId)) continue;
-    for (const participant of event.participants) present.add(participant);
-  }
+  const present = new Set((await projectActorScene(engine, actorId, commitId)).presentEntityIds);
   const issues: ValidationIssue[] = [];
   for (const characterId of [...interactionCharacters].sort()) {
     const characterLocation = state.values[characterId]?.["character.location"];
@@ -513,6 +526,7 @@ export class PlayerTurnService {
     private readonly translator: PlayerActionTranslator,
     render?: PlayerTurnRender,
     private readonly resolveCanon?: PlayerCanonResolver,
+    private readonly beforeCommit?: () => void,
   ) {
     if (render) this.render = render;
     else {
@@ -522,12 +536,13 @@ export class PlayerTurnService {
     }
   }
 
-  async turn(inputValue: PlayerTurnInput): Promise<PlayerTurnResult> {
+  async turn(inputValue: PlayerTurnInput, authority: PlayerTurnAuthority = {}): Promise<PlayerTurnResult> {
     const input = playerTurnInputSchema.parse(inputValue);
     const previousHead = await this.engine.branches.readHead(input.branchId);
-    const [contextBefore, storyTime] = await Promise.all([
+    const [contextBefore, storyTime, worldContext] = await Promise.all([
       buildActorScopedActionContext(this.engine, input.actorId, previousHead, input.utterance, input.sourceId),
       latestCommittedStoryTime(this.engine, previousHead),
+      this.engine.contextForCommit(previousHead),
     ]);
     let translated: unknown;
     try {
@@ -555,7 +570,9 @@ export class PlayerTurnService {
         )),
       );
     }
-    const candidate = parsedCandidate.data;
+    const normalization = normalizePlayerCandidate(parsedCandidate.data, contextBefore, worldContext.entities, input.utterance);
+    const candidate = normalization.candidate;
+    const authorizedKnowledgeClaimIds = new Set(authority.authorizedKnowledgeClaimIds ?? []);
     let action = playerActionToKnowledgeAwareAction({
       branchId: input.branchId,
       actorId: input.actorId,
@@ -564,7 +581,7 @@ export class PlayerTurnService {
       candidate,
       ...(storyTime ? { proposedTime: storyTime } : {}),
     });
-    const scopeIssues = validatePlayerActionScope(candidate, contextBefore);
+    const scopeIssues = validatePlayerActionScope(candidate, contextBefore, authorizedKnowledgeClaimIds);
     if (scopeIssues.length) {
       return this.rejected(input, previousHead, contextBefore, "scope", scopeIssues, candidate, action.proposal);
     }
@@ -576,14 +593,19 @@ export class PlayerTurnService {
     if (spatialIssues.length) {
       return this.rejected(input, previousHead, contextBefore, "scope", spatialIssues, candidate, action.proposal);
     }
+    let resolution: CanonicalChoiceResolution = { supersedesCanonicalEventIds: [] };
     if (this.resolveCanon) {
-      const resolution = await this.resolveCanon(action.proposal);
+      resolution = await this.resolveCanon(action.proposal);
       const supersedesCanonicalEventIds = [...new Set(resolution.supersedesCanonicalEventIds)].sort();
-      if (supersedesCanonicalEventIds.length || resolution.realizedPossibilityId) {
+      if (supersedesCanonicalEventIds.length || resolution.realizedPossibilityId || resolution.causalParentEventIds?.length) {
         action = {
           ...action,
           proposal: eventProposalSchema.parse({
             ...action.proposal,
+            causalParents: [...new Set([
+              ...action.proposal.causalParents,
+              ...(resolution.causalParentEventIds ?? []),
+            ])],
             ...(supersedesCanonicalEventIds.length ? { supersedesCanonicalEventIds } : {}),
             ...(resolution.realizedPossibilityId ? { possibilityId: resolution.realizedPossibilityId } : {}),
           }),
@@ -591,6 +613,23 @@ export class PlayerTurnService {
       }
     }
 
+    let progress: { value: NarrativeProgress; certificate: PlayerProgressCertificate };
+    try {
+      progress = await derivePlayerProgress(this.engine, input, candidate, contextBefore, resolution, authority, normalization.generalizedDestinationLabel);
+    } catch (error) {
+      return this.rejected(input, previousHead, contextBefore, "scope", [
+        issue(
+          error instanceof PlayerProgressError ? error.code : "INVALID_PLAYER_PROGRESS_AUTHORITY",
+          error instanceof Error ? error.message : String(error),
+        ),
+      ], candidate, action.proposal);
+    }
+    action = {
+      ...action,
+      proposal: eventProposalSchema.parse({ ...action.proposal, progress: progress.value }),
+    };
+
+    this.beforeCommit?.();
     const committed = await commitKnowledgeAwareAction(this.engine, action);
     if (!committed.gate.accepted) {
       return this.rejected(
@@ -640,13 +679,14 @@ export class PlayerTurnService {
       actorId: input.actorId,
       previousHead,
       newHead,
-      issues: committed.result.report.warnings,
+      issues: [...normalization.warnings, ...committed.result.report.warnings],
       contextBefore,
       contextAfter,
       renderedText,
       candidate,
       proposal: action.proposal,
       validation: committed.result.report,
+      progressCertificate: progress.certificate,
       ...(committed.result.eventHash ? { eventHash: committed.result.eventHash } : {}),
     };
   }
@@ -696,6 +736,288 @@ export class PlayerTurnService {
     if (after !== before) throw new Error("Player turn renderer mutated branch truth");
     return rendered;
   }
+}
+
+class PlayerProgressError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = "PlayerProgressError";
+  }
+}
+
+function normalizePlayerCandidate(
+  candidateInput: PlayerActionCandidate,
+  context: ActorScopedActionContext,
+  worldEntities: ReadonlyMap<string, Entity>,
+  utterance: string,
+): {
+  candidate: PlayerActionCandidate;
+  warnings: ValidationIssue[];
+  generalizedDestinationLabel?: string;
+} {
+  const candidate = structuredClone(playerActionCandidateSchema.parse(candidateInput));
+  const referenceable = new Set(context.referenceableEntities.map((entity) => entity.id));
+  const unknownDestinations = new Set<string>();
+  for (const operation of candidate.proposedDelta.operations) {
+    if (
+      operation.op === "set"
+      && operation.entityId === context.actorId
+      && operation.field === "character.location"
+      && typeof operation.value === "string"
+      && !referenceable.has(operation.value)
+      && !worldEntities.has(operation.value)
+    ) unknownDestinations.add(operation.value);
+  }
+  if (!unknownDestinations.size || !MOVEMENT_PATTERN.test(utterance)) return { candidate, warnings: [] };
+
+  candidate.proposedDelta.operations = candidate.proposedDelta.operations.filter((operation) => !(
+    operation.op === "set"
+    && operation.entityId === context.actorId
+    && operation.field === "character.location"
+    && typeof operation.value === "string"
+    && unknownDestinations.has(operation.value)
+  ));
+  candidate.participants = candidate.participants.filter((participantId) => !unknownDestinations.has(participantId));
+  const generalizedDestinationLabel = extractMovementLabel(utterance) ?? "一个尚未命名的邻近场景";
+  return {
+    candidate: playerActionCandidateSchema.parse(candidate),
+    warnings: [issue(
+      "PLAYER_DESTINATION_GENERALIZED",
+      `The requested destination was not a stable canonical entity; it will be committed as the open scene '${generalizedDestinationLabel}' instead of being rejected or invented as canon.`,
+      "proposedDelta.operations",
+    )],
+    generalizedDestinationLabel,
+  };
+}
+
+async function derivePlayerProgress(
+  engine: WorldEngine,
+  input: PlayerTurnInput,
+  candidate: PlayerActionCandidate,
+  context: ActorScopedActionContext,
+  resolution: CanonicalChoiceResolution,
+  authority: PlayerTurnAuthority,
+  generalizedDestinationLabel?: string,
+): Promise<{ value: NarrativeProgress; certificate: PlayerProgressCertificate }> {
+  const [state, scene, worldContext, history] = await Promise.all([
+    engine.projector.project(context.atCommit),
+    projectActorScene(engine, input.actorId, context.atCommit, input.sourceId),
+    engine.contextForCommit(context.atCommit),
+    committedHistory(engine, context.atCommit),
+  ]);
+  const effectiveOperations = candidate.proposedDelta.operations.filter((operation) => stateOperationChangesState(operation, state));
+  const knowledgeOperations = candidate.proposedKnowledge?.operations.length ?? 0;
+  const intent = authority.intent ?? inferPlayerIntent(input.utterance);
+  let progress: NarrativeProgress;
+
+  if (authority.progress) {
+    const parsed = narrativeProgressSchema.parse(structuredClone(authority.progress));
+    const channels = new Set(parsed.channels);
+    if (effectiveOperations.length) channels.add("state");
+    if (knowledgeOperations) channels.add("knowledge");
+    const threadIds = [...new Set([...parsed.threadIds, ...(resolution.threadIds ?? [])])];
+    if (threadIds.length) channels.add("thread");
+    progress = narrativeProgressSchema.parse({
+      ...parsed,
+      channels: [...channels],
+      threadIds,
+    });
+  } else {
+    const channels = new Set<ProgressChannel>();
+    if (effectiveOperations.length) channels.add("state");
+    if (knowledgeOperations) channels.add("knowledge");
+    if (effectiveOperations.some(isResourceOperation)) channels.add("resource");
+    if (effectiveOperations.some(isRelationshipOperation)) channels.add("relationship");
+
+    const characterParticipants = candidate.participants.filter((participantId) =>
+      participantId !== input.actorId
+      && worldContext.entities.get(participantId)?.kind === "character"
+      && scene.presentEntityIds.includes(participantId));
+    const threadIds = [...new Set(resolution.threadIds ?? [])];
+    if (!threadIds.length) {
+      const latest = scene.recentEvents.at(-1);
+      threadIds.push(...(latest?.progress?.threadIds.length
+        ? latest.progress.threadIds
+        : [`emergent-${contentHash({ actorId: input.actorId, scene: scene.key }).slice(0, 24)}`]));
+    }
+
+    const knownMovement = candidate.proposedDelta.operations.find((operation) =>
+      operation.op === "set"
+      && operation.entityId === input.actorId
+      && operation.field === "character.location"
+      && typeof operation.value === "string");
+    const movement = Boolean(generalizedDestinationLabel || knownMovement || MOVEMENT_PATTERN.test(input.utterance));
+    let sceneTransition: NarrativeProgress["scene"];
+    if (movement) {
+      channels.add("scene");
+      channels.add("consequence");
+      const destinationEntityId = knownMovement?.op === "set" && typeof knownMovement.value === "string"
+        ? knownMovement.value
+        : undefined;
+      const label = generalizedDestinationLabel
+        ?? (destinationEntityId ? worldContext.entities.get(destinationEntityId)?.canonicalName : undefined)
+        ?? extractMovementLabel(input.utterance)
+        ?? "当前场景之外的邻近区域";
+      sceneTransition = {
+        kind: destinationEntityId ? "arrive" : LEAVING_PATTERN.test(input.utterance) ? "depart" : "explore",
+        label,
+        ...(destinationEntityId ? { destinationEntityId } : {}),
+        beat: scene.beat + 1,
+      };
+    }
+
+    if (intent === "observe" && knowledgeOperations === 0 && !sceneTransition) {
+      channels.add("scene");
+      sceneTransition = {
+        kind: "stay",
+        ...(scene.label ? { label: scene.label } : {}),
+        beat: scene.beat + 1,
+      };
+    }
+    if (intent === "reflect") channels.add("plan");
+    if (intent === "wait") {
+      const groundedPressure = Boolean(
+        resolution.threadIds?.length
+        || scene.presentEntityIds.some((entityId) => entityId !== input.actorId && worldContext.entities.get(entityId)?.kind === "character")
+        || scene.recentEvents.at(-1)?.progress?.channels.some((channel) => channel === "time-pressure" || channel === "consequence"),
+      );
+      if (!groundedPressure) {
+        throw new PlayerProgressError(
+          "PLAYER_WAIT_WITHOUT_PRESSURE",
+          "Waiting can advance a turn only when a committed local character, consequence, or active canonical thread can respond.",
+        );
+      }
+      channels.add("time-pressure");
+      channels.add("consequence");
+    }
+    if (intent === "act" && characterParticipants.length) {
+      channels.add("relationship");
+      channels.add("consequence");
+    }
+    if (intent === "act" && ACTION_CONSEQUENCE_PATTERN.test(input.utterance)) channels.add("consequence");
+    if (intent !== "observe" && (channels.size > 0 || threadIds.length)) channels.add("thread");
+
+    if (!channels.size || (channels.size === 1 && channels.has("thread"))) {
+      throw new PlayerProgressError(
+        "PLAYER_ACTION_NO_PROGRESS",
+        "The interpreted action would not change state, knowledge, scene, relationship, plan, pressure, or a grounded narrative consequence.",
+      );
+    }
+    const noveltyKey = semanticNoveltyKey({
+      intent,
+      utterance: input.utterance,
+      participantIds: characterParticipants,
+      operationKeys: effectiveOperations.map(operationKey),
+      knowledgeClaimIds: candidate.proposedKnowledge?.operations.map((operation) => operation.claimId) ?? [],
+      threadIds,
+      sceneKey: scene.key,
+      movementLabel: sceneTransition?.label,
+    });
+    progress = narrativeProgressSchema.parse({
+      version: 1,
+      channels: [...channels],
+      threadIds,
+      noveltyKey,
+      ...(sceneTransition ? { scene: sceneTransition } : {}),
+    });
+  }
+
+  const repeated = history.some((entry) => entry.event.progress?.noveltyKey === progress.noveltyKey);
+  if (repeated && effectiveOperations.length === 0 && knowledgeOperations === 0) {
+    throw new PlayerProgressError(
+      "PLAYER_ACTION_REPEATS_NO_PROGRESS",
+      "This action repeats the same unresolved beat without a new state, knowledge, scene, relationship, plan, pressure, or consequence. Choose a different affordance or make the intended change more concrete.",
+    );
+  }
+  const certificate: PlayerProgressCertificate = {
+    channels: [...progress.channels],
+    threadIds: [...progress.threadIds],
+    noveltyKey: progress.noveltyKey,
+    effectiveStateOperations: effectiveOperations.length,
+    knowledgeOperations,
+    sceneChanged: Boolean(progress.scene),
+  };
+  return { value: progress, certificate };
+}
+
+const MOVEMENT_PATTERN = /(?:离开|出门|出去|走走|走去|走向|前往|去往|径直走|赶往|进入|来到|到达|闲逛|漫步|move|walk|leave|go\s+to|head\s+to|enter)/iu;
+const LEAVING_PATTERN = /(?:离开|出门|出去|摔门|leave|walk\s+out|go\s+out)/iu;
+const ACTION_CONSEQUENCE_PATTERN = /(?:说|问|答|道歉|拒绝|答应|拿|放|给|推|拉|开|关|坐|站|找|查|做|帮|阻止|攻击|敲|喊|追|躲|买|卖|ask|tell|say|apolog|refuse|accept|take|give|open|close|sit|stand|find|help|stop|attack|knock|call|buy|sell)/iu;
+
+function inferPlayerIntent(utterance: string): "act" | SafePlayerIntent {
+  const normalized = utterance.normalize("NFKC").trim();
+  if (/^(?:我)?(?:先|仔细|悄悄|认真|再)?(?:观察|查看|环顾|打量|倾听|看看)|^(?:i\s+)?(?:look|observe|listen)\b/iu.test(normalized)) return "observe";
+  if (/^(?:我)?(?:先|认真|重新|再)?(?:思考|回想|整理思绪|反省|梳理)|^(?:i\s+)?(?:reflect|think|remember)\b/iu.test(normalized)) return "reflect";
+  if (/^(?:我)?(?:先|暂时|什么也不做地)?(?:在[^，。！？,.!?]{1,24})?(?:等待|等一会|静候|按兵不动)|^(?:i\s+)?(?:wait|pause)\b/iu.test(normalized)) return "wait";
+  return "act";
+}
+
+function extractMovementLabel(utterance: string): string | undefined {
+  const normalized = utterance.normalize("NFKC").trim();
+  const chinese = normalized.match(/(?:前往|去往|走向|赶往|进入|来到|到达|去|到)([^，。！？,.!?]{1,32})/u)?.[1]
+    ?? normalized.match(/(街上|路上|城里|城外|村里|村外|附近|茶馆|酒楼|客栈|市场|河边|院外)/u)?.[1];
+  const english = normalized.match(/(?:go|head|walk|move)\s+(?:to|toward|into)\s+([^,.!?]{1,40})/iu)?.[1];
+  const label = (chinese ?? english)?.trim().replace(/(?:走走|看看|去看看|并.*)$/u, "").trim();
+  return label ? label.slice(0, 80) : undefined;
+}
+
+function stateOperationChangesState(
+  operation: PlayerActionCandidate["proposedDelta"]["operations"][number],
+  state: Awaited<ReturnType<WorldEngine["projector"]["project"]>>,
+): boolean {
+  if (operation.op === "activate-rule") return !state.activeRuleIds.includes(operation.ruleId);
+  if (operation.op === "deactivate-rule") return state.activeRuleIds.includes(operation.ruleId);
+  const current = state.values[operation.entityId]?.[operation.field];
+  if (operation.op === "set") return JSON.stringify(current) !== JSON.stringify(operation.value);
+  if (operation.op === "unset") return current !== undefined;
+  if (operation.op === "add-member") return !Array.isArray(current) || !current.includes(operation.member);
+  return Array.isArray(current) && current.includes(operation.member);
+}
+
+function isResourceOperation(operation: PlayerActionCandidate["proposedDelta"]["operations"][number]): boolean {
+  return "field" in operation && (operation.field.startsWith("artifact.") || operation.field === "character.inventory");
+}
+
+function isRelationshipOperation(operation: PlayerActionCandidate["proposedDelta"]["operations"][number]): boolean {
+  return "field" in operation && (operation.field === "character.relationships" || operation.field === "character.obligations");
+}
+
+function operationKey(operation: PlayerActionCandidate["proposedDelta"]["operations"][number]): string {
+  if (operation.op === "activate-rule" || operation.op === "deactivate-rule") return `rule:${operation.ruleId}`;
+  return `${operation.entityId}:${operation.field}:${operation.op}`;
+}
+
+function semanticNoveltyKey(input: {
+  intent: "act" | SafePlayerIntent;
+  utterance: string;
+  participantIds: string[];
+  operationKeys: string[];
+  knowledgeClaimIds: string[];
+  threadIds: string[];
+  sceneKey: string;
+  movementLabel?: string;
+}): string {
+  const semanticUtterance = input.utterance.normalize("NFKC").toLocaleLowerCase()
+    .replace(/[\s，。！？、,.!?;；:："'“”‘’]/g, "")
+    .slice(0, 160);
+  const category = input.movementLabel
+    ? `move:${input.movementLabel.normalize("NFKC").toLocaleLowerCase()}`
+    : input.intent === "wait"
+      ? "wait"
+      : input.intent === "reflect"
+        ? "plan"
+        : input.intent === "observe"
+          ? `observe:${input.knowledgeClaimIds.sort().join("+")}`
+          : semanticUtterance;
+  return `player:${contentHash({
+    intent: input.intent,
+    category,
+    participants: [...input.participantIds].sort(),
+    operations: [...input.operationKeys].sort(),
+    claims: [...input.knowledgeClaimIds].sort(),
+    threads: [...input.threadIds].sort(),
+    scene: input.sceneKey,
+  }).slice(0, 32)}`;
 }
 
 function validatePredicateScope(

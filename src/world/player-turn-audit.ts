@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
-import type { PlayerActionCandidate, PlayerTurnStage } from "./player-action.js";
+import type { PlayerActionCandidate, PlayerProgressCertificate, PlayerTurnStage } from "./player-action.js";
 import type { EventProposal, ValidationIssue, ValidationReport } from "./model.js";
 
 export type PlayerTurnOrigin = "freeform" | "scene-choice" | "host-safe-choice" | "cli";
@@ -18,6 +18,7 @@ export type PlayerTurnAudit = {
   utterance: string;
   origin: PlayerTurnOrigin;
   intent?: "act" | "observe" | "reflect" | "wait";
+  affordanceId?: string;
   previousHead: string;
   finalHead: string;
   stage: PlayerTurnStage;
@@ -27,6 +28,8 @@ export type PlayerTurnAudit = {
   proposal?: EventProposal;
   validation?: ValidationReport;
   eventHash?: string;
+  progressCertificate?: PlayerProgressCertificate;
+  reactionEvents: Array<{ eventHash: string; title: string; actorId: string }>;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
   backgroundError?: string;
 };

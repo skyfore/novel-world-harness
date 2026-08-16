@@ -109,6 +109,115 @@ describe("CompilerCommitService", () => {
     await expect(commits.proposals.read("pending", "bad-event", (await import("../src/world/model.js")).canonicalEventSchema)).resolves.toMatchObject({ id: "bad-event" });
   });
 
+  it("rejects an empty opening snapshot that cannot produce a playable character", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "opening-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "opening-cao")).accepted).toBe(true);
+    await proposals.submit("initial-world", {
+      proposalId: "empty-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("initial-world", "empty-opening");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "UNPLAYABLE_INITIAL_WORLD" }));
+  });
+
+  it("validates goal phase anchors, targets, and every action pattern at the commit boundary", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "goal-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "goal-cao")).accepted).toBe(true);
+    await proposals.submit("character-goal", {
+      proposalId: "bad-goal",
+      payload: {
+        id: "reach-missing-gate",
+        actorId: "cao-cao",
+        description: "Reach a later gate",
+        priority: 0.8,
+        requiresKnowledge: [],
+        targetIds: ["missing-gate"],
+        activation: {
+          preconditions: [],
+          afterCanonicalEventIds: ["missing-event"],
+        },
+        actionPatterns: [{
+          title: "Address a missing person",
+          participants: ["missing-person"],
+          preconditions: [],
+          proposedDelta: { version: 1, operations: [] },
+        }],
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("character-goal", "bad-goal");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "UNKNOWN_GOAL_TARGET" }),
+      expect.objectContaining({ code: "UNKNOWN_GOAL_EVENT" }),
+      expect.objectContaining({ code: "UNKNOWN_GOAL_PARTICIPANT" }),
+    ]));
+  });
+
+  it("rejects a canonical child whose story time precedes its causal parent", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "time-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "time-cao")).accepted).toBe(true);
+    await proposals.submit("canonical-event", {
+      proposalId: "future-parent",
+      payload: {
+        id: "future-parent-event",
+        title: "Later parent",
+        participants: ["cao-cao"],
+        storyTime: { kind: "exact", value: "2050", precision: "year" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("canonical-event", "future-parent")).accepted).toBe(true);
+    await proposals.submit("canonical-event", {
+      proposalId: "past-child",
+      payload: {
+        id: "past-child-event",
+        title: "Earlier child",
+        participants: ["cao-cao"],
+        storyTime: { kind: "exact", value: "1950", precision: "year" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: ["future-parent-event"],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("canonical-event", "past-child");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "TEMPORAL_CAUSAL_REGRESSION" }));
+  });
+
   it("keeps an event with an unknown observed-knowledge claim pending", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {

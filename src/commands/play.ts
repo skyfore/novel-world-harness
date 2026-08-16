@@ -45,6 +45,7 @@ export async function playCommand(options: PlayCommandOptions): Promise<void> {
     model,
     continueSession,
     saveSession,
+    trackLastOpenedSession: !printMode,
     ...(options.activeWorldScene !== undefined ? { activeWorldScene: options.activeWorldScene } : {}),
     ...(printMode ? { onRetry(event) {
       stderr.write(`\n${formatRetryNotice(event)}\n`);

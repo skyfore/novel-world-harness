@@ -73,6 +73,7 @@ import { playerSceneChoicesSchema, type PlayerSceneChoice } from "./player-scene
 import { formatElapsed } from "../util/elapsed-status.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/removal.js";
 import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
+import { createNwhModelLoadingIndicator, type NwhModelLoadingIndicator } from "./nwh-model-loading.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -87,6 +88,7 @@ export type NwhExtensionOptions = {
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
   preparedCacheRoot?: string;
   activeWorldScene?: PlaySceneRequest;
+  restoreSavedWorldOnStartup?: boolean;
   playerOpeningNarrator?: PlayerOpeningNarrator;
   runReparse?: typeof reparseCommand;
 };
@@ -318,6 +320,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let activePlayerChoicePrompt: symbol | undefined;
     let stopTerminalInput: (() => void) | undefined;
     let startupRestorePromise: Promise<void> | undefined;
+    let modelLoadingIndicator: NwhModelLoadingIndicator | undefined;
     let shuttingDown = false;
     let activeTask: NwhTask | undefined;
     const taskHistory: NwhTask[] = [];
@@ -1223,6 +1226,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     pi.on("session_shutdown", async () => {
       shuttingDown = true;
+      modelLoadingIndicator?.stop();
+      modelLoadingIndicator = undefined;
       stopTerminalInput?.();
       stopTerminalInput = undefined;
       prepareAllHostActivity?.close();
@@ -1382,6 +1387,29 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       return { messages };
     });
 
+    pi.on("agent_start", (_event, ctx) => {
+      if (ctx.mode !== "tui") return;
+      modelLoadingIndicator?.stop();
+      modelLoadingIndicator = createNwhModelLoadingIndicator(ctx.ui);
+    });
+
+    pi.on("message_update", (event) => {
+      if (event.message.role !== "assistant") return;
+      if (event.assistantMessageEvent.type === "thinking_delta") {
+        modelLoadingIndicator?.setPhase("thinking");
+      } else if (event.assistantMessageEvent.type === "text_delta") {
+        modelLoadingIndicator?.setPhase("streaming");
+      }
+    });
+
+    pi.on("tool_execution_start", (event) => {
+      modelLoadingIndicator?.setPhase("tool", event.toolName);
+    });
+
+    pi.on("tool_execution_end", () => {
+      modelLoadingIndicator?.setPhase("waiting");
+    });
+
     pi.on("agent_end", (event) => {
       if (!pendingTurn && !prepareAllState?.initialWorldRequestRunning) return;
       // agent_end is per low-level run. Keep every run until agent_settled so
@@ -1391,6 +1419,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     });
 
     pi.on("agent_settled", async (_event, ctx) => {
+      modelLoadingIndicator?.stop();
+      modelLoadingIndicator = undefined;
       compilerCircuitBroken = false;
       const completedTurn = pendingTurn;
       const openingRequest = !completedTurn && prepareAllState?.initialWorldRequestRunning;
@@ -1451,7 +1481,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (prepareAllState) await advancePrepareAll(ctx);
     });
 
-    pi.on("session_start", (_event, ctx) => {
+    pi.on("session_start", (event, ctx) => {
       if (ctx.mode !== "tui") return;
       const modeLabel = mode === "compiler" ? "compiler proposals" : "read-only assistant";
       const terminalTitle = `NWH — ${path.basename(workspace.root)}`;
@@ -1481,6 +1511,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const playerConversation = hasPlayerConversation(transcriptEntries);
       ctx.ui.setHeader((tui, theme) => createNwhWelcomeHeader(tui, theme, { mode, freshConversation }));
       if (mode === "assistant") {
+        const restoreSavedWorld = event.reason !== "new"
+          && (event.reason !== "startup" || options.restoreSavedWorldOnStartup !== false);
+        if (!restoreSavedWorld) {
+          ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · ready · no world selected · /novels or /play"));
+          return;
+        }
         const restore = async () => {
           if (shuttingDown) return;
           const activity = beginHostActivity(ctx, "startup", "Restoring the previous novel world");
@@ -2379,7 +2415,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (!guardForegroundIdle(ctx, "clear the conversation")) return;
         await ctx.newSession({
           withSession: async (replacementCtx) => {
-            replacementCtx.ui.notify("Conversation history cleared.", "info");
+            replacementCtx.ui.notify(
+              "Conversation history cleared. No novel world is active in this conversation; use /novels or /play to choose one.",
+              "info",
+            );
           },
         });
       },

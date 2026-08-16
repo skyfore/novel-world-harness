@@ -27,6 +27,7 @@ import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { createNwhExtension, type NwhInteractionMode } from "./nwh-extension.js";
 import type { PlaySceneRequest } from "../world/play-opening.js";
 import { nwhRuntimeDir, workspaceSessionDir } from "./runtime-paths.js";
+import { findMostRecentlyActiveSession, readLastOpenedSession, writeLastOpenedSession } from "./last-opened-session.js";
 
 export { expandFileMentions } from "./file-mentions.js";
 
@@ -51,6 +52,7 @@ export type PiAgentSessionOptions = {
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
   interactionMode?: NwhInteractionMode;
   activeWorldScene?: PlaySceneRequest;
+  trackLastOpenedSession?: boolean;
   runtimeDir?: string;
   piAgentDir?: string;
 };
@@ -69,6 +71,38 @@ export function resolveNwhTuiMode(requested: TuiMode | undefined, configured: Tu
 
 export function resolveNwhFullscreenExitOutput(configured: FullscreenExitOutput | undefined): FullscreenExitOutput {
   return configured ?? "resume-hint";
+}
+
+export function resolveSavedWorldStartupRestore(
+  continueSession: boolean,
+  activeWorldScene: PlaySceneRequest | undefined,
+): boolean {
+  return continueSession || activeWorldScene !== undefined;
+}
+
+async function continueWorkspaceSession(
+  workspaceRoot: string,
+  sessionsDir: string,
+  lastOpenedSession: string | undefined,
+  runtimeDir: string,
+): Promise<SessionManager> {
+  if (lastOpenedSession) {
+    try {
+      const selected = SessionManager.open(lastOpenedSession, sessionsDir);
+      if (path.resolve(selected.getCwd()) === path.resolve(workspaceRoot)) return selected;
+    } catch {
+      // A stale or damaged pointer must not prevent normal recent-session recovery.
+    }
+  }
+  const logicallyRecent = await findMostRecentlyActiveSession(workspaceRoot, runtimeDir);
+  if (logicallyRecent) {
+    try {
+      return SessionManager.open(logicallyRecent, sessionsDir);
+    } catch {
+      // Fall through to Pi's filesystem-based compatibility behavior.
+    }
+  }
+  return SessionManager.continueRecent(workspaceRoot, sessionsDir);
 }
 
 class NwhInteractiveMode extends InteractiveMode {
@@ -375,12 +409,20 @@ export class PiAgentSession {
   private async initialize(continueSession: boolean): Promise<void> {
     const agentDir = path.resolve(this.options.piAgentDir ?? getAgentDir());
     const sessionsDir = workspaceSessionDir(this.options.workspace.root, this.stateDir);
+    const lastOpenedSession = continueSession && this.options.trackLastOpenedSession
+      ? await readLastOpenedSession(this.options.workspace.root, this.stateDir)
+      : undefined;
     const sessionManager = this.saveSession
-      ? continueSession ? SessionManager.continueRecent(this.options.workspace.root, sessionsDir) : SessionManager.create(this.options.workspace.root, sessionsDir)
+      ? continueSession
+        ? await continueWorkspaceSession(this.options.workspace.root, sessionsDir, lastOpenedSession, this.stateDir)
+        : SessionManager.create(this.options.workspace.root, sessionsDir)
       : SessionManager.inMemory(this.options.workspace.root);
     let initialRuntime = true;
     const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager: nextSessionManager, sessionStartEvent }) => {
-      const activeWorldScene = initialRuntime ? this.options.activeWorldScene : undefined;
+      const isInitialRuntime = initialRuntime;
+      const activeWorldScene = isInitialRuntime ? this.options.activeWorldScene : undefined;
+      const restoreSavedWorldOnStartup = !isInitialRuntime
+        || resolveSavedWorldStartupRestore(continueSession, activeWorldScene);
       initialRuntime = false;
       if (path.resolve(cwd) !== this.options.workspace.root) {
         throw new Error(`NWH cannot switch this session to another workspace (${cwd}). Start a new process with --root instead.`);
@@ -428,6 +470,7 @@ export class PiAgentSession {
               ...(activeWorldScene !== undefined
                 ? { activeWorldScene }
                 : {}),
+              restoreSavedWorldOnStartup,
               ...(this.options.profile ? { profile: this.options.profile } : {}),
               onSessionShutdown: () => flushSettings(settingsManager),
               ...(this.options.resetCompilerProposalTools
@@ -452,6 +495,9 @@ export class PiAgentSession {
             ...(this.options.additionalTools ?? []),
           ],
         });
+      if (this.options.trackLastOpenedSession && created.session.sessionFile) {
+        await writeLastOpenedSession(this.options.workspace.root, this.stateDir, created.session.sessionFile);
+      }
       return {
         ...created,
         services,

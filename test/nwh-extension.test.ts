@@ -74,6 +74,7 @@ async function fixture(
   runReparse?: NwhExtensionOptions["runReparse"],
   playerOpeningNarrator?: NwhExtensionOptions["playerOpeningNarrator"],
   activeWorldScene?: NwhExtensionOptions["activeWorldScene"],
+  restoreSavedWorldOnStartup?: NwhExtensionOptions["restoreSavedWorldOnStartup"],
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-tui-extension-"));
   temporaryDirectories.push(root);
@@ -136,6 +137,7 @@ async function fixture(
         ? `脚下的路已经把你带离原处，新的位置与刚才的决定一起成为无法抹去的事实。${frame.actor.name}能感到行动留下的余波，却没有谁替你安排下一步。眼前的世界正从这个结果继续展开，你可以观察抵达之处，也可以立即应对最迫近的变化。`
         : `方才的余波还停在感官里，你重新看清自己所处的这一刻。${frame.actor.name}所知道的事情没有凭空增减，世界也没有趁你离开时替你作出选择。你可以先确认周围的变化，回想刚刚发生的事，或者直接采取此刻最重要的行动——接下来由你决定。`),
     ...(activeWorldScene !== undefined ? { activeWorldScene } : {}),
+    ...(restoreSavedWorldOnStartup !== undefined ? { restoreSavedWorldOnStartup } : {}),
     ...(runReparse ? { runReparse } : {}),
     preparedCacheRoot: path.join(root, "prepared-cache"),
   })(pi);
@@ -235,7 +237,37 @@ describe("NWH TUI extension", () => {
 
     expect(actions.cleared).toBe(true);
     expect(previousNotifications).toEqual([]);
-    expect(replacementNotifications).toEqual(["Conversation history cleared."]);
+    expect(replacementNotifications).toEqual([
+      "Conversation history cleared. No novel world is active in this conversation; use /novels or /play to choose one.",
+    ]);
+  });
+
+  it("shows animated model progress above the editor until the agent settles", async () => {
+    const { events } = await fixture();
+    const widgets: Array<{ key: string; content: string[] | undefined; placement?: string }> = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        setWidget: (key: string, content: string[] | undefined, options?: { placement?: string }) => {
+          widgets.push({ key, content, placement: options?.placement });
+        },
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("agent_start")?.({ type: "agent_start" }, ctx);
+    expect(widgets.at(-1)).toMatchObject({ key: "nwh-model-loading", placement: "aboveEditor" });
+    expect(widgets.at(-1)?.content?.[0]).toContain("模型正在思考");
+
+    await events.get("message_update")?.({
+      type: "message_update",
+      message: fauxAssistantMessage([fauxText("正在回答")]),
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "正在回答" },
+    }, ctx);
+    expect(widgets.at(-1)?.content?.[0]).toContain("模型正在输出");
+
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+    expect(widgets.at(-1)).toEqual({ key: "nwh-model-loading", content: undefined, placement: "aboveEditor" });
   });
 
   it("parses CLI-compatible /reparse flags", () => {
@@ -913,6 +945,101 @@ describe("NWH TUI extension", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(sentMessages).toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: finalNarration, display: true }));
+  });
+
+  it("keeps a user-created new session detached from the saved world", async () => {
+    let narratorCalls = 0;
+    const { events, root, sentMessages, getSessionName } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        narratorCalls += 1;
+        return "这段文字不应生成。";
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
+    const statuses: Array<string | undefined> = [];
+    const ctx = {
+      mode: "tui",
+      sessionManager: { getEntries: () => [] },
+      ui: {
+        notify: () => undefined,
+        setTitle: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: (_key: string, content: string | undefined) => { statuses.push(content); },
+        setHeader: () => undefined,
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("session_start")?.({
+      type: "session_start",
+      reason: "new",
+      previousSessionFile: "/tmp/previous.jsonl",
+    }, ctx);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(narratorCalls).toBe(0);
+    expect(sentMessages).toEqual([]);
+    expect(getSessionName()).toBeUndefined();
+    expect(statuses).toContain("NWH · ready · no world selected · /novels or /play");
+    await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ branchId: "main", actorId: "hero" });
+  });
+
+  it("can start an explicitly blank CLI transcript without attaching the saved world", async () => {
+    let narratorCalls = 0;
+    const { events, root, sentMessages, getSessionName } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        narratorCalls += 1;
+        return "这段文字不应生成。";
+      },
+      undefined,
+      false,
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
+    const ctx = {
+      mode: "tui",
+      sessionManager: { getEntries: () => [] },
+      ui: {
+        notify: () => undefined,
+        setTitle: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: () => undefined,
+        setHeader: () => undefined,
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("session_start")?.({ type: "session_start", reason: "startup" }, ctx);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(narratorCalls).toBe(0);
+    expect(sentMessages).toEqual([]);
+    expect(getSessionName()).toBeUndefined();
   });
 
   it("does not generate another scene when a restored transcript already contains player custom messages", async () => {

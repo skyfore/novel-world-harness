@@ -79,8 +79,8 @@ function copyLines(options: NwhWelcomeOptions): string[] {
     "NWH  Novel World Harness",
     subtitle,
     "1  Sign in with /login, then choose with /model",
-    "2  /novels, /instances and /characters show what is ready",
-    "3  /play or /continue enters a world; paste a novel path to compile",
+    "2  No world is active; /novels and /instances show what is ready",
+    "3  /play chooses a world; paste a novel path to compile",
   ];
 }
 

@@ -252,7 +252,7 @@ export async function prepareAllCommand(
     });
     if (decision === "pause") return pausePreparation(inspection, report);
     report(`Creating playable branch ${branchId}.`);
-    await dependencies.createBranch(root, branchId, undefined, sourceId);
+    await dependencies.createBranch(root, branchId, undefined, sourceId, options.cacheRoot);
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
 

@@ -185,6 +185,8 @@ export const branchSchema = z.object({
   id: idSchema,
   name: z.string().min(1),
   sourceId: idSchema.optional(),
+  preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  createdAt: z.string().datetime({ offset: true }).optional(),
   parentBranchId: idSchema.optional(),
   forkCommitId: idSchema.optional(),
   headCommitId: idSchema,

@@ -80,7 +80,10 @@ nwh novels
 nwh instances
 nwh characters
 nwh resume main --character 曹操
-pnpm dev --continue
+nwh continue huozhe.txt
+nwh switch huozhe.txt
+nwh create huozhe.txt
+pnpm dev --new-session
 pnpm dev --root ./my-novel
 pnpm dev --tui-mode fullscreen
 ```
@@ -121,7 +124,7 @@ missing opening state, and create a playable branch. Its internal continuation
 messages stay hidden from the visible transcript and carry their complete evidence
 slice directly rather than depending on user-prompt hooks.
 
-`nwh` and `nwh play` open Pi's viewport-based `fullscreen` TUI by default. It enters at the newest transcript content while keeping the editor, task status, and footer fixed; PageUp/PageDown scroll, Ctrl+Shift+Up/Down jump between prompts, and Ctrl+Shift+F searches the transcript. Pi's native Ctrl+O expands tool output, Ctrl+T toggles reasoning, and ↑/↓ browse prompt history. Foreground compiler tasks use Pi's assistant and tool components inside a focused fullscreen overlay: live thinking remains visible, completed task thinking collapses behind Ctrl+T, PageUp/PageDown inspect earlier task events, and new events follow the end until the user scrolls away. Fullscreen exits with only a resume hint instead of dumping the entire transcript. Use `--tui-mode regular` for terminal-native scrollback or terminal compatibility, and `-p` for non-interactive scripts and pipelines. An explicit Pi TUI preference saved through `/settings` is honored when the CLI flag is absent.
+`nwh` and `nwh play` open Pi's viewport-based `fullscreen` TUI by default and continue the latest saved transcript. `--new-session` starts a fresh transcript without resetting committed world progress or the active novel/instance/character. The TUI enters at the newest transcript content while keeping the editor, task status, and footer fixed; PageUp/PageDown scroll, Ctrl+Shift+Up/Down jump between prompts, and Ctrl+Shift+F searches the transcript. Pi's native Ctrl+O expands tool output, Ctrl+T toggles reasoning, and ↑/↓ browse prompt history. Foreground compiler tasks use Pi's assistant and tool components inside a focused fullscreen overlay: live thinking remains visible, completed task thinking collapses behind Ctrl+T, PageUp/PageDown inspect earlier task events, and new events follow the end until the user scrolls away. Fullscreen exits with only a resume hint instead of dumping the entire transcript. Use `--tui-mode regular` for terminal-native scrollback or terminal compatibility, and `-p` for non-interactive scripts and pipelines. An explicit Pi TUI preference saved through `/settings` is honored when the CLI flag is absent.
 
 Ordinary conversation starts with read-only discovery tools. Starting a source
 compiler loop adds only the narrow typed tools that can create pending proposals,
@@ -136,6 +139,9 @@ receives committed character context only. Inside the TUI:
 /instances
 /characters main
 /play 曹操 main
+/continue huozhe.txt
+/switch huozhe.txt
+/create-instance huozhe.txt
 /progress
 /leave
 /world-resume main 曹操
@@ -200,6 +206,9 @@ nwh novels
 nwh instances
 nwh characters <source-id> --branch main
 nwh resume main --character <id-or-name>
+nwh continue <source-id-or-title>
+nwh switch <source-id-or-title> --instance <id>
+nwh create <source-id-or-title> --instance <new-id>
 ```
 
 `init` is provider-neutral. Use the TUI's `/login` and `/model`, an existing workspace-local Pi authorization, or an explicit optional `llm` profile. `prepare` derives the next safe stage from durable artifacts, runs at most one unfinished compiler batch by default, and always prints `Next:`. It stops at the review barrier and never accepts model output. Once every proposal is explicitly accepted or rejected and the audit is clean, rerunning `prepare` creates the canonical-initialized branch exactly once.
@@ -266,7 +275,7 @@ nwh world validate ./player-action.json --branch main
 nwh world move --branch main --player ./player-action.json
 ```
 
-The primary natural-language path is the full TUI entered by `nwh resume`, `nwh play --novel ... --branch ... --character ...`, or `/play` inside `nwh`. NWH selects the novel before the character so the cast is evidence-filtered to that source. Long TUI selectors use Pi's native height-aware scrolling window and remain filterable, with an additional free-form id/name/alias input instead of forwarding the decision to the model; RPC clients fall back to bounded pages. Every player action uses a fresh Pi session with no novel-file tools, project instructions, compiler extension, future canon, or branch-write capability. The model can only capture one candidate in memory; the host supplies branch/head/source/actor identity and commits only after deterministic validation. Rejections report concrete issue codes and leave the branch head unchanged. Novel and character selection is persisted per instance, with one active pointer that ordinary `nwh` startup resumes automatically. `play-world --action` remains the compact script/legacy readline path.
+The primary natural-language path is the full TUI entered by `nwh continue [novel]`, `nwh switch [novel]`, `nwh create [novel]`, `nwh resume`, `nwh play`, or the equivalent slash commands. `continue` selects that novel's most recently played/updated instance; `switch` asks when several source-owned instances exist; `create` starts a fresh instance from the novel's active prepared revision. If a selected prepared novel has no instance, NWH creates one automatically instead of falling back to an unrelated `main`. Branch ownership and prepared-revision identity are persisted, and each genesis snapshot contains only that novel's artifacts. Long TUI selectors use Pi's native height-aware scrolling window and remain filterable, with an additional free-form id/name/alias input instead of forwarding the decision to the model; RPC clients fall back to bounded pages. Every player action uses a fresh Pi session with no novel-file tools, project instructions, compiler extension, future canon, or branch-write capability. The model can only capture one candidate in memory; the host supplies branch/head/source/actor identity and commits only after deterministic validation. Rejections report concrete issue codes and leave the branch head unchanged. Novel and character selection is persisted per instance, with one active pointer that ordinary `nwh` startup resumes automatically. `play-world --action` remains the compact script/legacy readline path.
 
 Branch and integrity workflows:
 

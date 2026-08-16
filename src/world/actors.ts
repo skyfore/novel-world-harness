@@ -69,6 +69,16 @@ export class ActorModelStore {
     await this.put("models", model.actorId, model);
   }
 
+  async ensureGoalRevision(input: CharacterGoal): Promise<void> {
+    const goal = characterGoalSchema.parse(input);
+    await writeImmutable(this.revisionPath("goals", safeId(goal.id), contentHash(goal)), goal);
+  }
+
+  async ensureModelRevision(input: CharacterModel): Promise<void> {
+    const model = characterModelSchema.parse(input);
+    await writeImmutable(this.revisionPath("models", safeId(model.actorId), contentHash(model)), model);
+  }
+
   async listGoals(actorId?: string): Promise<CharacterGoal[]> {
     const all = await this.list("goals", characterGoalSchema);
     return actorId ? all.filter((goal) => goal.actorId === actorId) : all;

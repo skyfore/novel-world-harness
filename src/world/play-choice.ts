@@ -9,14 +9,28 @@ import {
   type SelectedPlayExperience,
 } from "./play-experience.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
+import path from "node:path";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prepare.js";
+import { createWorldBranch } from "./instance.js";
+import { BranchStore } from "./store.js";
 
 export type AskPlayQuestion = (question: UserQuestion<string>) => Promise<string | undefined>;
+export type PlayInstanceMode = "continue" | "switch" | "create";
+export type PlayInstanceLifecycleEvent = {
+  type: "created" | "continued" | "switched";
+  branchId: string;
+  sourceId: string;
+  sourceTitle: string;
+  preparedRevisionHash?: string;
+};
 
 export async function choosePlayInstance(
   root: string,
   requested: string | undefined,
   ask: AskPlayQuestion,
   providedCatalog?: PlayExperienceCatalog,
+  options: { forcePrompt?: boolean } = {},
 ): Promise<string | undefined> {
   const catalog = providedCatalog ?? await inspectPlayExperience(root);
   if (!catalog.instances.length) throw new Error("No playable instances exist. Run nwh prepare-all first.");
@@ -24,7 +38,7 @@ export async function choosePlayInstance(
     const resolved = resolvePlayInstance(catalog.instances, requested);
     if (resolved) return resolved.branchId;
   }
-  if (!requested) {
+  if (!requested && !options.forcePrompt) {
     const active = catalog.instances.find((instance) => instance.active);
     if (active) return active.branchId;
     if (catalog.instances.length === 1) return catalog.instances[0]!.branchId;
@@ -63,33 +77,80 @@ export async function choosePlayExperience(
     source?: string;
     preferActiveSource?: boolean;
     preferSavedCharacter?: boolean;
+    instanceMode?: PlayInstanceMode;
+    createIfMissing?: boolean;
+    preparedCacheRoot?: string;
+    onInstanceLifecycle?: (event: PlayInstanceLifecycleEvent) => void;
   },
   ask: AskPlayQuestion,
 ): Promise<SelectedPlayExperience | undefined> {
   const catalog = await inspectPlayExperience(root);
+  const requestedInstance = options.branchId
+    ? resolvePlayInstance(catalog.instances, options.branchId)
+    : undefined;
   let sourceId: string | undefined;
   if (catalog.novels.length) {
-    sourceId = await choosePlayNovel(catalog, options.source, ask, {
+    sourceId = await choosePlayNovel(catalog, options.source ?? requestedInstance?.sourceId, ask, {
       preferActive: options.preferActiveSource ?? true,
     });
     if (!sourceId) return undefined;
   } else if (options.source) {
     throw new Error(`Unknown novel '${options.source}'. Use nwh novels to list registered sources.`);
   }
-  const instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
-  if (!instanceCatalog.instances.length) {
-    const source = catalog.novels.find((novel) => novel.id === sourceId);
-    throw new Error(`No playable instances exist for '${source?.title ?? sourceId}'. Run nwh prepare-all for that novel first.`);
-  }
+  const mode = options.instanceMode ?? "switch";
+  let createdInstance = false;
+  let createdBranchId: string | undefined;
+  let instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
   if (options.branchId) {
-    const requested = resolvePlayInstance(catalog.instances, options.branchId);
+    const requested = requestedInstance;
     if (requested?.sourceId && requested.sourceId !== sourceId) {
       const assigned = catalog.novels.find((novel) => novel.id === requested.sourceId);
       throw new Error(`Instance '${requested.branchId}' belongs to '${assigned?.title ?? requested.sourceId}', not the selected novel.`);
     }
   }
-  const branchId = await choosePlayInstance(root, options.branchId, ask, instanceCatalog);
+  if (sourceId && (mode === "create" || (!instanceCatalog.instances.length && (options.createIfMissing ?? true)))) {
+    const created = await createSourcePlayInstance(root, catalog, sourceId, {
+      ...(mode === "create" ? { alwaysCreate: true } : {}),
+      ...(mode === "create" && options.branchId ? { requestedBranchId: options.branchId } : {}),
+      ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}),
+    });
+    options.onInstanceLifecycle?.({
+      type: "created",
+      branchId: created.branchId,
+      sourceId,
+      sourceTitle: created.sourceTitle ?? sourceId,
+      ...(created.preparedRevisionHash ? { preparedRevisionHash: created.preparedRevisionHash } : {}),
+    });
+    createdInstance = true;
+    createdBranchId = created.branchId;
+    const refreshed = await inspectPlayExperience(root);
+    instanceCatalog = catalogForSource(refreshed, sourceId);
+  }
+  if (!instanceCatalog.instances.length) {
+    const source = catalog.novels.find((novel) => novel.id === sourceId);
+    throw new Error(`No playable instances exist for '${source?.title ?? sourceId}', and one could not be created.`);
+  }
+  const preferredBranch = createdBranchId ?? options.branchId
+    ?? (mode === "continue" ? instanceCatalog.instances[0]?.branchId : undefined);
+  const branchId = await choosePlayInstance(
+    root,
+    preferredBranch,
+    ask,
+    instanceCatalog,
+    { forcePrompt: mode === "switch" && !options.branchId && instanceCatalog.instances.length > 1 },
+  );
   if (!branchId) return undefined;
+  if (mode !== "create" && !createdInstance) {
+    const selectedInstance = instanceCatalog.instances.find((instance) => instance.branchId === branchId);
+    const source = catalog.novels.find((novel) => novel.id === sourceId);
+    if (sourceId && source) options.onInstanceLifecycle?.({
+      type: mode === "continue" ? "continued" : "switched",
+      branchId,
+      sourceId,
+      sourceTitle: source.title,
+      ...(selectedInstance?.preparedRevisionHash ? { preparedRevisionHash: selectedInstance.preparedRevisionHash } : {}),
+    });
+  }
   const listed = await listPlayableCharacters(root, { branchId, ...(sourceId ? { source: sourceId } : {}) });
   const playable = listed.characters.filter((character) => character.alive !== false);
   if (!playable.length) throw new Error(`No living committed characters are playable on '${branchId}'.`);
@@ -136,13 +197,63 @@ export async function choosePlayExperience(
 }
 
 export function catalogForSource(catalog: PlayExperienceCatalog, sourceId: string): PlayExperienceCatalog {
-  const matching = catalog.instances.filter((instance) => instance.sourceId === sourceId);
   return {
     ...catalog,
-    instances: matching.length
-      ? matching
-      : catalog.instances.filter((instance) => !instance.sourceId),
+    instances: catalog.instances.filter((instance) => instance.sourceId === sourceId),
   };
+}
+
+export async function createSourcePlayInstance(
+  root: string,
+  catalog: PlayExperienceCatalog,
+  sourceId: string,
+  options: { alwaysCreate?: boolean; requestedBranchId?: string; cacheRoot?: string } = {},
+): Promise<PlayInstanceSummary> {
+  const source = catalog.novels.find((novel) => novel.id === sourceId);
+  if (!source) throw new Error(`Unknown novel source '${sourceId}'.`);
+  const scoped = catalogForSource(catalog, sourceId);
+  if (!options.alwaysCreate && scoped.instances.length) return scoped.instances[0]!;
+
+  const branches = new BranchStore(root);
+  const ids = await branches.listIds();
+  let branchId = options.requestedBranchId;
+  if (branchId && ids.includes(branchId)) throw new Error(`Instance '${branchId}' already exists.`);
+  if (!branchId) {
+    branchId = options.alwaysCreate
+      ? nextSourceInstanceId(source, ids)
+      : await resolvePreparationBranchId(root, source);
+  }
+
+  const prepared = await new PreparedNovelCache(root, options.cacheRoot).loadActive(source);
+  if (!prepared) {
+    const inspection = await inspectPreparation(root, { sourceId, branchId });
+    if (inspection.stage !== "create-branch") {
+      const reason = inspection.repairReasons?.join(" ");
+      throw new Error([
+        `Novel '${source.title}' is not ready to create an instance (stage: ${inspection.stage}).`,
+        reason,
+        `Next: ${inspection.next}`,
+      ].filter(Boolean).join(" "));
+    }
+  }
+  await createWorldBranch(root, branchId, undefined, sourceId, options.cacheRoot);
+  const refreshed = await inspectPlayExperience(root);
+  const created = refreshed.instances.find((instance) => instance.branchId === branchId);
+  if (!created) throw new Error(`Created instance '${branchId}' was not discoverable.`);
+  return created;
+}
+
+function nextSourceInstanceId(source: SourceDocument, existingIds: readonly string[]): string {
+  const stem = path.basename(source.sourcePath, path.extname(source.sourcePath))
+    .normalize("NFKD")
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const base = `${stem || "novel"}-${source.id.slice(0, 8)}`;
+  for (let suffix = 1; ; suffix += 1) {
+    const candidate = suffix === 1 ? base : `${base}-${suffix}`;
+    if (!existingIds.includes(candidate)) return candidate;
+  }
 }
 
 export async function choosePlayNovel(

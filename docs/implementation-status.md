@@ -73,6 +73,7 @@ nwh audit
 nwh status
 nwh novels|instances|characters|progress
 nwh resume [instance] --character <id-or-name>
+nwh continue|switch|create [novel] [--instance <id>] [--character <id-or-name>]
 
 nwh world create|show|history|frontier
 nwh world validate|move
@@ -82,7 +83,7 @@ nwh world snapshot|fsck
 nwh play-world --list-characters|--character|--action
 ```
 
-The general model inside `nwh` / `nwh play` remains read-only. The host TUI can enter player mode through `/play`, a natural character-selection request, `nwh resume`, or a saved active selection. While player mode is active, ordinary input is intercepted before the general agent and delegated to a fresh restricted player-action session; it therefore cannot inherit compiler omniscience, source access, or local-file context. The terminal shell retains regular/fullscreen rendering, transcript history, committed progress/status, command completion, and durable branch/character resume.
+The general model inside `nwh` / `nwh play` remains read-only. The host TUI can enter player mode through `/continue`, `/switch`, `/create-instance`, `/play`, a natural character-selection request, `nwh resume`, or a saved active selection. Instances persist their owning source and prepared revision; new genesis snapshots are source-scoped, and legacy branches are inferred only when their genesis has one unambiguous source. Interactive CLI startup continues the latest transcript by default while `--new-session` preserves world progress but starts a fresh conversation. While player mode is active, ordinary input is intercepted before the general agent and delegated to a fresh restricted player-action session; it therefore cannot inherit compiler omniscience, source access, or local-file context.
 
 ## Removed obsolete scaffold
 

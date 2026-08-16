@@ -28,6 +28,8 @@ import { BranchStore, WorldObjectStore } from "./store.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
+  sourceId?: string;
+  preparedRevisionHash?: string;
   entities: ReadonlyMap<EntityId, Entity>;
   rules: ReadonlyMap<string, WorldRule>;
   stateSchema: StateSchemaRegistry;
@@ -180,7 +182,16 @@ export class WorldEngine {
     initialDelta: StateDelta = { version: 1, operations: [] },
     initialKnowledge?: KnowledgeDelta,
     sourceId?: string,
+    preparedRevisionHash?: string,
   ): Promise<CommitId> {
+    if (sourceId && this.context.sourceId && sourceId !== this.context.sourceId) {
+      throw new Error(`Cannot create source '${sourceId}' branch from '${this.context.sourceId}' world context.`);
+    }
+    if (preparedRevisionHash && this.context.preparedRevisionHash && preparedRevisionHash !== this.context.preparedRevisionHash) {
+      throw new Error(`Prepared revision ${preparedRevisionHash} does not match captured context ${this.context.preparedRevisionHash}.`);
+    }
+    const branchSourceId = sourceId ?? this.context.sourceId;
+    const branchPreparedRevisionHash = preparedRevisionHash ?? this.context.preparedRevisionHash;
     stateDeltaSchema.parse(initialDelta);
     const knowledge = initialKnowledge ? knowledgeDeltaSchema.parse(initialKnowledge) : undefined;
     if (knowledge) validateKnowledgeDeltaForContext(knowledge, this.context);
@@ -209,7 +220,14 @@ export class WorldEngine {
     };
     const eventHash = await this.objects.putEvent(event);
     const commitHash = await this.objects.putCommit({ version: 1, branchId, logicalTime: { step: 0 }, eventHashes: [eventHash], canonicalSnapshotHash: this.context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
-    await this.branches.create({ id: branchId, name, ...(sourceId ? { sourceId } : {}), headCommitId: commitHash });
+    await this.branches.create({
+      id: branchId,
+      name,
+      ...(branchSourceId ? { sourceId: branchSourceId } : {}),
+      ...(branchPreparedRevisionHash ? { preparedRevisionHash: branchPreparedRevisionHash } : {}),
+      createdAt: new Date().toISOString(),
+      headCommitId: commitHash,
+    });
     return commitHash;
   }
   async commitProposal(proposal: EventProposal): Promise<CommitProposalResult> {

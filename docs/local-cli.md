@@ -12,7 +12,7 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 
 - `nwh` opens a continuously rendered TUI in the current directory;
 - `nwh -p "..."` runs one prompt and exits;
-- `nwh --continue` resumes the latest workspace-local Pi session;
+- interactive `nwh` and `nwh play` resume the latest workspace-local Pi transcript by default; `--new-session` starts a fresh transcript without resetting committed world progress;
 - Pi's viewport-based `fullscreen` layout is the default; it opens at the newest transcript content with a fixed editor/status dock, while `--tui-mode regular` remains the terminal-native scrollback fallback;
 - `@path` attaches local file context without changing the displayed user message;
 - a standalone quoted, unquoted, absolute, or workspace-relative novel path starts
@@ -24,7 +24,8 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `/tasks` brings the current long-running NWH task back to its live foreground panel. A reparse opens there first and shows host lifecycle events, tool calls, provider reasoning activity, and streamed model text. Model prose is visibly marked unverified because only validated proposals can become world truth. `←` or `Esc` collapses the panel without cancelling the request, leaving a compact progress widget below the editor;
 - `/audit [--source <id>]` and `/prepared-cache [list|activate]` expose the same novel diagnostics and prepared-revision lifecycle in the TUI;
 - `/novels`, `/instances`, `/characters`, and `/progress` inspect compiled content without a model request;
-- `/play [character] [instance] [novel]` selects the novel first, then opens height-aware, natively scrolling and filterable instance/character selection (with free-form id/name/alias input); `/world-resume` restores the durable novel/instance/character selection;
+- `/continue [novel] [character]` resumes that novel's latest source-owned instance, `/switch [novel] [instance] [character]` selects another save, and `/create-instance [novel] [instance] [character]` starts a fresh save from the active prepared revision;
+- `/play [character] [instance] [novel]` opens height-aware, natively scrolling and filterable instance/character selection (with free-form id/name/alias input); `/world-resume` remains a compatibility alias for durable resume;
 - `NOVEL.md` provides checked-in project instructions;
 - `.novel-harness/instructions.md` provides local additions.
 
@@ -134,7 +135,7 @@ startup enters player mode; ordinary input is intercepted before the general mod
 and routed through the restricted boundary below. `/leave` returns to the read-only
 assistant without deleting durable resume state.
 
-`nwh resume`, TUI `/play`, and the compact `nwh play-world` command share a separate character-embodiment boundary. Each natural-language
+`nwh continue|switch|create`, `nwh resume`, TUI player commands, and the compact `nwh play-world` command share a separate character-embodiment boundary. Instance lookup is scoped by novel ownership: continue chooses the newest matching save, switch asks among matching saves, and a missing save is created from the selected novel's active prepared revision. Each natural-language
 action receives only an actor-scoped view plus entities explicitly named by the
 player and artifacts currently owned by that actor. Its fresh Pi session has no
 file tools, project instructions, compiler extension, source text, future canon,

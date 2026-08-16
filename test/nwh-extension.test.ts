@@ -118,7 +118,7 @@ describe("NWH TUI extension", () => {
   it("registers local commands and leaves assistant/thinking rendering to Pi", async () => {
     const { commands, sentUserMessages, markdownTransformers } = await fixture();
     expect(markdownTransformers).toHaveLength(0);
-    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
+    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "continue", "switch", "create-instance", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
     const ctx = commandContext(notifications, actions);
@@ -501,7 +501,7 @@ describe("NWH TUI extension", () => {
           value: true,
         })),
       ],
-    });
+    }, undefined, second.source.id);
     const questions: string[] = [];
     const characterPages: string[][] = [];
     const ctx = {

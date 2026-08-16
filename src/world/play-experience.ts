@@ -31,6 +31,10 @@ export type PlayInstanceSummary = {
   actorId?: string;
   actorName?: string;
   sessionAtHead?: boolean;
+  preparedRevisionHash?: string;
+  createdAt?: string;
+  updatedAt: string;
+  lastPlayedAt?: string;
 };
 
 export type PlayExperienceCatalog = {
@@ -70,7 +74,10 @@ export async function inspectPlayExperience(root: string): Promise<PlayExperienc
   if (!branchIds.length) return { project, novels, instances: [], activeSession, savedSessions };
   const { engine } = await openWorkspaceWorld(root);
   const instances = await Promise.all(branchIds.map(async (branchId): Promise<PlayInstanceSummary> => {
-    const branch = await engine.branches.read(branchId);
+    const [branch, headInfo] = await Promise.all([
+      engine.branches.read(branchId),
+      engine.branches.readHeadInfo(branchId),
+    ]);
     const history = await inspectHistory(engine, branch.headCommitId);
     const context = await engine.contextForCommit(branch.headCommitId);
     const saved = savedSessions.find((session) => session.branchId === branchId);
@@ -93,9 +100,22 @@ export async function inspectPlayExperience(root: string): Promise<PlayExperienc
       ...(saved
         ? { sessionAtHead: saved.lastCommitId === branch.headCommitId }
         : {}),
+      ...(branch.preparedRevisionHash ? { preparedRevisionHash: branch.preparedRevisionHash } : {}),
+      ...(branch.createdAt ? { createdAt: branch.createdAt } : {}),
+      updatedAt: headInfo.updatedAt,
+      ...(saved ? { lastPlayedAt: saved.updatedAt } : {}),
     };
   }));
+  instances.sort(comparePlayInstancesNewestFirst);
   return { project, novels, instances, activeSession, savedSessions };
+}
+
+export function comparePlayInstancesNewestFirst(left: PlayInstanceSummary, right: PlayInstanceSummary): number {
+  const leftTime = Date.parse(left.lastPlayedAt ?? left.updatedAt ?? left.createdAt ?? "1970-01-01T00:00:00.000Z");
+  const rightTime = Date.parse(right.lastPlayedAt ?? right.updatedAt ?? right.createdAt ?? "1970-01-01T00:00:00.000Z");
+  return rightTime - leftTime
+    || Number(right.active) - Number(left.active)
+    || left.branchId.localeCompare(right.branchId);
 }
 
 async function inferLegacyBranchSourceId(
@@ -162,16 +182,20 @@ export async function selectPlayExperience(
   const active = await sessionStore.read();
   const branchId = await resolveBranchId(new BranchStore(root), options.branchId, active?.branchId);
   const saved = await sessionStore.readInstance(branchId);
-  const requestedSource = options.source ?? saved?.sourceId;
-  const source = requestedSource
-    ? await resolveNovelSource(await WorkspaceStore.create(root), requestedSource)
-    : undefined;
   const { engine } = await openWorkspaceWorld(root);
   const branch = await engine.branches.read(branchId);
   const [context, state] = await Promise.all([
     engine.contextForCommit(branch.headCommitId),
     engine.projector.project(branch.headCommitId),
   ]);
+  const requestedSource = options.source ?? saved?.sourceId ?? branch.sourceId ?? context.sourceId;
+  const source = requestedSource
+    ? await resolveNovelSource(await WorkspaceStore.create(root), requestedSource)
+    : undefined;
+  const ownedSourceId = branch.sourceId ?? context.sourceId;
+  if (source && ownedSourceId && source.id !== ownedSourceId) {
+    throw new Error(`Instance '${branchId}' belongs to source '${ownedSourceId}', not '${source.title}'.`);
+  }
   const characters = [...context.entities.values()]
     .filter((entity) => entity.kind === "character")
     .filter((entity) => !source || entity.evidence.some((reference) => reference.span.sourceId === source.id))

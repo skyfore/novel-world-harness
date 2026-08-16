@@ -9,7 +9,7 @@ import {
   performPlayTurn,
   type SelectedPlayExperience,
 } from "../world/play-experience.js";
-import { choosePlayExperience, choosePlayInstance, choosePlayNovel, type AskPlayQuestion } from "../world/play-choice.js";
+import { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayNovel, createSourcePlayInstance, type AskPlayQuestion } from "../world/play-choice.js";
 import { askUserQuestion } from "../util/ask-user-question.js";
 import { formatCharacters } from "./catalog.js";
 
@@ -37,7 +37,12 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
       ? await choosePlayNovel(catalog, source, ask, { preferActive: false })
       : undefined;
     if (catalog.novels.length && !source) return undefined;
-    branchId = await choosePlayInstance(options.root, branchId, ask, catalog);
+    let instanceCatalog = source ? catalogForSource(catalog, source) : catalog;
+    if (source && !instanceCatalog.instances.length) {
+      await createSourcePlayInstance(options.root, catalog, source);
+      instanceCatalog = catalogForSource(await inspectPlayExperience(options.root), source);
+    }
+    branchId = await choosePlayInstance(options.root, branchId, ask, instanceCatalog);
     if (!branchId) return undefined;
     const listed = await listPlayableCharacters(options.root, { branchId, ...(source ? { source } : {}) });
     stdout.write(`${formatCharacters(listed.characters, listed.branchId)}\n`);
@@ -49,6 +54,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
     ...(source ? { source } : {}),
     preferActiveSource: false,
     preferSavedCharacter: false,
+    instanceMode: "continue",
   }, ask);
   if (!selection) return undefined;
 

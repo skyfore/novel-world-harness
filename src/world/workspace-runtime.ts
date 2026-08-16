@@ -1,7 +1,7 @@
 import { ActorModelStore, deterministicActorProposalSource } from "./actors.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { canonicalEventToPossibility } from "./canon-runtime.js";
-import { loadWorldContext } from "./context.js";
+import { loadWorldContext, type ScopedWorldArtifacts } from "./context.js";
 import { WorldEngine } from "./engine.js";
 import { PossibilityTemplateStore } from "./possibility-model.js";
 import { WorldRuntime, type NarrativeRender, type PossibilitySource } from "./runtime.js";
@@ -13,9 +13,19 @@ export type WorkspaceWorld = {
   possibilityTemplates: PossibilityTemplateStore;
 };
 
-export async function openWorkspaceWorld(workspaceRoot: string, render?: NarrativeRender): Promise<WorkspaceWorld> {
+export type WorkspaceWorldOpenOptions = {
+  sourceId?: string;
+  preparedRevisionHash?: string;
+  artifacts?: ScopedWorldArtifacts;
+};
+
+export async function openWorkspaceWorld(
+  workspaceRoot: string,
+  render?: NarrativeRender,
+  options: WorkspaceWorldOpenOptions = {},
+): Promise<WorkspaceWorld> {
   await WorkspaceStore.create(workspaceRoot);
-  const { context, contexts } = await loadWorldContext(workspaceRoot);
+  const { context, contexts } = await loadWorldContext(workspaceRoot, options);
   const engine = new WorldEngine(workspaceRoot, context, (snapshotHash) => contexts.load(snapshotHash));
   const actorModels = new ActorModelStore(workspaceRoot);
   const possibilityTemplates = new PossibilityTemplateStore(workspaceRoot);

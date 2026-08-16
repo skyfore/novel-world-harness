@@ -36,7 +36,7 @@ function copyLines(options: NwhWelcomeOptions): string[] {
       subtitle,
       options.mode === "compiler"
         ? "Welcome back. Continue the compiler task or type /status."
-        : "Welcome back. Use /world-resume for the saved world or /status for details.",
+        : "Welcome back. Use /continue for the latest saved world, /switch to change worlds, or /status for details.",
       "Use /help whenever you need the command map.",
       "",
     ];
@@ -57,7 +57,7 @@ function copyLines(options: NwhWelcomeOptions): string[] {
     subtitle,
     "1  Sign in with /login, then choose with /model",
     "2  /novels, /instances and /characters show what is ready",
-    "3  /play chooses a novel, then a character; paste a novel path to compile",
+    "3  /play or /continue enters a world; paste a novel path to compile",
   ];
 }
 
@@ -71,8 +71,8 @@ export function renderNwhWelcome(
   const copy = copyLines(options);
 
   if (width < 48) {
-    const freshHint = options.mode === "compiler" ? "/login -> /model" : "/play or paste a novel";
-    const returningHint = options.mode === "compiler" ? "Continue compiler. /status" : "Welcome back. /world-resume";
+    const freshHint = options.mode === "compiler" ? "/login -> /model" : "/continue, /switch, or paste a novel";
+    const returningHint = options.mode === "compiler" ? "Continue compiler. /status" : "Welcome back. /continue · /switch · /create-instance";
     return [
       `${theme.fg("accent", `(${eyes})`)} ${theme.bold("NWH")}`,
       theme.fg("muted", options.freshConversation ? freshHint : returningHint),

@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { UserQuestion } from "../src/util/ask-user-question.js";
+import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
+import { createWorldBranch } from "../src/commands/world.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { InitialWorldStore } from "../src/world/initial.js";
 import { choosePlayExperience } from "../src/world/play-choice.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
@@ -30,7 +34,7 @@ describe("structured play choices", () => {
         { op: "set", entityId: "hero", field: "character.alive", value: true },
         { op: "set", entityId: "rival", field: "character.alive", value: true },
       ],
-    });
+    }, undefined, rivalNovel.source.id);
     await runtime.forkBranch("alpha", alphaHead, "beta", "Beta");
     const questions: UserQuestion<string>[] = [];
 
@@ -63,7 +67,7 @@ describe("structured play choices", () => {
         { op: "set", entityId: "hero", field: "character.alive", value: true },
         { op: "set", entityId: "rival", field: "character.alive", value: true },
       ],
-    });
+    }, undefined, rivalNovel.source.id);
     await runtime.forkBranch("alpha", alphaHead, "beta", "Beta Timeline");
 
     const prompts: string[] = [];
@@ -110,10 +114,127 @@ describe("structured play choices", () => {
       source: { id: second.source.id },
       session: { branchId: "second", sourceId: second.source.id, actorId: "rival" },
     });
+    await choosePlayExperience(root, {
+      source: first.source.id,
+      branchId: "main",
+      character: "hero",
+    }, async () => undefined);
+    await expect(choosePlayExperience(root, { branchId: "second" }, async () => {
+      throw new Error("an explicitly named instance should infer its owning novel");
+    })).resolves.toMatchObject({
+      source: { id: second.source.id },
+      session: { branchId: "second", sourceId: second.source.id, actorId: "rival" },
+    });
     await expect(choosePlayExperience(root, {
       source: second.source.id,
       branchId: "main",
       character: "rival",
     }, async () => undefined)).rejects.toThrow("belongs to");
+  });
+
+  it("creates, continues, and switches source-owned instances from the selected prepared revision", async () => {
+    const cacheRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-cache-"));
+    const publisherRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-publisher-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-lifecycle-"));
+    roots.push(cacheRoot, publisherRoot, root);
+
+    const livingContent = "Fugui waits at the village gate.\n";
+    const publishedLiving = await createEvidenceFixture(publisherRoot, livingContent, "living.txt");
+    await new CanonicalModelStore(publisherRoot).putEntity({
+      id: "fugui",
+      kind: "character",
+      canonicalName: "Fugui",
+      aliases: [],
+      evidence: publishedLiving.evidence("Fugui"),
+    });
+    await new InitialWorldStore(publisherRoot).put({
+      version: 1,
+      delta: { version: 1, operations: [{ op: "set", entityId: "fugui", field: "character.alive", value: true }] },
+      evidence: publishedLiving.evidence("Fugui waits at the village gate."),
+    });
+    const livingBatches = await prepareCompilerBatches(publisherRoot, publishedLiving.source);
+    await new CompilerBatchStore(publisherRoot).replaceCompleted(
+      publishedLiving.source.id,
+      livingBatches.map((batch) => batch.id),
+    );
+    const published = await new PreparedNovelCache(publisherRoot, cacheRoot).publish(publishedLiving.source);
+
+    const living = await createEvidenceFixture(root, livingContent, "huozhe.txt");
+    const other = await createEvidenceFixture(root, "A warlord waits in the hall.\n", "three-kingdoms.txt");
+    await new CanonicalModelStore(root).putEntity({
+      id: "warlord",
+      kind: "character",
+      canonicalName: "Warlord",
+      aliases: [],
+      evidence: other.evidence("warlord"),
+    });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      delta: { version: 1, operations: [{ op: "set", entityId: "warlord", field: "character.alive", value: true }] },
+      evidence: other.evidence("A warlord waits in the hall."),
+    });
+    await createWorldBranch(root, "main", undefined, other.source.id, cacheRoot);
+
+    const lifecycle: Array<{ type: string; branchId: string }> = [];
+    const first = await choosePlayExperience(root, {
+      source: living.source.id,
+      instanceMode: "continue",
+      preparedCacheRoot: cacheRoot,
+      onInstanceLifecycle: (event) => lifecycle.push({ type: event.type, branchId: event.branchId }),
+    }, async () => {
+      throw new Error("a prepared novel with one character should be created without prompting");
+    });
+    expect(first?.session.branchId).not.toBe("main");
+    expect(lifecycle).toEqual([{ type: "created", branchId: first!.session.branchId }]);
+
+    const { engine } = await openWorkspaceWorld(root);
+    const createdBranch = await engine.branches.read(first!.session.branchId);
+    const createdContext = await engine.contextForCommit(createdBranch.headCommitId);
+    expect(createdBranch).toMatchObject({
+      sourceId: living.source.id,
+      preparedRevisionHash: published.bundleHash,
+    });
+    expect([...createdContext.entities.keys()]).toEqual(["fugui"]);
+    expect(createdContext).toMatchObject({
+      sourceId: living.source.id,
+      preparedRevisionHash: published.bundleHash,
+    });
+
+    lifecycle.splice(0);
+    const fresh = await choosePlayExperience(root, {
+      source: living.source.id,
+      instanceMode: "create",
+      preparedCacheRoot: cacheRoot,
+      onInstanceLifecycle: (event) => lifecycle.push({ type: event.type, branchId: event.branchId }),
+    }, async () => {
+      throw new Error("fresh instance creation should not prompt when there is one character");
+    });
+    expect(fresh!.session.branchId).not.toBe(first!.session.branchId);
+    expect(lifecycle).toEqual([{ type: "created", branchId: fresh!.session.branchId }]);
+
+    lifecycle.splice(0);
+    const continued = await choosePlayExperience(root, {
+      source: living.source.id,
+      instanceMode: "continue",
+      preparedCacheRoot: cacheRoot,
+      onInstanceLifecycle: (event) => lifecycle.push({ type: event.type, branchId: event.branchId }),
+    }, async () => {
+      throw new Error("continue should select the newest source instance without prompting");
+    });
+    expect(continued!.session.branchId).toBe(fresh!.session.branchId);
+    expect(lifecycle).toEqual([{ type: "continued", branchId: fresh!.session.branchId }]);
+
+    lifecycle.splice(0);
+    const switched = await choosePlayExperience(root, {
+      source: living.source.id,
+      instanceMode: "switch",
+      preparedCacheRoot: cacheRoot,
+      onInstanceLifecycle: (event) => lifecycle.push({ type: event.type, branchId: event.branchId }),
+    }, async (question) => {
+      expect(question.header).toBe("Instance");
+      return first!.session.branchId;
+    });
+    expect(switched!.session.branchId).toBe(first!.session.branchId);
+    expect(lifecycle).toEqual([{ type: "switched", branchId: first!.session.branchId }]);
   });
 });

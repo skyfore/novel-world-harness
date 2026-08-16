@@ -25,7 +25,7 @@ const WORLD_STORAGE_VERSION = "v1";
 const BRANCH_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 type ObjectKind = "deltas" | "knowledge" | "events" | "commits";
 type Schema<T> = z.ZodType<T>;
-type BranchHead = { version: 1; commitId: CommitId; updatedAt: string };
+export type BranchHead = { version: 1; commitId: CommitId; updatedAt: string };
 export type BranchLockMetadata =
   | { version: 1; pid: number; hostname: string; createdAt: string }
   | { version: 2; pid: number; hostname: string; createdAt: string; token: string };
@@ -177,11 +177,19 @@ export class BranchStore {
     }
   }
   async readHead(id: BranchId): Promise<CommitId> {
+    return (await this.readHeadInfo(id)).commitId;
+  }
+  async readHeadInfo(id: BranchId): Promise<BranchHead> {
     assertBranchId(id);
     const head = await readJson<BranchHead>(path.join(this.branchDirectory(id), "head.json"));
-    if (head.version !== 1 || typeof head.commitId !== "string") throw new Error(`Invalid branch head: ${id}`);
+    if (
+      head.version !== 1
+      || typeof head.commitId !== "string"
+      || typeof head.updatedAt !== "string"
+      || !Number.isFinite(Date.parse(head.updatedAt))
+    ) throw new Error(`Invalid branch head: ${id}`);
     assertContentHash(head.commitId);
-    return head.commitId;
+    return head;
   }
   async updateHead(id: BranchId, expected: CommitId, next: CommitId): Promise<void> {
     assertBranchId(id);

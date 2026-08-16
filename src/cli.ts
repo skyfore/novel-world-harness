@@ -48,6 +48,7 @@ program
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
   .option("--continue", "continue the latest session in this workspace")
+  .option("--new-session", "start a fresh terminal transcript while preserving world progress")
   .option("--no-save", "do not persist the interactive session");
 
 function rootFor(options: { root?: string }): string {
@@ -55,6 +56,35 @@ function rootFor(options: { root?: string }): string {
 }
 function configFor(options: { root?: string; config?: string }): string {
   return options.config ? resolveConfigPath(options.config) : path.resolve(rootFor(options), "novel-harness.yaml");
+}
+async function launchPlayableInstance(
+  novel: string | undefined,
+  options: {
+    root?: string;
+    config?: string;
+    instance?: string;
+    character?: string;
+    model?: string;
+    tuiMode?: TuiMode;
+    continue?: boolean;
+    newSession?: boolean;
+    save?: boolean;
+  },
+  instanceMode: "continue" | "switch" | "create",
+): Promise<void> {
+  const globalOptions = program.opts();
+  await resumeCommand({
+    root: rootFor(options),
+    configPath: configFor(options),
+    ...(options.instance ? { branchId: options.instance } : {}),
+    ...(options.character ? { character: options.character } : {}),
+    ...(novel ? { source: novel } : {}),
+    model: options.model ?? globalOptions.model,
+    tuiMode: options.tuiMode ?? globalOptions.tuiMode,
+    continueSession: options.newSession || globalOptions.newSession ? false : options.continue || globalOptions.continue || undefined,
+    saveSession: options.save && globalOptions.save,
+    instanceMode,
+  });
 }
 function nonNegativeInteger(value: string, name: string): number {
   const parsed = Number(value);
@@ -125,6 +155,7 @@ program.command("resume")
   .option("--model <model>", "override the Pi model for player actions")
   .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
   .option("--continue", "continue the latest TUI transcript")
+  .option("--new-session", "start a fresh TUI transcript while preserving world progress")
   .option("--no-save", "do not persist the TUI transcript")
   .description("resume a novel, character and playable instance in the full TUI")
   .action(async (instance, options) => {
@@ -137,10 +168,30 @@ program.command("resume")
       ...(options.novel ? { source: options.novel } : {}),
       model: options.model ?? globalOptions.model,
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
-      continueSession: options.continue || globalOptions.continue,
+      continueSession: options.newSession || globalOptions.newSession ? false : options.continue || globalOptions.continue || undefined,
       saveSession: options.save && globalOptions.save,
     });
   });
+for (const command of [
+  { name: "continue", mode: "continue" as const, description: "continue the latest instance for a novel" },
+  { name: "switch", mode: "switch" as const, description: "switch to a novel, instance or character" },
+  { name: "create", mode: "create" as const, description: "create and enter a fresh instance for a novel" },
+]) {
+  const configured = program.command(command.name)
+    .argument("[novel]", "registered novel source id, title or path")
+    .option("-c, --config <path>", "configuration file")
+    .option("--root <path>", "local novel workspace")
+    .option("--instance <id>", "playable instance id")
+    .option("--character <id-or-name>", "character to inhabit")
+    .option("--model <model>", "override the Pi model for player actions")
+    .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
+    .option("--continue", "continue the latest TUI transcript")
+    .option("--new-session", "start a fresh TUI transcript while preserving world progress")
+    .option("--no-save", "do not persist the TUI transcript")
+    .description(command.description)
+    .action(async (novel, options) => launchPlayableInstance(novel, options, command.mode));
+  if (command.name === "create") configured.alias("create-instance");
+}
 program.command("audit")
   .option("--root <path>", "local novel workspace")
   .option("--source <id>", "audit only one registered novel source")
@@ -263,7 +314,7 @@ program
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
   .option("--source <id>", "registered source id")
-  .option("--branch <id>", "playable branch id", "main")
+  .option("--branch <id>", "playable branch id")
   .option("--model <model>", "override compiler model; use provider/model when ambiguous")
   .option("--max-batches <n>", "run at most N unfinished batches", "1")
   .description("advance one safe step from novel ingest toward a reviewed playable world")
@@ -273,7 +324,7 @@ program
       configPath: configFor(options),
       ...(novel ? { novelPath: novel } : {}),
       ...(options.source ? { sourceId: options.source } : {}),
-      branchId: options.branch,
+      ...(options.branch ? { branchId: options.branch } : {}),
       model: options.model ?? program.opts().model,
       maxBatches: nonNegativeInteger(options.maxBatches, "--max-batches"),
     });
@@ -285,7 +336,7 @@ program
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
   .option("--source <id>", "registered source id")
-  .option("--branch <id>", "playable branch id", "main")
+  .option("--branch <id>", "playable branch id")
   .option("--model <model>", "override compiler model; use provider/model when ambiguous")
   .option("-y, --yes", "accept every recommended preparation decision without prompting")
   .description("guide full compilation, validation and playable-branch preparation")
@@ -295,7 +346,7 @@ program
       configPath: configFor(options),
       ...(novel ? { novelPath: novel } : {}),
       ...(options.source ? { sourceId: options.source } : {}),
-      branchId: options.branch,
+      ...(options.branch ? { branchId: options.branch } : {}),
       model: options.model ?? program.opts().model,
       yes: Boolean(options.yes),
     });
@@ -339,6 +390,7 @@ program
   .option("-p, --print <prompt>", "run one prompt and exit")
   .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
   .option("--continue", "continue the latest session in this workspace")
+  .option("--new-session", "start a fresh terminal transcript while preserving world progress")
   .option("--no-save", "do not persist the interactive session")
   .description("open the local-first terminal session")
   .action(async (options) => {
@@ -350,6 +402,7 @@ program
         ...(options.novel ? { source: options.novel } : {}),
         preferActiveSource: false,
         preferSavedCharacter: false,
+        instanceMode: "continue",
       }, askUserQuestion);
     }
     await playCommand({
@@ -359,7 +412,7 @@ program
       model: options.model ?? globalOptions.model,
       printPrompt: options.print ?? globalOptions.print,
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
-      continueSession: options.continue || globalOptions.continue,
+      continueSession: options.newSession || globalOptions.newSession ? false : options.continue || globalOptions.continue || undefined,
       saveSession: options.save && globalOptions.save,
     });
   });
@@ -373,7 +426,7 @@ program.action(async () => {
     model: options.model,
     printPrompt: options.print,
     tuiMode: options.tuiMode,
-    continueSession: options.continue,
+    continueSession: options.newSession ? false : options.continue || undefined,
     saveSession: options.save,
   });
 });

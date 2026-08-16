@@ -28,6 +28,12 @@ export class PossibilityTemplateStore {
     await atomicJson(path.join(this.root, "refs", `${id}.json`), { version: 1, id, hash, updatedAt: new Date().toISOString() } satisfies TemplateRef);
   }
 
+  async ensureRevision(input: PossibilityTemplate): Promise<void> {
+    const value = possibilityTemplateSchema.parse(input);
+    const id = safeTemplateId(value.id);
+    await writeImmutable(path.join(this.root, "revisions", id, `${contentHash(value)}.json`), value);
+  }
+
   async get(idInput: string): Promise<PossibilityTemplate> {
     const id = safeId(idInput);
     const ref = await this.readRef(id);

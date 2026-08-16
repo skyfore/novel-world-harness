@@ -53,6 +53,10 @@ export class CanonicalModelStore {
   putClaim(claim: Claim): Promise<void> { const value = claimSchema.parse(claim); return this.put("claims", value.id, value); }
   putEvent(event: CanonicalEvent): Promise<void> { const value = canonicalEventSchema.parse(event); return this.put("events", value.id, value); }
   putRule(rule: WorldRule): Promise<void> { const value = worldRuleSchema.parse(rule); return this.put("rules", value.id, value); }
+  ensureEntityRevision(entity: Entity): Promise<void> { const value = entitySchema.parse(entity); return this.ensureRevision("entities", value.id, value); }
+  ensureClaimRevision(claim: Claim): Promise<void> { const value = claimSchema.parse(claim); return this.ensureRevision("claims", value.id, value); }
+  ensureEventRevision(event: CanonicalEvent): Promise<void> { const value = canonicalEventSchema.parse(event); return this.ensureRevision("events", value.id, value); }
+  ensureRuleRevision(rule: WorldRule): Promise<void> { const value = worldRuleSchema.parse(rule); return this.ensureRevision("rules", value.id, value); }
   getEntity(id: string): Promise<Entity> { return this.get("entities", id, entitySchema); }
   getClaim(id: string): Promise<Claim> { return this.get("claims", id, claimSchema); }
   getEvent(id: string): Promise<CanonicalEvent> { return this.get("events", id, canonicalEventSchema); }
@@ -106,6 +110,10 @@ export class CanonicalModelStore {
     const hash = contentHash(value);
     await writeImmutable(this.revisionPath(kind, id, hash), value);
     await atomicJson(this.refPath(kind, id), { version: 1, id, hash } satisfies StoredCanonicalRef);
+  }
+  private async ensureRevision(kind: CanonicalKind, idInput: string, value: unknown): Promise<void> {
+    const id = safeId(idInput);
+    await writeImmutable(this.revisionPath(kind, id, contentHash(value)), value);
   }
   private async get<T>(kind: CanonicalKind, idInput: string, schema: z.ZodType<T>): Promise<T> {
     const id = safeId(idInput);

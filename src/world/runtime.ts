@@ -68,6 +68,8 @@ export class WorldRuntime {
       id: newBranchId,
       name,
       ...(parent.sourceId ? { sourceId: parent.sourceId } : {}),
+      ...(parent.preparedRevisionHash ? { preparedRevisionHash: parent.preparedRevisionHash } : {}),
+      createdAt: new Date().toISOString(),
       parentBranchId,
       forkCommitId,
       headCommitId: forkCommitId,

@@ -15,6 +15,10 @@ export type PlayCommandOptions = {
   tuiMode?: TuiMode;
 };
 
+export function resolvePlaySessionContinuation(options: Pick<PlayCommandOptions, "continueSession" | "printPrompt">): boolean {
+  return options.continueSession ?? options.printPrompt === undefined;
+}
+
 async function optionalConfig(options: PlayCommandOptions) {
   try {
     return await loadConfig(options.configPath);
@@ -31,12 +35,13 @@ export async function playCommand(options: PlayCommandOptions): Promise<void> {
   const model = options.model ?? profile?.model;
   const saveSession = options.saveSession ?? true;
   const printMode = options.printPrompt !== undefined;
+  const continueSession = resolvePlaySessionContinuation(options);
   let textStarted = false;
   const session = await PiAgentSession.create({
     workspace,
     profile,
     model,
-    continueSession: options.continueSession,
+    continueSession,
     saveSession,
     ...(printMode ? { onRetry(event) {
       stderr.write(`\n${formatRetryNotice(event)}\n`);

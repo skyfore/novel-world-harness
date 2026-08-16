@@ -16,12 +16,13 @@ export { ActorModelStore, deterministicActorProposalSource, type CharacterGoal, 
 export { commitKnowledgeAwareAction, knowledgeAwareActionSchema, validateActionKnowledge, type ActionGateReport, type KnowledgeAwareAction } from "./world/action-gate.js";
 export { CanonicalModelStore, ProposalStore, type CanonicalKind, type CanonicalRevisionRef } from "./world/canonical-model.js";
 export { canonicalEventToPossibility } from "./world/canon-runtime.js";
-export { loadWorldContext, pinBranchPreparationContexts, WorldContextStore, type CanonicalSnapshot } from "./world/context.js";
+export { loadWorldContext, pinBranchPreparationContexts, WorldContextStore, type CanonicalSnapshot, type ScopedWorldArtifacts } from "./world/context.js";
 export { diffWorldBranches, diffWorldStates, type HistoryDifference, type KnowledgeDifference, type StateDifference, type WorldBranchDiff } from "./world/diff.js";
 export { WorldEngine, WorldProjector, validateEventProposal, type ResolvedWorldModelContext, type WorldContextResolver, type WorldModelContext } from "./world/engine.js";
 export { fsckWorld, type FsckIssue, type WorldFsckReport } from "./world/fsck.js";
 export { buildFrontier, evaluatePossibility, selectEligible, type Frontier, type PossibilityStatus, type SchedulerFactors } from "./world/frontier.js";
 export { InitialWorldStore, initialWorldSchema, type InitialWorld } from "./world/initial.js";
+export { createWorldBranch, type CreatedWorldBranch } from "./world/instance.js";
 export { KnowledgeProjector, type ActorWorldView } from "./world/knowledge.js";
 export { isNarrativeInterpretation, NarrativeMetaView, type NarrativeObservation, type NarrativeMetaKind } from "./world/meta.js";
 export { modelActorProposalSource, actorActionTemplateSchema, type ActorActionTemplate, type ActorReasoner, type ActorReasoningInput } from "./world/model-actor-policy.js";
@@ -30,11 +31,11 @@ export { NarrativeRenderer, type ActorNarrativeFrame, type NarrativeAdapter, typ
 export { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "./world/possibility-model.js";
 export { buildActorScopedActionContext, playerActionCandidateSchema, playerActionToKnowledgeAwareAction, playerTurnInputSchema, PlayerTurnService, validatePlayerActionScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionTranslator, type PlayerTurnInput, type PlayerTurnResult } from "./world/player-action.js";
 export { PlaySessionStore, activePlaySessionSchema, type ActivePlaySession } from "./world/play-session.js";
-export { choosePlayExperience, choosePlayInstance, choosePlayNovel, resolvePlayInstance, resolvePlayNovel, type AskPlayQuestion } from "./world/play-choice.js";
+export { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayNovel, createSourcePlayInstance, resolvePlayInstance, resolvePlayNovel, type AskPlayQuestion, type PlayInstanceLifecycleEvent, type PlayInstanceMode } from "./world/play-choice.js";
 export { inspectPlayExperience, listPlayableCharacters, performPlayTurn, resolveCharacter, resolveNovelSource, selectPlayExperience, type PlayExperienceCatalog, type PlayableCharacter, type PlayInstanceSummary, type PlayTurnOutcome, type SelectedPlayExperience } from "./world/play-experience.js";
 export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type CanonReplayResult, type IsolatedCanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";
 export { WorldRuntime, adjudicateActorCandidates, type MoveInput, type MoveResult } from "./world/runtime.js";
 export { WorldSnapshotStore, type WorldSnapshot } from "./world/snapshot.js";
 export { StateSchemaRegistry, DEFAULT_STATE_FIELDS, applyStateDelta, evaluatePredicate, validateEngineInvariants } from "./world/state.js";
 export { BranchStore, WorldObjectStore } from "./world/store.js";
-export { openWorkspaceWorld, type WorkspaceWorld } from "./world/workspace-runtime.js";
+export { openWorkspaceWorld, type WorkspaceWorld, type WorkspaceWorldOpenOptions } from "./world/workspace-runtime.js";

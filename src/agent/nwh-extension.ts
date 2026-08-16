@@ -24,8 +24,6 @@ import { prepareCompilerBatches, prepareOpeningWorldCompilerBatch, proposeMinima
 import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
 import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prepare.js";
-import { InitialWorldStore } from "../world/initial.js";
-import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { PlaySessionStore } from "../world/play-session.js";
@@ -40,7 +38,14 @@ import {
   resolveNovelSource,
   type SelectedPlayExperience,
 } from "../world/play-experience.js";
-import { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayNovel } from "../world/play-choice.js";
+import {
+  catalogForSource,
+  choosePlayExperience,
+  choosePlayInstance,
+  choosePlayNovel,
+  createSourcePlayInstance,
+  type PlayInstanceMode,
+} from "../world/play-choice.js";
 import { formatCharacters, formatInstances, formatNovels, formatProgress } from "../commands/catalog.js";
 import { createTuiUserQuestion } from "../util/tui-user-question.js";
 import type { UserQuestionCustomInput } from "../util/ask-user-question.js";
@@ -48,6 +53,7 @@ import { auditCompiler } from "../compiler/audit.js";
 import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
+import { createWorldBranch } from "../world/instance.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -70,6 +76,9 @@ const COMMAND_HELP = `NWH commands:
   /characters [instance] [novel] list characters from a novel at an instance head
   /play [character] [instance] [novel] choose a novel, then a character
   /world-resume [instance] [character] [novel] resume a saved or named instance
+  /continue [novel] [character] continue that novel's latest instance
+  /switch [novel] [instance] [character] switch novel, instance or character
+  /create-instance [novel] [instance] [character] create a fresh world instance
   /progress [instance]      show committed progress for an instance
   /leave                    leave player mode without deleting resume state
   /files [path filter]       list safe workspace files
@@ -232,9 +241,26 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         source?: string;
         preferActiveSource?: boolean;
         preferSavedCharacter?: boolean;
+        instanceMode?: PlayInstanceMode;
       } = {},
     ): Promise<SelectedPlayExperience | undefined> => {
-      const selection = await choosePlayExperience(workspace.root, input, createTuiUserQuestion(ctx.ui));
+      let selection: SelectedPlayExperience | undefined;
+      try {
+        selection = await choosePlayExperience(workspace.root, {
+          ...input,
+          ...(options.preparedCacheRoot ? { preparedCacheRoot: options.preparedCacheRoot } : {}),
+          onInstanceLifecycle: (event) => {
+            const action = event.type === "created" ? "Created" : event.type === "continued" ? "Continuing" : "Switched to";
+            ctx.ui.notify(
+              `${action} ${event.sourceTitle} instance '${event.branchId}'${event.preparedRevisionHash ? ` · revision ${event.preparedRevisionHash.slice(0, 12)}` : ""}.`,
+              "info",
+            );
+          },
+        }, createTuiUserQuestion(ctx.ui));
+      } catch (error) {
+        ctx.ui.notify(`Cannot enter novel world: ${error instanceof Error ? error.message : String(error)}`, "error");
+        return undefined;
+      }
       if (!selection) {
         ctx.ui.notify("Player selection cancelled; the current mode is unchanged.", "info");
         return undefined;
@@ -304,10 +330,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ? await choosePlayNovel(catalog, undefined, createTuiUserQuestion(ctx.ui), { preferActive: false })
         : undefined;
       if (catalog.novels.length && !sourceId) return true;
-      const instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
-      if (!instanceCatalog.instances.length) {
+      let instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
+      if (sourceId && !instanceCatalog.instances.length) {
+        await createSourcePlayInstance(workspace.root, catalog, sourceId, {
+          ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}),
+        });
+        instanceCatalog = catalogForSource(await inspectPlayExperience(workspace.root), sourceId);
         const source = catalog.novels.find((novel) => novel.id === sourceId);
-        throw new Error(`No playable instances exist for '${source?.title ?? sourceId}'. Run /prepare-all for that novel first.`);
+        ctx.ui.notify(`Created the first playable instance for ${source?.title ?? sourceId}.`, "info");
       }
       const branchId = await choosePlayInstance(workspace.root, undefined, createTuiUserQuestion(ctx.ui), instanceCatalog);
       if (!branchId) return true;
@@ -336,6 +366,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ...(actor ? { character: actor.id } : {}),
         preferActiveSource: false,
         preferSavedCharacter: false,
+        instanceMode: "continue",
       });
       return true;
     };
@@ -570,13 +601,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
           return;
         }
-        const initial = await new InitialWorldStore(workspace.root).get();
-        if (!initial) {
-          stopPrepareAll(ctx, "Cannot create a branch without an accepted initial world.", "error");
-          return;
-        }
-        const { engine } = await openWorkspaceWorld(workspace.root);
-        await engine.createBranch(state.branchId, state.branchId, initial.delta, initial.knowledge, state.sourceId);
+        await createWorldBranch(workspace.root, state.branchId, undefined, state.sourceId, options.preparedCacheRoot);
         await advancePrepareAll(ctx);
         return;
       }
@@ -848,11 +873,19 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ? await choosePlayNovel(catalog, requestedSource, createTuiUserQuestion(ctx.ui), { preferActive: false })
           : undefined;
         if (catalog.novels.length && !sourceId) return;
+        let instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
+        if (sourceId && !instanceCatalog.instances.length) {
+          await createSourcePlayInstance(workspace.root, catalog, sourceId, {
+            ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}),
+          });
+          instanceCatalog = catalogForSource(await inspectPlayExperience(workspace.root), sourceId);
+          ctx.ui.notify(`Created the first playable instance for the selected novel.`, "info");
+        }
         const branchId = await choosePlayInstance(
           workspace.root,
           requestedBranchId,
           createTuiUserQuestion(ctx.ui),
-          catalog,
+          instanceCatalog,
         );
         if (!branchId) return;
         const result = await listPlayableCharacters(workspace.root, {
@@ -873,6 +906,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(source ? { source } : {}),
           preferActiveSource: false,
           preferSavedCharacter: false,
+          instanceMode: "switch",
         });
       },
     });
@@ -885,6 +919,49 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(branchId ? { branchId } : {}),
           ...(character ? { character } : {}),
           ...(source ? { source } : {}),
+          instanceMode: "continue",
+        });
+      },
+    });
+
+    pi.registerCommand("continue", {
+      description: "Continue the latest saved instance for a novel",
+      handler: async (args, ctx) => {
+        const [source, character] = splitCommandArguments(args);
+        await activatePlayer(ctx, {
+          ...(source ? { source } : {}),
+          ...(character ? { character } : {}),
+          instanceMode: "continue",
+        });
+      },
+    });
+
+    pi.registerCommand("switch", {
+      description: "Switch to another novel, instance, or character",
+      handler: async (args, ctx) => {
+        const [source, branchId, character] = splitCommandArguments(args);
+        await activatePlayer(ctx, {
+          ...(source ? { source } : {}),
+          ...(branchId ? { branchId } : {}),
+          ...(character ? { character } : {}),
+          preferActiveSource: false,
+          preferSavedCharacter: true,
+          instanceMode: "switch",
+        });
+      },
+    });
+
+    pi.registerCommand("create-instance", {
+      description: "Create a fresh instance for a novel revision",
+      handler: async (args, ctx) => {
+        const [source, branchId, character] = splitCommandArguments(args);
+        await activatePlayer(ctx, {
+          ...(source ? { source } : {}),
+          ...(branchId ? { branchId } : {}),
+          ...(character ? { character } : {}),
+          preferActiveSource: false,
+          preferSavedCharacter: false,
+          instanceMode: "create",
         });
       },
     });

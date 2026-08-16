@@ -75,6 +75,12 @@ export type PreparedCacheRevision = {
   cachePath: string;
 };
 
+export type ActivePreparedNovel = {
+  bundleHash: string;
+  bundle: PreparedNovelBundle;
+  cachePath: string;
+};
+
 export class PreparedNovelCache {
   readonly root: string;
 
@@ -95,6 +101,20 @@ export class PreparedNovelCache {
       contentMd5: identity.contentMd5,
       cachePath: cached.cachePath,
       bundleHash: cached.manifest.bundleHash,
+    };
+  }
+
+  async loadActive(source: SourceDocument): Promise<ActivePreparedNovel | null> {
+    const identity = await sourceIdentity(this.workspaceRoot, source);
+    const cached = await this.readCached(identity.contentMd5);
+    if (!cached) return null;
+    assertSourceIdentity(cached.bundle, identity);
+    const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
+    if (layoutIssue) throw new Error(layoutIssue);
+    return {
+      bundleHash: cached.manifest.bundleHash,
+      bundle: cached.bundle,
+      cachePath: cached.cachePath,
     };
   }
 

@@ -4,36 +4,24 @@ import { z } from "zod";
 import { validateEventProposal } from "../world/engine.js";
 import { diffWorldBranches } from "../world/diff.js";
 import { fsckWorld } from "../world/fsck.js";
-import { InitialWorldStore } from "../world/initial.js";
 import { KnowledgeProjector } from "../world/knowledge.js";
 import { eventProposalSchema, predicateSchema, stateDeltaSchema, type CommitId } from "../world/model.js";
 import { NarrativeRenderer } from "../world/narrative.js";
 import { runIsolatedCanonReplay } from "../world/replay.js";
 import { WorldSnapshotStore } from "../world/snapshot.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
+import { createWorldBranch } from "../world/instance.js";
+
+export { createWorldBranch } from "../world/instance.js";
 
 async function openWorld(root: string) {
   const { engine, runtime, actorModels } = await openWorkspaceWorld(root);
   return { engine, actors: actorModels, runtime };
 }
 
-export async function worldCreateCommand(root: string, branchId: string, seedPath?: string, sourceId?: string): Promise<void> {
-  const { engine } = await openWorld(root);
-  const canonicalInitial = seedPath ? null : await new InitialWorldStore(root).get();
-  if (!seedPath && !canonicalInitial) {
-    throw new Error("No accepted initial world. Review and accept an initial-world proposal before creating a playable branch, or pass --seed explicitly.");
-  }
-  const seed = seedPath
-    ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8")))
-    : canonicalInitial!.delta;
-  const head = await engine.createBranch(
-    branchId,
-    branchId,
-    seed,
-    seedPath ? undefined : canonicalInitial?.knowledge,
-    sourceId,
-  );
-  stdout.write(`${branchId}\t${head}${canonicalInitial && !seedPath ? "\t[canonical initial world]" : ""}\n`);
+export async function worldCreateCommand(root: string, branchId: string, seedPath?: string, sourceId?: string, cacheRoot?: string): Promise<void> {
+  const created = await createWorldBranch(root, branchId, seedPath, sourceId, cacheRoot);
+  stdout.write(`${branchId}\t${created.head}${created.usedCanonicalInitial ? "\t[canonical initial world]" : ""}${created.preparedRevisionHash ? `\trevision=${created.preparedRevisionHash}` : ""}\n`);
 }
 
 export async function worldShowCommand(root: string, branchId: string): Promise<void> {

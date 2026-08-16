@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, MessageRenderer, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, MessageRenderer, ReplacedSessionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -125,6 +125,30 @@ function commandContext(notifications: string[], actions: { cleared: boolean; sh
   } as unknown as ExtensionCommandContext;
 }
 
+function sessionReplacingCommandContext(
+  previousNotifications: string[],
+  replacementNotifications: string[],
+  actions: { cleared: boolean },
+): ExtensionCommandContext {
+  let stale = false;
+  const replacementCtx = {
+    ui: { notify(message: string) { replacementNotifications.push(message); } },
+  } as unknown as ReplacedSessionContext;
+  return {
+    get ui() {
+      if (stale) throw new Error("stale command context");
+      return { notify(message: string) { previousNotifications.push(message); } };
+    },
+    isIdle: () => true,
+    newSession: async (options?: Parameters<ExtensionCommandContext["newSession"]>[0]) => {
+      actions.cleared = true;
+      stale = true;
+      await options?.withSession?.(replacementCtx);
+      return { cancelled: false };
+    },
+  } as unknown as ExtensionCommandContext;
+}
+
 function preparationContext(notifications: string[], questions: string[]): ExtensionCommandContext {
   return {
     ...commandContext(notifications, { cleared: false, shutdown: false }),
@@ -164,6 +188,20 @@ describe("NWH TUI extension", () => {
     expect(notifications[2]).toContain("/model");
     expect(actions).toEqual({ cleared: true, shutdown: true });
     expect(sentUserMessages).toEqual([]);
+  });
+
+  it("uses the replacement-session context after /clear", async () => {
+    const { commands } = await fixture();
+    const previousNotifications: string[] = [];
+    const replacementNotifications: string[] = [];
+    const actions = { cleared: false };
+    const ctx = sessionReplacingCommandContext(previousNotifications, replacementNotifications, actions);
+
+    await expect(commands.get("clear")?.handler("", ctx)).resolves.toBeUndefined();
+
+    expect(actions.cleared).toBe(true);
+    expect(previousNotifications).toEqual([]);
+    expect(replacementNotifications).toEqual(["Conversation history cleared."]);
   });
 
   it("parses CLI-compatible /reparse flags", () => {

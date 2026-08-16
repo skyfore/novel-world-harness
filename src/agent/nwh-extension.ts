@@ -2383,8 +2383,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       description: "Start a new NWH conversation",
       handler: async (_args, ctx) => {
         if (!guardForegroundIdle(ctx, "clear the conversation")) return;
-        const result = await ctx.newSession();
-        if (!result.cancelled) ctx.ui.notify("Conversation history cleared.", "info");
+        await ctx.newSession({
+          withSession: async (replacementCtx) => {
+            replacementCtx.ui.notify("Conversation history cleared.", "info");
+          },
+        });
       },
     });
 

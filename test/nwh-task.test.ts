@@ -176,6 +176,46 @@ describe("NWH long-running tasks", () => {
     expect(expanded).toContain("Public answer.");
   });
 
+  it("collapses a thinking block on thinking_end while the assistant message is still streaming", async () => {
+    const task = new NwhTask("stream", "Streaming task");
+    task.start(() => new Promise<void>(() => {}));
+    const message = fauxAssistantMessage([
+      fauxThinking("reasoning that has just completed"),
+      fauxText("The public answer is now streaming."),
+    ], { stopReason: "pending" });
+    task.appendAgentEvent({ type: "message_start", message });
+    task.appendAgentEvent({
+      type: "message_update",
+      message,
+      assistantMessageEvent: {
+        type: "thinking_end",
+        contentIndex: 0,
+        content: "reasoning that has just completed",
+      },
+    });
+
+    expect(task.snapshot.transcript[0]).toMatchObject({
+      kind: "assistant",
+      streaming: true,
+      completedThinkingBlocks: [0],
+    });
+
+    let collapsed = "";
+    let expanded = "";
+    const ui = taskUi((component) => {
+      collapsed = component.render(100).join("\n");
+      component.handleInput?.("ctrl+t");
+      expanded = component.render(100).join("\n");
+      component.handleInput?.("\x1b[D");
+    });
+
+    await expect(showNwhTask(ui, task, "/novel")).resolves.toBe("background");
+    expect(collapsed).toContain("Thinking complete");
+    expect(collapsed).not.toContain("reasoning that has just completed");
+    expect(collapsed).toContain("The public answer is now streaming.");
+    expect(expanded).toContain("reasoning that has just completed");
+  });
+
   it("keeps live output at the end and lets the foreground overlay page through earlier task events", async () => {
     const task = new NwhTask("reparse-source", "Reparse Novel");
     task.start(() => new Promise<void>(() => {}));

@@ -29,7 +29,7 @@ type NwhTaskTranscriptBase = {
 
 export type NwhTaskTranscriptEntry = NwhTaskTranscriptBase & (
   | { kind: "progress"; message: string }
-  | { kind: "assistant"; message: AssistantMessage; streaming: boolean }
+  | { kind: "assistant"; message: AssistantMessage; streaming: boolean; completedThinkingBlocks: number[] }
   | {
     kind: "tool";
     toolCallId: string;
@@ -73,6 +73,7 @@ export class NwhTask {
   private completionPromise: Promise<void> = Promise.resolve();
   private nextTranscriptId = 1;
   private pendingAssistantMessage?: AssistantMessage;
+  private readonly completedThinkingBlocks = new Set<number>();
   private assistantUpdateTimer?: NodeJS.Timeout;
 
   constructor(id: string, title: string, activity = "Starting") {
@@ -142,11 +143,22 @@ export class NwhTask {
     if (this.state.status !== "running" && this.state.status !== "cancelling") return;
     if (event.type === "message_start" && event.message.role === "assistant") {
       this.flushAssistantUpdate();
-      this.appendTranscript({ kind: "assistant", message: sanitizeAssistantMessage(event.message), streaming: true });
+      this.completedThinkingBlocks.clear();
+      this.appendTranscript({
+        kind: "assistant",
+        message: sanitizeAssistantMessage(event.message),
+        streaming: true,
+        completedThinkingBlocks: [],
+      });
       return;
     }
     if (event.type === "message_update" && event.message.role === "assistant") {
+      const lifecycleBoundary = this.trackThinkingLifecycle(event);
       this.pendingAssistantMessage = event.message;
+      if (lifecycleBoundary) {
+        this.flushAssistantUpdate();
+        return;
+      }
       if (!this.assistantUpdateTimer) {
         this.assistantUpdateTimer = setTimeout(
           () => this.flushAssistantUpdate(),
@@ -162,8 +174,16 @@ export class NwhTask {
       this.assistantUpdateTimer = undefined;
       const entry = this.findStreamingAssistant();
       const message = sanitizeAssistantMessage(event.message);
-      if (entry) this.replaceTranscript(entry, { ...entry, revision: entry.revision + 1, message, streaming: false });
-      else this.appendTranscript({ kind: "assistant", message, streaming: false });
+      this.completeAllThinking(message);
+      const completedThinkingBlocks = [...this.completedThinkingBlocks].sort((left, right) => left - right);
+      if (entry) this.replaceTranscript(entry, {
+        ...entry,
+        revision: entry.revision + 1,
+        message,
+        streaming: false,
+        completedThinkingBlocks,
+      });
+      else this.appendTranscript({ kind: "assistant", message, streaming: false, completedThinkingBlocks });
       return;
     }
     if (event.type === "tool_execution_start") {
@@ -230,6 +250,37 @@ export class NwhTask {
     );
   }
 
+  private trackThinkingLifecycle(event: Extract<AgentSessionEvent, { type: "message_update" }>): boolean {
+    const update = event.assistantMessageEvent;
+    if (!("contentIndex" in update) || event.message.role !== "assistant") return false;
+    const contentIndex = typeof update.contentIndex === "number" ? update.contentIndex : undefined;
+    if (contentIndex === undefined) return false;
+    if (update.type === "thinking_start") {
+      this.completedThinkingBlocks.delete(contentIndex);
+      return false;
+    }
+    if (update.type === "thinking_end") {
+      this.completedThinkingBlocks.add(contentIndex);
+      return true;
+    }
+    if (update.type === "text_start" || update.type === "text_delta" || update.type === "text_end" || update.type === "toolcall_start") {
+      let changed = false;
+      for (let index = 0; index < Math.min(contentIndex, event.message.content.length); index += 1) {
+        if (event.message.content[index]?.type !== "thinking" || this.completedThinkingBlocks.has(index)) continue;
+        this.completedThinkingBlocks.add(index);
+        changed = true;
+      }
+      return changed;
+    }
+    return false;
+  }
+
+  private completeAllThinking(message: AssistantMessage): void {
+    for (let index = 0; index < message.content.length; index += 1) {
+      if (message.content[index]?.type === "thinking") this.completedThinkingBlocks.add(index);
+    }
+  }
+
   private flushAssistantUpdate(): void {
     if (this.assistantUpdateTimer) clearTimeout(this.assistantUpdateTimer);
     this.assistantUpdateTimer = undefined;
@@ -238,8 +289,9 @@ export class NwhTask {
     if (!pending) return;
     const entry = this.findStreamingAssistant();
     const message = sanitizeAssistantMessage(pending);
-    if (entry) this.replaceTranscript(entry, { ...entry, revision: entry.revision + 1, message });
-    else this.appendTranscript({ kind: "assistant", message, streaming: true });
+    const completedThinkingBlocks = [...this.completedThinkingBlocks].sort((left, right) => left - right);
+    if (entry) this.replaceTranscript(entry, { ...entry, revision: entry.revision + 1, message, completedThinkingBlocks });
+    else this.appendTranscript({ kind: "assistant", message, streaming: true, completedThinkingBlocks });
   }
 
   private appendTranscript(entry: NewNwhTaskTranscriptEntry): void {
@@ -497,11 +549,12 @@ class NwhTaskView implements Component {
     if (entry.kind === "assistant") {
       const component = new AssistantMessageComponent(
         undefined,
-        !entry.streaming && !this.thinkingExpanded,
+        false,
         getMarkdownTheme(),
         "Thinking complete · Ctrl+T to expand",
       );
       component.updateContent(entry.message, entry.streaming);
+      this.configureThinking(component, entry);
       return component;
     }
     const component = new ToolExecutionComponent(entry.toolName, entry.toolCallId, entry.args, {}, undefined, this.tui, this.cwd);
@@ -514,8 +567,8 @@ class NwhTaskView implements Component {
 
   private updateTranscriptComponent(component: Component, entry: NwhTaskTranscriptEntry): void {
     if (entry.kind === "assistant" && component instanceof AssistantMessageComponent) {
-      component.setHideThinkingBlock(!entry.streaming && !this.thinkingExpanded);
       component.updateContent(entry.message, entry.streaming);
+      this.configureThinking(component, entry);
     } else if (entry.kind === "tool" && component instanceof ToolExecutionComponent) {
       component.updateArgs(entry.args);
       component.setArgsComplete();
@@ -529,9 +582,22 @@ class NwhTaskView implements Component {
     for (const entry of this.task.snapshot.transcript) {
       const component = this.renderedEntries.get(entry.id)?.component;
       if (entry.kind === "assistant" && component instanceof AssistantMessageComponent) {
-        component.setHideThinkingBlock(!entry.streaming && !this.thinkingExpanded);
+        component.setThinkingDisplayMode(this.thinkingExpanded ? "expanded" : "auto");
       } else if (entry.kind === "tool" && component instanceof ToolExecutionComponent) {
         component.setExpanded(this.toolsExpanded);
+      }
+    }
+  }
+
+  private configureThinking(
+    component: AssistantMessageComponent,
+    entry: Extract<NwhTaskTranscriptEntry, { kind: "assistant" }>,
+  ): void {
+    component.setThinkingDisplayMode(this.thinkingExpanded ? "expanded" : "auto");
+    const completed = new Set(entry.completedThinkingBlocks);
+    for (let index = 0; index < entry.message.content.length; index += 1) {
+      if (entry.message.content[index]?.type === "thinking") {
+        component.setThinkingBlockComplete(index, completed.has(index));
       }
     }
   }

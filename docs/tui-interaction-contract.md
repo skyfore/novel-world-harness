@@ -40,11 +40,14 @@ prints a result.
 ## Surfaces
 
 - Main Pi turns use Pi's native assistant, thinking, and tool components.
-- Isolated scene sessions bridge Pi's native provider/model identity, thinking,
-  text deltas, retry events, and capture-tool lifecycle into an above-editor
-  surface. The accepted text is checked against that live stream before the
-  same prose is persisted as a clean narrator message. A rejected first draft
-  remains visible while its replacement streams.
+- Isolated scene sessions bridge Pi assistant events into a TUI-only transient
+  message in Pi's native scrollable transcript. Provider/model, attempt, retry,
+  and capture-tool phases use compact footer status. The accepted text is
+  checked against the live stream before replacing it with a clean narrator
+  message; a rejected first draft is removed before its replacement streams.
+- Thinking defaults to `auto`: an active block is visible, `thinking_end`
+  collapses it, text-start and message-end are fallbacks, and Pi's existing
+  Ctrl+T binding expands completed blocks without an NWH key interceptor.
 - Every accepted scene opens an AskUserQuestion-style next-move dialog with
   2-4 actor-scoped suggestions and a free-form action path. Suggestions are
   capture-only proposals; selection still enters the normal deterministic

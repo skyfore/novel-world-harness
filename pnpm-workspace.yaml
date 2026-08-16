@@ -10,3 +10,5 @@ minimumReleaseAgeExclude:
   - '@earendil-works/pi-protocol@0.84.2'
   - '@earendil-works/pi-telemetry@0.84.2'
   - '@earendil-works/pi-tui@0.84.2'
+patchedDependencies:
+  '@earendil-works/pi-coding-agent@0.84.2': patches/@earendil-works__pi-coding-agent@0.84.2.patch

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getMarkdownTheme, type AgentSessionEvent, type ExtensionAPI, type ExtensionContext, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme, type AgentSessionEvent, type ExtensionAPI, type ExtensionContext, type ExtensionFactory, type TransientAssistantStream } from "@earendil-works/pi-coding-agent";
 import { Key, Markdown, Text, matchesKey } from "@earendil-works/pi-tui";
 import { expandFileMentions } from "./file-mentions.js";
 import { createNwhWelcomeHeader, hasPlayerConversation, isFreshConversation, NWH_WORKING_FRAMES } from "./nwh-welcome.js";
@@ -473,87 +473,83 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       purpose: PlayScenePurpose,
       signal: AbortSignal,
     ): { observer: PlayerSceneNarrationObserver; verifyFinalText: (text: string) => void; close: () => void } => {
-      const widgetAvailable = ctx.mode === "tui" && typeof ctx.ui.setWidget === "function";
       let content = "";
-      let thinking = "";
       let retryNotice = "";
       let toolActivity = "";
-      let toolArguments = "";
       let model = "";
       let attempt: 1 | 2 = 1;
       let sawNativeEvents = false;
-      const rejectedAttempts: Array<{ attempt: number; content: string; thinking: string }> = [];
-      let renderTimer: NodeJS.Timeout | undefined;
-      const render = () => {
-        renderTimer = undefined;
-        if (!widgetAvailable || signal.aborted) return;
-        const title = purpose === "opening"
-          ? "✦ 故事正在展开"
+      let messageSequence = 0;
+      let currentStream: TransientAssistantStream | undefined;
+      const streams: TransientAssistantStream[] = [];
+      const title = () => {
+        return purpose === "opening"
+          ? "故事正在展开"
           : purpose === "turn"
-            ? "✦ 世界正在回应"
-            : "✦ 正在进入当前场景";
-        ctx.ui.setWidget(
-          "nwh-player-scene-stream",
-          [
-            ctx.ui.theme.fg("accent", title),
-            ctx.ui.theme.fg("dim", `${model || "provider/model pending"} · attempt ${attempt} · live LLM stream`),
-            ...rejectedAttempts.flatMap((previous) => [
-              ctx.ui.theme.fg("warning", `Attempt ${previous.attempt} rejected by scene validation; streamed output retained for inspection:`),
-              ...(previous.thinking ? [ctx.ui.theme.fg("dim", `[thinking]\n${previous.thinking}`)] : []),
-              ...(previous.content ? [previous.content] : []),
-            ]),
-            ...(thinking ? [ctx.ui.theme.fg("dim", `[thinking · live]\n${thinking}`)] : []),
-            ...(content ? [content] : [ctx.ui.theme.fg("dim", "Waiting for the first provider stream event…")]),
-            ...(toolActivity ? [ctx.ui.theme.fg("dim", `${toolActivity}${toolArguments ? `\n${toolArguments}` : ""}`)] : []),
-            ...(retryNotice ? [ctx.ui.theme.fg("dim", retryNotice)] : []),
-          ],
-          { placement: "aboveEditor" },
+            ? "世界正在回应"
+            : "正在进入当前场景";
+      };
+      const updateStatus = () => {
+        if (ctx.mode !== "tui" || signal.aborted) return;
+        const activity = retryNotice || toolActivity || "实时生成场景";
+        ctx.ui.setStatus(
+          "nwh-play-opening",
+          ctx.ui.theme.fg("dim", `NWH · ${title()} · ${model || "模型连接中"} · 第 ${attempt}/2 稿 · ${activity}`),
         );
       };
-      const renderSoon = () => {
-        if (!widgetAvailable || renderTimer) return;
-        renderTimer = setTimeout(render, 32);
-        renderTimer.unref();
+      const disposeStreams = () => {
+        for (const stream of streams.splice(0)) stream.dispose();
+        currentStream = undefined;
       };
+      const openStream = () => {
+        if (ctx.mode !== "tui" || typeof ctx.ui.openTransientAssistantStream !== "function") return undefined;
+        const stream = ctx.ui.openTransientAssistantStream(
+          `nwh-player-scene-${attempt}-${++messageSequence}`,
+          {
+            hiddenThinkingLabel: "思考已隐藏 · Ctrl+T 显示",
+            completedThinkingLabel: "思考已完成 · Ctrl+T 展开",
+          },
+        );
+        streams.push(stream);
+        currentStream = stream;
+        return stream;
+      };
+      const streamForMessage = () => currentStream ?? openStream();
       const observer: PlayerSceneNarrationObserver = {
         signal,
         onAttempt(nextAttempt) {
-          if (nextAttempt > attempt && (content || thinking)) {
-            rejectedAttempts.push({ attempt, content, thinking });
-          }
+          if (nextAttempt > attempt) disposeStreams();
           attempt = nextAttempt;
           content = "";
-          thinking = "";
           toolActivity = "";
-          toolArguments = "";
-          retryNotice = nextAttempt === 2 ? "首稿未通过场景完整性校验；正在流式生成第二稿。" : "";
-          render();
+          retryNotice = nextAttempt === 2 ? "首稿未通过校验，正在重写" : "";
+          updateStatus();
         },
         onText(delta) {
           if (sawNativeEvents) return;
-          const firstDelta = content.length === 0;
           content += delta;
-          if (firstDelta) render();
-          else renderSoon();
+          updateStatus();
         },
         onRetry(message) {
           retryNotice = message;
-          render();
+          updateStatus();
         },
         onEvent(event: AgentSessionEvent) {
           sawNativeEvents = true;
           if ((event.type === "message_start" || event.type === "message_update" || event.type === "message_end") && event.message.role === "assistant") {
             model = `${event.message.provider}/${event.message.model}`;
           }
+          if (event.type === "message_start" && event.message.role === "assistant") {
+            currentStream = openStream();
+            currentStream?.update(event.message);
+            retryNotice = "";
+            updateStatus();
+            return;
+          }
           if (event.type === "message_update" && event.message.role === "assistant") {
             if (event.assistantMessageEvent.type === "text_delta") content += event.assistantMessageEvent.delta;
-            if (event.assistantMessageEvent.type === "thinking_delta") thinking += event.assistantMessageEvent.delta;
-            if (event.assistantMessageEvent.type === "toolcall_start") {
-              toolArguments = "";
-              toolActivity = "↳ model tool call stream";
-            }
-            if (event.assistantMessageEvent.type === "toolcall_delta") toolArguments += event.assistantMessageEvent.delta;
-            renderSoon();
+            streamForMessage()?.update(event.message, event.assistantMessageEvent);
+            updateStatus();
             return;
           }
           if (event.type === "message_end" && event.message.role === "assistant") {
@@ -562,32 +558,31 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
                 .flatMap((block) => block.type === "text" ? [block.text] : [])
                 .join("");
             }
-            if (!thinking) {
-              thinking = event.message.content
-                .flatMap((block) => block.type === "thinking" ? [block.thinking] : [])
-                .join("");
-            }
-            render();
+            streamForMessage()?.complete(event.message);
+            currentStream = undefined;
+            updateStatus();
             return;
           }
           if (event.type === "tool_execution_start") {
-            toolActivity = `↳ model tool: ${event.toolName} (arguments received; capture-only)`;
-            render();
+            toolActivity = event.toolName === "propose_player_choices"
+              ? "正在整理可选行动"
+              : `正在执行 ${event.toolName}`;
+            updateStatus();
             return;
           }
           if (event.type === "tool_execution_end") {
-            toolActivity = `↳ model tool: ${event.toolName} ${event.isError ? "failed" : "completed"}`;
-            render();
+            toolActivity = event.isError ? `${event.toolName} 执行失败` : "可选行动已生成";
+            updateStatus();
             return;
           }
           if (event.type === "auto_retry_start") {
-            retryNotice = `Provider retry ${event.attempt}/${event.maxAttempts} in ${Math.ceil(event.delayMs / 1_000)}s: ${event.errorMessage}`;
-            render();
+            retryNotice = `连接重试 ${event.attempt}/${event.maxAttempts}，${Math.ceil(event.delayMs / 1_000)} 秒后继续`;
+            updateStatus();
             return;
           }
           if (event.type === "auto_retry_end") {
-            retryNotice = event.success ? `Provider retry ${event.attempt} succeeded.` : `Provider retry ${event.attempt} failed: ${event.finalError ?? "unknown error"}`;
-            render();
+            retryNotice = event.success ? "连接已恢复" : `连接重试 ${event.attempt} 失败`;
+            updateStatus();
           }
         },
       };
@@ -600,8 +595,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           }
         },
         close() {
-          if (renderTimer) clearTimeout(renderTimer);
-          if (widgetAvailable) ctx.ui.setWidget("nwh-player-scene-stream", undefined, { placement: "aboveEditor" });
+          disposeStreams();
         },
       };
     };

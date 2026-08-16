@@ -60,9 +60,10 @@ describe("PiAgentSession", () => {
     expect(session.messageCount).toBe(0);
     expect(session.sessionFile).toBeUndefined();
     const settings = (session as unknown as {
-      runtimeHost: { services: { settingsManager: { getHideThinkingBlock(): boolean; getFullscreenExitOutput(): string } } };
+      runtimeHost: { services: { settingsManager: { getHideThinkingBlock(): boolean; getThinkingDisplayMode(): string; getFullscreenExitOutput(): string } } };
     }).runtimeHost.services.settingsManager;
     expect(settings.getHideThinkingBlock()).toBe(false);
+    expect(settings.getThinkingDisplayMode()).toBe("auto");
     expect(settings.getFullscreenExitOutput()).toBe("transcript");
     await session.dispose();
   });

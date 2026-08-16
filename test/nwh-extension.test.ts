@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, MessageRenderer, ReplacedSessionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { fauxAssistantMessage, fauxText, fauxThinking } from "@earendil-works/pi-ai";
+import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, MessageRenderer, ReplacedSessionContext, ToolDefinition, TransientAssistantStream, TransientAssistantStreamOptions } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage, fauxText, fauxThinking, type AssistantMessage, type AssistantMessageEvent } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createNwhExtension,
@@ -28,6 +28,40 @@ function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
+}
+
+type RecordedTransientStream = {
+  key: string;
+  options?: TransientAssistantStreamOptions;
+  updates: AssistantMessage[];
+  events: AssistantMessageEvent[];
+  completed?: AssistantMessage;
+  disposed: boolean;
+};
+
+function transientStreamRecorder(streams: RecordedTransientStream[]) {
+  return (key: string, options?: TransientAssistantStreamOptions): TransientAssistantStream => {
+    const recorded: RecordedTransientStream = {
+      key,
+      ...(options ? { options } : {}),
+      updates: [],
+      events: [],
+      disposed: false,
+    };
+    streams.push(recorded);
+    return {
+      update(message, event) {
+        recorded.updates.push(structuredClone(message));
+        if (event) recorded.events.push(structuredClone(event));
+      },
+      complete(message) {
+        recorded.completed = structuredClone(message);
+      },
+      dispose() {
+        recorded.disposed = true;
+      },
+    };
+  };
 }
 
 afterEach(async () => {
@@ -763,11 +797,25 @@ describe("NWH TUI extension", () => {
       undefined,
       undefined,
       async (_frame, _purpose, observer) => {
+        const firstDelta = "黄昏的微光沿着门边慢慢退去";
         observer?.onAttempt?.(1);
-        observer?.onText?.("黄昏的微光沿着门边慢慢退去");
+        observer?.onEvent?.({ type: "message_start", message: fauxAssistantMessage([]) } as never);
+        const firstMessage = fauxAssistantMessage([fauxText(firstDelta)]);
+        observer?.onEvent?.({
+          type: "message_update",
+          message: firstMessage,
+          assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: firstDelta },
+        } as never);
         started.resolve();
         await release.promise;
-        observer?.onText?.("，你听见近处的风声。");
+        const remaining = finalNarration.slice(firstDelta.length);
+        const finalMessage = fauxAssistantMessage([fauxText(finalNarration)]);
+        observer?.onEvent?.({
+          type: "message_update",
+          message: finalMessage,
+          assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: remaining },
+        } as never);
+        observer?.onEvent?.({ type: "message_end", message: finalMessage } as never);
         return finalNarration;
       },
     );
@@ -778,14 +826,16 @@ describe("NWH TUI extension", () => {
       version: 1,
       operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
     });
-    const widgets: Array<string[] | undefined> = [];
+    const streams: RecordedTransientStream[] = [];
+    const widgetKeys: string[] = [];
     const ctx = {
       mode: "tui",
       ui: {
         notify: () => undefined,
         setStatus: () => undefined,
         setWorkingMessage: () => undefined,
-        setWidget: (_key: string, content: string[] | undefined) => widgets.push(content),
+        openTransientAssistantStream: transientStreamRecorder(streams),
+        setWidget: (key: string, content: string[] | undefined) => { if (content) widgetKeys.push(key); },
         theme: { fg: (_color: string, text: string) => text },
       },
     } as unknown as ExtensionCommandContext;
@@ -793,14 +843,20 @@ describe("NWH TUI extension", () => {
     const entering = commands.get("play")!.handler("hero main", ctx);
     await started.promise;
 
-    expect(widgets.flatMap((content) => content ?? []).join("\n")).toContain("黄昏的微光沿着门边慢慢退去");
+    expect(streams[0]?.updates.at(-1)?.content).toContainEqual(expect.objectContaining({
+      type: "text",
+      text: "黄昏的微光沿着门边慢慢退去",
+    }));
+    expect(widgetKeys).not.toContain("nwh-player-scene-stream");
     expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
 
     release.resolve();
     await entering;
 
     expect(sentMessages).toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: finalNarration, display: true }));
-    expect(widgets.at(-1)).toBeUndefined();
+    expect(streams).toHaveLength(1);
+    expect(streams[0]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: finalNarration }));
+    expect(streams[0]?.disposed).toBe(true);
   });
 
   it("returns from session_start before generating a restored world's scene", async () => {
@@ -1071,6 +1127,11 @@ describe("NWH TUI extension", () => {
           message: thinking,
           assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "先确认角色可见范围", partial: thinking },
         } as never);
+        observer?.onEvent?.({
+          type: "message_update",
+          message: thinking,
+          assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "先确认角色可见范围", partial: thinking },
+        } as never);
         const text = fauxAssistantMessage([fauxThinking("先确认角色可见范围"), fauxText(narration)]);
         observer?.onEvent?.({
           type: "message_update",
@@ -1088,30 +1149,98 @@ describe("NWH TUI extension", () => {
       version: 1,
       operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
     });
-    const widgets: Array<string[] | undefined> = [];
+    const streams: RecordedTransientStream[] = [];
+    const statuses: string[] = [];
+    const widgetKeys: string[] = [];
     const ctx = {
       mode: "tui",
       ui: {
         notify: () => undefined,
-        setStatus: () => undefined,
+        setStatus: (_key: string, status: string | undefined) => { if (status) statuses.push(status); },
         setWorkingMessage: () => undefined,
-        setWidget: (_key: string, content: string[] | undefined) => widgets.push(content),
+        openTransientAssistantStream: transientStreamRecorder(streams),
+        setWidget: (key: string, content: string[] | undefined) => { if (content) widgetKeys.push(key); },
         theme: { fg: (_color: string, text: string) => text },
       },
     } as unknown as ExtensionCommandContext;
 
     await commands.get("play")!.handler("hero main", ctx);
 
-    const live = widgets.flatMap((content) => content ?? []).join("\n");
-    expect(live).toContain("faux/faux-1");
-    expect(live).toContain("[thinking · live]");
-    expect(live).toContain("先确认角色可见范围");
-    expect(live).toContain(narration);
+    expect(widgetKeys).not.toContain("nwh-player-scene-stream");
+    expect(statuses.join("\n")).toContain("faux/faux-1");
+    expect(streams).toHaveLength(1);
+    expect(streams[0]?.events.map((event) => event.type)).toEqual([
+      "thinking_delta",
+      "thinking_end",
+      "text_delta",
+    ]);
+    expect(streams[0]?.updates.at(-1)?.content).toContainEqual(expect.objectContaining({ type: "text", text: narration }));
+    expect(streams[0]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: narration }));
+    expect(streams[0]?.disposed).toBe(true);
     expect(sentMessages).toContainEqual(expect.objectContaining({
       customType: "nwh-narrator",
       content: narration,
       display: true,
     }));
+  });
+
+  it("disposes a rejected scene stream before mounting the replacement attempt", async () => {
+    const rejected = "首稿只是一段不足以成立的场景。";
+    const accepted = "夜色压低了远处的轮廓，你仍站在尚未被下一次行动改变的位置。近处能够确认的声音和光线都属于此刻，没有隐藏的命运替你越过选择。你可以先观察眼前，也可以整理已知线索，或者立即采取最迫切的行动。";
+    const { commands, root, sentMessages } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async (_frame, _purpose, observer) => {
+        observer?.onAttempt?.(1);
+        const first = fauxAssistantMessage([fauxText(rejected)]);
+        observer?.onEvent?.({ type: "message_start", message: fauxAssistantMessage([]) } as never);
+        observer?.onEvent?.({
+          type: "message_update",
+          message: first,
+          assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: rejected },
+        } as never);
+        observer?.onEvent?.({ type: "message_end", message: first } as never);
+        observer?.onAttempt?.(2);
+        const second = fauxAssistantMessage([fauxText(accepted)]);
+        observer?.onEvent?.({ type: "message_start", message: fauxAssistantMessage([]) } as never);
+        observer?.onEvent?.({
+          type: "message_update",
+          message: second,
+          assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: accepted },
+        } as never);
+        observer?.onEvent?.({ type: "message_end", message: second } as never);
+        return accepted;
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const streams: RecordedTransientStream[] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        setStatus: () => undefined,
+        setWorkingMessage: () => undefined,
+        openTransientAssistantStream: transientStreamRecorder(streams),
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")!.handler("hero main", ctx);
+
+    expect(streams).toHaveLength(2);
+    expect(streams[0]).toMatchObject({ disposed: true });
+    expect(streams[1]).toMatchObject({ disposed: true });
+    expect(streams[1]?.completed?.content).toContainEqual(expect.objectContaining({ type: "text", text: accepted }));
+    expect(sentMessages).toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: accepted }));
+    expect(sentMessages).not.toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: rejected }));
   });
 
   it("rejects a settled narrator result that differs from the native text stream", async () => {

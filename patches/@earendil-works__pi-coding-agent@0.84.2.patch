@@ -1,0 +1,650 @@
+diff --git a/dist/core/extensions/index.d.ts b/dist/core/extensions/index.d.ts
+index 901326b015de4617b3a61b008e290e353b0c7142..410f9480786682e8befd181942a1b7ece21a73f3 100644
+--- a/dist/core/extensions/index.d.ts
++++ b/dist/core/extensions/index.d.ts
+@@ -6,7 +6,7 @@ export type { SourceInfo } from "../source-info.ts";
+ export { createExtensionRuntime, discoverAndLoadExtensions, loadExtensionFromFactory, loadExtensions, } from "./loader.ts";
+ export type { ExtensionErrorListener, ForkHandler, NavigateTreeHandler, NewSessionHandler, ShutdownHandler, SwitchSessionHandler, } from "./runner.ts";
+ export { ExtensionRunner } from "./runner.ts";
+-export type { AfterProviderResponseEvent, AgentEndEvent, AgentSettledEvent, AgentStartEvent, AgentToolResult, AgentToolUpdateCallback, AppendEntryHandler, AppKeybinding, AutocompleteProviderFactory, BashToolCallEvent, BashToolResultEvent, BeforeAgentStartEvent, BeforeAgentStartEventResult, BeforeProviderHeadersEvent, BeforeProviderRequestEvent, BeforeProviderRequestEventResult, BuildSystemPromptOptions, CompactOptions, ContextEvent, ContextEventResult, ContextUsage, CustomToolCallEvent, CustomToolResultEvent, EditorFactory, EditToolCallEvent, EditToolResultEvent, EntryRenderer, EntryRenderOptions, ExecOptions, ExecResult, Extension, ExtensionActions, ExtensionAPI, ExtensionCommandContext, ExtensionCommandContextActions, ExtensionContext, ExtensionContextActions, ExtensionError, ExtensionEvent, ExtensionFactory, ExtensionFlag, ExtensionHandler, ExtensionMode, ExtensionRuntime, ExtensionShortcut, ExtensionUIContext, ExtensionUIDialogOptions, ExtensionWidgetOptions, FindToolCallEvent, FindToolResultEvent, GetActiveToolsHandler, GetAllToolsHandler, GetCommandsHandler, GetThinkingLevelHandler, GrepToolCallEvent, GrepToolResultEvent, InlineExtension, InputEvent, InputEventResult, InputSource, KeybindingsManager, LoadExtensionsResult, LsToolCallEvent, LsToolResultEvent, MarkdownTransformContext, MarkdownTransformer, MessageEndEvent, MessageRenderer, MessageRenderOptions, MessageStartEvent, MessageUpdateEvent, ModelSelectEvent, ModelSelectSource, ProjectTrustContext, ProjectTrustEvent, ProjectTrustEventDecision, ProjectTrustEventResult, ProjectTrustHandler, ProviderConfig, ProviderModelConfig, ReadToolCallEvent, ReadToolResultEvent, RegisteredCommand, RegisteredTool, ReplacedSessionContext, ResolvedCommand, ResourcesDiscoverEvent, ResourcesDiscoverResult, SendMessageHandler, SendUserMessageHandler, SessionBeforeCompactEvent, SessionBeforeCompactResult, SessionBeforeForkEvent, SessionBeforeForkResult, SessionBeforeSwitchEvent, SessionBeforeSwitchResult, SessionBeforeTreeEvent, SessionBeforeTreeResult, SessionCompactEvent, SessionEvent, SessionInfoChangedEvent, SessionShutdownEvent, SessionStartEvent, SessionTreeEvent, SetActiveToolsHandler, SetLabelHandler, SetModelHandler, SetThinkingLevelHandler, TerminalInputHandler, ToolCallEvent, ToolCallEventResult, ToolDefinition, ToolExecutionEndEvent, ToolExecutionMode, ToolExecutionStartEvent, ToolExecutionUpdateEvent, ToolInfo, ToolRenderResultOptions, ToolResultEvent, ToolResultEventResult, TreePreparation, TurnEndEvent, TurnStartEvent, UserBashEvent, UserBashEventResult, WidgetPlacement, WorkingIndicatorOptions, WriteToolCallEvent, WriteToolResultEvent, } from "./types.ts";
++export type { AfterProviderResponseEvent, AgentEndEvent, AgentSettledEvent, AgentStartEvent, AgentToolResult, AgentToolUpdateCallback, AppendEntryHandler, AppKeybinding, AutocompleteProviderFactory, BashToolCallEvent, BashToolResultEvent, BeforeAgentStartEvent, BeforeAgentStartEventResult, BeforeProviderHeadersEvent, BeforeProviderRequestEvent, BeforeProviderRequestEventResult, BuildSystemPromptOptions, CompactOptions, ContextEvent, ContextEventResult, ContextUsage, CustomToolCallEvent, CustomToolResultEvent, EditorFactory, EditToolCallEvent, EditToolResultEvent, EntryRenderer, EntryRenderOptions, ExecOptions, ExecResult, Extension, ExtensionActions, ExtensionAPI, ExtensionCommandContext, ExtensionCommandContextActions, ExtensionContext, ExtensionContextActions, ExtensionError, ExtensionEvent, ExtensionFactory, ExtensionFlag, ExtensionHandler, ExtensionMode, ExtensionRuntime, ExtensionShortcut, ExtensionUIContext, ExtensionUIDialogOptions, ExtensionWidgetOptions, FindToolCallEvent, FindToolResultEvent, GetActiveToolsHandler, GetAllToolsHandler, GetCommandsHandler, GetThinkingLevelHandler, GrepToolCallEvent, GrepToolResultEvent, InlineExtension, InputEvent, InputEventResult, InputSource, KeybindingsManager, LoadExtensionsResult, LsToolCallEvent, LsToolResultEvent, MarkdownTransformContext, MarkdownTransformer, MessageEndEvent, MessageRenderer, MessageRenderOptions, MessageStartEvent, MessageUpdateEvent, ModelSelectEvent, ModelSelectSource, ProjectTrustContext, ProjectTrustEvent, ProjectTrustEventDecision, ProjectTrustEventResult, ProjectTrustHandler, ProviderConfig, ProviderModelConfig, ReadToolCallEvent, ReadToolResultEvent, RegisteredCommand, RegisteredTool, ReplacedSessionContext, ResolvedCommand, ResourcesDiscoverEvent, ResourcesDiscoverResult, SendMessageHandler, SendUserMessageHandler, SessionBeforeCompactEvent, SessionBeforeCompactResult, SessionBeforeForkEvent, SessionBeforeForkResult, SessionBeforeSwitchEvent, SessionBeforeSwitchResult, SessionBeforeTreeEvent, SessionBeforeTreeResult, SessionCompactEvent, SessionEvent, SessionInfoChangedEvent, SessionShutdownEvent, SessionStartEvent, SessionTreeEvent, SetActiveToolsHandler, SetLabelHandler, SetModelHandler, SetThinkingLevelHandler, TerminalInputHandler, ToolCallEvent, ToolCallEventResult, ToolDefinition, ToolExecutionEndEvent, ToolExecutionMode, ToolExecutionStartEvent, ToolExecutionUpdateEvent, ToolInfo, ToolRenderResultOptions, ToolResultEvent, ToolResultEventResult, TransientAssistantStream, TransientAssistantStreamOptions, TreePreparation, TurnEndEvent, TurnStartEvent, UserBashEvent, UserBashEventResult, WidgetPlacement, WorkingIndicatorOptions, WriteToolCallEvent, WriteToolResultEvent, } from "./types.ts";
+ export { defineTool, isBashToolResult, isEditToolResult, isFindToolResult, isGrepToolResult, isLsToolResult, isReadToolResult, isToolCallEventType, isWriteToolResult, } from "./types.ts";
+ export { wrapRegisteredTool, wrapRegisteredTools } from "./wrapper.ts";
+ //# sourceMappingURL=index.d.ts.map
+diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
+index 556623bc660d9ede782f6f7eaac7d93e7c0a6069..b5ddd7af16283249cbed022f7ebb670491d9aaa9 100644
+--- a/dist/core/extensions/types.d.ts
++++ b/dist/core/extensions/types.d.ts
+@@ -8,7 +8,7 @@
+  * - Interact with the user via UI primitives
+  */
+ import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel, ToolExecutionMode } from "@earendil-works/pi-agent-core";
+-import type { Api, AssistantMessageEvent, AssistantMessageEventStream, ConstrainedSamplingConfig, Context, ImageContent, Model, OAuthCredentials, OAuthLoginCallbacks, Provider, ProviderHeaders, RefreshModelsContext, SimpleStreamOptions, TextContent, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
++import type { Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, ConstrainedSamplingConfig, Context, ImageContent, Model, OAuthCredentials, OAuthLoginCallbacks, Provider, ProviderHeaders, RefreshModelsContext, SimpleStreamOptions, TextContent, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
+ import type { AutocompleteItem, AutocompleteProvider, Component, EditorComponent, EditorTheme, KeyId, OverlayHandle, OverlayOptions, TUI } from "@earendil-works/pi-tui";
+ import type { Static, TSchema } from "typebox";
+ import type { Theme } from "../../modes/interactive/theme/theme.ts";
+@@ -24,6 +24,7 @@ import type { ScopedModel } from "../model-resolver.ts";
+ import type { BranchSummaryEntry, CompactionEntry, CustomEntry, ReadonlySessionManager, SessionEntry, SessionManager } from "../session-manager.ts";
+ import type { SlashCommandInfo } from "../slash-commands.ts";
+ import type { SourceInfo } from "../source-info.ts";
++import type { ThinkingDisplayMode } from "../settings-manager.ts";
+ import type { BuildSystemPromptOptions } from "../system-prompt.ts";
+ import type { BashOperations } from "../tools/bash.ts";
+ import type { EditToolDetails } from "../tools/edit.ts";
+@@ -58,6 +59,20 @@ export interface WorkingIndicatorOptions {
+     /** Frame interval in milliseconds for animated indicators. */
+     intervalMs?: number;
+ }
++export interface TransientAssistantStreamOptions {
++    /** Thinking presentation for this stream. Defaults to the user's Pi setting. */
++    thinkingDisplayMode?: ThinkingDisplayMode;
++    /** Label used when thinking is explicitly hidden. */
++    hiddenThinkingLabel?: string;
++    /** Label used after an auto-collapsed thinking block completes. */
++    completedThinkingLabel?: string;
++}
++/** A TUI-only assistant message mounted in Pi's scrollable transcript. */
++export interface TransientAssistantStream {
++    update(message: AssistantMessage, event?: AssistantMessageEvent): void;
++    complete(message: AssistantMessage): void;
++    dispose(): void;
++}
+ /** Wrap the current autocomplete provider with additional behavior. */
+ export type AutocompleteProviderFactory = (current: AutocompleteProvider) => AutocompleteProvider;
+ export type EditorFactory = (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => EditorComponent;
+@@ -93,6 +108,8 @@ export interface ExtensionUIContext {
+     setWorkingIndicator(options?: WorkingIndicatorOptions): void;
+     /** Set the label shown for hidden thinking blocks. Call with no argument to restore default. */
+     setHiddenThinkingLabel(label?: string): void;
++    /** Mount an extension-owned assistant stream in the native scrollable transcript. */
++    openTransientAssistantStream?(key: string, options?: TransientAssistantStreamOptions): TransientAssistantStream;
+     /** Set a widget to display above or below the editor. Accepts string array or component factory. */
+     setWidget(key: string, content: string[] | undefined, options?: ExtensionWidgetOptions): void;
+     setWidget(key: string, content: ((tui: TUI, theme: Theme) => Component & {
+diff --git a/dist/core/settings-manager.d.ts b/dist/core/settings-manager.d.ts
+index 494157a038b5fd6b4d9ccf30d331983d84755d2a..bafc294194b59883a6492854cce040e9bfc1bb2d 100644
+--- a/dist/core/settings-manager.d.ts
++++ b/dist/core/settings-manager.d.ts
+@@ -63,6 +63,7 @@ export type PackageSource = string | {
+     prompts?: string[];
+     themes?: string[];
+ };
++export type ThinkingDisplayMode = "auto" | "expanded" | "hidden";
+ export interface Settings {
+     lastChangelogVersion?: string;
+     defaultProvider?: string;
+@@ -76,6 +77,7 @@ export interface Settings {
+     branchSummary?: BranchSummarySettings;
+     retry?: RetrySettings;
+     hideThinkingBlock?: boolean;
++    thinkingDisplayMode?: ThinkingDisplayMode;
+     showCacheMissNotices?: boolean;
+     externalEditor?: string;
+     shellPath?: string;
+@@ -233,9 +235,11 @@ export declare class SettingsManager {
+     };
+     getWebSocketConnectTimeoutMs(): number | undefined;
+     getHideThinkingBlock(): boolean;
++    getThinkingDisplayMode(): ThinkingDisplayMode;
+     getShowCacheMissNotices(): boolean;
+     getExternalEditorCommand(): string;
+     setHideThinkingBlock(hide: boolean): void;
++    setThinkingDisplayMode(mode: ThinkingDisplayMode): void;
+     setShowCacheMissNotices(show: boolean): void;
+     getShellPath(): string | undefined;
+     setShellPath(path: string | undefined): void;
+diff --git a/dist/core/settings-manager.js b/dist/core/settings-manager.js
+index d7fc89cb0560694e74c4f37eaf6733f36a9079f5..616ffe73c226254ce5b5111a85c3d668fa590fa6 100644
+--- a/dist/core/settings-manager.js
++++ b/dist/core/settings-manager.js
+@@ -196,6 +196,12 @@ export class SettingsManager {
+             settings.steeringMode = settings.queueMode;
+             delete settings.queueMode;
+         }
++        // Migrate the old all-or-nothing thinking visibility flag into the
++        // per-scope display mode before global and project settings are merged.
++        if (!("thinkingDisplayMode" in settings) && typeof settings.hideThinkingBlock === "boolean") {
++            settings.thinkingDisplayMode = settings.hideThinkingBlock ? "hidden" : "expanded";
++            delete settings.hideThinkingBlock;
++        }
+         // Migrate legacy websockets boolean -> transport enum
+         if (!("transport" in settings) && typeof settings.websockets === "boolean") {
+             settings.transport = settings.websockets ? "websocket" : "sse";
+@@ -576,7 +582,17 @@ export class SettingsManager {
+         return parseTimeoutSetting(this.settings.websocketConnectTimeoutMs, "websocketConnectTimeoutMs");
+     }
+     getHideThinkingBlock() {
+-        return this.settings.hideThinkingBlock ?? false;
++        return this.getThinkingDisplayMode() === "hidden";
++    }
++    getThinkingDisplayMode() {
++        const configured = this.settings.thinkingDisplayMode;
++        if (configured === "auto" || configured === "expanded" || configured === "hidden") {
++            return configured;
++        }
++        if (Object.prototype.hasOwnProperty.call(this.settings, "hideThinkingBlock")) {
++            return this.settings.hideThinkingBlock ? "hidden" : "expanded";
++        }
++        return "auto";
+     }
+     getShowCacheMissNotices() {
+         return this.settings.showCacheMissNotices ?? false;
+@@ -593,7 +609,15 @@ export class SettingsManager {
+         return process.platform === "win32" ? "notepad" : "nano";
+     }
+     setHideThinkingBlock(hide) {
+-        this.globalSettings.hideThinkingBlock = hide;
++        this.setThinkingDisplayMode(hide ? "hidden" : "expanded");
++    }
++    setThinkingDisplayMode(mode) {
++        if (mode !== "auto" && mode !== "expanded" && mode !== "hidden") {
++            throw new Error(`Invalid thinking display mode: ${String(mode)}`);
++        }
++        this.globalSettings.thinkingDisplayMode = mode;
++        delete this.globalSettings.hideThinkingBlock;
++        this.markModified("thinkingDisplayMode");
+         this.markModified("hideThinkingBlock");
+         this.save();
+     }
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index f43bc9620f36d198d75abeeb5c84e171de0d5ffe..0e72a3e6f98b4b044b462977350fa2258589326a 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -4,7 +4,7 @@ export { AgentSession, type AgentSessionConfig, type AgentSessionEvent, type Age
+ export { readStoredCredential } from "./core/auth-storage.ts";
+ export { type BranchPreparation, type BranchSummaryResult, type CollectEntriesResult, type CompactionResult, type CutPointResult, calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, type FileOperations, findCutPoint, findTurnStartIndex, type GenerateBranchSummaryOptions, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.ts";
+ export { createEventBus, type EventBus, type EventBusController } from "./core/event-bus.ts";
+-export type { AgentEndEvent, AgentSettledEvent, AgentStartEvent, AgentToolResult, AgentToolUpdateCallback, AppKeybinding, AutocompleteProviderFactory, BashToolCallEvent, BeforeAgentStartEvent, BeforeAgentStartEventResult, BeforeProviderHeadersEvent, BeforeProviderRequestEvent, BeforeProviderRequestEventResult, BuildSystemPromptOptions, CompactOptions, ContextEvent, ContextUsage, CustomToolCallEvent, EditToolCallEvent, EntryRenderer, EntryRenderOptions, ExecOptions, ExecResult, Extension, ExtensionActions, ExtensionAPI, ExtensionCommandContext, ExtensionCommandContextActions, ExtensionContext, ExtensionContextActions, ExtensionError, ExtensionEvent, ExtensionFactory, ExtensionFlag, ExtensionHandler, ExtensionRuntime, ExtensionShortcut, ExtensionUIContext, ExtensionUIDialogOptions, ExtensionWidgetOptions, FindToolCallEvent, GrepToolCallEvent, InlineExtension, InputEvent, InputEventResult, InputSource, KeybindingsManager, LoadExtensionsResult, LsToolCallEvent, MarkdownTransformContext, MarkdownTransformer, MessageEndEvent, MessageRenderer, MessageRenderOptions, MessageStartEvent, MessageUpdateEvent, ProjectTrustContext, ProjectTrustEvent, ProjectTrustEventDecision, ProjectTrustEventResult, ProjectTrustHandler, ProviderConfig, ProviderModelConfig, ReadToolCallEvent, RegisteredCommand, RegisteredTool, ResolvedCommand, SessionBeforeCompactEvent, SessionBeforeForkEvent, SessionBeforeSwitchEvent, SessionBeforeTreeEvent, SessionCompactEvent, SessionInfoChangedEvent, SessionShutdownEvent, SessionStartEvent, SessionTreeEvent, SlashCommandInfo, SlashCommandSource, SourceInfo, TerminalInputHandler, ToolCallEvent, ToolCallEventResult, ToolDefinition, ToolExecutionEndEvent, ToolExecutionMode, ToolExecutionStartEvent, ToolExecutionUpdateEvent, ToolInfo, ToolRenderResultOptions, ToolResultEvent, TurnEndEvent, TurnStartEvent, UserBashEvent, UserBashEventResult, WidgetPlacement, WorkingIndicatorOptions, WriteToolCallEvent, } from "./core/extensions/index.ts";
++export type { AgentEndEvent, AgentSettledEvent, AgentStartEvent, AgentToolResult, AgentToolUpdateCallback, AppKeybinding, AutocompleteProviderFactory, BashToolCallEvent, BeforeAgentStartEvent, BeforeAgentStartEventResult, BeforeProviderHeadersEvent, BeforeProviderRequestEvent, BeforeProviderRequestEventResult, BuildSystemPromptOptions, CompactOptions, ContextEvent, ContextUsage, CustomToolCallEvent, EditToolCallEvent, EntryRenderer, EntryRenderOptions, ExecOptions, ExecResult, Extension, ExtensionActions, ExtensionAPI, ExtensionCommandContext, ExtensionCommandContextActions, ExtensionContext, ExtensionContextActions, ExtensionError, ExtensionEvent, ExtensionFactory, ExtensionFlag, ExtensionHandler, ExtensionRuntime, ExtensionShortcut, ExtensionUIContext, ExtensionUIDialogOptions, ExtensionWidgetOptions, FindToolCallEvent, GrepToolCallEvent, InlineExtension, InputEvent, InputEventResult, InputSource, KeybindingsManager, LoadExtensionsResult, LsToolCallEvent, MarkdownTransformContext, MarkdownTransformer, MessageEndEvent, MessageRenderer, MessageRenderOptions, MessageStartEvent, MessageUpdateEvent, ProjectTrustContext, ProjectTrustEvent, ProjectTrustEventDecision, ProjectTrustEventResult, ProjectTrustHandler, ProviderConfig, ProviderModelConfig, ReadToolCallEvent, RegisteredCommand, RegisteredTool, ResolvedCommand, SessionBeforeCompactEvent, SessionBeforeForkEvent, SessionBeforeSwitchEvent, SessionBeforeTreeEvent, SessionCompactEvent, SessionInfoChangedEvent, SessionShutdownEvent, SessionStartEvent, SessionTreeEvent, SlashCommandInfo, SlashCommandSource, SourceInfo, TerminalInputHandler, ToolCallEvent, ToolCallEventResult, ToolDefinition, ToolExecutionEndEvent, ToolExecutionMode, ToolExecutionStartEvent, ToolExecutionUpdateEvent, ToolInfo, ToolRenderResultOptions, ToolResultEvent, TransientAssistantStream, TransientAssistantStreamOptions, TurnEndEvent, TurnStartEvent, UserBashEvent, UserBashEventResult, WidgetPlacement, WorkingIndicatorOptions, WriteToolCallEvent, } from "./core/extensions/index.ts";
+ export { createExtensionRuntime, defineTool, discoverAndLoadExtensions, ExtensionRunner, isBashToolResult, isEditToolResult, isFindToolResult, isGrepToolResult, isLsToolResult, isReadToolResult, isToolCallEventType, isWriteToolResult, wrapRegisteredTool, wrapRegisteredTools, } from "./core/extensions/index.ts";
+ export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+ export { convertToLlm } from "./core/messages.ts";
+@@ -17,7 +17,7 @@ export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./co
+ export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
+ export { AgentSessionRuntime, type AgentSessionRuntimeDiagnostic, type AgentSessionServices, type CreateAgentSessionFromServicesOptions, type CreateAgentSessionOptions, type CreateAgentSessionResult, type CreateAgentSessionRuntimeFactory, type CreateAgentSessionRuntimeResult, type CreateAgentSessionServicesOptions, createAgentSession, createAgentSessionFromServices, createAgentSessionRuntime, createAgentSessionServices, createBashTool, createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createReadOnlyTools, createReadTool, createWriteTool, type PromptTemplate, } from "./core/sdk.ts";
+ export { type BranchSummaryEntry, buildContextEntries, buildSessionContext, type CompactionEntry, CURRENT_SESSION_VERSION, type CustomEntry, type CustomMessageEntry, type FileEntry, getLatestCompactionEntry, type ModelChangeEntry, migrateSessionEntries, type NewSessionOptions, parseSessionEntries, type SessionContext, type SessionEntry, type SessionEntryBase, type SessionHeader, type SessionInfo, type SessionInfoEntry, SessionManager, type SessionMessageEntry, type SessionTreeNode, sessionEntryToContextMessages, type ThinkingLevelChangeEntry, } from "./core/session-manager.ts";
+-export { type CompactionSettings, type DefaultProjectTrust, type FullscreenExitOutput, type ImageSettings, type PackageSource, type RetrySettings, SettingsManager, type SettingsManagerCreateOptions, type TuiMode, } from "./core/settings-manager.ts";
++export { type CompactionSettings, type DefaultProjectTrust, type FullscreenExitOutput, type ImageSettings, type PackageSource, type RetrySettings, SettingsManager, type SettingsManagerCreateOptions, type ThinkingDisplayMode, type TuiMode, } from "./core/settings-manager.ts";
+ export { formatSkillsForPrompt, type LoadSkillsFromDirOptions, type LoadSkillsResult, loadSkills, loadSkillsFromDir, type Skill, type SkillFrontmatter, } from "./core/skills.ts";
+ export { createSyntheticSourceInfo } from "./core/source-info.ts";
+ export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
+diff --git a/dist/modes/interactive/components/assistant-message.d.ts b/dist/modes/interactive/components/assistant-message.d.ts
+index 3eb9e0bf570a79398fb3b81fc88eca79b286201e..06e04c0d36b24b886e0d63b579a6c2b4d42fa232 100644
+--- a/dist/modes/interactive/components/assistant-message.d.ts
++++ b/dist/modes/interactive/components/assistant-message.d.ts
+@@ -1,23 +1,32 @@
+ import type { AssistantMessage } from "@earendil-works/pi-ai";
+ import { Container, type MarkdownTheme } from "@earendil-works/pi-tui";
+ import type { MarkdownTransformer } from "../../../core/extensions/types.ts";
++export type ThinkingDisplayMode = "auto" | "expanded" | "hidden";
+ /**
+  * Component that renders a complete assistant message
+  */
+ export declare class AssistantMessageComponent extends Container {
+     private contentContainer;
+     private hideThinkingBlock;
++    private thinkingDisplayMode;
++    private completedThinkingBlocks;
+     private markdownTheme;
+     private hiddenThinkingLabel;
++    private completedThinkingLabel;
+     private outputPad;
+     private markdownTransformers;
+     private lastMessage?;
+     private hasToolCalls;
+     private isStreaming;
+-    constructor(message?: AssistantMessage, hideThinkingBlock?: boolean, markdownTheme?: MarkdownTheme, hiddenThinkingLabel?: string, outputPad?: number, markdownTransformers?: readonly MarkdownTransformer[]);
++    constructor(message?: AssistantMessage, hideThinkingBlock?: boolean, markdownTheme?: MarkdownTheme, hiddenThinkingLabel?: string, outputPad?: number, markdownTransformers?: readonly MarkdownTransformer[], thinkingDisplayMode?: ThinkingDisplayMode, completedThinkingLabel?: string);
+     invalidate(): void;
+     setHideThinkingBlock(hide: boolean): void;
++    setThinkingDisplayMode(mode: ThinkingDisplayMode): void;
++    setThinkingBlockComplete(contentIndex: number, complete?: boolean): void;
++    completeThinkingBlocksBefore(contentIndex: number): void;
++    completeAllThinkingBlocks(): void;
+     setHiddenThinkingLabel(label: string): void;
++    setCompletedThinkingLabel(label: string): void;
+     setOutputPad(padding: number): void;
+     render(width: number): string[];
+     updateContent(message: AssistantMessage, isStreaming?: boolean): void;
+diff --git a/dist/modes/interactive/components/assistant-message.js b/dist/modes/interactive/components/assistant-message.js
+index 56061b12694b1fa89862fa21dd15b76c254d8e77..ef2301ba0162ce8495fb0bb020ce52e8b882bd3a 100644
+--- a/dist/modes/interactive/components/assistant-message.js
++++ b/dist/modes/interactive/components/assistant-message.js
+@@ -10,18 +10,23 @@ const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
+ export class AssistantMessageComponent extends Container {
+     contentContainer;
+     hideThinkingBlock;
++    thinkingDisplayMode;
++    completedThinkingBlocks = new Set();
+     markdownTheme;
+     hiddenThinkingLabel;
++    completedThinkingLabel;
+     outputPad;
+     markdownTransformers;
+     lastMessage;
+     hasToolCalls = false;
+     isStreaming = false;
+-    constructor(message, hideThinkingBlock = false, markdownTheme = getMarkdownTheme(), hiddenThinkingLabel = "Thinking...", outputPad = 1, markdownTransformers = []) {
++    constructor(message, hideThinkingBlock = false, markdownTheme = getMarkdownTheme(), hiddenThinkingLabel = "Thinking...", outputPad = 1, markdownTransformers = [], thinkingDisplayMode = hideThinkingBlock ? "hidden" : "expanded", completedThinkingLabel = "Thinking complete · Ctrl+T to expand") {
+         super();
+         this.hideThinkingBlock = hideThinkingBlock;
++        this.thinkingDisplayMode = thinkingDisplayMode;
+         this.markdownTheme = markdownTheme;
+         this.hiddenThinkingLabel = hiddenThinkingLabel;
++        this.completedThinkingLabel = completedThinkingLabel;
+         this.outputPad = outputPad;
+         this.markdownTransformers = markdownTransformers;
+         // Container for text/thinking content
+@@ -39,16 +44,61 @@ export class AssistantMessageComponent extends Container {
+     }
+     setHideThinkingBlock(hide) {
+         this.hideThinkingBlock = hide;
++        this.thinkingDisplayMode = hide ? "hidden" : "expanded";
+         if (this.lastMessage) {
+             this.updateContent(this.lastMessage);
+         }
+     }
++    setThinkingDisplayMode(mode) {
++        this.thinkingDisplayMode = mode;
++        this.hideThinkingBlock = mode === "hidden";
++        if (this.lastMessage) {
++            this.updateContent(this.lastMessage);
++        }
++    }
++    setThinkingBlockComplete(contentIndex, complete = true) {
++        if (complete) {
++            this.completedThinkingBlocks.add(contentIndex);
++        }
++        else {
++            this.completedThinkingBlocks.delete(contentIndex);
++        }
++        if (this.lastMessage) {
++            this.updateContent(this.lastMessage);
++        }
++    }
++    completeThinkingBlocksBefore(contentIndex) {
++        if (!this.lastMessage)
++            return;
++        for (let index = 0; index < Math.min(contentIndex, this.lastMessage.content.length); index++) {
++            if (this.lastMessage.content[index]?.type === "thinking") {
++                this.completedThinkingBlocks.add(index);
++            }
++        }
++        this.updateContent(this.lastMessage);
++    }
++    completeAllThinkingBlocks() {
++        if (!this.lastMessage)
++            return;
++        for (let index = 0; index < this.lastMessage.content.length; index++) {
++            if (this.lastMessage.content[index]?.type === "thinking") {
++                this.completedThinkingBlocks.add(index);
++            }
++        }
++        this.updateContent(this.lastMessage);
++    }
+     setHiddenThinkingLabel(label) {
+         this.hiddenThinkingLabel = label;
+         if (this.lastMessage) {
+             this.updateContent(this.lastMessage);
+         }
+     }
++    setCompletedThinkingLabel(label) {
++        this.completedThinkingLabel = label;
++        if (this.lastMessage) {
++            this.updateContent(this.lastMessage);
++        }
++    }
+     setOutputPad(padding) {
+         this.outputPad = padding;
+         if (this.lastMessage) {
+@@ -85,6 +135,7 @@ export class AssistantMessageComponent extends Container {
+             }
+             else if (content.type === "thinking") {
+                 const thinkingBlocks = [];
++                const thinkingBlockIndexes = [];
+                 for (; i < message.content.length; i++) {
+                     const thinkingContent = message.content[i];
+                     if (thinkingContent.type !== "thinking") {
+@@ -93,6 +144,7 @@ export class AssistantMessageComponent extends Container {
+                     const thinking = thinkingContent.thinking.trim();
+                     if (thinking) {
+                         thinkingBlocks.push(thinking);
++                        thinkingBlockIndexes.push(i);
+                     }
+                 }
+                 i--;
+@@ -104,9 +156,12 @@ export class AssistantMessageComponent extends Container {
+                 const hasVisibleContentAfter = message.content
+                     .slice(i + 1)
+                     .some((c) => (c.type === "text" && c.text.trim()) || (c.type === "thinking" && c.thinking.trim()));
+-                if (this.hideThinkingBlock) {
++                const autoCollapsed = this.thinkingDisplayMode === "auto" &&
++                    (!this.isStreaming || thinkingBlockIndexes.every((index) => this.completedThinkingBlocks.has(index)));
++                if (this.thinkingDisplayMode === "hidden" || autoCollapsed) {
+                     // Show one static label for each run of thinking blocks when hidden.
+-                    this.contentContainer.addChild(new Text(theme.italic(theme.fg("thinkingText", this.hiddenThinkingLabel)), this.outputPad, 0));
++                    const label = autoCollapsed ? this.completedThinkingLabel : this.hiddenThinkingLabel;
++                    this.contentContainer.addChild(new Text(theme.italic(theme.fg("thinkingText", label)), this.outputPad, 0));
+                 }
+                 else {
+                     // Render each run of thinking blocks as one Markdown section.
+diff --git a/dist/modes/interactive/components/settings-selector.d.ts b/dist/modes/interactive/components/settings-selector.d.ts
+index c1cffed8fef4a1937d87559821f82df42bfdf662..3e5e1efe72efc893bd1aa0f78a412b663a2fb70f 100644
+--- a/dist/modes/interactive/components/settings-selector.d.ts
++++ b/dist/modes/interactive/components/settings-selector.d.ts
+@@ -1,7 +1,7 @@
+ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+ import type { Transport } from "@earendil-works/pi-ai";
+ import { Container, type ScrollViewScrollbar, SettingsList } from "@earendil-works/pi-tui";
+-import type { DefaultProjectTrust, FullscreenExitOutput, MermaidRenderingMode, TuiMode, WarningSettings } from "../../../core/settings-manager.ts";
++import type { DefaultProjectTrust, FullscreenExitOutput, MermaidRenderingMode, ThinkingDisplayMode, TuiMode, WarningSettings } from "../../../core/settings-manager.ts";
+ import { type TerminalTheme } from "../theme/theme.ts";
+ export interface SettingsConfig {
+     autoCompact: boolean;
+@@ -19,7 +19,9 @@ export interface SettingsConfig {
+     currentTheme: string;
+     terminalTheme: TerminalTheme;
+     availableThemes: string[];
+-    hideThinkingBlock: boolean;
++    thinkingDisplayMode?: ThinkingDisplayMode;
++    /** @deprecated Use thinkingDisplayMode. */
++    hideThinkingBlock?: boolean;
+     mermaidRenderingMode: MermaidRenderingMode;
+     showCacheMissNotices: boolean;
+     collapseChangelog: boolean;
+@@ -53,7 +55,9 @@ export interface SettingsCallbacks {
+     onThinkingLevelChange: (level: ThinkingLevel) => void;
+     onThemeChange: (theme: string) => void;
+     onThemePreview?: (theme: string) => void;
+-    onHideThinkingBlockChange: (hidden: boolean) => void;
++    onThinkingDisplayModeChange?: (mode: ThinkingDisplayMode) => void;
++    /** @deprecated Use onThinkingDisplayModeChange. */
++    onHideThinkingBlockChange?: (hidden: boolean) => void;
+     onMermaidRenderingModeChange: (mode: MermaidRenderingMode) => void;
+     onShowCacheMissNoticesChange: (shown: boolean) => void;
+     onCollapseChangelogChange: (collapsed: boolean) => void;
+diff --git a/dist/modes/interactive/components/settings-selector.js b/dist/modes/interactive/components/settings-selector.js
+index b9f1dd947eadefb119095fe7702c81d56e81ce39..46da416d1a96f81271ebe29b73c50b5c11433a01 100644
+--- a/dist/modes/interactive/components/settings-selector.js
++++ b/dist/modes/interactive/components/settings-selector.js
+@@ -310,10 +310,10 @@ export class SettingsSelectorComponent extends Container {
+             },
+             {
+                 id: "hide-thinking",
+-                label: "Hide thinking",
+-                description: "Hide thinking blocks in assistant responses",
+-                currentValue: config.hideThinkingBlock ? "true" : "false",
+-                values: ["true", "false"],
++                label: "Thinking display",
++                description: "Auto shows live thinking and collapses each completed block",
++                currentValue: config.thinkingDisplayMode ?? (config.hideThinkingBlock ? "hidden" : "expanded"),
++                values: ["auto", "expanded", "hidden"],
+             },
+             {
+                 id: "mermaid-rendering",
+@@ -561,7 +561,12 @@ export class SettingsSelectorComponent extends Container {
+                     break;
+                 }
+                 case "hide-thinking":
+-                    callbacks.onHideThinkingBlockChange(newValue === "true");
++                    if (callbacks.onThinkingDisplayModeChange) {
++                        callbacks.onThinkingDisplayModeChange(newValue);
++                    }
++                    else {
++                        callbacks.onHideThinkingBlockChange?.(newValue === "hidden");
++                    }
+                     break;
+                 case "mermaid-rendering":
+                     callbacks.onMermaidRenderingModeChange(newValue);
+diff --git a/dist/modes/interactive/interactive-mode.d.ts b/dist/modes/interactive/interactive-mode.d.ts
+index 18f66f7a7e28345115069dd63e8ae1ced34dc92b..f8eb6a20c521f692a265f82e56baf3630f68743e 100644
+--- a/dist/modes/interactive/interactive-mode.d.ts
++++ b/dist/modes/interactive/interactive-mode.d.ts
+@@ -94,6 +94,8 @@ export declare class InteractiveMode {
+     private pendingTools;
+     private toolOutputExpanded;
+     private hideThinkingBlock;
++    private thinkingDisplayMode;
++    private transientAssistantStreams;
+     private outputPad;
+     private readonly mermaidMarkdownTransformer;
+     private skillCommands;
+@@ -202,6 +204,10 @@ export declare class InteractiveMode {
+     private setWorkingVisible;
+     private setWorkingIndicator;
+     private setHiddenThinkingLabel;
++    private applyAssistantThinkingEvent;
++    private openTransientAssistantStream;
++    private reattachTransientAssistantStreams;
++    private clearTransientAssistantStreams;
+     /**
+      * Set an extension widget (string array or custom component).
+      */
+diff --git a/dist/modes/interactive/interactive-mode.js b/dist/modes/interactive/interactive-mode.js
+index 6a88679e03161d2c048e2abab0041e96d214e67b..0967fc092a29bbcb42fe8b2b6b0879b0d3c4f90e 100644
+--- a/dist/modes/interactive/interactive-mode.js
++++ b/dist/modes/interactive/interactive-mode.js
+@@ -276,6 +276,8 @@ export class InteractiveMode {
+     toolOutputExpanded = false;
+     // Thinking block visibility state
+     hideThinkingBlock = false;
++    thinkingDisplayMode = "auto";
++    transientAssistantStreams = new Map();
+     outputPad = 1;
+     mermaidMarkdownTransformer = createMermaidMarkdownTransformer({
+         getMode: () => this.settingsManager.getMermaidRenderingMode(),
+@@ -385,8 +387,10 @@ export class InteractiveMode {
+         this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+         this.footerContainer = new Container();
+         this.footerContainer.addChild(this.footer);
+-        // Load hide thinking block setting
+-        this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
++        // Load thinking block presentation. Auto keeps live thinking visible and
++        // collapses each block after the provider marks it complete.
++        this.thinkingDisplayMode = this.settingsManager.getThinkingDisplayMode();
++        this.hideThinkingBlock = this.thinkingDisplayMode === "hidden";
+         this.outputPad = this.settingsManager.getOutputPad();
+         // Register themes from resource loader and initialize
+         setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
+@@ -1487,7 +1491,8 @@ export class InteractiveMode {
+         this.footer.setSession(this.session);
+         this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+         this.footerDataProvider.setCwd(this.sessionManager.getCwd());
+-        this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
++        this.thinkingDisplayMode = this.settingsManager.getThinkingDisplayMode();
++        this.hideThinkingBlock = this.thinkingDisplayMode === "hidden";
+         this.outputPad = this.settingsManager.getOutputPad();
+         this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
+         const clearOnShrink = this.settingsManager.getClearOnShrink();
+@@ -1664,6 +1669,68 @@ export class InteractiveMode {
+         }
+         this.ui.requestRender();
+     }
++    applyAssistantThinkingEvent(component, event) {
++        if (!event)
++            return;
++        const contentIndex = typeof event.contentIndex === "number" ? event.contentIndex : undefined;
++        if (event.type === "thinking_start" && contentIndex !== undefined) {
++            component.setThinkingBlockComplete(contentIndex, false);
++            return;
++        }
++        if (event.type === "thinking_end" && contentIndex !== undefined) {
++            component.setThinkingBlockComplete(contentIndex, true);
++            return;
++        }
++        if ((event.type === "text_start" || event.type === "text_delta" || event.type === "text_end" || event.type === "toolcall_start") && contentIndex !== undefined) {
++            component.completeThinkingBlocksBefore(contentIndex);
++        }
++    }
++    openTransientAssistantStream(key, options) {
++        this.transientAssistantStreams.get(key)?.dispose();
++        const displayMode = options?.thinkingDisplayMode ?? this.thinkingDisplayMode;
++        const component = new AssistantMessageComponent(undefined, displayMode === "hidden", this.getMarkdownThemeWithSettings(), options?.hiddenThinkingLabel ?? this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers(), displayMode, options?.completedThinkingLabel ?? "Thinking complete · Ctrl+T to expand");
++        let disposed = false;
++        const handle = {
++            component,
++            update: (message, event) => {
++                if (disposed)
++                    return;
++                component.updateContent(message, true);
++                this.applyAssistantThinkingEvent(component, event);
++                this.ui.requestRender();
++            },
++            complete: (message) => {
++                if (disposed)
++                    return;
++                component.updateContent(message, false);
++                component.completeAllThinkingBlocks();
++                this.ui.requestRender();
++            },
++            dispose: () => {
++                if (disposed)
++                    return;
++                disposed = true;
++                this.transientAssistantStreams.delete(key);
++                this.chatContainer.removeChild(component);
++                this.ui.requestRender();
++            },
++        };
++        this.transientAssistantStreams.set(key, handle);
++        this.chatContainer.addChild(component);
++        this.ui.requestRender();
++        return handle;
++    }
++    reattachTransientAssistantStreams() {
++        for (const stream of this.transientAssistantStreams.values()) {
++            stream.component.setThinkingDisplayMode(this.thinkingDisplayMode);
++            this.chatContainer.addChild(stream.component);
++        }
++    }
++    clearTransientAssistantStreams() {
++        for (const stream of [...this.transientAssistantStreams.values()]) {
++            stream.dispose();
++        }
++    }
+     /**
+      * Set an extension widget (string array or custom component).
+      */
+@@ -1724,6 +1791,7 @@ export class InteractiveMode {
+         }
+         this.ui.hideOverlay();
+         this.clearExtensionTerminalInputListeners();
++        this.clearTransientAssistantStreams();
+         this.setExtensionFooter(undefined);
+         this.setExtensionHeader(undefined);
+         this.clearExtensionWidgets();
+@@ -1884,6 +1952,7 @@ export class InteractiveMode {
+             setWorkingVisible: (visible) => this.setWorkingVisible(visible),
+             setWorkingIndicator: (options) => this.setWorkingIndicator(options),
+             setHiddenThinkingLabel: (label) => this.setHiddenThinkingLabel(label),
++            openTransientAssistantStream: (key, options) => this.openTransientAssistantStream(key, options),
+             setWidget: (key, content, options) => this.setExtensionWidget(key, content, options),
+             setFooter: (factory) => this.setExtensionFooter(factory),
+             setHeader: (factory) => this.setExtensionHeader(factory),
+@@ -2569,7 +2638,7 @@ export class InteractiveMode {
+                     this.ui.requestRender();
+                 }
+                 else if (event.message.role === "assistant") {
+-                    this.streamingComponent = new AssistantMessageComponent(undefined, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers());
++                    this.streamingComponent = new AssistantMessageComponent(undefined, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers(), this.thinkingDisplayMode);
+                     this.streamingMessage = event.message;
+                     this.chatContainer.addChild(this.streamingComponent);
+                     this.streamingComponent.updateContent(this.streamingMessage, true);
+@@ -2580,6 +2649,7 @@ export class InteractiveMode {
+                 if (this.streamingComponent && event.message.role === "assistant") {
+                     this.streamingMessage = event.message;
+                     this.streamingComponent.updateContent(this.streamingMessage, true);
++                    this.applyAssistantThinkingEvent(this.streamingComponent, event.assistantMessageEvent);
+                     for (const content of this.streamingMessage.content) {
+                         if (content.type === "toolCall") {
+                             if (!this.pendingTools.has(content.id)) {
+@@ -2617,6 +2687,7 @@ export class InteractiveMode {
+                         this.streamingMessage.errorMessage = errorMessage;
+                     }
+                     this.streamingComponent.updateContent(this.streamingMessage, false);
++                    this.streamingComponent.completeAllThinkingBlocks();
+                     if (this.streamingMessage.stopReason === "aborted" || this.streamingMessage.stopReason === "error") {
+                         if (!errorMessage) {
+                             errorMessage = this.streamingMessage.errorMessage || "Error";
+@@ -2918,7 +2989,7 @@ export class InteractiveMode {
+                 break;
+             }
+             case "assistant": {
+-                const assistantComponent = new AssistantMessageComponent(message, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers());
++                const assistantComponent = new AssistantMessageComponent(message, this.hideThinkingBlock, this.getMarkdownThemeWithSettings(), this.hiddenThinkingLabel, this.outputPad, this.getMarkdownTransformers(), this.thinkingDisplayMode);
+                 this.chatContainer.addChild(assistantComponent);
+                 break;
+             }
+@@ -3369,18 +3440,20 @@ export class InteractiveMode {
+         this.showStatus(`Tool output: ${expanded ? "expanded" : "collapsed"}`);
+     }
+     toggleThinkingBlockVisibility() {
+-        this.hideThinkingBlock = !this.hideThinkingBlock;
+-        this.settingsManager.setHideThinkingBlock(this.hideThinkingBlock);
++        this.thinkingDisplayMode = this.thinkingDisplayMode === "expanded" ? "auto" : "expanded";
++        this.hideThinkingBlock = false;
++        this.settingsManager.setThinkingDisplayMode(this.thinkingDisplayMode);
+         // Rebuild chat from session messages
+         this.chatContainer.clear();
+         this.rebuildChatFromMessages();
+         // If streaming, re-add the streaming component with updated visibility and re-render
+         if (this.streamingComponent && this.streamingMessage) {
+-            this.streamingComponent.setHideThinkingBlock(this.hideThinkingBlock);
++            this.streamingComponent.setThinkingDisplayMode(this.thinkingDisplayMode);
+             this.streamingComponent.updateContent(this.streamingMessage);
+             this.chatContainer.addChild(this.streamingComponent);
+         }
+-        this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
++        this.reattachTransientAssistantStreams();
++        this.showStatus(`Thinking blocks: ${this.thinkingDisplayMode === "auto" ? "auto-collapse" : "expanded"}`);
+     }
+     async handleOpenExternalEditor() {
+         const editorCmd = this.settingsManager.getExternalEditorCommand();
+@@ -3671,7 +3744,7 @@ export class InteractiveMode {
+                 currentTheme: this.themeController.getThemeSelection() || "dark",
+                 terminalTheme: this.themeController.getTerminalTheme(),
+                 availableThemes: getAvailableThemes(),
+-                hideThinkingBlock: this.hideThinkingBlock,
++                thinkingDisplayMode: this.thinkingDisplayMode,
+                 mermaidRenderingMode: this.settingsManager.getMermaidRenderingMode(),
+                 collapseChangelog: this.settingsManager.getCollapseChangelog(),
+                 enableInstallTelemetry: this.settingsManager.getEnableInstallTelemetry(),
+@@ -3746,16 +3819,23 @@ export class InteractiveMode {
+                     void this.themeController.setThemeSetting(themeSetting);
+                 },
+                 onThemePreview: (themeName) => this.themeController.preview(themeName),
+-                onHideThinkingBlockChange: (hidden) => {
+-                    this.hideThinkingBlock = hidden;
+-                    this.settingsManager.setHideThinkingBlock(hidden);
++                onThinkingDisplayModeChange: (mode) => {
++                    this.thinkingDisplayMode = mode;
++                    this.hideThinkingBlock = mode === "hidden";
++                    this.settingsManager.setThinkingDisplayMode(mode);
+                     for (const child of this.chatContainer.children) {
+                         if (child instanceof AssistantMessageComponent) {
+-                            child.setHideThinkingBlock(hidden);
++                            child.setThinkingDisplayMode(mode);
+                         }
+                     }
+                     this.chatContainer.clear();
+                     this.rebuildChatFromMessages();
++                    if (this.streamingComponent && this.streamingMessage) {
++                        this.streamingComponent.setThinkingDisplayMode(mode);
++                        this.streamingComponent.updateContent(this.streamingMessage);
++                        this.chatContainer.addChild(this.streamingComponent);
++                    }
++                    this.reattachTransientAssistantStreams();
+                 },
+                 onMermaidRenderingModeChange: (mode) => {
+                     this.settingsManager.setMermaidRenderingMode(mode);
+@@ -4827,7 +4907,8 @@ export class InteractiveMode {
+             if (chatRestoredBeforeSessionStart) {
+                 return;
+             }
+-            this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
++            this.thinkingDisplayMode = this.settingsManager.getThinkingDisplayMode();
++            this.hideThinkingBlock = this.thinkingDisplayMode === "hidden";
+             this.outputPad = this.settingsManager.getOutputPad();
+             this.rebuildChatFromMessages();
+             chatRestoredBeforeSessionStart = true;

@@ -20,6 +20,14 @@ Novel World Harness owns the parts specific to executable fiction:
 
 The previous direct Anthropic SDK implementation coupled the CLI to one provider and duplicated session/tool-loop behavior already available in Pi. The current adapter resolves the configured profile through Pi and can register a custom provider endpoint when `baseUrl` and `apiProtocol` are supplied. Interactive use is hosted by Pi's public `AgentSessionRuntime` and `InteractiveMode`; an NWH inline extension supplies branding, safe local commands, and guarded file mentions.
 
+The pinned Pi package carries a reproducible pnpm patch that adds a generic
+TUI-only transient assistant stream for extension-owned child sessions. The
+stream is mounted in Pi's transcript rather than an editor widget, uses Pi's
+assistant component and Ctrl+T visibility control, and defaults thinking to
+live-while-active/auto-collapsed-on-completion. This is presentation state only:
+it does not add the child session to the parent model context or relax NWH's
+actor-scoped narrator boundary.
+
 “Remove external services” applies to the external persistence layer in Phase 0: PostgreSQL and other attached databases are removed. It does not require removing Pi or forcing the official Claude API. A remote model is still optional infrastructure selected by the user; all harness state and retrieval stay file-based.
 
 For safety, the Pi session disables built-in model coding tools and external extension discovery. Ordinary sessions expose only Novel Harness's three custom read-only local tools. Explicit compiler sessions add typed compiler tools, which can write pending proposal envelopes, move a defective current-batch envelope to rejected history, and explicitly finish a validated batch. They cannot write arbitrary files, execute a shell as a model tool, access the network as a tool, accept canonical truth, or commit world state. Repeated unchanged finish failures terminate the current tool loop without checkpointing the batch. The TUI's `!command` path is a deliberate user terminal action, not an agent capability.

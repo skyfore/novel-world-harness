@@ -76,18 +76,20 @@ Pi's main TUI had no component subscribed to the nested session's deltas. The
 same gap existed after an accepted player action.
 
 **Repair.** `createPiPlayerOpeningNarrator()` accepts a
-`PlayerSceneNarrationObserver`. The full nested Pi event stream bridges
-provider/model identity, thinking deltas, text deltas, retry events, and the
-capture-only choice-tool lifecycle into the `nwh-player-scene-stream`
-above-editor widget, coalesced at 32 ms. The accepted stream is checked against
-the settled result, which is then stored once as a clean `nwh-narrator`
-transcript message. A scene-validation retry keeps the rejected first draft
-visible while the replacement streams. Opening, orientation, retry, and
-post-commit turn narration share this path; status never masquerades as prose.
+`PlayerSceneNarrationObserver`. Pi exposes a transient assistant-stream handle
+that mounts the nested session in the native scrollable transcript without
+adding it to the parent model context. Provider/model, attempt, retry, and the
+capture-only choice-tool lifecycle use compact footer status. Active thinking
+is visible and collapses on `thinking_end`; text-start and message-end provide
+fallbacks. The accepted stream is checked against the settled result, then the
+transient components are replaced by one clean `nwh-narrator` transcript
+message. A scene-validation retry disposes the rejected draft before the
+replacement starts. Opening, orientation, retry, and post-commit narration
+share this path; status never masquerades as prose.
 
-**Evidence.** Narrator tests assert native provider/model, thinking, and text
-events in the active widget, then prove the persisted narration is exactly the
-accepted streamed text.
+**Evidence.** Narrator tests assert provider/model status and native thinking
+and text events in the transient stream, prove that no scene widget is mounted,
+and verify that persisted narration is exactly the accepted streamed text.
 
 ### 3a. Restored player transcripts were mistaken for new conversations
 
@@ -253,7 +255,7 @@ only model context is separated.
 ## Verification status and residual boundary
 
 The repair is gated by TypeScript compilation, the production build, and the
-full test suite. The current suite has 57 test files and 267 passing tests.
+full test suite. The current suite has 61 test files and 293 passing tests.
 
 Pi still persists foreground compiler messages in the user-visible session, by
 design, so a user can inspect exactly what streamed. The new context filter

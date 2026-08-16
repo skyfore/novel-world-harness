@@ -31,6 +31,8 @@ describe("player opening narration", () => {
 
     expect(resolvePlayScenePurpose("auto", { logicalStep: 0, selectionChanged: true, hadPreviousSelection: false })).toBe("opening");
     expect(resolvePlayScenePurpose("auto", { logicalStep: 4, selectionChanged: true, hadPreviousSelection: false })).toBe("orientation");
+    expect(resolvePlayScenePurpose("auto", { logicalStep: 4, selectionChanged: false, hadPreviousSelection: true })).toBeUndefined();
+    expect(resolvePlayScenePurpose("auto", { logicalStep: 4, selectionChanged: true, hadPreviousSelection: true })).toBe("orientation");
     expect(resolvePlayScenePurpose("continue", { logicalStep: 4, selectionChanged: true, hadPreviousSelection: false })).toBeUndefined();
     expect(resolvePlayScenePurpose("continue", { logicalStep: 4, selectionChanged: false, hadPreviousSelection: true })).toBeUndefined();
     expect(resolvePlayScenePurpose("continue", { logicalStep: 4, selectionChanged: true, hadPreviousSelection: true })).toBe("orientation");
@@ -102,6 +104,8 @@ describe("player opening narration", () => {
     expect(playScenePrompt(frame, "turn")).toContain("action was accepted and committed");
     expect(() => assertPlaySceneNarration("你现在是福贵。故事开始。你要做什么？")).toThrow("underspecified");
     expect(assertPlaySceneNarration("风从门缝里挤进来，带着一点凉意。你听见近处细碎的响动，却还不能确定那意味着什么。眼前没有替你写好的决定，只有这个尚未被行动改变的片刻。你可以先观察周围，也可以整理脑中的念头，或者径直尝试自己最想做的事——下一步由你来定。")).toContain("下一步由你来定");
+    const streamed = "\n风从门缝里挤进来，带着一点凉意。你听见近处细碎的响动，却还不能确定那意味着什么。眼前没有替你写好的决定，只有这个尚未被行动改变的片刻。你可以先观察周围，也可以整理脑中的念头，或者径直尝试自己最想做的事——下一步由你来定。\n";
+    expect(assertPlaySceneNarration(streamed)).toBe(streamed);
     await expect(engine.branches.readHead("main")).resolves.toBe(committed.newHead);
   });
 });

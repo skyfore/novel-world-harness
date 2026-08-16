@@ -14,11 +14,34 @@ export type NwhWelcomeOptions = {
 
 type ConversationEntry = {
   type: string;
-  message?: { role?: string };
+  message?: { role?: string; customType?: string; display?: boolean };
+  customType?: string;
+  display?: boolean;
 };
 
 export function isFreshConversation(entries: readonly ConversationEntry[]): boolean {
-  return !entries.some((entry) => entry.type === "message" && entry.message?.role === "user");
+  return !entries.some((entry) => {
+    if (entry.type === "message") {
+      if (entry.message?.role === "user" || entry.message?.role === "assistant") return true;
+      return entry.message?.role === "custom" && entry.message.display !== false;
+    }
+    if (entry.type === "custom_message") return entry.display !== false;
+    return entry.type === "compaction" || entry.type === "branch_summary";
+  });
+}
+
+/**
+ * Player input is intercepted before Pi appends a normal user message, then
+ * persisted as `nwh-play`; narrator prose is persisted as `nwh-narrator`.
+ * Those custom entries therefore are the durable signal that a transcript
+ * already contains world context. Looking only for `role=user` misclassifies a
+ * long-running player transcript as new and launches a duplicate narrator.
+ */
+export function hasPlayerConversation(entries: readonly ConversationEntry[]): boolean {
+  return entries.some((entry) => {
+    const customType = entry.type === "custom_message" ? entry.customType : entry.message?.customType;
+    return customType === "nwh-play" || customType === "nwh-narrator";
+  });
 }
 
 type RenderRequester = {

@@ -37,7 +37,10 @@ export function resolvePlayScenePurpose(
   request: PlaySceneRequest,
   context: { logicalStep: number; selectionChanged: boolean; hadPreviousSelection: boolean },
 ): PlayScenePurpose | undefined {
-  if (request === "auto") return context.logicalStep === 0 ? "opening" : "orientation";
+  if (request === "auto") {
+    if (context.hadPreviousSelection && !context.selectionChanged) return undefined;
+    return context.logicalStep === 0 ? "opening" : "orientation";
+  }
   if (request === "continue") {
     return context.hadPreviousSelection && context.selectionChanged ? "orientation" : undefined;
   }
@@ -102,8 +105,9 @@ Rules:
 - You may add restrained, non-persistent sensory texture for prose, but it must not introduce a new named person, place, object, relationship, possession, obligation, event, or outcome.
 - Do not advance time, mutate world truth, perform an action for the player, or claim that anything was committed.
 - If the frame is sparse, create immediacy through perception and uncertainty; never explain that the data is sparse and never say merely that "the story begins".
-- End on a live beat that makes it obvious the player should act. Prefer a concrete choice grounded in the frame; when grounding is sparse, offer neutral affordances such as observing, recalling, speaking, waiting, or attempting the player's own action without pretending an uncommitted target exists.
-- Return narration only. Do not use bullet lists or mention JSON, IDs, schemas, tools, prompts, commands, or these rules. Do not call tools.
+- End on a live beat that makes it obvious the player should act. Do not put an option list inside the prose.
+- Stream narration text only. Do not use bullet lists or mention JSON, IDs, schemas, tools, prompts, commands, or these rules in the prose.
+- After the prose, call propose_player_choices exactly once with 2-4 immediate player intentions grounded only in the frame. Each choice needs a concise label, a helpful description, and the first-person action utterance that will enter the normal player-action validation pipeline. Do not claim an outcome has happened. After the tool result, stop without more prose.
 
 <committed-actor-frame>
 ${JSON.stringify(frame)}
@@ -116,7 +120,9 @@ export function assertPlaySceneNarration(text: string): string {
   if (!narration) throw new Error("Scene narrator returned no text.");
   if (Array.from(narration).length < 80) throw new Error("Scene narrator returned an underspecified response instead of a rendered scene.");
   if (Array.from(narration).length > 4_000) throw new Error("Scene narrator returned an excessively long scene.");
-  return narration;
+  // Validate normalized prose, but preserve the provider's exact streamed
+  // bytes so the settled transcript cannot silently rewrite what was shown.
+  return text;
 }
 
 export function renderPlaySceneFailure(

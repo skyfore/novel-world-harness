@@ -40,8 +40,15 @@ prints a result.
 ## Surfaces
 
 - Main Pi turns use Pi's native assistant, thinking, and tool components.
-- Isolated prose sessions bridge deltas into an above-editor scene surface and
-  persist the settled prose as a clean narrator message.
+- Isolated scene sessions bridge Pi's native provider/model identity, thinking,
+  text deltas, retry events, and capture-tool lifecycle into an above-editor
+  surface. The accepted text is checked against that live stream before the
+  same prose is persisted as a clean narrator message. A rejected first draft
+  remains visible while its replacement streams.
+- Every accepted scene opens an AskUserQuestion-style next-move dialog with
+  2-4 actor-scoped suggestions and a free-form action path. Suggestions are
+  capture-only proposals; selection still enters the normal deterministic
+  player-action validation and commit boundary.
 - Managed long-running operations use the NWH task overlay for host progress,
   assistant messages, thinking, and tool calls. A compact dock remains while a
   task is in the background.
@@ -70,3 +77,7 @@ prints a result.
   require an immediate explanatory rejection.
 - Player tests cover cancellation before commit and narration failure after
   commit as distinct outcomes.
+- Player tests verify that historical custom transcripts do not trigger a new
+  narrator, native scene deltas match the persisted prose exactly, stored
+  current-head choices resume without a model call, and selected choices pass
+  through the ordinary player-action translator.

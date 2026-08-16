@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-14
+Date: 2026-08-16
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
@@ -18,11 +18,11 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
 | Canon replay and branching | Implemented vertical slice | Predicate checkpoints, fork, diff, divergent possibility eligibility |
 | Actor behavior | Partial | Deterministic goal actions are connected; model reasoner exists only as an adapter/API |
-| Narrative | Partial | Immutable narrative frames and deterministic text exist; no Pi narration adapter is connected |
+| Narrative | Implemented vertical slice | Actor-scoped Pi scene narrator streams native provider/model, thinking, text, retry, and capture-tool events; accepted prose cannot mutate world truth |
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
 | Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation |
 | Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
-| Player experience | Implemented vertical slice | Restricted Pi translation of natural language into a host-owned validated player event |
+| Player experience | Implemented vertical slice | Restricted Pi translation of natural language and model-proposed/free-form next-move choices into a host-owned validated player event |
 | Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, per-instance character memory, and durable active resume |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
@@ -105,9 +105,9 @@ The TUI player mode and `play-world` connect natural language to deterministic c
 
 `modelActorProposalSource` correctly limits its input to `ActorWorldView + CharacterGoal + CharacterModel`, but no Pi-backed `ActorReasoner` is constructed by `world move`. The CLI uses deterministic pre-authored candidate actions only.
 
-### 4. Rendering is still a debug renderer
+### 4. The low-level renderer remains diagnostic
 
-`NarrativeRenderer` enforces the correct authority boundary, but its default adapter only lists committed event titles. A model-backed renderer must be added behind the same immutable frame contract and tested for epistemic leakage.
+`NarrativeRenderer` still provides deterministic event-title rendering for low-level CLI/API inspection. The TUI player path now adds an isolated Pi narrator over a committed actor frame, with native event streaming and a capture-only choice tool. Broader prose-quality and epistemic-leakage evaluation across representative novels is still required.
 
 ### 5. Compilation quality has no representative benchmark
 

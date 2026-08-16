@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { isFreshConversation, NWH_WORKING_FRAMES, renderNwhWelcome } from "../src/agent/nwh-welcome.js";
+import { hasPlayerConversation, isFreshConversation, NWH_WORKING_FRAMES, renderNwhWelcome } from "../src/agent/nwh-welcome.js";
 
 const theme = {
   bold: (text: string) => text,
@@ -48,5 +48,25 @@ describe("NWH welcome header", () => {
       { type: "model_change" },
       { type: "message", message: { role: "user" } },
     ])).toBe(false);
+    expect(isFreshConversation([
+      { type: "custom_message", customType: "nwh-play", display: true },
+    ])).toBe(false);
+    expect(isFreshConversation([
+      { type: "message", message: { role: "custom", customType: "nwh-narrator", display: true } },
+    ])).toBe(false);
+  });
+
+  it("recognizes player-only custom transcripts as existing world context", () => {
+    expect(hasPlayerConversation([
+      { type: "model_change" },
+      { type: "custom_message", customType: "nwh-play", display: true },
+      { type: "custom_message", customType: "nwh-narrator", display: true },
+    ])).toBe(true);
+    expect(hasPlayerConversation([
+      { type: "message", message: { role: "user" } },
+    ])).toBe(false);
+    expect(hasPlayerConversation([
+      { type: "message", message: { role: "custom", customType: "nwh-narrator", display: true } },
+    ])).toBe(true);
   });
 });

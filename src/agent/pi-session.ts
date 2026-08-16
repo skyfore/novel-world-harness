@@ -378,7 +378,10 @@ export class PiAgentSession {
     const sessionManager = this.saveSession
       ? continueSession ? SessionManager.continueRecent(this.options.workspace.root, sessionsDir) : SessionManager.create(this.options.workspace.root, sessionsDir)
       : SessionManager.inMemory(this.options.workspace.root);
+    let initialRuntime = true;
     const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager: nextSessionManager, sessionStartEvent }) => {
+      const activeWorldScene = initialRuntime ? this.options.activeWorldScene : undefined;
+      initialRuntime = false;
       if (path.resolve(cwd) !== this.options.workspace.root) {
         throw new Error(`NWH cannot switch this session to another workspace (${cwd}). Start a new process with --root instead.`);
       }
@@ -422,8 +425,8 @@ export class PiAgentSession {
               workspace: this.options.workspace,
               saveSession: this.saveSession,
               mode: this.options.interactionMode ?? "assistant",
-              ...(this.options.activeWorldScene !== undefined
-                ? { activeWorldScene: this.options.activeWorldScene }
+              ...(activeWorldScene !== undefined
+                ? { activeWorldScene }
                 : {}),
               ...(this.options.profile ? { profile: this.options.profile } : {}),
               onSessionShutdown: () => flushSettings(settingsManager),

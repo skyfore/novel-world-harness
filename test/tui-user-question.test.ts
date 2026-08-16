@@ -114,4 +114,26 @@ describe("TUI user questions", () => {
       options,
     })).resolves.toBe("character-14");
   });
+
+  it("keeps a free-form input path alongside recommended choices", async () => {
+    const ui = {
+      async select(_title: string, choices: string[]) {
+        return choices.find((choice) => choice.startsWith("Describe another action"));
+      },
+      async input() { return "我绕到屋后看看"; },
+      notify: () => undefined,
+    } as unknown as ExtensionUIContext;
+
+    await expect(createTuiUserQuestion(ui)({
+      header: "Next move",
+      question: "What do you do?",
+      options: [{ value: "observe", label: "Observe", description: "Look around", recommended: true }],
+      customInput: {
+        label: "Describe another action",
+        description: "Enter any immediate action.",
+        prompt: "Your action",
+        resolve: (input) => input.trim() || undefined,
+      },
+    })).resolves.toBe("我绕到屋后看看");
+  });
 });

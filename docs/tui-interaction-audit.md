@@ -76,16 +76,49 @@ Pi's main TUI had no component subscribed to the nested session's deltas. The
 same gap existed after an accepted player action.
 
 **Repair.** `createPiPlayerOpeningNarrator()` accepts a
-`PlayerSceneNarrationObserver`. Its `onText` callback bridges model deltas into
-the `nwh-player-scene-stream` above-editor widget, coalesced at 32 ms. The
-settled result is then stored once as a clean `nwh-narrator` transcript message.
-Opening, orientation, retry, and post-commit turn narration share this path.
-Provider retry text stays a secondary status instead of being mixed into story
-prose.
+`PlayerSceneNarrationObserver`. The full nested Pi event stream bridges
+provider/model identity, thinking deltas, text deltas, retry events, and the
+capture-only choice-tool lifecycle into the `nwh-player-scene-stream`
+above-editor widget, coalesced at 32 ms. The accepted stream is checked against
+the settled result, which is then stored once as a clean `nwh-narrator`
+transcript message. A scene-validation retry keeps the rejected first draft
+visible while the replacement streams. Opening, orientation, retry, and
+post-commit turn narration share this path; status never masquerades as prose.
 
-**Evidence.** Narrator tests stop the model after the first delta, assert that
-the delta is already present in the active widget, then release it and assert
-that only the final narration is persisted.
+**Evidence.** Narrator tests assert native provider/model, thinking, and text
+events in the active widget, then prove the persisted narration is exactly the
+accepted streamed text.
+
+### 3a. Restored player transcripts were mistaken for new conversations
+
+**Cause.** Player input and narrator prose are durable `nwh-play` and
+`nwh-narrator` custom messages. Freshness detection looked only for ordinary
+`role=user` messages, so a long-running player-only transcript could be treated
+as empty and receive another automatic scene request.
+
+**Repair.** Startup now recognizes visible custom transcript entries and uses a
+separate player-context check for automatic scene timing. `activeWorldScene`
+is consumed only by the first Pi runtime, and `auto` is suppressed when the
+selected actor/instance is already active. Explicit `/scene`, a new instance,
+or an actual switch remain deliberate narration triggers. Scene choices are
+stored with branch, actor, and commit identity; history restores them only when
+that identity still matches, without requesting another narrator.
+
+**Evidence.** Tests cover historical player-only transcripts even with an
+explicit startup `auto`, repeated `/play` selection, and current-head choice
+restoration with zero narrator calls.
+
+### 3b. Narration handed agency back as an empty text box
+
+**Cause.** The prose ended on an actionable beat but did not expose grounded
+actions through the existing AskUserQuestion interaction.
+
+**Repair.** The isolated narrator has one capture-only
+`propose_player_choices` tool. It returns 2-4 immediate actor-visible
+utterances, or conservative host defaults if the provider omits the tool. The
+TUI presents those choices plus free-form input. Choosing an option schedules
+its utterance through the same restricted translator, scope/knowledge checks,
+engine validation, and commit path as typed player input.
 
 ### 4. Player action translation looked hung and could run forever
 

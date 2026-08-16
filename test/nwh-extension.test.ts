@@ -39,6 +39,7 @@ async function fixture(
   playerTranslator?: PlayerActionTranslator,
   runReparse?: NwhExtensionOptions["runReparse"],
   playerOpeningNarrator?: NwhExtensionOptions["playerOpeningNarrator"],
+  activeWorldScene?: NwhExtensionOptions["activeWorldScene"],
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-tui-extension-"));
   temporaryDirectories.push(root);
@@ -100,6 +101,7 @@ async function fixture(
       : purpose === "turn"
         ? `脚下的路已经把你带离原处，新的位置与刚才的决定一起成为无法抹去的事实。${frame.actor.name}能感到行动留下的余波，却没有谁替你安排下一步。眼前的世界正从这个结果继续展开，你可以观察抵达之处，也可以立即应对最迫近的变化。`
         : `方才的余波还停在感官里，你重新看清自己所处的这一刻。${frame.actor.name}所知道的事情没有凭空增减，世界也没有趁你离开时替你作出选择。你可以先确认周围的变化，回想刚刚发生的事，或者直接采取此刻最重要的行动——接下来由你决定。`),
+    ...(activeWorldScene !== undefined ? { activeWorldScene } : {}),
     ...(runReparse ? { runReparse } : {}),
     preparedCacheRoot: path.join(root, "prepared-cache"),
   })(pi);
@@ -817,6 +819,356 @@ describe("NWH TUI extension", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(sentMessages).toContainEqual(expect.objectContaining({ customType: "nwh-narrator", content: finalNarration, display: true }));
+  });
+
+  it("does not generate another scene when a restored transcript already contains player custom messages", async () => {
+    let narratorCalls = 0;
+    const { events, root, sentMessages } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        narratorCalls += 1;
+        return "这段文字不应生成。";
+      },
+      "auto",
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
+    const ctx = {
+      mode: "tui",
+      sessionManager: {
+        getEntries: () => [
+          { type: "custom_message", customType: "nwh-play", content: "**福贵:** 我看看四周", display: true },
+          { type: "custom_message", customType: "nwh-narrator", content: "旧场景", display: true },
+        ],
+      },
+      ui: {
+        notify: () => undefined,
+        setTitle: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: () => undefined,
+        setHeader: () => undefined,
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("session_start")?.({ type: "session_start" }, ctx);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(narratorCalls).toBe(0);
+    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
+  });
+
+  it("does not honor an automatic startup scene request inside any existing visible transcript", async () => {
+    let narratorCalls = 0;
+    const { events, root } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        narratorCalls += 1;
+        return "这段文字不应生成。";
+      },
+      "auto",
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
+    const restored = deferred();
+    const ctx = {
+      mode: "tui",
+      sessionManager: {
+        getEntries: () => [{ type: "message", message: { role: "user", content: "这是已有会话" } }],
+      },
+      ui: {
+        notify: () => undefined,
+        setTitle: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: (_key: string, content: string | undefined) => {
+          if (content?.includes("福贵@main")) restored.resolve();
+        },
+        setHeader: () => undefined,
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("session_start")?.({ type: "session_start" }, ctx);
+    await restored.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(narratorCalls).toBe(0);
+  });
+
+  it("does not narrate twice when /play selects the already active character and instance", async () => {
+    let narratorCalls = 0;
+    const { commands, root } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        narratorCalls += 1;
+        return "风从院墙上缓慢压下来，你站在尚未发生下一步的时刻里。眼前的门窗、脚下的尘土和远处模糊的响动都没有替你作出决定。你可以观察周围，整理已经知道的事，或者立即尝试自己的行动，让世界从真正的选择之后继续。";
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")!.handler("hero main", ctx);
+    await commands.get("play")!.handler("hero main", ctx);
+
+    expect(narratorCalls).toBe(1);
+  });
+
+  it("restores persisted choices for the current head without making another narrator request", async () => {
+    let narratorCalls = 0;
+    const { events, root } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        narratorCalls += 1;
+        return "不应重新生成";
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
+    const questions: string[] = [];
+    const ctx = {
+      mode: "tui",
+      sessionManager: {
+        getEntries: () => [{
+          type: "custom_message",
+          customType: "nwh-narrator",
+          content: "旧场景",
+          display: true,
+          details: {
+            version: 1,
+            branchId: "main",
+            actorId: "hero",
+            commitId: genesis,
+            purpose: "opening",
+            choices: [
+              { label: "观察", description: "看看周围。", action: "我先观察周围。" },
+              { label: "等待", description: "等一小会。", action: "我先等待片刻。" },
+            ],
+          },
+        }],
+      },
+      ui: {
+        notify: () => undefined,
+        async select(title: string) {
+          questions.push(title);
+          return undefined;
+        },
+        setTitle: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: () => undefined,
+        setHeader: () => undefined,
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("session_start")?.({ type: "session_start" }, ctx);
+    await expect.poll(() => questions, { timeout: 1_000 }).toContain("福贵，你接下来准备怎么做？");
+
+    expect(narratorCalls).toBe(0);
+  });
+
+  it("renders native narrator text and thinking deltas and persists exactly the streamed final text", async () => {
+    const narration = "雨声沿着屋檐一寸寸落下，你站在尚未被下一步行动改变的门槛前。眼前能确认的痕迹都留在昏暗光线里，远处的动静却还没有给出答案。你可以先观察近处，也可以整理心里的疑问，或者立刻采取此刻最重要的行动。";
+    const { commands, root, sentMessages } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async (_frame, _purpose, observer) => {
+        const start = fauxAssistantMessage([]);
+        observer?.onAttempt?.(1);
+        observer?.onEvent?.({ type: "message_start", message: start } as never);
+        const thinking = fauxAssistantMessage([fauxThinking("先确认角色可见范围")]);
+        observer?.onEvent?.({
+          type: "message_update",
+          message: thinking,
+          assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "先确认角色可见范围", partial: thinking },
+        } as never);
+        const text = fauxAssistantMessage([fauxThinking("先确认角色可见范围"), fauxText(narration)]);
+        observer?.onEvent?.({
+          type: "message_update",
+          message: text,
+          assistantMessageEvent: { type: "text_delta", contentIndex: 1, delta: narration, partial: text },
+        } as never);
+        observer?.onEvent?.({ type: "message_end", message: text } as never);
+        return narration;
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const widgets: Array<string[] | undefined> = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        setStatus: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWidget: (_key: string, content: string[] | undefined) => widgets.push(content),
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")!.handler("hero main", ctx);
+
+    const live = widgets.flatMap((content) => content ?? []).join("\n");
+    expect(live).toContain("faux/faux-1");
+    expect(live).toContain("[thinking · live]");
+    expect(live).toContain("先确认角色可见范围");
+    expect(live).toContain(narration);
+    expect(sentMessages).toContainEqual(expect.objectContaining({
+      customType: "nwh-narrator",
+      content: narration,
+      display: true,
+    }));
+  });
+
+  it("rejects a settled narrator result that differs from the native text stream", async () => {
+    const streamed = "雨停在门槛之外，你能听见檐角最后几滴水落下。屋里没有新的事实凭空出现，眼前仍只有已经看见的门、微暗的光和等待决定的片刻。你可以先观察，也可以依照自己的判断采取行动。";
+    const settled = "这是一段与用户实际看到的流不相同、因此绝不能写入会话的替代文本。它即使看起来完整，也不能越过真实流与最终消息必须一致的校验边界。用户应当得到明确失败，而不是被悄悄替换输出。";
+    const { commands, root, sentMessages } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async (_frame, _purpose, observer) => {
+        const message = fauxAssistantMessage([fauxText(streamed)]);
+        observer?.onAttempt?.(1);
+        observer?.onEvent?.({ type: "message_start", message: fauxAssistantMessage([]) } as never);
+        observer?.onEvent?.({
+          type: "message_update",
+          message,
+          assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: streamed, partial: message },
+        } as never);
+        observer?.onEvent?.({ type: "message_end", message } as never);
+        return settled;
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const notifications: string[] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")!.handler("hero main", ctx);
+
+    expect(sentMessages.some((message) => message.customType === "nwh-narrator")).toBe(false);
+    expect(notifications).toContainEqual(expect.stringContaining("did not match the text shown in the live provider stream"));
+  });
+
+  it("offers grounded default choices and routes the selected utterance through the normal player gate", async () => {
+    const translated = deferred();
+    const utterances: string[] = [];
+    const narratorText = "冷风卷过空地，你听见脚边细碎的沙石声，眼前这一刻仍停在你的决定之前。近处的光影和记忆里已经知道的事情彼此交错，却没有替你指出唯一道路。你可以先靠近门边观察，也可以停下来梳理线索，或者选择完全不同的行动。";
+    const { commands, root } = await fixture(
+      undefined,
+      async (input) => {
+        utterances.push(input.utterance);
+        translated.resolve();
+        throw new Error("stop after observing selected utterance");
+      },
+      undefined,
+      async () => ({
+        narration: narratorText,
+        choices: [
+          { label: "靠近门边", description: "听清门外的声音。", action: "我靠近门边，仔细听外面的声音。" },
+          { label: "整理线索", description: "回想自己知道的事。", action: "我先整理已经知道的线索。" },
+        ],
+      }),
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const questions: string[] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        async select(title: string, choices: string[]) {
+          questions.push(title);
+          return choices.find((choice) => choice.includes("靠近门边"));
+        },
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")!.handler("hero main", ctx);
+    await translated.promise;
+
+    expect(questions).toContain("福贵，你接下来准备怎么做？");
+    expect(utterances).toEqual(["我靠近门边，仔细听外面的声音。"]);
   });
 
   it("opens a structured character question with a free-form alias path for /play", async () => {

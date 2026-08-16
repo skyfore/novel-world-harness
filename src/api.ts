@@ -31,6 +31,18 @@ export { NarrativeRenderer, type ActorNarrativeFrame, type NarrativeAdapter, typ
 export { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "./world/possibility-model.js";
 export { buildActorScopedActionContext, playerActionCandidateSchema, playerActionToKnowledgeAwareAction, playerTurnInputSchema, PlayerTurnService, validatePlayerActionScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionTranslator, type PlayerTurnInput, type PlayerTurnResult } from "./world/player-action.js";
 export { PlaySessionStore, activePlaySessionSchema, type ActivePlaySession } from "./world/play-session.js";
+export {
+  assertPlaySceneNarration,
+  buildPlayOpeningFrame,
+  playSceneRequestForEntry,
+  playScenePrompt,
+  renderPlaySceneFailure,
+  resolvePlayScenePurpose,
+  type PlayOpeningFrame,
+  type PlayEntryIntent,
+  type PlayScenePurpose,
+  type PlaySceneRequest,
+} from "./world/play-opening.js";
 export { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayNovel, createSourcePlayInstance, resolvePlayInstance, resolvePlayNovel, type AskPlayQuestion, type PlayInstanceLifecycleEvent, type PlayInstanceMode } from "./world/play-choice.js";
 export { inspectPlayExperience, listPlayableCharacters, performPlayTurn, resolveCharacter, resolveNovelSource, selectPlayExperience, type PlayExperienceCatalog, type PlayableCharacter, type PlayInstanceSummary, type PlayTurnOutcome, type SelectedPlayExperience } from "./world/play-experience.js";
 export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type CanonReplayResult, type IsolatedCanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";

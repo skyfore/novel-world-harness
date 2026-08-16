@@ -26,6 +26,7 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `/novels`, `/instances`, `/characters`, and `/progress` inspect compiled content without a model request;
 - `/continue [novel] [character]` resumes that novel's latest source-owned instance, `/switch [novel] [instance] [character]` selects another save, and `/create-instance [novel] [instance] [character]` starts a fresh save from the active prepared revision;
 - `/play [character] [instance] [novel]` opens height-aware, natively scrolling and filterable instance/character selection (with free-form id/name/alias input); `/world-resume` remains a compatibility alias for durable resume;
+- `/scene` asks the isolated narrator to render the current committed moment again without advancing the world;
 - `NOVEL.md` provides checked-in project instructions;
 - `.novel-harness/instructions.md` provides local additions.
 
@@ -135,7 +136,7 @@ startup enters player mode; ordinary input is intercepted before the general mod
 and routed through the restricted boundary below. `/leave` returns to the read-only
 assistant without deleting durable resume state.
 
-`nwh continue|switch|create`, `nwh resume`, TUI player commands, and the compact `nwh play-world` command share a separate character-embodiment boundary. Instance lookup is scoped by novel ownership: continue chooses the newest matching save, switch asks among matching saves, and a missing save is created from the selected novel's active prepared revision. Each natural-language
+`nwh continue|switch|create`, `nwh resume`, TUI player commands, and the compact `nwh play-world` command share a separate character-embodiment boundary. Instance lookup is scoped by novel ownership: continue chooses the newest matching save, switch asks among matching saves, and a missing save is created from the selected novel's active prepared revision. The scene timing follows player intent: `play` renders the selected character's current scene, `create` opens the new story, and a real `switch` re-orients the player at the selected head. `continue`, `resume`, and an ordinary restart preserve the existing time/conversation context without inserting another narrator message. Restoration into a deliberately fresh transcript renders one orientation because no prior screen context exists. Scene prose comes from a fresh tool-free narrator session; an underspecified draft is revised once automatically. A final provider failure is shown explicitly with `/scene`, `/login`, and `/model` recovery guidance instead of masquerading as generic story prose. None of these rendering paths moves the branch head. Each natural-language
 action receives only an actor-scoped view plus entities explicitly named by the
 player and artifacts currently owned by that actor. Its fresh Pi session has no
 file tools, project instructions, compiler extension, source text, future canon,

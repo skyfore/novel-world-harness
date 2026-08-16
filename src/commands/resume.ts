@@ -2,6 +2,7 @@ import type { TuiMode } from "@earendil-works/pi-coding-agent";
 import { choosePlayExperience, type AskPlayQuestion, type PlayInstanceMode } from "../world/play-choice.js";
 import { askUserQuestion } from "../util/ask-user-question.js";
 import { playCommand } from "./play.js";
+import { playSceneRequestForEntry } from "../world/play-opening.js";
 
 export type ResumeCommandOptions = {
   root: string;
@@ -18,13 +19,15 @@ export type ResumeCommandOptions = {
 };
 
 export async function resumeCommand(options: ResumeCommandOptions): Promise<void> {
+  const instanceMode = options.instanceMode ?? "continue";
   const selection = await choosePlayExperience(options.root, {
     ...(options.branchId ? { branchId: options.branchId } : {}),
     ...(options.character ? { character: options.character } : {}),
     ...(options.source ? { source: options.source } : {}),
-    instanceMode: options.instanceMode ?? "continue",
+    instanceMode,
     onInstanceLifecycle: (event) => {
-      const verb = event.type === "created" ? "Created" : event.type === "continued" ? "Continuing" : "Switched to";
+      if (event.type === "continued") return;
+      const verb = event.type === "created" ? "Created" : "Switched to";
       process.stdout.write(`${verb} ${event.sourceTitle} instance '${event.branchId}'${event.preparedRevisionHash ? ` at revision ${event.preparedRevisionHash.slice(0, 12)}` : ""}.\n`);
     },
   }, options.ask ?? askUserQuestion);
@@ -37,5 +40,8 @@ export async function resumeCommand(options: ResumeCommandOptions): Promise<void
     ...(options.tuiMode ? { tuiMode: options.tuiMode } : {}),
     continueSession: options.continueSession,
     saveSession: options.saveSession,
+    activeWorldScene: instanceMode === "continue" && options.continueSession === false
+      ? playSceneRequestForEntry("startup", true)
+      : playSceneRequestForEntry(instanceMode),
   });
 }

@@ -32,6 +32,7 @@ async function fixture(
   onSessionShutdown?: () => Promise<void>,
   playerTranslator?: PlayerActionTranslator,
   runReparse?: NwhExtensionOptions["runReparse"],
+  playerOpeningNarrator?: NwhExtensionOptions["playerOpeningNarrator"],
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-tui-extension-"));
   temporaryDirectories.push(root);
@@ -75,6 +76,9 @@ async function fixture(
     mode: "assistant",
     onSessionShutdown,
     playerTranslator,
+    playerOpeningNarrator: playerOpeningNarrator ?? (async (frame, purpose) => purpose === "opening"
+      ? `门外的风声忽远忽近，你的意识落回此刻。${frame.actor.name}所能确认的一切都在眼前，而尚未发生的命运仍旧沉默。周围没有谁替你作出决定，只有这个等待被打破的瞬间。你可以先观察近处，梳理自己的念头，或者立刻尝试心中浮现的行动——故事会从你的选择继续。`
+      : `方才的余波还停在感官里，你重新看清自己所处的这一刻。${frame.actor.name}所知道的事情没有凭空增减，世界也没有趁你离开时替你作出选择。你可以先确认周围的变化，回想刚刚发生的事，或者直接采取此刻最重要的行动——接下来由你决定。`),
     ...(runReparse ? { runReparse } : {}),
     preparedCacheRoot: path.join(root, "prepared-cache"),
   })(pi);
@@ -118,7 +122,7 @@ describe("NWH TUI extension", () => {
   it("registers local commands and leaves assistant/thinking rendering to Pi", async () => {
     const { commands, sentUserMessages, markdownTransformers } = await fixture();
     expect(markdownTransformers).toHaveLength(0);
-    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "continue", "switch", "create-instance", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
+    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "continue", "switch", "create-instance", "scene", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
     const ctx = commandContext(notifications, actions);
@@ -391,13 +395,13 @@ describe("NWH TUI extension", () => {
       requiresKnowledge: [],
       forbidsKnowledge: [],
     });
-    const { events, root, sentVisibleMessages } = await fixture(undefined, translator);
+    const { commands, events, root, sentVisibleMessages } = await fixture(undefined, translator);
     const canon = new CanonicalModelStore(root);
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: ["Lin Qi"], evidence: [] });
     await canon.putEntity({ id: "hall", kind: "location", canonicalName: "前厅", aliases: [], evidence: [] });
     await canon.putEntity({ id: "camp", kind: "location", canonicalName: "营地", aliases: [], evidence: [] });
     const { engine } = await openWorkspaceWorld(root);
-    await engine.createBranch("main", "Main", {
+    const genesis = await engine.createBranch("main", "Main", {
       version: 1,
       operations: [
         { op: "set", entityId: "hero", field: "character.alive", value: true },
@@ -423,7 +427,19 @@ describe("NWH TUI extension", () => {
       ctx,
     )).resolves.toEqual({ action: "handled" });
     await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ branchId: "main", actorId: "hero" });
-    expect(sentVisibleMessages.join("\n")).toContain("Entered **林岐**");
+    expect(sentVisibleMessages.join("\n")).not.toContain("Entered **林岐**");
+    expect(sentVisibleMessages.join("\n")).toContain("门外的风声忽远忽近");
+    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
+
+    const openingMessageCount = sentVisibleMessages.length;
+    await commands.get("continue")?.handler("", ctx as unknown as ExtensionCommandContext);
+    expect(sentVisibleMessages).toHaveLength(openingMessageCount);
+    await commands.get("switch")?.handler("", ctx as unknown as ExtensionCommandContext);
+    expect(sentVisibleMessages).toHaveLength(openingMessageCount);
+    await commands.get("scene")?.handler("", ctx as unknown as ExtensionCommandContext);
+    expect(sentVisibleMessages).toHaveLength(openingMessageCount + 1);
+    expect(sentVisibleMessages.at(-1)).toContain("门外的风声忽远忽近");
+    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
 
     await expect(input(
       { type: "input", text: "我离开前厅去营地", source: "interactive" } as InputEvent,
@@ -434,8 +450,43 @@ describe("NWH TUI extension", () => {
     const head = await reopened.engine.branches.readHead("main");
     expect((await reopened.engine.projector.project(head)).values.hero?.["character.location"]).toBe("camp");
     expect(sentVisibleMessages.join("\n")).toContain("Committed at step 1");
-    expect(notifications).toEqual([]);
+    expect(notifications).toContainEqual(expect.stringContaining("Playing 林岐"));
     expect(statuses).toContain("NWH · 林岐@main · step 1");
+  });
+
+  it("reports narrator failure without presenting canned prose as a story opening", async () => {
+    const { commands, root, sentVisibleMessages } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async () => { throw new Error("provider unavailable"); },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const notifications: string[] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")?.handler("hero main", ctx);
+
+    expect(sentVisibleMessages).toHaveLength(1);
+    expect(sentVisibleMessages[0]).toContain("没有成功生成故事开场");
+    expect(sentVisibleMessages[0]).toContain("/scene");
+    expect(sentVisibleMessages[0]).not.toContain("故事正从已提交的起点开始");
+    expect(notifications).toContainEqual(expect.stringContaining("Scene narration failed: provider unavailable"));
+    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
   it("opens a structured character question with a free-form alias path for /play", async () => {
@@ -476,7 +527,8 @@ describe("NWH TUI extension", () => {
     expect(questions).toEqual(["Who do you want to play on 'main'?"]);
     expect(inputs).toEqual(["Character id, name, or alias"]);
     await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ branchId: "main", actorId: "rival" });
-    expect(sentVisibleMessages.join("\n")).toContain("Entered **宿敌**");
+    expect(sentVisibleMessages.join("\n")).not.toContain("Entered **宿敌**");
+    expect(sentVisibleMessages.join("\n")).toContain("门外的风声忽远忽近");
   });
 
   it("chooses a novel before showing a filtered, bounded character picker for /play", async () => {

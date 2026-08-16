@@ -3,6 +3,7 @@ import type { TuiMode } from "@earendil-works/pi-coding-agent";
 import { formatRetryNotice, PiAgentSession } from "../agent/pi-session.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
+import type { PlaySceneRequest } from "../world/play-opening.js";
 
 export type PlayCommandOptions = {
   configPath: string;
@@ -13,6 +14,7 @@ export type PlayCommandOptions = {
   saveSession?: boolean;
   printPrompt?: string;
   tuiMode?: TuiMode;
+  activeWorldScene?: PlaySceneRequest;
 };
 
 export function resolvePlaySessionContinuation(options: Pick<PlayCommandOptions, "continueSession" | "printPrompt">): boolean {
@@ -43,6 +45,7 @@ export async function playCommand(options: PlayCommandOptions): Promise<void> {
     model,
     continueSession,
     saveSession,
+    ...(options.activeWorldScene !== undefined ? { activeWorldScene: options.activeWorldScene } : {}),
     ...(printMode ? { onRetry(event) {
       stderr.write(`\n${formatRetryNotice(event)}\n`);
     } } : {}),

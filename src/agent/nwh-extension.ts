@@ -54,6 +54,15 @@ import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
 import { createWorldBranch } from "../world/instance.js";
+import {
+  buildPlayOpeningFrame,
+  playSceneRequestForEntry,
+  renderPlaySceneFailure,
+  resolvePlayScenePurpose,
+  type PlayScenePurpose,
+  type PlaySceneRequest,
+} from "../world/play-opening.js";
+import { createPiPlayerOpeningNarrator, type PlayerOpeningNarrator } from "./pi-player-opening.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -67,6 +76,8 @@ export type NwhExtensionOptions = {
   onSessionShutdown?: () => Promise<void>;
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
   preparedCacheRoot?: string;
+  activeWorldScene?: PlaySceneRequest;
+  playerOpeningNarrator?: PlayerOpeningNarrator;
   runReparse?: typeof reparseCommand;
 };
 
@@ -79,6 +90,7 @@ const COMMAND_HELP = `NWH commands:
   /continue [novel] [character] continue that novel's latest instance
   /switch [novel] [instance] [character] switch novel, instance or character
   /create-instance [novel] [instance] [character] create a fresh world instance
+  /scene                    render the current scene again without advancing it
   /progress [instance]      show committed progress for an instance
   /leave                    leave player mode without deleting resume state
   /files [path filter]       list safe workspace files
@@ -233,6 +245,49 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       pi.sendMessage({ customType: "nwh-play", content, display: true });
     };
 
+    const narratePlayerScene = async (
+      ctx: ExtensionContext,
+      selection: SelectedPlayExperience,
+      purpose: PlayScenePurpose,
+    ): Promise<void> => {
+      let frame: Awaited<ReturnType<typeof buildPlayOpeningFrame>> = {
+        branchId: selection.session.branchId,
+        commitId: selection.session.lastCommitId,
+        logicalStep: selection.logicalStep,
+        actor: { id: selection.actor.id, name: selection.actor.canonicalName },
+        selfState: {},
+        ownedEntityState: {},
+        knowledge: [],
+        visibleEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
+        recentVisibleEvents: [],
+      };
+      try {
+        frame = await buildPlayOpeningFrame(
+          workspace.root,
+          selection.session.branchId,
+          selection.actor.id,
+          selection.source?.id,
+        );
+        if (ctx.mode === "tui") {
+          ctx.ui.setStatus(
+            "nwh-play-opening",
+            ctx.ui.theme.fg("dim", purpose === "opening" ? "Opening story..." : "Establishing scene..."),
+          );
+        }
+        const narrator = options.playerOpeningNarrator ?? createPiPlayerOpeningNarrator({
+          root: workspace.root,
+          ...(options.profile ? { profile: options.profile } : {}),
+          ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+        });
+        showPlayMessage(await narrator(frame, purpose));
+      } catch (error) {
+        showPlayMessage(renderPlaySceneFailure(frame));
+        ctx.ui.notify(`Scene narration failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      } finally {
+        if (ctx.mode === "tui") ctx.ui.setStatus("nwh-play-opening", undefined);
+      }
+    };
+
     const activatePlayer = async (
       ctx: ExtensionContext,
       input: {
@@ -242,15 +297,18 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         preferActiveSource?: boolean;
         preferSavedCharacter?: boolean;
         instanceMode?: PlayInstanceMode;
+        scene?: PlaySceneRequest;
       } = {},
     ): Promise<SelectedPlayExperience | undefined> => {
+      const previousSelection = selectedPlay;
       let selection: SelectedPlayExperience | undefined;
       try {
         selection = await choosePlayExperience(workspace.root, {
           ...input,
           ...(options.preparedCacheRoot ? { preparedCacheRoot: options.preparedCacheRoot } : {}),
           onInstanceLifecycle: (event) => {
-            const action = event.type === "created" ? "Created" : event.type === "continued" ? "Continuing" : "Switched to";
+            if (event.type === "continued") return;
+            const action = event.type === "created" ? "Created" : "Switched to";
             ctx.ui.notify(
               `${action} ${event.sourceTitle} instance '${event.branchId}'${event.preparedRevisionHash ? ` · revision ${event.preparedRevisionHash.slice(0, 12)}` : ""}.`,
               "info",
@@ -268,12 +326,22 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       selectedPlay = selection;
       playerMode = true;
       setPlayerStatus(ctx, selection);
-      showPlayMessage([
-        `Entered **${selection.actor.canonicalName}** (${selection.actor.id}) on **${selection.session.branchId}** at committed step ${selection.logicalStep}.`,
-        selection.source ? `Novel: **${selection.source.title}**.` : "",
-        selection.actor.locationName ? `Current location: ${selection.actor.locationName}.` : "",
-        "Your next ordinary message is treated as this character's immediate action. Use /leave to return to compiler/assistant mode.",
-      ].filter(Boolean).join("\n"));
+      const selectionChanged = !previousSelection
+        || previousSelection.session.branchId !== selection.session.branchId
+        || previousSelection.actor.id !== selection.actor.id;
+      const requestedScene = input.scene ?? "none";
+      const purpose = resolvePlayScenePurpose(requestedScene, {
+        logicalStep: selection.logicalStep,
+        selectionChanged,
+        hadPreviousSelection: Boolean(previousSelection),
+      });
+      if (selectionChanged && purpose) {
+        ctx.ui.notify(
+          `Playing ${selection.actor.canonicalName} in ${selection.source?.title ?? selection.branchName} · ordinary messages are character actions · /leave exits player mode.`,
+          "info",
+        );
+      }
+      if (purpose) await narratePlayerScene(ctx, selection, purpose);
       return selection;
     };
 
@@ -367,6 +435,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         preferActiveSource: false,
         preferSavedCharacter: false,
         instanceMode: "continue",
+        scene: playSceneRequestForEntry("play"),
       });
       return true;
     };
@@ -626,6 +695,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.on("session_shutdown", async () => options.onSessionShutdown?.());
 
     pi.on("tool_call", (event) => {
+      if (playerMode) {
+        return {
+          block: true,
+          reason: "Player narration is limited to the committed actor frame; tools are unavailable in player mode.",
+        };
+      }
       if (compilerCircuitBroken) {
         return {
           block: true,
@@ -844,6 +919,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
               branchId: catalog.activeSession.branchId,
               ...(catalog.activeSession.sourceId ? { source: catalog.activeSession.sourceId } : {}),
               character: catalog.activeSession.actorId,
+              instanceMode: "continue",
+              scene: options.activeWorldScene ?? playSceneRequestForEntry("startup", freshConversation),
             });
           } catch (error) {
             ctx.ui.notify(`Saved play session is unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
@@ -907,6 +984,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           preferActiveSource: false,
           preferSavedCharacter: false,
           instanceMode: "switch",
+          scene: playSceneRequestForEntry("play"),
         });
       },
     });
@@ -920,6 +998,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(character ? { character } : {}),
           ...(source ? { source } : {}),
           instanceMode: "continue",
+          scene: playSceneRequestForEntry("resume"),
         });
       },
     });
@@ -932,6 +1011,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(source ? { source } : {}),
           ...(character ? { character } : {}),
           instanceMode: "continue",
+          scene: playSceneRequestForEntry("continue"),
         });
       },
     });
@@ -947,6 +1027,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           preferActiveSource: false,
           preferSavedCharacter: true,
           instanceMode: "switch",
+          scene: playSceneRequestForEntry("switch"),
         });
       },
     });
@@ -962,7 +1043,17 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           preferActiveSource: false,
           preferSavedCharacter: false,
           instanceMode: "create",
+          scene: playSceneRequestForEntry("create"),
         });
+      },
+    });
+
+    pi.registerCommand("scene", {
+      description: "Render the current character scene without advancing the world",
+      handler: async (_args, ctx) => {
+        const selection = selectedPlay ?? await activatePlayer(ctx, { instanceMode: "continue", scene: "none" });
+        if (!selection) return;
+        await narratePlayerScene(ctx, selection, selection.logicalStep === 0 ? "opening" : "orientation");
       },
     });
 

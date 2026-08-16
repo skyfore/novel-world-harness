@@ -25,6 +25,7 @@ import type { LlmProfile } from "../config/schema.js";
 import { compilerBatchOutcomeFromMessages, type CompilerBatchOutcome } from "../compiler/batch-outcome.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { createNwhExtension, type NwhInteractionMode } from "./nwh-extension.js";
+import type { PlaySceneRequest } from "../world/play-opening.js";
 import { nwhRuntimeDir, workspaceSessionDir } from "./runtime-paths.js";
 
 export { expandFileMentions } from "./file-mentions.js";
@@ -49,6 +50,7 @@ export type PiAgentSessionOptions = {
   includeNwhExtension?: boolean;
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
   interactionMode?: NwhInteractionMode;
+  activeWorldScene?: PlaySceneRequest;
   runtimeDir?: string;
   piAgentDir?: string;
 };
@@ -415,6 +417,9 @@ export class PiAgentSession {
               workspace: this.options.workspace,
               saveSession: this.saveSession,
               mode: this.options.interactionMode ?? "assistant",
+              ...(this.options.activeWorldScene !== undefined
+                ? { activeWorldScene: this.options.activeWorldScene }
+                : {}),
               ...(this.options.profile ? { profile: this.options.profile } : {}),
               onSessionShutdown: () => flushSettings(settingsManager),
               ...(this.options.resetCompilerProposalTools

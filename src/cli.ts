@@ -36,6 +36,7 @@ import {
   worldValidateCommand,
 } from "./commands/world.js";
 import { choosePlayExperience } from "./world/play-choice.js";
+import { playSceneRequestForEntry } from "./world/play-opening.js";
 import { askUserQuestion } from "./util/ask-user-question.js";
 
 const program = new Command();
@@ -395,7 +396,8 @@ program
   .description("open the local-first terminal session")
   .action(async (options) => {
     const globalOptions = program.opts();
-    if (options.branch || options.character || options.novel) {
+    const explicitlySelectedWorld = Boolean(options.branch || options.character || options.novel);
+    if (explicitlySelectedWorld) {
       await choosePlayExperience(rootFor(options), {
         ...(options.branch ? { branchId: options.branch } : {}),
         ...(options.character ? { character: options.character } : {}),
@@ -414,6 +416,7 @@ program
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
       continueSession: options.newSession || globalOptions.newSession ? false : options.continue || globalOptions.continue || undefined,
       saveSession: options.save && globalOptions.save,
+      ...(explicitlySelectedWorld ? { activeWorldScene: playSceneRequestForEntry("play") } : {}),
     });
   });
 

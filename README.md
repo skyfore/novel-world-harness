@@ -137,6 +137,9 @@ receives committed character context only. Inside the TUI:
 ```text
 /novels
 /instances
+/remove instance main
+/remove analysis huozhe.txt
+/remove all huozhe.txt
 /characters main
 /play 曹操 main
 /continue huozhe.txt
@@ -157,7 +160,14 @@ receives committed character context only. Inside the TUI:
 /exit
 ```
 
-The TUI also supports multiline editing, `↑`/`↓` prompt history, interrupt/queue shortcuts, session navigation, and expandable tool output; use `/hotkeys` for the current key map. Long NWH operations such as `/reparse` open in a live task panel with host lifecycle events, tool calls, provider reasoning activity, and streamed model text explicitly labeled as unverified proposal commentary. `←` or `Esc` returns the task to a compact background widget without cancelling it, `/tasks` brings it back to the foreground, and the task panel's displayed cancel key propagates an abort into its nested Pi session. Completed, failed, and cancelled task output remains inspectable for the rest of the TUI session. A leading `!` is an explicit user-run shell command provided by the terminal UI. It is not exposed to the model as a tool.
+`/remove` is an explicitly confirmed development/debugging flow. `instance`
+deletes one leaf branch and its resume state, `analysis` resets the selected
+novel's evidence index, compiler artifacts, proposals, and prepared cache while
+leaving its registered source and pinned instances intact, and `all` also removes
+every owned instance and unregisters the novel. Immutable content-addressed
+source evidence is retained in every mode; it is never silently garbage-collected.
+
+The TUI also supports multiline editing, `↑`/`↓` prompt history, interrupt/queue shortcuts, session navigation, and expandable tool output; use `/hotkeys` for the current key map. The main agent receives a metadata-only `rename_session` tool and names a transcript after its concrete novel, character, or objective; host-known compiler/player contexts provide the same meaningful-title fallback, while an existing manual name is preserved. Long NWH operations such as `/reparse` open in a live task panel with host lifecycle events, tool calls, provider reasoning activity, and streamed model text explicitly labeled as unverified proposal commentary. `←` or `Esc` returns the task to a compact background widget without cancelling it, `/tasks` brings it back to the foreground, and the task panel's displayed cancel key propagates an abort into its nested Pi session. Completed, failed, and cancelled task output remains inspectable for the rest of the TUI session. A leading `!` is an explicit user-run shell command provided by the terminal UI. It is not exposed to the model as a tool.
 
 Selected excerpts are sent to the configured model provider. “Local-first” describes discovery, access control, and persistence; it is not an offline-model guarantee.
 

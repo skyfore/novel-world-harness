@@ -176,6 +176,28 @@ export class BranchStore {
       throw error;
     }
   }
+  async assertRemovable(id: BranchId, removingBranchIds: ReadonlySet<string> = new Set([id])): Promise<void> {
+    assertBranchId(id);
+    await this.read(id);
+    for (const candidateId of await this.listIds()) {
+      if (candidateId === id || removingBranchIds.has(candidateId)) continue;
+      const candidate = await this.read(candidateId);
+      if (candidate.parentBranchId === id) {
+        throw new Error(`Cannot remove instance '${id}' while child instance '${candidateId}' still depends on it. Remove the child first.`);
+      }
+    }
+    const lock = await this.inspectLock(id);
+    if (lock.present) throw new Error(`Cannot remove instance '${id}' while its branch lock is ${lock.stale ? "stale" : "active"}.`);
+  }
+  async remove(id: BranchId): Promise<void> {
+    await this.assertRemovable(id);
+    const directory = this.branchDirectory(id);
+    const tombstone = path.join(this.root, `.deleting-${id}-${crypto.randomUUID()}`);
+    await this.withLock(id, async () => {
+      await fs.rename(directory, tombstone);
+    });
+    await fs.rm(tombstone, { recursive: true, force: true });
+  }
   async readHead(id: BranchId): Promise<CommitId> {
     return (await this.readHeadInfo(id)).commitId;
   }

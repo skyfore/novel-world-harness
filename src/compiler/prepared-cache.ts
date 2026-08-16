@@ -238,6 +238,18 @@ export class PreparedNovelCache {
     return revisions.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.bundleHash.localeCompare(right.bundleHash));
   }
 
+  async remove(source: SourceDocument): Promise<boolean> {
+    const contentMd5 = source.contentMd5 ?? (await sourceIdentity(this.workspaceRoot, source)).contentMd5;
+    const target = this.cachePath(contentMd5);
+    try {
+      await fs.rm(target, { recursive: true });
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
   async activate(source: SourceDocument, bundleHash: string): Promise<PreparedCacheResult> {
     digestSchema.parse(bundleHash);
     const identity = await sourceIdentity(this.workspaceRoot, source);

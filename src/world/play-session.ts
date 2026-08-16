@@ -74,6 +74,33 @@ export class PlaySessionStore {
     await this.atomicWrite(this.filePath, value);
     return value;
   }
+  async removeInstance(branchId: string): Promise<ActivePlaySession | null> {
+    const parsedBranchId = idSchema.parse(branchId);
+    const active = await this.read();
+    await fs.rm(path.join(this.instancesDir, `${parsedBranchId}.json`), { force: true });
+    if (active?.branchId !== parsedBranchId) return active;
+    await fs.rm(this.filePath, { force: true });
+    const remaining = await this.listInstanceFiles();
+    const next = remaining.sort((left, right) =>
+      Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+      || left.branchId.localeCompare(right.branchId))[0];
+    if (!next) return null;
+    await this.atomicWrite(this.filePath, next);
+    return next;
+  }
+  private async listInstanceFiles(): Promise<ActivePlaySession[]> {
+    try {
+      const names = (await fs.readdir(this.instancesDir)).filter((name) => name.endsWith(".json")).sort();
+      return Promise.all(names.map(async (name) => {
+        const session = activePlaySessionSchema.parse(JSON.parse(await fs.readFile(path.join(this.instancesDir, name), "utf8")));
+        if (name !== `${session.branchId}.json`) throw new Error(`Play-session file '${name}' contains branch '${session.branchId}'.`);
+        return session;
+      }));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
   private async readInstanceFile(branchId: string): Promise<ActivePlaySession | null> {
     try {
       const session = activePlaySessionSchema.parse(JSON.parse(await fs.readFile(path.join(this.instancesDir, `${branchId}.json`), "utf8")));

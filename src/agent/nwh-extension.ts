@@ -70,6 +70,8 @@ import {
   type PlayerSceneNarrationObserver,
 } from "./pi-player-opening.js";
 import { formatElapsed } from "../util/elapsed-status.js";
+import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/removal.js";
+import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
 
@@ -91,6 +93,7 @@ export type NwhExtensionOptions = {
 const COMMAND_HELP = `NWH commands:
   /novels                   list registered novel sources
   /instances                list playable branches and committed progress
+  /remove [instance|analysis|all] [target] remove debug instances or novel-derived state
   /characters [instance] [novel] list characters from a novel at an instance head
   /play [character] [instance] [novel] choose a novel, then a character
   /world-resume [instance] [character] [novel] resume a saved or named instance
@@ -284,6 +287,18 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     const runReparse = options.runReparse ?? reparseCommand;
     const taskRunning = () => activeTask?.snapshot.status === "running"
       || activeTask?.snapshot.status === "cancelling";
+    let managedSessionName: string | undefined;
+    const setAgentSessionName = (title: string) => {
+      const normalized = normalizeSessionTitle(title);
+      pi.setSessionName(normalized);
+      managedSessionName = normalized;
+    };
+    const setContextSessionName = (title: string) => {
+      const current = pi.getSessionName();
+      if (current && current !== managedSessionName) return;
+      setAgentSessionName(title);
+    };
+    pi.registerTool(createRenameSessionTool(setAgentSessionName));
 
     const beginHostActivity = (ctx: ExtensionContext, key: string, initial: string) => {
       const token = Symbol(key);
@@ -576,6 +591,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
       selectedPlay = selection;
       playerMode = true;
+      setContextSessionName(`${selection.source?.title ?? "Novel world"} · ${selection.actor.canonicalName} · ${selection.session.branchId}`);
       setPlayerStatus(ctx, selection);
       const selectionChanged = !previousSelection
         || previousSelection.session.branchId !== selection.session.branchId
@@ -742,6 +758,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       await resetCompilerBatch(turn.batch.segmentIds, turn.batch.id, turn.source.id);
       pendingTurn = turn;
       pendingTurnInitiatedByUserInput = initiatedByUserInput;
+      setContextSessionName(`${turn.source.title} · world compilation`);
     };
 
     const activateCompilerTools = (ctx: ExtensionContext) => {
@@ -1334,6 +1351,154 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       },
     });
 
+    pi.registerCommand("remove", {
+      description: "Remove one instance, reset a novel analysis, or remove both",
+      handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "remove novel-world state")) return;
+        const tokens = splitCommandArguments(args);
+        let scope = tokens.shift() as "instance" | "analysis" | "all" | undefined;
+        const requestedTarget = tokens.join(" ") || undefined;
+        if (scope && !["instance", "analysis", "all"].includes(scope)) {
+          throw new Error("Usage: /remove [instance|analysis|all] [instance-or-novel]");
+        }
+        if (!scope) {
+          scope = await choose(ctx, "What do you want to remove?", [
+            {
+              value: "instance",
+              label: "One instance",
+              description: "Delete one branch and its saved evolution; keep the novel analysis.",
+              recommended: true,
+            },
+            {
+              value: "analysis",
+              label: "Novel analysis",
+              description: "Reset evidence, compiler artifacts, and prepared revisions; keep registered source and pinned instances.",
+            },
+            {
+              value: "all",
+              label: "Novel and instances",
+              description: "Remove the registration, analysis, and every instance owned by that novel.",
+            },
+          ]);
+        }
+        if (!scope) return;
+
+        if (scope === "instance") {
+          const catalog = await inspectPlayExperience(workspace.root);
+          const branchId = await choosePlayInstance(
+            workspace.root,
+            requestedTarget,
+            createTuiUserQuestion(ctx.ui),
+            catalog,
+            { forcePrompt: !requestedTarget },
+          );
+          if (!branchId) return;
+          const instance = catalog.instances.find((candidate) => candidate.branchId === branchId);
+          if (!instance) throw new Error(`Unknown instance '${branchId}'.`);
+          const confirmation = await choose(ctx, "Remove this instance?", [
+            { value: "cancel", label: "Cancel", description: "Keep the instance and all committed evolution.", recommended: true },
+            {
+              value: "remove",
+              label: "Remove instance",
+              description: `${branchId} at step ${instance.logicalStep} will no longer be playable.`,
+            },
+          ]);
+          if (confirmation !== "remove") return;
+          const activity = beginHostActivity(ctx, "removal", `Removing instance ${branchId}`);
+          try {
+            const result = await withWorkspaceOperationLock(
+              workspace.root,
+              "removal",
+              () => removeWorldInstance(workspace.root, branchId),
+            );
+            if (selectedPlay?.session.branchId === branchId) {
+              const scene = activePlayerScene;
+              if (scene) {
+                scene.controller.abort();
+                await scene.promise;
+              }
+              playerMode = false;
+              selectedPlay = undefined;
+              ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · ready · /play to choose a novel world"));
+            }
+            ctx.ui.notify(
+              `Removed instance '${result.branchId}'.${result.nextActiveSession ? ` Active resume target is now '${result.nextActiveSession.branchId}'.` : " No active resume target remains."}`,
+              "info",
+            );
+          } finally {
+            activity.close();
+          }
+          return;
+        }
+
+        const sourceId = await chooseNovelSourceId(
+          ctx,
+          requestedTarget,
+          scope === "analysis" ? "Choose a novel analysis to reset" : "Choose a novel to remove",
+        );
+        if (!sourceId) return;
+        const catalog = await inspectPlayExperience(workspace.root);
+        const source = catalog.novels.find((candidate) => candidate.id === sourceId);
+        if (!source) throw new Error(`Unknown source '${sourceId}'.`);
+        const ownedInstances = catalog.instances.filter((instance) => instance.sourceId === sourceId);
+        const confirmation = await choose(ctx, scope === "analysis" ? "Reset this novel analysis?" : "Remove this novel and its instances?", [
+          {
+            value: "cancel",
+            label: "Cancel",
+            description: "Keep the current novel-world state.",
+            recommended: true,
+          },
+          scope === "analysis"
+            ? {
+                value: "remove",
+                label: "Reset analysis",
+                description: `Rebuild ${source.title} from archived evidence later; ${ownedInstances.length} pinned instance(s) remain.`,
+              }
+            : {
+                value: "remove",
+                label: "Remove everything",
+                description: `Unregister ${source.title}, reset its analysis, and remove ${ownedInstances.length} instance(s).`,
+              },
+        ]);
+        if (confirmation !== "remove") return;
+        setContextSessionName(`${source.title} · ${scope === "analysis" ? "reset analysis" : "remove novel"}`);
+        const activity = beginHostActivity(ctx, "removal", scope === "analysis" ? `Resetting ${source.title} analysis` : `Removing ${source.title}`);
+        try {
+          if (scope === "analysis") {
+            const result = await withWorkspaceOperationLock(workspace.root, "compiler", () => removeNovelAnalysis(
+              workspace.root,
+              source,
+              { ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}) },
+            ));
+            if (activeSourceId === sourceId) activeSourceId = undefined;
+            ctx.ui.notify(
+              `Reset analysis for ${source.title}: reset ${result.canonicalArtifacts + result.actorArtifacts + result.possibilities} active artifact(s) and removed ${result.proposals} proposal(s). ${ownedInstances.length} pinned instance(s) remain playable; archived source evidence is retained.`,
+              "info",
+            );
+            return;
+          }
+
+          const result = await withWorkspaceOperationLock(workspace.root, "compiler", () => removeNovel(
+            workspace.root,
+            source,
+            { ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}) },
+          ));
+          if (activeSourceId === sourceId) activeSourceId = undefined;
+          if (selectedPlay?.source?.id === sourceId || result.removedBranchIds.includes(selectedPlay?.session.branchId ?? "")) {
+            playerMode = false;
+            selectedPlay = undefined;
+            ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · ready · /play to choose a novel world"));
+          }
+          ctx.ui.notify(
+            `Removed ${source.title}, ${result.removedBranchIds.length} instance(s), and its active parsed-world state. Immutable archived source evidence is retained by design.`,
+            "info",
+          );
+        } finally {
+          activity.close();
+        }
+      },
+    });
+
     pi.registerCommand("characters", {
       description: "List committed characters at an instance head",
       handler: async (args, ctx) => {
@@ -1670,6 +1835,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }
         activeSourceId = sourceId;
         const source = inspection.source ?? await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);
+        if (source) setContextSessionName(`${source.title} · full preparation`);
         // A changed source cannot be identified as the immutable cached input.
         // Preserve the audit diagnosis instead of letting cache lookup throw a
         // less useful hash-mismatch error before the repair stage is reported.
@@ -1816,6 +1982,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activeSourceId = sourceId;
+        setContextSessionName(`${source.title} · reparse chapters ${selectedChapters.join(",")}`);
         ctx.ui.notify(`Starting reparse for ${source.title}: chapter(s) ${selectedChapters.join(", ")}.`, "info");
         const task = new NwhTask(
           `reparse-${source.id}`,
@@ -1989,6 +2156,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           `current play: ${current ? `${current.actorName ?? current.actorId ?? "no character"}@${current.branchId} step ${current.logicalStep}` : "none"}`,
           `model: ${modelLabel(ctx.model)}`,
           `session: ${ctx.sessionManager.getSessionId()}`,
+          `session title: ${ctx.sessionManager.getSessionName() ?? "unnamed (agent will name it after a substantive turn)"}`,
           `entries: ${ctx.sessionManager.getEntries().length}`,
           `persistence: ${saveSession ? "on" : "off"}`,
           `task: ${activeTask ? taskSummary(activeTask) : "none"}`,

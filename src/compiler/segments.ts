@@ -77,6 +77,10 @@ export class SegmentStore {
   async list(sourceId: string): Promise<SourceSegment[]> {
     return (await this.readManifest(sourceId))?.segments ?? [];
   }
+
+  async remove(sourceId: string): Promise<void> {
+    await fs.rm(path.join(this.root, safeId(sourceId)), { recursive: true, force: true });
+  }
 }
 
 export async function segmentSource(workspaceRoot: string, source: SourceDocument): Promise<SegmentManifest> {

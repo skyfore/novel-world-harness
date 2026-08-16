@@ -55,6 +55,7 @@ async function fixture(
   const sentMessages: Array<{ customType?: string; content: string; display?: boolean }> = [];
   const markdownTransformers: MarkdownTransformer[] = [];
   const messageRenderers = new Map<string, MessageRenderer>();
+  let sessionName: string | undefined;
   const pi = {
     registerMessageRenderer(customType: string, renderer: MessageRenderer) {
       messageRenderers.set(customType, renderer);
@@ -80,6 +81,12 @@ async function fixture(
       if (options?.triggerTurn) sentHiddenMessages.push(message.content);
       else if (message.display) sentVisibleMessages.push(message.content);
     },
+    setSessionName(name: string) {
+      sessionName = name;
+    },
+    getSessionName() {
+      return sessionName;
+    },
   } as unknown as ExtensionAPI;
   const workspace = await LocalFileWorkspace.create(root);
   await createNwhExtension({
@@ -96,7 +103,7 @@ async function fixture(
     ...(runReparse ? { runReparse } : {}),
     preparedCacheRoot: path.join(root, "prepared-cache"),
   })(pi);
-  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages, sentVisibleMessages, sentMessages, markdownTransformers, messageRenderers };
+  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages, sentVisibleMessages, sentMessages, markdownTransformers, messageRenderers, getSessionName: () => sessionName };
 }
 
 function commandContext(notifications: string[], actions: { cleared: boolean; shutdown: boolean }): ExtensionCommandContext {
@@ -105,6 +112,7 @@ function commandContext(notifications: string[], actions: { cleared: boolean; sh
     model: { provider: "anthropic", id: "claude-sonnet-5" },
     sessionManager: {
       getSessionId: () => "session-1",
+      getSessionName: () => undefined,
       getEntries: () => [],
     },
     newSession: async () => {
@@ -137,7 +145,7 @@ describe("NWH TUI extension", () => {
     const { commands, sentUserMessages, markdownTransformers, messageRenderers } = await fixture();
     expect(markdownTransformers).toHaveLength(0);
     expect([...messageRenderers.keys()]).toEqual(["nwh-narrator", "nwh-play"]);
-    expect([...commands.keys()]).toEqual(["novels", "instances", "characters", "play", "world-resume", "continue", "switch", "create-instance", "scene", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
+    expect([...commands.keys()]).toEqual(["novels", "instances", "remove", "characters", "play", "world-resume", "continue", "switch", "create-instance", "scene", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
     const ctx = commandContext(notifications, actions);
@@ -163,6 +171,67 @@ describe("NWH TUI extension", () => {
       .toEqual({ all: true, source: "novel-1" });
     expect(() => parseTuiReparseArguments("--all --chapters 2"))
       .toThrow("only one reparse scope");
+  });
+
+  it("offers a guarded TUI flow for removing one selected world instance", async () => {
+    const { commands, root } = await fixture();
+    const evidence = await createEvidenceFixture(root, "Hero waits.\n", "remove-from-tui.txt");
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: evidence.evidence("Hero"),
+    });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    }, undefined, evidence.source.id);
+    const notifications: string[] = [];
+    const questions: string[] = [];
+    const ctx = {
+      ...commandContext(notifications, { cleared: false, shutdown: false }),
+      mode: "tui",
+      ui: {
+        notify(message: string) { notifications.push(message); },
+        async select(title: string, choices: string[]) {
+          questions.push(title);
+          if (title === "What do you want to remove?") return choices.find((choice) => choice.includes("One instance"));
+          if (title.includes("Which novel-world instance")) return choices.find((choice) => choice.includes("main"));
+          if (title === "Remove this instance?") return choices.find((choice) => choice.includes("Remove instance"));
+          return undefined;
+        },
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("remove")!.handler("", ctx);
+
+    expect(questions).toEqual([
+      "What do you want to remove?",
+      "Which novel-world instance do you want to use?",
+      "Remove this instance?",
+    ]);
+    expect(notifications).toContainEqual(expect.stringContaining("Removed instance 'main'"));
+    await expect(new BranchStore(root).read("main")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("exposes an agent tool that writes a meaningful session selector title", async () => {
+    const { registeredToolDefinitions, getSessionName } = await fixture();
+    const tool = registeredToolDefinitions.get("rename_session")!;
+
+    await tool.execute(
+      "rename-session",
+      { title: "红楼梦 · 林黛玉支线调试" } as never,
+      undefined,
+      undefined,
+      {} as never,
+    );
+
+    expect(getSessionName()).toBe("红楼梦 · 林黛玉支线调试");
   });
 
   it("blocks world-changing slash commands while Pi is streaming a foreground response", async () => {
@@ -474,7 +543,7 @@ describe("NWH TUI extension", () => {
     ) as InputEventResult | undefined;
 
     expect(result).toEqual({ action: "continue" });
-    expect(registeredTools).toEqual([]);
+    expect(registeredTools).toEqual(["rename_session"]);
     expect(notifications).toEqual([]);
   });
 
@@ -751,7 +820,7 @@ describe("NWH TUI extension", () => {
   });
 
   it("opens a structured character question with a free-form alias path for /play", async () => {
-    const { commands, root, sentVisibleMessages } = await fixture();
+    const { commands, root, sentVisibleMessages, getSessionName } = await fixture();
     const canon = new CanonicalModelStore(root);
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: [], evidence: [] });
     await canon.putEntity({ id: "rival", kind: "character", canonicalName: "宿敌", aliases: ["对手"], evidence: [] });
@@ -788,6 +857,7 @@ describe("NWH TUI extension", () => {
     expect(questions).toEqual(["Who do you want to play on 'main'?"]);
     expect(inputs).toEqual(["Character id, name, or alias"]);
     await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ branchId: "main", actorId: "rival" });
+    expect(getSessionName()).toBe("Novel world · 宿敌 · main");
     expect(sentVisibleMessages.join("\n")).not.toContain("Entered **宿敌**");
     expect(sentVisibleMessages.join("\n")).toContain("门外的风声忽远忽近");
   });

@@ -165,6 +165,17 @@ export class WorkspaceStore {
     );
   }
 
+  async unregisterSource(id: string): Promise<boolean> {
+    const filePath = path.join(this.sourcesDir, stateFileName(id));
+    try {
+      await fs.rm(filePath);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  }
+
   private async registerSourceBytes(title: string, content: Uint8Array, sourcePath: string): Promise<SourceDocument> {
     const identity = await new SourceMaterialStore().put(content, title);
     const id = identity.contentSha256.slice(0, 20);

@@ -235,6 +235,16 @@ export class ProposalStore {
     try { await fs.rename(source, target); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`Proposal not found: ${id}`); throw error; }
   }
+  async removeForSource(sourceId: string): Promise<number> {
+    let removed = 0;
+    for (const status of ["pending", "accepted", "rejected"] as const) {
+      for (const summary of await this.list(status, sourceId)) {
+        await fs.rm(this.proposalPath(status, summary.id), { force: true });
+        removed += 1;
+      }
+    }
+    return removed;
+  }
   private proposalPath(status: ProposalStatus, id: string): string { return path.join(this.root, status, `${safeId(id)}.json`); }
 }
 

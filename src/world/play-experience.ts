@@ -5,6 +5,7 @@ import { PlaySessionStore, type ActivePlaySession } from "./play-session.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
 import { BranchStore } from "./store.js";
 import { WorkspaceStore, type SourceDocument, type StoredProject } from "../storage/workspace-store.js";
+import { PlayerTurnAuditStore, type PlayerTurnOrigin } from "./player-turn-audit.js";
 
 export type PlayableCharacter = {
   id: string;
@@ -51,6 +52,7 @@ export type SelectedPlayExperience = {
   source?: SourceDocument;
   actor: PlayableCharacter;
   logicalStep: number;
+  readinessWarnings: string[];
 };
 
 export type PlayTurnOutcome = {
@@ -59,6 +61,8 @@ export type PlayTurnOutcome = {
   logicalStep: number;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
   backgroundError?: string;
+  auditId?: string;
+  auditError?: string;
 };
 
 export async function inspectPlayExperience(root: string): Promise<PlayExperienceCatalog> {
@@ -218,7 +222,25 @@ export async function selectPlayExperience(
     actorId: actor.id,
     lastCommitId: branch.headCommitId,
   });
-  return { session, branchName: branch.name, ...(source ? { source } : {}), actor, logicalStep: state.logicalTime.step };
+  const actorState = state.values[actor.id] ?? {};
+  const readinessWarnings: string[] = [];
+  if (!Object.keys(actorState).length) {
+    readinessWarnings.push(
+      `${branch.preparedRevisionHash ? "当前实例固定的 prepared revision" : "当前实例的 genesis"}没有为 ${actor.canonicalName} 提供初始动态状态；观察、思考和等待仍可继续，但依赖具体位置或持有物的行动会保持保守。`,
+    );
+  } else if (typeof actorState["character.location"] !== "string") {
+    readinessWarnings.push(
+      `${actor.canonicalName} 的当前位置尚未写入该实例的 committed state；当前事件可以证明同场人物，但跨场景移动会要求更明确的落点。`,
+    );
+  }
+  return {
+    session,
+    branchName: branch.name,
+    ...(source ? { source } : {}),
+    actor,
+    logicalStep: state.logicalTime.step,
+    readinessWarnings,
+  };
 }
 
 export async function performPlayTurn(options: {
@@ -228,8 +250,11 @@ export async function performPlayTurn(options: {
   utterance: string;
   translator: PlayerActionTranslator;
   advanceBackground?: number;
+  origin?: PlayerTurnOrigin;
+  intent?: "act" | "observe" | "reflect" | "wait";
 }): Promise<PlayTurnOutcome> {
-  const advanceBackground = options.advanceBackground ?? 1;
+  const startedAt = new Date();
+  const advanceBackground = options.advanceBackground ?? 0;
   if (!Number.isInteger(advanceBackground) || advanceBackground < 0 || advanceBackground > 100) {
     throw new Error("advanceBackground must be an integer between 0 and 100");
   }
@@ -267,6 +292,7 @@ export async function performPlayTurn(options: {
         branchId: options.branchId,
         maxActorCandidates: 0,
         maxBackgroundCandidates: advanceBackground,
+        temporalMode: "advance",
       });
       finalHead = advanced.newHead;
       for (const eventHash of advanced.committedEvents) {
@@ -285,7 +311,44 @@ export async function performPlayTurn(options: {
     actorId: options.actorId,
     lastCommitId: finalHead,
   });
-  return { result, finalHead, logicalStep: finalState.logicalTime.step, backgroundEvents, ...(backgroundError ? { backgroundError } : {}) };
+  const finishedAt = new Date();
+  let auditId: string | undefined;
+  let auditError: string | undefined;
+  try {
+    const audit = await new PlayerTurnAuditStore(options.root).write({
+      startedAt: startedAt.toISOString(),
+      finishedAt: finishedAt.toISOString(),
+      durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
+      branchId: options.branchId,
+      actorId: options.actorId,
+      utterance: options.utterance,
+      origin: options.origin ?? "cli",
+      ...(options.intent ? { intent: options.intent } : {}),
+      previousHead: result.previousHead,
+      finalHead,
+      stage: result.stage,
+      accepted: result.accepted,
+      issues: structuredClone(result.issues),
+      ...(result.candidate ? { candidate: structuredClone(result.candidate) } : {}),
+      ...(result.proposal ? { proposal: structuredClone(result.proposal) } : {}),
+      ...(result.validation ? { validation: structuredClone(result.validation) } : {}),
+      ...(result.eventHash ? { eventHash: result.eventHash } : {}),
+      backgroundEvents: structuredClone(backgroundEvents),
+      ...(backgroundError ? { backgroundError } : {}),
+    });
+    auditId = audit.id;
+  } catch (error) {
+    auditError = error instanceof Error ? error.message : String(error);
+  }
+  return {
+    result,
+    finalHead,
+    logicalStep: finalState.logicalTime.step,
+    backgroundEvents,
+    ...(backgroundError ? { backgroundError } : {}),
+    ...(auditId ? { auditId } : {}),
+    ...(auditError ? { auditError } : {}),
+  };
 }
 
 export function resolveCharacter(

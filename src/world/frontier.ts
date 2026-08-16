@@ -2,20 +2,48 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
-import type { BranchId, CommitId, EventProposal, Possibility, WorldState } from "./model.js";
+import type { BranchId, CommitId, EventProposal, Possibility, StoryTime, WorldState } from "./model.js";
 import { evaluatePredicate } from "./state.js";
 
 export type PossibilityStatus = "latent" | "eligible" | "blocked" | "expired" | "superseded" | "realized";
 export type SchedulerFactors = { urgency: number; causalSupport: number; actorPressure: number; runtimeRelevance: number; conditionStrength: number; canonAffinity: number };
 export type EvaluatedPossibility = { possibility: Possibility; status: PossibilityStatus; reasons: string[]; factors: SchedulerFactors; score: number };
-export type Frontier = { version: 1; branchId: BranchId; commitId: CommitId; evaluated: EvaluatedPossibility[] };
+export type FrontierTemporalMode = "current-window" | "advance";
+export type Frontier = {
+  version: 1;
+  branchId: BranchId;
+  commitId: CommitId;
+  temporalMode: FrontierTemporalMode;
+  evaluated: EvaluatedPossibility[];
+};
 
-export function evaluatePossibility(state: WorldState, possibility: Possibility, options: { realizedIds?: ReadonlySet<string>; supersededIds?: ReadonlySet<string>; canonAffinity?: number } = {}): EvaluatedPossibility {
+type FrontierEvaluationOptions = {
+  realizedIds?: ReadonlySet<string>;
+  supersededIds?: ReadonlySet<string>;
+  canonAffinity?: number;
+  temporalMode?: FrontierTemporalMode;
+  temporalAnchor?: StoryTime;
+  activeEntityIds?: ReadonlySet<string>;
+};
+
+export function evaluatePossibility(state: WorldState, possibility: Possibility, options: FrontierEvaluationOptions = {}): EvaluatedPossibility {
   const reasons: string[] = [];
   const unresolvedParents = possibility.causalParents.filter((parent) =>
     !options.realizedIds?.has(parent) && !options.realizedIds?.has(`canon-${parent}`),
   );
   const causalParentsSatisfied = unresolvedParents.length === 0;
+  const temporal = assessTemporalCompatibility(
+    options.temporalAnchor ?? state.logicalTime.storyTime,
+    possibility.candidateWindow,
+    options.temporalMode ?? "current-window",
+    possibility.causalParents.length > 0,
+    !possibility.canonicalEventId && possibility.kind !== "canon-analogue",
+  );
+  const rootSceneSupported = !possibility.canonicalEventId
+    || possibility.causalParents.length > 0
+    || possibility.preconditions.length > 0
+    || options.activeEntityIds === undefined
+    || possibility.participants.some((participant) => options.activeEntityIds!.has(participant));
   let status: PossibilityStatus;
   if (options.realizedIds?.has(possibility.id)) {
     status = "realized";
@@ -36,9 +64,16 @@ export function evaluatePossibility(state: WorldState, possibility: Possibility,
       reasons.push(`waiting for causal parent(s): ${unresolvedParents.join(", ")}`);
     } else {
       const satisfied = possibility.preconditions.filter((predicate) => evaluatePredicate(state, predicate)).length;
-      if (satisfied === possibility.preconditions.length) {
+      if (satisfied === possibility.preconditions.length && temporal.allowed && rootSceneSupported) {
         status = "eligible";
         reasons.push("all preconditions and causal dependencies are satisfied");
+        if (temporal.reason) reasons.push(temporal.reason);
+      } else if (satisfied === possibility.preconditions.length && !rootSceneSupported) {
+        status = "latent";
+        reasons.push("root canonical development has no participant, condition, or causal support in the active scene");
+      } else if (satisfied === possibility.preconditions.length) {
+        status = "latent";
+        reasons.push(temporal.reason ?? "candidate time is outside the active scene window");
       } else {
         status = "latent";
         reasons.push(`${satisfied}/${possibility.preconditions.length} preconditions are satisfied`);
@@ -58,12 +93,33 @@ export function evaluatePossibility(state: WorldState, possibility: Possibility,
   return { possibility, status, reasons, factors, score };
 }
 
-export function buildFrontier(branchId: BranchId, commitId: CommitId, state: WorldState, templates: readonly Possibility[], options: { realizedIds?: ReadonlySet<string>; supersededIds?: ReadonlySet<string>; canonAffinity?: ReadonlyMap<string, number> } = {}): Frontier {
+export function buildFrontier(branchId: BranchId, commitId: CommitId, state: WorldState, templates: readonly Possibility[], options: {
+  realizedIds?: ReadonlySet<string>;
+  supersededIds?: ReadonlySet<string>;
+  canonAffinity?: ReadonlyMap<string, number>;
+  temporalMode?: FrontierTemporalMode;
+  temporalAnchor?: StoryTime;
+  activeEntityIds?: ReadonlySet<string>;
+} = {}): Frontier {
   const evaluated = templates.map((template) => {
     const possibility: Possibility = { ...template, branchId, evaluatedAtCommit: commitId };
-    return evaluatePossibility(state, possibility, { realizedIds: options.realizedIds, supersededIds: options.supersededIds, canonAffinity: possibility.canonicalEventId ? options.canonAffinity?.get(possibility.canonicalEventId) : undefined });
-  }).sort((left, right) => right.score - left.score || left.possibility.id.localeCompare(right.possibility.id));
-  return { version: 1, branchId, commitId, evaluated };
+    return evaluatePossibility(state, possibility, {
+      realizedIds: options.realizedIds,
+      supersededIds: options.supersededIds,
+      canonAffinity: possibility.canonicalEventId ? options.canonAffinity?.get(possibility.canonicalEventId) : undefined,
+      temporalMode: options.temporalMode,
+      temporalAnchor: options.temporalAnchor,
+      activeEntityIds: options.activeEntityIds,
+    });
+  }).sort((left, right) => {
+    if (options.temporalMode === "advance" && left.status === "eligible" && right.status === "eligible") {
+      const leftOrder = temporalOrder(left.possibility.candidateWindow);
+      const rightOrder = temporalOrder(right.possibility.candidateWindow);
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    }
+    return right.score - left.score || left.possibility.id.localeCompare(right.possibility.id);
+  });
+  return { version: 1, branchId, commitId, temporalMode: options.temporalMode ?? "current-window", evaluated };
 }
 
 export function selectEligible(frontier: Frontier, limit = 10, options: { includePlayerChoices?: boolean } = {}): EvaluatedPossibility[] {
@@ -99,20 +155,106 @@ export class FrontierStore {
   readonly root: string;
   constructor(workspaceRoot: string) { this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "frontier"); }
   async write(frontier: Frontier): Promise<void> {
-    const filePath = this.filePath(frontier.branchId, frontier.commitId);
+    const filePath = this.filePath(frontier.branchId, frontier.commitId, frontier.temporalMode);
     await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
     const temporary = `${filePath}.${process.pid}.tmp`;
     await fs.writeFile(temporary, `${JSON.stringify(frontier, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     await fs.rename(temporary, filePath);
   }
-  async read(branchId: BranchId, commitId: CommitId): Promise<Frontier | null> {
-    try { return JSON.parse(await fs.readFile(this.filePath(branchId, commitId), "utf8")) as Frontier; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+  async read(
+    branchId: BranchId,
+    commitId: CommitId,
+    temporalMode: FrontierTemporalMode = "current-window",
+  ): Promise<Frontier | null> {
+    try { return JSON.parse(await fs.readFile(this.filePath(branchId, commitId, temporalMode), "utf8")) as Frontier; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (temporalMode !== "current-window") return null;
+      // Read-only compatibility with the pre-temporal-mode cache layout.
+      try {
+        const legacy = JSON.parse(await fs.readFile(this.legacyFilePath(branchId, commitId), "utf8")) as Omit<Frontier, "temporalMode">;
+        return { ...legacy, temporalMode: "current-window" };
+      } catch (legacyError) {
+        if ((legacyError as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw legacyError;
+      }
+    }
   }
-  private filePath(branchId: BranchId, commitId: CommitId): string {
+  private filePath(branchId: BranchId, commitId: CommitId, temporalMode: FrontierTemporalMode): string {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(branchId)) throw new Error(`Invalid branch id: ${branchId}`);
+    if (!/^[a-f0-9]{64}$/.test(commitId)) throw new Error(`Invalid commit id: ${commitId}`);
+    return path.join(this.root, branchId, `${commitId}.${temporalMode}.json`);
+  }
+  private legacyFilePath(branchId: BranchId, commitId: CommitId): string {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(branchId)) throw new Error(`Invalid branch id: ${branchId}`);
     if (!/^[a-f0-9]{64}$/.test(commitId)) throw new Error(`Invalid commit id: ${commitId}`);
     return path.join(this.root, branchId, `${commitId}.json`);
   }
 }
 function clampFactor(value: number): number { return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0; }
+
+type ComparableTime = { scale: "year" | "ordinal"; min: number; max: number };
+
+function assessTemporalCompatibility(
+  current: StoryTime | undefined,
+  candidate: StoryTime | undefined,
+  mode: FrontierTemporalMode,
+  causallySupported: boolean,
+  unwindowedIsImmediate: boolean,
+): { allowed: boolean; reason?: string } {
+  const currentRange = comparableTime(current);
+  const candidateRange = comparableTime(candidate);
+  if (!currentRange) return { allowed: true };
+  if (!candidateRange || candidateRange.scale !== currentRange.scale) {
+    return causallySupported
+      ? { allowed: true, reason: "candidate time is admitted by an already-realized causal parent" }
+      : unwindowedIsImmediate && !candidate
+        ? { allowed: true, reason: "an unwindowed non-canonical development is treated as immediate" }
+      : { allowed: false, reason: "candidate time cannot be placed safely relative to the active scene" };
+  }
+  if (candidateRange.max < currentRange.min) {
+    return { allowed: false, reason: "candidate window is earlier than committed branch time" };
+  }
+  if (mode === "current-window" && candidateRange.min > currentRange.max) {
+    return { allowed: false, reason: "candidate window is later than the active scene; explicit time advancement is required" };
+  }
+  return {
+    allowed: true,
+    reason: candidateRange.min > currentRange.max
+      ? "candidate is the earliest eligible forward development"
+      : "candidate window overlaps committed branch time",
+  };
+}
+
+function comparableTime(time: StoryTime | undefined): ComparableTime | undefined {
+  if (!time || time.kind === "unknown" || time.kind === "relative") return undefined;
+  if (time.kind === "ordinal") {
+    return typeof time.orderHint === "number"
+      ? { scale: "ordinal", min: time.orderHint, max: time.orderHint }
+      : undefined;
+  }
+  if (time.kind === "exact") {
+    const range = yearsIn(time.value);
+    return range ? { scale: "year", ...range } : undefined;
+  }
+  const earliest = yearsIn(time.earliest);
+  const latest = yearsIn(time.latest);
+  if (!earliest || !latest) return undefined;
+  return { scale: "year", min: Math.min(earliest.min, latest.min), max: Math.max(earliest.max, latest.max) };
+}
+
+function yearsIn(value: string): { min: number; max: number } | undefined {
+  const years = [...value.matchAll(/(?:^|\D)(\d{3,4})(?:s)?(?=\D|$)/g)].map((match) => ({
+    year: Number(match[1]),
+    decade: match[0].trim().endsWith("s"),
+  }));
+  if (!years.length) return undefined;
+  return {
+    min: Math.min(...years.map(({ year }) => year)),
+    max: Math.max(...years.map(({ year, decade }) => year + (decade ? 9 : 0))),
+  };
+}
+
+function temporalOrder(time: StoryTime | undefined): number {
+  return comparableTime(time)?.min ?? Number.POSITIVE_INFINITY;
+}

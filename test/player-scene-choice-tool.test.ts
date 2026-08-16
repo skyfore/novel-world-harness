@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createPlayerSceneChoiceCaptureTool } from "../src/agent/player-scene-choice-tool.js";
-import { defaultPlayerSceneChoices } from "../src/agent/pi-player-opening.js";
+import { defaultPlayerSceneChoices, ensureSafePlayerSceneChoices } from "../src/agent/pi-player-opening.js";
 
 describe("player scene choice capture tool", () => {
   it("captures only bounded suggested utterances and can reset between narration attempts", async () => {
@@ -13,7 +13,7 @@ describe("player scene choice capture tool", () => {
     };
 
     await capture.tool.execute("choices-1", input, undefined, undefined, {} as never);
-    expect(capture.getChoices()).toEqual(input.choices);
+    expect(capture.getChoices()).toEqual(input.choices.map((choice) => ({ ...choice, intent: "act" })));
     await expect(capture.tool.execute("choices-2", input, undefined, undefined, {} as never))
       .rejects.toThrow("Only one scene-choice set");
 
@@ -30,5 +30,10 @@ describe("player scene choice capture tool", () => {
 
     expect(defaultPlayerSceneChoices()).toHaveLength(3);
     expect(defaultPlayerSceneChoices().every((choice) => choice.action.length > 0)).toBe(true);
+    expect(defaultPlayerSceneChoices().map((choice) => choice.intent)).toEqual(["observe", "reflect", "wait"]);
+    expect(ensureSafePlayerSceneChoices([
+      { label: "开门", description: "试着打开门。", action: "我试着打开门。", intent: "act" },
+      { label: "敲门", description: "先敲一敲门。", action: "我先敲门。", intent: "act" },
+    ]).map((choice) => choice.intent)).toEqual(["observe", "act", "act"]);
   });
 });

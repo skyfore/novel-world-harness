@@ -1,7 +1,6 @@
-import path from "node:path";
 import type { ActorProposalCandidate, ActorProposalSource } from "./actors.js";
-import type { BranchId, CommitId, EventProposal, Possibility, WorldState } from "./model.js";
-import { buildFrontier, FrontierStore, possibilityToProposal, selectEligible, type Frontier } from "./frontier.js";
+import type { BranchId, CommitId, EventProposal, Possibility, StoryTime, WorldState } from "./model.js";
+import { buildFrontier, FrontierStore, possibilityToProposal, selectEligible, type Frontier, type FrontierTemporalMode } from "./frontier.js";
 import { WorldEngine } from "./engine.js";
 
 export type PossibilitySource = (input: {
@@ -15,6 +14,7 @@ export type MoveInput = {
   playerProposal?: EventProposal;
   maxActorCandidates?: number;
   maxBackgroundCandidates?: number;
+  temporalMode?: FrontierTemporalMode;
 };
 
 export type AdjudicationConflict = {
@@ -54,8 +54,7 @@ export class WorldRuntime {
     private readonly render?: NarrativeRender,
     private readonly actorProposalSource?: ActorProposalSource,
   ) {
-    const workspaceRoot = path.resolve(engine.objects.root, "../../..");
-    this.frontierStore = new FrontierStore(workspaceRoot);
+    this.frontierStore = new FrontierStore(engine.workspaceRoot);
   }
 
   async forkBranch(parentBranchId: BranchId, forkCommitId: CommitId, newBranchId: BranchId, name: string): Promise<void> {
@@ -113,8 +112,9 @@ export class WorldRuntime {
       }
     }
 
-    const backgroundLimit = boundedLimit(input.maxBackgroundCandidates ?? 1, "maxBackgroundCandidates");
-    let latestFrontier = await this.refreshFrontier(input.branchId, currentHead);
+    const backgroundLimit = boundedLimit(input.maxBackgroundCandidates ?? 0, "maxBackgroundCandidates");
+    const temporalMode = backgroundLimit > 0 ? input.temporalMode ?? "advance" : "current-window";
+    let latestFrontier = await this.refreshFrontier(input.branchId, currentHead, { temporalMode });
     for (let index = 0; index < backgroundLimit; index += 1) {
       const candidate = selectEligible(latestFrontier, 1)[0];
       if (!candidate) break;
@@ -127,7 +127,7 @@ export class WorldRuntime {
       }
       currentHead = result.newHead;
       if (result.eventHash) committedEvents.push(result.eventHash);
-      latestFrontier = await this.refreshFrontier(input.branchId, currentHead);
+      latestFrontier = await this.refreshFrontier(input.branchId, currentHead, { temporalMode });
     }
 
     const state = await this.engine.projector.project(currentHead);
@@ -143,14 +143,25 @@ export class WorldRuntime {
     };
   }
 
-  async refreshFrontier(branchId: BranchId, commitId?: CommitId): Promise<Frontier> {
+  async refreshFrontier(
+    branchId: BranchId,
+    commitId?: CommitId,
+    options: { temporalMode?: FrontierTemporalMode } = {},
+  ): Promise<Frontier> {
     const head = commitId ?? (await this.engine.branches.readHead(branchId));
-    const state = await this.engine.projector.project(head);
+    const [state, temporalAnchor, activeEntityIds] = await Promise.all([
+      this.engine.projector.project(head),
+      this.temporalAnchor(head),
+      this.activeEntityIds(head),
+    ]);
     const templates = await this.possibilitySource({ branchId, commitId: head, state });
     const history = await this.possibilityHistory(head);
     const frontier = buildFrontier(branchId, head, state, templates, {
       realizedIds: history.realizedIds,
       supersededIds: history.supersededIds,
+      temporalMode: options.temporalMode ?? "current-window",
+      ...(temporalAnchor ? { temporalAnchor } : {}),
+      activeEntityIds,
     });
     await this.frontierStore.write(frontier);
     return frontier;
@@ -200,6 +211,31 @@ export class WorldRuntime {
       cursor = commit.parentCommitId;
     }
     return { realizedIds: realized, supersededIds: superseded };
+  }
+
+  private async temporalAnchor(commitId: CommitId): Promise<StoryTime | undefined> {
+    const seen = new Set<string>();
+    let cursor: CommitId | undefined = commitId;
+    while (cursor) {
+      if (seen.has(cursor)) throw new Error(`Commit ancestry cycle detected at ${cursor}`);
+      seen.add(cursor);
+      const commit = await this.engine.objects.getCommit(cursor);
+      if (commit.logicalTime.storyTime && commit.logicalTime.storyTime.kind !== "unknown") {
+        return commit.logicalTime.storyTime;
+      }
+      cursor = commit.parentCommitId;
+    }
+    return undefined;
+  }
+
+  private async activeEntityIds(commitId: CommitId): Promise<ReadonlySet<string>> {
+    const commit = await this.engine.objects.getCommit(commitId);
+    const active = new Set<string>();
+    for (const eventHash of commit.eventHashes) {
+      const event = await this.engine.objects.getEvent(eventHash);
+      for (const participant of event.participants) active.add(participant);
+    }
+    return active;
   }
 
   private async isAncestor(ancestor: CommitId, descendant: CommitId): Promise<boolean> {

@@ -103,7 +103,7 @@ describe("play-world command", () => {
     });
 
     expect(result?.accepted).toBe(false);
-    expect(result?.issues).toContainEqual(expect.objectContaining({ code: "PRECONDITION_FAILED" }));
+    expect(result?.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_PRECONDITION_UNSATISFIED" }));
     expect(await (await openWorkspaceWorld(root)).engine.branches.readHead("main")).toBe(genesis);
   });
 
@@ -120,6 +120,7 @@ describe("play-world command", () => {
       branchId: "main",
       character: "hero",
       action: "我在前厅等待片刻。",
+      advanceBackground: 1,
       translator: () => ({
         title: "林岐在前厅等待",
         participants: [],

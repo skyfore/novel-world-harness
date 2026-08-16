@@ -140,11 +140,31 @@ assistant without deleting durable resume state.
 
 `nwh continue|switch|create`, `nwh resume`, TUI player commands, and the compact `nwh play-world` command share a separate character-embodiment boundary. Instance lookup is scoped by novel ownership: continue chooses the newest matching save, switch asks among matching saves, and a missing save is created from the selected novel's active prepared revision. The scene timing follows player intent: `play` renders the selected character's current scene, `create` opens the new story, and a real `switch` re-orients the player at the selected head. `continue`, `resume`, and an ordinary restart preserve the existing time/conversation context without inserting another narrator message. Player-only custom transcript entries count as existing context, including when the launch command carried an automatic scene request. A fresh transcript created by an explicit player-entry command renders one orientation because no prior screen context exists; a plain `--new-session`, `/new`, or `/clear` stays unbound and renders no scene. Startup never waits for an optional narrator before letting Pi render the transcript. The isolated narrator is mounted as one assistant stream in Pi's scrollable transcript, while provider/model, retry, and choice-tool phases use compact footer status. The accepted text must match the observed stream before that same native component is committed as the durable scene; no duplicate narrator message is mounted. Thinking and current-head choice metadata are stored with it outside parent-model context and restore with the transcript. A rejected underspecified attempt is removed before one automatic retry streams. After an accepted scene, AskUserQuestion-style 2-4 contextual actions and a free-form input are shown. Historical sessions restore saved choices only when branch, actor, and commit still match, without regenerating the scene. A final provider failure is shown explicitly with `/scene`, `/login`, and `/model` recovery guidance instead of masquerading as generic story prose. None of these rendering paths moves the branch head. Each natural-language
 action receives only an actor-scoped view plus entities explicitly named by the
-player and artifacts currently owned by that actor. Its fresh Pi session has no
+player and artifacts currently owned by that actor. Scene presence is carried
+separately from merely referenceable identities, so a known name no longer
+pretends to prove co-location, while participants in the current committed scene
+remain interactable even when an older prepared revision lacks location fields.
+Its fresh Pi session has no
 file tools, project instructions, compiler extension, source text, future canon,
 or mutation tool. A single capture-only candidate is passed to deterministic
 scope, knowledge, world-rule, invariant, and optimistic-head validation before the
-host may commit it. The structured translation phase exposes progress rather than raw candidate JSON. After an accepted commit, a separate isolated narrator streams the actor-visible consequence from the new committed head; deterministic commit metadata and invisible background events are not presented as story prose. If that rendering fails, NWH states that the action is already committed and tells the player to use `/scene` instead of repeating it. Rejected turns do not move branch truth.
+host may commit it. Missing sparse-state fields are treated as unknown and cannot
+be fabricated into positive preconditions. Observation, reflection, and short-wait
+choices are narrow host-owned intents with empty deltas and no invented
+preconditions; only a host-safe observation is marked recommended. The same
+animated working indicator is used while translating, validating, and rendering.
+After an accepted commit, a separate isolated narrator streams the actor-visible
+consequence from the new committed head; deterministic commit metadata and
+invisible background events are not presented as story prose. Ordinary player
+turns default to zero automatic background/canon events. `play-world
+--advance-background <n>` is an explicit opt-in, and the frontier rejects temporal
+regression and orders forward candidates by their story window. If rendering
+fails, NWH states that the action is already committed and tells the player to use
+`/scene` instead of repeating it. Rejected proposals do not move branch truth,
+but they no longer end the interaction: NWH renders/re-establishes the unchanged
+scene and offers another action. Candidate, proposal, validation, timing, and
+issue details are persisted in the workspace runtime state under
+`world/v1/play/turns/` for diagnosis rather than dumped into story prose.
 
 `nwh compile` uses the same TUI with narrow `propose_*` tools and starts an evidence-backed batch. Supplying `nwh compile "<instruction>"` keeps the one-shot compiler path for automation. Neither form can accept proposals or mutate canonical/runtime truth.
 

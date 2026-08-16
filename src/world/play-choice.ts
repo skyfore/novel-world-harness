@@ -193,7 +193,24 @@ export async function choosePlayExperience(
     });
   }
   if (!character) return undefined;
-  return selectPlayExperience(root, { branchId, character, ...(sourceId ? { source: sourceId } : {}) });
+  const selection = await selectPlayExperience(root, { branchId, character, ...(sourceId ? { source: sourceId } : {}) });
+  const selectedInstance = instanceCatalog.instances.find((instance) => instance.branchId === branchId);
+  const source = sourceId ? catalog.novels.find((novel) => novel.id === sourceId) : undefined;
+  if (source && selectedInstance?.preparedRevisionHash) {
+    try {
+      const active = await new PreparedNovelCache(root, options.preparedCacheRoot).loadActive(source);
+      if (active && active.bundleHash !== selectedInstance.preparedRevisionHash) {
+        selection.readinessWarnings.unshift(
+          `实例 '${branchId}' 固定在 prepared revision ${selectedInstance.preparedRevisionHash.slice(0, 12)}，而新实例会使用 ${active.bundleHash.slice(0, 12)}。这是可重放性保护；如需新版初始世界，请创建新实例，不要改写当前分支。`,
+        );
+      }
+    } catch (error) {
+      selection.readinessWarnings.push(
+        `无法核对当前实例与 active prepared revision：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  return selection;
 }
 
 export function catalogForSource(catalog: PlayExperienceCatalog, sourceId: string): PlayExperienceCatalog {

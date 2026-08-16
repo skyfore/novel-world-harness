@@ -20,7 +20,7 @@ export { loadWorldContext, pinBranchPreparationContexts, WorldContextStore, type
 export { diffWorldBranches, diffWorldStates, type HistoryDifference, type KnowledgeDifference, type StateDifference, type WorldBranchDiff } from "./world/diff.js";
 export { WorldEngine, WorldProjector, validateEventProposal, type ResolvedWorldModelContext, type WorldContextResolver, type WorldModelContext } from "./world/engine.js";
 export { fsckWorld, type FsckIssue, type WorldFsckReport } from "./world/fsck.js";
-export { buildFrontier, evaluatePossibility, selectEligible, type Frontier, type PossibilityStatus, type SchedulerFactors } from "./world/frontier.js";
+export { buildFrontier, evaluatePossibility, selectEligible, type Frontier, type FrontierTemporalMode, type PossibilityStatus, type SchedulerFactors } from "./world/frontier.js";
 export { InitialWorldStore, initialWorldSchema, type InitialWorld } from "./world/initial.js";
 export { createWorldBranch, type CreatedWorldBranch } from "./world/instance.js";
 export { KnowledgeProjector, type ActorWorldView } from "./world/knowledge.js";
@@ -29,7 +29,8 @@ export { modelActorProposalSource, actorActionTemplateSchema, type ActorActionTe
 export * from "./world/model.js";
 export { NarrativeRenderer, type ActorNarrativeFrame, type NarrativeAdapter, type NarrativeEvent, type NarrativeFrame, type NarrativeStyle, type OmniscientNarrativeFrame } from "./world/narrative.js";
 export { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "./world/possibility-model.js";
-export { buildActorScopedActionContext, playerActionCandidateSchema, playerActionToKnowledgeAwareAction, playerTurnInputSchema, PlayerTurnService, validatePlayerActionScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionTranslator, type PlayerTurnInput, type PlayerTurnResult } from "./world/player-action.js";
+export { buildActorScopedActionContext, deterministicPlayerIntentCandidate, playerActionCandidateSchema, playerActionToKnowledgeAwareAction, playerTurnInputSchema, PlayerTurnService, validatePlayerActionGrounding, validatePlayerActionScope, validatePlayerActionSpatialScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionTranslator, type PlayerTurnInput, type PlayerTurnResult, type SafePlayerIntent } from "./world/player-action.js";
+export { PlayerTurnAuditStore, type PlayerTurnAudit, type PlayerTurnOrigin } from "./world/player-turn-audit.js";
 export { PlaySessionStore, activePlaySessionSchema, type ActivePlaySession } from "./world/play-session.js";
 export {
   assertPlaySceneNarration,

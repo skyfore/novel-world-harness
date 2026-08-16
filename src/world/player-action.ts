@@ -19,6 +19,7 @@ import {
   type EntityId,
   type EventProposal,
   type Predicate,
+  type StoryTime,
   type StateFieldSpec,
   type StateValue,
   type ValidationIssue,
@@ -76,6 +77,7 @@ export const actorScopedActionContextSchema = z
     selfState: z.record(z.string(), stateValueSchema),
     ownedEntityState: z.record(idSchema, z.record(z.string(), stateValueSchema)),
     knowledge: z.array(actorScopedKnowledgeSchema),
+    presentEntities: z.array(actorScopedEntitySchema),
     referenceableEntities: z.array(actorScopedEntitySchema),
     writableEntityIds: z.array(idSchema),
     writableStateFields: z.array(stateFieldSpecSchema),
@@ -87,6 +89,34 @@ export type PlayerActionTranslationInput = Readonly<{
   utterance: string;
   context: ActorScopedActionContext;
 }>;
+
+export type SafePlayerIntent = "observe" | "reflect" | "wait";
+
+/**
+ * Convert the UI's narrow, host-owned intents without asking a model to invent
+ * state predicates. These actions can always be represented in a sparse world:
+ * they record player agency while writing no unsupported world facts.
+ */
+export function deterministicPlayerIntentCandidate(
+  intent: SafePlayerIntent,
+  input: PlayerActionTranslationInput,
+): PlayerActionCandidate {
+  const titles: Record<SafePlayerIntent, string> = {
+    observe: "观察当前场景",
+    reflect: "整理已知线索",
+    wait: "短暂等待并留意变化",
+  };
+  return playerActionCandidateSchema.parse({
+    title: titles[intent],
+    participants: input.context.presentEntities
+      .map((entity) => entity.id)
+      .filter((entityId) => entityId !== input.context.actorId),
+    preconditions: [],
+    proposedDelta: { version: 1, operations: [] },
+    requiresKnowledge: [],
+    forbidsKnowledge: [],
+  });
+}
 
 /** A translator may be model-backed, but its only world input is actor-scoped. */
 export type PlayerActionTranslator = (
@@ -144,17 +174,30 @@ export async function buildActorScopedActionContext(
   utterance?: string,
   sourceId?: string,
 ): Promise<ActorScopedActionContext> {
-  const [context, view, worldState] = await Promise.all([
+  const [context, view, worldState, commit] = await Promise.all([
     engine.contextForCommit(commitId),
     new KnowledgeProjector(engine).view(actorId, commitId),
     engine.projector.project(commitId),
+    engine.objects.getCommit(commitId),
   ]);
   const referenceable = new Set<EntityId>([actorId]);
+  const present = new Set<EntityId>([actorId]);
   const writable = new Set<EntityId>([actorId]);
   const ownedEntityState: Record<EntityId, Record<string, StateValue>> = {};
   const visibleKnowledge = sourceId
     ? view.knowledge.filter((entry) => entry.claim?.evidence.some((reference) => reference.span.sourceId === sourceId))
     : view.knowledge;
+
+  for (const eventHash of commit.eventHashes) {
+    const event = await engine.objects.getEvent(eventHash);
+    if (event.title === "Genesis" || !event.participants.includes(actorId)) continue;
+    for (const participant of event.participants) {
+      const entity = context.entities.get(participant);
+      if (!entity || !belongsToSource(entity, sourceId)) continue;
+      present.add(participant);
+      referenceable.add(participant);
+    }
+  }
 
   for (const [field, value] of Object.entries(view.selfState)) {
     const spec = context.stateSchema.get(field);
@@ -195,6 +238,7 @@ export async function buildActorScopedActionContext(
     .filter((entity): entity is NonNullable<typeof entity> => Boolean(entity))
     .map((entity) => ({ id: entity.id, kind: entity.kind, name: entity.canonicalName }))
     .sort((left, right) => left.id.localeCompare(right.id));
+  const presentEntities = referenceableEntities.filter((entity) => present.has(entity.id));
   const writableKinds = new Set(
     [...writable]
       .map((id) => context.entities.get(id)?.kind)
@@ -228,6 +272,7 @@ export async function buildActorScopedActionContext(
     selfState: structuredClone(view.selfState),
     ownedEntityState,
     knowledge,
+    presentEntities,
     referenceableEntities,
     writableEntityIds: [actorId, ...[...writable].filter((id) => id !== actorId).sort()],
     writableStateFields,
@@ -313,6 +358,43 @@ export function validatePlayerActionScope(
 }
 
 /**
+ * A model may condition an action only on actor-visible values that actually
+ * exist in the sparse committed projection. Missing fields are unknown, not a
+ * license to invent a positive precondition. Known-false preconditions are
+ * rejected before the engine so the UI can explain/recover from the proposal
+ * without presenting a generic commit failure.
+ */
+export function validatePlayerActionGrounding(
+  candidateInput: PlayerActionCandidate,
+  actorContextInput: ActorScopedActionContext,
+): ValidationIssue[] {
+  const candidate = playerActionCandidateSchema.parse(candidateInput);
+  const actorContext = actorScopedActionContextSchema.parse(actorContextInput);
+  const values = new Map<string, Readonly<Record<string, StateValue>>>([
+    [actorContext.actorId, actorContext.selfState],
+    ...Object.entries(actorContext.ownedEntityState),
+  ]);
+  const issues: ValidationIssue[] = [];
+  candidate.preconditions.forEach((predicate, index) => {
+    const evaluated = evaluateVisiblePredicate(predicate, values);
+    if (!evaluated.known) {
+      issues.push(issue(
+        "PLAYER_PRECONDITION_UNGROUNDED",
+        "Player action precondition depends on a field that is absent from the actor-visible committed state",
+        `preconditions.${index}`,
+      ));
+    } else if (!evaluated.value) {
+      issues.push(issue(
+        "PLAYER_PRECONDITION_UNSATISFIED",
+        "Player action precondition is false in the actor-visible committed state",
+        `preconditions.${index}`,
+      ));
+    }
+  });
+  return issues;
+}
+
+/**
  * Host-only physical interaction gate. Naming an entity makes its identity
  * referenceable, but never proves that a distant character is present. The
  * full projected state is consulted only after model translation and is not
@@ -350,13 +432,29 @@ export async function validatePlayerActionSpatialScope(
     }
   }
   const actorLocation = state.values[actorId]?.["character.location"];
+  const currentCommit = await engine.objects.getCommit(commitId);
+  const present = new Set<EntityId>([actorId]);
+  for (const eventHash of currentCommit.eventHashes) {
+    const event = await engine.objects.getEvent(eventHash);
+    if (event.title === "Genesis" || !event.participants.includes(actorId)) continue;
+    for (const participant of event.participants) present.add(participant);
+  }
   const issues: ValidationIssue[] = [];
   for (const characterId of [...interactionCharacters].sort()) {
     const characterLocation = state.values[characterId]?.["character.location"];
-    if (typeof actorLocation !== "string" || typeof characterLocation !== "string" || actorLocation !== characterLocation) {
+    if (typeof actorLocation === "string" && typeof characterLocation === "string" && actorLocation !== characterLocation) {
       issues.push(issue(
         "PLAYER_REMOTE_INTERACTION_FORBIDDEN",
-        `Player action cannot physically interact with ${characterId} because that character is not co-located with the selected actor`,
+        `Player action cannot physically interact with ${characterId} because committed locations prove that character is elsewhere`,
+        "participants",
+      ));
+    } else if (
+      (typeof actorLocation !== "string" || typeof characterLocation !== "string")
+      && !present.has(characterId)
+    ) {
+      issues.push(issue(
+        "PLAYER_SPATIAL_CONTEXT_UNKNOWN",
+        `Player action cannot yet prove that ${characterId} is present; no contradictory remote location was inferred`,
         "participants",
       ));
     }
@@ -371,6 +469,7 @@ export function playerActionToKnowledgeAwareAction(input: {
   expectedParentCommit: CommitId;
   utterance: string;
   candidate: PlayerActionCandidate;
+  proposedTime?: StoryTime;
 }): KnowledgeAwareAction {
   const candidate = playerActionCandidateSchema.parse(input.candidate);
   const proposalId = `player-${contentHash({
@@ -388,7 +487,7 @@ export function playerActionToKnowledgeAwareAction(input: {
     actorId: input.actorId,
     title: candidate.title,
     participants: [...new Set([input.actorId, ...candidate.participants])],
-    proposedTime: { kind: "unknown" },
+    proposedTime: input.proposedTime ?? { kind: "unknown" },
     preconditions: candidate.preconditions,
     proposedDelta: candidate.proposedDelta,
     ...(candidate.proposedKnowledge ? { proposedKnowledge: candidate.proposedKnowledge } : {}),
@@ -426,7 +525,10 @@ export class PlayerTurnService {
   async turn(inputValue: PlayerTurnInput): Promise<PlayerTurnResult> {
     const input = playerTurnInputSchema.parse(inputValue);
     const previousHead = await this.engine.branches.readHead(input.branchId);
-    const contextBefore = await buildActorScopedActionContext(this.engine, input.actorId, previousHead, input.utterance, input.sourceId);
+    const [contextBefore, storyTime] = await Promise.all([
+      buildActorScopedActionContext(this.engine, input.actorId, previousHead, input.utterance, input.sourceId),
+      latestCommittedStoryTime(this.engine, previousHead),
+    ]);
     let translated: unknown;
     try {
       translated = await this.translator(deepFreeze({
@@ -460,10 +562,15 @@ export class PlayerTurnService {
       expectedParentCommit: previousHead,
       utterance: input.utterance,
       candidate,
+      ...(storyTime ? { proposedTime: storyTime } : {}),
     });
     const scopeIssues = validatePlayerActionScope(candidate, contextBefore);
     if (scopeIssues.length) {
       return this.rejected(input, previousHead, contextBefore, "scope", scopeIssues, candidate, action.proposal);
+    }
+    const groundingIssues = validatePlayerActionGrounding(candidate, contextBefore);
+    if (groundingIssues.length) {
+      return this.rejected(input, previousHead, contextBefore, "scope", groundingIssues, candidate, action.proposal);
     }
     const spatialIssues = await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead);
     if (spatialIssues.length) {
@@ -682,9 +789,13 @@ function belongsToSource(entity: Entity, sourceId?: string): boolean {
   return !sourceId || entity.evidence.some((reference) => reference.span.sourceId === sourceId);
 }
 
+const FIRST_PERSON_ENTITY_ALIASES = new Set([
+  "我", "我们", "咱", "咱们", "你", "你们", "他", "他们", "她", "她们", "它", "它们",
+]);
+
 function explicitlyMentions(utterance: string, name: string): boolean {
   const needle = name.trim().toLocaleLowerCase();
-  if (!needle) return false;
+  if (!needle || FIRST_PERSON_ENTITY_ALIASES.has(needle)) return false;
   const haystack = utterance.toLocaleLowerCase();
   let index = haystack.indexOf(needle);
   while (index >= 0) {
@@ -701,8 +812,64 @@ function explicitlyMentions(utterance: string, name: string): boolean {
   return false;
 }
 
+type VisiblePredicateEvaluation = { known: boolean; value: boolean };
+
+function evaluateVisiblePredicate(
+  predicate: Predicate,
+  values: ReadonlyMap<string, Readonly<Record<string, StateValue>>>,
+): VisiblePredicateEvaluation {
+  if (predicate.op === "all" || predicate.op === "any") {
+    const items = predicate.items.map((item) => evaluateVisiblePredicate(item, values));
+    if (predicate.op === "all") {
+      if (items.some((item) => item.known && !item.value)) return { known: true, value: false };
+      return items.every((item) => item.known)
+        ? { known: true, value: true }
+        : { known: false, value: false };
+    }
+    if (items.some((item) => item.known && item.value)) return { known: true, value: true };
+    return items.every((item) => item.known)
+      ? { known: true, value: false }
+      : { known: false, value: false };
+  }
+  if (predicate.op === "not") {
+    const item = evaluateVisiblePredicate(predicate.item, values);
+    return item.known ? { known: true, value: !item.value } : item;
+  }
+  if (predicate.op === "rule-active" || predicate.op === "after-step" || predicate.op === "before-step") {
+    // These are rejected by the capability scope gate and are not visible
+    // values that grounding should attempt to reinterpret.
+    return { known: true, value: true };
+  }
+  const entity = values.get(predicate.entityId);
+  if (!entity || !Object.hasOwn(entity, predicate.field)) return { known: false, value: false };
+  const current = entity[predicate.field];
+  if (predicate.op === "fact-exists") return { known: true, value: current !== undefined };
+  if (predicate.op === "fact-equals") {
+    return { known: true, value: JSON.stringify(current) === JSON.stringify(predicate.value) };
+  }
+  return {
+    known: true,
+    value: Array.isArray(current) && current.includes(predicate.member),
+  };
+}
+
 function issue(code: string, message: string, path?: string): ValidationIssue {
   return { code, message, ...(path ? { path } : {}) };
+}
+
+async function latestCommittedStoryTime(engine: WorldEngine, commitId: CommitId): Promise<StoryTime | undefined> {
+  const seen = new Set<string>();
+  let cursor: CommitId | undefined = commitId;
+  while (cursor) {
+    if (seen.has(cursor)) throw new Error(`Commit ancestry cycle detected at ${cursor}`);
+    seen.add(cursor);
+    const commit = await engine.objects.getCommit(cursor);
+    if (commit.logicalTime.storyTime && commit.logicalTime.storyTime.kind !== "unknown") {
+      return structuredClone(commit.logicalTime.storyTime);
+    }
+    cursor = commit.parentCommitId;
+  }
+  return undefined;
 }
 
 function deepFreeze<T>(value: T): T {

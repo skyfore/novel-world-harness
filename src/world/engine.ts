@@ -160,14 +160,16 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
 export type CommitProposalResult = { report: ValidationReport; previousHead: CommitId; newHead: CommitId; eventHash?: string };
 
 export class WorldEngine {
+  readonly workspaceRoot: string;
   readonly objects: WorldObjectStore;
   readonly branches: BranchStore;
   readonly projector: WorldProjector;
   readonly context: ResolvedWorldModelContext;
   private readonly contextCache = new Map<ObjectHash, ResolvedWorldModelContext>();
   constructor(workspaceRoot: string, context: WorldModelContext, private readonly contextResolver?: WorldContextResolver) {
-    this.objects = new WorldObjectStore(workspaceRoot);
-    this.branches = new BranchStore(workspaceRoot);
+    this.workspaceRoot = workspaceRoot;
+    this.objects = new WorldObjectStore(this.workspaceRoot);
+    this.branches = new BranchStore(this.workspaceRoot);
     this.context = resolveContext(context);
     this.contextCache.set(this.context.canonicalSnapshotHash, this.context);
     this.projector = new WorldProjector(this.objects, (snapshotHash) => this.contextForSnapshot(snapshotHash));

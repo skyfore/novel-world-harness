@@ -6,13 +6,17 @@ export const playerSceneChoiceSchema = z.object({
   label: z.string().trim().min(1).max(80),
   description: z.string().trim().min(1).max(240),
   action: z.string().trim().min(1).max(1_000),
+  intent: z.enum(["act", "observe", "reflect", "wait"]).default("act"),
 }).strict();
 
 export const playerSceneChoicesSchema = z.object({
   choices: z.array(playerSceneChoiceSchema).min(2).max(4),
 }).strict();
 
-export type PlayerSceneChoice = z.infer<typeof playerSceneChoiceSchema>;
+// Use the input type so persisted v1 transcripts and custom narrators that do
+// not yet emit `intent` remain source-compatible. Parsing normalizes them to
+// the conservative `act` capability.
+export type PlayerSceneChoice = z.input<typeof playerSceneChoiceSchema>;
 
 export type PlayerSceneChoiceCaptureTool = {
   tool: ToolDefinition;
@@ -33,6 +37,9 @@ function prepareArguments(value: unknown): z.infer<typeof playerSceneChoicesSche
  * A capture-only sink for suggested player utterances. The tool has no world,
  * file, store, or commit access. Selecting one of its results still enters the
  * ordinary player-action translation and deterministic validation pipeline.
+ * The three non-`act` intents are deliberately narrow host capabilities: the
+ * host ignores any implied outcome in their prose and records only the chosen
+ * observation/reflection/wait intention.
  */
 export function createPlayerSceneChoiceCaptureTool(): PlayerSceneChoiceCaptureTool {
   let choices: PlayerSceneChoice[] = [];
@@ -48,6 +55,7 @@ export function createPlayerSceneChoiceCaptureTool(): PlayerSceneChoiceCaptureTo
       "Base every choice only on the supplied committed actor frame.",
       "Phrase choices as immediate player intentions, never as outcomes that already happened.",
       "Do not introduce hidden state, future canon, or named entities absent from the actor frame.",
+      "Use intent=observe only for looking/listening, intent=reflect only for reviewing already-known information, intent=wait only for a short deliberate pause, and intent=act for every other choice.",
     ],
     parameters,
     prepareArguments,
@@ -75,4 +83,3 @@ export function createPlayerSceneChoiceCaptureTool(): PlayerSceneChoiceCaptureTo
     },
   };
 }
-

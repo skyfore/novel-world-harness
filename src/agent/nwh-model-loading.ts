@@ -61,11 +61,15 @@ export function createNwhModelLoadingIndicator(
     random?: () => number;
     intervalMs?: number;
     messageTicks?: number;
+    phaseLabels?: Partial<Record<NwhModelLoadingPhase, string>>;
+    widgetKey?: string;
   } = {},
 ): NwhModelLoadingIndicator {
   const random = options.random ?? Math.random;
   const intervalMs = options.intervalMs ?? 180;
   const messageTicks = options.messageTicks ?? 12;
+  const phaseLabels = { ...PHASE_LABELS, ...options.phaseLabels };
+  const widgetKey = options.widgetKey ?? "nwh-model-loading";
   let phase: NwhModelLoadingPhase = "waiting";
   let detail: string | undefined;
   let frameIndex = 0;
@@ -78,8 +82,8 @@ export function createNwhModelLoadingIndicator(
     const frame = NWH_WORKING_FRAMES[frameIndex % NWH_WORKING_FRAMES.length] ?? NWH_WORKING_FRAMES[0];
     const detailText = detail ? ` · ${detail}` : "";
     const pet = ui.theme.fg("accent", frame);
-    const status = ui.theme.fg("dim", `${PHASE_LABELS[phase]} · ${message}${detailText} · Esc 可中止`);
-    ui.setWidget("nwh-model-loading", [`${pet}  ${status}`], { placement: "aboveEditor" });
+    const status = ui.theme.fg("dim", `${phaseLabels[phase]} · ${message}${detailText} · Esc 可中止`);
+    ui.setWidget(widgetKey, [`${pet}  ${status}`], { placement: "aboveEditor" });
   };
 
   render();
@@ -110,7 +114,7 @@ export function createNwhModelLoadingIndicator(
       if (stopped) return;
       stopped = true;
       clearInterval(timer);
-      ui.setWidget("nwh-model-loading", undefined, { placement: "aboveEditor" });
+      ui.setWidget(widgetKey, undefined, { placement: "aboveEditor" });
     },
   };
 }

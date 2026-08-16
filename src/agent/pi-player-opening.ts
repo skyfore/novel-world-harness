@@ -51,18 +51,28 @@ export function defaultPlayerSceneChoices(): PlayerSceneChoice[] {
       label: "观察眼前",
       description: "先确认周围可感知的环境、人物和动静。",
       action: "我先仔细观察眼前的环境、人物和动静。",
+      intent: "observe",
     },
     {
       label: "整理线索",
       description: "梳理自己此刻已经知道的事实和疑问。",
       action: "我先整理自己此刻知道的事情和最迫切的问题。",
+      intent: "reflect",
     },
     {
       label: "等待片刻",
       description: "暂不贸然行动，留意局势接下来暴露的信息。",
       action: "我暂时不贸然行动，安静等待片刻并留意周围的变化。",
+      intent: "wait",
     },
   ];
+}
+
+export function ensureSafePlayerSceneChoices(choices: readonly PlayerSceneChoice[]): PlayerSceneChoice[] {
+  const normalized = choices.map((choice) => structuredClone(choice));
+  if (normalized.some((choice) => choice.intent === "observe")) return normalized;
+  const observe = defaultPlayerSceneChoices()[0]!;
+  return [observe, ...normalized.filter((choice) => choice.action !== observe.action)].slice(0, 4);
 }
 
 export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOptions): PlayerOpeningNarrator {
@@ -102,7 +112,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
         const choices = choiceCapture.getChoices();
         return {
           narration: assertPlaySceneNarration(firstDraft),
-          choices: choices.length ? choices : defaultPlayerSceneChoices(),
+          choices: choices.length ? ensureSafePlayerSceneChoices(choices) : defaultPlayerSceneChoices(),
         };
       } catch {
         observer?.signal?.throwIfAborted();
@@ -115,7 +125,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
         const choices = choiceCapture.getChoices();
         return {
           narration: assertPlaySceneNarration(revised),
-          choices: choices.length ? choices : defaultPlayerSceneChoices(),
+          choices: choices.length ? ensureSafePlayerSceneChoices(choices) : defaultPlayerSceneChoices(),
         };
       }
     } finally {

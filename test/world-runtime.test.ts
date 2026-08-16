@@ -8,6 +8,7 @@ import { WorldRuntime } from "../src/world/runtime.js";
 import { buildFrontier, selectEligible } from "../src/world/frontier.js";
 import { emptyWorldState } from "../src/world/state.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
+import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 
 const roots: string[] = [];
 
@@ -97,8 +98,31 @@ describe("WorldRuntime", () => {
     expect(buildFrontier("main", "head", state, [consequence], { realizedIds: new Set(["player-choice"]) }).evaluated[0]?.status).toBe("eligible");
   });
 
+  it("keeps an unsupported root canon development out of an unrelated active scene", () => {
+    const state = emptyWorldState("head");
+    const unrelated: Possibility = {
+      id: "unrelated-root",
+      branchId: "main",
+      evaluatedAtCommit: "head",
+      kind: "canon-analogue",
+      title: "An unrelated root development",
+      preconditions: [],
+      blockers: [],
+      participants: ["rival"],
+      causalParents: [],
+      canonicalEventId: "unrelated",
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence: [],
+    };
+    const frontier = buildFrontier("main", "head", state, [unrelated], { activeEntityIds: new Set(["hero"]) });
+    expect(frontier.evaluated[0]?.status).toBe("latent");
+    expect(frontier.evaluated[0]?.reasons.join(" ")).toContain("no participant");
+  });
+
   it("lets a canonical possibility realize once from surviving conditions", async () => {
-    const { engine, runtime } = await fixture();
+    const { root, engine, runtime } = await fixture();
     const genesis = await engine.createBranch("main", "Main", {
       version: 1,
       operations: [
@@ -107,6 +131,11 @@ describe("WorldRuntime", () => {
       ],
     });
 
+    const noImplicitBackground = await runtime.move({ branchId: "main" });
+    expect(noImplicitBackground.newHead).toBe(genesis);
+    expect(noImplicitBackground.committedEvents).toEqual([]);
+    expect(runtime.frontierStore.root).toBe(path.join(workspaceStateDir(root), "world", "v1", "frontier"));
+
     const result = await runtime.move({ branchId: "main", maxBackgroundCandidates: 1 });
     expect(result.previousHead).toBe(genesis);
     expect(result.newHead).not.toBe(genesis);
@@ -114,11 +143,50 @@ describe("WorldRuntime", () => {
     expect(result.frontier.evaluated.find((entry) => entry.possibility.id === "canon-promotion")?.status).toBe("realized");
     const state = await engine.projector.project(result.newHead);
     expect(state.values.hero?.["character.title"]).toBe("Commander");
+    expect((await runtime.frontierStore.read("main", genesis, "current-window"))?.temporalMode).toBe("current-window");
+    expect((await runtime.frontierStore.read("main", genesis, "advance"))?.temporalMode).toBe("advance");
 
     const second = await runtime.move({ branchId: "main", maxBackgroundCandidates: 1 });
     expect(second.newHead).toBe(result.newHead);
     expect(second.committedEvents).toEqual([]);
     expect(second.frontier.evaluated.find((entry) => entry.possibility.id === "canon-promotion")?.status).toBe("realized");
+  });
+
+  it("keeps past and future roots outside the active scene, then advances in chronological order only when explicit", () => {
+    const state = {
+      ...emptyWorldState("head", 4),
+      logicalTime: {
+        step: 4,
+        storyTime: { kind: "exact" as const, value: "1950", precision: "year" as const },
+      },
+    };
+    const possibility = (id: string, year: string): Possibility => ({
+      id,
+      branchId: "main",
+      evaluatedAtCommit: "head",
+      kind: "canon-analogue",
+      title: id,
+      candidateWindow: { kind: "exact", value: year, precision: "year" },
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      causalParents: [],
+      canonicalEventId: id,
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence: [],
+    });
+    const templates = [possibility("past", "1940"), possibility("present", "1950"), possibility("future", "1960")];
+
+    const current = buildFrontier("main", "head", state, templates, { temporalMode: "current-window" });
+    expect(current.evaluated.find((entry) => entry.possibility.id === "past")?.status).toBe("latent");
+    expect(current.evaluated.find((entry) => entry.possibility.id === "present")?.status).toBe("eligible");
+    expect(current.evaluated.find((entry) => entry.possibility.id === "future")?.status).toBe("latent");
+
+    const advancing = buildFrontier("main", "head", state, templates, { temporalMode: "advance" });
+    expect(selectEligible(advancing).map((entry) => entry.possibility.id)).toEqual(["present", "future"]);
+    expect(advancing.evaluated.find((entry) => entry.possibility.id === "past")?.reasons.join(" ")).toContain("earlier than committed");
   });
 
   it("forks history and keeps a destroyed canonical future blocked", async () => {

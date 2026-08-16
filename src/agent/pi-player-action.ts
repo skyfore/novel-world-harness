@@ -24,7 +24,8 @@ Security and truth boundaries:
 - Use only IDs and writable capabilities in the supplied context. Do not guess hidden IDs or facts.
 - Naming a character does not prove physical presence. Include another character as a participant or artifact recipient only for an immediate co-located interaction; the host rejects remote interaction.
 - Submit exactly one propose_player_action tool call. Do not claim success: the host will scope-check, knowledge-check, validate, and commit it.
-- Describe the intended immediate transition, not a distant chain of consequences. Include truthful preconditions when the action depends on current visible state.
+- Describe the intended immediate transition, not a distant chain of consequences. Include a precondition only when its exact field and current value are present in selfState or ownedEntityState. An absent field is unknown: never invent character.alive, character.location, ownership, or any other positive precondition from identity, prose, genre expectations, or common sense.
+- Pure observation, reflection, or waiting should use an empty proposedDelta and no fabricated preconditions. Lack of a world-state write never means the interaction itself must be refused.
 - When refusing an immediate state-changing choice, preserve the controlled current value explicitly in proposedDelta so deterministic code can recognize the conflict; never fabricate a write outside the actor's capabilities.`;
 
 /** Create a fresh, capability-restricted Pi session for every player turn. */

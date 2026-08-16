@@ -364,7 +364,7 @@ program
   .option("--character <id-or-name>", "character to inhabit")
   .option("--novel <id-or-title>", "registered novel source to enter")
   .option("-a, --action <text>", "perform one natural-language action and exit")
-  .option("--advance-background <n>", "maximum background/canon events after an accepted action", "1")
+  .option("--advance-background <n>", "opt in to at most n temporally safe background/canon events after an accepted action", "0")
   .option("--list-characters", "list committed playable characters")
   .option("--model <model>", "override action translator model; use provider/model when ambiguous")
   .description("choose a novel, inhabit a committed character and drive a validated alternate timeline")

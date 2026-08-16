@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, ExtensionAPI, ExtensionCommandContext, ExtensionContext, InputEvent, InputEventResult, MarkdownTransformer, MessageRenderer, ReplacedSessionContext, ToolDefinition, TransientAssistantStream, TransientAssistantStreamOptions } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxText, fauxThinking, type AssistantMessage, type AssistantMessageEvent } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createNwhExtension,
   filterNwhModelContext,
@@ -72,6 +72,7 @@ function transientStreamRecorder(streams: RecordedTransientStream[]) {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   for (const root of temporaryDirectories.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -776,6 +777,146 @@ describe("NWH TUI extension", () => {
     expect(statuses).toContain("NWH · 林岐@main · step 1");
   });
 
+  it("animates the shared loading pet while the nested player translator is pending", async () => {
+    vi.useFakeTimers();
+    const started = deferred();
+    const release = deferred();
+    const { commands, events, root } = await fixture(undefined, async () => {
+      started.resolve();
+      await release.promise;
+      return {
+        title: "Hero observes",
+        participants: [],
+        preconditions: [],
+        proposedDelta: { version: 1, operations: [] },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      };
+    });
+    await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const widgets: Array<{ key: string; content: string[] | undefined }> = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        setStatus: () => undefined,
+        setWidget: (key: string, content: string[] | undefined) => widgets.push({ key, content }),
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+    await commands.get("play")!.handler("hero main", ctx as unknown as ExtensionCommandContext);
+    const turn = events.get("input")!(
+      { type: "input", text: "我看看四周", source: "interactive" } as InputEvent,
+      ctx,
+    ) as Promise<InputEventResult>;
+    await started.promise;
+    expect(widgets.some((widget) => widget.content?.[0]?.includes("(o,o)"))).toBe(true);
+    vi.advanceTimersByTime(180);
+    expect(widgets.some((widget) => widget.content?.[0]?.includes("(O,o)"))).toBe(true);
+    expect(widgets.some((widget) => widget.content?.[0]?.includes("正在理解你的行动"))).toBe(true);
+    release.resolve();
+    await turn;
+    expect(widgets.at(-1)).toMatchObject({ key: "nwh-model-loading", content: undefined });
+  });
+
+  it("continues from the unchanged committed scene after a rejected proposal", async () => {
+    const translator: PlayerActionTranslator = () => ({
+      title: "Hero acts on an unsupported condition",
+      participants: [],
+      preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.alive", value: false }],
+      proposedDelta: { version: 1, operations: [] },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    });
+    const { commands, events, root, sentVisibleMessages } = await fixture(undefined, translator);
+    await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const notifications: string[] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+    await commands.get("play")!.handler("hero main", ctx as unknown as ExtensionCommandContext);
+    await expect(events.get("input")!(
+      { type: "input", text: "执行这个动作", source: "interactive" } as InputEvent,
+      ctx,
+    )).resolves.toEqual({ action: "handled" });
+
+    expect(await engine.branches.readHead("main")).toBe(genesis);
+    expect(sentVisibleMessages.join("\n")).toContain("当前场景和已提交事实保持不变");
+    expect(sentVisibleMessages.join("\n")).toContain("方才的余波还停在感官里");
+    expect(sentVisibleMessages.join("\n")).not.toContain("Action rejected at");
+    expect(notifications).toContainEqual(expect.stringContaining("scope/PLAYER_PRECONDITION_UNSATISFIED"));
+  });
+
+  it("executes the recommended observe option as a host-safe turn without invoking the model translator", async () => {
+    const turnNarrated = deferred();
+    let translatorCalls = 0;
+    const opening = "冷风从门缝里钻进来，你听见近处细碎的响动，眼前的一切仍停在决定之前。光影落在脚边，已经知道的事没有凭空改变，也没有任何命运替你选择。你可以先观察这个片刻，再决定是否采取更具体的行动。";
+    const afterObserve = "你把注意力收回眼前，细小的风声、光影和近处动静重新有了层次。没有新的世界事实被凭空补上，但这一刻已经因你的主动观察而继续。仍有足够的余地让你追问、等待，或采取更明确的下一步。";
+    const { commands, root } = await fixture(
+      undefined,
+      () => {
+        translatorCalls += 1;
+        throw new Error("safe choice must not invoke the model translator");
+      },
+      undefined,
+      async (_frame, purpose) => {
+        if (purpose === "opening") {
+          return {
+            narration: opening,
+            choices: [
+              { label: "观察眼前", description: "确认当前可感知的动静。", action: "我先仔细观察眼前。", intent: "observe" },
+              { label: "尝试行动", description: "采取一个具体动作。", action: "我向前走一步。", intent: "act" },
+            ],
+          };
+        }
+        turnNarrated.resolve();
+        return afterObserve;
+      },
+    );
+    await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", { version: 1, operations: [] });
+    const offered: string[] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        async select(_title: string, choices: string[]) {
+          offered.push(...choices);
+          return choices.find((choice) => choice.includes("观察眼前"));
+        },
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")!.handler("hero main", ctx);
+    await turnNarrated.promise;
+    expect(translatorCalls).toBe(0);
+    expect(offered.some((choice) => choice.includes("观察眼前 (recommended)"))).toBe(true);
+    expect((await engine.projector.project(await engine.branches.readHead("main"))).logicalTime.step).toBe(1);
+  });
+
   it("cancels a player translation before commitment and leaves world truth unchanged", async () => {
     const started = deferred();
     const release = deferred();
@@ -1243,6 +1384,7 @@ describe("NWH TUI extension", () => {
     });
     await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
     const questions: string[] = [];
+    const offered: string[] = [];
     const ctx = {
       mode: "tui",
       sessionManager: {
@@ -1268,8 +1410,9 @@ describe("NWH TUI extension", () => {
       },
       ui: {
         notify: () => undefined,
-        async select(title: string) {
+        async select(title: string, choices: string[]) {
           questions.push(title);
+          offered.push(...choices);
           return undefined;
         },
         setTitle: () => undefined,
@@ -1287,6 +1430,51 @@ describe("NWH TUI extension", () => {
     await expect.poll(() => questions, { timeout: 1_000 }).toContain("福贵，你接下来准备怎么做？");
 
     expect(narratorCalls).toBe(0);
+    expect(offered.some((choice) => choice.includes("观察 (recommended)"))).toBe(true);
+  });
+
+  it("automatically recovers a legacy transcript that ended on a raw engine rejection", async () => {
+    const purposes: string[] = [];
+    const recovery = "你重新把注意力放回眼前，风声和近处细小的动静都还停留在原来的位置。刚才没有任何未经确认的结果被写进世界，现场也没有因此消失。你仍然可以观察、整理已知之事，或者换一个更明确的即时行动，让这一刻从自己的选择继续。";
+    const { events, root } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async (_frame, purpose) => {
+        purposes.push(purpose);
+        return recovery;
+      },
+    );
+    await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", { version: 1, operations: [] });
+    await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
+    const entries = [{
+      type: "custom_message",
+      customType: "nwh-play",
+      content: "Action rejected at **engine**; committed world truth is unchanged.\n- PRECONDITION_FAILED",
+      display: true,
+    }];
+    const ctx = {
+      mode: "tui",
+      isIdle: () => true,
+      sessionManager: { getEntries: () => entries },
+      ui: {
+        notify: () => undefined,
+        setTitle: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: () => undefined,
+        setHeader: () => undefined,
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("session_start")?.({ type: "session_start", reason: "startup" }, ctx);
+    await expect.poll(() => purposes, { timeout: 1_000 }).toContain("recovery");
+    expect(await engine.branches.readHead("main")).toBe(genesis);
   });
 
   it("renders native narrator text and thinking deltas and persists exactly the streamed final text", async () => {

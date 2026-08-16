@@ -65,7 +65,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
     ...(profile ? { profile } : {}),
     ...(options.model ? { model: options.model } : {}),
   });
-  const advanceBackground = options.advanceBackground ?? 1;
+  const advanceBackground = options.advanceBackground ?? 0;
   if (!Number.isInteger(advanceBackground) || advanceBackground < 0 || advanceBackground > 100) {
     throw new Error("advanceBackground must be an integer between 0 and 100");
   }
@@ -105,10 +105,11 @@ async function runAndPrintTurn(
     utterance,
     translator,
     advanceBackground,
+    origin: "cli",
   });
   const { result } = outcome;
   if (!result.accepted) {
-    stdout.write(`Action rejected at ${result.stage}; world head unchanged (${result.previousHead}).\n`);
+    stdout.write(`The requested effect was not committed (${result.stage}); the current scene and world head remain available (${result.previousHead}). Choose another immediate action to continue.\n`);
     for (const issue of result.issues) stdout.write(`- ${issue.code}: ${issue.message}\n`);
     return result;
   }

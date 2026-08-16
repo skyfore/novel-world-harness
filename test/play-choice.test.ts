@@ -212,6 +212,20 @@ describe("structured play choices", () => {
     expect(fresh!.session.branchId).not.toBe(first!.session.branchId);
     expect(lifecycle).toEqual([{ type: "created", branchId: fresh!.session.branchId }]);
 
+    await new InitialWorldStore(publisherRoot).put({
+      version: 1,
+      delta: {
+        version: 1,
+        operations: [
+          { op: "set", entityId: "fugui", field: "character.alive", value: true },
+          { op: "set", entityId: "fugui", field: "character.title", value: "Farmer" },
+        ],
+      },
+      evidence: publishedLiving.evidence("Fugui waits at the village gate."),
+    });
+    const revised = await new PreparedNovelCache(publisherRoot, cacheRoot).publish(publishedLiving.source);
+    expect(revised.bundleHash).not.toBe(published.bundleHash);
+
     lifecycle.splice(0);
     const continued = await choosePlayExperience(root, {
       source: living.source.id,
@@ -223,6 +237,8 @@ describe("structured play choices", () => {
     });
     expect(continued!.session.branchId).toBe(fresh!.session.branchId);
     expect(lifecycle).toEqual([{ type: "continued", branchId: fresh!.session.branchId }]);
+    expect(continued!.readinessWarnings).toContainEqual(expect.stringContaining("固定在 prepared revision"));
+    expect(continued!.readinessWarnings.join(" ")).toContain(revised.bundleHash!.slice(0, 12));
 
     lifecycle.splice(0);
     const switched = await choosePlayExperience(root, {

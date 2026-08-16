@@ -10,6 +10,7 @@ import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import type { CanonicalEvent, Claim, Entity } from "../src/world/model.js";
 import {
   buildActorScopedActionContext,
+  deterministicPlayerIntentCandidate,
   PlayerTurnService,
   type PlayerActionCandidate,
 } from "../src/world/player-action.js";
@@ -29,6 +30,7 @@ async function fixture() {
     { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] },
     { id: "villain", kind: "character", canonicalName: "Hidden Villain", aliases: [], evidence: [] },
     { id: "mo-yan", kind: "character", canonicalName: "墨砚", aliases: ["Mo Yan"], evidence: [] },
+    { id: "narrator", kind: "character", canonicalName: "我", aliases: [], evidence: [] },
     { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: [] },
     { id: "camp", kind: "location", canonicalName: "Camp", aliases: [], evidence: [] },
     { id: "library", kind: "location", canonicalName: "Library", aliases: ["藏书楼"], evidence: [] },
@@ -153,12 +155,24 @@ describe("actor-scoped player action context", () => {
     });
     expect(context.knowledge.map((entry) => entry.claimId)).toEqual(["known-route"]);
     expect(context.referenceableEntities.map((entity) => entity.id)).toEqual(["camp", "hall", "hero", "silver-key"]);
+    expect(context.presentEntities.map((entity) => entity.id)).toEqual(["hero"]);
     expect(context.writableEntityIds).toEqual(["hero", "silver-key"]);
     expect(context.ownedEntityState).toEqual({ "silver-key": { "artifact.owner": "hero" } });
     expect(serialized).not.toContain("future-secret");
     expect(serialized).not.toContain("future-ambush");
     expect(serialized).not.toContain("secret-lair");
     expect(serialized).not.toContain("villain");
+  });
+
+  it("builds sparse-state-safe host intents without model-invented predicates", async () => {
+    const { engine, head } = await fixture();
+    const context = await buildActorScopedActionContext(engine, "hero", head);
+    for (const intent of ["observe", "reflect", "wait"] as const) {
+      const candidate = deterministicPlayerIntentCandidate(intent, { utterance: intent, context });
+      expect(candidate.preconditions).toEqual([]);
+      expect(candidate.proposedDelta.operations).toEqual([]);
+      expect(candidate.title).toBeTruthy();
+    }
   });
 });
 
@@ -202,6 +216,36 @@ describe("PlayerTurnService", () => {
     expect(observedContext).not.toContain("future-ambush");
   });
 
+  it("preserves the latest committed story-time anchor across no-op player turns", async () => {
+    const { engine, head } = await fixture();
+    const anchored = await engine.commitProposal({
+      proposalId: "anchor-1950",
+      branchId: "main",
+      expectedParentCommit: head,
+      source: "background",
+      title: "The current scene is anchored in 1950",
+      participants: ["hero"],
+      proposedTime: { kind: "exact", value: "1950", precision: "year" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(anchored.report.accepted).toBe(true);
+    const service = new PlayerTurnService(engine, () => ({
+      title: "Hero observes",
+      participants: [],
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    }));
+    const first = await service.turn({ branchId: "main", actorId: "hero", utterance: "Observe." });
+    const second = await service.turn({ branchId: "main", actorId: "hero", utterance: "Observe again." });
+    expect(first.proposal?.proposedTime).toEqual({ kind: "exact", value: "1950", precision: "year" });
+    expect(second.proposal?.proposedTime).toEqual({ kind: "exact", value: "1950", precision: "year" });
+  });
+
   it("allows an explicitly named destination as a reference without exposing its state", async () => {
     const { engine } = await fixture();
     let observedContext: Parameters<ConstructorParameters<typeof PlayerTurnService>[1]>[0]["context"] | undefined;
@@ -224,6 +268,7 @@ describe("PlayerTurnService", () => {
 
     expect(result.accepted).toBe(true);
     expect(observedContext?.referenceableEntities).toContainEqual(expect.objectContaining({ id: "library", name: "Library" }));
+    expect(observedContext?.referenceableEntities.map((entity) => entity.id)).not.toContain("narrator");
     expect(observedContext?.writableEntityIds).not.toContain("library");
     expect(observedContext).not.toHaveProperty("worldState");
     expect((await engine.projector.project(result.newHead)).values.hero?.["character.location"]).toBe("library");
@@ -326,6 +371,55 @@ describe("PlayerTurnService", () => {
     expect(result.stage).toBe("scope");
     expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_REMOTE_INTERACTION_FORBIDDEN" }));
     expect(await engine.branches.readHead("main")).toBe(head);
+  });
+
+  it("distinguishes scene-grounded presence from unknown and known-remote locations", async () => {
+    const { engine, head } = await fixture();
+    const sparseScene = await engine.commitProposal({
+      proposalId: "sparse-shared-scene",
+      branchId: "main",
+      expectedParentCommit: head,
+      source: "background",
+      title: "Hero and Mo Yan remain in the same immediate scene",
+      participants: ["hero", "mo-yan"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: {
+        version: 1,
+        operations: [
+          { op: "unset", entityId: "hero", field: "character.location" },
+          { op: "unset", entityId: "mo-yan", field: "character.location" },
+        ],
+      },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(sparseScene.report.accepted).toBe(true);
+
+    const coPresent = new PlayerTurnService(engine, () => ({
+      title: "Hero speaks quietly to Mo Yan",
+      participants: ["mo-yan"],
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    }));
+    const presentResult = await coPresent.turn({ branchId: "main", actorId: "hero", utterance: "我对墨砚低声说话。" });
+    expect(presentResult.accepted).toBe(true);
+    expect(presentResult.contextBefore.presentEntities.map((entity) => entity.id)).toEqual(["hero", "mo-yan"]);
+
+    const uncertain = new PlayerTurnService(engine, () => ({
+      title: "Hero tries to address the Hidden Villain",
+      participants: ["villain"],
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    }));
+    const uncertainResult = await uncertain.turn({ branchId: "main", actorId: "hero", utterance: "我对 Hidden Villain 说话。" });
+    expect(uncertainResult.accepted).toBe(false);
+    expect(uncertainResult.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_SPATIAL_CONTEXT_UNKNOWN" }));
+    expect(uncertainResult.issues).not.toContainEqual(expect.objectContaining({ code: "PLAYER_REMOTE_INTERACTION_FORBIDDEN" }));
   });
 
   it("host-derives supersession when a co-located player choice conflicts with eligible canon", async () => {
@@ -444,6 +538,16 @@ describe("PlayerTurnService", () => {
     expect(unmentioned.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_ENTITY_OUT_OF_SCOPE" }));
     expect(await engine.branches.readHead("main")).toBe(head);
 
+    const ungrounded = new PlayerTurnService(engine, () => ({
+      ...moveToCamp(),
+      preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.title", value: "Unwritten" }],
+    }));
+    const ungroundedResult = await ungrounded.turn({ branchId: "main", actorId: "hero", utterance: "Act as if I had an unwritten title." });
+    expect(ungroundedResult.accepted).toBe(false);
+    expect(ungroundedResult.stage).toBe("scope");
+    expect(ungroundedResult.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_PRECONDITION_UNGROUNDED" }));
+    expect(await engine.branches.readHead("main")).toBe(head);
+
     const unownedArtifact = new PlayerTurnService(engine, () => ({
       title: "Hero gives the black key to Mo Yan",
       participants: ["black-key", "mo-yan"],
@@ -472,8 +576,8 @@ describe("PlayerTurnService", () => {
     }));
     const impossibleResult = await impossible.turn({ branchId: "main", actorId: "hero", utterance: "Go to camp while dead." });
     expect(impossibleResult.accepted).toBe(false);
-    expect(impossibleResult.stage).toBe("engine");
-    expect(impossibleResult.issues).toContainEqual(expect.objectContaining({ code: "PRECONDITION_FAILED" }));
+    expect(impossibleResult.stage).toBe("scope");
+    expect(impossibleResult.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_PRECONDITION_UNSATISFIED" }));
     expect(await engine.branches.readHead("main")).toBe(head);
 
     const disbelieved = await engine.commitProposal({

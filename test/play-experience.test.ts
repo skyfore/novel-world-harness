@@ -12,6 +12,7 @@ import {
   performPlayTurn,
   selectPlayExperience,
 } from "../src/world/play-experience.js";
+import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 
 const roots: string[] = [];
 
@@ -52,7 +53,8 @@ describe("play experience catalog", () => {
 
     const selection = await selectPlayExperience(root, { branchId: "main", source: first.source.id, character: "Hero" });
     expect(selection.session).toMatchObject({ branchId: "main", sourceId: first.source.id, actorId: "hero" });
-    await performPlayTurn({
+    expect(selection.readinessWarnings).toContainEqual(expect.stringContaining("当前位置尚未写入"));
+    const outcome = await performPlayTurn({
       root,
       branchId: "main",
       actorId: "hero",
@@ -69,6 +71,44 @@ describe("play experience catalog", () => {
           forbidsKnowledge: [],
         };
       },
+    });
+    expect(outcome.auditId).toMatch(/^turn-/);
+    const auditDirectory = path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main");
+    const auditFiles = await fs.readdir(auditDirectory);
+    expect(auditFiles).toHaveLength(1);
+    const audit = JSON.parse(await fs.readFile(path.join(auditDirectory, auditFiles[0]!), "utf8")) as Record<string, unknown>;
+    expect(audit).toMatchObject({
+      id: outcome.auditId,
+      accepted: true,
+      stage: "committed",
+      utterance: "I ask Rival to wait.",
+      origin: "cli",
+    });
+    const rejected = await performPlayTurn({
+      root,
+      branchId: "main",
+      actorId: "hero",
+      utterance: "Act on an impossible condition.",
+      translator: () => ({
+        title: "Unsupported action",
+        participants: [],
+        preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.alive", value: false }],
+        proposedDelta: { version: 1, operations: [] },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+    });
+    expect(rejected.result.accepted).toBe(false);
+    const allAuditFiles = await fs.readdir(auditDirectory);
+    const rejectedAudits = await Promise.all(allAuditFiles.map(async (file) =>
+      JSON.parse(await fs.readFile(path.join(auditDirectory, file), "utf8")) as {
+        id: string;
+        issues: Array<{ code: string }>;
+        candidate?: { preconditions: unknown[] };
+      }));
+    expect(rejectedAudits.find((entry) => entry.id === rejected.auditId)).toMatchObject({
+      issues: [expect.objectContaining({ code: "PLAYER_PRECONDITION_UNSATISFIED" })],
+      candidate: { preconditions: [expect.objectContaining({ field: "character.alive", value: false })] },
     });
 
     const after = await inspectPlayExperience(root);

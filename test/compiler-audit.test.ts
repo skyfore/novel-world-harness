@@ -7,6 +7,7 @@ import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
+import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -110,5 +111,39 @@ describe("compiler audit", () => {
     expect(report.consistency.causalComponents).toBe(10);
     expect(report.coverage.causalityConsistency).toBe(0);
     expect(report.notes).toContainEqual(expect.stringContaining("dominated by unconditional disconnected roots"));
+  });
+
+  it("blocks novel-scale output that has plot records but no executable effects or character growth", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-semantics-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero lives through a long sequence.\n");
+    const evidence = fixture.evidence("Hero lives through a long sequence.");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+    for (let index = 1; index <= 20; index += 1) {
+      await canon.putEvent({
+        id: `semantic-event-${index}`,
+        title: `Story record ${index}`,
+        participants: ["hero"],
+        storyTime: { kind: "ordinal", label: `beat-${index}`, orderHint: index },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence,
+        causalParents: index === 1 ? [] : [`semantic-event-${index - 1}`],
+        confidence: 1,
+      });
+    }
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.consistency.semanticReady).toBe(false);
+    expect(report.coverage).toMatchObject({
+      timelineAnchoring: 1,
+      eventEffectExplicitness: 0,
+      characterDevelopmentCoverage: 0,
+    });
+    expect(report.consistency.semanticIssues).toEqual(expect.arrayContaining([
+      expect.stringContaining("typed state or knowledge effect"),
+      expect.stringContaining("phase-bounded goals or development phases"),
+    ]));
   });
 });

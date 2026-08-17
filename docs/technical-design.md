@@ -3,7 +3,7 @@
 - **Status:** Proposed implementation blueprint
 - **Date:** 2026-08-11
 - **Applies to:** Phase 1–3 world compiler/runtime work
-- **Architecture decision:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md)
+- **Architecture decisions:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
 
 ## 1. Purpose
 
@@ -194,10 +194,11 @@ type StoryTime =
 type LogicalTime = {
   step: number;
   storyTime?: StoryTime;
+  elapsedDays?: number;
 };
 ```
 
-`LogicalTime.step` gives every committed branch event a deterministic total order. `StoryTime` preserves the source's semantic uncertainty.
+`LogicalTime.step` gives every committed branch event a deterministic total order. `StoryTime` preserves the source's semantic uncertainty. `elapsedDays` is cumulative branch time for deterministic ageing and temporal predicates. Textual frame/flashback order belongs to `NarrativeContext`, never to these clocks.
 
 A compiler may know only that A occurs before B. The runtime still assigns deterministic commit steps while retaining the weaker story-time semantics.
 

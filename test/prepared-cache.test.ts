@@ -6,6 +6,7 @@ import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batc
 import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { canonicalJson, contentHash } from "../src/world/canonical.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
@@ -173,5 +174,34 @@ describe("versioned prepared novel cache", () => {
     await expect(legacyCache.listRevisions(fixture.source)).resolves.toEqual([
       expect.objectContaining({ bundleHash: published.bundleHash, active: true }),
     ]);
+
+    const semanticLegacyRoot = await temporaryRoot("nwh-prepared-semantic-legacy-");
+    const semanticLegacyBase = path.join(semanticLegacyRoot, published.contentMd5);
+    const currentBundle = JSON.parse(await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8")) as Record<string, unknown>;
+    delete currentBundle.compilerFingerprint;
+    const legacyHash = contentHash(currentBundle);
+    const semanticLegacyRevision = path.join(semanticLegacyBase, "revisions", legacyHash);
+    await fs.mkdir(semanticLegacyRevision, { recursive: true });
+    await fs.writeFile(path.join(semanticLegacyRevision, "bundle.json"), `${canonicalJson(currentBundle)}\n`);
+    await fs.writeFile(path.join(semanticLegacyRevision, "manifest.json"), `${canonicalJson({
+      version: 1,
+      contentMd5: published.contentMd5,
+      contentSha256: fixture.source.contentSha256,
+      sourceId: fixture.source.id,
+      bundleHash: legacyHash,
+      createdAt: new Date(0).toISOString(),
+    })}\n`);
+    await fs.writeFile(path.join(semanticLegacyBase, "active.json"), `${canonicalJson({
+      version: 1,
+      contentMd5: published.contentMd5,
+      bundleHash: legacyHash,
+      updatedAt: new Date(0).toISOString(),
+    })}\n`);
+    await expect(new PreparedNovelCache(sourceRoot, semanticLegacyRoot).lookup(fixture.source)).resolves.toMatchObject({
+      status: "miss",
+      bundleHash: legacyHash,
+      requiresReparse: true,
+      reason: expect.stringContaining("incompatible semantic pipeline"),
+    });
   });
 });

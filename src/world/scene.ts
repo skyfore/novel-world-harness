@@ -1,6 +1,6 @@
 import { contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
-import type { CommitId, CommittedEvent, Entity, EntityId, NarrativeProgress, StateDelta } from "./model.js";
+import type { CommitId, CommittedEvent, Entity, EntityId, NarrativeProgress, StateDelta, StateValue } from "./model.js";
 
 export type SceneEventProjection = {
   eventId: string;
@@ -19,6 +19,8 @@ export type ActorSceneProjection = {
   beat: number;
   locationId?: EntityId;
   label?: string;
+  /** Actor-observable persistent state of the committed location. */
+  locationState: Record<string, StateValue>;
   presentEntityIds: EntityId[];
   recentEvents: SceneEventProjection[];
   recentNoveltyKeys: string[];
@@ -146,10 +148,12 @@ export async function projectActorScene(
     : label
       ? `scene:${contentHash(label.normalize("NFKC").trim()).slice(0, 16)}`
       : `scene:${lastBoundaryEventId ?? "opening"}`;
+  const locationState = locationId ? structuredClone(state.values[locationId] ?? {}) : {};
   const signature = contentHash({
     key,
     beat,
     presentEntityIds,
+    locationState,
     latestMeaningfulEventId: recentEvents.at(-1)?.eventId,
   });
   return {
@@ -159,6 +163,7 @@ export async function projectActorScene(
     beat,
     ...(locationId ? { locationId } : {}),
     ...(label ? { label } : {}),
+    locationState,
     presentEntityIds,
     recentEvents,
     recentNoveltyKeys,

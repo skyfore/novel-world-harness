@@ -9,15 +9,20 @@ import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../w
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema } from "../world/initial.js";
-import { canonicalEventSchema, claimSchema, entitySchema, worldRuleSchema } from "../world/model.js";
+import { WORLD_ENGINE_VERSION, canonicalEventSchema, claimSchema, entitySchema, worldRuleSchema } from "../world/model.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
-import { CompilerBatchStore, prepareCompilerBatches } from "./batches.js";
+import { COMPILER_PIPELINE_VERSION, CompilerBatchStore, prepareCompilerBatches } from "./batches.js";
 import { SEGMENTER_VERSION } from "./segments.js";
 import { CompilerValidator, type CanonicalProposalKind, type CompilerValidationCatalog } from "./validator.js";
+import { DEFAULT_STATE_FIELDS } from "../world/state.js";
+import { auditCompiler } from "./audit.js";
+
+export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
+export const COMPILER_PROMPT_VERSION = 2;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -29,6 +34,12 @@ const preparedNovelBundleSchema = z.object({
     contentSha256: digestSchema,
   }).strict(),
   segmenterVersion: z.number().int().positive(),
+  compilerFingerprint: z.object({
+    pipelineVersion: z.number().int().positive(),
+    promptVersion: z.number().int().positive(),
+    engineVersion: z.string().min(1),
+    stateSchemaHash: digestSchema,
+  }).strict().optional(),
   batchIds: z.array(z.string().min(1)),
   canonical: z.object({
     entities: z.array(entitySchema),
@@ -66,6 +77,8 @@ export type PreparedCacheResult = {
   cachePath: string;
   bundleHash?: string;
   reason?: string;
+  /** The cached artifact cannot be safely upgraded by merely resuming batches. */
+  requiresReparse?: boolean;
 };
 
 export type PreparedCacheRevision = {
@@ -96,6 +109,17 @@ export class PreparedNovelCache {
     const cached = await this.readCached(identity.contentMd5);
     if (!cached) return { status: "miss", contentMd5: identity.contentMd5, cachePath: this.cachePath(identity.contentMd5) };
     assertSourceIdentity(cached.bundle, identity);
+    const compatibilityIssue = await this.batchLayoutIssue(source, cached.bundle);
+    if (compatibilityIssue) {
+      return {
+        status: "miss",
+        contentMd5: identity.contentMd5,
+        cachePath: cached.cachePath,
+        bundleHash: cached.manifest.bundleHash,
+        reason: compatibilityIssue,
+        requiresReparse: true,
+      };
+    }
     return {
       status: "already-cached",
       contentMd5: identity.contentMd5,
@@ -149,7 +173,9 @@ export class PreparedNovelCache {
         status: "miss",
         contentMd5: identity.contentMd5,
         cachePath: cached.cachePath,
+        bundleHash: cached.manifest.bundleHash,
         reason: layoutIssue,
+        requiresReparse: true,
       };
     }
 
@@ -174,9 +200,9 @@ export class PreparedNovelCache {
     };
   }
 
-  async publish(source: SourceDocument): Promise<PreparedCacheResult> {
+  async publish(source: SourceDocument, options: { allowSemanticDebtForRollback?: boolean } = {}): Promise<PreparedCacheResult> {
     const identity = await sourceIdentity(this.workspaceRoot, source);
-    const bundle = await this.buildBundle(source, identity);
+    const bundle = await this.buildBundle(source, identity, options);
     const bundleHash = contentHash(bundle);
     await this.ensureRevisionLayout(identity.contentMd5);
     const cachePath = this.revisionPath(identity.contentMd5, bundleHash);
@@ -269,7 +295,7 @@ export class PreparedNovelCache {
     }
   }
 
-  async activate(source: SourceDocument, bundleHash: string): Promise<PreparedCacheResult> {
+  async activate(source: SourceDocument, bundleHash: string, options: { allowIncompatibleRollback?: boolean } = {}): Promise<PreparedCacheResult> {
     digestSchema.parse(bundleHash);
     const identity = await sourceIdentity(this.workspaceRoot, source);
     await this.ensureRevisionLayout(identity.contentMd5, false);
@@ -280,7 +306,7 @@ export class PreparedNovelCache {
     const pending = await new ProposalStore(this.workspaceRoot).list("pending", source.id);
     if (pending.length) throw new Error(`Cannot activate a prepared revision while ${pending.length} source proposal(s) are pending.`);
     const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
-    if (layoutIssue) throw new Error(layoutIssue);
+    if (layoutIssue && !options.allowIncompatibleRollback) throw new Error(layoutIssue);
     await pinBranchPreparationContexts(this.workspaceRoot);
     try {
       await this.materialize(cached.bundle, true);
@@ -300,6 +326,7 @@ export class PreparedNovelCache {
   private async buildBundle(
     source: SourceDocument,
     identity: { contentMd5: string; contentSha256: string },
+    options: { allowSemanticDebtForRollback?: boolean },
   ): Promise<PreparedNovelBundle> {
     const proposals = new ProposalStore(this.workspaceRoot);
     const pending = await proposals.list("pending", source.id);
@@ -309,6 +336,10 @@ export class PreparedNovelCache {
     const completed = new Set(progress.completedBatchIds);
     const unfinished = batches.filter((batch) => !completed.has(batch.id));
     if (unfinished.length) throw new Error(`Cannot cache ${source.id}: ${unfinished.length} compiler batch(es) are unfinished.`);
+    const semanticAudit = await auditCompiler(this.workspaceRoot, { sourceId: source.id });
+    if (semanticAudit.consistency.semanticReady === false && !options.allowSemanticDebtForRollback) {
+      throw new Error(`Cannot cache ${source.id}: novel-scale semantic readiness failed (${semanticAudit.consistency.semanticIssues.join(" ")}).`);
+    }
 
     const canonical = new CanonicalModelStore(this.workspaceRoot);
     const actors = new ActorModelStore(this.workspaceRoot);
@@ -331,6 +362,7 @@ export class PreparedNovelCache {
       version: 1,
       source: { id: source.id, ...identity },
       segmenterVersion: SEGMENTER_VERSION,
+      compilerFingerprint: currentCompilerFingerprint(),
       batchIds: batches.map((batch) => batch.id).sort(),
       canonical: {
         entities: fromSource(entities),
@@ -463,6 +495,9 @@ export class PreparedNovelCache {
   }
 
   private async batchLayoutIssue(source: SourceDocument, bundle: PreparedNovelBundle): Promise<string | null> {
+    if (canonicalJson(bundle.compilerFingerprint) !== canonicalJson(currentCompilerFingerprint())) {
+      return `Cached world was compiled by an incompatible semantic pipeline; reparse is required (cache=${bundle.compilerFingerprint?.pipelineVersion ?? "legacy"}, current=${COMPILER_PIPELINE_VERSION}).`;
+    }
     const batches = await prepareCompilerBatches(this.workspaceRoot, source);
     const currentBatchIds = batches.map((batch) => batch.id).sort();
     if (canonicalJson(currentBatchIds) === canonicalJson([...bundle.batchIds].sort())) return null;
@@ -587,6 +622,15 @@ export class PreparedNovelCache {
   private revisionPath(contentMd5: string, bundleHash: string): string {
     return path.join(this.cachePath(contentMd5), "revisions", digestSchema.parse(bundleHash));
   }
+}
+
+export function currentCompilerFingerprint(): NonNullable<PreparedNovelBundle["compilerFingerprint"]> {
+  return {
+    pipelineVersion: COMPILER_PIPELINE_VERSION,
+    promptVersion: COMPILER_PROMPT_VERSION,
+    engineVersion: WORLD_ENGINE_VERSION,
+    stateSchemaHash: contentHash(DEFAULT_STATE_FIELDS),
+  };
 }
 
 function belongsExclusivelyToSource(

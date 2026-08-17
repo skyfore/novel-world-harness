@@ -78,5 +78,47 @@ describe("model actor policy", () => {
     expect(JSON.stringify(observed)).not.toContain("future-betrayal");
     expect(observed).not.toHaveProperty("worldState");
   });
-});
 
+  it("does not invoke model reasoning for a goal whose phase activation is false", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-model-actor-phase-"));
+    roots.push(root);
+    const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] };
+    const hall: Entity = { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: [] };
+    const camp: Entity = { id: "camp", kind: "location", canonicalName: "Camp", aliases: [], evidence: [] };
+    const engine = new WorldEngine(root, {
+      entities: new Map([[hero.id, hero], [hall.id, hall], [camp.id, camp]]),
+      rules: new Map(),
+      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    });
+    const head = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+      ],
+    });
+    const goal: CharacterGoal = {
+      id: "camp-only-goal",
+      actorId: "hero",
+      description: "Act only after reaching camp",
+      priority: 1,
+      requiresKnowledge: [],
+      activation: {
+        preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "camp" }],
+        afterCanonicalEventIds: [],
+      },
+      evidence: [{ span: { sourceId: "test", startLine: 1, endLine: 1, quoteHash: "x" }, strength: "explicit" }],
+    };
+    let reasoned = false;
+    const source = modelActorProposalSource(engine, {
+      goals: async () => [goal],
+      modelFor: async () => null,
+      reasoner: () => {
+        reasoned = true;
+        return { title: "Should not run", participants: [], preconditions: [], proposedDelta: { version: 1, operations: [] } };
+      },
+    });
+    await expect(source({ branchId: "main", commitId: head })).resolves.toEqual([]);
+    expect(reasoned).toBe(false);
+  });
+});

@@ -15,6 +15,8 @@ import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { resolveNovelSource } from "../world/play-experience.js";
+import { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "../compiler/reconcile-world.js";
+import type { ReparseCommandOptions } from "./reparse.js";
 
 export type PrepareAllCommandOptions = {
   root: string;
@@ -44,6 +46,7 @@ type PrepareAllDependencies = {
   converge: typeof convergeWorldProposals;
   createBranch: typeof worldCreateCommand;
   ask: AskUserQuestion;
+  reparse: (options: ReparseCommandOptions) => Promise<unknown>;
 };
 
 const defaultDependencies: PrepareAllDependencies = {
@@ -52,9 +55,10 @@ const defaultDependencies: PrepareAllDependencies = {
   converge: convergeWorldProposals,
   createBranch: worldCreateCommand,
   ask: askUserQuestion,
+  reparse: async (options) => (await import("./reparse.js")).reparseCommand(options),
 };
 
-const INITIAL_WORLD_PROMPT = `Inspect the opening evidence and existing artifact catalog, then propose one evidence-backed initial world representing only the state already true at the opening. Propose any genuinely missing referenced entities or claims first. Do not include later canonical developments. Finish the compiler batch explicitly after all proposal calls succeed.`;
+const INITIAL_WORLD_PROMPT = `Inspect the opening evidence and existing artifact catalog, then propose one evidence-backed initial world representing one explicit temporal checkpoint only. Separate textual narrator frames, recollections, flashbacks, and lived chronology. Prefer the earliest playable chronological scene when it is present in the supplied evidence; otherwise mark a textual-frame checkpoint. Include checkpoint.mode and rationale, plus storyTime, narrativeLayerId, and beforeCanonicalEventId whenever supported. Never merge old-age frame facts with a younger remembered self, and never grant a character knowledge acquired later. Propose genuinely missing referenced entities or base claims first. Do not include later canonical developments. Finish the compiler batch explicitly after all proposal calls succeed.`;
 
 export async function prepareAllCommand(
   options: PrepareAllCommandOptions,
@@ -119,9 +123,49 @@ export async function prepareAllCommand(
     branchId = await resolvePreparationBranchId(root, inspection.source!);
     if (branchId !== inspection.branchId) inspection = await inspectPreparation(root, { sourceId, branchId });
   }
+  const preparedCache = new PreparedNovelCache(root, options.cacheRoot);
+  const cachedBeforePreparation = await preparedCache.lookup(inspection.source!);
+  if (cachedBeforePreparation.requiresReparse) {
+    const decision = await ask({
+      header: "Pipeline upgrade",
+      question: "The active prepared novel uses older world semantics. Reparse the whole novel before continuing?",
+      options: [
+        { value: "reparse", label: "Reparse all", description: "Preserve the old immutable revision and rebuild every source batch with the current world model.", recommended: true },
+        { value: "pause", label: "Pause here", description: "Keep the legacy revision active and run an explicit reparse later." },
+      ],
+    });
+    if (decision === "pause") {
+      return pausePreparation({
+        ...inspection,
+        next: `nwh reparse --source ${sourceId} --all`,
+      }, report);
+    }
+    report(`Prepared revision ${cachedBeforePreparation.bundleHash} requires a semantic pipeline upgrade; starting a rollback-safe whole-novel reparse.`);
+    await dependencies.reparse({
+      root,
+      configPath,
+      sourceId,
+      all: true,
+      ...(options.model ? { model: options.model } : {}),
+      cacheRoot: options.cacheRoot,
+      acquireLock: false,
+      signal: options.signal,
+      onProgress: report,
+      onStatus: options.onStatus,
+      onModelText: options.onModelText,
+      onModelThinking: options.onModelThinking,
+      onModelToolCall: options.onModelToolCall,
+      onModelToolResult: options.onModelToolResult,
+      onModelEvent: options.onModelEvent,
+    });
+    if (!options.branchId) {
+      branchId = await resolvePreparationBranchId(root, inspection.source!, undefined, { preferNew: true });
+      report(`Existing branches remain pinned to their prior revision; the upgraded world will use new branch '${branchId}'.`);
+    }
+    inspection = await inspectPreparation(root, { sourceId, branchId });
+  }
   if (inspection.stage === "repair") throw preparationFailure(inspection);
 
-  const preparedCache = new PreparedNovelCache(root, options.cacheRoot);
   if (options.restoreCache !== false) {
     const restored = await preparedCache.restore(inspection.source!);
     if (restored.status === "restored") {
@@ -178,6 +222,44 @@ export async function prepareAllCommand(
     await convergeForPreparation(root, sourceId, dependencies.converge, report);
     options.signal?.throwIfAborted();
     inspection = await inspectPreparation(root, { sourceId, branchId });
+  }
+
+  if (inspection.audit && semanticRepairIsIsolated(inspection.audit)) {
+    const decision = await ask({
+      header: "World semantics",
+      question: "The novel-scale audit found timeline/effect/character-growth gaps. Run a bounded whole-world reconciliation pass?",
+      options: [
+        { value: "repair", label: "Reconcile world", description: "Propose evidence-backed replacements through the normal validation barrier.", recommended: true },
+        { value: "pause", label: "Pause here", description: "Keep the audit findings for manual repair." },
+      ],
+    });
+    if (decision === "pause") return pausePreparation(inspection, report);
+    for (let iteration = 1; iteration <= 2 && inspection.audit && semanticRepairIsIsolated(inspection.audit); iteration += 1) {
+      report(`Running whole-world semantic reconciliation pass ${iteration}/2.`);
+      await dependencies.compileInitialWorld({
+        root,
+        configPath,
+        allowMissingConfig: true,
+        ...(options.model ? { model: options.model } : {}),
+        saveSession: false,
+        prompt: await buildWorldReconciliationPrompt(root, sourceId, inspection.audit, iteration),
+        compilerBatchId: `reconcile-${sourceId}-v2-${iteration}`,
+        sourceId,
+        includeLocalTools: true,
+        disabledProposalTools: ["propose_state_delta"],
+        acquireLock: false,
+        signal: options.signal,
+        onProgress: report,
+        onStatus: options.onStatus,
+        onModelText: options.onModelText,
+        onModelThinking: options.onModelThinking,
+        onModelToolCall: options.onModelToolCall,
+        onModelToolResult: options.onModelToolResult,
+        onModelEvent: options.onModelEvent,
+      });
+      await convergeForPreparation(root, sourceId, dependencies.converge, report);
+      inspection = await inspectPreparation(root, { sourceId, branchId });
+    }
   }
 
   if (inspection.stage === "needs-initial-world") {

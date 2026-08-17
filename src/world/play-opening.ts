@@ -3,16 +3,21 @@ import { NarrativeRenderer } from "./narrative.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
 import { buildNarrativeDirection, publicPlayerAffordance, type NarrativeThreadView, type PlayerAffordance } from "./narrative-director.js";
 import type { ActorSceneProjection } from "./scene.js";
+import { projectCharacterDevelopment, type CharacterDevelopmentView } from "./development.js";
 
 export type PlayOpeningFrame = {
   branchId: string;
   commitId: string;
   logicalStep: number;
+  storyTime?: unknown;
+  elapsedDays: number;
   actor: {
     id: string;
     name: string;
   };
   selfState: Record<string, unknown>;
+  /** Derived from this branch's committed history and the actor's knowledge. */
+  development: CharacterDevelopmentView;
   ownedEntityState: Record<string, Record<string, unknown>>;
   knowledge: Awaited<ReturnType<typeof buildActorScopedActionContext>>["knowledge"];
   /** Entities grounded as present by the current committed scene event. */
@@ -27,7 +32,7 @@ export type PlayOpeningFrame = {
     storyTime?: unknown;
   }>;
   /** Persistent scene projection derived only from committed history. */
-  scene: Pick<ActorSceneProjection, "key" | "beat" | "label" | "locationId" | "signature">;
+  scene: Pick<ActorSceneProjection, "key" | "beat" | "label" | "locationId" | "locationState" | "signature">;
   /** Actor-visible summaries of unresolved local, goal, and structural pressure. */
   activeThreads: NarrativeThreadView[];
   /** Host-generated and deterministically preflighted next actions. */
@@ -74,12 +79,13 @@ export async function buildPlayOpeningFrame(
 ): Promise<PlayOpeningFrame> {
   const { engine, runtime } = await openWorkspaceWorld(root);
   const head = await engine.branches.readHead(branchId);
-  const [context, state, scoped, narrative, direction] = await Promise.all([
+  const [context, state, scoped, narrative, direction, development] = await Promise.all([
     engine.contextForCommit(head),
     engine.projector.project(head),
     buildActorScopedActionContext(engine, actorId, head, undefined, sourceId),
     new NarrativeRenderer(engine).frame(branchId, head, { pointOfView: "actor", actorId }),
     buildNarrativeDirection(engine, runtime, actorId, head, sourceId),
+    projectCharacterDevelopment(engine, actorId, head),
   ]);
   const actor = context.entities.get(actorId);
   if (!actor || actor.kind !== "character") throw new Error(`Actor view requires a character: ${actorId}`);
@@ -89,8 +95,11 @@ export async function buildPlayOpeningFrame(
     branchId,
     commitId: head,
     logicalStep: state.logicalTime.step,
+    ...(state.logicalTime.storyTime ? { storyTime: structuredClone(state.logicalTime.storyTime) } : {}),
+    elapsedDays: state.logicalTime.elapsedDays ?? 0,
     actor: { id: actor.id, name: actor.canonicalName },
     selfState: structuredClone(scoped.selfState),
+    development: structuredClone(development),
     ownedEntityState: structuredClone(scoped.ownedEntityState),
     knowledge: structuredClone(scoped.knowledge),
     presentEntities: structuredClone(scoped.presentEntities),
@@ -109,6 +118,7 @@ export async function buildPlayOpeningFrame(
       beat: direction.scene.beat,
       ...(direction.scene.label ? { label: direction.scene.label } : {}),
       ...(direction.scene.locationId ? { locationId: direction.scene.locationId } : {}),
+      locationState: structuredClone(direction.scene.locationState),
       signature: direction.scene.signature,
     },
     activeThreads: structuredClone(direction.threads),

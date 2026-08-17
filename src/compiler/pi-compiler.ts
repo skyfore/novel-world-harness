@@ -3,7 +3,7 @@ import type { LlmProfile } from "../config/schema.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { createCompilerProposalToolset } from "./proposal-tools.js";
 
-export const SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS = new Set(["propose_world_rule", "propose_state_delta"]);
+export const SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS = new Set(["propose_state_delta"]);
 
 export type PiCompilerOptions = {
   root: string;

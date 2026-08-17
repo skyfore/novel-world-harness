@@ -20,6 +20,7 @@ import {
 } from "./model.js";
 import { evaluatePredicate } from "./state.js";
 import { committedHistory, projectActorScene, realizedCanonicalEvents } from "./scene.js";
+import { storyTimesOverlap } from "./time.js";
 
 const goalActionSchema = z
   .object({
@@ -62,15 +63,95 @@ export const characterGoalSchema = z
   .strict();
 export type CharacterGoal = z.infer<typeof characterGoalSchema>;
 
+export const characterDevelopmentPhaseSchema = z
+  .object({
+    id: idSchema,
+    label: z.string().trim().min(1),
+    activation: z
+      .object({
+        preconditions: z.array(predicateSchema).default([]),
+        afterCanonicalEventIds: z.array(idSchema).default([]),
+        afterExperiencedCanonicalEventIds: z.array(idSchema).default([]),
+        requiresKnowledge: z.array(idSchema).default([]),
+        storyWindow: storyTimeSchema.optional(),
+      })
+      .strict(),
+    traitModifiers: z.record(z.string(), z.number().min(-2).max(2)).default({}),
+    decisionBiasModifiers: z.record(z.string(), z.number().min(-2).max(2)).default({}),
+    evidence: z.array(evidenceRefSchema).min(1),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const activation = value.activation;
+    if (!activation.preconditions.length
+      && !activation.afterCanonicalEventIds.length
+      && !activation.afterExperiencedCanonicalEventIds.length
+      && !activation.requiresKnowledge.length
+      && !activation.storyWindow) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A development phase must have at least one state, event, knowledge, or story-time trigger",
+        path: ["activation"],
+      });
+    }
+  });
+export type CharacterDevelopmentPhase = z.infer<typeof characterDevelopmentPhaseSchema>;
+
 export const characterModelSchema = z
   .object({
     actorId: idSchema,
     traits: z.record(z.string(), z.number().min(-1).max(1)),
     decisionBiases: z.record(z.string(), z.number().min(-1).max(1)),
+    developmentPhases: z.array(characterDevelopmentPhaseSchema).optional(),
     evidence: z.array(evidenceRefSchema).min(1),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const ids = value.developmentPhases?.map((phase) => phase.id) ?? [];
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({ code: "custom", message: "Character development phase IDs must be unique", path: ["developmentPhases"] });
+    }
+  });
 export type CharacterModel = z.infer<typeof characterModelSchema>;
+
+export type EffectiveCharacterModel = {
+  actorId: string;
+  traits: Record<string, number>;
+  decisionBiases: Record<string, number>;
+  activePhaseIds: string[];
+};
+
+export function resolveCharacterModel(
+  model: CharacterModel,
+  input: {
+    state: WorldState;
+    knownClaimIds: ReadonlySet<string>;
+    realizedCanonicalEventIds: ReadonlySet<string>;
+    experiencedCanonicalEventIds: ReadonlySet<string>;
+    storyTime?: StoryTime;
+  },
+): EffectiveCharacterModel {
+  const traits = { ...model.traits };
+  const decisionBiases = { ...model.decisionBiases };
+  const activePhaseIds: string[] = [];
+  for (const phase of model.developmentPhases ?? []) {
+    const activation = phase.activation;
+    const active = activation.preconditions.every((predicate) => evaluatePredicate(input.state, predicate))
+      && activation.afterCanonicalEventIds.every((eventId) => input.realizedCanonicalEventIds.has(eventId))
+      && activation.afterExperiencedCanonicalEventIds.every((eventId) => input.experiencedCanonicalEventIds.has(eventId))
+      && activation.requiresKnowledge.every((claimId) => input.knownClaimIds.has(claimId))
+      && (!activation.storyWindow || goalStoryWindowActive(
+        input.storyTime,
+        activation.storyWindow,
+        input.realizedCanonicalEventIds,
+      ));
+    if (!active) continue;
+    activePhaseIds.push(phase.id);
+    applyModifiers(traits, phase.traitModifiers);
+    applyModifiers(decisionBiases, phase.decisionBiasModifiers);
+  }
+  return { actorId: model.actorId, traits, decisionBiases, activePhaseIds };
+}
 
 export type GoalActivation = {
   active: boolean;
@@ -78,6 +159,20 @@ export type GoalActivation = {
   expired: boolean;
   reasons: string[];
 };
+
+/** True only when a goal can represent change across time, not merely a static wish. */
+export function characterGoalHasDevelopmentBoundary(goal: CharacterGoal): boolean {
+  return Boolean(
+    goal.requiresKnowledge.length
+    || goal.blockedByKnowledge?.length
+    || goal.activation?.preconditions.length
+    || goal.activation?.afterCanonicalEventIds.length
+    || goal.activation?.storyWindow
+    || goal.completion?.length
+    || goal.expiry?.length
+    || goal.milestones?.some((milestone) => milestone.conditions.length),
+  );
+}
 
 export function evaluateCharacterGoal(
   goal: CharacterGoal,
@@ -521,23 +616,20 @@ function goalStoryWindowActive(
     return Boolean(realizedCanonicalEventIds?.has(candidate.anchorEventId));
   }
   if (!current || current.kind === "unknown" || current.kind === "relative") return false;
-  const left = storyYears(current);
-  const right = storyYears(candidate);
-  if (!left || !right) {
-    if (current.kind !== "ordinal" || candidate.kind !== "ordinal") return false;
-    if (typeof current.orderHint === "number" && typeof candidate.orderHint === "number") {
-      return current.orderHint === candidate.orderHint;
-    }
-    return current.label.normalize("NFKC").trim().toLocaleLowerCase()
+  if (storyTimesOverlap(current, candidate)) return true;
+  // Unnumbered ordinal labels are only comparable by stable normalized label.
+  return current.kind === "ordinal"
+    && candidate.kind === "ordinal"
+    && current.orderHint === undefined
+    && candidate.orderHint === undefined
+    && current.label.normalize("NFKC").trim().toLocaleLowerCase()
       === candidate.label.normalize("NFKC").trim().toLocaleLowerCase();
-  }
-  return left.min <= right.max && right.min <= left.max;
 }
 
-function storyYears(time: StoryTime): { min: number; max: number } | undefined {
-  const values = time.kind === "exact" ? [time.value] : time.kind === "range" ? [time.earliest, time.latest] : [];
-  const years = values.flatMap((value) => [...value.matchAll(/(?:^|\D)(\d{3,4})(?:s)?(?=\D|$)/g)].map((match) => Number(match[1])));
-  return years.length ? { min: Math.min(...years), max: Math.max(...years.map((year) => year + 9)) } : undefined;
+function applyModifiers(target: Record<string, number>, modifiers: Record<string, number>): void {
+  for (const [key, modifier] of Object.entries(modifiers)) {
+    target[key] = Math.max(-1, Math.min(1, (target[key] ?? 0) + modifier));
+  }
 }
 
 function safeId(id: string): string {

@@ -582,7 +582,7 @@ describe("NWH TUI extension", () => {
     expect(result).toEqual({ action: "continue" });
     expect(registeredTools).toContain("propose_entity");
     expect(registeredTools).toContain("withdraw_compiler_proposal");
-    expect(registeredTools).not.toContain("propose_world_rule");
+    expect(registeredTools).toContain("propose_world_rule");
     expect(statuses).toContain("NWH · world compiler loop");
     expect(notifications[0]).toContain("Novel indexed");
 

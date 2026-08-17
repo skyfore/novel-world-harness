@@ -21,7 +21,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed StateDelta used to create a runtime genesis branch." },
   "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
-  "character-model": { name: "propose_character_model", label: "Propose character model", description: "Submit evidence-backed traits and decision biases for one actor. The model never grants omniscient knowledge." },
+  "character-model": { name: "propose_character_model", label: "Propose character model", description: "Submit an evidence-backed baseline plus event/knowledge/state/time-activated development phases for one actor. The model never grants omniscient knowledge." },
   "state-delta": { name: "propose_state_delta", label: "Propose state delta", description: "Submit a deterministic state-delta candidate for later validation. This never moves a branch head." },
   possibility: { name: "propose_possibility", label: "Propose possibility", description: "Submit an uncommitted future possibility. canon-analogue is reserved for a real canonicalEventId; a choice only the player may make must use player-choice. Do not submit actor-plan templates; actor intent belongs in character goals." },
 };
@@ -90,13 +90,13 @@ function constrainCompilerStateFields(value: unknown): void {
       : undefined;
     if (
       typeof operation === "string" &&
-      ["set", "unset", "add-member", "remove-member", "fact-equals", "fact-exists", "entity-in"].includes(operation) &&
+      ["set", "unset", "add-member", "remove-member", "adjust-number", "fact-equals", "fact-gte", "fact-lte", "fact-exists", "entity-in"].includes(operation) &&
       propertyRecord.field
     ) {
       propertyRecord.field = {
         type: "string",
         enum: COMPILER_STATE_FIELDS,
-        description: "A registered deterministic world-state field. character.* applies only to characters; artifact.owner only to artifacts; location.open only to locations; faction.leader only to factions.",
+        description: "A registered deterministic world-state field whose entity-kind and value constraints are validated by the host.",
       };
     }
   }

@@ -3,7 +3,7 @@ import path from "node:path";
 import { stdout } from "node:process";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
-import { CompilerBatchStore, prepareCompilerBatches, type CompilerBatch } from "../compiler/batches.js";
+import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatch, type CompilerBatch } from "../compiler/batches.js";
 import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
 import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
@@ -76,7 +76,7 @@ export async function reparseCommand(
   report("Checking the active prepared revision and rollback baseline.");
   await recoverInterruptedReparse(root, source, batches, selectedBatchIds, cache, report);
   options.signal?.throwIfAborted();
-  const baseline = await cache.publish(source);
+  const baseline = await cache.publish(source, { allowSemanticDebtForRollback: true });
   if (!baseline.bundleHash) throw new Error("Current prepared revision was not published.");
   const previousBundleHash = baseline.bundleHash;
   await pinBranchPreparationContexts(root);
@@ -156,7 +156,7 @@ export async function reparseCommand(
     return { sourceId: source.id, chapters: selectedChapters, previousBundleHash, activeBundleHash: active.bundleHash };
   } catch (error) {
     options.onStatus?.(`Reparse failed; restoring revision ${previousBundleHash}`);
-    for (const batchId of [...selectedBatchIds, `opening-${batches[0]!.id}`]) {
+    for (const batchId of [...selectedBatchIds, openingBatchId(batches)]) {
       await rejectPendingCompilerBatchProposals(root, batchId);
     }
     try {
@@ -203,11 +203,17 @@ async function recoverInterruptedReparse(
     `Detected an interrupted reparse affecting ${unfinished.length} selected batch(es); `
     + `restoring active revision ${active.bundleHash} before retrying.`,
   );
-  for (const batchId of [...selectedBatchIds, `opening-${batches[0]!.id}`]) {
+  for (const batchId of [...selectedBatchIds, openingBatchId(batches)]) {
     await rejectPendingCompilerBatchProposals(root, batchId);
   }
-  await cache.activate(source, active.bundleHash);
+  await cache.activate(source, active.bundleHash, { allowIncompatibleRollback: true });
   report("Interrupted reparse baseline restored; restarting the selected scope from a clean prepared revision.");
+}
+
+function openingBatchId(batches: readonly CompilerBatch[]): string {
+  const opening = selectOpeningCompilerBatch(batches);
+  if (!opening) throw new Error("Cannot resolve the opening compiler batch.");
+  return `opening-${opening.id}`;
 }
 
 export function parseOrdinalSelection(value: string, available: readonly number[], optionName: string): number[] {

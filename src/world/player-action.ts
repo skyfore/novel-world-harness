@@ -23,6 +23,7 @@ import {
   type ProgressChannel,
   type Predicate,
   type StoryTime,
+  type TimeAdvance,
   type StateFieldSpec,
   type StateValue,
   type ValidationIssue,
@@ -31,6 +32,7 @@ import {
 import { NarrativeRenderer } from "./narrative.js";
 import type { CanonicalChoiceResolution } from "./runtime.js";
 import { committedHistory, projectActorScene } from "./scene.js";
+import { advanceStoryTime } from "./time.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -243,12 +245,24 @@ export async function buildActorScopedActionContext(
   }
 
   for (const entity of context.entities.values()) {
-    if (entity.kind !== "artifact") continue;
     if (!belongsToSource(entity, sourceId)) continue;
-    if (worldState.values[entity.id]?.["artifact.owner"] !== actorId) continue;
-    referenceable.add(entity.id);
-    writable.add(entity.id);
-    ownedEntityState[entity.id] = { "artifact.owner": actorId };
+    if (entity.kind === "artifact" && worldState.values[entity.id]?.["artifact.owner"] === actorId) {
+      referenceable.add(entity.id);
+      writable.add(entity.id);
+      ownedEntityState[entity.id] = { "artifact.owner": actorId };
+      continue;
+    }
+    if (entity.kind === "relationship") {
+      const relationshipState = worldState.values[entity.id];
+      const from = relationshipState?.["relationship.from"];
+      const to = relationshipState?.["relationship.to"];
+      if (from !== actorId && to !== actorId) continue;
+      referenceable.add(entity.id);
+      writable.add(entity.id);
+      ownedEntityState[entity.id] = structuredClone(relationshipState ?? {});
+      if (typeof from === "string") addExistingEntity(referenceable, from, context.entities, sourceId);
+      if (typeof to === "string") addExistingEntity(referenceable, to, context.entities, sourceId);
+    }
   }
 
   const referenceableEntities = [...referenceable]
@@ -344,6 +358,9 @@ export function validatePlayerActionScope(
       continue;
     }
     if (operation.op === "set") validateStateValueReferences(operation.value, spec, `${operationPath}.value`, referenceable, issues);
+    if (operation.op === "adjust-number" && spec.valueType !== "number") {
+      issues.push(issue("PLAYER_FIELD_OUT_OF_SCOPE", `adjust-number requires a numeric field, not ${operation.field}`, `${operationPath}.field`));
+    }
     if (operation.op === "add-member" || operation.op === "remove-member") {
       requireReferenceable(operation.member, `${operationPath}.member`, referenceable, issues);
     }
@@ -483,6 +500,7 @@ export function playerActionToKnowledgeAwareAction(input: {
   utterance: string;
   candidate: PlayerActionCandidate;
   proposedTime?: StoryTime;
+  timeAdvance?: TimeAdvance;
 }): KnowledgeAwareAction {
   const candidate = playerActionCandidateSchema.parse(input.candidate);
   const proposalId = `player-${contentHash({
@@ -501,6 +519,7 @@ export function playerActionToKnowledgeAwareAction(input: {
     title: candidate.title,
     participants: [...new Set([input.actorId, ...candidate.participants])],
     proposedTime: input.proposedTime ?? { kind: "unknown" },
+    ...(input.timeAdvance ? { timeAdvance: input.timeAdvance } : {}),
     preconditions: candidate.preconditions,
     proposedDelta: candidate.proposedDelta,
     ...(candidate.proposedKnowledge ? { proposedKnowledge: candidate.proposedKnowledge } : {}),
@@ -573,13 +592,17 @@ export class PlayerTurnService {
     const normalization = normalizePlayerCandidate(parsedCandidate.data, contextBefore, worldContext.entities, input.utterance);
     const candidate = normalization.candidate;
     const authorizedKnowledgeClaimIds = new Set(authority.authorizedKnowledgeClaimIds ?? []);
+    const turnIntent = authority.intent ?? inferPlayerIntent(input.utterance);
+    const timeAdvance = turnIntent === "wait" ? waitTimeAdvance(input.utterance) : undefined;
+    const proposedTime = storyTime && timeAdvance ? advanceStoryTime(storyTime, timeAdvance) : storyTime;
     let action = playerActionToKnowledgeAwareAction({
       branchId: input.branchId,
       actorId: input.actorId,
       expectedParentCommit: previousHead,
       utterance: input.utterance,
       candidate,
-      ...(storyTime ? { proposedTime: storyTime } : {}),
+      ...(proposedTime ? { proposedTime } : {}),
+      ...(timeAdvance ? { timeAdvance } : {}),
     });
     const scopeIssues = validatePlayerActionScope(candidate, contextBefore, authorizedKnowledgeClaimIds);
     if (scopeIssues.length) {
@@ -948,8 +971,36 @@ function inferPlayerIntent(utterance: string): "act" | SafePlayerIntent {
   const normalized = utterance.normalize("NFKC").trim();
   if (/^(?:我)?(?:先|仔细|悄悄|认真|再)?(?:观察|查看|环顾|打量|倾听|看看)|^(?:i\s+)?(?:look|observe|listen)\b/iu.test(normalized)) return "observe";
   if (/^(?:我)?(?:先|认真|重新|再)?(?:思考|回想|整理思绪|反省|梳理)|^(?:i\s+)?(?:reflect|think|remember)\b/iu.test(normalized)) return "reflect";
-  if (/^(?:我)?(?:先|暂时|什么也不做地)?(?:在[^，。！？,.!?]{1,24})?(?:等待|等一会|静候|按兵不动)|^(?:i\s+)?(?:wait|pause)\b/iu.test(normalized)) return "wait";
+  if (/^(?:我)?(?:先|暂时|什么也不做地)?(?:在[^，。！？,.!?]{1,24})?(?:等待|等(?:上)?(?:一会|片刻|\d+(?:\.\d+)?(?:分钟|小时|天|周|个月|月|年))|静候|按兵不动)|^(?:i\s+)?(?:wait|pause)\b/iu.test(normalized)) return "wait";
   return "act";
+}
+
+function waitTimeAdvance(utterance: string): TimeAdvance {
+  const normalized = utterance.normalize("NFKC").toLocaleLowerCase();
+  const match = normalized.match(/(\d+(?:\.\d+)?)\s*(分钟|分|小时|天|周|个月|月|年|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?)/iu);
+  if (!match) return { amount: 5, unit: "minute" };
+  const requested = Number(match[1]);
+  const rawUnit = match[2]!.toLocaleLowerCase();
+  const unit: TimeAdvance["unit"] = /分钟|^分$|minute|mins?/.test(rawUnit)
+    ? "minute"
+    : /小时|hour|hrs?/.test(rawUnit)
+      ? "hour"
+      : /周|week/.test(rawUnit)
+        ? "week"
+        : /个月|^月$|month/.test(rawUnit)
+          ? "month"
+          : /年|year/.test(rawUnit)
+            ? "year"
+            : "day";
+  const maximum: Record<TimeAdvance["unit"], number> = {
+    minute: 525_960,
+    hour: 8_766,
+    day: 365.25,
+    week: 52,
+    month: 12,
+    year: 1,
+  };
+  return { amount: Math.min(requested, maximum[unit]), unit };
 }
 
 function extractMovementLabel(utterance: string): string | undefined {
@@ -971,7 +1022,8 @@ function stateOperationChangesState(
   if (operation.op === "set") return JSON.stringify(current) !== JSON.stringify(operation.value);
   if (operation.op === "unset") return current !== undefined;
   if (operation.op === "add-member") return !Array.isArray(current) || !current.includes(operation.member);
-  return Array.isArray(current) && current.includes(operation.member);
+  if (operation.op === "remove-member") return Array.isArray(current) && current.includes(operation.member);
+  return typeof current === "number" && operation.amount !== 0;
 }
 
 function isResourceOperation(operation: PlayerActionCandidate["proposedDelta"]["operations"][number]): boolean {
@@ -979,7 +1031,7 @@ function isResourceOperation(operation: PlayerActionCandidate["proposedDelta"]["
 }
 
 function isRelationshipOperation(operation: PlayerActionCandidate["proposedDelta"]["operations"][number]): boolean {
-  return "field" in operation && (operation.field === "character.relationships" || operation.field === "character.obligations");
+  return "field" in operation && (operation.field.startsWith("relationship.") || operation.field === "character.relationships" || operation.field === "character.obligations");
 }
 
 function operationKey(operation: PlayerActionCandidate["proposedDelta"]["operations"][number]): string {
@@ -1043,6 +1095,11 @@ function validatePredicateScope(
   }
   if (predicate.op === "after-step" || predicate.op === "before-step") {
     issues.push(issue("PLAYER_LOGICAL_TIME_OBSERVATION_FORBIDDEN", "Actor-scoped action translation cannot inspect engine logical time", path));
+    return;
+  }
+  if (predicate.op === "elapsed-days-gte" || predicate.op === "elapsed-days-lte"
+    || predicate.op === "story-time-at-or-after" || predicate.op === "story-time-before") {
+    issues.push(issue("PLAYER_WORLD_TIME_OBSERVATION_FORBIDDEN", "Actor-scoped action translation cannot introduce an absolute world-time predicate", path));
     return;
   }
   if (!writable.has(predicate.entityId)) {
@@ -1157,7 +1214,9 @@ function evaluateVisiblePredicate(
     const item = evaluateVisiblePredicate(predicate.item, values);
     return item.known ? { known: true, value: !item.value } : item;
   }
-  if (predicate.op === "rule-active" || predicate.op === "after-step" || predicate.op === "before-step") {
+  if (predicate.op === "rule-active" || predicate.op === "after-step" || predicate.op === "before-step"
+    || predicate.op === "elapsed-days-gte" || predicate.op === "elapsed-days-lte"
+    || predicate.op === "story-time-at-or-after" || predicate.op === "story-time-before") {
     // These are rejected by the capability scope gate and are not visible
     // values that grounding should attempt to reinterpret.
     return { known: true, value: true };
@@ -1169,6 +1228,9 @@ function evaluateVisiblePredicate(
   if (predicate.op === "fact-equals") {
     return { known: true, value: JSON.stringify(current) === JSON.stringify(predicate.value) };
   }
+  if (predicate.op === "fact-gte") return { known: typeof current === "number", value: typeof current === "number" && current >= predicate.value };
+  if (predicate.op === "fact-lte") return { known: typeof current === "number", value: typeof current === "number" && current <= predicate.value };
+  if (predicate.op !== "entity-in") return { known: false, value: false };
   return {
     known: true,
     value: Array.isArray(current) && current.includes(predicate.member),

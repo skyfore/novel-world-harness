@@ -12,6 +12,7 @@ import {
   stateDeltaSchema,
   stateOperationSchema,
   stateValueSchema,
+  storyTimeSchema,
   worldRuleSchema,
   type ArtifactProposal,
   type CanonicalEvent,
@@ -32,9 +33,15 @@ const possibilityTemplateSchema = possibilitySchema.omit({ branchId: true, evalu
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
     z.object({ op: z.literal("fact-equals"), entityId: idSchema, field: z.string().min(1), value: stateValueSchema }).strict(),
+    z.object({ op: z.literal("fact-gte"), entityId: idSchema, field: z.string().min(1), value: z.number().finite() }).strict(),
+    z.object({ op: z.literal("fact-lte"), entityId: idSchema, field: z.string().min(1), value: z.number().finite() }).strict(),
     z.object({ op: z.literal("fact-exists"), entityId: idSchema, field: z.string().min(1) }).strict(),
     z.object({ op: z.literal("entity-in"), entityId: idSchema, field: z.string().min(1), member: idSchema }).strict(),
     z.object({ op: z.literal("rule-active"), ruleId: idSchema }).strict(),
+    z.object({ op: z.literal("elapsed-days-gte"), days: z.number().finite().nonnegative() }).strict(),
+    z.object({ op: z.literal("elapsed-days-lte"), days: z.number().finite().nonnegative() }).strict(),
+    z.object({ op: z.literal("story-time-at-or-after"), time: storyTimeSchema }).strict(),
+    z.object({ op: z.literal("story-time-before"), time: storyTimeSchema }).strict(),
     z.object({ op: z.literal("all"), items: z.array(compilerRulePredicateSchema) }).strict(),
     z.object({ op: z.literal("any"), items: z.array(compilerRulePredicateSchema) }).strict(),
     z.object({ op: z.literal("not"), item: compilerRulePredicateSchema }).strict(),
@@ -47,7 +54,7 @@ const compilerWorldRuleSchema = worldRuleSchema.extend({
 });
 const compilerCanonicalEventSchema = canonicalEventSchema.extend({
   observedOutcome: stateDeltaSchema.extend({
-    operations: z.array(stateOperationSchema).max(1, "Compiler canonical events must describe one world-state operation at a time."),
+    operations: z.array(stateOperationSchema).max(16, "A single atomic canonical event may contain at most 16 typed world-state effects."),
   }),
 });
 const compilerClaimSchema = claimSchema.extend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((claim, ctx) => {
@@ -72,7 +79,7 @@ export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "wor
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
-const stateFieldOperations = new Set(["set", "unset", "add-member", "remove-member", "fact-equals", "fact-exists", "entity-in"]);
+const stateFieldOperations = new Set(["set", "unset", "add-member", "remove-member", "adjust-number", "fact-equals", "fact-gte", "fact-lte", "fact-exists", "entity-in"]);
 
 export const compilerProposalSchemas = {
   entity: entitySchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
@@ -289,6 +296,8 @@ function collectProposalClosureIssues(
     const initial = payload as z.infer<typeof initialWorldSchema>;
     collectStateDeltaIssues(initial.delta, "delta", missing, fieldReference);
     if (initial.knowledge) collectKnowledgeDeltaIssues(initial.knowledge, "knowledge", missing);
+    if (initial.checkpoint?.beforeCanonicalEventId) missing("events", initial.checkpoint.beforeCanonicalEventId, "checkpoint.beforeCanonicalEventId");
+    if (initial.checkpoint?.storyTime) collectStoryTimeIssues(initial.checkpoint.storyTime, "checkpoint.storyTime", missing);
     return;
   }
   if (proposal.kind === "character-goal") {
@@ -321,7 +330,21 @@ function collectProposalClosureIssues(
     return;
   }
   if (proposal.kind === "character-model") {
-    missing("entities", (payload as CharacterModel).actorId, "actorId");
+    const model = payload as CharacterModel;
+    missing("entities", model.actorId, "actorId");
+    model.developmentPhases?.forEach((phase, phaseIndex) => {
+      phase.activation.preconditions.forEach((predicate, index) =>
+        collectPredicateIssues(predicate, `developmentPhases.${phaseIndex}.activation.preconditions.${index}`, missing, fieldReference));
+      phase.activation.afterCanonicalEventIds.forEach((id, index) =>
+        missing("events", id, `developmentPhases.${phaseIndex}.activation.afterCanonicalEventIds.${index}`));
+      phase.activation.afterExperiencedCanonicalEventIds.forEach((id, index) =>
+        missing("events", id, `developmentPhases.${phaseIndex}.activation.afterExperiencedCanonicalEventIds.${index}`));
+      phase.activation.requiresKnowledge.forEach((id, index) =>
+        missing("claims", id, `developmentPhases.${phaseIndex}.activation.requiresKnowledge.${index}`));
+      if (phase.activation.storyWindow) {
+        collectStoryTimeIssues(phase.activation.storyWindow, `developmentPhases.${phaseIndex}.activation.storyWindow`, missing);
+      }
+    });
     return;
   }
   if (proposal.kind === "state-delta") {
@@ -363,7 +386,12 @@ function collectPredicateIssues(predicate: Predicate, path: string, missing: Mis
     missing("rules", predicate.ruleId, `${path}.ruleId`);
     return;
   }
-  if (predicate.op === "after-step" || predicate.op === "before-step") return;
+  if (predicate.op === "after-step" || predicate.op === "before-step"
+    || predicate.op === "elapsed-days-gte" || predicate.op === "elapsed-days-lte") return;
+  if (predicate.op === "story-time-at-or-after" || predicate.op === "story-time-before") {
+    collectStoryTimeIssues(predicate.time, `${path}.time`, missing);
+    return;
+  }
   missing("entities", predicate.entityId, `${path}.entityId`);
   fieldReference(predicate.entityId, predicate.field, `${path}.field`);
   if (predicate.op === "entity-in") missing("entities", predicate.member, `${path}.member`);
@@ -466,6 +494,9 @@ function assertCompilerStateFields(value: unknown): void {
     if (spec && (record.op === "set" || record.op === "fact-equals")) {
       assertCompilerStateValueShape(spec, record.value);
     }
+    if (spec && (record.op === "adjust-number" || record.op === "fact-gte" || record.op === "fact-lte") && spec.valueType !== "number") {
+      throw new Error(`${record.op} requires a numeric field; '${record.field}' is ${spec.valueType}.`);
+    }
     if (spec && ["add-member", "remove-member", "entity-in"].includes(record.op) && spec.valueType !== "entity-ref-set") {
       throw new Error(`${record.op} requires an entity-ref-set field; '${record.field}' is ${spec.valueType}.`);
     }
@@ -492,6 +523,12 @@ function assertCompilerStateValueShape(
   }
   if (spec.valueType === "number" && (typeof value !== "number" || !Number.isFinite(value))) {
     throw new Error(`Compiler state field '${spec.key}' requires a finite number value.`);
+  }
+  if (typeof value === "number" && spec.minimum !== undefined && value < spec.minimum) {
+    throw new Error(`Compiler state field '${spec.key}' must be >= ${spec.minimum}.`);
+  }
+  if (typeof value === "number" && spec.maximum !== undefined && value > spec.maximum) {
+    throw new Error(`Compiler state field '${spec.key}' must be <= ${spec.maximum}.`);
   }
   if (
     (spec.valueType === "string" || spec.valueType === "json-scalar")

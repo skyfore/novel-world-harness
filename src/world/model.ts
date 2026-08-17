@@ -37,7 +37,7 @@ export type SourceSpan = z.infer<typeof sourceSpanSchema>;
 export const evidenceRefSchema = z.object({ span: sourceSpanSchema, strength: z.enum(["explicit", "strong-inference", "weak-inference"]) }).strict();
 export type EvidenceRef = z.infer<typeof evidenceRefSchema>;
 
-export const entityKindSchema = z.enum(["character", "location", "faction", "artifact", "institution", "concept", "other"]);
+export const entityKindSchema = z.enum(["character", "location", "faction", "artifact", "institution", "relationship", "concept", "other"]);
 export type EntityKind = z.infer<typeof entityKindSchema>;
 
 export const entitySchema = z.object({ id: idSchema, kind: entityKindSchema, canonicalName: z.string().min(1), aliases: z.array(z.string().min(1)), evidence: z.array(evidenceRefSchema) }).strict();
@@ -65,13 +65,63 @@ export const storyTimeSchema = z.discriminatedUnion("kind", [
 ]);
 export type StoryTime = z.infer<typeof storyTimeSchema>;
 
-export const logicalTimeSchema = z.object({ step: z.number().int().nonnegative(), storyTime: storyTimeSchema.optional() }).strict();
+/**
+ * Human/calendar time and replay order deliberately stay separate. `step` is
+ * the authoritative total order of commits. `elapsedDays` is a deterministic
+ * duration accumulated by accepted events and is therefore safe to use for
+ * ageing, deadlines, recovery, decay, and other continuous world processes.
+ */
+export const logicalTimeSchema = z
+  .object({
+    step: z.number().int().nonnegative(),
+    storyTime: storyTimeSchema.optional(),
+    elapsedDays: z.number().finite().nonnegative().optional(),
+  })
+  .strict();
 export type LogicalTime = z.infer<typeof logicalTimeSchema>;
+
+export const timeAdvanceSchema = z
+  .object({
+    amount: z.number().finite().positive(),
+    unit: z.enum(["minute", "hour", "day", "week", "month", "year"]),
+  })
+  .strict();
+export type TimeAdvance = z.infer<typeof timeAdvanceSchema>;
+
+/** Narrative/discourse order is metadata, never the world clock. */
+export const narrativeContextSchema = z
+  .object({
+    layerId: idSchema,
+    discourseOrder: z.number().int().nonnegative(),
+    mode: z.enum(["scene", "summary", "flashback", "flashforward", "frame", "recollection", "hypothetical"]),
+    viewpointActorId: idSchema.optional(),
+  })
+  .strict();
+export type NarrativeContext = z.infer<typeof narrativeContextSchema>;
 
 export const valueTypeSchema = z.enum(["boolean", "number", "string", "entity-ref", "entity-ref-set", "json-scalar"]);
 export type ValueType = z.infer<typeof valueTypeSchema>;
 
-export const stateFieldSpecSchema = z.object({ key: z.string().min(1), appliesTo: z.array(entityKindSchema).min(1), valueType: valueTypeSchema, cardinality: z.enum(["one", "many"]), required: z.boolean().optional(), exclusive: z.boolean().optional() }).strict();
+export const stateFieldSpecSchema = z
+  .object({
+    key: z.string().min(1),
+    appliesTo: z.array(entityKindSchema).min(1),
+    valueType: valueTypeSchema,
+    cardinality: z.enum(["one", "many"]),
+    required: z.boolean().optional(),
+    exclusive: z.boolean().optional(),
+    minimum: z.number().finite().optional(),
+    maximum: z.number().finite().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.minimum !== undefined || value.maximum !== undefined) && value.valueType !== "number") {
+      ctx.addIssue({ code: "custom", message: "minimum/maximum are only valid for number fields" });
+    }
+    if (value.minimum !== undefined && value.maximum !== undefined && value.minimum > value.maximum) {
+      ctx.addIssue({ code: "custom", message: "minimum must be <= maximum", path: ["minimum"] });
+    }
+  });
 export type StateFieldSpec = z.infer<typeof stateFieldSpecSchema>;
 
 export const stateValueSchema = z.union([z.boolean(), z.number(), z.string(), z.array(z.string()), z.null()]);
@@ -79,11 +129,17 @@ export type StateValue = z.infer<typeof stateValueSchema>;
 
 export type Predicate =
   | { op: "fact-equals"; entityId: EntityId; field: string; value: StateValue }
+  | { op: "fact-gte"; entityId: EntityId; field: string; value: number }
+  | { op: "fact-lte"; entityId: EntityId; field: string; value: number }
   | { op: "fact-exists"; entityId: EntityId; field: string }
   | { op: "entity-in"; entityId: EntityId; field: string; member: EntityId }
   | { op: "rule-active"; ruleId: RuleId }
   | { op: "after-step"; step: number }
   | { op: "before-step"; step: number }
+  | { op: "elapsed-days-gte"; days: number }
+  | { op: "elapsed-days-lte"; days: number }
+  | { op: "story-time-at-or-after"; time: StoryTime }
+  | { op: "story-time-before"; time: StoryTime }
   | { op: "all"; items: Predicate[] }
   | { op: "any"; items: Predicate[] }
   | { op: "not"; item: Predicate };
@@ -91,11 +147,17 @@ export type Predicate =
 export const predicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
     z.object({ op: z.literal("fact-equals"), entityId: idSchema, field: z.string().min(1), value: stateValueSchema }).strict(),
+    z.object({ op: z.literal("fact-gte"), entityId: idSchema, field: z.string().min(1), value: z.number().finite() }).strict(),
+    z.object({ op: z.literal("fact-lte"), entityId: idSchema, field: z.string().min(1), value: z.number().finite() }).strict(),
     z.object({ op: z.literal("fact-exists"), entityId: idSchema, field: z.string().min(1) }).strict(),
     z.object({ op: z.literal("entity-in"), entityId: idSchema, field: z.string().min(1), member: idSchema }).strict(),
     z.object({ op: z.literal("rule-active"), ruleId: idSchema }).strict(),
     z.object({ op: z.literal("after-step"), step: z.number().int().nonnegative() }).strict(),
     z.object({ op: z.literal("before-step"), step: z.number().int().nonnegative() }).strict(),
+    z.object({ op: z.literal("elapsed-days-gte"), days: z.number().finite().nonnegative() }).strict(),
+    z.object({ op: z.literal("elapsed-days-lte"), days: z.number().finite().nonnegative() }).strict(),
+    z.object({ op: z.literal("story-time-at-or-after"), time: storyTimeSchema }).strict(),
+    z.object({ op: z.literal("story-time-before"), time: storyTimeSchema }).strict(),
     z.object({ op: z.literal("all"), items: z.array(predicateSchema) }).strict(),
     z.object({ op: z.literal("any"), items: z.array(predicateSchema) }).strict(),
     z.object({ op: z.literal("not"), item: predicateSchema }).strict(),
@@ -107,6 +169,7 @@ export const stateOperationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("unset"), entityId: idSchema, field: z.string().min(1) }).strict(),
   z.object({ op: z.literal("add-member"), entityId: idSchema, field: z.string().min(1), member: idSchema }).strict(),
   z.object({ op: z.literal("remove-member"), entityId: idSchema, field: z.string().min(1), member: idSchema }).strict(),
+  z.object({ op: z.literal("adjust-number"), entityId: idSchema, field: z.string().min(1), amount: z.number().finite() }).strict(),
   z.object({ op: z.literal("activate-rule"), ruleId: idSchema }).strict(),
   z.object({ op: z.literal("deactivate-rule"), ruleId: idSchema }).strict(),
 ]);
@@ -179,6 +242,8 @@ export const canonicalEventSchema = z.object({
   title: z.string().min(1),
   participants: z.array(idSchema),
   storyTime: storyTimeSchema,
+  timeAdvance: timeAdvanceSchema.optional(),
+  narrativeContext: narrativeContextSchema.optional(),
   preconditions: z.array(predicateSchema),
   observedOutcome: stateDeltaSchema,
   observedKnowledge: knowledgeDeltaSchema.optional(),
@@ -201,6 +266,7 @@ export const eventProposalSchema = z
     title: z.string().min(1),
     participants: z.array(idSchema),
     proposedTime: storyTimeSchema,
+    timeAdvance: timeAdvanceSchema.optional(),
     preconditions: z.array(predicateSchema),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
@@ -219,6 +285,7 @@ export const committedEventSchema = z
     eventId: idSchema,
     branchId: idSchema,
     logicalTime: logicalTimeSchema,
+    timeAdvance: timeAdvanceSchema.optional(),
     proposalId: idSchema.optional(),
     title: z.string().min(1),
     participants: z.array(idSchema),
@@ -259,6 +326,7 @@ export const possibilitySchema = z
     kind: z.enum(["canon-analogue", "player-choice", "actor-plan", "obligation", "causal-consequence", "background-pressure", "environmental", "generated"]),
     title: z.string().min(1),
     candidateWindow: storyTimeSchema.optional(),
+    timeAdvance: timeAdvanceSchema.optional(),
     preconditions: z.array(predicateSchema),
     blockers: z.array(predicateSchema),
     expiry: z.array(predicateSchema).optional(),

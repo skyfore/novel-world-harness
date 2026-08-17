@@ -4,8 +4,9 @@ import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
 import type { BranchId, CommitId, EventProposal, EvidenceRef, Possibility, StoryTime, WorldState } from "./model.js";
 import { evaluatePredicate } from "./state.js";
+import { comparableStoryTime } from "./time.js";
 
-export type PossibilityStatus = "latent" | "eligible" | "blocked" | "expired" | "superseded" | "realized";
+export type PossibilityStatus = "latent" | "eligible" | "blocked" | "expired" | "superseded" | "invalidated" | "realized";
 export type SchedulerFactors = { urgency: number; causalSupport: number; actorPressure: number; runtimeRelevance: number; conditionStrength: number; canonAffinity: number };
 export type EvaluatedPossibility = { possibility: Possibility; status: PossibilityStatus; reasons: string[]; factors: SchedulerFactors; score: number };
 export type FrontierTemporalMode = "current-window" | "advance";
@@ -55,6 +56,9 @@ export function evaluatePossibility(state: WorldState, possibility: Possibility,
   } else if (options.supersededIds?.has(possibility.id)) {
     status = "superseded";
     reasons.push("replaced by another committed development");
+  } else if (possibility.causalParents.some((parent) => possibilityIdAliases(parent).some((id) => options.supersededIds?.has(id)))) {
+    status = "invalidated";
+    reasons.push("a required causal parent was replaced by branch history");
   } else if (possibility.expiry?.some((predicate) => evaluatePredicate(state, predicate))) {
     status = "expired";
     reasons.push("an expiry condition is true");
@@ -118,7 +122,9 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
       activeEntityIds: options.activeEntityIds,
       rootEvidenceSupported: rootEvidenceSupport.get(possibility.id),
     });
-  }).sort((left, right) => {
+  });
+  propagateInvalidatedDescendants(evaluated);
+  evaluated.sort((left, right) => {
     if (options.temporalMode === "advance" && left.status === "eligible" && right.status === "eligible") {
       const leftOrder = temporalOrder(left.possibility.candidateWindow);
       const rightOrder = temporalOrder(right.possibility.candidateWindow);
@@ -193,6 +199,7 @@ export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: str
     title: possibility.title,
     participants: possibility.participants,
     proposedTime: possibility.candidateWindow ?? { kind: "unknown" },
+    ...(possibility.timeAdvance ? { timeAdvance: possibility.timeAdvance } : {}),
     preconditions: possibility.preconditions,
     proposedDelta,
     ...(possibility.proposedKnowledge ? { proposedKnowledge: possibility.proposedKnowledge } : {}),
@@ -244,8 +251,6 @@ export class FrontierStore {
 }
 function clampFactor(value: number): number { return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0; }
 
-type ComparableTime = { scale: "year" | "ordinal"; min: number; max: number };
-
 function assessTemporalCompatibility(
   current: StoryTime | undefined,
   candidate: StoryTime | undefined,
@@ -253,8 +258,8 @@ function assessTemporalCompatibility(
   causallySupported: boolean,
   unwindowedIsImmediate: boolean,
 ): { allowed: boolean; reason?: string } {
-  const currentRange = comparableTime(current);
-  const candidateRange = comparableTime(candidate);
+  const currentRange = comparableStoryTime(current);
+  const candidateRange = comparableStoryTime(candidate);
   if (!currentRange) return { allowed: true };
   if (!candidateRange || candidateRange.scale !== currentRange.scale) {
     return causallySupported
@@ -277,35 +282,33 @@ function assessTemporalCompatibility(
   };
 }
 
-function comparableTime(time: StoryTime | undefined): ComparableTime | undefined {
-  if (!time || time.kind === "unknown" || time.kind === "relative") return undefined;
-  if (time.kind === "ordinal") {
-    return typeof time.orderHint === "number"
-      ? { scale: "ordinal", min: time.orderHint, max: time.orderHint }
-      : undefined;
-  }
-  if (time.kind === "exact") {
-    const range = yearsIn(time.value);
-    return range ? { scale: "year", ...range } : undefined;
-  }
-  const earliest = yearsIn(time.earliest);
-  const latest = yearsIn(time.latest);
-  if (!earliest || !latest) return undefined;
-  return { scale: "year", min: Math.min(earliest.min, latest.min), max: Math.max(earliest.max, latest.max) };
-}
-
-function yearsIn(value: string): { min: number; max: number } | undefined {
-  const years = [...value.matchAll(/(?:^|\D)(\d{3,4})(?:s)?(?=\D|$)/g)].map((match) => ({
-    year: Number(match[1]),
-    decade: match[0].trim().endsWith("s"),
-  }));
-  if (!years.length) return undefined;
-  return {
-    min: Math.min(...years.map(({ year }) => year)),
-    max: Math.max(...years.map(({ year, decade }) => year + (decade ? 9 : 0))),
-  };
-}
-
 function temporalOrder(time: StoryTime | undefined): number {
-  return comparableTime(time)?.min ?? Number.POSITIVE_INFINITY;
+  return comparableStoryTime(time)?.min ?? Number.POSITIVE_INFINITY;
+}
+
+function possibilityIdAliases(id: string): string[] {
+  return id.startsWith("canon-") ? [id, id.slice("canon-".length)] : [id, `canon-${id}`];
+}
+
+function propagateInvalidatedDescendants(evaluated: EvaluatedPossibility[]): void {
+  const byId = new Map<string, EvaluatedPossibility>();
+  for (const entry of evaluated) {
+    byId.set(entry.possibility.id, entry);
+    if (entry.possibility.canonicalEventId) byId.set(entry.possibility.canonicalEventId, entry);
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const entry of evaluated) {
+      if (["realized", "superseded", "expired", "invalidated"].includes(entry.status)) continue;
+      const invalidParent = entry.possibility.causalParents
+        .map((parent) => byId.get(parent) ?? byId.get(`canon-${parent}`))
+        .find((parent) => parent && ["superseded", "expired", "invalidated"].includes(parent.status));
+      if (!invalidParent) continue;
+      entry.status = "invalidated";
+      entry.score = 0;
+      entry.reasons = [`required causal parent ${invalidParent.possibility.id} is ${invalidParent.status}`];
+      changed = true;
+    }
+  }
 }

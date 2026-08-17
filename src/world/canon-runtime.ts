@@ -10,6 +10,7 @@ export function canonicalEventToPossibility(event: CanonicalEvent, branchId: str
     kind: "canon-analogue",
     title: event.title,
     candidateWindow: event.storyTime,
+    ...(event.timeAdvance ? { timeAdvance: event.timeAdvance } : {}),
     preconditions: event.preconditions,
     blockers: [],
     participants: event.participants,

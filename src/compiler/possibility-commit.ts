@@ -129,7 +129,9 @@ function validatePredicate(
     if (!rules.has(predicate.ruleId)) errors.push(issue("UNKNOWN_RULE", `Predicate references unknown rule ${predicate.ruleId}`));
     return;
   }
-  if (predicate.op === "after-step" || predicate.op === "before-step") return;
+  if (predicate.op === "after-step" || predicate.op === "before-step"
+    || predicate.op === "elapsed-days-gte" || predicate.op === "elapsed-days-lte"
+    || predicate.op === "story-time-at-or-after" || predicate.op === "story-time-before") return;
   const entity = entities.get(predicate.entityId);
   if (!entity) {
     errors.push(issue("UNKNOWN_PREDICATE_ENTITY", `Predicate references unknown entity ${predicate.entityId}`));
@@ -139,6 +141,9 @@ function validatePredicate(
     const field = schema.get(predicate.field);
     if (!field.appliesTo.includes(entity.kind as never)) errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} does not apply to ${entity.kind}`));
     if (predicate.op === "fact-equals") schema.validateValue(field, predicate.value, entities as never);
+    if ((predicate.op === "fact-gte" || predicate.op === "fact-lte") && field.valueType !== "number") {
+      errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} is not numeric`));
+    }
     if (predicate.op === "entity-in") {
       if (!entities.has(predicate.member)) errors.push(issue("UNKNOWN_PREDICATE_MEMBER", `Unknown member ${predicate.member}`));
       if (field.valueType !== "entity-ref-set") errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} is not a set field`));

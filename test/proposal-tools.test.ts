@@ -316,7 +316,7 @@ describe("compiler proposal tools", () => {
       .resolves.toMatchObject({ payload: { evidence } });
   });
 
-  it("requires source compiler events to split independent world-state operations", async () => {
+  it("keeps simultaneous effects of one atomic source event together", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-event-atomic-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "墨砚开门并送出停战信。\n");
@@ -341,9 +341,9 @@ describe("compiler proposal tools", () => {
         confidence: 1,
       },
     });
-    expect(Compile(tool.parameters).Check(prepared)).toBe(false);
+    expect(Compile(tool.parameters).Check(prepared)).toBe(true);
     await expect(tool.execute("combined-event", prepared as never, undefined, undefined, {} as ExtensionContext))
-      .rejects.toThrow("one world-state operation at a time");
+      .resolves.toMatchObject({ details: { proposalId: "combined-event", kind: "canonical-event" } });
   });
 
   it("automatically finishes every active successful submission without model-side id bookkeeping", async () => {

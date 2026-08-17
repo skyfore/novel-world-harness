@@ -4,13 +4,25 @@ import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
-import { evidenceRefSchema, knowledgeDeltaSchema, stateDeltaSchema } from "./model.js";
+import { evidenceRefSchema, idSchema, knowledgeDeltaSchema, stateDeltaSchema, storyTimeSchema } from "./model.js";
+
+export const openingCheckpointSchema = z
+  .object({
+    mode: z.enum(["chronological", "textual-frame", "custom"]),
+    storyTime: storyTimeSchema.optional(),
+    narrativeLayerId: idSchema.optional(),
+    beforeCanonicalEventId: idSchema.optional(),
+    rationale: z.string().trim().min(1).max(1000),
+  })
+  .strict();
+export type OpeningCheckpoint = z.infer<typeof openingCheckpointSchema>;
 
 export const initialWorldSchema = z
   .object({
     version: z.literal(1),
     delta: stateDeltaSchema,
     knowledge: knowledgeDeltaSchema.optional(),
+    checkpoint: openingCheckpointSchema.optional(),
     evidence: z.array(evidenceRefSchema).min(1),
   })
   .strict();

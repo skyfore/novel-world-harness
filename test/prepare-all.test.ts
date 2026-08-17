@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { prepareAllCommand } from "../src/commands/prepare-all.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
+import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { canonicalJson, contentHash } from "../src/world/canonical.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { WorldEngine } from "../src/world/engine.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
@@ -24,6 +26,72 @@ afterEach(async () => {
 });
 
 describe("prepare-all command", () => {
+  it("routes an incompatible prepared revision through whole-novel reparse and a fresh branch", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-upgrade-"));
+    roots.push(root);
+    vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
+    const fixture = await createEvidenceFixture(root, "Hero waits at the opening.\n");
+    const cacheRoot = path.join(root, "prepared-cache");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "upgrade-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "upgrade-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        evidence: fixture.evidence("Hero waits at the opening."),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await convergeWorldProposals(root, fixture.source.id);
+    const cache = new PreparedNovelCache(root, cacheRoot);
+    const published = await cache.publish(fixture.source);
+    await worldCreateCommand(root, "main", undefined, fixture.source.id, cacheRoot);
+
+    const currentBundle = JSON.parse(await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8")) as Record<string, unknown>;
+    delete currentBundle.compilerFingerprint;
+    const legacyHash = contentHash(currentBundle);
+    const cacheBase = path.join(cacheRoot, published.contentMd5);
+    const legacyRevision = path.join(cacheBase, "revisions", legacyHash);
+    await fs.mkdir(legacyRevision, { recursive: true });
+    await fs.writeFile(path.join(legacyRevision, "bundle.json"), `${canonicalJson(currentBundle)}\n`);
+    await fs.writeFile(path.join(legacyRevision, "manifest.json"), `${canonicalJson({
+      version: 1,
+      contentMd5: published.contentMd5,
+      contentSha256: fixture.source.contentSha256,
+      sourceId: fixture.source.id,
+      bundleHash: legacyHash,
+      createdAt: new Date(0).toISOString(),
+    })}\n`);
+    await fs.writeFile(path.join(cacheBase, "active.json"), `${canonicalJson({
+      version: 1,
+      contentMd5: published.contentMd5,
+      bundleHash: legacyHash,
+      updatedAt: new Date(0).toISOString(),
+    })}\n`);
+
+    let reparseCalls = 0;
+    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot }, {
+      reparse: async (options) => {
+        reparseCalls += 1;
+        expect(options.all).toBe(true);
+        await cache.publish(fixture.source);
+      },
+    });
+
+    expect(reparseCalls).toBe(1);
+    expect(result.stage).toBe("ready");
+    expect(result.branchId).not.toBe("main");
+    expect((await new BranchStore(root).read("main")).preparedRevisionHash).toBe(published.bundleHash);
+    expect((await new BranchStore(root).read(result.branchId)).preparedRevisionHash).toBe(published.bundleHash);
+  });
+
   it("lets the user stop at review without accepting pending proposals", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-review-"));
     roots.push(root);

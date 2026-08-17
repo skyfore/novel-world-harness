@@ -75,9 +75,9 @@ export class CompilerValidator {
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
     if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, claims, events, rules, errors);
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
-    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, claims, rules, errors);
+    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, claims, events, rules, errors);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, claims, events, rules, errors);
-    if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, errors);
+    if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, claims, events, rules, errors);
     return { accepted: errors.length === 0, errors, warnings };
   }
 
@@ -103,8 +103,8 @@ export class CompilerValidator {
     errors: ValidationIssue[],
   ): void {
     if (!event.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event ${event.id} has no source evidence`, "evidence"));
-    if (event.observedOutcome.operations.length > 1) {
-      errors.push(issue("NON_ATOMIC_CANONICAL_EVENT", `Event ${event.id} contains multiple world-state operations; submit one explicitly narrated transition per canonical event`, "observedOutcome.operations"));
+    if (event.observedOutcome.operations.length > 16) {
+      errors.push(issue("OVERSIZED_CANONICAL_EVENT", `Event ${event.id} contains more than 16 typed state effects and must be split at a genuine causal boundary`, "observedOutcome.operations"));
     }
     for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
     for (const parentId of event.causalParents) {
@@ -154,10 +154,14 @@ export class CompilerValidator {
     initial: InitialWorld,
     entities: ReadonlyMap<string, Entity>,
     claims: ReadonlyMap<string, Claim>,
+    events: ReadonlyMap<string, CanonicalEvent>,
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
   ): void {
     if (!initial.evidence.length) errors.push(issue("MISSING_EVIDENCE", "Initial world has no source evidence", "evidence"));
+    if (initial.checkpoint?.beforeCanonicalEventId && !events.has(initial.checkpoint.beforeCanonicalEventId)) {
+      errors.push(issue("UNKNOWN_OPENING_EVENT", `Initial checkpoint references unknown canonical event ${initial.checkpoint.beforeCanonicalEventId}`, "checkpoint.beforeCanonicalEventId"));
+    }
     this.validateOperations(initial.delta.operations, entities, rules, errors, "delta.operations");
     for (let index = 0; index < (initial.knowledge?.operations.length ?? 0); index += 1) {
       const operation = initial.knowledge!.operations[index]!;
@@ -260,10 +264,30 @@ export class CompilerValidator {
     }
   }
 
-  private validateCharacterModel(model: CharacterModel, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
+  private validateCharacterModel(
+    model: CharacterModel,
+    entities: ReadonlyMap<string, Entity>,
+    claims: ReadonlyMap<string, Claim>,
+    events: ReadonlyMap<string, CanonicalEvent>,
+    rules: ReadonlyMap<string, WorldRule>,
+    errors: ValidationIssue[],
+  ): void {
     const actor = entities.get(model.actorId);
     if (!actor || actor.kind !== "character") errors.push(issue("INVALID_MODEL_ACTOR", `Character model actor ${model.actorId} is not a canonical character`, "actorId"));
     if (!model.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Character model ${model.actorId} has no source evidence`, "evidence"));
+    for (let phaseIndex = 0; phaseIndex < (model.developmentPhases?.length ?? 0); phaseIndex += 1) {
+      const phase = model.developmentPhases![phaseIndex]!;
+      phase.activation.preconditions.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      for (const eventId of [...phase.activation.afterCanonicalEventIds, ...phase.activation.afterExperiencedCanonicalEventIds]) {
+        if (!events.has(eventId)) errors.push(issue("UNKNOWN_DEVELOPMENT_EVENT", `Character phase ${phase.id} references unknown canonical event ${eventId}`, `developmentPhases.${phaseIndex}.activation`));
+      }
+      for (const claimId of phase.activation.requiresKnowledge) {
+        if (!claims.has(claimId)) errors.push(issue("UNKNOWN_DEVELOPMENT_CLAIM", `Character phase ${phase.id} references unknown claim ${claimId}`, `developmentPhases.${phaseIndex}.activation.requiresKnowledge`));
+      }
+      if (phase.activation.storyWindow?.kind === "relative" && !events.has(phase.activation.storyWindow.anchorEventId)) {
+        errors.push(issue("UNKNOWN_DEVELOPMENT_EVENT", `Character phase ${phase.id} story window references unknown canonical event ${phase.activation.storyWindow.anchorEventId}`, `developmentPhases.${phaseIndex}.activation.storyWindow`));
+      }
+    }
   }
 
   private validateOperations(operations: CanonicalEvent["observedOutcome"]["operations"], entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[], pathPrefix: string): void {
@@ -282,13 +306,18 @@ export class CompilerValidator {
     if (predicate.op === "all" || predicate.op === "any") { for (const item of predicate.items) this.validatePredicate(item, entities, rules, errors); return; }
     if (predicate.op === "not") { this.validatePredicate(predicate.item, entities, rules, errors); return; }
     if (predicate.op === "rule-active") { if (!rules.has(predicate.ruleId)) errors.push(issue("UNKNOWN_RULE", `Predicate references unknown rule ${predicate.ruleId}`)); return; }
-    if (predicate.op === "after-step" || predicate.op === "before-step") return;
+    if (predicate.op === "after-step" || predicate.op === "before-step"
+      || predicate.op === "elapsed-days-gte" || predicate.op === "elapsed-days-lte"
+      || predicate.op === "story-time-at-or-after" || predicate.op === "story-time-before") return;
     const entity = entities.get(predicate.entityId);
     if (!entity) { errors.push(issue("UNKNOWN_PREDICATE_ENTITY", `Predicate references unknown entity ${predicate.entityId}`)); return; }
     try {
       const field = this.stateSchema.get(predicate.field);
       if (!field.appliesTo.includes(entity.kind)) errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} does not apply to ${entity.kind}`));
       if (predicate.op === "fact-equals") this.stateSchema.validateValue(field, predicate.value, entities);
+      if ((predicate.op === "fact-gte" || predicate.op === "fact-lte") && field.valueType !== "number") {
+        errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} is not numeric`));
+      }
       if (predicate.op === "entity-in") {
         if (!entities.has(predicate.member)) errors.push(issue("UNKNOWN_PREDICATE_MEMBER", `Unknown member ${predicate.member}`));
         if (field.valueType !== "entity-ref-set") errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} is not a set field`));

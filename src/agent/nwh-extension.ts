@@ -57,6 +57,7 @@ import { formatCharacters, formatInstances, formatNovels, formatProgress } from 
 import { createTuiUserQuestion } from "../util/tui-user-question.js";
 import type { UserQuestionCustomInput } from "../util/ask-user-question.js";
 import { auditCompiler } from "../compiler/audit.js";
+import { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "../compiler/reconcile-world.js";
 import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
@@ -143,7 +144,7 @@ TUI shortcuts:
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
 const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
-const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence and existing artifact catalog. Propose one evidence-backed initial-world representing only the state already true at the opening. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.`;
+const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.`;
 
 type TuiPrepareAllState = {
   sourceId: string;
@@ -152,6 +153,9 @@ type TuiPrepareAllState = {
   initialWorldRequestRunning: boolean;
   initialWorldAttempted: boolean;
   initialWorldBatchId?: string;
+  reconciliationRequestRunning: boolean;
+  reconciliationAttempts: number;
+  reconciliationBatchId?: string;
   preparedCacheVerified: boolean;
   providerRetryCounts: Map<string, number>;
 };
@@ -224,6 +228,7 @@ const COMPILER_CONTEXT_TYPES = new Set([
   "nwh-compiler-batch",
   "nwh-prepare-all-batch",
   "nwh-prepare-all-initial-world",
+  "nwh-prepare-all-reconciliation",
 ]);
 
 type ContextMessage = { role: string; customType?: string; details?: unknown };
@@ -749,15 +754,29 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         branchId: selection.session.branchId,
         commitId: selection.session.lastCommitId,
         logicalStep: selection.logicalStep,
+        elapsedDays: 0,
         actor: { id: selection.actor.id, name: selection.actor.canonicalName },
         selfState: {},
+        development: {
+          actorId: selection.actor.id,
+          atCommit: selection.session.lastCommitId,
+        elapsedDays: 0,
+        experiencedEventIds: [],
+        experiencedCanonicalEventIds: [],
+        recentLivedExperiences: [],
+        knownClaimIds: [],
+          activeGoalIds: [],
+          completedGoalIds: [],
+          expiredGoalIds: [],
+          achievedMilestoneIds: [],
+        },
         ownedEntityState: {},
         knowledge: [],
         presentEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
         referenceableEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
         visibleEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
         recentVisibleEvents: [],
-        scene: { key: "scene:unavailable", beat: 0, signature: "unavailable" },
+        scene: { key: "scene:unavailable", beat: 0, locationState: {}, signature: "unavailable" },
         activeThreads: [],
         affordances: [],
         ...(turnResolution ? { turnResolution } : {}),
@@ -1412,6 +1431,33 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         await advancePrepareAll(ctx);
         return;
       }
+      if (inspection.stage === "repair" && inspection.audit && semanticRepairIsIsolated(inspection.audit) && state.reconciliationAttempts < 2) {
+        if (state.reconciliationAttempts === 0) {
+          const decision = await choose(ctx, "Reconcile world semantics?", [
+            { value: "repair", label: "Reconcile world", description: "Repair evidence-backed timeline, effects, and character phases through typed proposals.", recommended: true },
+            { value: "pause", label: "Pause", description: "Keep the semantic audit findings for manual repair." },
+          ]);
+          if (decision !== "repair") {
+            stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
+            return;
+          }
+        }
+        const iteration = state.reconciliationAttempts + 1;
+        const batchId = `reconcile-${state.sourceId}-v2-${iteration}`;
+        activateCompilerTools(ctx);
+        await resetCompilerBatch([], batchId, state.sourceId);
+        state.reconciliationAttempts = iteration;
+        state.reconciliationRequestRunning = true;
+        state.reconciliationBatchId = batchId;
+        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Reconciling world · ${iteration}/2`));
+        sendHiddenPreparationTurn(
+          ctx,
+          await buildWorldReconciliationPrompt(workspace.root, state.sourceId, inspection.audit, iteration),
+          "nwh-prepare-all-reconciliation",
+          [],
+        );
+        return;
+      }
       if (inspection.stage === "ready") {
         prepareAllHostActivity?.update("Verifying the playable revision");
         if (!state.preparedCacheVerified) {
@@ -1611,14 +1657,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     pi.on("context", (event) => {
       const messages = filterNwhModelContext(
         event.messages,
-        Boolean(pendingTurn || prepareAllState?.initialWorldRequestRunning),
+        Boolean(pendingTurn || prepareAllState?.initialWorldRequestRunning || prepareAllState?.reconciliationRequestRunning),
       );
       if (messages.length === event.messages.length && messages.every((message, index) => message === event.messages[index])) return;
       return { messages };
     });
 
     pi.on("agent_end", (event) => {
-      if (!pendingTurn && !prepareAllState?.initialWorldRequestRunning) return;
+      if (!pendingTurn && !prepareAllState?.initialWorldRequestRunning && !prepareAllState?.reconciliationRequestRunning) return;
       // agent_end is per low-level run. Keep every run until agent_settled so
       // provider retries, compaction retries, and queued continuations cannot
       // erase an earlier unresolved proposal failure or finish handshake.
@@ -1629,18 +1675,23 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       compilerCircuitBroken = false;
       const completedTurn = pendingTurn;
       const openingRequest = !completedTurn && prepareAllState?.initialWorldRequestRunning;
-      if (!completedTurn && !openingRequest) return;
+      const reconciliationRequest = !completedTurn && prepareAllState?.reconciliationRequestRunning;
+      if (!completedTurn && !openingRequest && !reconciliationRequest) return;
       const outcome = compilerBatchOutcomeFromMessages(pendingRunMessages);
       pendingRunMessages = [];
       if (!completedTurn) {
-        prepareAllState!.initialWorldRequestRunning = false;
+        if (openingRequest) prepareAllState!.initialWorldRequestRunning = false;
+        if (reconciliationRequest) prepareAllState!.reconciliationRequestRunning = false;
         const failure = compilerBatchFailure(outcome);
         if (failure) {
-          const rejected = prepareAllState!.initialWorldBatchId
-            ? await rejectPendingCompilerBatchProposals(workspace.root, prepareAllState!.initialWorldBatchId!)
+          const specialBatchId = reconciliationRequest
+            ? prepareAllState!.reconciliationBatchId
+            : prepareAllState!.initialWorldBatchId;
+          const rejected = specialBatchId
+            ? await rejectPendingCompilerBatchProposals(workspace.root, specialBatchId)
             : [];
-          ctx.ui.notify(`Opening-state compiler did not complete (${failure}); converging any valid drafts before fallback.`, "warning");
-          if (rejected.length) ctx.ui.notify(`Rejected ${rejected.length} partial opening-state proposal(s); incomplete model turns cannot enter canonical truth.`, "warning");
+          ctx.ui.notify(`${reconciliationRequest ? "World reconciliation" : "Opening-state compiler"} did not complete (${failure}); incomplete drafts will not enter canonical truth.`, "warning");
+          if (rejected.length) ctx.ui.notify(`Rejected ${rejected.length} partial proposal(s).`, "warning");
         }
         await advancePrepareAll(ctx);
         return;
@@ -2357,6 +2408,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           compileAllApproved: false,
           initialWorldRequestRunning: false,
           initialWorldAttempted: false,
+          reconciliationRequestRunning: false,
+          reconciliationAttempts: 0,
           preparedCacheVerified: false,
           providerRetryCounts: new Map(),
         };

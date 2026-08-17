@@ -70,6 +70,10 @@ export async function createWorldBranch(
     sourceId,
     prepared?.bundleHash,
     seedPath ? [] : canonicalInitial?.evidence,
+    seedPath ? {} : {
+      ...(canonicalInitial?.checkpoint?.storyTime ? { storyTime: canonicalInitial.checkpoint.storyTime } : {}),
+      elapsedDays: 0,
+    },
   );
   return {
     head,

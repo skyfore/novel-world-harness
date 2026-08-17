@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { contentHash } from "./canonical.js";
-import type { ActorProposalCandidate, CharacterGoal, CharacterModel } from "./actors.js";
+import { evaluateCharacterGoal, type ActorProposalCandidate, type CharacterGoal, type CharacterModel } from "./actors.js";
+import { projectCharacterDevelopment, type CharacterDevelopmentView } from "./development.js";
 import type { WorldEngine } from "./engine.js";
 import { isActionableKnowledge, KnowledgeProjector, type ActorWorldView } from "./knowledge.js";
 import { knowledgeDeltaSchema, predicateSchema, stateDeltaSchema, type EvidenceRef } from "./model.js";
+import { committedHistory, realizedCanonicalEvents } from "./scene.js";
 
 export const actorActionTemplateSchema = z
   .object({
@@ -21,6 +23,7 @@ export type ActorReasoningInput = {
   actor: ActorWorldView;
   goal: CharacterGoal;
   model: CharacterModel | null;
+  development: CharacterDevelopmentView;
 };
 
 export type ActorReasoner = (
@@ -41,21 +44,40 @@ export function modelActorProposalSource(
   if (!Number.isInteger(maxActors) || maxActors <= 0 || maxActors > 100) throw new Error("maxActorsPerRefresh must be 1..100");
 
   return async ({ branchId, commitId }) => {
-    const context = await engine.contextForCommit(commitId);
+    const [context, state, history] = await Promise.all([
+      engine.contextForCommit(commitId),
+      engine.projector.project(commitId),
+      committedHistory(engine, commitId),
+    ]);
+    const realizedCanonicalEventIds = realizedCanonicalEvents(history);
     const goals = [...(await options.goals())]
       .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
       .slice(0, maxActors);
     const candidates: ActorProposalCandidate[] = [];
+    const developmentByActor = new Map<string, Promise<CharacterDevelopmentView>>();
     for (const goal of goals) {
       const entity = context.entities.get(goal.actorId);
       if (!entity || entity.kind !== "character") continue;
       const actor = await knowledge.view(goal.actorId, commitId);
       const known = new Set(actor.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
-      if (goal.requiresKnowledge.some((claimId) => !known.has(claimId))) continue;
-      if (goal.blockedByKnowledge?.some((claimId) => known.has(claimId))) continue;
+      if (!evaluateCharacterGoal(goal, {
+        state,
+        knownClaimIds: known,
+        realizedCanonicalEventIds,
+        storyTime: state.logicalTime.storyTime,
+      }).active) continue;
 
       const model = await options.modelFor(goal.actorId);
-      const output = await options.reasoner({ actor, goal, model });
+      let developmentPromise = developmentByActor.get(goal.actorId);
+      if (!developmentPromise) {
+        developmentPromise = projectCharacterDevelopment(engine, goal.actorId, commitId, {
+          goals,
+          model,
+        });
+        developmentByActor.set(goal.actorId, developmentPromise);
+      }
+      const development = await developmentPromise;
+      const output = await options.reasoner({ actor, goal, model, development });
       if (!output) continue;
       const action = actorActionTemplateSchema.parse(output);
       const participants = [...new Set([goal.actorId, ...action.participants])];
@@ -74,7 +96,7 @@ export function modelActorProposalSource(
           actorId: goal.actorId,
           title: action.title,
           participants,
-          proposedTime: { kind: "unknown" },
+          proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
           preconditions: action.preconditions,
           proposedDelta: action.proposedDelta,
           ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
@@ -86,4 +108,3 @@ export function modelActorProposalSource(
     return candidates;
   };
 }
-

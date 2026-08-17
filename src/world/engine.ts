@@ -16,6 +16,7 @@ import {
   type EvidenceRef,
   type EventProposal,
   type KnowledgeDelta,
+  type LogicalTime,
   type ObjectHash,
   type StateDelta,
   type ValidationIssue,
@@ -24,8 +25,9 @@ import {
   type WorldState,
 } from "./model.js";
 import type { PossibilityTemplate } from "./possibility-model.js";
-import { StateSchemaRegistry, applyStateDelta, emptyWorldState, evaluatePredicate, validateEngineInvariants } from "./state.js";
+import { StateSchemaRegistry, advanceTemporalState, applyStateDelta, emptyWorldState, evaluatePredicate, validateEngineInvariants } from "./state.js";
 import { BranchStore, WorldObjectStore } from "./store.js";
+import { assertMonotonicLogicalTime, nextLogicalTime } from "./time.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -75,10 +77,17 @@ export class WorldProjector {
     }
     chain.reverse();
     let state = emptyWorldState(chain[0]?.id ?? commitId, 0);
-    let previousStep = -1;
+    let previousTime: LogicalTime | undefined;
     for (const entry of chain) {
       const context = await this.contextForSnapshot(entry.commit.canonicalSnapshotHash);
-      if (entry.commit.logicalTime.step <= previousStep) throw new Error(`Non-monotonic logical time at commit ${entry.id}`);
+      if (previousTime) {
+        try {
+          assertMonotonicLogicalTime(previousTime, entry.commit.logicalTime);
+        } catch (error) {
+          throw new Error(`Non-monotonic world time at commit ${entry.id}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      state = advanceTemporalState(state, entry.commit.logicalTime, context.stateSchema, context.entities);
       for (const eventHash of entry.commit.eventHashes) {
         const event = await this.objects.getEvent(eventHash);
         if (event.logicalTime.step !== entry.commit.logicalTime.step) throw new Error(`Event/commit logical time mismatch for ${eventHash}`);
@@ -87,7 +96,7 @@ export class WorldProjector {
       state = { ...state, atCommit: entry.id, logicalTime: entry.commit.logicalTime };
       const invariantErrors = validateEngineInvariants(state, context.stateSchema, context.entities, context.rules);
       if (invariantErrors.length) throw new Error(`Projected state violates invariants: ${invariantErrors.join("; ")}`);
-      previousStep = entry.commit.logicalTime.step;
+      previousTime = entry.commit.logicalTime;
     }
     return state;
   }
@@ -101,13 +110,20 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   if (state.atCommit !== head) errors.push({ code: "STATE_HEAD_MISMATCH", message: `Projected state ${state.atCommit} does not match ${head}` });
   for (const entityId of proposal.participants) if (!context.entities.has(entityId)) errors.push({ code: "UNKNOWN_PARTICIPANT", message: `Unknown participant ${entityId}` });
   if (proposal.actorId && !context.entities.has(proposal.actorId)) errors.push({ code: "UNKNOWN_ACTOR", message: `Unknown actor ${proposal.actorId}` });
-  if (proposal.actorId && state.values[proposal.actorId]?.["character.alive"] === false) errors.push({ code: "ACTOR_DEAD", message: `Actor ${proposal.actorId} is not alive` });
+  let evaluationState = state;
+  try {
+    const logicalTime = nextLogicalTime(state.logicalTime, proposal.proposedTime, proposal.timeAdvance);
+    evaluationState = advanceTemporalState(state, logicalTime, context.stateSchema, context.entities);
+  } catch (error) {
+    errors.push({ code: "INVALID_WORLD_TIME", message: error instanceof Error ? error.message : String(error), path: "proposedTime" });
+  }
+  if (proposal.actorId && evaluationState.values[proposal.actorId]?.["character.alive"] === false) errors.push({ code: "ACTOR_DEAD", message: `Actor ${proposal.actorId} is not alive` });
   for (let index = 0; index < (proposal.supersedesCanonicalEventIds?.length ?? 0); index += 1) {
     const eventId = proposal.supersedesCanonicalEventIds![index]!;
     if (!context.events?.has(eventId)) errors.push({ code: "UNKNOWN_SUPERSEDED_CANONICAL_EVENT", message: `Unknown superseded canonical event ${eventId}`, path: `supersedesCanonicalEventIds.${index}` });
   }
   for (let index = 0; index < proposal.preconditions.length; index += 1) {
-    if (!evaluatePredicate(state, proposal.preconditions[index]!)) errors.push({ code: "PRECONDITION_FAILED", message: `Precondition ${index} is false`, path: `preconditions.${index}` });
+    if (!evaluatePredicate(evaluationState, proposal.preconditions[index]!)) errors.push({ code: "PRECONDITION_FAILED", message: `Precondition ${index} is false`, path: `preconditions.${index}` });
   }
   if (proposal.proposedKnowledge) {
     const knowledge = knowledgeDeltaSchema.parse(proposal.proposedKnowledge);
@@ -126,15 +142,15 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   }
 
   const applicableRules: WorldRule[] = [];
-  for (const ruleId of state.activeRuleIds) {
+  for (const ruleId of evaluationState.activeRuleIds) {
     const rule = context.rules.get(ruleId);
     if (!rule) {
       errors.push({ code: "UNKNOWN_ACTIVE_RULE", message: `Active rule ${ruleId} is not in the model` });
       continue;
     }
-    if (!rule.appliesWhen.every((predicate) => evaluatePredicate(state, predicate))) continue;
+    if (!rule.appliesWhen.every((predicate) => evaluatePredicate(evaluationState, predicate))) continue;
     applicableRules.push(rule);
-    if (rule.requires?.some((predicate) => !evaluatePredicate(state, predicate))) {
+    if (rule.requires?.some((predicate) => !evaluatePredicate(evaluationState, predicate))) {
       errors.push({ code: "RULE_REQUIREMENT_FAILED", message: `Rule ${ruleId} requirement is not satisfied` });
     }
   }
@@ -143,7 +159,7 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   if (!errors.length) {
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
-      postState = applyStateDelta(state, delta, context.stateSchema, context.entities, context.rules);
+      postState = applyStateDelta(evaluationState, delta, context.stateSchema, context.entities, context.rules);
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
       for (const rule of applicableRules) {
         if (rule.forbids?.length && rule.forbids.every((predicate) => evaluatePredicate(postState!, predicate))) {
@@ -152,8 +168,10 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
       }
       const stateChanged = contentHash({ values: state.values, activeRuleIds: state.activeRuleIds })
         !== contentHash({ values: postState.values, activeRuleIds: postState.activeRuleIds });
+      const timeChanged = (postState.logicalTime.elapsedDays ?? 0) > (state.logicalTime.elapsedDays ?? 0)
+        || JSON.stringify(postState.logicalTime.storyTime) !== JSON.stringify(state.logicalTime.storyTime);
       const hasKnowledgeEffect = Boolean(proposal.proposedKnowledge?.operations.length);
-      if (proposal.source === "player" && !stateChanged && !hasKnowledgeEffect && !proposal.progress) {
+      if (proposal.source === "player" && !stateChanged && !timeChanged && !hasKnowledgeEffect && !proposal.progress) {
         errors.push({
           code: "PLAYER_PROGRESS_REQUIRED",
           message: "An otherwise empty player event requires host-derived narrative progress metadata; raw no-op player commits are forbidden.",
@@ -202,6 +220,7 @@ export class WorldEngine {
     sourceId?: string,
     preparedRevisionHash?: string,
     initialEvidence: readonly EvidenceRef[] = [],
+    initialTime: Omit<LogicalTime, "step"> = {},
   ): Promise<CommitId> {
     if (sourceId && this.context.sourceId && sourceId !== this.context.sourceId) {
       throw new Error(`Cannot create source '${sourceId}' branch from '${this.context.sourceId}' world context.`);
@@ -214,7 +233,14 @@ export class WorldEngine {
     stateDeltaSchema.parse(initialDelta);
     const knowledge = initialKnowledge ? knowledgeDeltaSchema.parse(initialKnowledge) : undefined;
     if (knowledge) validateKnowledgeDeltaForContext(knowledge, this.context);
-    const initialState = applyStateDelta(emptyWorldState("genesis", 0), initialDelta, this.context.stateSchema, this.context.entities, this.context.rules);
+    const logicalTime: LogicalTime = { step: 0, ...initialTime };
+    const initialState = applyStateDelta(
+      { ...emptyWorldState("genesis", 0), logicalTime },
+      initialDelta,
+      this.context.stateSchema,
+      this.context.entities,
+      this.context.rules,
+    );
     const invariantErrors = validateEngineInvariants(initialState, this.context.stateSchema, this.context.entities, this.context.rules);
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
     const deltaHash = await this.objects.putDelta(initialDelta);
@@ -224,12 +250,12 @@ export class WorldEngine {
       .map((event) => event.id)
       .sort();
     const evidence: EvidenceRef[] = structuredClone([...initialEvidence]);
-    const eventId = contentHash({ kind: "genesis", branchId, deltaHash, knowledgeDeltaHash, realizesCanonicalEventIds, evidence });
+    const eventId = contentHash({ kind: "genesis", branchId, logicalTime, deltaHash, knowledgeDeltaHash, realizesCanonicalEventIds, evidence });
     const event: CommittedEvent = {
       version: 1,
       eventId,
       branchId,
-      logicalTime: { step: 0 },
+      logicalTime,
       title: "Genesis",
       participants: [...new Set([...touchedEntities(initialDelta), ...touchedKnowledgeEntities(knowledge)])].sort(),
       deltaHash,
@@ -239,7 +265,7 @@ export class WorldEngine {
       ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
     };
     const eventHash = await this.objects.putEvent(event);
-    const commitHash = await this.objects.putCommit({ version: 1, branchId, logicalTime: { step: 0 }, eventHashes: [eventHash], canonicalSnapshotHash: this.context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
+    const commitHash = await this.objects.putCommit({ version: 1, branchId, logicalTime, eventHashes: [eventHash], canonicalSnapshotHash: this.context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
     await this.branches.create({
       id: branchId,
       name,
@@ -255,11 +281,12 @@ export class WorldEngine {
     const head = await this.branches.readHead(parsed.branchId);
     const context = await this.contextForCommit(head);
     const state = await this.projector.project(head);
-    const { report } = validateEventProposal(parsed, head, state, context);
+    const { report, postState } = validateEventProposal(parsed, head, state, context);
     if (!report.accepted) return { report, previousHead: head, newHead: head };
+    if (!postState) throw new Error("Accepted event proposal did not produce a projected post-state");
     const deltaHash = await this.objects.putDelta(parsed.proposedDelta);
     const knowledgeDeltaHash = parsed.proposedKnowledge ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge) : undefined;
-    const logicalTime = { step: state.logicalTime.step + 1, storyTime: parsed.proposedTime } as const;
+    const logicalTime = postState.logicalTime;
     const canonicalPossibilityId = parsed.possibilityId?.startsWith("canon-")
       ? parsed.possibilityId.slice("canon-".length)
       : undefined;
@@ -271,6 +298,8 @@ export class WorldEngine {
       parent: head,
       proposalId: parsed.proposalId,
       title: parsed.title,
+      logicalTime,
+      timeAdvance: parsed.timeAdvance,
       deltaHash,
       knowledgeDeltaHash,
       supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds,
@@ -283,6 +312,7 @@ export class WorldEngine {
       eventId,
       branchId: parsed.branchId,
       logicalTime,
+      ...(parsed.timeAdvance ? { timeAdvance: parsed.timeAdvance } : {}),
       proposalId: parsed.proposalId,
       ...(parsed.actorId ? { actorId: parsed.actorId } : {}),
       title: parsed.title,
@@ -339,7 +369,8 @@ function canonicalEventSatisfiedAtGenesis(event: CanonicalEvent, state: WorldSta
     if (operation.op === "set") return JSON.stringify(value) === JSON.stringify(operation.value);
     if (operation.op === "unset") return value === undefined;
     if (operation.op === "add-member") return Array.isArray(value) && value.includes(operation.member);
-    return !Array.isArray(value) || !value.includes(operation.member);
+    if (operation.op === "remove-member") return !Array.isArray(value) || !value.includes(operation.member);
+    return false;
   });
   const initialKnowledge = knowledge?.operations ?? [];
   const knowledgeSatisfied = (event.observedKnowledge?.operations ?? []).every((operation) =>

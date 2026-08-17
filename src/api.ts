@@ -4,6 +4,7 @@ export { convergeWorldProposals, type WorldConvergenceProgress, type WorldPropos
 export { EvidenceVerifier, type EvidenceInspection, type EvidenceVerification } from "./compiler/evidence.js";
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
 export { PreparedNovelCache, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
+export { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "./compiler/reconcile-world.js";
 export { CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
 export { CompilerCommitService, CompilerValidator, type CompilerConvergenceProgress, type CompilerValidation } from "./compiler/validator.js";
 export { evaluateCompilerAgainstGold, compilerGoldSchema, type CompilerEvaluationReport, type CompilerGold, type SetMetric } from "./eval/compiler-eval.js";
@@ -12,7 +13,7 @@ export { ingestWorkspaceContent, ingestWorkspaceSource } from "./commands/ingest
 export { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore, type SourceMaterialIdentity } from "./storage/source-material-store.js";
 export { WorkspaceStore, type SourceDocument, type StoredProject } from "./storage/workspace-store.js";
 
-export { ActorModelStore, deterministicActorProposalSource, type CharacterGoal, type CharacterModel } from "./world/actors.js";
+export { ActorModelStore, characterDevelopmentPhaseSchema, deterministicActorProposalSource, evaluateCharacterGoal, resolveCharacterModel, type CharacterDevelopmentPhase, type CharacterGoal, type CharacterModel, type EffectiveCharacterModel } from "./world/actors.js";
 export { commitKnowledgeAwareAction, knowledgeAwareActionSchema, validateActionKnowledge, type ActionGateReport, type KnowledgeAwareAction } from "./world/action-gate.js";
 export { CanonicalModelStore, ProposalStore, type CanonicalKind, type CanonicalRevisionRef } from "./world/canonical-model.js";
 export { canonicalEventToPossibility } from "./world/canon-runtime.js";
@@ -21,7 +22,13 @@ export { diffWorldBranches, diffWorldStates, type HistoryDifference, type Knowle
 export { WorldEngine, WorldProjector, validateEventProposal, type ResolvedWorldModelContext, type WorldContextResolver, type WorldModelContext } from "./world/engine.js";
 export { fsckWorld, type FsckIssue, type WorldFsckReport } from "./world/fsck.js";
 export { buildFrontier, evaluatePossibility, selectEligible, type Frontier, type FrontierTemporalMode, type PossibilityStatus, type SchedulerFactors } from "./world/frontier.js";
-export { InitialWorldStore, initialWorldSchema, type InitialWorld } from "./world/initial.js";
+export {
+  projectCharacterDevelopment,
+  type CharacterDevelopmentView,
+  type CharacterLifeStage,
+  type CharacterLivedExperience,
+} from "./world/development.js";
+export { InitialWorldStore, initialWorldSchema, openingCheckpointSchema, type InitialWorld, type OpeningCheckpoint } from "./world/initial.js";
 export { createWorldBranch, type CreatedWorldBranch } from "./world/instance.js";
 export { KnowledgeProjector, type ActorWorldView } from "./world/knowledge.js";
 export { isNarrativeInterpretation, NarrativeMetaView, type NarrativeObservation, type NarrativeMetaKind } from "./world/meta.js";
@@ -52,6 +59,18 @@ export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type Canon
 export { committedHistory, projectActorScene, realizedCanonicalEvents, type ActorSceneProjection, type CommittedHistoryEntry, type SceneEventProjection } from "./world/scene.js";
 export { WorldRuntime, adjudicateActorCandidates, type MoveInput, type MoveResult } from "./world/runtime.js";
 export { WorldSnapshotStore, type WorldSnapshot } from "./world/snapshot.js";
-export { StateSchemaRegistry, DEFAULT_STATE_FIELDS, applyStateDelta, evaluatePredicate, validateEngineInvariants } from "./world/state.js";
+export { StateSchemaRegistry, DEFAULT_STATE_FIELDS, advanceTemporalState, applyStateDelta, evaluatePredicate, validateEngineInvariants } from "./world/state.js";
+export {
+  advanceStoryTime,
+  assertMonotonicLogicalTime,
+  comparableStoryTime,
+  compareStoryTime,
+  nextLogicalTime,
+  storyTimeAtOrAfter,
+  storyTimeBefore,
+  storyTimesOverlap,
+  timeAdvanceInDays,
+  type ComparableStoryTime,
+} from "./world/time.js";
 export { BranchStore, WorldObjectStore } from "./world/store.js";
 export { openWorkspaceWorld, type WorkspaceWorld, type WorkspaceWorldOpenOptions } from "./world/workspace-runtime.js";

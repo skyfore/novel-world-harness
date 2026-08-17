@@ -365,6 +365,7 @@ function finalStateWrites(delta: EventProposal["proposedDelta"]): Map<string, un
     else if (operation.op === "deactivate-rule") writes.set(`rule:${operation.ruleId}`, false);
     else if (operation.op === "set") writes.set(`state:${operation.entityId}:${operation.field}`, operation.value);
     else if (operation.op === "unset") writes.set(`state:${operation.entityId}:${operation.field}`, { unset: true });
+    else if (operation.op === "adjust-number") writes.set(`state:${operation.entityId}:${operation.field}`, { op: operation.op, amount: operation.amount });
     else writes.set(`state:${operation.entityId}:${operation.field}`, { op: operation.op, member: operation.member });
   }
   return writes;

@@ -3,7 +3,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { hydrateCompilerBatch, prepareCompilerBatches, prepareOpeningWorldCompilerBatch, runCompilerBatches } from "../src/compiler/batches.js";
+import {
+  COMPILER_PIPELINE_VERSION,
+  CompilerBatchStore,
+  hydrateCompilerBatch,
+  prepareCompilerBatches,
+  prepareOpeningWorldCompilerBatch,
+  runCompilerBatches,
+} from "../src/compiler/batches.js";
 import {
   compilerBatchFailure,
   compilerBatchOutcomeFromMessages,
@@ -46,6 +53,29 @@ async function fixtureWithContent(content: string): Promise<{ root: string; sour
 }
 
 describe("compiler batches", () => {
+  it("invalidates resumable progress from an older semantic pipeline", async () => {
+    const { root, source } = await fixture();
+    const store = new CompilerBatchStore(root);
+    await fs.mkdir(store.root, { recursive: true });
+    await fs.writeFile(path.join(store.root, `${source.id}.json`), `${JSON.stringify({
+      version: 1,
+      sourceId: source.id,
+      completedBatchIds: ["legacy-complete"],
+      updatedAt: new Date(0).toISOString(),
+    }, null, 2)}\n`);
+
+    await expect(store.read(source.id)).resolves.toMatchObject({
+      pipelineVersion: COMPILER_PIPELINE_VERSION,
+      completedBatchIds: [],
+    });
+
+    await store.markComplete(source.id, "current-complete");
+    await expect(store.read(source.id)).resolves.toMatchObject({
+      pipelineVersion: COMPILER_PIPELINE_VERSION,
+      completedBatchIds: ["current-complete"],
+    });
+  });
+
   it("requires a clean model stop and an explicit, consistent finish handshake", () => {
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toBeUndefined();
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "no-artifacts" })).toBeUndefined();

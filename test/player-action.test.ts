@@ -252,6 +252,35 @@ describe("PlayerTurnService", () => {
     expect(second.proposal?.proposedTime).toEqual({ kind: "exact", value: "1950", precision: "year" });
   });
 
+  it("advances both elapsed time and a comparable story anchor when the player waits", async () => {
+    const { engine, head } = await fixture();
+    const anchored = await engine.commitProposal({
+      proposalId: "anchor-wait-1950",
+      branchId: "main",
+      expectedParentCommit: head,
+      source: "background",
+      title: "The current scene is anchored in 1950",
+      participants: ["hero", "mo-yan"],
+      proposedTime: { kind: "exact", value: "1950", precision: "year" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(anchored.report.accepted).toBe(true);
+    const service = new PlayerTurnService(engine, ({ context }) =>
+      deterministicPlayerIntentCandidate("wait", { utterance: "等待1年", context }));
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "等待1年" });
+
+    expect(result.accepted).toBe(true);
+    expect(result.proposal?.timeAdvance).toEqual({ amount: 1, unit: "year" });
+    expect(result.proposal?.proposedTime).toEqual({ kind: "exact", value: "1951", precision: "year" });
+    const state = await engine.projector.project(result.newHead);
+    expect(state.logicalTime.storyTime).toEqual({ kind: "exact", value: "1951", precision: "year" });
+    expect(state.logicalTime.elapsedDays).toBeCloseTo(365.2425);
+  });
+
   it("allows an explicitly named destination as a reference without exposing its state", async () => {
     const { engine } = await fixture();
     let observedContext: Parameters<ConstructorParameters<typeof PlayerTurnService>[1]>[0]["context"] | undefined;

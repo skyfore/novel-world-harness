@@ -1,4 +1,4 @@
-import { ActorModelStore } from "../world/actors.js";
+import { ActorModelStore, characterGoalHasDevelopmentBoundary } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore } from "../world/initial.js";
 import type { CanonicalEvent, EvidenceRef, StoryTime } from "../world/model.js";
@@ -46,6 +46,8 @@ export type CompilerAuditReport = {
     causalComponents: number;
     largestCausalComponent: number;
     unconditionalRootEvents: string[];
+    semanticReady: boolean | null;
+    semanticIssues: string[];
   };
   coverage: {
     sourceIndexing: number | null;
@@ -56,6 +58,10 @@ export type CompilerAuditReport = {
     entityResolution: null;
     majorEventResolution: null;
     epistemicCoverage: null;
+    timelineAnchoring: number | null;
+    eventEffectExplicitness: number | null;
+    characterDevelopmentCoverage: number | null;
+    openingCheckpointDeclared: number | null;
   };
   notes: string[];
 };
@@ -142,6 +148,36 @@ export async function auditCompiler(
   const graph = auditCausalGraph(events);
   const narrativeGraphNavigable = events.length ? graphNavigable(events, graph) : null;
   const eventsWithExplicitDelta = events.filter((event) => event.observedOutcome.operations.length > 0).length;
+  const eventsWithExplicitEffect = events.filter((event) =>
+    event.observedOutcome.operations.length > 0 || (event.observedKnowledge?.operations.length ?? 0) > 0).length;
+  const timelineAnchoring = events.length
+    ? events.filter((event) => event.storyTime.kind !== "unknown").length / events.length
+    : null;
+  const eventEffectExplicitness = events.length ? eventsWithExplicitEffect / events.length : null;
+  const participationCounts = new Map<string, number>();
+  for (const event of events) {
+    for (const participantId of event.participants) {
+      if (entities.find((entity) => entity.id === participantId)?.kind !== "character") continue;
+      participationCounts.set(participantId, (participationCounts.get(participantId) ?? 0) + 1);
+    }
+  }
+  const recurringCharacters = [...participationCounts].filter(([, count]) => count >= 3).map(([id]) => id);
+  const growthActors = new Set([
+    ...models.filter((model) => (model.developmentPhases?.length ?? 0) > 0).map((model) => model.actorId),
+    ...goals.filter(characterGoalHasDevelopmentBoundary).map((goal) => goal.actorId),
+  ]);
+  const characterDevelopmentCoverage = recurringCharacters.length
+    ? recurringCharacters.filter((actorId) => growthActors.has(actorId)).length / recurringCharacters.length
+    : null;
+  const semanticIssues: string[] = [];
+  // Small fixtures and short stories may intentionally be sparse. The hard
+  // semantic gate targets novel-scale compilations where omissions compound.
+  if (events.length >= 20) {
+    if ((eventEffectExplicitness ?? 0) < 0.65) semanticIssues.push(`Only ${formatRatio(eventEffectExplicitness)} of canonical events have a typed state or knowledge effect (minimum 65%).`);
+    if ((timelineAnchoring ?? 0) < 0.75) semanticIssues.push(`Only ${formatRatio(timelineAnchoring)} of canonical events have a story-time anchor (minimum 75%).`);
+    if (recurringCharacters.length && (characterDevelopmentCoverage ?? 0) < 0.5) semanticIssues.push(`Only ${formatRatio(characterDevelopmentCoverage)} of recurring characters have phase-bounded goals or development phases (minimum 50%).`);
+    if (initialWorld && !initialWorld.checkpoint) semanticIssues.push("The initial world does not declare a temporal/narrative checkpoint.");
+  }
   const sourceIndexing = sources.length
     ? changedSinceIngest.length
       ? 0
@@ -180,6 +216,8 @@ export async function auditCompiler(
       causalComponents: graph.components.length,
       largestCausalComponent: Math.max(0, ...graph.components.map((component) => component.length)),
       unconditionalRootEvents: graph.unconditionalRoots,
+      semanticReady: events.length >= 20 ? semanticIssues.length === 0 : null,
+      semanticIssues,
     },
     coverage: {
       sourceIndexing,
@@ -190,6 +228,10 @@ export async function auditCompiler(
       entityResolution: null,
       majorEventResolution: null,
       epistemicCoverage: null,
+      timelineAnchoring,
+      eventEffectExplicitness,
+      characterDevelopmentCoverage,
+      openingCheckpointDeclared: initialWorld ? (initialWorld.checkpoint ? 1 : 0) : null,
     },
     notes: [
       ...(options.sourceId ? [`Audit is scoped to source ${options.sourceId}; unrelated registered sources and artifacts are excluded.`] : []),
@@ -198,9 +240,14 @@ export async function auditCompiler(
       ...(narrativeGraphNavigable === false
         ? ["The canonical event graph is dominated by unconditional disconnected roots; recurring characters alone are not enough to make later canon active at the opening."]
         : []),
+      ...(semanticIssues.length ? ["Novel-scale semantic readiness failed; structural validity alone is insufficient for publication."] : []),
       "Source indexing measures indexed source bytes and may be below 1 when blank-only gaps are intentionally omitted.",
     ],
   };
+}
+
+function formatRatio(value: number | null): string {
+  return value === null ? "n/a" : `${Math.round(value * 100)}%`;
 }
 
 function auditCausalGraph(events: readonly CanonicalEvent[]): {

@@ -9,6 +9,7 @@ import type {
   WorldState,
   WorldRule,
 } from "./model.js";
+import { storyTimeAtOrAfter, storyTimeBefore } from "./time.js";
 
 export class StateSchemaRegistry {
   private readonly specs = new Map<string, StateFieldSpec>();
@@ -39,6 +40,11 @@ export class StateSchemaRegistry {
       throw new Error(`State field ${operation.field} does not apply to ${entity.kind}`);
     }
     if (operation.op === "set") this.validateValue(spec, operation.value, entities);
+    if (operation.op === "adjust-number") {
+      if (spec.cardinality !== "one" || spec.valueType !== "number") {
+        throw new Error(`adjust-number requires a single numeric field: ${operation.field}`);
+      }
+    }
     if (operation.op === "add-member" || operation.op === "remove-member") {
       if (spec.cardinality !== "many" || spec.valueType !== "entity-ref-set") {
         throw new Error(`${operation.op} requires an entity-ref-set field: ${operation.field}`);
@@ -58,6 +64,8 @@ export class StateSchemaRegistry {
         break;
       case "number":
         if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`Expected finite number for ${spec.key}`);
+        if (spec.minimum !== undefined && value < spec.minimum) throw new Error(`${spec.key} must be >= ${spec.minimum}`);
+        if (spec.maximum !== undefined && value > spec.maximum) throw new Error(`${spec.key} must be <= ${spec.maximum}`);
         break;
       case "string":
       case "json-scalar":
@@ -85,6 +93,12 @@ export class StateSchemaRegistry {
 
 export const DEFAULT_STATE_FIELDS: StateFieldSpec[] = [
   { key: "character.alive", appliesTo: ["character"], valueType: "boolean", cardinality: "one" },
+  { key: "character.ageYears", appliesTo: ["character"], valueType: "number", cardinality: "one", minimum: 0 },
+  { key: "character.lifeStage", appliesTo: ["character"], valueType: "string", cardinality: "one" },
+  { key: "character.health", appliesTo: ["character"], valueType: "number", cardinality: "one", minimum: 0, maximum: 1 },
+  { key: "character.experience", appliesTo: ["character"], valueType: "number", cardinality: "one", minimum: 0 },
+  { key: "character.reputation", appliesTo: ["character"], valueType: "number", cardinality: "one", minimum: -1, maximum: 1 },
+  { key: "character.wealth", appliesTo: ["character"], valueType: "number", cardinality: "one" },
   { key: "character.location", appliesTo: ["character"], valueType: "entity-ref", cardinality: "one" },
   { key: "character.faction", appliesTo: ["character"], valueType: "entity-ref", cardinality: "one" },
   { key: "character.title", appliesTo: ["character"], valueType: "string", cardinality: "one" },
@@ -94,9 +108,28 @@ export const DEFAULT_STATE_FIELDS: StateFieldSpec[] = [
   { key: "character.obligations", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many" },
   { key: "character.inventory", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many" },
   { key: "artifact.owner", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", exclusive: true },
+  { key: "artifact.custodian", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", exclusive: true },
+  { key: "artifact.quantity", appliesTo: ["artifact"], valueType: "number", cardinality: "one", minimum: 0 },
+  { key: "artifact.condition", appliesTo: ["artifact"], valueType: "number", cardinality: "one", minimum: 0, maximum: 1 },
   { key: "artifact.delivered", appliesTo: ["artifact"], valueType: "boolean", cardinality: "one" },
   { key: "location.open", appliesTo: ["location"], valueType: "boolean", cardinality: "one" },
+  { key: "location.condition", appliesTo: ["location"], valueType: "number", cardinality: "one", minimum: 0, maximum: 1 },
+  { key: "location.controller", appliesTo: ["location"], valueType: "entity-ref", cardinality: "one", exclusive: true },
+  { key: "institution.active", appliesTo: ["institution"], valueType: "boolean", cardinality: "one" },
+  { key: "institution.status", appliesTo: ["institution"], valueType: "string", cardinality: "one" },
+  { key: "institution.leader", appliesTo: ["institution"], valueType: "entity-ref", cardinality: "one", exclusive: true },
+  { key: "institution.members", appliesTo: ["institution"], valueType: "entity-ref-set", cardinality: "many" },
+  { key: "institution.resources", appliesTo: ["institution"], valueType: "number", cardinality: "one" },
+  { key: "faction.active", appliesTo: ["faction"], valueType: "boolean", cardinality: "one" },
   { key: "faction.leader", appliesTo: ["faction"], valueType: "entity-ref", cardinality: "one", exclusive: true },
+  { key: "faction.members", appliesTo: ["faction"], valueType: "entity-ref-set", cardinality: "many" },
+  { key: "faction.resources", appliesTo: ["faction"], valueType: "number", cardinality: "one" },
+  { key: "relationship.from", appliesTo: ["relationship"], valueType: "entity-ref", cardinality: "one", required: true },
+  { key: "relationship.to", appliesTo: ["relationship"], valueType: "entity-ref", cardinality: "one", required: true },
+  { key: "relationship.kind", appliesTo: ["relationship"], valueType: "string", cardinality: "one" },
+  { key: "relationship.strength", appliesTo: ["relationship"], valueType: "number", cardinality: "one", minimum: -1, maximum: 1 },
+  { key: "relationship.active", appliesTo: ["relationship"], valueType: "boolean", cardinality: "one" },
+  { key: "relationship.obligations", appliesTo: ["relationship"], valueType: "entity-ref-set", cardinality: "many" },
 ];
 
 export function emptyWorldState(atCommit: string, step = 0): WorldState {
@@ -104,10 +137,18 @@ export function emptyWorldState(atCommit: string, step = 0): WorldState {
 }
 
 export function evaluatePredicate(state: WorldState, predicate: Predicate): boolean {
-  const fields = state.values[predicate.op === "rule-active" || predicate.op === "after-step" || predicate.op === "before-step" || predicate.op === "all" || predicate.op === "any" || predicate.op === "not" ? "" : predicate.entityId];
+  const fields = "entityId" in predicate ? state.values[predicate.entityId] : undefined;
   switch (predicate.op) {
     case "fact-equals":
       return deepEqual(fields?.[predicate.field], predicate.value);
+    case "fact-gte": {
+      const value = fields?.[predicate.field];
+      return typeof value === "number" && value >= predicate.value;
+    }
+    case "fact-lte": {
+      const value = fields?.[predicate.field];
+      return typeof value === "number" && value <= predicate.value;
+    }
     case "fact-exists":
       return fields !== undefined && Object.prototype.hasOwnProperty.call(fields, predicate.field) && fields[predicate.field] !== null;
     case "entity-in": {
@@ -120,6 +161,14 @@ export function evaluatePredicate(state: WorldState, predicate: Predicate): bool
       return state.logicalTime.step > predicate.step;
     case "before-step":
       return state.logicalTime.step < predicate.step;
+    case "elapsed-days-gte":
+      return (state.logicalTime.elapsedDays ?? 0) >= predicate.days;
+    case "elapsed-days-lte":
+      return (state.logicalTime.elapsedDays ?? 0) <= predicate.days;
+    case "story-time-at-or-after":
+      return storyTimeAtOrAfter(state.logicalTime.storyTime, predicate.time);
+    case "story-time-before":
+      return storyTimeBefore(state.logicalTime.storyTime, predicate.time);
     case "all":
       return predicate.items.every((item) => evaluatePredicate(state, item));
     case "any":
@@ -174,10 +223,48 @@ export function applyStateDelta(
         current[operation.field] = [...next].sort();
         break;
       }
+      case "adjust-number": {
+        const existing = current[operation.field];
+        if (typeof existing !== "number" || !Number.isFinite(existing)) {
+          throw new Error(`Cannot adjust unknown or non-numeric state field: ${operation.entityId}.${operation.field}`);
+        }
+        const next = existing + operation.amount;
+        registry.validateValue(registry.get(operation.field), next, entities);
+        current[operation.field] = next;
+        break;
+      }
     }
   }
 
   return { ...input, values, activeRuleIds: [...activeRules].sort() };
+}
+
+/**
+ * Apply deterministic continuous effects before an event's predicates and
+ * delta are evaluated. Only explicit, already-known state is advanced; the
+ * engine never invents an age or health value from prose.
+ */
+export function advanceTemporalState(
+  input: WorldState,
+  logicalTime: WorldState["logicalTime"],
+  registry: StateSchemaRegistry,
+  entities: ReadonlyMap<EntityId, Entity>,
+): WorldState {
+  const elapsed = (logicalTime.elapsedDays ?? 0) - (input.logicalTime.elapsedDays ?? 0);
+  if (elapsed < 0) throw new Error("Elapsed world time cannot move backwards");
+  const values: WorldState["values"] = {};
+  for (const [entityId, fields] of Object.entries(input.values)) values[entityId] = cloneFields(fields);
+  if (elapsed > 0) {
+    for (const [entityId, entity] of entities) {
+      if (entity.kind !== "character" || values[entityId]?.["character.alive"] === false) continue;
+      const age = values[entityId]?.["character.ageYears"];
+      if (typeof age !== "number") continue;
+      const nextAge = age + elapsed / 365.2425;
+      registry.validateValue(registry.get("character.ageYears"), nextAge, entities);
+      values[entityId]!["character.ageYears"] = nextAge;
+    }
+  }
+  return { ...input, logicalTime, values };
 }
 
 export function validateEngineInvariants(
@@ -205,6 +292,12 @@ export function validateEngineInvariants(
         registry.validateValue(spec, value, entities);
       } catch (error) {
         errors.push(`${entityId}.${field}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    for (const spec of registry.list()) {
+      if (!spec.required || !spec.appliesTo.includes(entity.kind)) continue;
+      if (!Object.prototype.hasOwnProperty.call(fields, spec.key) || fields[spec.key] === null) {
+        errors.push(`${entityId}.${spec.key}: required state field is missing`);
       }
     }
   }

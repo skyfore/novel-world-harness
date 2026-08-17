@@ -1,0 +1,145 @@
+import {
+  evaluateCharacterGoal,
+  resolveCharacterModel,
+  type CharacterGoal,
+  type CharacterModel,
+  type EffectiveCharacterModel,
+} from "./actors.js";
+import type { WorldEngine } from "./engine.js";
+import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import type { LogicalTime, ProgressChannel, StoryTime } from "./model.js";
+import { committedHistory, realizedCanonicalEvents } from "./scene.js";
+import { evaluatePredicate } from "./state.js";
+
+export type CharacterLifeStage = {
+  value: string;
+  source: "explicit-state" | "generic-age-band";
+};
+
+export type CharacterLivedExperience = {
+  eventId: string;
+  atCommit: string;
+  title: string;
+  logicalTime: LogicalTime;
+  participantIds: string[];
+  progressChannels: ProgressChannel[];
+};
+
+export type CharacterDevelopmentView = {
+  actorId: string;
+  atCommit: string;
+  storyTime?: StoryTime;
+  elapsedDays: number;
+  ageYears?: number;
+  lifeStage?: CharacterLifeStage;
+  experiencedEventIds: string[];
+  experiencedCanonicalEventIds: string[];
+  /** Bounded committed experience context for actor reasoning; never future canon. */
+  recentLivedExperiences: CharacterLivedExperience[];
+  knownClaimIds: string[];
+  model?: EffectiveCharacterModel;
+  activeGoalIds: string[];
+  completedGoalIds: string[];
+  expiredGoalIds: string[];
+  achievedMilestoneIds: string[];
+};
+
+/**
+ * A character's growth is a derived view over committed history, private
+ * knowledge, and state. It is never a second mutable timeline.
+ */
+export async function projectCharacterDevelopment(
+  engine: WorldEngine,
+  actorId: string,
+  commitId: string,
+  overrides: { goals?: readonly CharacterGoal[]; model?: CharacterModel | null } = {},
+): Promise<CharacterDevelopmentView> {
+  const [context, state, history, actorView] = await Promise.all([
+    engine.contextForCommit(commitId),
+    engine.projector.project(commitId),
+    committedHistory(engine, commitId),
+    new KnowledgeProjector(engine).view(actorId, commitId),
+  ]);
+  const actor = context.entities.get(actorId);
+  if (!actor || actor.kind !== "character") throw new Error(`Character development requires a character: ${actorId}`);
+
+  const knownClaimIds = new Set(actorView.knowledge
+    .filter((entry) => isActionableKnowledge(entry.fact))
+    .map((entry) => entry.fact.claimId));
+  const realized = realizedCanonicalEvents(history);
+  const experiencedEntries = history.filter((entry) => entry.event.participants.includes(actorId));
+  const experiencedCanonical = new Set(experiencedEntries.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? []));
+  const recentLivedExperiences = experiencedEntries
+    .filter((entry) => entry.event.title !== "Genesis")
+    .slice(-12)
+    .map((entry) => ({
+      eventId: entry.event.eventId,
+      atCommit: entry.commitId,
+      title: entry.event.title,
+      logicalTime: structuredClone(entry.event.logicalTime),
+      participantIds: [...entry.event.participants],
+      progressChannels: [...(entry.event.progress?.channels ?? [])],
+    }));
+  const model = overrides.model === undefined ? context.actorModels?.get(actorId) : overrides.model;
+  const effectiveModel = model ? resolveCharacterModel(model, {
+    state,
+    knownClaimIds,
+    realizedCanonicalEventIds: realized,
+    experiencedCanonicalEventIds: experiencedCanonical,
+    storyTime: state.logicalTime.storyTime,
+  }) : undefined;
+
+  const activeGoalIds: string[] = [];
+  const completedGoalIds: string[] = [];
+  const expiredGoalIds: string[] = [];
+  const achievedMilestoneIds: string[] = [];
+  const goals = (overrides.goals ?? context.actorGoals ?? []).filter((goal) => goal.actorId === actorId);
+  for (const goal of goals) {
+    const activation = evaluateCharacterGoal(goal, {
+      state,
+      knownClaimIds,
+      realizedCanonicalEventIds: realized,
+      storyTime: state.logicalTime.storyTime,
+    });
+    if (activation.active) activeGoalIds.push(goal.id);
+    if (activation.complete) completedGoalIds.push(goal.id);
+    if (activation.expired) expiredGoalIds.push(goal.id);
+    for (const milestone of goal.milestones ?? []) {
+      if (milestone.conditions.every((predicate) => evaluatePredicate(state, predicate))) {
+        achievedMilestoneIds.push(`${goal.id}:${milestone.id}`);
+      }
+    }
+  }
+
+  const age = state.values[actorId]?.["character.ageYears"];
+  const explicitLifeStage = state.values[actorId]?.["character.lifeStage"];
+  return {
+    actorId,
+    atCommit: commitId,
+    ...(state.logicalTime.storyTime ? { storyTime: structuredClone(state.logicalTime.storyTime) } : {}),
+    elapsedDays: state.logicalTime.elapsedDays ?? 0,
+    ...(typeof age === "number" ? { ageYears: age } : {}),
+    ...(typeof explicitLifeStage === "string"
+      ? { lifeStage: { value: explicitLifeStage, source: "explicit-state" as const } }
+      : typeof age === "number"
+        ? { lifeStage: { value: genericLifeStage(age), source: "generic-age-band" as const } }
+        : {}),
+    experiencedEventIds: experiencedEntries.map((entry) => entry.event.eventId),
+    experiencedCanonicalEventIds: [...experiencedCanonical].sort(),
+    recentLivedExperiences,
+    knownClaimIds: [...knownClaimIds].sort(),
+    ...(effectiveModel ? { model: effectiveModel } : {}),
+    activeGoalIds: activeGoalIds.sort(),
+    completedGoalIds: completedGoalIds.sort(),
+    expiredGoalIds: expiredGoalIds.sort(),
+    achievedMilestoneIds: achievedMilestoneIds.sort(),
+  };
+}
+
+// Kept behind a helper so generic age bands never become authoritative world truth.
+function genericLifeStage(age: number): string {
+  if (age < 13) return "child";
+  if (age < 18) return "adolescent";
+  if (age < 60) return "adult";
+  return "older-adult";
+}

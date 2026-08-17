@@ -34,12 +34,13 @@ export async function resolvePreparationBranchId(
   workspaceRoot: string,
   source: SourceDocument,
   requestedBranchId?: string,
+  options: { preferNew?: boolean } = {},
 ): Promise<string> {
   if (requestedBranchId) return requestedBranchId;
   const branches = new BranchStore(workspaceRoot);
   const ids = await branches.listIds();
   if (!ids.includes("main")) return "main";
-  if (await preparationBranchMatchesSource(workspaceRoot, branches, "main", source.id)) return "main";
+  if (!options.preferNew && await preparationBranchMatchesSource(workspaceRoot, branches, "main", source.id)) return "main";
 
   const sourceStem = path.basename(source.sourcePath, path.extname(source.sourcePath))
     .normalize("NFKD")
@@ -50,7 +51,7 @@ export async function resolvePreparationBranchId(
   for (let suffix = 1; ; suffix += 1) {
     const candidate = suffix === 1 ? base : `${base}-${suffix}`;
     if (!ids.includes(candidate)) return candidate;
-    if (await preparationBranchMatchesSource(workspaceRoot, branches, candidate, source.id)) return candidate;
+    if (!options.preferNew && await preparationBranchMatchesSource(workspaceRoot, branches, candidate, source.id)) return candidate;
   }
 }
 
@@ -134,6 +135,7 @@ export async function inspectPreparation(
     || audit.evidence.invalidReferences > 0
     || audit.consistency.causalGraphValid === false
     || audit.consistency.narrativeGraphNavigable === false
+    || audit.consistency.semanticReady === false
   ) {
     return {
       ...shared,
@@ -243,6 +245,7 @@ function preparationRepairReasons(audit: CompilerAuditReport): string[] {
     ...(audit.consistency.narrativeGraphNavigable === false
       ? [`The event graph has ${audit.consistency.unconditionalRootEvents.length} unconditional roots across ${audit.consistency.causalComponents} causal components; reparse with phase gates and evidence-backed causal links so later canon cannot all activate at the opening.`]
       : []),
+    ...audit.consistency.semanticIssues,
   ];
 }
 

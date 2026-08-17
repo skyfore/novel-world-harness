@@ -250,32 +250,46 @@ describe("NWH TUI extension", () => {
     ]);
   });
 
-  it("shows animated model progress above the editor until the agent settles", async () => {
+  it("leaves foreground model progress to Pi's single native loading indicator", async () => {
     const { events } = await fixture();
     const widgets: Array<{ key: string; content: string[] | undefined; placement?: string }> = [];
+    const workingMessages: Array<string | undefined> = [];
+    const workingIndicators: Array<{ frames?: readonly string[]; intervalMs?: number } | undefined> = [];
     const ctx = {
       mode: "tui",
+      sessionManager: { getEntries: () => [] },
       ui: {
         setWidget: (key: string, content: string[] | undefined, options?: { placement?: string }) => {
           widgets.push({ key, content, placement: options?.placement });
         },
+        setTitle: () => undefined,
+        setWorkingMessage: (message?: string) => { workingMessages.push(message); },
+        setWorkingIndicator: (indicator?: { frames?: readonly string[]; intervalMs?: number }) => {
+          workingIndicators.push(indicator);
+        },
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: () => undefined,
+        setHeader: () => undefined,
         theme: { fg: (_color: string, text: string) => text },
       },
     } as unknown as ExtensionContext;
 
+    await events.get("session_start")?.({ type: "session_start", reason: "new" }, ctx);
     await events.get("agent_start")?.({ type: "agent_start" }, ctx);
-    expect(widgets.at(-1)).toMatchObject({ key: "nwh-model-loading", placement: "aboveEditor" });
-    expect(widgets.at(-1)?.content?.[0]).toContain("模型正在思考");
+    expect(workingMessages).toEqual(["Consulting local evidence..."]);
+    expect(workingIndicators).toEqual([{ frames: expect.any(Array), intervalMs: 180 }]);
+    expect(workingIndicators[0]?.frames).toHaveLength(4);
+    expect(widgets).toEqual([]);
 
     await events.get("message_update")?.({
       type: "message_update",
       message: fauxAssistantMessage([fauxText("正在回答")]),
       assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "正在回答" },
     }, ctx);
-    expect(widgets.at(-1)?.content?.[0]).toContain("模型正在输出");
+    expect(widgets).toEqual([]);
 
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
-    expect(widgets.at(-1)).toEqual({ key: "nwh-model-loading", content: undefined, placement: "aboveEditor" });
+    expect(widgets).toEqual([]);
   });
 
   it("shows a first Ctrl+C confirmation and exits only on the second press", async () => {

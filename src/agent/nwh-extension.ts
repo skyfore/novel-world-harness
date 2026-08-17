@@ -80,7 +80,7 @@ import { playerSceneChoicesSchema, type PlayerSceneChoice } from "./player-scene
 import { formatElapsed } from "../util/elapsed-status.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/removal.js";
 import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
-import { createNwhModelLoadingIndicator, type NwhModelLoadingIndicator } from "./nwh-model-loading.js";
+import { createNwhModelLoadingIndicator } from "./nwh-model-loading.js";
 import { NWH_DOUBLE_CTRL_C_WINDOW_MS, NwhDoubleCtrlCExit } from "./nwh-exit.js";
 import { classifyPlayerInput, renderPlayerMetaResponse } from "../world/player-input-route.js";
 
@@ -374,7 +374,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let stopTerminalInput: (() => void) | undefined;
     const doubleCtrlCExit = new NwhDoubleCtrlCExit();
     let startupRestorePromise: Promise<void> | undefined;
-    let modelLoadingIndicator: NwhModelLoadingIndicator | undefined;
     let shuttingDown = false;
     let activeTask: NwhTask | undefined;
     const taskHistory: NwhTask[] = [];
@@ -1443,8 +1442,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     pi.on("session_shutdown", async () => {
       shuttingDown = true;
-      modelLoadingIndicator?.stop();
-      modelLoadingIndicator = undefined;
       stopTerminalInput?.();
       stopTerminalInput = undefined;
       prepareAllHostActivity?.close();
@@ -1620,29 +1617,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       return { messages };
     });
 
-    pi.on("agent_start", (_event, ctx) => {
-      if (ctx.mode !== "tui") return;
-      modelLoadingIndicator?.stop();
-      modelLoadingIndicator = createNwhModelLoadingIndicator(ctx.ui);
-    });
-
-    pi.on("message_update", (event) => {
-      if (event.message.role !== "assistant") return;
-      if (event.assistantMessageEvent.type === "thinking_delta") {
-        modelLoadingIndicator?.setPhase("thinking");
-      } else if (event.assistantMessageEvent.type === "text_delta") {
-        modelLoadingIndicator?.setPhase("streaming");
-      }
-    });
-
-    pi.on("tool_execution_start", (event) => {
-      modelLoadingIndicator?.setPhase("tool", event.toolName);
-    });
-
-    pi.on("tool_execution_end", () => {
-      modelLoadingIndicator?.setPhase("waiting");
-    });
-
     pi.on("agent_end", (event) => {
       if (!pendingTurn && !prepareAllState?.initialWorldRequestRunning) return;
       // agent_end is per low-level run. Keep every run until agent_settled so
@@ -1652,8 +1626,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     });
 
     pi.on("agent_settled", async (_event, ctx) => {
-      modelLoadingIndicator?.stop();
-      modelLoadingIndicator = undefined;
       compilerCircuitBroken = false;
       const completedTurn = pendingTurn;
       const openingRequest = !completedTurn && prepareAllState?.initialWorldRequestRunning;
@@ -1721,6 +1693,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       ctx.ui.setTitle(terminalTitle);
       const titleTimer = setTimeout(() => ctx.ui.setTitle(terminalTitle), 0);
       titleTimer.unref();
+      // Pi owns foreground agent turns, including retries and compaction. Keep
+      // their progress on its native row; the widget loader is only for nested
+      // model sessions (player translation and scene narration).
       ctx.ui.setWorkingMessage(mode === "compiler" ? "Building evidence-backed proposals..." : "Consulting local evidence...");
       ctx.ui.setWorkingIndicator({ frames: NWH_WORKING_FRAMES, intervalMs: 180 });
       ctx.ui.setHiddenThinkingLabel("Thinking hidden · Ctrl+T to show");

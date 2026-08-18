@@ -12,6 +12,7 @@ import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { inspectPreparation } from "../src/workflow/prepare.js";
+import { canonicalJson, contentHash } from "../src/world/canonical.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -202,5 +203,69 @@ describe("explicit prepared-novel reparsing", () => {
     await expect(cache.lookup(fixture.source)).resolves.toMatchObject({ bundleHash: result.activeBundleHash });
     await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ aliases: ["Hero"] });
     await expect(new InitialWorldStore(root).get()).resolves.not.toBeNull();
+  });
+
+  it("keeps an incompatible active fingerprint intact when a semantic-upgrade reparse fails", async () => {
+    const root = await temporaryRoot("nwh-reparse-legacy-rollback-");
+    const cacheRoot = await temporaryRoot("nwh-reparse-legacy-rollback-cache-");
+    const fixture = await createEvidenceFixture(root, "# Opening\nHero waits.\n");
+    const batch = (await prepareCompilerBatches(root, fixture.source))[0]!;
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "legacy-rollback-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: batch.evidence },
+      generatedBy: { worker: "test", compilerBatchId: batch.id },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "legacy-rollback-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        evidence: batch.evidence,
+      },
+      generatedBy: { worker: "test", compilerBatchId: `opening-${batch.id}` },
+    });
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, [batch.id]);
+    await convergeWorldProposals(root, fixture.source.id);
+    const cache = new PreparedNovelCache(root, cacheRoot);
+    const current = await cache.publish(fixture.source);
+    const legacyBundle = JSON.parse(await fs.readFile(path.join(current.cachePath, "bundle.json"), "utf8")) as Record<string, unknown>;
+    delete legacyBundle.compilerFingerprint;
+    const legacyHash = contentHash(legacyBundle);
+    const cacheBase = path.join(cacheRoot, current.contentMd5);
+    const legacyRevision = path.join(cacheBase, "revisions", legacyHash);
+    await fs.mkdir(legacyRevision, { recursive: true });
+    await fs.writeFile(path.join(legacyRevision, "bundle.json"), `${canonicalJson(legacyBundle)}\n`);
+    await fs.writeFile(path.join(legacyRevision, "manifest.json"), `${canonicalJson({
+      version: 1,
+      contentMd5: current.contentMd5,
+      contentSha256: fixture.source.contentSha256,
+      sourceId: fixture.source.id,
+      bundleHash: legacyHash,
+      createdAt: new Date(0).toISOString(),
+    })}\n`);
+    await fs.writeFile(path.join(cacheBase, "active.json"), `${canonicalJson({
+      version: 1,
+      contentMd5: current.contentMd5,
+      bundleHash: legacyHash,
+      updatedAt: new Date(0).toISOString(),
+    })}\n`);
+
+    await expect(reparseCommand({
+      root,
+      configPath: path.join(root, "missing.yaml"),
+      sourceId: fixture.source.id,
+      all: true,
+      cacheRoot,
+    }, {
+      async compileSource() { throw new Error("simulated provider failure"); },
+    })).rejects.toThrow(`rolled back to ${legacyHash}`);
+
+    await expect(cache.lookup(fixture.source)).resolves.toMatchObject({
+      bundleHash: legacyHash,
+      requiresReparse: true,
+    });
+    expect((await cache.listRevisions(fixture.source)).filter((revision) => revision.active))
+      .toEqual([expect.objectContaining({ bundleHash: legacyHash })]);
   });
 });

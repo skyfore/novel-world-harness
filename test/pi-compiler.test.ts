@@ -3,8 +3,8 @@ import { resolvePiCompilerSessionLifecycle } from "../src/compiler/pi-compiler.j
 
 describe("Pi compiler session lifecycle", () => {
   it("keeps an explicit manual compiler conversation persistable", () => {
-    expect(resolvePiCompilerSessionLifecycle({})).toEqual({ isolated: false, saveSession: true });
-    expect(resolvePiCompilerSessionLifecycle({ saveSession: false })).toEqual({ isolated: false, saveSession: false });
+    expect(resolvePiCompilerSessionLifecycle({})).toEqual({ isolated: false, saveSession: true, includeNwhExtension: true });
+    expect(resolvePiCompilerSessionLifecycle({ saveSession: false })).toEqual({ isolated: false, saveSession: false, includeNwhExtension: true });
   });
 
   it("makes every source-, batch-, slice-, or tool-bounded job fresh and ephemeral", () => {
@@ -14,7 +14,7 @@ describe("Pi compiler session lifecycle", () => {
       { segmentIds: [] },
       { includeLocalTools: false },
     ] as const) {
-      expect(resolvePiCompilerSessionLifecycle(options)).toEqual({ isolated: true, saveSession: false });
+      expect(resolvePiCompilerSessionLifecycle(options)).toEqual({ isolated: true, saveSession: false, includeNwhExtension: false });
     }
   });
 

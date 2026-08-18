@@ -263,16 +263,26 @@ describe("NWH TUI extension", () => {
     expect(source).not.toContain("find_source_evidence");
     expect(source).not.toContain("read_source_evidence");
     expect(source).not.toContain("propose_initial_world");
+    expect(source).toContain("peek_adjacent_evidence");
+    expect(source).toContain("defer_boundary_artifact");
+    expect(source).not.toContain("replace_boundary_proposal");
+
+    const boundary = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "source", "boundary-calibration");
+    expect(boundary).not.toContain("peek_adjacent_evidence");
+    expect(boundary).not.toContain("defer_boundary_artifact");
+    expect(boundary).toContain("replace_boundary_proposal");
 
     const opening = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "opening");
     expect(opening).toContain("propose_initial_world");
     expect(opening).not.toContain("find_source_evidence");
     expect(opening).not.toContain("propose_canonical_event");
+    expect(opening).not.toContain("peek_adjacent_evidence");
 
     const reconciliation = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "reconciliation");
     expect(reconciliation).toContain("find_source_evidence");
     expect(reconciliation).toContain("read_source_evidence");
     expect(reconciliation).not.toContain("propose_state_delta");
+    expect(reconciliation).not.toContain("peek_adjacent_evidence");
   });
   it("registers local commands and leaves assistant/thinking rendering to Pi", async () => {
     const { commands, sentUserMessages, markdownTransformers, messageRenderers } = await fixture();

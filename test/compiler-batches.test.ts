@@ -220,6 +220,7 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("ASCII logical entity ID"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("character.relationships stores relationship entity IDs"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Compile explicitly narrated later canonical events too"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("observedKnowledge"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("location.open"))).toBe(true);
@@ -239,6 +240,9 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("finish_compiler_batch"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("only compiler pass guaranteed"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("reviewed_segments"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("peek_adjacent_evidence"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("defer_boundary_artifact"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("context-only"))).toBe(true);
   });
 
   it("keeps source delimiters structural when novel text imitates them", async () => {
@@ -285,6 +289,11 @@ describe("compiler batches", () => {
     const opening = await prepareOpeningWorldCompilerBatch(root, source);
 
     expect(opening.prompt).toContain("may propose exactly one initial-world");
+    expect(opening.prompt).toContain("one world-time cut");
+    expect(opening.prompt).toContain("later discourse is not automatically future world truth");
+    expect(opening.prompt).toContain("never put the counterpart character ID in character.relationships");
+    expect(opening.prompt).not.toContain("peek_adjacent_evidence");
+    expect(opening.prompt).not.toContain("defer_boundary_artifact");
     expect(opening.prompt).not.toContain("Ordinary source-review batches must not propose an initial-world");
   });
 

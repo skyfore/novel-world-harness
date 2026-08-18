@@ -68,6 +68,16 @@ deadline in addition to provider idle timeouts and abort without checkpointing w
 that deadline expires. Automated source turns
 also omit raw staging-only state deltas, and supplemental opening-state turns are
 given the real opening segment and exact EvidenceRef rather than an ungrounded prompt.
+An ordinary one-segment source turn may read at most one bounded, context-only
+preview from each immediate neighbor. That preview deliberately carries no
+EvidenceRef and cannot expand the turn's proposal evidence authority. If it
+confirms that an artifact crosses the deterministic split, the model records a
+non-canonical boundary deferral. The host then schedules a fresh isolated
+two-segment calibration batch after ordinary source batches and before proposal
+review. Both complete segments are citable only in that pair pass. A pair pass
+may replace an earlier partial pending proposal only by first recording a new
+same-kind, same-logical-identity candidate; the host then preserves the partial
+envelope in rejected history. It cannot rewrite accepted canon.
 Hidden `/prepare-all` continuation turns carry their complete evidence payload
 directly because Pi custom-message turns do not run ordinary user-prompt hooks.
 Artifact catalogs are source-scoped, size-bounded, and hydrated only for the

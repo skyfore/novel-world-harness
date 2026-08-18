@@ -26,7 +26,7 @@ import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./sou
 
 export type NarrativeThreadView = {
   id: string;
-  kind: "scene" | "goal" | "canon-pressure" | "emergent";
+  kind: "scene" | "relationship" | "goal" | "canon-pressure" | "emergent";
   summary: string;
   participantIds: string[];
   pressure: number;
@@ -68,6 +68,11 @@ type InternalThread = NarrativeThreadView & {
   linkId: string;
   possibility?: Possibility;
   goal?: CharacterGoal;
+  relationship?: {
+    entityId: string;
+    otherActorId: string;
+    kind?: string;
+  };
 };
 
 type AffordanceDraft = Omit<ResolvedPlayerAffordance, "id" | "recommended">;
@@ -128,6 +133,8 @@ export async function buildNarrativeDirection(
       });
     }
   }
+
+  addCommittedRelationshipThreads(internalThreads, scoped, context.entities, actorId, scopedHistory);
 
   for (const goal of scopedGoals) {
     if (goal.actorId !== actorId && !scene.presentEntityIds.includes(goal.actorId)) continue;
@@ -192,6 +199,7 @@ export async function buildNarrativeDirection(
   const drafts: AffordanceDraft[] = [];
   addCanonicalAffordances(drafts, uniqueThreads, scoped, scene, context.entities, actorId);
   addConversationAffordances(drafts, uniqueThreads, scoped, scene, context.entities, actorId);
+  addRelationshipAffordances(drafts, uniqueThreads, scoped, scene, actorId);
   addLocationAffordances(drafts, uniqueThreads, scoped, scene, actorId);
   addSafeObservationAffordance(drafts, uniqueThreads, scene, actorId);
   addGoalAndPlanAffordances(drafts, uniqueThreads, scoped, scene, actorId);
@@ -227,9 +235,48 @@ export async function buildNarrativeDirection(
     .map((entry, index) => ({ ...entry, recommended: index === 0 }));
   return {
     scene,
-    threads: uniqueThreads.map(({ linkId: _linkId, possibility: _possibility, goal: _goal, ...thread }) => structuredClone(thread)),
+    threads: uniqueThreads.map(({ linkId: _linkId, possibility: _possibility, goal: _goal, relationship: _relationship, ...thread }) => structuredClone(thread)),
     affordances: ranked,
   };
+}
+
+function addCommittedRelationshipThreads(
+  threads: InternalThread[],
+  scoped: ActorScopedActionContext,
+  entities: ReadonlyMap<string, { kind: string }>,
+  actorId: string,
+  history: Awaited<ReturnType<typeof committedHistory>>,
+): void {
+  for (const [relationshipId, state] of Object.entries(scoped.ownedEntityState)) {
+    if (entities.get(relationshipId)?.kind !== "relationship" || state["relationship.active"] === false) continue;
+    const from = state["relationship.from"];
+    const to = state["relationship.to"];
+    if (from !== actorId && to !== actorId) continue;
+    const otherActorId = from === actorId ? to : from;
+    if (typeof otherActorId !== "string" || entities.get(otherActorId)?.kind !== "character") continue;
+    const otherName = actorVisibleEntityName(scoped, otherActorId);
+    if (!otherName) continue;
+    const relationshipKind = typeof state["relationship.kind"] === "string"
+      ? state["relationship.kind"].normalize("NFKC").trim().slice(0, 80)
+      : undefined;
+    const linkId = `relationship-${relationshipId}`;
+    threads.push({
+      id: opaqueThreadId(linkId),
+      linkId,
+      kind: "relationship",
+      summary: relationshipKind
+        ? `你与${otherName}之间已存在的“${relationshipKind}”关系仍在影响当前选择。`
+        : `你与${otherName}之间已存在的关系仍在影响当前选择。`,
+      participantIds: [actorId, otherActorId],
+      pressure: state["relationship.active"] === true ? 0.72 : 0.55,
+      stage: threadStage(linkId, history),
+      relationship: {
+        entityId: relationshipId,
+        otherActorId,
+        ...(relationshipKind ? { kind: relationshipKind } : {}),
+      },
+    });
+  }
 }
 
 export async function resolvePlayerAffordance(
@@ -470,20 +517,14 @@ function addConversationAffordances(
     const related = threads.filter((thread) => thread.participantIds.includes(participantId));
     const links = (related.length ? related : threads.slice(0, 1));
     const stage = Math.max(0, ...links.map((thread) => thread.stage));
-    const relationships = Array.isArray(scoped.selfState["character.relationships"])
-      ? scoped.selfState["character.relationships"] as string[]
-      : [];
-    const operations: StateOperation[] = !relationships.includes(participantId)
-      && scoped.writableStateFields.some((field) => field.key === "character.relationships")
-      ? [{ op: "add-member", entityId: actorId, field: "character.relationships", member: participantId }]
-      : nextMomentumOperation(scoped, actorId);
+    const operations = nextPlanOperation(scoped, actorId, `推进与${name}的当前交涉`);
     const phase = stage <= 0
       ? { label: `主动与${name}交涉`, action: `我主动对${name}开口，明确表达自己的态度，并要求对方回应眼前这件事。` }
       : stage === 1
         ? { label: `追问${name}的明确立场`, action: `我不再停留在寒暄，直接追问${name}对此事的明确立场和下一步打算。` }
         : { label: `向${name}提出具体条件`, action: `我向${name}提出一个必须当场回应的具体条件，把这段交涉推向决定。` };
     const progress = progressFor({
-      channels: ["relationship", "thread", "consequence", ...(operations.length ? ["state" as const] : [])],
+      channels: ["relationship", "thread", "consequence", ...(operations.length ? ["state" as const, "plan" as const] : [])],
       threadIds: links.map((thread) => thread.linkId),
       noveltyKey: `talk:${participantId}:${links.map((thread) => thread.linkId).join("+")}:stage-${Math.min(stage, 2)}`,
     });
@@ -505,6 +546,68 @@ function addConversationAffordances(
       authorizedKnowledgeClaimIds: [],
       progress,
       score: 1 + Math.max(...links.map((thread) => thread.pressure), 0),
+    });
+  }
+}
+
+function addRelationshipAffordances(
+  drafts: AffordanceDraft[],
+  threads: readonly InternalThread[],
+  scoped: ActorScopedActionContext,
+  scene: ActorSceneProjection,
+  actorId: string,
+): void {
+  for (const thread of threads) {
+    const relationship = thread.relationship;
+    if (!relationship || scene.presentEntityIds.includes(relationship.otherActorId)) continue;
+    const name = actorVisibleEntityName(scoped, relationship.otherActorId);
+    if (!name) continue;
+    const phase = Math.min(thread.stage, 2);
+    const copies = [
+      {
+        label: `确定如何回应与${name}的关系`,
+        action: `我把与${name}之间现有的关系作为眼下要处理的事情，先确定一种符合当前处境的接触方式。`,
+        title: `确定回应与${name}现有关系的方式`,
+        plan: `寻找一种符合当前处境的方式，回应与${name}之间的现有关系`,
+      },
+      {
+        label: `落实与${name}有关的接触计划`,
+        action: `我不再只想着与${name}之间的关系，开始落实一个不会越过当前世界条件的接触计划。`,
+        title: `落实与${name}有关的接触计划`,
+        plan: `落实与${name}有关、且不越过当前世界条件的接触计划`,
+      },
+      {
+        label: `重新界定与${name}的关系方向`,
+        action: `我根据已经发生的变化，重新界定自己接下来要如何处理与${name}之间的关系。`,
+        title: `重新界定与${name}的关系方向`,
+        plan: `根据当前世界的变化，重新界定与${name}之间的关系方向`,
+      },
+    ] as const;
+    const copy = copies[phase]!;
+    const operations = nextPlanOperation(scoped, actorId, copy.plan);
+    const progress = progressFor({
+      channels: ["relationship", "thread", "consequence", ...(operations.length ? ["state" as const, "plan" as const] : [])],
+      threadIds: [thread.linkId],
+      noveltyKey: `relationship-plan:${relationship.entityId}:stage-${phase}`,
+    });
+    drafts.push({
+      label: copy.label,
+      description: "从已提交的角色关系形成可回放的行动方向，不假定对方在场，也不预写对方的回应。",
+      action: copy.action,
+      intent: "act",
+      progressChannels: [...progress.channels],
+      threadIds: [thread.id],
+      candidate: playerActionCandidateSchema.parse({
+        title: copy.title,
+        participants: [],
+        preconditions: [],
+        proposedDelta: { version: 1, operations },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+      authorizedKnowledgeClaimIds: [],
+      progress,
+      score: 0.95 + thread.pressure / 4,
     });
   }
 }
@@ -555,6 +658,14 @@ function addSafeObservationAffordance(
 ): void {
   const focus = threads[0];
   if (!focus) return;
+  const groundedPerception = Boolean(
+    scene.locationId
+    || scene.label
+    || Object.keys(scene.locationState).length
+    || scene.recentEvents.length
+    || scene.presentEntityIds.some((entityId) => entityId !== actorId),
+  );
+  if (!groundedPerception) return;
   const progress = progressFor({
     channels: ["scene"],
     threadIds: [focus.linkId],
@@ -578,7 +689,7 @@ function addSafeObservationAffordance(
     }),
     authorizedKnowledgeClaimIds: [],
     progress,
-    score: 1.05,
+    score: 0.86,
   });
 }
 
@@ -792,6 +903,12 @@ function nextMomentumOperation(scoped: ActorScopedActionContext, actorId: string
     : 0;
   if (!Number.isFinite(current) || current >= 3) return [];
   return [{ op: "set", entityId: actorId, field: "character.momentum", value: Math.min(3, current + 1) }];
+}
+
+function nextPlanOperation(scoped: ActorScopedActionContext, actorId: string, plan: string): StateOperation[] {
+  if (!scoped.writableStateFields.some((field) => field.key === "character.plan")) return [];
+  if (scoped.selfState["character.plan"] === plan) return [];
+  return [{ op: "set", entityId: actorId, field: "character.plan", value: plan }];
 }
 
 function threadStage(

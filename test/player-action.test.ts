@@ -13,6 +13,7 @@ import {
   buildActorScopedActionContext,
   deterministicPlayerIntentCandidate,
   PlayerTurnService,
+  validatePlayerActionScope,
   type PlayerActionCandidate,
 } from "../src/world/player-action.js";
 import { projectActorScene } from "../src/world/scene.js";
@@ -282,6 +283,27 @@ describe("actor-scoped player action context", () => {
       expect(candidate.proposedDelta.operations).toEqual([]);
       expect(candidate.title).toBeTruthy();
     }
+  });
+
+  it("rejects counterpart character IDs in character.relationships", async () => {
+    const { engine, head } = await fixture();
+    const context = await buildActorScopedActionContext(engine, "hero", head);
+    const issues = validatePlayerActionScope({
+      title: "Record Mo Yan as a relationship",
+      participants: [],
+      preconditions: [],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "add-member", entityId: "hero", field: "character.relationships", member: "mo-yan" }],
+      },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    }, context);
+
+    expect(issues).toContainEqual(expect.objectContaining({
+      code: "PLAYER_RELATIONSHIP_REFERENCE_INVALID",
+      path: "proposedDelta.operations.0.member",
+    }));
   });
 });
 

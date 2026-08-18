@@ -296,6 +296,22 @@ export class CompilerValidator {
       try {
         this.stateSchema.validateOperation(operation, entities);
         if ((operation.op === "activate-rule" || operation.op === "deactivate-rule") && !rules.has(operation.ruleId)) errors.push(issue("UNKNOWN_RULE", `Unknown rule ${operation.ruleId}`, `${pathPrefix}.${index}`));
+        if (operation.op !== "activate-rule" && operation.op !== "deactivate-rule" && operation.field === "character.relationships") {
+          const addedReferences = operation.op === "set" && Array.isArray(operation.value)
+            ? operation.value
+            : operation.op === "add-member"
+              ? [operation.member]
+              : [];
+          for (let memberIndex = 0; memberIndex < addedReferences.length; memberIndex += 1) {
+            const member = addedReferences[memberIndex];
+            if (typeof member !== "string" || entities.get(member)?.kind === "relationship") continue;
+            errors.push(issue(
+              "INVALID_RELATIONSHIP_REFERENCE",
+              `character.relationships may reference relationship entities only; ${member} is ${entities.get(member)?.kind ?? "unknown"}`,
+              operation.op === "set" ? `${pathPrefix}.${index}.value.${memberIndex}` : `${pathPrefix}.${index}.member`,
+            ));
+          }
+        }
       } catch (error) {
         errors.push(issue("INVALID_STATE_OPERATION", error instanceof Error ? error.message : String(error), `${pathPrefix}.${index}`));
       }

@@ -161,6 +161,10 @@ describe("narrative scene director", () => {
     expect(actorVisibleDirection).toContain("Unidentified character 1");
     expect(direction.threads.filter((thread) => thread.kind === "goal").map(publicNarrativeThread))
       .toEqual(direction.threads.filter((thread) => thread.kind === "goal").map(() => undefined));
+    expect(direction.affordances.flatMap((choice) => choice.candidate.proposedDelta.operations).some((operation) =>
+      operation.op === "add-member"
+      && operation.field === "character.relationships"
+      && operation.member === "rival")).toBe(false);
     const recommended = direction.affordances.find((choice) => choice.recommended)!;
     expect(direction.affordances.some((choice) => choice.progress.noveltyKey.startsWith("canon-step:"))).toBe(false);
 
@@ -188,6 +192,76 @@ describe("narrative scene director", () => {
     const next = await buildNarrativeDirection(engine, runtime, "hero", result.newHead);
     expect(next.affordances.map((choice) => choice.progress.noveltyKey)).not.toContain(recommended.progress.noveltyKey);
     expect(next.threads.some((thread) => thread.stage >= 1)).toBe(true);
+  });
+
+  it("turns an actor-known committed relationship into an executable evolving thread without assuming remote presence", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-director-relationship-"));
+    roots.push(root);
+    const evidence = [{
+      span: { sourceId: "novel-a", startLine: 3, endLine: 3, quoteHash: "committed-relationship" },
+      strength: "explicit" as const,
+    }];
+    const entities: Entity[] = [
+      { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence },
+      { id: "ally", kind: "character", canonicalName: "Ally", aliases: [], evidence },
+      { id: "family-bond", kind: "relationship", canonicalName: "Family bond", aliases: [], evidence },
+    ];
+    const context: WorldModelContext = {
+      entities: new Map(entities.map((entity) => [entity.id, entity])),
+      claims: new Map(),
+      events: new Map(),
+      rules: new Map(),
+      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    };
+    const engine = new WorldEngine(root, context);
+    const head = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "ally", field: "character.alive", value: true },
+        { op: "set", entityId: "hero", field: "character.relationships", value: ["family-bond"] },
+        { op: "set", entityId: "family-bond", field: "relationship.from", value: "hero" },
+        { op: "set", entityId: "family-bond", field: "relationship.to", value: "ally" },
+        { op: "set", entityId: "family-bond", field: "relationship.kind", value: "family" },
+        { op: "set", entityId: "family-bond", field: "relationship.active", value: true },
+      ],
+    });
+    const runtime = new WorldRuntime(engine, () => []);
+
+    const direction = await buildNarrativeDirection(engine, runtime, "hero", head);
+    const relationshipThread = direction.threads.find((thread) => thread.kind === "relationship")!;
+    const relationshipChoice = direction.affordances.find((choice) =>
+      choice.progress.noveltyKey === "relationship-plan:family-bond:stage-0")!;
+
+    expect(publicNarrativeThread(relationshipThread)).toMatchObject({
+      kind: "relationship",
+      summary: expect.stringContaining("Ally"),
+      stage: "emerging",
+    });
+    expect(direction.affordances.some((choice) => choice.intent === "observe")).toBe(false);
+    expect(relationshipChoice).toMatchObject({ intent: "act", recommended: true });
+    expect(relationshipChoice.candidate.participants).toEqual([]);
+    expect(relationshipChoice.candidate.proposedDelta.operations).toEqual([
+      expect.objectContaining({ op: "set", entityId: "hero", field: "character.plan" }),
+    ]);
+
+    const result = await new PlayerTurnService(engine, () => structuredClone(relationshipChoice.candidate)).turn({
+      branchId: "main",
+      actorId: "hero",
+      utterance: relationshipChoice.action,
+    }, {
+      intent: relationshipChoice.intent,
+      affordanceId: relationshipChoice.id,
+      progress: relationshipChoice.progress,
+      authorizedKnowledgeClaimIds: relationshipChoice.authorizedKnowledgeClaimIds,
+    });
+    expect(result.accepted).toBe(true);
+    expect(result.contextAfter.selfState["character.plan"]).toContain("Ally");
+
+    const next = await buildNarrativeDirection(engine, runtime, "hero", result.newHead);
+    expect(next.threads.find((thread) => thread.kind === "relationship")?.stage).toBe(1);
+    expect(next.affordances.some((choice) =>
+      choice.progress.noveltyKey === "relationship-plan:family-bond:stage-1")).toBe(true);
   });
 
   it("keeps co-present characters through solo beats and resets presence only at a committed scene boundary", async () => {

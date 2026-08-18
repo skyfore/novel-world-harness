@@ -344,6 +344,9 @@ describe("prepare-all command", () => {
         expect(options.sourceId).toBe(fixture.source.id);
         expect(options.prompt).toContain("<source-segment");
         expect(options.prompt).toContain("The world begins quietly.");
+        expect(options.prompt).toContain("one explicit world-time cut");
+        expect(options.prompt).toContain("Later discourse may establish a pre-checkpoint fact");
+        expect(options.prompt).toContain("never counterpart character IDs");
         await new CompilerProposalService(root).submit("initial-world", {
           proposalId: "generated-initial-world",
           payload: {

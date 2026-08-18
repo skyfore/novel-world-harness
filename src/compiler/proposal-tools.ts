@@ -5,6 +5,7 @@ import { z } from "zod";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { evidenceRefSchema, idSchema, type EvidenceRef } from "../world/model.js";
 import {
+  compilerProposalLogicalIdentity,
   compilerProposalSchemas,
   COMPILER_STATE_FIELDS,
   CompilerProposalService,
@@ -13,7 +14,10 @@ import {
 } from "./proposals.js";
 import { createCompilerArtifactRetrievalTools } from "./artifact-retrieval.js";
 import { createCompilerSourceEvidenceTools, SOURCE_EVIDENCE_TOOL_NAMES } from "./source-evidence-retrieval.js";
-import { segmentSource, SegmentStore, type SourceSegment } from "./segments.js";
+import { readSegmentText, segmentSource, SegmentStore, type SourceSegment } from "./segments.js";
+import { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./boundary-calibration.js";
+import { promptJson } from "../util/prompt-data.js";
+import { safeTextPrefix } from "../util/text-pages.js";
 
 function proposalResult(text: string, details: CompilerProposalRecordedDetails) {
   return { content: [{ type: "text" as const, text }], details };
@@ -36,10 +40,19 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "find_compiler_artifacts",
   "read_compiler_artifact",
   ...SOURCE_EVIDENCE_TOOL_NAMES,
+  "peek_adjacent_evidence",
+  "defer_boundary_artifact",
   ...Object.values(labels).map(({ name }) => name),
   "withdraw_compiler_proposal",
+  "replace_boundary_proposal",
   "finish_compiler_batch",
 ]);
+
+export const BOUNDARY_CALIBRATION_TOOL_NAMES = [
+  "peek_adjacent_evidence",
+  "defer_boundary_artifact",
+  "replace_boundary_proposal",
+] as const;
 
 type ProposalToolInput = {
   proposal_id: string;
@@ -157,17 +170,42 @@ type CompilerWithdrawDetails =
   | CompilerBatchBlockedDetails
   | { compilerProposalWithdrawn: true; proposalId: string; reason: string };
 
+type BoundaryCalibrationDetails =
+  | CompilerBatchBlockedDetails
+  | { compilerBoundaryCalibrationRequested: true; calibrationBatchId: string; direction: "previous" | "next" };
+
+type AdjacentEvidencePeekDetails =
+  | CompilerBatchBlockedDetails
+  | { compilerAdjacentEvidencePeek: true; direction: "previous" | "next"; adjacentSegmentId: string };
+
+type BoundaryReplacementDetails =
+  | CompilerBatchBlockedDetails
+  | { compilerBoundaryProposalReplaced: true; proposalId: string; replacementProposalId: string; reason: string };
+
+function safeTextSuffix(text: string, maxChars: number): string {
+  let start = Math.max(0, text.length - maxChars);
+  if (start > 0 && start < text.length
+    && text.charCodeAt(start - 1) >= 0xD800 && text.charCodeAt(start - 1) <= 0xDBFF
+    && text.charCodeAt(start) >= 0xDC00 && text.charCodeAt(start) <= 0xDFFF) {
+    start += 1;
+  }
+  return text.slice(start);
+}
+
 export function createCompilerProposalToolset(
   workspaceRoot: string,
   generatedBy: { provider?: string; model?: string } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
+  const boundaryCalibrations = new BoundaryCalibrationStore(workspaceRoot);
   const successfulProposalIds = new Set<string>();
+  const peekedDirections = new Set<"previous" | "next">();
   let expectedSegmentIds: string[] = [];
   let boundedSliceSegments: SourceSegment[] = [];
   let validatedSourceSegments: SourceSegment[] = [];
   let compilerBatchId: string | undefined;
   let activeSourceId: string | undefined;
+  let activeBoundaryCalibration: BoundaryCalibrationRequest | undefined;
   let finished = false;
   let circuitBreak: { reason: string; failureCount: number } | undefined;
   let totalFinishFailures = 0;
@@ -252,6 +290,139 @@ export function createCompilerProposalToolset(
       }
     }
   };
+  const adjacentSegment = (direction: "previous" | "next") => {
+    if (!activeSourceId || expectedSegmentIds.length !== 1 || boundedSliceSegments.length !== 1) {
+      throw new Error("Adjacent evidence is available only to a one-segment, source-scoped compiler batch.");
+    }
+    if (!compilerBatchId?.startsWith(`batch-${activeSourceId}-`)) {
+      throw new Error("Adjacent evidence is unavailable outside an ordinary source-review batch.");
+    }
+    const focus = boundedSliceSegments[0]!;
+    const focusIndex = validatedSourceSegments.findIndex((segment) => segment.id === focus.id);
+    const adjacentIndex = focusIndex + (direction === "previous" ? -1 : 1);
+    const adjacent = validatedSourceSegments[adjacentIndex];
+    if (!adjacent) throw new Error(`The active segment has no ${direction} neighbor.`);
+    return {
+      focus,
+      adjacent,
+      left: direction === "previous" ? adjacent : focus,
+      right: direction === "previous" ? focus : adjacent,
+    };
+  };
+
+  const peekAdjacentParameters = Type.Object({
+    direction: Type.Union([Type.Literal("previous"), Type.Literal("next")]),
+    max_chars: Type.Optional(Type.Integer({ minimum: 500, maximum: 4_000 })),
+    reason: Type.String({ minLength: 1, maxLength: 500 }),
+  }, { additionalProperties: false });
+  const peekAdjacentTool = defineTool<typeof peekAdjacentParameters, AdjacentEvidencePeekDetails>({
+    name: "peek_adjacent_evidence",
+    label: "Peek adjacent evidence",
+    description: "Read one bounded context-only preview from the immediate previous or next source segment when the current slice appears to cut through a semantic unit. The preview has no EvidenceRef and cannot ground a proposal.",
+    promptSnippet: "Peek at one immediate neighboring boundary when continuity is genuinely uncertain",
+    promptGuidelines: [
+      "Analyze the supplied segment first and call this only for a concrete unresolved opening or closing boundary.",
+      "The returned preview is context-only: never cite it or copy it as proposal evidence.",
+      "Each direction may be peeked at most once per batch.",
+    ],
+    executionMode: "sequential" as const,
+    parameters: peekAdjacentParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("retrieval");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (peekedDirections.has(input.direction)) {
+        throw new Error(`The ${input.direction} adjacent preview has already been read in this batch.`);
+      }
+      const { focus, adjacent } = adjacentSegment(input.direction);
+      const text = await readSegmentText(workspaceRoot, adjacent);
+      const maxChars = input.max_chars ?? 4_000;
+      const chunk = input.direction === "previous"
+        ? safeTextSuffix(text, maxChars)
+        : safeTextPrefix(text, maxChars);
+      peekedDirections.add(input.direction);
+      return {
+        content: [{
+          type: "text" as const,
+          text: promptJson({
+            type: "adjacent-context-preview",
+            sourceId: activeSourceId,
+            direction: input.direction,
+            relativeToSegmentId: focus.id,
+            adjacentSegmentId: adjacent.id,
+            adjacentLines: [adjacent.startLine, adjacent.endLine],
+            ...(adjacent.title ? { adjacentTitle: adjacent.title } : {}),
+            excerptPosition: input.direction === "previous" ? "tail" : "head",
+            totalCharacters: text.length,
+            truncated: chunk.length < text.length,
+            chunk,
+            citationPolicy: "context-only; this preview supplies no EvidenceRef and cannot ground a proposal",
+          }),
+        }],
+        details: {
+          compilerAdjacentEvidencePeek: true as const,
+          direction: input.direction,
+          adjacentSegmentId: adjacent.id,
+        },
+      };
+    },
+  });
+
+  const deferBoundaryParameters = Type.Object({
+    direction: Type.Union([Type.Literal("previous"), Type.Literal("next")]),
+    reason: Type.String({ minLength: 1, maxLength: 1_000 }),
+    artifact_ids: Type.Optional(Type.Array(
+      Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+      { maxItems: 12, uniqueItems: true },
+    )),
+  }, { additionalProperties: false });
+  const deferBoundaryTool = defineTool<typeof deferBoundaryParameters, BoundaryCalibrationDetails>({
+    name: "defer_boundary_artifact",
+    label: "Defer boundary artifact",
+    description: "Request a fresh isolated two-segment calibration batch for an artifact whose meaning crosses the current deterministic split. This records workflow state only, never world truth.",
+    promptSnippet: "Defer a genuinely cross-boundary artifact to a citable two-segment pass",
+    promptGuidelines: [
+      "Peek in the same direction first and defer only when the preview confirms that a semantic unit crosses the split.",
+      "Do not submit a knowingly partial artifact; withdraw a defective current-batch draft before finishing.",
+      "Name any existing artifact or pending proposal IDs likely to need boundary review.",
+    ],
+    executionMode: "sequential",
+    parameters: deferBoundaryParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (!peekedDirections.has(input.direction)) {
+        throw new Error(`Call peek_adjacent_evidence with direction=${input.direction} before deferring a boundary artifact.`);
+      }
+      if (!activeSourceId || !compilerBatchId) throw new Error("Boundary deferral requires an active source batch.");
+      const { focus, left, right } = adjacentSegment(input.direction);
+      const request = await boundaryCalibrations.request({
+        sourceId: activeSourceId,
+        leftSegmentId: left.id,
+        rightSegmentId: right.id,
+        requestedByBatchId: compilerBatchId,
+        requestedBySegmentId: focus.id,
+        direction: input.direction,
+        reason: input.reason,
+        artifactIds: input.artifact_ids ?? [],
+      });
+      recordProposalProgress();
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Boundary calibration ${request.id} queued for ${left.id} + ${right.id}. It will run in a fresh isolated session with both full segments as citable evidence after ordinary source batches finish.`,
+        }],
+        details: {
+          compilerBoundaryCalibrationRequested: true,
+          calibrationBatchId: request.id,
+          direction: input.direction,
+        },
+      };
+    },
+  });
   const retrievalTools = [
     ...createCompilerArtifactRetrievalTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
     ...createCompilerSourceEvidenceTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
@@ -335,6 +506,85 @@ export function createCompilerProposalToolset(
       };
     },
   });
+  const replaceBoundaryParameters = Type.Object({
+    proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+    replacement_proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+    reason: Type.String({ minLength: 1, maxLength: 500 }),
+  }, { additionalProperties: false });
+  const replaceBoundaryTool = defineTool<typeof replaceBoundaryParameters, BoundaryReplacementDetails>({
+    name: "replace_boundary_proposal",
+    label: "Replace boundary proposal",
+    description: "During a queued two-segment calibration pass, move one incomplete adjacent source-batch proposal to rejected history after an active same-identity replacement has been recorded in this calibration batch.",
+    promptSnippet: "Replace a prior partial boundary proposal only after recording its corrected candidate",
+    promptGuidelines: [
+      "Retrieve and inspect the exact prior payload first.",
+      "Submit the corrected replacement under a new proposal_id while preserving the same stable logical artifact identity.",
+      "This tool cannot replace canonical truth, unrelated evidence, or a proposal with a different logical identity.",
+    ],
+    executionMode: "sequential",
+    parameters: replaceBoundaryParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (!activeBoundaryCalibration || !activeSourceId || !compilerBatchId) {
+        throw new Error("Boundary proposal replacement is available only inside a queued two-segment calibration batch.");
+      }
+      if (input.proposal_id === input.replacement_proposal_id) {
+        throw new Error("A boundary replacement must use a new proposal_id.");
+      }
+      if (!successfulProposalIds.has(input.replacement_proposal_id)) {
+        throw new Error(`Replacement ${input.replacement_proposal_id} is not an active successful submission in this calibration batch.`);
+      }
+      let prior: Record<string, unknown>;
+      let replacement: Record<string, unknown>;
+      try {
+        [prior, replacement] = await Promise.all([
+          service.store.readEnvelope("pending", input.proposal_id),
+          service.store.readEnvelope("pending", input.replacement_proposal_id),
+        ]);
+      } catch {
+        throw new Error("Both the prior proposal and its replacement must still be pending.");
+      }
+      const priorKind = prior.kind;
+      const replacementKind = replacement.kind;
+      if (typeof priorKind !== "string" || !(priorKind in compilerProposalSchemas)
+        || replacementKind !== priorKind) {
+        throw new Error("A boundary replacement must have the same compiler proposal kind as the prior proposal.");
+      }
+      const kind = priorKind as CompilerProposalKind;
+      const priorPayload = compilerProposalSchemas[kind].parse(prior.payload);
+      const replacementPayload = compilerProposalSchemas[kind].parse(replacement.payload);
+      const priorIdentity = compilerProposalLogicalIdentity(kind, priorPayload);
+      const replacementIdentity = compilerProposalLogicalIdentity(kind, replacementPayload);
+      if (!priorIdentity || priorIdentity !== replacementIdentity) {
+        throw new Error("A boundary replacement must preserve the prior proposal's stable logical artifact identity.");
+      }
+      const generatedBy = prior.generatedBy;
+      const priorBatchId = generatedBy && typeof generatedBy === "object" && !Array.isArray(generatedBy)
+        ? (generatedBy as Record<string, unknown>).compilerBatchId
+        : undefined;
+      if (typeof priorBatchId !== "string" || !priorBatchId.startsWith(`batch-${activeSourceId}-`)) {
+        throw new Error("Only a pending proposal from an ordinary source-review batch may be replaced here.");
+      }
+      await assertEvidenceWithinBoundedSlice(priorPayload, prior.evidence);
+      await service.withdraw(input.proposal_id);
+      recordProposalProgress();
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Boundary proposal ${input.proposal_id} moved to rejected history after recording same-identity replacement ${input.replacement_proposal_id}: ${input.reason}`,
+        }],
+        details: {
+          compilerBoundaryProposalReplaced: true,
+          proposalId: input.proposal_id,
+          replacementProposalId: input.replacement_proposal_id,
+          reason: input.reason,
+        },
+      };
+    },
+  });
   const finishParameters = Type.Object({
     outcome: Type.Union([Type.Literal("complete"), Type.Literal("no-artifacts")]),
     reviewed_segments: Type.Array(Type.Object({
@@ -390,14 +640,24 @@ export function createCompilerProposalToolset(
     },
   });
   return {
-    tools: [...retrievalTools, ...proposalTools, withdrawTool, finishTool],
+    tools: [
+      ...retrievalTools,
+      peekAdjacentTool,
+      deferBoundaryTool,
+      ...proposalTools,
+      withdrawTool,
+      replaceBoundaryTool,
+      finishTool,
+    ],
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
       successfulProposalIds.clear();
+      peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];
       validatedSourceSegments = [];
       compilerBatchId = nextCompilerBatchId;
       activeSourceId = sourceId;
+      activeBoundaryCalibration = undefined;
       finished = false;
       circuitBreak = undefined;
       totalFinishFailures = 0;
@@ -423,6 +683,25 @@ export function createCompilerProposalToolset(
         if (missing.length) throw new Error(`Active compiler slice references unknown segment(s): ${missing.join(", ")}.`);
         validatedSourceSegments = structuredClone(derivedManifest.segments);
         boundedSliceSegments = expectedSegmentIds.map((id) => structuredClone(byId.get(id)!));
+      }
+      if (compilerBatchId && activeSourceId) {
+        activeBoundaryCalibration = await boundaryCalibrations.get(activeSourceId, compilerBatchId);
+        if (activeBoundaryCalibration) {
+          const calibrationSegmentIds = [
+            activeBoundaryCalibration.leftSegmentId,
+            activeBoundaryCalibration.rightSegmentId,
+          ].sort();
+          if (calibrationSegmentIds.length !== expectedSegmentIds.length
+            || calibrationSegmentIds.some((id, index) => id !== expectedSegmentIds[index])) {
+            throw new Error(`Boundary calibration ${compilerBatchId} requires exactly: ${calibrationSegmentIds.join(", ")}.`);
+          }
+        }
+        if (!activeBoundaryCalibration && compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
+          // A retry must not inherit a request made by an attempt that never
+          // reached the finish/checkpoint handshake. The model decides again
+          // from the frozen evidence slice in this fresh turn.
+          await boundaryCalibrations.removeRequestedByBatch(activeSourceId, compilerBatchId);
+        }
       }
       if (!compilerBatchId) return;
       for (const summary of await service.store.list("pending")) {

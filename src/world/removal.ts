@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { CompilerBatchStore } from "../compiler/batches.js";
+import { BoundaryCalibrationStore } from "../compiler/boundary-calibration.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { SegmentStore } from "../compiler/segments.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
@@ -139,8 +140,11 @@ export async function removeNovelAnalysis(
   await segments.remove(sourceId);
 
   const batchStore = new CompilerBatchStore(root);
-  const compilerProgress = (await batchStore.read(sourceId)).updatedAt !== new Date(0).toISOString();
+  const boundaryStore = new BoundaryCalibrationStore(root);
+  const compilerProgress = (await batchStore.read(sourceId)).updatedAt !== new Date(0).toISOString()
+    || (await boundaryStore.list(sourceId)).length > 0;
   await batchStore.reset(sourceId);
+  await boundaryStore.reset(sourceId);
 
   const proposals = await new ProposalStore(root).removeForSource(sourceId);
   const preparedCache = await new PreparedNovelCache(root, options.cacheRoot).remove(source);

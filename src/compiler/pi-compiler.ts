@@ -1,7 +1,7 @@
 import { PiAgentSession, type PiAgentSessionOptions } from "../agent/pi-session.js";
 import type { LlmProfile } from "../config/schema.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import { createCompilerProposalToolset } from "./proposal-tools.js";
+import { BOUNDARY_CALIBRATION_TOOL_NAMES, createCompilerProposalToolset } from "./proposal-tools.js";
 import { SOURCE_EVIDENCE_TOOL_NAMES } from "./source-evidence-retrieval.js";
 
 export const SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS = new Set(["propose_state_delta"]);
@@ -16,7 +16,7 @@ Your output is always a typed pending proposal until deterministic host validati
 export function compilerModeInstructions(includeLocalTools: boolean): string {
   return includeLocalTools
     ? `Compiler mode is enabled. Use read-only local evidence tools only when this explicit manual compiler session exposes them. Use find_source_evidence/read_source_evidence when they are present for exact text from the one active novel, and find_compiler_artifacts/read_compiler_artifact for exact source-scoped prior semantics. Then use only the typed compiler tools for proposing, withdrawing defective current-batch candidates, and finishing the batch. A proposal is not canonical truth and must not be described as committed. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`
-    : `Compiler batch mode is enabled. Do not list, search, or read workspace files. When find_source_evidence/read_source_evidence are absent, the host-supplied evidence slice is the complete allowed raw source text; when they are present, they are the only additional raw-evidence channel and remain bound to the active novel. You may use find_compiler_artifacts/read_compiler_artifact for exact source-scoped prior semantics when the bounded catalog is incomplete. Use only the typed compiler tools for proposing, withdrawing defective current-batch candidates, and finishing the batch. A proposal is not canonical truth and must not be described as committed. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`;
+    : `Compiler batch mode is enabled. Do not list, search, or read workspace files. When find_source_evidence/read_source_evidence are absent, the host-supplied evidence slice is the complete citable raw source text. An exposed peek_adjacent_evidence tool is the sole exception for one bounded context-only edge preview; it supplies no EvidenceRef and cannot ground a proposal. A separately queued boundary calibration receives both full neighboring slices as its new citable boundary. When whole-source evidence tools are present, they remain bound to the active novel. You may use find_compiler_artifacts/read_compiler_artifact for exact source-scoped prior semantics when the bounded catalog is incomplete. Use only the typed compiler tools for proposing, withdrawing defective current-batch candidates, requesting boundary calibration, replacing a partial adjacent draft inside that calibration, and finishing the batch. A proposal is not canonical truth and must not be described as committed. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`;
 }
 
 export type PiCompilerOptions = {
@@ -35,12 +35,14 @@ export type PiCompilerOptions = {
   compilerBatchId?: string;
   sourceId?: string;
   includeLocalTools?: boolean;
+  enableBoundaryCalibration?: boolean;
   disabledProposalTools?: readonly string[];
 };
 
 export type PiCompilerSessionLifecycle = {
   isolated: boolean;
   saveSession: boolean;
+  includeNwhExtension: boolean;
 };
 
 /**
@@ -65,6 +67,10 @@ export function resolvePiCompilerSessionLifecycle(
   return {
     isolated,
     saveSession: isolated ? false : options.saveSession ?? true,
+    // A host-bounded compiler job already owns its evidence and tool scope.
+    // The interactive NWH extension would reinterpret the supplied batch
+    // prompt as ordinary user input and can consume it before the model runs.
+    includeNwhExtension: !isolated,
   };
 }
 
@@ -80,6 +86,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
   const disabledProposalTools = new Set([
     ...(options.segmentIds ? SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS : []),
     ...(options.segmentIds ? BOUNDED_SLICE_DISABLED_TOOLS : []),
+    ...(options.enableBoundaryCalibration ? [] : BOUNDARY_CALIBRATION_TOOL_NAMES),
     ...(options.disabledProposalTools ?? []),
   ]);
   return PiAgentSession.create({
@@ -95,6 +102,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     ...(options.onRetry ? { onRetry: options.onRetry } : {}),
     interactionMode: "compiler",
+    includeNwhExtension: lifecycle.includeNwhExtension,
     // Compiler facts must come only from the explicitly supplied evidence
     // slice. Workspace prose instructions are intentionally excluded.
     includeProjectInstructions: false,

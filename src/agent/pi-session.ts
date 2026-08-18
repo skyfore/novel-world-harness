@@ -366,7 +366,11 @@ async function registeredSourceRealPaths(workspaceRoot: string, runtimeDir?: str
 
 function toolAuthority(name: string): "read-only" | "pending-proposal" | "capture-only" | "session-metadata" | "host-defined" {
   if (name === "rename_session") return "session-metadata";
-  if (name.startsWith("propose_") || name === "withdraw_compiler_proposal" || name === "finish_compiler_batch") {
+  if (name.startsWith("propose_")
+    || name === "withdraw_compiler_proposal"
+    || name === "replace_boundary_proposal"
+    || name === "defer_boundary_artifact"
+    || name === "finish_compiler_batch") {
     return name === "propose_player_action" || name === "propose_player_choices" ? "capture-only" : "pending-proposal";
   }
   if ([
@@ -379,6 +383,7 @@ function toolAuthority(name: string): "read-only" | "pending-proposal" | "captur
     "read_compiler_artifact",
     "find_source_evidence",
     "read_source_evidence",
+    "peek_adjacent_evidence",
   ].includes(name)) return "read-only";
   return "host-defined";
 }

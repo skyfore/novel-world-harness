@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { BoundaryCalibrationStore } from "../src/compiler/boundary-calibration.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
@@ -25,6 +26,59 @@ async function temporaryRoot(prefix: string): Promise<string> {
 }
 
 describe("versioned prepared novel cache", () => {
+  it("stores only deterministic source batches after a transient boundary calibration", async () => {
+    const cacheRoot = await temporaryRoot("nwh-prepared-boundary-cache-");
+    const sourceRoot = await temporaryRoot("nwh-prepared-boundary-source-");
+    const content = "Chapter 1\nAlice raises the key and\n\nChapter 2\nopens the gate.\n";
+    const fixture = await createEvidenceFixture(sourceRoot, content);
+    const regular = await prepareCompilerBatches(sourceRoot, fixture.source);
+    expect(regular).toHaveLength(2);
+    await new BoundaryCalibrationStore(sourceRoot).request({
+      sourceId: fixture.source.id,
+      leftSegmentId: regular[0]!.segmentIds[0]!,
+      rightSegmentId: regular[1]!.segmentIds[0]!,
+      requestedByBatchId: regular[0]!.id,
+      requestedBySegmentId: regular[0]!.segmentIds[0]!,
+      direction: "next",
+      reason: "The action crosses the split.",
+    });
+    const withCalibration = await prepareCompilerBatches(sourceRoot, fixture.source);
+    expect(withCalibration.map((batch) => batch.purpose)).toEqual([
+      "source-review",
+      "source-review",
+      "boundary-calibration",
+    ]);
+
+    const proposals = new CompilerProposalService(sourceRoot);
+    await proposals.submit("entity", {
+      proposalId: "boundary-alice",
+      payload: { id: "alice", kind: "character", canonicalName: "Alice", aliases: [], evidence: fixture.evidence("Alice") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "boundary-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "alice", field: "character.alive", value: true }] },
+        evidence: fixture.evidence("Alice raises the key"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await new CompilerBatchStore(sourceRoot).replaceCompleted(
+      fixture.source.id,
+      withCalibration.map((batch) => batch.id),
+    );
+    await convergeWorldProposals(sourceRoot, fixture.source.id);
+    const published = await new PreparedNovelCache(sourceRoot, cacheRoot).publish(fixture.source);
+    const bundle = JSON.parse(await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8")) as { batchIds: string[] };
+    expect(bundle.batchIds).toEqual(regular.map((batch) => batch.id).sort());
+
+    const restoredRoot = await temporaryRoot("nwh-prepared-boundary-restored-");
+    const restoredFixture = await createEvidenceFixture(restoredRoot, content);
+    await expect(new PreparedNovelCache(restoredRoot, cacheRoot).restore(restoredFixture.source))
+      .resolves.toMatchObject({ status: "restored", bundleHash: published.bundleHash });
+  });
+
   it("refuses to create from an active bundle after newer accepted source artifacts make it stale", async () => {
     const cacheRoot = await temporaryRoot("nwh-prepared-fresh-cache-");
     const sourceRoot = await temporaryRoot("nwh-prepared-fresh-source-");

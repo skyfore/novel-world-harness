@@ -132,6 +132,38 @@ describe("CompilerCommitService", () => {
     expect(validation.errors).toContainEqual(expect.objectContaining({ code: "UNPLAYABLE_INITIAL_WORLD" }));
   });
 
+  it("rejects character IDs stored as relationship references in an initial world", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "relationship-owner-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "relationship-owner-cao")).accepted).toBe(true);
+    await proposals.submit("initial-world", {
+      proposalId: "invalid-relationship-opening",
+      payload: {
+        version: 1,
+        delta: {
+          version: 1,
+          operations: [
+            { op: "set", entityId: "cao-cao", field: "character.alive", value: true },
+            { op: "set", entityId: "cao-cao", field: "character.relationships", value: ["cao-cao"] },
+          ],
+        },
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("initial-world", "invalid-relationship-opening");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({
+      code: "INVALID_RELATIONSHIP_REFERENCE",
+      path: "delta.operations.1.value.0",
+    }));
+  });
+
   it("validates goal phase anchors, targets, and every action pattern at the commit boundary", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {

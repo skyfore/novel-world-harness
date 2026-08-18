@@ -23,7 +23,7 @@ import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 2;
+export const COMPILER_PROMPT_VERSION = 4;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -388,7 +388,14 @@ export class PreparedNovelCache {
       source: { id: source.id, ...identity },
       segmenterVersion: SEGMENTER_VERSION,
       compilerFingerprint: currentCompilerFingerprint(),
-      batchIds: batches.map((batch) => batch.id).sort(),
+      // Boundary calibrations are transient, model-requested workflow checks.
+      // Their accepted artifacts are already captured below; cache compatibility
+      // is keyed only to the deterministic source-review layout so a prepared
+      // revision can be restored without replaying old diagnostic requests.
+      batchIds: batches
+        .filter((batch) => batch.purpose === "source-review")
+        .map((batch) => batch.id)
+        .sort(),
       canonical: {
         entities: fromSource(entities),
         claims: fromSource(claims),
@@ -531,7 +538,10 @@ export class PreparedNovelCache {
       return `Cached world was compiled by an incompatible semantic pipeline; reparse is required (cache=${bundle.compilerFingerprint?.pipelineVersion ?? "legacy"}, current=${COMPILER_PIPELINE_VERSION}).`;
     }
     const batches = await prepareCompilerBatches(this.workspaceRoot, source);
-    const currentBatchIds = batches.map((batch) => batch.id).sort();
+    const currentBatchIds = batches
+      .filter((batch) => batch.purpose === "source-review")
+      .map((batch) => batch.id)
+      .sort();
     if (canonicalJson(currentBatchIds) === canonicalJson([...bundle.batchIds].sort())) return null;
     return `Cached compiler batches use a different segmenter layout (cache=${bundle.segmenterVersion}, current=${SEGMENTER_VERSION}).`;
   }

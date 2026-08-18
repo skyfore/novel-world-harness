@@ -5,6 +5,7 @@ import { Key, Markdown, Text, matchesKey } from "@earendil-works/pi-tui";
 import { expandFileMentions } from "./file-mentions.js";
 import { createNwhWelcomeHeader, hasPlayerConversation, isFreshConversation, NWH_WORKING_FRAMES } from "./nwh-welcome.js";
 import {
+  BOUNDARY_CALIBRATION_TOOL_NAMES,
   COMPILER_TOOL_NAMES,
   createCompilerProposalToolset,
   type CompilerProposalToolset,
@@ -107,12 +108,20 @@ const COMPILER_TOOL_NAME_SET = new Set(COMPILER_TOOL_NAMES);
 export function compilerToolNamesForScope(
   availableNames: readonly string[],
   scope: "source" | "opening" | "reconciliation",
+  sourcePurpose: "source-review" | "boundary-calibration" = "source-review",
 ): string[] {
   const known = new Set(COMPILER_TOOL_NAMES);
   return [...new Set(availableNames)]
     .filter((name) => known.has(name))
     .filter((name) => !SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(name))
     .filter((name) => scope === "reconciliation" || !SOURCE_EVIDENCE_TOOL_NAMES.includes(name as typeof SOURCE_EVIDENCE_TOOL_NAMES[number]))
+    .filter((name) => scope === "source" || !BOUNDARY_CALIBRATION_TOOL_NAMES.includes(name as typeof BOUNDARY_CALIBRATION_TOOL_NAMES[number]))
+    .filter((name) => {
+      if (scope !== "source") return true;
+      return sourcePurpose === "boundary-calibration"
+        ? name !== "peek_adjacent_evidence" && name !== "defer_boundary_artifact"
+        : name !== "replace_boundary_proposal";
+    })
     .filter((name) => scope !== "source" || name !== "propose_initial_world")
     .filter((name) => scope !== "opening" || [
       "find_compiler_artifacts",
@@ -1203,6 +1212,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     const activateCompilerTools = (
       ctx: ExtensionContext,
       scope: "source" | "opening" | "reconciliation" = "source",
+      sourcePurpose: "source-review" | "boundary-calibration" = "source-review",
     ) => {
       if (!compilerToolsRegistered) {
         const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
@@ -1215,7 +1225,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const knownCompilerNames = new Set(COMPILER_TOOL_NAMES);
       const availableCompilerTools = registeredCompilerToolset?.tools ?? pi.getAllTools()
         .filter((tool) => knownCompilerNames.has(tool.name));
-      const compilerNames = compilerToolNamesForScope(availableCompilerTools.map((tool) => tool.name), scope);
+      const compilerNames = compilerToolNamesForScope(availableCompilerTools.map((tool) => tool.name), scope, sourcePurpose);
       pi.setActiveTools([...new Set(compilerNames)]);
       compilerToolScope = scope;
       if (ctx.mode === "tui") ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · world compiler loop"));
@@ -1351,7 +1361,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activeSourceId = preparation.source.id;
-        activateCompilerTools(ctx, "source");
+        activateCompilerTools(ctx, "source", preparation.batch.purpose);
         await beginTurn(preparation);
         const retryAttempt = state.providerRetryCounts.get(preparation.batch.id) ?? 0;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Preparing · batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`));
@@ -1658,7 +1668,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             return { action: "handled" };
           }
           sourceActivity?.update("Preparing the foreground compiler turn");
-          activateCompilerTools(ctx);
+          activateCompilerTools(ctx, "source", preparation.batch.purpose);
           await beginTurn(preparation, true);
           ctx.ui.notify(
             `Novel indexed: ${preparation.source.sourcePath} · starting batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`,
@@ -2451,7 +2461,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             return;
           }
           activity.update("Preparing the foreground compiler turn");
-          activateCompilerTools(ctx);
+          activateCompilerTools(ctx, "source", preparation.batch.purpose);
           await beginTurn(preparation);
           ctx.ui.notify(`Archived pasted content as ${preparation.source.id} · starting batch 1/${preparation.totalBatches}.`, "info");
           pi.sendMessage({
@@ -2482,7 +2492,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             return;
           }
           activity.update("Preparing the foreground compiler turn");
-          activateCompilerTools(ctx);
+          activateCompilerTools(ctx, "source", preparation.batch.purpose);
           await beginTurn(preparation);
           ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
           // Host-generated compiler context must never be represented as a user

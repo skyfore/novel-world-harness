@@ -633,6 +633,22 @@ export function validatePlayerActionScope(
       continue;
     }
     if (operation.op === "set") validateStateValueReferences(operation.value, spec, `${operationPath}.value`, referenceable, issues);
+    if (operation.field === "character.relationships") {
+      const addedReferences = operation.op === "set" && Array.isArray(operation.value)
+        ? operation.value
+        : operation.op === "add-member"
+          ? [operation.member]
+          : [];
+      for (let memberIndex = 0; memberIndex < addedReferences.length; memberIndex += 1) {
+        const member = addedReferences[memberIndex];
+        if (typeof member !== "string" || !entityKinds.has(member) || entityKinds.get(member) === "relationship") continue;
+        issues.push(issue(
+          "PLAYER_RELATIONSHIP_REFERENCE_INVALID",
+          `character.relationships may reference relationship entities only; ${member} is ${entityKinds.get(member)}`,
+          operation.op === "set" ? `${operationPath}.value.${memberIndex}` : `${operationPath}.member`,
+        ));
+      }
+    }
     if (operation.op === "adjust-number" && spec.valueType !== "number") {
       issues.push(issue("PLAYER_FIELD_OUT_OF_SCOPE", `adjust-number requires a numeric field, not ${operation.field}`, `${operationPath}.field`));
     }

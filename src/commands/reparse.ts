@@ -77,7 +77,18 @@ export async function reparseCommand(
   report("Checking the active prepared revision and rollback baseline.");
   await recoverInterruptedReparse(root, source, batches, selectedBatchIds, cache, report);
   options.signal?.throwIfAborted();
-  const baseline = await cache.publish(source, { allowSemanticDebtForRollback: true });
+  const activeBaseline = await cache.lookup(source);
+  // During a semantic upgrade, the active immutable revision is the rollback
+  // authority even though its compiler fingerprint is intentionally old.
+  // Republishing its materialized contents here would stamp those old
+  // semantics with the current fingerprint and make a failed upgrade appear
+  // complete on the next prepare-all run.
+  const baseline = activeBaseline.requiresReparse && activeBaseline.bundleHash
+    ? activeBaseline
+    : await cache.publish(source, { allowSemanticDebtForRollback: true });
+  if (activeBaseline.requiresReparse && activeBaseline.bundleHash) {
+    report(`Using incompatible active revision ${activeBaseline.bundleHash} as the rollback baseline without restamping its compiler semantics.`);
+  }
   if (!baseline.bundleHash) throw new Error("Current prepared revision was not published.");
   const previousBundleHash = baseline.bundleHash;
   await pinBranchPreparationContexts(root);
@@ -161,7 +172,7 @@ export async function reparseCommand(
       await rejectPendingCompilerBatchProposals(root, batchId);
     }
     try {
-      await cache.activate(source, previousBundleHash);
+      await cache.activate(source, previousBundleHash, { allowIncompatibleRollback: true });
     } catch (rollbackError) {
       throw new AggregateError([error, rollbackError], `Reparse failed and rollback to ${previousBundleHash} also failed.`);
     }

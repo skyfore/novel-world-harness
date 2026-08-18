@@ -77,7 +77,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
     },
     async runner(batch, context) {
       options.signal?.throwIfAborted();
-      const label = `Compiler batch ${batch.ordinal + 1}/${context.totalBatches}`;
+      const label = batch.purpose === "boundary-calibration"
+        ? `Boundary calibration ${batch.ordinal + 1}/${context.totalBatches}`
+        : `Compiler batch ${batch.ordinal + 1}/${context.totalBatches}`;
       options.onStatus?.(`${label} · creating model session`);
       let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
       let modelTextStreamed = false;
@@ -88,10 +90,16 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         ...(options.model ? { model: options.model } : {}),
         saveSession: false,
         includeLocalTools: false,
+        enableBoundaryCalibration: true,
         segmentIds: batch.segmentIds,
         compilerBatchId: batch.id,
         sourceId: batch.sourceId,
-        disabledProposalTools: ["propose_initial_world"],
+        disabledProposalTools: [
+          "propose_initial_world",
+          ...(batch.purpose === "boundary-calibration"
+            ? ["peek_adjacent_evidence", "defer_boundary_artifact"]
+            : ["replace_boundary_proposal"]),
+        ],
         onRetry(event) {
           const message = formatRetryNotice(event);
           elapsed?.update(`retrying model request: ${message}`);

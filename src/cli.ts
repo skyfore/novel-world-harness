@@ -110,7 +110,7 @@ async function readStandardInput(): Promise<Buffer> {
 program.command("init")
   .argument("[directory]", "target directory")
   .option("--root <path>", "local novel workspace")
-  .description("create starter novel-harness.yaml and NOVEL.md files")
+  .description("create starter novel-harness.yaml and NWH.md files")
   .action(async (directory, options) => initCommand(directory ?? rootFor(options)));
 program.command("doctor").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("validate runtime, credentials and local file tooling").action(async (options) => doctorCommand(configFor(options)));
 program.command("ingest")
@@ -293,7 +293,12 @@ proposals.command("accept-all").option("--root <path>", "local novel workspace")
 proposals.command("reject").argument("<id>").option("--root <path>", "local novel workspace").action(async (id, options) => rejectProposalCommand(rootFor(options), id));
 
 const world = program.command("world").description("inspect and execute committed novel-world branches");
-world.command("create").argument("[branch]", "branch id", "main").option("--root <path>", "local novel workspace").option("--seed <json>", "StateDelta JSON seed; canonical initial world is used by default").action(async (branch, options) => worldCreateCommand(rootFor(options), branch, options.seed));
+world.command("create")
+  .argument("[branch]", "branch id", "main")
+  .option("--root <path>", "local novel workspace")
+  .option("--seed <json>", "StateDelta JSON seed; canonical initial world is used by default")
+  .option("--source <id>", "registered source id; required when more than one source exists")
+  .action(async (branch, options) => worldCreateCommand(rootFor(options), branch, options.seed, options.source));
 world.command("show").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").action(async (options) => worldShowCommand(rootFor(options), options.branch));
 world.command("history").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").action(async (options) => worldHistoryCommand(rootFor(options), options.branch));
 world.command("frontier").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").action(async (options) => worldFrontierCommand(rootFor(options), options.branch));

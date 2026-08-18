@@ -6,6 +6,8 @@ import type { SourceDocument } from "../storage/workspace-store.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { PreparedNovelCache, type PreparedCacheResult } from "./prepared-cache.js";
+import { promptJson } from "../util/prompt-data.js";
+import { assertSourceIsNotProjectInstruction } from "../workspace/instruction-trust.js";
 
 const AUTO_SOURCE_EXTENSIONS = new Set([".txt", ".text", ".novel", ".md", ".markdown"]);
 
@@ -63,6 +65,7 @@ export async function prepareSourceLoopFromInput(
   await workspace.readFile({ path: absolute, startLine: 1, endLine: 1 });
   const store = await WorkspaceStore.create(workspaceRoot);
   const config = await loadOptionalConfig(path.join(workspaceRoot, "novel-harness.yaml"));
+  await assertSourceIsNotProjectInstruction(workspaceRoot, absolute, config?.project.instructions);
   await store.ensureProject(config?.project);
   const source = await store.registerSource(absolute);
   const preparedCache = await new PreparedNovelCache(workspaceRoot, options.cacheRoot).restore(source);
@@ -136,9 +139,9 @@ function buildSourceLoopPrompt(
   completedBatches: number,
   totalBatches: number,
 ): string {
-  return `The user supplied the novel source ${source.sourcePath}. NWH has registered it as ${source.id}, split it into evidence segments, and selected compiler batch ${completedBatches + 1}/${totalBatches}.
+  return `The user supplied the novel source path ${promptJson(source.sourcePath)}. NWH has registered it as ${source.id}, split it into evidence segments, and selected compiler batch ${completedBatches + 1}/${totalBatches}.
 
-Execute the novel-world compiler loop now. Do not stop at identifying the book, explaining NWH, or suggesting commands. Treat the novel and its emerging world model as the primary subject. Repository source and documentation remain available as secondary context when the user explicitly asks about the harness or when compiler behavior genuinely requires inspection.
+Execute the novel-world compiler loop now. Do not stop at identifying the book, explaining NWH, or suggesting commands. Treat the novel and its emerging world model as the primary subject. This isolated source-review turn has no workspace or repository read tools; its evidence slice and source-scoped artifact retrieval tools are the complete permitted inputs.
 
 For this bounded batch, analyze the supplied evidence, use the typed propose_* tools to record small pending candidates, and finish with a concise progress report covering created proposals, unresolved identities or contradictions, and the next evidence frontier. Proposals are not committed world truth.
 

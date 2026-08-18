@@ -124,7 +124,7 @@ describe("play experience catalog", () => {
         actorId: "hero",
         actorName: "Hero",
         sessionAtHead: true,
-        lastEventTitle: "Hero waits",
+        lastEventTitle: "Attempted player intent (not an asserted outcome): I ask Rival to wait.",
       }),
     ]);
   });

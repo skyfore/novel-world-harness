@@ -13,6 +13,7 @@ import { pinBranchPreparationContexts } from "../world/context.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { promptJson } from "../util/prompt-data.js";
 import { compileSourceCommand } from "./compile-source.js";
 import { prepareAllCommand } from "./prepare-all.js";
 
@@ -246,7 +247,7 @@ async function resolveSource(root: string, sourceId?: string): Promise<SourceDoc
 
 function reparsePrompt(prompt: string, batch: CompilerBatch, runId: string, whole: boolean): string {
   return `Explicit ${whole ? "whole-novel" : "chapter"} reparse run ${runId}; detected chapter ${batch.chapterOrdinal}`
-    + `${batch.chapterTitle ? ` (${batch.chapterTitle})` : ""}. Re-evaluate the supplied evidence even when related identities appear in the catalog. `
+    + `${batch.chapterTitle ? ` (title JSON: ${promptJson(batch.chapterTitle)})` : ""}. Re-evaluate the supplied evidence even when related identities appear in the catalog. `
     + `The host preserved prior immutable revisions for existing branches. Reuse stable payload logical IDs for corrected artifacts, but every newly submitted proposal envelope ID must be unique and end with -${runId}. `
     + `Do not resubmit an unchanged artifact merely to manufacture a revision. Finish this batch normally after the evidence has been reconsidered.\n\n${prompt}`;
 }

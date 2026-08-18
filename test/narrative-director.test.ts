@@ -5,11 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { canonicalEventToPossibility } from "../src/world/canon-runtime.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import type { CanonicalEvent, Claim, Entity } from "../src/world/model.js";
-import { buildNarrativeDirection } from "../src/world/narrative-director.js";
+import { buildNarrativeDirection, publicNarrativeThread, publicPlayerAffordance } from "../src/world/narrative-director.js";
 import { PlayerTurnService } from "../src/world/player-action.js";
 import { WorldRuntime } from "../src/world/runtime.js";
 import { projectActorScene } from "../src/world/scene.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
+import type { CharacterGoal } from "../src/world/actors.js";
 
 const roots: string[] = [];
 
@@ -20,11 +21,15 @@ afterEach(async () => {
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-director-"));
   roots.push(root);
+  const overlappingEvidence = [{
+    span: { sourceId: "novel-a", startLine: 7, endLine: 7, quoteHash: "shared-scene-line" },
+    strength: "explicit" as const,
+  }];
   const entities: Entity[] = [
-    { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] },
-    { id: "rival", kind: "character", canonicalName: "Rival", aliases: [], evidence: [] },
-    { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: [] },
-    { id: "camp", kind: "location", canonicalName: "Camp", aliases: [], evidence: [] },
+    { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: overlappingEvidence },
+    { id: "rival", kind: "character", canonicalName: "Rival", aliases: [], evidence: overlappingEvidence },
+    { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: overlappingEvidence },
+    { id: "camp", kind: "location", canonicalName: "Camp", aliases: [], evidence: overlappingEvidence },
   ];
   const route: Claim = {
     id: "route-to-camp",
@@ -32,7 +37,15 @@ async function fixture() {
     predicate: "knows-route-to",
     object: "camp",
     epistemicType: "explicit-fact",
-    evidence: [],
+    evidence: overlappingEvidence,
+  };
+  const concealedClaim: Claim = {
+    id: "concealed-meaning",
+    subject: "hero",
+    predicate: "hidden-meaning-of-scene",
+    object: true,
+    epistemicType: "interpretation",
+    evidence: overlappingEvidence,
   };
   const leave: CanonicalEvent = {
     id: "leave-for-camp",
@@ -44,16 +57,32 @@ async function fixture() {
       version: 1,
       operations: [{ op: "set", entityId: "hero", field: "character.location", value: "camp" }],
     },
-    evidence: [],
+    evidence: overlappingEvidence,
     causalParents: [],
     confidence: 1,
   };
+  const hiddenPolicyGoal: CharacterGoal = {
+    id: "hidden-policy-goal",
+    actorId: "hero",
+    description: "Secret compiler arc: betray Rival after the future coronation",
+    priority: 1,
+    requiresKnowledge: [],
+    activation: {
+      preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.alive", value: true }],
+      afterCanonicalEventIds: [],
+    },
+    evidence: [{
+      span: { sourceId: "novel-a", startLine: 99, endLine: 99, quoteHash: "hidden-policy" },
+      strength: "inferred",
+    }],
+  };
   const context: WorldModelContext = {
     entities: new Map(entities.map((entity) => [entity.id, entity])),
-    claims: new Map([[route.id, route]]),
+    claims: new Map([[route.id, route], [concealedClaim.id, concealedClaim]]),
     events: new Map([[leave.id, leave]]),
     rules: new Map(),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    actorGoals: [hiddenPolicyGoal],
   };
   const engine = new WorldEngine(root, context);
   const head = await engine.createBranch("main", "Main", {
@@ -71,11 +100,48 @@ async function fixture() {
   const runtime = new WorldRuntime(engine, ({ branchId, commitId }) => [
     canonicalEventToPossibility(leave, branchId, commitId),
   ]);
-  return { engine, runtime, head };
+  return { engine, runtime, head, leave, overlappingEvidence, concealedClaim };
 }
 
 describe("narrative scene director", () => {
-  it("returns only executable progress-bearing choices and makes the canon-shaped choice a soft recommendation", async () => {
+  it("never turns overlapping source evidence into implicit character knowledge", async () => {
+    const { engine, runtime, head, overlappingEvidence, concealedClaim } = await fixture();
+    const perceived = await engine.commitProposal({
+      proposalId: "ambiguous-scene",
+      branchId: "main",
+      expectedParentCommit: head,
+      source: "background",
+      title: "Omniscient hidden meaning",
+      actorObservations: [{ actorId: "hero", summary: "Hero notices an ambiguous movement." }],
+      participants: ["hero"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence: overlappingEvidence,
+    });
+    expect(perceived.report.accepted).toBe(true);
+    const direction = await buildNarrativeDirection(engine, runtime, "hero", perceived.newHead);
+    const observe = direction.affordances.find((choice) => choice.intent === "observe")!;
+    expect(observe).toBeDefined();
+    expect(observe.authorizedKnowledgeClaimIds).toEqual([]);
+    expect(observe.candidate.proposedKnowledge).toBeUndefined();
+
+    const result = await new PlayerTurnService(engine, () => structuredClone(observe.candidate)).turn({
+      branchId: "main",
+      actorId: "hero",
+      utterance: observe.action,
+    }, {
+      intent: observe.intent,
+      affordanceId: observe.id,
+      progress: observe.progress,
+      authorizedKnowledgeClaimIds: observe.authorizedKnowledgeClaimIds,
+    });
+    expect(result.accepted).toBe(true);
+    expect(result.contextAfter.knowledge.map((entry) => entry.claimId)).not.toContain(concealedClaim.id);
+  });
+
+  it("returns executable choices without materializing a future canon delta", async () => {
     const { engine, runtime, head } = await fixture();
     const direction = await buildNarrativeDirection(engine, runtime, "hero", head);
 
@@ -83,9 +149,20 @@ describe("narrative scene director", () => {
     expect(direction.affordances.filter((choice) => choice.recommended)).toHaveLength(1);
     expect(direction.affordances.every((choice) => choice.progress.channels.length > 0)).toBe(true);
     expect(direction.affordances.every((choice) => choice.progress.noveltyKey.length > 0)).toBe(true);
+    expect(direction.threads.some((thread) => thread.kind === "canon-pressure")).toBe(true);
+    expect(direction.threads.filter((thread) => thread.kind === "canon-pressure").map(publicNarrativeThread))
+      .toEqual(direction.threads.filter((thread) => thread.kind === "canon-pressure").map(() => undefined));
+    const actorVisibleDirection = JSON.stringify({
+      threads: direction.threads.flatMap((thread) => publicNarrativeThread(thread) ?? []),
+      affordances: direction.affordances.map(publicPlayerAffordance),
+    });
+    expect(actorVisibleDirection).not.toContain("Secret compiler arc");
+    expect(actorVisibleDirection).not.toContain("Rival");
+    expect(actorVisibleDirection).toContain("Unidentified character 1");
+    expect(direction.threads.filter((thread) => thread.kind === "goal").map(publicNarrativeThread))
+      .toEqual(direction.threads.filter((thread) => thread.kind === "goal").map(() => undefined));
     const recommended = direction.affordances.find((choice) => choice.recommended)!;
-    expect(recommended.action).toContain("Camp");
-    expect(recommended.progress.channels).toEqual(expect.arrayContaining(["state", "scene", "thread"]));
+    expect(direction.affordances.some((choice) => choice.progress.noveltyKey.startsWith("canon-step:"))).toBe(false);
 
     const turns = new PlayerTurnService(
       engine,
@@ -105,12 +182,8 @@ describe("narrative scene director", () => {
     });
 
     expect(result.accepted).toBe(true);
-    expect(result.progressCertificate).toMatchObject({
-      effectiveStateOperations: 1,
-      sceneChanged: true,
-    });
-    expect(result.proposal?.possibilityId).toBe("canon-leave-for-camp");
-    expect((await engine.projector.project(result.newHead)).values.hero?.["character.location"]).toBe("camp");
+    expect(result.newHead).not.toBe(head);
+    expect(result.proposal?.possibilityId).not.toBe("canon-leave-for-camp");
 
     const next = await buildNarrativeDirection(engine, runtime, "hero", result.newHead);
     expect(next.affordances.map((choice) => choice.progress.noveltyKey)).not.toContain(recommended.progress.noveltyKey);

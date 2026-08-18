@@ -111,6 +111,20 @@ describe("novel source compiler loop", () => {
     });
   });
 
+  it("does not let a TUI source turn reclassify configured guidance as novel evidence", async () => {
+    const { root } = await fixture();
+    const guidance = path.join(root, "NWH.md");
+    await fs.writeFile(guidance, "Trusted harness guidance.\n", "utf8");
+    await fs.writeFile(
+      path.join(root, "novel-harness.yaml"),
+      "version: 1\nproject:\n  name: configured-world\n  instructions:\n    - NWH.md\n",
+      "utf8",
+    );
+
+    await expect(prepareSourceLoopFromInput(root, guidance))
+      .rejects.toThrow("configured as trusted project guidance");
+  });
+
   it("does not turn a standalone source-code attachment into a novel compiler loop", async () => {
     const { root } = await fixture();
     const codePath = path.join(root, "compiler.ts");

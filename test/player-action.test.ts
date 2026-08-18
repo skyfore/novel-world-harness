@@ -5,6 +5,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Compile } from "typebox/compile";
 import { afterEach, describe, expect, it } from "vitest";
 import { createPlayerActionCaptureTool } from "../src/agent/player-action-tool.js";
+import { createPlayerActionModelBoundary, playerActionModelContext } from "../src/agent/pi-player-action.js";
 import { canonicalEventToPossibility } from "../src/world/canon-runtime.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import type { CanonicalEvent, Claim, Entity } from "../src/world/model.js";
@@ -38,12 +39,13 @@ async function fixture() {
     { id: "secret-lair", kind: "location", canonicalName: "Secret Lair", aliases: [], evidence: [] },
     { id: "silver-key", kind: "artifact", canonicalName: "银钥", aliases: ["Silver Key"], evidence: [] },
     { id: "black-key", kind: "artifact", canonicalName: "黑钥", aliases: ["Black Key"], evidence: [] },
+    { id: "secret-bond", kind: "relationship", canonicalName: "Hidden bond", aliases: [], evidence: [] },
   ];
   const route: Claim = {
     id: "known-route",
     subject: "hero",
     predicate: "knows-route-between",
-    object: ["hall", "camp"],
+    object: { route: { from: "hall", waypoints: ["library"], to: "camp" } },
     epistemicType: "explicit-fact",
     evidence: [],
   };
@@ -108,6 +110,9 @@ async function fixture() {
       { op: "set", entityId: "mo-yan", field: "character.location", value: "hall" },
       { op: "set", entityId: "silver-key", field: "artifact.owner", value: "hero" },
       { op: "set", entityId: "black-key", field: "artifact.owner", value: "villain" },
+      { op: "set", entityId: "secret-bond", field: "relationship.from", value: "hero" },
+      { op: "set", entityId: "secret-bond", field: "relationship.to", value: "villain" },
+      { op: "set", entityId: "secret-bond", field: "relationship.strength", value: 0.9 },
     ],
   });
   const learned = await engine.commitProposal({
@@ -155,14 +160,117 @@ describe("actor-scoped player action context", () => {
       "character.location": "hall",
     });
     expect(context.knowledge.map((entry) => entry.claimId)).toEqual(["known-route"]);
-    expect(context.referenceableEntities.map((entity) => entity.id)).toEqual(["camp", "hall", "hero", "mo-yan", "silver-key"]);
+    expect(context.referenceableEntities.map((entity) => entity.id)).toEqual(["camp", "hall", "hero", "library", "mo-yan", "silver-key"]);
     expect(context.presentEntities.map((entity) => entity.id)).toEqual(["hero", "mo-yan"]);
+    expect(context.presentEntities.find((entity) => entity.id === "mo-yan")?.name).toBe("Unidentified character 1");
     expect(context.writableEntityIds).toEqual(["hero", "silver-key"]);
     expect(context.ownedEntityState).toEqual({ "silver-key": { "artifact.owner": "hero" } });
+    expect(context.writableStateFields.map((field) => field.key)).not.toEqual(expect.arrayContaining([
+      "character.experience",
+      "character.momentum",
+      "character.reputation",
+      "relationship.strength",
+    ]));
+    expect(context.writableStateFields.map((field) => field.key)).toEqual(expect.arrayContaining([
+      "character.location",
+      "character.plan",
+      "artifact.owner",
+    ]));
+    expect(serialized).not.toContain("secret-bond");
     expect(serialized).not.toContain("future-secret");
     expect(serialized).not.toContain("future-ambush");
     expect(serialized).not.toContain("secret-lair");
     expect(serialized).not.toContain("villain");
+    const modelContext = playerActionModelContext(context);
+    expect(modelContext).not.toHaveProperty("atCommit");
+    expect(modelContext).not.toHaveProperty("temporalContext");
+    expect(modelContext.scene).not.toHaveProperty("beat");
+    expect(modelContext).not.toHaveProperty("visibleStateFieldTypes");
+    expect(modelContext.actorId).toBe("actor-self");
+    expect((modelContext.referenceableEntities as Array<{ id: string }>).every((entity) =>
+      entity.id === "actor-self" || /^entity-\d{3}$/.test(entity.id))).toBe(true);
+    expect((modelContext.knowledge as Array<{ claimId: string }>)[0]?.claimId).toBe("claim-001");
+    expect(JSON.stringify(modelContext)).not.toContain('"actorId":"hero"');
+    expect(JSON.stringify(modelContext)).not.toContain('"claimId":"known-route"');
+    expect(JSON.stringify(modelContext)).not.toContain('"from":"hall"');
+    expect(JSON.stringify(modelContext)).not.toContain('"to":"camp"');
+    expect(JSON.stringify(modelContext)).not.toContain(head);
+  });
+
+  it("decodes only supplied turn-local handles back to host IDs before validation", async () => {
+    const { engine, head } = await fixture();
+    const boundary = createPlayerActionModelBoundary(await buildActorScopedActionContext(engine, "hero", head));
+    const entities = boundary.context.referenceableEntities as Array<{ id: string; name: string }>;
+    const claims = boundary.context.knowledge as Array<{ claimId: string }>;
+    const actorHandle = boundary.context.actorId as string;
+    const hallHandle = entities.find((entity) => entity.name === "Hall")!.id;
+    const campHandle = entities.find((entity) => entity.name === "Camp")!.id;
+    const decoded = boundary.decodeCandidate({
+      title: "Hero walks from the Hall to Camp",
+      participants: [campHandle],
+      preconditions: [{ op: "fact-equals", entityId: actorHandle, field: "character.location", value: hallHandle }],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: actorHandle, field: "character.location", value: campHandle }],
+      },
+      requiresKnowledge: [claims[0]!.claimId],
+      forbidsKnowledge: [],
+    });
+
+    expect(decoded).toEqual(moveToCamp());
+  });
+
+  it("does not decode guessed admitted stable IDs that were not supplied as handles", async () => {
+    const { engine, head } = await fixture();
+    const boundary = createPlayerActionModelBoundary(await buildActorScopedActionContext(engine, "hero", head));
+    const decoded = boundary.decodeCandidate({
+      title: "Try a stable identifier",
+      participants: [],
+      preconditions: [],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "Wait" }],
+      },
+      requiresKnowledge: ["known-route"],
+      forbidsKnowledge: [],
+    });
+
+    expect(decoded.proposedDelta.operations[0]).toEqual(expect.objectContaining({
+      entityId: "invalid-model-entity-handle",
+    }));
+    expect(decoded.requiresKnowledge).toEqual(["invalid-model-claim-handle"]);
+  });
+
+  it("discovers entity references in owner-visible state before replacing every stable ID with a turn handle", async () => {
+    const { engine, head } = await fixture();
+    const revealed = await engine.commitProposal({
+      proposalId: "record-custodian",
+      branchId: "main",
+      expectedParentCommit: head,
+      source: "background",
+      title: "The owned key records its custodian",
+      actorObservations: [{ actorId: "hero", summary: "The owned key records its custodian" }],
+      participants: ["hero"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "silver-key", field: "artifact.custodian", value: "villain" }],
+      },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(revealed.report.accepted).toBe(true);
+    const scoped = await buildActorScopedActionContext(engine, "hero", revealed.newHead);
+    expect(scoped.ownedEntityState["silver-key"]?.["artifact.custodian"]).toBe("villain");
+    expect(scoped.referenceableEntities).toContainEqual(expect.objectContaining({ id: "villain", name: "Hidden Villain" }));
+
+    const model = createPlayerActionModelBoundary(scoped).context;
+    const owned = model.ownedEntityState as Record<string, Record<string, unknown>>;
+    const silverKeyHandle = (model.referenceableEntities as Array<{ id: string; name: string }>)
+      .find((entity) => entity.name === "银钥")!.id;
+    expect(owned[silverKeyHandle]?.["artifact.custodian"]).toMatch(/^entity-\d{3}$/);
+    expect(JSON.stringify(model)).not.toContain('"artifact.custodian":"villain"');
   });
 
   it("builds sparse-state-safe host intents without model-invented predicates", async () => {
@@ -185,6 +293,9 @@ describe("PlayerTurnService", () => {
       observedContext = JSON.stringify(input.context);
       expect(Object.isFrozen(input)).toBe(true);
       expect(Object.isFrozen(input.context)).toBe(true);
+      expect(input.context).not.toHaveProperty("atCommit");
+      expect(input.context.scene).not.toHaveProperty("beat");
+      expect(input.context.recentVisibleEvents.every((event) => !Object.hasOwn(event, "step"))).toBe(true);
       return moveToCamp();
     });
 
@@ -209,12 +320,42 @@ describe("PlayerTurnService", () => {
       evidence: [],
     });
     expect(result.proposal?.proposalId).toMatch(/^player-[a-f0-9]{24}$/);
+    expect(result.proposal?.title).toBe("Attempted player intent (not an asserted outcome): I leave the hall and walk to camp.");
+    expect(result.proposal?.title).not.toBe("Hero walks from the Hall to Camp");
     expect(result.validation?.accepted).toBe(true);
     expect(result.eventHash).toBeDefined();
-    expect(result.renderedText).toContain("Hero walks from the Hall to Camp");
+    expect(result.renderedText).toContain("Attempted player intent (not an asserted outcome): I leave the hall and walk to camp.");
+    expect(result.renderedText).not.toContain("Hero walks from the Hall to Camp");
     expect((await engine.projector.project(result.newHead)).values.hero?.["character.location"]).toBe("camp");
     expect(observedContext).not.toContain("future-secret");
     expect(observedContext).not.toContain("future-ambush");
+  });
+
+  it("validates the player renderer result and detects branch mutation", async () => {
+    const invalidFixture = await fixture();
+    const invalidRender = (() => ({ text: "not a string" })) as unknown as NonNullable<ConstructorParameters<typeof PlayerTurnService>[2]>;
+    const invalidService = new PlayerTurnService(invalidFixture.engine, () => moveToCamp(), invalidRender);
+    await expect(invalidService.turn({
+      branchId: "main",
+      actorId: "hero",
+      utterance: "I leave the hall and walk to camp.",
+    })).rejects.toThrow("Player turn renderer must return a string");
+
+    const mutationFixture = await fixture();
+    const foreignHead = "c".repeat(64);
+    let committedHead = "";
+    const mutationService = new PlayerTurnService(mutationFixture.engine, () => moveToCamp(), async (input) => {
+      committedHead = input.commitId;
+      await mutationFixture.engine.branches.updateHead(input.branchId, input.commitId, foreignHead);
+      return "Rendered scene";
+    });
+    await expect(mutationService.turn({
+      branchId: "main",
+      actorId: "hero",
+      utterance: "I leave the hall and walk to camp.",
+    })).rejects.toThrow("Player turn renderer mutated branch truth");
+    expect(await mutationFixture.engine.branches.readHead("main")).toBe(foreignHead);
+    await mutationFixture.engine.branches.updateHead("main", foreignHead, committedHead);
   });
 
   it("preserves the story-time anchor but rejects a repeated perception beat that would loop", async () => {
@@ -281,7 +422,7 @@ describe("PlayerTurnService", () => {
     expect(state.logicalTime.elapsedDays).toBeCloseTo(365.2425);
   });
 
-  it("allows an explicitly named destination as a reference without exposing its state", async () => {
+  it("allows a destination acquired through actor knowledge without exposing its state", async () => {
     const { engine } = await fixture();
     let observedContext: Parameters<ConstructorParameters<typeof PlayerTurnService>[1]>[0]["context"] | undefined;
     const service = new PlayerTurnService(engine, (input) => {
@@ -415,6 +556,22 @@ describe("PlayerTurnService", () => {
 
   it("rejects a named but distant character as a physical participant", async () => {
     const { engine, head } = await fixture();
+    const learnedRumor = await engine.commitProposal({
+      proposalId: "hear-villain-rumor",
+      branchId: "main",
+      expectedParentCommit: head,
+      source: "background",
+      title: "Hero hears a rumor about the Hidden Villain",
+      actorObservations: [{ actorId: "hero", summary: "Hero hears a rumor about the Hidden Villain" }],
+      participants: ["hero"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      proposedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "false-rumor", status: "heard", confidence: 0.4 }] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(learnedRumor.report.accepted).toBe(true);
     const service = new PlayerTurnService(engine, () => ({
       title: "Hero refuses to hand the silver key to the Hidden Villain",
       participants: ["villain"],
@@ -432,7 +589,7 @@ describe("PlayerTurnService", () => {
     expect(result.accepted).toBe(false);
     expect(result.stage).toBe("scope");
     expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_REMOTE_INTERACTION_FORBIDDEN" }));
-    expect(await engine.branches.readHead("main")).toBe(head);
+    expect(await engine.branches.readHead("main")).toBe(learnedRumor.newHead);
   });
 
   it("distinguishes scene-grounded presence from unknown and known-remote locations", async () => {
@@ -451,8 +608,10 @@ describe("PlayerTurnService", () => {
         operations: [
           { op: "unset", entityId: "hero", field: "character.location" },
           { op: "unset", entityId: "mo-yan", field: "character.location" },
+          { op: "unset", entityId: "villain", field: "character.location" },
         ],
       },
+      proposedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "false-rumor", status: "heard", confidence: 0.4 }] },
       causalParents: [],
       evidence: [],
     });
@@ -511,6 +670,38 @@ describe("PlayerTurnService", () => {
     expect(result.proposal?.supersedesCanonicalEventIds).toEqual(["give-key"]);
     const frontier = await runtime.refreshFrontier("main", result.newHead);
     expect(frontier.evaluated.find((entry) => entry.possibility.id === "canon-give-key")?.status).toBe("superseded");
+  });
+
+  it("does not let a canon resolver mutate an already scoped player proposal", async () => {
+    const { engine } = await fixture();
+    let mutationRejected = false;
+    const service = new PlayerTurnService(
+      engine,
+      () => moveToCamp(),
+      undefined,
+      (proposal) => {
+        expect(Object.isFrozen(proposal)).toBe(true);
+        expect(Object.isFrozen(proposal.proposedDelta.operations)).toBe(true);
+        try {
+          proposal.proposedDelta.operations.push({
+            op: "set",
+            entityId: "villain",
+            field: "character.location",
+            value: "hall",
+          });
+        } catch {
+          mutationRejected = true;
+        }
+        return { supersedesCanonicalEventIds: [] };
+      },
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "I walk to Camp." });
+
+    expect(mutationRejected).toBe(true);
+    expect(result.accepted).toBe(true);
+    expect(result.proposal?.proposedDelta.operations).toHaveLength(1);
+    expect(result.proposal?.proposedDelta.operations[0]).toMatchObject({ entityId: "hero", value: "camp" });
   });
 
   it("marks a player-performed canonical effect realized instead of scheduling it twice", async () => {
@@ -584,12 +775,12 @@ describe("PlayerTurnService", () => {
   it("rejects an unmentioned destination and an explicitly named but unowned artifact", async () => {
     const { engine, head } = await fixture();
     const unmentionedDestination = new PlayerTurnService(engine, () => ({
-      title: "Hero goes to the Library",
-      participants: ["library"],
+      title: "Hero goes to the Secret Lair",
+      participants: ["secret-lair"],
       preconditions: [],
       proposedDelta: {
         version: 1,
-        operations: [{ op: "set", entityId: "hero", field: "character.location", value: "library" }],
+        operations: [{ op: "set", entityId: "hero", field: "character.location", value: "secret-lair" }],
       },
       requiresKnowledge: [],
       forbidsKnowledge: [],
@@ -625,7 +816,7 @@ describe("PlayerTurnService", () => {
     expect(unowned.accepted).toBe(false);
     expect(unowned.stage).toBe("scope");
     expect(unowned.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_WRITE_OUT_OF_SCOPE" }));
-    expect(unowned.contextBefore.referenceableEntities.map((entity) => entity.id)).toEqual(expect.arrayContaining(["black-key", "mo-yan"]));
+    expect(unowned.contextBefore.referenceableEntities.map((entity) => entity.id)).not.toContain("black-key");
     expect(unowned.contextBefore.writableEntityIds).not.toContain("black-key");
     expect(await engine.branches.readHead("main")).toBe(head);
   });
@@ -704,5 +895,26 @@ describe("player action capture tool", () => {
       {} as ExtensionContext,
     )).rejects.toThrow("Only one player action candidate");
     expect(capture.getExecutionAttempts()).toBe(2);
+  });
+
+  it("constrains adjust-number fields to the host-supplied writable schema", () => {
+    const capture = createPlayerActionCaptureTool(undefined, ["artifact.quantity"]);
+    const validator = Compile(capture.tool.parameters);
+    const adjusted = {
+      ...moveToCamp(),
+      preconditions: [],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "adjust-number", entityId: "silver-key", field: "artifact.quantity", amount: 1 }],
+      },
+    };
+    expect(validator.Check(adjusted)).toBe(true);
+    expect(validator.Check({
+      ...adjusted,
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "adjust-number", entityId: "silver-key", field: "character.wealth", amount: 1 }],
+      },
+    })).toBe(false);
   });
 });

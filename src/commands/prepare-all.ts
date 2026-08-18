@@ -245,7 +245,7 @@ export async function prepareAllCommand(
         prompt: await buildWorldReconciliationPrompt(root, sourceId, inspection.audit, iteration),
         compilerBatchId: `reconcile-${sourceId}-v2-${iteration}`,
         sourceId,
-        includeLocalTools: true,
+        includeLocalTools: false,
         disabledProposalTools: ["propose_state_delta"],
         acquireLock: false,
         signal: options.signal,

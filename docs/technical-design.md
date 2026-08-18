@@ -1206,7 +1206,7 @@ The semantic core and typed compiler proposal boundary now exist. The next miles
 2. orchestrate ingest, bounded compile, proposal review summary, audit, and branch creation without bypassing explicit acceptance;
 3. translate a natural-language player action into a pending typed event proposal using only the actor-scoped view;
 4. add an interactive character session that shows perception, validation results, committed consequences, and the next prompt;
-5. connect one Pi-backed actor reasoner behind `ActorWorldView + CharacterGoal + CharacterModel`;
+5. connect one Pi-backed actor reasoner behind the opaque `ActorReasoningInput` projection (actor-visible state/knowledge, one active goal, active disposition, and committed development);
 6. connect one Pi-backed narrative adapter behind the immutable `NarrativeFrame` contract;
 7. measure epistemic leakage, event/state-delta fidelity, divergence durability, and narrative quality on several genres;
 8. refine schemas and scheduling only from observed corpus failures.

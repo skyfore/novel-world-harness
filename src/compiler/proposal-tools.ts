@@ -1,7 +1,9 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { isDeepStrictEqual } from "node:util";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
-import { evidenceRefSchema, idSchema } from "../world/model.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
+import { evidenceRefSchema, idSchema, type EvidenceRef } from "../world/model.js";
 import {
   compilerProposalSchemas,
   COMPILER_STATE_FIELDS,
@@ -9,6 +11,9 @@ import {
   validateCompilerProposalClosure,
   type CompilerProposalKind,
 } from "./proposals.js";
+import { createCompilerArtifactRetrievalTools } from "./artifact-retrieval.js";
+import { createCompilerSourceEvidenceTools, SOURCE_EVIDENCE_TOOL_NAMES } from "./source-evidence-retrieval.js";
+import { segmentSource, SegmentStore, type SourceSegment } from "./segments.js";
 
 function proposalResult(text: string, details: CompilerProposalRecordedDetails) {
   return { content: [{ type: "text" as const, text }], details };
@@ -25,6 +30,16 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "state-delta": { name: "propose_state_delta", label: "Propose state delta", description: "Submit a deterministic state-delta candidate for later validation. This never moves a branch head." },
   possibility: { name: "propose_possibility", label: "Propose possibility", description: "Submit an uncommitted future possibility. canon-analogue is reserved for a real canonicalEventId; a choice only the player may make must use player-choice. Do not submit actor-plan templates; actor intent belongs in character goals." },
 };
+
+/** Exact model-tool authority owned by the compiler embedding. */
+export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
+  "find_compiler_artifacts",
+  "read_compiler_artifact",
+  ...SOURCE_EVIDENCE_TOOL_NAMES,
+  ...Object.values(labels).map(({ name }) => name),
+  "withdraw_compiler_proposal",
+  "finish_compiler_batch",
+]);
 
 type ProposalToolInput = {
   proposal_id: string;
@@ -149,6 +164,8 @@ export function createCompilerProposalToolset(
   const service = new CompilerProposalService(workspaceRoot);
   const successfulProposalIds = new Set<string>();
   let expectedSegmentIds: string[] = [];
+  let boundedSliceSegments: SourceSegment[] = [];
+  let validatedSourceSegments: SourceSegment[] = [];
   let compilerBatchId: string | undefined;
   let activeSourceId: string | undefined;
   let finished = false;
@@ -158,7 +175,6 @@ export function createCompilerProposalToolset(
   let totalToolCalls = 0;
   let finishGraceCalls = 0;
   const finishFailureCounts = new Map<string, number>();
-
   const circuitBreakResult = (reason: string, failureCount: number) => ({
     content: [{
       type: "text" as const,
@@ -167,7 +183,7 @@ export function createCompilerProposalToolset(
     details: { compilerBatchBlocked: true as const, reason, finishFailureCount: failureCount, toolCallCount: totalToolCalls },
     terminate: true,
   });
-  const beginToolCall = (kind: "mutation" | "finish") => {
+  const beginToolCall = (kind: "retrieval" | "mutation" | "finish") => {
     if (circuitBreak) return circuitBreakResult(circuitBreak.reason, circuitBreak.failureCount);
     totalToolCalls += 1;
     if (totalToolCalls <= MAX_COMPILER_TOOL_CALLS) return undefined;
@@ -201,6 +217,45 @@ export function createCompilerProposalToolset(
     if (finished) throw new Error("Compiler batch was already finished; no more proposals may be submitted in this turn.");
     if (circuitBreak) throw new Error("Compiler batch was stopped by its compiler circuit breaker; start a new batch turn to retry.");
   };
+  const assertEvidenceWithinBoundedSlice = async (payload: unknown, envelopeEvidence: unknown): Promise<void> => {
+    if (expectedSegmentIds.length === 0) return;
+    if (!activeSourceId || boundedSliceSegments.length !== expectedSegmentIds.length) {
+      throw new Error("Bounded compiler evidence is unavailable for this batch.");
+    }
+    const payloadEvidence = payload && typeof payload === "object" && !Array.isArray(payload)
+      && Array.isArray((payload as { evidence?: unknown }).evidence)
+      ? evidenceRefSchema.array().parse((payload as { evidence: unknown[] }).evidence)
+      : [];
+    const references = [
+      ...payloadEvidence,
+      ...(envelopeEvidence === undefined ? [] : evidenceRefSchema.array().parse(envelopeEvidence)),
+    ];
+    const allowedIds = new Set(expectedSegmentIds);
+    const contains = (reference: EvidenceRef, segment: SourceSegment): boolean => {
+      if (reference.span.sourceId !== activeSourceId) return false;
+      if (reference.span.startByte !== undefined || reference.span.endByte !== undefined) {
+        if (reference.span.startByte === undefined || reference.span.endByte === undefined) return false;
+        return reference.span.startByte >= segment.startByte && reference.span.endByte <= segment.endByte;
+      }
+      if (reference.span.startLine < segment.startLine || reference.span.endLine > segment.endLine) return false;
+      // Long physical lines can be split into multiple byte segments carrying
+      // the same line number. Line-only evidence is ambiguous in that case.
+      return !validatedSourceSegments.some((other) => !allowedIds.has(other.id)
+        && other.startLine <= reference.span.endLine
+        && other.endLine >= reference.span.startLine);
+    };
+    for (const reference of references) {
+      if (!boundedSliceSegments.some((segment) => contains(reference, segment))) {
+        throw new Error(
+          `Proposal evidence ${reference.span.sourceId}:${reference.span.startLine}-${reference.span.endLine} is outside the host-supplied compiler segment slice (${expectedSegmentIds.join(", ")}).`,
+        );
+      }
+    }
+  };
+  const retrievalTools = [
+    ...createCompilerArtifactRetrievalTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
+    ...createCompilerSourceEvidenceTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
+  ];
 
   const proposalTools = (Object.keys(labels) as CompilerProposalKind[]).map((kind) => {
     const metadata = labels[kind];
@@ -219,6 +274,7 @@ export function createCompilerProposalToolset(
         const blocked = beginToolCall("mutation");
         if (blocked) return blocked;
         assertBatchWritable();
+        await assertEvidenceWithinBoundedSlice(input.payload, input.evidence);
         await assertStableLogicalRevision(service, kind, input.payload, compilerBatchId);
         if (!successfulProposalIds.has(input.proposal_id) && successfulProposalIds.size >= MAX_ACTIVE_COMPILER_PROPOSALS) {
           throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
@@ -334,10 +390,12 @@ export function createCompilerProposalToolset(
     },
   });
   return {
-    tools: [...proposalTools, withdrawTool, finishTool],
+    tools: [...retrievalTools, ...proposalTools, withdrawTool, finishTool],
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
       successfulProposalIds.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
+      boundedSliceSegments = [];
+      validatedSourceSegments = [];
       compilerBatchId = nextCompilerBatchId;
       activeSourceId = sourceId;
       finished = false;
@@ -347,6 +405,25 @@ export function createCompilerProposalToolset(
       totalToolCalls = 0;
       finishGraceCalls = 0;
       finishFailureCounts.clear();
+      if (expectedSegmentIds.length && !activeSourceId) {
+        throw new Error("A bounded compiler batch requires an active sourceId.");
+      }
+      if (expectedSegmentIds.length) {
+        const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId!);
+        if (!source) throw new Error(`Unknown active compiler source: ${activeSourceId}`);
+        const [persistedManifest, derivedManifest] = await Promise.all([
+          new SegmentStore(workspaceRoot).readManifest(activeSourceId!),
+          segmentSource(workspaceRoot, source),
+        ]);
+        if (!persistedManifest || !isDeepStrictEqual(persistedManifest, derivedManifest)) {
+          throw new Error(`Source evidence index for ${activeSourceId} is missing or stale; re-ingest/reparse before compilation.`);
+        }
+        const byId = new Map(derivedManifest.segments.map((segment) => [segment.id, segment]));
+        const missing = expectedSegmentIds.filter((id) => !byId.has(id));
+        if (missing.length) throw new Error(`Active compiler slice references unknown segment(s): ${missing.join(", ")}.`);
+        validatedSourceSegments = structuredClone(derivedManifest.segments);
+        boundedSliceSegments = expectedSegmentIds.map((id) => structuredClone(byId.get(id)!));
+      }
       if (!compilerBatchId) return;
       for (const summary of await service.store.list("pending")) {
         const envelope = await service.store.readEnvelope("pending", summary.id);

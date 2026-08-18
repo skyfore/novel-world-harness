@@ -5,6 +5,7 @@ import { Key, Markdown, Text, matchesKey } from "@earendil-works/pi-tui";
 import { expandFileMentions } from "./file-mentions.js";
 import { createNwhWelcomeHeader, hasPlayerConversation, isFreshConversation, NWH_WORKING_FRAMES } from "./nwh-welcome.js";
 import {
+  COMPILER_TOOL_NAMES,
   createCompilerProposalToolset,
   type CompilerProposalToolset,
 } from "../compiler/proposal-tools.js";
@@ -22,7 +23,8 @@ import {
   type SourceLoopTurn,
 } from "../compiler/source-loop.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import { SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS } from "../compiler/pi-compiler.js";
+import { COMPILER_SYSTEM_PROMPT, compilerModeInstructions, SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS } from "../compiler/pi-compiler.js";
+import { SOURCE_EVIDENCE_TOOL_NAMES } from "../compiler/source-evidence-retrieval.js";
 import { prepareCompilerBatches, prepareOpeningWorldCompilerBatch, proposeMinimalOpeningWorld } from "../compiler/batches.js";
 import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
@@ -63,10 +65,12 @@ import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
 import { createWorldBranch } from "../world/instance.js";
 import {
+  assertPlaySceneNarration,
   buildPlayOpeningFrame,
   playSceneRequestForEntry,
   renderPlaySceneFailure,
   resolvePlayScenePurpose,
+  playerSceneModelFrame,
   type PlayScenePurpose,
   type PlaySceneRequest,
 } from "../world/play-opening.js";
@@ -84,8 +88,42 @@ import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.
 import { createNwhModelLoadingIndicator } from "./nwh-model-loading.js";
 import { NWH_DOUBLE_CTRL_C_WINDOW_MS, NwhDoubleCtrlCExit } from "./nwh-exit.js";
 import { classifyPlayerInput, renderPlayerMetaResponse } from "../world/player-input-route.js";
+import {
+  branchContainsNwhPrivateContext,
+  branchHasUntrustedSummary,
+  contextPolicyMarker,
+  projectCompletedNwhMessages,
+  projectNwhModelMessages,
+  projectNwhSummaryEntries,
+  NWH_CONTEXT_POLICY_MARKER,
+  type NwhContextMessage,
+} from "./context-policy.js";
+import { promptJson } from "../util/prompt-data.js";
 
 export type NwhInteractionMode = "assistant" | "compiler";
+
+const COMPILER_TOOL_NAME_SET = new Set(COMPILER_TOOL_NAMES);
+
+export function compilerToolNamesForScope(
+  availableNames: readonly string[],
+  scope: "source" | "opening" | "reconciliation",
+): string[] {
+  const known = new Set(COMPILER_TOOL_NAMES);
+  return [...new Set(availableNames)]
+    .filter((name) => known.has(name))
+    .filter((name) => !SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(name))
+    .filter((name) => scope === "reconciliation" || !SOURCE_EVIDENCE_TOOL_NAMES.includes(name as typeof SOURCE_EVIDENCE_TOOL_NAMES[number]))
+    .filter((name) => scope !== "source" || name !== "propose_initial_world")
+    .filter((name) => scope !== "opening" || [
+      "find_compiler_artifacts",
+      "read_compiler_artifact",
+      "propose_entity",
+      "propose_claim",
+      "propose_initial_world",
+      "withdraw_compiler_proposal",
+      "finish_compiler_batch",
+    ].includes(name));
+}
 
 export type NwhExtensionOptions = {
   workspace: LocalFileWorkspace;
@@ -224,15 +262,6 @@ async function raceWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Pro
   }
 }
 
-const COMPILER_CONTEXT_TYPES = new Set([
-  "nwh-compiler-batch",
-  "nwh-prepare-all-batch",
-  "nwh-prepare-all-initial-world",
-  "nwh-prepare-all-reconciliation",
-]);
-
-type ContextMessage = { role: string; customType?: string; details?: unknown };
-
 type PlayerTranscriptEntry = {
   type: string;
   customType?: string;
@@ -320,30 +349,11 @@ function upgradeLegacyChoiceIntents(value: unknown): unknown {
  * Compiler turns stay visible in the transcript, but completed compiler
  * prompts/answers must not silently become context for a later assistant turn.
  */
-export function filterNwhModelContext<T extends ContextMessage>(
+export function filterNwhModelContext<T extends NwhContextMessage>(
   messages: readonly T[],
   compilerTurnActive: boolean,
 ): T[] {
-  const isBoundary = (message: T) => message.role === "custom"
-    && Boolean(message.customType && COMPILER_CONTEXT_TYPES.has(message.customType));
-  if (compilerTurnActive) {
-    const boundary = messages.findLastIndex(isBoundary);
-    return boundary < 0 ? [...messages] : messages.slice(boundary);
-  }
-  let compilerSpan = false;
-  const filtered: T[] = [];
-  for (const message of messages) {
-    if (isBoundary(message)) {
-      const details = message.details && typeof message.details === "object" ? message.details as Record<string, unknown> : undefined;
-      if (details?.excludePreviousUser === true && filtered.at(-1)?.role === "user") filtered.pop();
-      compilerSpan = true;
-      continue;
-    }
-    if (compilerSpan && (message.role === "assistant" || message.role === "toolResult")) continue;
-    compilerSpan = false;
-    filtered.push(message);
-  }
-  return filtered;
+  return projectNwhModelMessages(messages, compilerTurnActive);
 }
 
 export function createNwhExtension(options: NwhExtensionOptions): ExtensionFactory {
@@ -360,7 +370,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ? new Text("", 0, 0)
         : new Markdown(content, 1, 0, getMarkdownTheme());
     });
-    let compilerToolsActive = mode === "compiler";
+    let compilerToolsRegistered = mode === "compiler";
+    let compilerToolScope: "source" | "opening" | "reconciliation" | undefined;
     let activeSourceId: string | undefined;
     let pendingTurn: SourceLoopTurn | undefined;
     let pendingTurnInitiatedByUserInput = false;
@@ -401,6 +412,13 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       setAgentSessionName(title);
     };
     pi.registerTool(createRenameSessionTool(setAgentSessionName));
+    let assistantToolNames: string[];
+    try {
+      assistantToolNames = [...new Set([...pi.getActiveTools(), "rename_session"])];
+    } catch {
+      // Synthetic embedding contexts may not expose Pi's active-tool registry.
+      assistantToolNames = ["rename_session"];
+    }
 
     const beginHostActivity = (ctx: ExtensionContext, key: string, initial: string) => {
       const token = Symbol(key);
@@ -758,17 +776,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         actor: { id: selection.actor.id, name: selection.actor.canonicalName },
         selfState: {},
         development: {
-          actorId: selection.actor.id,
-          atCommit: selection.session.lastCommitId,
-        elapsedDays: 0,
-        experiencedEventIds: [],
-        experiencedCanonicalEventIds: [],
-        recentLivedExperiences: [],
-        knownClaimIds: [],
-          activeGoalIds: [],
-          completedGoalIds: [],
-          expiredGoalIds: [],
-          achievedMilestoneIds: [],
+          elapsedDays: 0,
+          recentExperiences: [],
         },
         ownedEntityState: {},
         knowledge: [],
@@ -817,9 +826,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(options.profile ? { profile: options.profile } : {}),
           ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
         });
-        const output = await narrator(frame, purpose, stream.observer);
-        const narration = typeof output === "string" ? output : output.narration;
-        const rawChoices = typeof output === "string" ? [] : output.choices;
+        const output = await narrator(playerSceneModelFrame(frame), purpose, stream.observer);
+        const narration = assertPlaySceneNarration(typeof output === "string" ? output : output.narration);
+        const rawChoices = typeof output === "string"
+          ? []
+          : playerSceneChoicesSchema.parse({ choices: output.choices }).choices;
         const choices = bindPlayerSceneChoices(rawChoices, frame.affordances);
         stream.verifyFinalText(narration);
         if (controller.signal.aborted) return [];
@@ -1193,20 +1204,41 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       setContextSessionName(`${turn.source.title} · world compilation`);
     };
 
-    const activateCompilerTools = (ctx: ExtensionContext) => {
-      if (!compilerToolsActive) {
+    const activateCompilerTools = (
+      ctx: ExtensionContext,
+      scope: "source" | "opening" | "reconciliation" = "source",
+    ) => {
+      if (!compilerToolsRegistered) {
         const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
         registeredCompilerToolset = createCompilerProposalToolset(workspace.root, generatedBy);
         for (const tool of registeredCompilerToolset.tools) {
           if (!SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name)) pi.registerTool(tool);
         }
-        compilerToolsActive = true;
+        compilerToolsRegistered = true;
       }
+      const knownCompilerNames = new Set(COMPILER_TOOL_NAMES);
+      const availableCompilerTools = registeredCompilerToolset?.tools ?? pi.getAllTools()
+        .filter((tool) => knownCompilerNames.has(tool.name));
+      const compilerNames = compilerToolNamesForScope(availableCompilerTools.map((tool) => tool.name), scope);
+      pi.setActiveTools([...new Set(compilerNames)]);
+      compilerToolScope = scope;
       if (ctx.mode === "tui") ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · world compiler loop"));
     };
 
+    const restoreAssistantTools = (ctx?: ExtensionContext) => {
+      if (!compilerToolScope) return;
+      pi.setActiveTools(assistantToolNames);
+      compilerToolScope = undefined;
+      if (ctx?.mode === "tui") {
+        ctx.ui.setStatus(
+          "nwh-mode",
+          ctx.ui.theme.fg("dim", mode === "compiler" ? "NWH · compiler proposals" : "NWH · read-only assistant"),
+        );
+      }
+    };
+
     const compilerPromptForTurn = (turn: SourceLoopTurn, retryAttempt = 0) => [
-      `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for ${turn.source.sourcePath}. Analyze the supplied evidence now and record typed pending proposals.`,
+      `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for source path ${promptJson(turn.source.sourcePath)}. Analyze the supplied evidence now and record typed pending proposals.`,
       ...(retryAttempt > 0 ? [
         `This is provider-recovery attempt ${retryAttempt}/${MAX_PREPARE_ALL_PROVIDER_RETRIES}. Use neutral, concise literary-analysis language; do not reproduce or embellish narrative passages in prose. Prefer typed tool calls and short clinical summaries. Recover active current-batch proposals instead of duplicating them.`,
       ] : []),
@@ -1258,6 +1290,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     };
 
     const stopPrepareAll = (ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "warning") => {
+      restoreAssistantTools(ctx);
       prepareAllState = undefined;
       pendingTurn = undefined;
       pendingTurnInitiatedByUserInput = false;
@@ -1322,7 +1355,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activeSourceId = preparation.source.id;
-        activateCompilerTools(ctx);
+        activateCompilerTools(ctx, "source");
         await beginTurn(preparation);
         const retryAttempt = state.providerRetryCounts.get(preparation.batch.id) ?? 0;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Preparing · batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`));
@@ -1399,7 +1432,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
           return;
         }
-        activateCompilerTools(ctx);
+        activateCompilerTools(ctx, "opening");
         const openingBatch = await prepareOpeningWorldCompilerBatch(workspace.root, inspection.source!);
         await resetCompilerBatch(openingBatch.segmentIds, openingBatch.id, inspection.source!.id);
         state.initialWorldRequestRunning = true;
@@ -1444,7 +1477,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }
         const iteration = state.reconciliationAttempts + 1;
         const batchId = `reconcile-${state.sourceId}-v2-${iteration}`;
-        activateCompilerTools(ctx);
+        activateCompilerTools(ctx, "reconciliation");
         await resetCompilerBatch([], batchId, state.sourceId);
         state.reconciliationAttempts = iteration;
         state.reconciliationRequestRunning = true;
@@ -1520,11 +1553,35 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           terminate: true,
         };
       }
+      const compilerTurnActive = Boolean(
+        pendingTurn
+        || prepareAllState?.initialWorldRequestRunning
+        || prepareAllState?.reconciliationRequestRunning,
+      );
       if (pendingTurn && event.toolName === "propose_initial_world") {
         return {
           block: true,
           reason: "Ordinary source-review batches cannot propose the initial world; NWH runs a dedicated opening-world pass after source compilation.",
         };
+      }
+      if (COMPILER_TOOL_NAME_SET.has(event.toolName)) {
+        if (mode === "assistant" && !compilerTurnActive) {
+          return {
+            block: true,
+            reason: "Compiler proposal tools are unavailable outside an explicit compiler turn.",
+          };
+        }
+        try {
+          if (!pi.getActiveTools().includes(event.toolName)) {
+            return {
+              block: true,
+              reason: `Compiler tool ${event.toolName} is outside the active compiler scope.`,
+            };
+          }
+        } catch {
+          // The real Pi runtime exposes active tools. Synthetic embeddings may
+          // omit the registry and still enforce their own configured toolset.
+        }
       }
       if (!pendingTurn || !LOCAL_EVIDENCE_TOOL_NAMES.has(event.toolName)) return;
       return {
@@ -1639,25 +1696,140 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     });
 
     pi.on("before_agent_start", async (event) => {
-      const expanded = await expandFileMentions(event.prompt, workspace);
+      const compilerActive = Boolean(
+        pendingTurn
+        || prepareAllState?.initialWorldRequestRunning
+        || prepareAllState?.reconciliationRequestRunning,
+      );
+      // Automatic compiler turns have a host-selected evidence boundary.
+      // Generic @file expansion would bypass both the selected segment and the
+      // source-scoped exact-retrieval tools, so it is allowed only outside
+      // such a turn (including explicit standalone manual compiler sessions).
+      const expanded = compilerActive ? event.prompt : await expandFileMentions(event.prompt, workspace);
       const context: string[] = [];
       if (pendingTurn) context.push(pendingTurn.prompt);
       if (expanded !== event.prompt) context.push(expanded.slice(event.prompt.length).trim());
-      if (!context.length) return;
+      let activeCompilerTools: Array<{ name: string; guidelines: readonly string[] }> = [];
+      if (compilerActive) {
+        try {
+          const activeNames = new Set(pi.getActiveTools());
+          activeCompilerTools = pi.getAllTools()
+            .filter((tool) => activeNames.has(tool.name))
+            .map((tool) => ({ name: tool.name, guidelines: tool.promptGuidelines ?? [] }));
+        } catch {
+          activeCompilerTools = (registeredCompilerToolset?.tools ?? [])
+            .filter((tool) => !SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name))
+            .map((tool) => ({ name: tool.name, guidelines: tool.promptGuidelines ?? [] }));
+        }
+      }
+      const compilerTurnContract = compilerActive
+        ? `<nwh-compiler-turn-contract>\n${promptJson({
+            mode: "compiler",
+            evidence: pendingTurn ? "supplied bounded source segment" : "supplied host reconciliation/opening payload",
+            projectInstructions: "disabled",
+            ordinaryConversation: "excluded",
+            tools: activeCompilerTools,
+            persistence: "typed writes are pending proposals only; successful finish is required for checkpointing",
+          })}\n</nwh-compiler-turn-contract>`
+        : undefined;
+      if (!context.length && !compilerTurnContract) return;
       return {
-        message: {
-          customType: pendingTurn ? "nwh-compiler-batch" : "nwh-file-context",
-          content: context.join("\n\n"),
-          display: false,
-          ...(pendingTurnInitiatedByUserInput ? { details: { excludePreviousUser: true } } : {}),
-        },
+        ...(context.length
+          ? {
+              message: {
+                customType: pendingTurn ? "nwh-compiler-batch" : "nwh-file-context",
+                content: context.join("\n\n"),
+                display: false,
+                ...(pendingTurnInitiatedByUserInput ? { details: { excludePreviousUser: true } } : {}),
+              },
+            }
+          : {}),
+        ...(compilerTurnContract
+          ? {
+              systemPrompt: `${COMPILER_SYSTEM_PROMPT}\n\n${compilerModeInstructions(false)}\n\n${compilerTurnContract}`,
+            }
+          : {}),
       };
     });
 
-    pi.on("context", (event) => {
-      const messages = filterNwhModelContext(
+    pi.on("session_before_compact", (event, ctx) => {
+      let sessionContainsPrivateContext = branchContainsNwhPrivateContext(event.branchEntries);
+      try {
+        sessionContainsPrivateContext ||= branchContainsNwhPrivateContext(ctx.sessionManager.getEntries());
+      } catch {
+        // Synthetic embeddings may expose only the branch supplied by Pi.
+      }
+      const dropSummaries = branchHasUntrustedSummary(event.branchEntries, sessionContainsPrivateContext);
+      const history = projectCompletedNwhMessages(
+        event.preparation.messagesToSummarize,
+        false,
+        dropSummaries,
+      );
+      const prefix = projectCompletedNwhMessages(
+        event.preparation.turnPrefixMessages,
+        history.state.compilerSpan,
+        dropSummaries,
+      );
+      event.preparation.messagesToSummarize = history.messages;
+      event.preparation.turnPrefixMessages = prefix.messages;
+      if (dropSummaries) event.preparation.previousSummary = undefined;
+      if (!history.messages.length && !prefix.messages.length && !event.preparation.previousSummary) {
+        return {
+          compaction: {
+            summary: `No ordinary model-visible history was compacted. NWH private entries were excluded by context policy v2.`,
+            firstKeptEntryId: event.preparation.firstKeptEntryId,
+            tokensBefore: event.preparation.tokensBefore,
+            details: { nwhContextPolicyVersion: 2, privateEntriesExcluded: true },
+          },
+        };
+      }
+    });
+
+    pi.on("session_compact", (event) => {
+      pi.appendEntry(
+        NWH_CONTEXT_POLICY_MARKER,
+        contextPolicyMarker(event.compactionEntry.id, "compaction"),
+      );
+    });
+
+    pi.on("session_before_tree", (event, ctx) => {
+      let branch = event.preparation.entriesToSummarize;
+      let sessionContainsPrivateContext = branchContainsNwhPrivateContext(branch);
+      try {
+        branch = ctx.sessionManager.getBranch();
+        sessionContainsPrivateContext ||= branchContainsNwhPrivateContext(ctx.sessionManager.getEntries());
+      } catch {
+        // Synthetic embedding contexts may not provide a session manager.
+      }
+      const allowedIds = new Set(projectNwhSummaryEntries(branch, sessionContainsPrivateContext).map((entry) => entry.id));
+      event.preparation.entriesToSummarize = event.preparation.entriesToSummarize
+        .filter((entry) => allowedIds.has(entry.id));
+    });
+
+    pi.on("session_tree", (event) => {
+      if (!event.summaryEntry) return;
+      pi.appendEntry(
+        NWH_CONTEXT_POLICY_MARKER,
+        contextPolicyMarker(event.summaryEntry.id, "branch"),
+      );
+    });
+
+    pi.on("context", (event, ctx) => {
+      let dropSummaries = false;
+      try {
+        const branch = ctx.sessionManager.getBranch();
+        dropSummaries = branchHasUntrustedSummary(
+          branch,
+          branchContainsNwhPrivateContext(ctx.sessionManager.getEntries()),
+        );
+      } catch {
+        // A context can be synthetic in embedding tests. The real Pi runtime
+        // always supplies a read-only session manager.
+      }
+      const messages = projectNwhModelMessages(
         event.messages,
         Boolean(pendingTurn || prepareAllState?.initialWorldRequestRunning || prepareAllState?.reconciliationRequestRunning),
+        dropSummaries,
       );
       if (messages.length === event.messages.length && messages.every((message, index) => message === event.messages[index])) return;
       return { messages };
@@ -1677,6 +1849,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const openingRequest = !completedTurn && prepareAllState?.initialWorldRequestRunning;
       const reconciliationRequest = !completedTurn && prepareAllState?.reconciliationRequestRunning;
       if (!completedTurn && !openingRequest && !reconciliationRequest) return;
+      restoreAssistantTools(ctx);
       const outcome = compilerBatchOutcomeFromMessages(pendingRunMessages);
       pendingRunMessages = [];
       if (!completedTurn) {
@@ -2218,7 +2391,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }
         playerMode = false;
         selectedPlay = undefined;
-        const modeLabel = compilerToolsActive && mode === "assistant" ? "world compiler loop" : "read-only assistant";
+        const modeLabel = compilerToolScope && mode === "assistant" ? "world compiler loop" : "read-only assistant";
         ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", `NWH · ${modeLabel}`));
         ctx.ui.setWorkingMessage("Consulting local evidence...");
         ctx.ui.notify("Left player mode. The selected instance and character remain saved; use /world-resume to return.", "info");
@@ -2705,7 +2878,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ctx.ui.notify([
           `workspace: ${workspace.root}`,
           `state: ${workspaceStateDir(workspace.root)}`,
-          `mode: ${playerMode ? "player" : compilerToolsActive && mode === "assistant" ? "world-compiler-loop" : mode}`,
+          `mode: ${playerMode ? "player" : compilerToolScope && mode === "assistant" ? "world-compiler-loop" : mode}`,
           `active source: ${activeSourceId ?? "none"}`,
           `registered novels: ${catalog.novels.length}`,
           `playable instances: ${catalog.instances.length}`,

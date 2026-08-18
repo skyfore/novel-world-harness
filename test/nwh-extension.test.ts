@@ -6,6 +6,7 @@ import { fauxAssistantMessage, fauxText, fauxThinking, type AssistantMessage, ty
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createNwhExtension,
+  compilerToolNamesForScope,
   filterNwhModelContext,
   parseTuiReparseArguments,
   splitCommandArguments,
@@ -21,6 +22,7 @@ import type { PlayerActionTranslator } from "../src/world/player-action.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { PlaySessionStore } from "../src/world/play-session.js";
+import { COMPILER_TOOL_NAMES } from "../src/compiler/proposal-tools.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -83,6 +85,10 @@ async function fixture(
   playerOpeningNarrator?: NwhExtensionOptions["playerOpeningNarrator"],
   activeWorldScene?: NwhExtensionOptions["activeWorldScene"],
   restoreSavedWorldOnStartup?: NwhExtensionOptions["restoreSavedWorldOnStartup"],
+  extensionConfig: {
+    mode?: NwhExtensionOptions["mode"];
+    preRegisteredToolNames?: readonly string[];
+  } = {},
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-tui-extension-"));
   temporaryDirectories.push(root);
@@ -93,16 +99,22 @@ async function fixture(
   const events = new Map<string, (...args: unknown[]) => unknown>();
   const registeredTools: string[] = [];
   const registeredToolDefinitions = new Map<string, ToolDefinition>();
+  const activeTools = new Set<string>();
+  const activeToolSnapshots: string[][] = [];
   const sentUserMessages: string[] = [];
   const sentHiddenMessages: string[] = [];
   const sentVisibleMessages: string[] = [];
   const sentMessages: Array<{ customType?: string; content: string; display?: boolean }> = [];
   const markdownTransformers: MarkdownTransformer[] = [];
   const messageRenderers = new Map<string, MessageRenderer>();
+  const appendedEntries: Array<{ customType: string; data?: unknown }> = [];
   let sessionName: string | undefined;
   const pi = {
     registerMessageRenderer(customType: string, renderer: MessageRenderer) {
       messageRenderers.set(customType, renderer);
+    },
+    appendEntry(customType: string, data?: unknown) {
+      appendedEntries.push({ customType, data });
     },
     registerMarkdownTransformer(transformer: MarkdownTransformer) {
       markdownTransformers.push(transformer);
@@ -116,6 +128,21 @@ async function fixture(
     registerTool(tool: { name: string }) {
       registeredTools.push(tool.name);
       registeredToolDefinitions.set(tool.name, tool as ToolDefinition);
+      activeTools.add(tool.name);
+    },
+    getActiveTools() {
+      return [...activeTools];
+    },
+    getAllTools() {
+      return [...registeredToolDefinitions.values()].map((tool) => ({
+        ...tool,
+        sourceInfo: {} as never,
+      }));
+    },
+    setActiveTools(names: string[]) {
+      activeTools.clear();
+      for (const name of names) if (registeredToolDefinitions.has(name)) activeTools.add(name);
+      activeToolSnapshots.push([...activeTools].sort());
     },
     sendUserMessage(message: string) {
       sentUserMessages.push(message);
@@ -132,11 +159,15 @@ async function fixture(
       return sessionName;
     },
   } as unknown as ExtensionAPI;
+  for (const name of extensionConfig.preRegisteredToolNames ?? []) {
+    registeredToolDefinitions.set(name, { name, promptGuidelines: [] } as unknown as ToolDefinition);
+    activeTools.add(name);
+  }
   const workspace = await LocalFileWorkspace.create(root);
   await createNwhExtension({
     workspace,
     saveSession: true,
-    mode: "assistant",
+    mode: extensionConfig.mode ?? "assistant",
     onSessionShutdown,
     playerTranslator,
     playerOpeningNarrator: playerOpeningNarrator ?? (async (frame, purpose) => purpose === "opening"
@@ -149,7 +180,23 @@ async function fixture(
     ...(runReparse ? { runReparse } : {}),
     preparedCacheRoot: path.join(root, "prepared-cache"),
   })(pi);
-  return { commands, events, registeredTools, registeredToolDefinitions, root, sentUserMessages, sentHiddenMessages, sentVisibleMessages, sentMessages, markdownTransformers, messageRenderers, getSessionName: () => sessionName };
+  return {
+    commands,
+    events,
+    registeredTools,
+    registeredToolDefinitions,
+    root,
+    sentUserMessages,
+    sentHiddenMessages,
+    sentVisibleMessages,
+    sentMessages,
+    appendedEntries,
+    markdownTransformers,
+    messageRenderers,
+    activeToolSnapshots,
+    getActiveTools: () => [...activeTools].sort(),
+    getSessionName: () => sessionName,
+  };
 }
 
 function commandContext(notifications: string[], actions: { cleared: boolean; shutdown: boolean }): ExtensionCommandContext {
@@ -211,6 +258,22 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 }
 
 describe("NWH TUI extension", () => {
+  it("derives fail-closed compiler capabilities for source, opening, and reconciliation turns", () => {
+    const source = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "source");
+    expect(source).not.toContain("find_source_evidence");
+    expect(source).not.toContain("read_source_evidence");
+    expect(source).not.toContain("propose_initial_world");
+
+    const opening = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "opening");
+    expect(opening).toContain("propose_initial_world");
+    expect(opening).not.toContain("find_source_evidence");
+    expect(opening).not.toContain("propose_canonical_event");
+
+    const reconciliation = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "reconciliation");
+    expect(reconciliation).toContain("find_source_evidence");
+    expect(reconciliation).toContain("read_source_evidence");
+    expect(reconciliation).not.toContain("propose_state_delta");
+  });
   it("registers local commands and leaves assistant/thinking rendering to Pi", async () => {
     const { commands, sentUserMessages, markdownTransformers, messageRenderers } = await fixture();
     expect(markdownTransformers).toHaveLength(0);
@@ -560,7 +623,7 @@ describe("NWH TUI extension", () => {
   });
 
   it("turns a pasted novel path into an indexed compiler batch", async () => {
-    const { events, registeredTools, root } = await fixture();
+    const { events, registeredTools, root, getActiveTools } = await fixture();
     const input = events.get("input");
     const notifications: string[] = [];
     const statuses: string[] = [];
@@ -583,13 +646,20 @@ describe("NWH TUI extension", () => {
     expect(registeredTools).toContain("propose_entity");
     expect(registeredTools).toContain("withdraw_compiler_proposal");
     expect(registeredTools).toContain("propose_world_rule");
+    expect(getActiveTools()).toContain("find_compiler_artifacts");
+    expect(getActiveTools()).not.toContain("find_source_evidence");
+    expect(getActiveTools()).not.toContain("read_source_evidence");
+    expect(getActiveTools()).toContain("finish_compiler_batch");
+    expect(getActiveTools()).not.toContain("propose_initial_world");
+    expect(getActiveTools()).not.toContain("rename_session");
     expect(statuses).toContain("NWH · world compiler loop");
     expect(notifications[0]).toContain("Novel indexed");
 
+    await fs.writeFile(path.join(root, "chapters", "side.md"), "SIDE_FILE_MUST_NOT_ENTER_BOUNDED_COMPILER\n", "utf8");
     const beforeAgentStart = events.get("before_agent_start");
     const context = await beforeAgentStart?.({
       type: "before_agent_start",
-      prompt: userInput,
+      prompt: 'compile @"chapters/side.md"',
       systemPrompt: "system",
       systemPromptOptions: {},
     } as unknown as BeforeAgentStartEvent) as BeforeAgentStartEventResult | undefined;
@@ -597,12 +667,57 @@ describe("NWH TUI extension", () => {
     expect(context?.message?.display).toBe(false);
     expect(context?.message?.content).toContain("<source-segment");
     expect(context?.message?.content).toContain("first line");
+    expect(context?.message?.content).not.toContain("SIDE_FILE_MUST_NOT_ENTER_BOUNDED_COMPILER");
+    expect(context?.message?.content).not.toContain("<attached-file");
     expect(context?.message?.content).not.toContain("Begin novel-world compiler batch");
+    expect(context?.systemPrompt).toContain("Compiler batch mode is enabled");
+    expect(context?.systemPrompt).toContain("isolated Novel World Harness compiler");
+    expect(context?.systemPrompt).not.toContain("system\n\n");
+    expect(context?.systemPrompt).toContain("<nwh-compiler-turn-contract>");
+    expect(context?.systemPrompt).toContain("find_compiler_artifacts");
 
     expect(events.get("tool_call")?.({ type: "tool_call", toolName: "read_file", toolCallId: "read-1", input: {} }, ctx))
       .toMatchObject({ block: true, reason: expect.stringContaining("evidence slice") });
     expect(events.get("tool_call")?.({ type: "tool_call", toolName: "propose_initial_world", toolCallId: "opening-too-early", input: {} }, ctx))
       .toMatchObject({ block: true, reason: expect.stringContaining("dedicated opening-world pass") });
+  });
+
+  it("narrows and restores tools that were pre-registered by the standalone compiler session", async () => {
+    const baseCompilerTools = ["list_files", "search_files", "read_file", ...COMPILER_TOOL_NAMES];
+    const { events, root, getActiveTools } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { mode: "compiler", preRegisteredToolNames: baseCompilerTools },
+    );
+    const notifications: string[] = [];
+    const ctx = {
+      mode: "tui",
+      model: { provider: "anthropic", id: "claude-sonnet-5" },
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("input")?.(
+      { type: "input", text: `'${path.join(root, "chapters", "chapter one.md")}'`, source: "interactive" } as InputEvent,
+      ctx,
+    );
+
+    expect(getActiveTools()).toContain("propose_entity");
+    expect(getActiveTools()).toContain("find_compiler_artifacts");
+    expect(getActiveTools()).not.toContain("find_source_evidence");
+    expect(getActiveTools()).not.toContain("propose_initial_world");
+    expect(getActiveTools()).not.toContain("read_file");
+
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+    expect(getActiveTools()).toEqual([...new Set([...baseCompilerTools, "rename_session"])].sort());
+    expect(notifications).toContainEqual(expect.stringContaining("was not checkpointed"));
   });
 
   it("archives /prepare-content text without replacing the visible user command", async () => {
@@ -672,6 +787,41 @@ describe("NWH TUI extension", () => {
     ], false)).toEqual([ordinaryAfter]);
   });
 
+  it("projects private NWH content before compaction and branch summarization", async () => {
+    const { events, appendedEntries } = await fixture();
+    const branchEntries = [
+      { type: "custom_message", id: "compiler", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", customType: "nwh-compiler-batch", content: "evidence", display: false },
+      { type: "message", id: "answer", parentId: "compiler", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "assistant", content: [] } },
+      { type: "custom_message", id: "play", parentId: "answer", timestamp: "2026-01-01T00:00:02.000Z", customType: "nwh-play", content: "player wording", display: true },
+      { type: "compaction", id: "legacy-summary", parentId: "play", timestamp: "2026-01-01T00:00:03.000Z", firstKeptEntryId: "play", tokensBefore: 10, summary: "legacy potentially mixed summary" },
+    ];
+    const preparation = {
+      messagesToSummarize: [
+        { role: "custom", customType: "nwh-compiler-batch", content: "evidence" },
+        { role: "assistant", content: "compiler answer" },
+      ],
+      turnPrefixMessages: [
+        { role: "custom", customType: "nwh-play", content: "player wording" },
+        { role: "user", content: "ordinary" },
+      ],
+      previousSummary: "legacy potentially mixed summary",
+    };
+    events.get("session_before_compact")?.({ preparation, branchEntries }, {});
+    expect(preparation.messagesToSummarize).toEqual([]);
+    expect(preparation.turnPrefixMessages).toEqual([{ role: "user", content: "ordinary" }]);
+    expect(preparation.previousSummary).toBeUndefined();
+
+    const treePreparation = { entriesToSummarize: branchEntries };
+    events.get("session_before_tree")?.({ preparation: treePreparation }, {});
+    expect(treePreparation.entriesToSummarize).toEqual([]);
+
+    events.get("session_compact")?.({ compactionEntry: { id: "summary-1" } }, {});
+    expect(appendedEntries.at(-1)).toMatchObject({
+      customType: "nwh-context-policy",
+      data: { version: 2, summaryEntryId: "summary-1", summaryKind: "compaction" },
+    });
+  });
+
   it("blocks every subsequent tool call until a circuit-broken agent run settles", async () => {
     const { events } = await fixture();
     const ctx = {} as ExtensionContext;
@@ -697,7 +847,7 @@ describe("NWH TUI extension", () => {
       toolName: "propose_entity",
       toolCallId: "next-run",
       input: {},
-    }, ctx)).toBeUndefined();
+    }, ctx)).toMatchObject({ block: true, reason: expect.stringContaining("outside an explicit compiler turn") });
   });
 
   it("keeps standalone source-code paths as read-only attachments", async () => {
@@ -733,6 +883,14 @@ describe("NWH TUI extension", () => {
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: ["Lin Qi"], evidence: [] });
     await canon.putEntity({ id: "hall", kind: "location", canonicalName: "前厅", aliases: [], evidence: [] });
     await canon.putEntity({ id: "camp", kind: "location", canonicalName: "营地", aliases: [], evidence: [] });
+    await canon.putClaim({
+      id: "hero-knows-camp",
+      subject: "hero",
+      predicate: "knows-route-to",
+      object: "camp",
+      epistemicType: "explicit-fact",
+      evidence: [],
+    });
     const { engine } = await openWorkspaceWorld(root);
     const genesis = await engine.createBranch("main", "Main", {
       version: 1,
@@ -740,6 +898,9 @@ describe("NWH TUI extension", () => {
         { op: "set", entityId: "hero", field: "character.alive", value: true },
         { op: "set", entityId: "hero", field: "character.location", value: "hall" },
       ],
+    }, {
+      version: 1,
+      operations: [{ op: "learn", actorId: "hero", claimId: "hero-knows-camp", status: "knows", confidence: 1 }],
     });
     const notifications: string[] = [];
     const statuses: Array<string | undefined> = [];
@@ -1027,11 +1188,15 @@ describe("NWH TUI extension", () => {
   });
 
   it("reports narrator failure without presenting canned prose as a story opening", async () => {
+    let narratorFrame: Record<string, unknown> | undefined;
     const { commands, root, sentVisibleMessages } = await fixture(
       undefined,
       undefined,
       undefined,
-      async () => { throw new Error("provider unavailable"); },
+      async (frame) => {
+        narratorFrame = frame as unknown as Record<string, unknown>;
+        throw new Error("provider unavailable");
+      },
     );
     const canon = new CanonicalModelStore(root);
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
@@ -1058,6 +1223,11 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages[0]).toContain("/scene");
     expect(sentVisibleMessages[0]).not.toContain("故事正从已提交的起点开始");
     expect(notifications).toContainEqual(expect.stringContaining("Scene narration failed: provider unavailable"));
+    expect(narratorFrame).not.toHaveProperty("branchId");
+    expect(narratorFrame).not.toHaveProperty("commitId");
+    expect(narratorFrame).not.toHaveProperty("logicalStep");
+    expect(narratorFrame).not.toHaveProperty("storyTime");
+    expect(narratorFrame?.actor).toEqual({ name: "福贵" });
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
@@ -2207,7 +2377,7 @@ describe("NWH TUI extension", () => {
   });
 
   it("checkpoints a successful compiler batch before /compile-next advances", async () => {
-    const { commands, events, root, sentUserMessages, sentHiddenMessages } = await fixture();
+    const { commands, events, root, sentUserMessages, sentHiddenMessages, getActiveTools } = await fixture();
     const novelPath = path.join(root, "long-novel.txt");
     await fs.writeFile(
       novelPath,
@@ -2241,6 +2411,13 @@ describe("NWH TUI extension", () => {
       ],
     }, ctx);
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+    expect(getActiveTools()).toEqual(["rename_session"]);
+    expect(events.get("tool_call")?.({
+      type: "tool_call",
+      toolName: "propose_entity",
+      toolCallId: "forged-outside-compiler",
+      input: {},
+    }, ctx)).toMatchObject({ block: true, reason: expect.stringContaining("outside an explicit compiler turn") });
     await commands.get("compile-next")?.handler("", ctx);
 
     expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);

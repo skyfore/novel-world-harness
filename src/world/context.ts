@@ -6,11 +6,12 @@ import { ActorModelStore, type ActorArtifactKind } from "./actors.js";
 import { canonicalJson, contentHash } from "./canonical.js";
 import { CanonicalModelStore, type CanonicalKind, type CanonicalRevisionRef } from "./canonical-model.js";
 import type { WorldModelContext } from "./engine.js";
-import { idSchema, stateFieldSpecSchema, type CanonicalEvent, type Claim, type Entity, type WorldRule } from "./model.js";
+import { idSchema, stateFieldSpecSchema, type CanonicalEvent, type Claim, type Entity, type EvidenceRef, type WorldRule } from "./model.js";
 import { PossibilityTemplateStore, type PossibilityTemplate } from "./possibility-model.js";
 import type { CharacterGoal, CharacterModel } from "./actors.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "./state.js";
 import { BranchStore, WorldObjectStore } from "./store.js";
+import { assertEvidenceExclusiveToSource, evidenceSourceIds } from "./source-scope.js";
 
 const revisionRefSchema = z.object({ id: z.string().min(1), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
 const canonicalSnapshotV1Schema = z.object({
@@ -109,6 +110,17 @@ export class WorldContextStore {
     preparedRevisionHash?: string,
     refsFromContent = false,
   ): Promise<WorldModelContext> {
+    if (sourceId) {
+      assertArtifactCollectionsExclusiveToSource(sourceId, [
+        artifacts.entities,
+        artifacts.claims,
+        artifacts.events,
+        artifacts.rules,
+        artifacts.goals,
+        artifacts.models,
+        artifacts.possibilities,
+      ]);
+    }
     const canonicalRefs = async <T extends { id: string }>(kind: CanonicalKind, items: readonly T[]) =>
       refsFromContent
         ? items.map((item) => ({ id: item.id, hash: contentHash(item) })).sort((left, right) => left.id.localeCompare(right.id))
@@ -151,16 +163,38 @@ export class WorldContextStore {
     const snapshot = canonicalSnapshotSchema.parse(JSON.parse(await fs.readFile(path.join(this.root, `${snapshotHash}.json`), "utf8")));
     if (contentHash(snapshot) !== snapshotHash) throw new Error(`Corrupt canonical snapshot ${snapshotHash}`);
     if (snapshot.version !== 1 || await this.readLegacySupplement(snapshotHash)) return;
-    const [goals, models, possibilities] = await Promise.all([
+    const [goals, models, possibilities, snapshotEntities, snapshotEvents, snapshotClaims, snapshotRules] = await Promise.all([
       this.actors.listGoals(),
       this.actors.listModels(),
       this.possibilities.list(),
+      Promise.all(snapshot.entities.map((ref) => this.canon.getEntityRevision(ref.id, ref.hash))),
+      Promise.all(snapshot.events.map((ref) => this.canon.getEventRevision(ref.id, ref.hash))),
+      Promise.all(snapshot.claims.map((ref) => this.canon.getClaimRevision(ref.id, ref.hash))),
+      Promise.all(snapshot.rules.map((ref) => this.canon.getRuleRevision(ref.id, ref.hash))),
     ]);
+    const entityIds = new Set(snapshotEntities.map((entity) => entity.id));
+    const characterIds = new Set(snapshotEntities.filter((entity) => entity.kind === "character").map((entity) => entity.id));
+    const eventIds = new Set(snapshotEvents.map((event) => event.id));
+    const snapshotSourceIds = new Set(evidenceSourceIds([
+      ...snapshotEntities.flatMap((item) => item.evidence),
+      ...snapshotEvents.flatMap((item) => item.evidence),
+      ...snapshotClaims.flatMap((item) => item.evidence),
+      ...snapshotRules.flatMap((item) => item.evidence),
+    ]));
+    const evidenceFitsLegacySnapshot = (evidence: readonly EvidenceRef[]) => !snapshotSourceIds.size
+      || (evidence.length > 0 && evidence.every((reference) => snapshotSourceIds.has(reference.span.sourceId)));
+    const scopedGoals = goals.filter((goal) => characterIds.has(goal.actorId) && evidenceFitsLegacySnapshot(goal.evidence));
+    const scopedModels = models.filter((model) => characterIds.has(model.actorId) && evidenceFitsLegacySnapshot(model.evidence));
+    const scopedPossibilities = possibilities.filter((possibility) =>
+      possibility.participants.every((participantId) => entityIds.has(participantId))
+      && possibility.causalParents.every((eventId) => eventIds.has(eventId))
+      && (!possibility.canonicalEventId || eventIds.has(possibility.canonicalEventId))
+      && evidenceFitsLegacySnapshot(possibility.evidence));
     const supplement = legacyPolicySupplementSchema.parse({
       version: 1,
-      actorGoals: await this.actorRefs("goals", goals.map((item) => item.id)),
-      actorModels: await this.actorRefs("models", models.map((item) => item.actorId)),
-      possibilities: await this.possibilityRefs(possibilities.map((item) => item.id)),
+      actorGoals: await this.actorRefs("goals", scopedGoals.map((item) => item.id)),
+      actorModels: await this.actorRefs("models", scopedModels.map((item) => item.actorId)),
+      possibilities: await this.possibilityRefs(scopedPossibilities.map((item) => item.id)),
     });
     await this.writeImmutable(path.join(this.root, "supplements", `${snapshotHash}.json`), supplement);
   }
@@ -199,10 +233,21 @@ export class WorldContextStore {
       Promise.all(snapshot.claims.map((ref) => this.canon.getClaimRevision(ref.id, ref.hash))),
       Promise.all(snapshot.events.map((ref) => this.canon.getEventRevision(ref.id, ref.hash))),
       Promise.all(snapshot.rules.map((ref) => this.canon.getRuleRevision(ref.id, ref.hash))),
-      policies ? Promise.all(policies.actorGoals.map((ref) => this.actors.getGoalRevision(ref.id, ref.hash))) : this.actors.listGoals(),
-      policies ? Promise.all(policies.actorModels.map((ref) => this.actors.getModelRevision(ref.id, ref.hash))) : this.actors.listModels(),
-      policies ? Promise.all(policies.possibilities.map((ref) => this.possibilities.getRevision(ref.id, ref.hash))) : this.possibilities.list(),
+      policies ? Promise.all(policies.actorGoals.map((ref) => this.actors.getGoalRevision(ref.id, ref.hash))) : [],
+      policies ? Promise.all(policies.actorModels.map((ref) => this.actors.getModelRevision(ref.id, ref.hash))) : [],
+      policies ? Promise.all(policies.possibilities.map((ref) => this.possibilities.getRevision(ref.id, ref.hash))) : [],
     ]);
+    if (snapshot.version === 3) {
+      assertArtifactCollectionsExclusiveToSource(snapshot.sourceId, [
+        entities,
+        claims,
+        events,
+        rules,
+        actorGoals,
+        actorModels,
+        possibilities,
+      ]);
+    }
     return {
       canonicalSnapshotHash: snapshotHash,
       ...(snapshot.version === 3 ? { sourceId: snapshot.sourceId } : {}),
@@ -247,6 +292,21 @@ export class WorldContextStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       if ((await fs.readFile(filePath, "utf8")) !== serialized) throw new Error(`Canonical snapshot already exists with different content: ${snapshotHash}`);
+    }
+  }
+}
+
+function assertArtifactCollectionsExclusiveToSource(
+  sourceId: string,
+  collections: Array<readonly ({ id?: string; actorId?: string; evidence: readonly EvidenceRef[] })[]>,
+): void {
+  for (const items of collections) {
+    for (const item of items) {
+      assertEvidenceExclusiveToSource(
+        item.evidence,
+        sourceId,
+        `World snapshot artifact ${item.id ?? item.actorId ?? "unknown"}`,
+      );
     }
   }
 }

@@ -3,19 +3,24 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { WorkspaceStore, type SourceDocument } from "../../src/storage/workspace-store.js";
 import type { EvidenceRef } from "../../src/world/model.js";
+import { segmentSource, SegmentStore } from "../../src/compiler/segments.js";
 
 export async function createEvidenceFixture(root: string, content: string, fileName = "novel.txt"): Promise<{
   source: SourceDocument;
+  segmentId: string;
   evidence: (quote: string, occurrence?: number) => EvidenceRef[];
 }> {
   const absolute = path.join(root, fileName);
   await fs.writeFile(absolute, content, "utf8");
   const store = await WorkspaceStore.create(root);
   const source = await store.registerSource(absolute);
+  const manifest = await segmentSource(root, source);
+  await new SegmentStore(root).write(manifest);
   const buffer = Buffer.from(content, "utf8");
 
   return {
     source,
+    segmentId: manifest.segments[0]!.id,
     evidence(quote: string, occurrence = 0): EvidenceRef[] {
       const needle = Buffer.from(quote, "utf8");
       let startByte = -1;
@@ -44,4 +49,3 @@ export async function createEvidenceFixture(root: string, content: string, fileN
     },
   };
 }
-

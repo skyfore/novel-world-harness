@@ -15,7 +15,9 @@ export class StateSchemaRegistry {
   private readonly specs = new Map<string, StateFieldSpec>();
 
   constructor(specs: StateFieldSpec[]) {
-    for (const spec of specs) {
+    for (const input of specs) {
+      const legacyVisibility = input.visibility ?? legacyDefaultVisibility(input.key);
+      const spec = legacyVisibility ? { ...input, visibility: legacyVisibility } : input;
       if (this.specs.has(spec.key)) throw new Error(`Duplicate state field: ${spec.key}`);
       this.specs.set(spec.key, spec);
     }
@@ -91,45 +93,72 @@ export class StateSchemaRegistry {
   }
 }
 
+/** In-memory compatibility migration for snapshots captured before visibility v1. */
+function legacyDefaultVisibility(key: string): StateFieldSpec["visibility"] {
+  if ([
+    "character.experience", "character.momentum", "relationship.strength",
+    "institution.resources", "faction.resources",
+  ].includes(key)) return "engine";
+  if ([
+    "character.reputation", "location.controller", "institution.leader",
+    "institution.members", "faction.leader", "faction.members",
+  ].includes(key)) return "knowledge";
+  if ([
+    "artifact.custodian", "artifact.quantity", "artifact.condition", "artifact.delivered",
+    "relationship.from", "relationship.to", "relationship.kind", "relationship.active",
+    "relationship.obligations",
+  ].includes(key)) return "owner";
+  if ([
+    "character.alive", "character.title", "artifact.owner", "location.open",
+    "location.condition", "institution.active", "institution.status", "faction.active",
+  ].includes(key)) return "public";
+  if ([
+    "character.ageYears", "character.lifeStage", "character.health", "character.wealth",
+    "character.location", "character.faction", "character.plan", "character.relationships",
+    "character.obligations", "character.inventory",
+  ].includes(key)) return "self";
+  return undefined;
+}
+
 export const DEFAULT_STATE_FIELDS: StateFieldSpec[] = [
-  { key: "character.alive", appliesTo: ["character"], valueType: "boolean", cardinality: "one" },
-  { key: "character.ageYears", appliesTo: ["character"], valueType: "number", cardinality: "one", minimum: 0 },
-  { key: "character.lifeStage", appliesTo: ["character"], valueType: "string", cardinality: "one" },
-  { key: "character.health", appliesTo: ["character"], valueType: "number", cardinality: "one", minimum: 0, maximum: 1 },
-  { key: "character.experience", appliesTo: ["character"], valueType: "number", cardinality: "one", minimum: 0 },
-  { key: "character.reputation", appliesTo: ["character"], valueType: "number", cardinality: "one", minimum: -1, maximum: 1 },
-  { key: "character.wealth", appliesTo: ["character"], valueType: "number", cardinality: "one" },
-  { key: "character.location", appliesTo: ["character"], valueType: "entity-ref", cardinality: "one" },
-  { key: "character.faction", appliesTo: ["character"], valueType: "entity-ref", cardinality: "one" },
-  { key: "character.title", appliesTo: ["character"], valueType: "string", cardinality: "one" },
-  { key: "character.plan", appliesTo: ["character"], valueType: "string", cardinality: "one" },
-  { key: "character.momentum", appliesTo: ["character"], valueType: "number", cardinality: "one" },
-  { key: "character.relationships", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many" },
-  { key: "character.obligations", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many" },
-  { key: "character.inventory", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many" },
-  { key: "artifact.owner", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", exclusive: true },
-  { key: "artifact.custodian", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", exclusive: true },
-  { key: "artifact.quantity", appliesTo: ["artifact"], valueType: "number", cardinality: "one", minimum: 0 },
-  { key: "artifact.condition", appliesTo: ["artifact"], valueType: "number", cardinality: "one", minimum: 0, maximum: 1 },
-  { key: "artifact.delivered", appliesTo: ["artifact"], valueType: "boolean", cardinality: "one" },
-  { key: "location.open", appliesTo: ["location"], valueType: "boolean", cardinality: "one" },
-  { key: "location.condition", appliesTo: ["location"], valueType: "number", cardinality: "one", minimum: 0, maximum: 1 },
-  { key: "location.controller", appliesTo: ["location"], valueType: "entity-ref", cardinality: "one", exclusive: true },
-  { key: "institution.active", appliesTo: ["institution"], valueType: "boolean", cardinality: "one" },
-  { key: "institution.status", appliesTo: ["institution"], valueType: "string", cardinality: "one" },
-  { key: "institution.leader", appliesTo: ["institution"], valueType: "entity-ref", cardinality: "one", exclusive: true },
-  { key: "institution.members", appliesTo: ["institution"], valueType: "entity-ref-set", cardinality: "many" },
-  { key: "institution.resources", appliesTo: ["institution"], valueType: "number", cardinality: "one" },
-  { key: "faction.active", appliesTo: ["faction"], valueType: "boolean", cardinality: "one" },
-  { key: "faction.leader", appliesTo: ["faction"], valueType: "entity-ref", cardinality: "one", exclusive: true },
-  { key: "faction.members", appliesTo: ["faction"], valueType: "entity-ref-set", cardinality: "many" },
-  { key: "faction.resources", appliesTo: ["faction"], valueType: "number", cardinality: "one" },
-  { key: "relationship.from", appliesTo: ["relationship"], valueType: "entity-ref", cardinality: "one", required: true },
-  { key: "relationship.to", appliesTo: ["relationship"], valueType: "entity-ref", cardinality: "one", required: true },
-  { key: "relationship.kind", appliesTo: ["relationship"], valueType: "string", cardinality: "one" },
-  { key: "relationship.strength", appliesTo: ["relationship"], valueType: "number", cardinality: "one", minimum: -1, maximum: 1 },
-  { key: "relationship.active", appliesTo: ["relationship"], valueType: "boolean", cardinality: "one" },
-  { key: "relationship.obligations", appliesTo: ["relationship"], valueType: "entity-ref-set", cardinality: "many" },
+  { key: "character.alive", appliesTo: ["character"], valueType: "boolean", cardinality: "one", visibility: "public" },
+  { key: "character.ageYears", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "self", minimum: 0 },
+  { key: "character.lifeStage", appliesTo: ["character"], valueType: "string", cardinality: "one", visibility: "self" },
+  { key: "character.health", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "self", minimum: 0, maximum: 1 },
+  { key: "character.experience", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "engine", minimum: 0 },
+  { key: "character.reputation", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "knowledge", minimum: -1, maximum: 1 },
+  { key: "character.wealth", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "self" },
+  { key: "character.location", appliesTo: ["character"], valueType: "entity-ref", cardinality: "one", visibility: "self" },
+  { key: "character.faction", appliesTo: ["character"], valueType: "entity-ref", cardinality: "one", visibility: "self" },
+  { key: "character.title", appliesTo: ["character"], valueType: "string", cardinality: "one", visibility: "public" },
+  { key: "character.plan", appliesTo: ["character"], valueType: "string", cardinality: "one", visibility: "self" },
+  { key: "character.momentum", appliesTo: ["character"], valueType: "number", cardinality: "one", visibility: "engine" },
+  { key: "character.relationships", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" },
+  { key: "character.obligations", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" },
+  { key: "character.inventory", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" },
+  { key: "artifact.owner", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", visibility: "public", exclusive: true },
+  { key: "artifact.custodian", appliesTo: ["artifact"], valueType: "entity-ref", cardinality: "one", visibility: "owner", exclusive: true },
+  { key: "artifact.quantity", appliesTo: ["artifact"], valueType: "number", cardinality: "one", visibility: "owner", minimum: 0 },
+  { key: "artifact.condition", appliesTo: ["artifact"], valueType: "number", cardinality: "one", visibility: "owner", minimum: 0, maximum: 1 },
+  { key: "artifact.delivered", appliesTo: ["artifact"], valueType: "boolean", cardinality: "one", visibility: "owner" },
+  { key: "location.open", appliesTo: ["location"], valueType: "boolean", cardinality: "one", visibility: "public" },
+  { key: "location.condition", appliesTo: ["location"], valueType: "number", cardinality: "one", visibility: "public", minimum: 0, maximum: 1 },
+  { key: "location.controller", appliesTo: ["location"], valueType: "entity-ref", cardinality: "one", visibility: "knowledge", exclusive: true },
+  { key: "institution.active", appliesTo: ["institution"], valueType: "boolean", cardinality: "one", visibility: "public" },
+  { key: "institution.status", appliesTo: ["institution"], valueType: "string", cardinality: "one", visibility: "public" },
+  { key: "institution.leader", appliesTo: ["institution"], valueType: "entity-ref", cardinality: "one", visibility: "knowledge", exclusive: true },
+  { key: "institution.members", appliesTo: ["institution"], valueType: "entity-ref-set", cardinality: "many", visibility: "knowledge" },
+  { key: "institution.resources", appliesTo: ["institution"], valueType: "number", cardinality: "one", visibility: "engine" },
+  { key: "faction.active", appliesTo: ["faction"], valueType: "boolean", cardinality: "one", visibility: "public" },
+  { key: "faction.leader", appliesTo: ["faction"], valueType: "entity-ref", cardinality: "one", visibility: "knowledge", exclusive: true },
+  { key: "faction.members", appliesTo: ["faction"], valueType: "entity-ref-set", cardinality: "many", visibility: "knowledge" },
+  { key: "faction.resources", appliesTo: ["faction"], valueType: "number", cardinality: "one", visibility: "engine" },
+  { key: "relationship.from", appliesTo: ["relationship"], valueType: "entity-ref", cardinality: "one", visibility: "owner", required: true },
+  { key: "relationship.to", appliesTo: ["relationship"], valueType: "entity-ref", cardinality: "one", visibility: "owner", required: true },
+  { key: "relationship.kind", appliesTo: ["relationship"], valueType: "string", cardinality: "one", visibility: "owner" },
+  { key: "relationship.strength", appliesTo: ["relationship"], valueType: "number", cardinality: "one", visibility: "engine", minimum: -1, maximum: 1 },
+  { key: "relationship.active", appliesTo: ["relationship"], valueType: "boolean", cardinality: "one", visibility: "owner" },
+  { key: "relationship.obligations", appliesTo: ["relationship"], valueType: "entity-ref-set", cardinality: "many", visibility: "owner" },
 ];
 
 export function emptyWorldState(atCommit: string, step = 0): WorldState {

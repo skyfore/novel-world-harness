@@ -154,6 +154,7 @@ describe("world time and character development", () => {
       expectedParentCommit: genesis,
       source: "canon-candidate",
       title: "Hero survives a turning point",
+      actorObservations: [{ actorId: "hero", summary: "Hero survives a turning point" }],
       participants: ["hero"],
       proposedTime: { kind: "exact", value: "2001", precision: "year" },
       timeAdvance: { amount: 1, unit: "year" },

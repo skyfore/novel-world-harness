@@ -1,13 +1,33 @@
+import { z } from "zod";
 import type { ActorProposalCandidate, ActorProposalSource } from "./actors.js";
-import type { BranchId, CommitId, EventProposal, EvidenceRef, Possibility, StoryTime, WorldState } from "./model.js";
+import {
+  eventProposalSchema,
+  idSchema,
+  possibilitySchema,
+  type BranchId,
+  type CommitId,
+  type EventProposal,
+  type EvidenceRef,
+  type Possibility,
+  type StoryTime,
+  type WorldState,
+} from "./model.js";
 import { buildFrontier, FrontierStore, possibilityToProposal, selectEligible, type Frontier, type FrontierTemporalMode } from "./frontier.js";
 import { WorldEngine } from "./engine.js";
 import { committedHistory } from "./scene.js";
+import { immutableClone } from "../util/immutable.js";
+
+const MAX_CALLBACK_CANDIDATES = 10_000;
+const actorProposalCandidateSchema = z.object({
+  proposal: eventProposalSchema,
+  priority: z.number().finite().min(0).max(1),
+  goalId: idSchema,
+}).strict();
 
 export type PossibilitySource = (input: {
   branchId: BranchId;
   commitId: CommitId;
-  state: WorldState;
+  state: Readonly<WorldState>;
 }) => Promise<readonly Possibility[]> | readonly Possibility[];
 
 export type MoveInput = {
@@ -44,7 +64,7 @@ export type CanonicalChoiceResolution = {
 export type NarrativeRender = (input: {
   branchId: BranchId;
   commitId: CommitId;
-  state: WorldState;
+  state: Readonly<WorldState>;
   committedEvents: readonly string[];
 }) => Promise<string | undefined> | string | undefined;
 
@@ -99,7 +119,12 @@ export class WorldRuntime {
 
     const actorLimit = boundedLimit(input.maxActorCandidates ?? 1, "maxActorCandidates");
     if (this.actorProposalSource && actorLimit > 0) {
-      const candidates = await this.actorProposalSource({ branchId: input.branchId, commitId: currentHead });
+      const rawCandidates = await this.actorProposalSource(immutableClone({
+        branchId: input.branchId,
+        commitId: currentHead,
+      }));
+      const candidates = actorProposalCandidateSchema.array().max(MAX_CALLBACK_CANDIDATES)
+        .parse(structuredClone(rawCandidates));
       const adjudicated = adjudicateActorCandidates(candidates, actorLimit);
       adjudicationConflicts.push(...adjudicated.conflicts);
       rejectedProposals.push(...adjudicated.conflicts.map((conflict) => conflict.loserProposalId));
@@ -134,7 +159,25 @@ export class WorldRuntime {
     }
 
     const state = await this.engine.projector.project(currentHead);
-    const renderedText = await this.render?.({ branchId: input.branchId, commitId: currentHead, state, committedEvents });
+    let renderedText: string | undefined;
+    if (this.render) {
+      const beforeRender = await this.engine.branches.readHead(input.branchId);
+      if (beforeRender !== currentHead) {
+        throw new Error(`Cannot render world move at stale commit ${currentHead}; current head is ${beforeRender}`);
+      }
+      const rendered: unknown = await this.render(immutableClone({
+        branchId: input.branchId,
+        commitId: currentHead,
+        state,
+        committedEvents,
+      }));
+      const afterRender = await this.engine.branches.readHead(input.branchId);
+      if (afterRender !== beforeRender) throw new Error("World runtime renderer mutated branch truth");
+      if (rendered !== undefined && typeof rendered !== "string") {
+        throw new Error("World runtime renderer must return a string or undefined");
+      }
+      renderedText = rendered;
+    }
     return {
       previousHead,
       newHead: currentHead,
@@ -157,7 +200,9 @@ export class WorldRuntime {
       this.temporalAnchor(head),
       this.branchActivity(head),
     ]);
-    const templates = await this.possibilitySource({ branchId, commitId: head, state });
+    const rawTemplates = await this.possibilitySource(immutableClone({ branchId, commitId: head, state }));
+    const templates = possibilitySchema.array().max(MAX_CALLBACK_CANDIDATES)
+      .parse(structuredClone(rawTemplates));
     const history = await this.possibilityHistory(head);
     const frontier = buildFrontier(branchId, head, state, templates, {
       realizedIds: history.realizedIds,

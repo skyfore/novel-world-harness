@@ -25,6 +25,10 @@ version: 1
 project:
   name: demo-world
   language: zh-CN
+  # Only these explicitly named files become trusted workspace guidance.
+  # Novel sources are never trusted by filename.
+  instructions:
+    - NWH.md
 
 llm:
   defaultProfile: main
@@ -52,6 +56,14 @@ The current terminal harness consumes three role routes:
 - `narrator`: ordinary `nwh` / `nwh play` sessions and the restricted `play-world` action translator.
 
 Unknown routes are allowed for future adapters, but they have no effect until code asks for that role.
+
+`project.instructions` is an explicit trust allowlist (maximum eight files and
+64,000 rendered characters total). A listed file that is missing, unsafe, or
+outside the workspace makes startup fail visibly; NWH never silently falls back
+to a conventionally named instruction file. Real-path checks reject a registered
+novel source as guidance, and ingest/source-loop entry rejects the inverse role
+change, so aliases and symlinks cannot make one physical file both trusted code
+guidance and untrusted evidence.
 
 Pi owns provider transport. A custom compatible endpoint can be described without changing CLI code:
 
@@ -101,6 +113,6 @@ $NWH_HOME/
 
 JSON control files use a temporary file plus atomic rename. Source manifests retain the origin label for provenance, but exact source bytes are copied once into the immutable SHA-256 material store. The origin file is no longer an authority after successful ingest.
 
-Legacy `.novel-harness/` is excluded from normal model file discovery. Only an existing `.novel-harness/instructions.md` is loaded explicitly as trusted project guidance. Retrieved source excerpts may appear in persisted Pi transcripts.
+Legacy `.novel-harness/` is excluded from normal model file discovery. A workspace file becomes trusted guidance only when its path is explicitly listed in `project.instructions`; there are no conventionally trusted filenames. Retrieved source excerpts may appear in persisted Pi transcripts, but remain untrusted evidence.
 
 Synthetic readiness thresholds and unused runtime tuning fields are intentionally not configuration. Inventory is reported by `nwh status`; evidence and consistency are checked by `nwh audit`; semantic quality must be measured against an explicit annotated corpus.

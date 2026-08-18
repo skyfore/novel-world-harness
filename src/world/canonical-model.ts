@@ -219,7 +219,13 @@ export class ProposalStore {
     const summaries: ProposalSummary[] = [];
     for (const name of names) {
       const value = JSON.parse(await fs.readFile(path.join(directory, name), "utf8")) as Record<string, unknown>;
-      if (sourceId && !proposalContainsSource(value, sourceId)) continue;
+      if (sourceId) {
+        const sourceIds = proposalEvidenceSourceIds(value);
+        if (sourceIds.length > 1) {
+          throw new Error(`Proposal ${typeof value.id === "string" ? value.id : name} mixes evidence from multiple novel sources: ${sourceIds.join(", ")}.`);
+        }
+        if (sourceIds[0] !== sourceId) continue;
+      }
       const generatedBy = value.generatedBy as Record<string, unknown> | undefined;
       if (typeof value.id !== "string" || typeof value.kind !== "string" || typeof value.schemaVersion !== "number" || typeof value.createdAt !== "string" || typeof generatedBy?.worker !== "string") {
         throw new Error(`Invalid proposal envelope: ${name}`);
@@ -248,12 +254,28 @@ export class ProposalStore {
   private proposalPath(status: ProposalStatus, id: string): string { return path.join(this.root, status, `${safeId(id)}.json`); }
 }
 
-function proposalContainsSource(value: unknown, sourceId: string): boolean {
-  if (Array.isArray(value)) return value.some((item) => proposalContainsSource(item, sourceId));
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  if (record.sourceId === sourceId) return true;
-  return Object.values(record).some((item) => proposalContainsSource(item, sourceId));
+function proposalEvidenceSourceIds(value: Record<string, unknown>): string[] {
+  const payload = value.payload && typeof value.payload === "object" && !Array.isArray(value.payload)
+    ? value.payload as Record<string, unknown>
+    : undefined;
+  const candidates = [value.evidence, payload?.evidence];
+  const sourceIds = new Set<string>();
+  for (const candidate of candidates) {
+    if (candidate === undefined) continue;
+    if (!Array.isArray(candidate)) throw new Error("Proposal evidence must be an array.");
+    for (const reference of candidate) {
+      if (!reference || typeof reference !== "object" || Array.isArray(reference)) {
+        throw new Error("Proposal evidence contains an invalid reference.");
+      }
+      const span = (reference as Record<string, unknown>).span;
+      if (!span || typeof span !== "object" || Array.isArray(span)
+        || typeof (span as Record<string, unknown>).sourceId !== "string") {
+        throw new Error("Proposal evidence contains an invalid source span.");
+      }
+      sourceIds.add((span as Record<string, unknown>).sourceId as string);
+    }
+  }
+  return [...sourceIds].sort();
 }
 
 function proposalIdentity<T>(proposal: ArtifactProposal<T>): Omit<ArtifactProposal<T>, "createdAt"> {

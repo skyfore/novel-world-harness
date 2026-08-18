@@ -27,11 +27,11 @@ describe("init command", () => {
     const raw = await fs.readFile(path.join(root, "novel-harness.yaml"), "utf8");
     expect(YAML.parse(raw)).toEqual({
       version: 1,
-      project: { name: "my-novel-world", language: "zh-CN" },
+      project: { name: "my-novel-world", language: "zh-CN", instructions: ["NWH.md"] },
     });
     expect(raw).not.toContain("provider:");
     expect(raw).not.toContain("apiKeyEnv:");
-    await expect(fs.readFile(path.join(root, "NOVEL.md"), "utf8")).resolves.toContain("Source evidence is authoritative");
+    await expect(fs.readFile(path.join(root, "NWH.md"), "utf8")).resolves.toContain("Source evidence is authoritative");
   });
 
   it("does not overwrite an existing config", async () => {
@@ -55,6 +55,6 @@ describe("init command", () => {
     });
 
     await expect(fs.readFile(path.join(root, "novel-harness.yaml"), "utf8")).resolves.toContain(path.basename(root));
-    await expect(fs.readFile(path.join(root, "NOVEL.md"), "utf8")).resolves.toContain("Novel workspace");
+    await expect(fs.readFile(path.join(root, "NWH.md"), "utf8")).resolves.toContain("Novel World Harness workspace");
   });
 });

@@ -2,7 +2,7 @@ import { validateActionKnowledge } from "./action-gate.js";
 import { evaluateCharacterGoal, type CharacterGoal } from "./actors.js";
 import { contentHash } from "./canonical.js";
 import { validateEventProposal, type WorldEngine } from "./engine.js";
-import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
 import type {
   NarrativeProgress,
   Possibility,
@@ -22,6 +22,7 @@ import {
 } from "./player-action.js";
 import type { WorldRuntime } from "./runtime.js";
 import { committedHistory, projectActorScene, realizedCanonicalEvents, type ActorSceneProjection } from "./scene.js";
+import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 
 export type NarrativeThreadView = {
   id: string;
@@ -38,16 +39,23 @@ export type PlayerAffordance = {
   description: string;
   action: string;
   intent: "act" | "observe" | "reflect" | "wait";
-  progressChannels: ProgressChannel[];
-  threadIds: string[];
   recommended: boolean;
 };
 
 export type ResolvedPlayerAffordance = PlayerAffordance & {
+  progressChannels: ProgressChannel[];
+  threadIds: string[];
   candidate: PlayerActionCandidate;
   authorizedKnowledgeClaimIds: string[];
   progress: NarrativeProgress;
   score: number;
+};
+
+export type ActorVisibleNarrativeThread = {
+  kind: Exclude<NarrativeThreadView["kind"], "canon-pressure" | "goal">;
+  summary: string;
+  pressure: "low" | "medium" | "high";
+  stage: "emerging" | "developing" | "escalated";
 };
 
 export type NarrativeDirection = {
@@ -85,20 +93,21 @@ export async function buildNarrativeDirection(
     runtime.refreshFrontier((await engine.objects.getCommit(commitId)).branchId, commitId),
     committedHistory(engine, commitId),
   ]);
+  const effectiveSourceId = await resolveCommitSourceId(engine, context, commitId, sourceId, "Narrative direction");
+  const scopedHistory = history.filter((entry) => !entry.event.evidence.length
+    || evidenceBelongsExclusivelyToSource(entry.event.evidence, effectiveSourceId));
   const knownClaimIds = new Set(scoped.knowledge.filter((entry) => entry.status !== "disbelieves").map((entry) => entry.claimId));
-  const realizedCanonicalEventIds = realizedCanonicalEvents(history);
+  const realizedCanonicalEventIds = realizedCanonicalEvents(scopedHistory);
   const knownClaimsByActor = new Map<string, ReadonlySet<string>>([[actorId, knownClaimIds]]);
-  const localGoalActorIds = [...new Set((context.actorGoals ?? [])
+  const scopedGoals = (context.actorGoals ?? [])
+    .filter((goal) => evidenceBelongsExclusivelyToSource(goal.evidence, effectiveSourceId));
+  const localGoalActorIds = [...new Set(scopedGoals
     .map((goal) => goal.actorId)
     .filter((goalActorId) => goalActorId !== actorId && scene.presentEntityIds.includes(goalActorId)))];
   const knowledgeProjector = new KnowledgeProjector(engine);
   await Promise.all(localGoalActorIds.map(async (goalActorId) => {
     const view = await knowledgeProjector.view(goalActorId, commitId);
-    knownClaimsByActor.set(goalActorId, new Set(
-      view.knowledge
-        .filter((entry) => isActionableKnowledge(entry.fact))
-        .map((entry) => entry.fact.claimId),
-    ));
+    knownClaimsByActor.set(goalActorId, actionableKnowledgeClaimIds(view, effectiveSourceId));
   }));
   const internalThreads: InternalThread[] = [];
   const latestVisibleEvent = scene.recentEvents.at(-1);
@@ -115,12 +124,12 @@ export async function buildNarrativeDirection(
         summary: `“${latestVisibleEvent.title}”留下的局势仍可被下一步行动改变。`,
         participantIds: [...latestVisibleEvent.participantIds],
         pressure: 0.65,
-        stage: threadStage(linkId, history),
+        stage: threadStage(linkId, scopedHistory),
       });
     }
   }
 
-  for (const goal of context.actorGoals ?? []) {
+  for (const goal of scopedGoals) {
     if (goal.actorId !== actorId && !scene.presentEntityIds.includes(goal.actorId)) continue;
     const activation = evaluateCharacterGoal(goal, {
       state,
@@ -128,7 +137,7 @@ export async function buildNarrativeDirection(
       realizedCanonicalEventIds,
       storyTime: state.logicalTime.storyTime,
     });
-    if (!activation.active || !goalVisibleInCurrentPhase(goal, history, scene.presentEntityIds)) continue;
+    if (!activation.active || !goalVisibleInCurrentPhase(goal, scopedHistory, scene.presentEntityIds)) continue;
     const participantIds = [...new Set([goal.actorId, ...(goal.targetIds ?? []), ...(goal.candidateAction?.participants ?? [])])]
       .filter((id) => id === actorId || scoped.referenceableEntities.some((entity) => entity.id === id));
     internalThreads.push({
@@ -140,12 +149,14 @@ export async function buildNarrativeDirection(
         : `${context.entities.get(goal.actorId)?.canonicalName ?? "现场人物"}正在对局势施加可感知的行动压力。`,
       participantIds,
       pressure: goal.priority,
-      stage: threadStage(`goal-${goal.id}`, history),
+      stage: threadStage(`goal-${goal.id}`, scopedHistory),
       goal,
     });
   }
 
   for (const entry of frontier.evaluated) {
+    if (entry.possibility.evidence.length
+      && !evidenceBelongsExclusivelyToSource(entry.possibility.evidence, effectiveSourceId)) continue;
     if (entry.status !== "eligible" || !entry.possibility.participants.includes(actorId)) continue;
     const otherCharacters = entry.possibility.participants.filter((id) =>
       id !== actorId && context.entities.get(id)?.kind === "character");
@@ -160,7 +171,7 @@ export async function buildNarrativeDirection(
         : "当前局势中有一个已经具备条件、但尚未被决定的节点。",
       participantIds: [...entry.possibility.participants],
       pressure: Math.max(0.1, Math.min(1, entry.score || entry.possibility.pressure)),
-      stage: threadStage(entry.possibility.id, history),
+      stage: threadStage(entry.possibility.id, scopedHistory),
       possibility: entry.possibility,
     });
   }
@@ -174,20 +185,20 @@ export async function buildNarrativeDirection(
       summary: "当前场景尚未定向；一次具体行动会建立可继续追踪的新支线。",
       participantIds: [actorId],
       pressure: 0.35,
-      stage: threadStage(`emergent-${contentHash({ actorId, scene: scene.key }).slice(0, 24)}`, history),
+      stage: threadStage(`emergent-${contentHash({ actorId, scene: scene.key }).slice(0, 24)}`, scopedHistory),
     });
   }
 
   const drafts: AffordanceDraft[] = [];
   addCanonicalAffordances(drafts, uniqueThreads, scoped, scene, context.entities, actorId);
   addConversationAffordances(drafts, uniqueThreads, scoped, scene, context.entities, actorId);
-  addLocationAffordances(drafts, uniqueThreads, scoped, scene, context.entities, actorId);
-  addDiscoverableAffordance(drafts, uniqueThreads, scoped, scene, history, context.claims, actorId);
+  addLocationAffordances(drafts, uniqueThreads, scoped, scene, actorId);
+  addSafeObservationAffordance(drafts, uniqueThreads, scene, actorId);
   addGoalAndPlanAffordances(drafts, uniqueThreads, scoped, scene, actorId);
   addPressureWaitAffordance(drafts, uniqueThreads, scoped, scene, actorId);
   addExplorationAffordances(drafts, uniqueThreads, scoped, scene, actorId);
 
-  const committedNoveltyKeys = new Set(history.flatMap((entry) =>
+  const committedNoveltyKeys = new Set(scopedHistory.flatMap((entry) =>
     entry.event.progress?.noveltyKey ? [entry.event.progress.noveltyKey] : []));
   const preflighted: ResolvedPlayerAffordance[] = [];
   for (const draft of drafts.sort((left, right) => right.score - left.score || left.action.localeCompare(right.action))) {
@@ -195,7 +206,7 @@ export async function buildNarrativeDirection(
     const id = `aff-${contentHash({ at: commitId, action: draft.action, candidate: draft.candidate, progress: draft.progress }).slice(0, 24)}`;
     if (preflighted.some((entry) => entry.progress.noveltyKey === draft.progress.noveltyKey || entry.action === draft.action)) continue;
     const resolved: ResolvedPlayerAffordance = { ...draft, id, recommended: false };
-    const issues = await preflightPlayerAffordance(engine, scoped, resolved, commitId);
+    const issues = await preflightPlayerAffordance(engine, scoped, resolved, commitId, effectiveSourceId);
     if (!issues.length) preflighted.push(resolved);
     if (preflighted.length >= 4) break;
   }
@@ -206,7 +217,7 @@ export async function buildNarrativeDirection(
       const id = `aff-${contentHash({ at: commitId, action: fallback.action, progress: fallback.progress }).slice(0, 24)}`;
       if (preflighted.some((entry) => entry.action === fallback.action || entry.progress.noveltyKey === fallback.progress.noveltyKey)) continue;
       const resolved: ResolvedPlayerAffordance = { ...fallback, id, recommended: false };
-      if (!(await preflightPlayerAffordance(engine, scoped, resolved, commitId)).length) preflighted.push(resolved);
+      if (!(await preflightPlayerAffordance(engine, scoped, resolved, commitId, effectiveSourceId)).length) preflighted.push(resolved);
       if (preflighted.length >= 2) break;
     }
   }
@@ -234,8 +245,29 @@ export async function resolvePlayerAffordance(
 }
 
 export function publicPlayerAffordance(affordance: ResolvedPlayerAffordance): PlayerAffordance {
-  const { candidate: _candidate, authorizedKnowledgeClaimIds: _claims, progress: _progress, score: _score, ...publicValue } = affordance;
+  const {
+    candidate: _candidate,
+    authorizedKnowledgeClaimIds: _claims,
+    progress: _progress,
+    score: _score,
+    progressChannels: _channels,
+    threadIds: _threadIds,
+    ...publicValue
+  } = affordance;
   return structuredClone(publicValue);
+}
+
+export function publicNarrativeThread(thread: NarrativeThreadView): ActorVisibleNarrativeThread | undefined {
+  // Canon-shaped pressure and compiler-authored character policy are useful to
+  // the deterministic director, but neither is actor knowledge. Keep both out
+  // of actor/narrator data.
+  if (thread.kind === "canon-pressure" || thread.kind === "goal") return undefined;
+  return {
+    kind: thread.kind,
+    summary: thread.summary,
+    pressure: thread.pressure >= 0.75 ? "high" : thread.pressure >= 0.4 ? "medium" : "low",
+    stage: thread.stage >= 2 ? "escalated" : thread.stage >= 1 ? "developing" : "emerging",
+  };
 }
 
 async function preflightPlayerAffordance(
@@ -243,12 +275,13 @@ async function preflightPlayerAffordance(
   scoped: ActorScopedActionContext,
   affordance: ResolvedPlayerAffordance,
   commitId: string,
+  sourceId?: string,
 ): Promise<ValidationIssue[]> {
   const authorized = new Set(affordance.authorizedKnowledgeClaimIds);
   const issues = [
     ...validatePlayerActionScope(affordance.candidate, scoped, authorized),
     ...validatePlayerActionGrounding(affordance.candidate, scoped),
-    ...await validatePlayerActionSpatialScope(engine, affordance.candidate, scoped.actorId, commitId),
+    ...await validatePlayerActionSpatialScope(engine, affordance.candidate, scoped.actorId, commitId, sourceId),
   ];
   if (issues.length) return issues;
   const action = playerActionToKnowledgeAwareAction({
@@ -279,6 +312,10 @@ function addCanonicalAffordances(
   for (const thread of threads) {
     const possibility = thread.possibility;
     if (!possibility?.proposedDelta) continue;
+    // Canon analogues may shape pressure/ranking, but their future outcome is
+    // compiler knowledge. Never turn that outcome delta into a player-facing
+    // executable action at a branch head where it has not happened.
+    if (possibility.kind === "canon-analogue") continue;
     if (possibility.proposedDelta.operations.some((operation) =>
       operation.op === "activate-rule" || operation.op === "deactivate-rule" || !writable.has(operation.entityId))) continue;
     if ((possibility.proposedKnowledge?.operations ?? []).some((operation) =>
@@ -349,7 +386,8 @@ function describeControllableCanonicalTransition(
     && referenceable.has(operation.value)
     && entities.get(operation.value)?.kind === "location"
   ) {
-    const name = entities.get(operation.value)!.canonicalName;
+    const name = actorVisibleEntityName(scoped, operation.value);
+    if (!name) return undefined;
     return {
       label: `前往${name}推进当前节点`,
       description: "完成一个明确且由你控制的场景转移，使当前故事压力进入下一处接触点。",
@@ -365,7 +403,8 @@ function describeControllableCanonicalTransition(
     && (operation.field === "character.relationships" || operation.field === "character.obligations")
     && referenceable.has(operation.member)
   ) {
-    const name = entities.get(operation.member)?.canonicalName ?? operation.member;
+    const name = actorVisibleEntityName(scoped, operation.member);
+    if (!name) return undefined;
     const establishing = operation.op === "add-member";
     return {
       label: establishing ? `明确与${name}的牵连` : `解除与${name}的牵连`,
@@ -386,8 +425,9 @@ function describeControllableCanonicalTransition(
     && present.has(operation.value)
     && entities.get(operation.value)?.kind === "character"
   ) {
-    const artifact = entities.get(operation.entityId)!.canonicalName;
-    const recipient = entities.get(operation.value)!.canonicalName;
+    const artifact = actorVisibleEntityName(scoped, operation.entityId);
+    const recipient = actorVisibleEntityName(scoped, operation.value);
+    if (!artifact || !recipient) return undefined;
     return {
       label: `把${artifact}交给${recipient}`,
       description: "完成一项由你控制、且收受者就在现场的物品转移。",
@@ -402,7 +442,8 @@ function describeControllableCanonicalTransition(
     && operation.value === true
     && scoped.ownedEntityState[operation.entityId]?.["artifact.owner"] === actorId
   ) {
-    const artifact = entities.get(operation.entityId)?.canonicalName ?? operation.entityId;
+    const artifact = actorVisibleEntityName(scoped, operation.entityId);
+    if (!artifact) return undefined;
     return {
       label: `完成${artifact}的交付`,
       description: "完成一项已经具备现场条件的明确交付，不替玩家隐藏真正的状态变化。",
@@ -424,7 +465,8 @@ function addConversationAffordances(
 ): void {
   for (const participantId of scene.presentEntityIds) {
     if (participantId === actorId || entities.get(participantId)?.kind !== "character") continue;
-    const name = entities.get(participantId)!.canonicalName;
+    const name = actorVisibleEntityName(scoped, participantId);
+    if (!name) continue;
     const related = threads.filter((thread) => thread.participantIds.includes(participantId));
     const links = (related.length ? related : threads.slice(0, 1));
     const stage = Math.max(0, ...links.map((thread) => thread.stage));
@@ -472,12 +514,11 @@ function addLocationAffordances(
   threads: readonly InternalThread[],
   scoped: ActorScopedActionContext,
   scene: ActorSceneProjection,
-  entities: ReadonlyMap<string, { kind: string; canonicalName: string }>,
   actorId: string,
 ): void {
   const links = threads.slice(0, 2);
   for (const location of scoped.referenceableEntities.filter((entity) => entity.kind === "location" && entity.id !== scene.locationId).slice(0, 2)) {
-    const name = entities.get(location.id)?.canonicalName ?? location.name;
+    const name = location.name;
     const progress = progressFor({
       channels: ["state", "scene", "thread"],
       threadIds: links.map((thread) => thread.linkId),
@@ -506,47 +547,36 @@ function addLocationAffordances(
   }
 }
 
-function addDiscoverableAffordance(
+function addSafeObservationAffordance(
   drafts: AffordanceDraft[],
   threads: readonly InternalThread[],
-  scoped: ActorScopedActionContext,
   scene: ActorSceneProjection,
-  history: Awaited<ReturnType<typeof committedHistory>>,
-  claims: ReadonlyMap<string, { id: string; subject: string; evidence: Array<{ span: { sourceId: string; startLine: number; endLine: number } }> }> | undefined,
   actorId: string,
 ): void {
-  if (!claims) return;
-  const known = new Set(scoped.knowledge.map((entry) => entry.claimId));
-  const referenceable = new Set(scoped.referenceableEntities.map((entity) => entity.id));
-  const recentEvidence = history.slice(-8).flatMap((entry) => entry.event.evidence);
-  const claim = [...claims.values()].find((candidate) =>
-    !known.has(candidate.id)
-    && referenceable.has(candidate.subject)
-    && candidate.evidence.some((claimEvidence) => recentEvidence.some((eventEvidence) => evidenceOverlaps(claimEvidence, eventEvidence))));
-  if (!claim) return;
-  const links = threads.slice(0, 2);
+  const focus = threads[0];
+  if (!focus) return;
   const progress = progressFor({
-    channels: ["knowledge", "thread"],
-    threadIds: links.map((thread) => thread.linkId),
-    noveltyKey: `discover:${claim.id}`,
+    channels: ["scene"],
+    threadIds: [focus.linkId],
+    noveltyKey: `observe:${scene.key}`,
+    scene: { kind: "stay", ...(scene.label ? { label: scene.label } : {}), beat: scene.beat + 1 },
   });
   drafts.push({
-    label: "查明刚才暴露的细节",
-    description: "现场已有可验证但你尚未掌握的信息；观察会获得新知识，而不是原地空看。",
-    action: "我仔细检查刚才发生的事留下的细节，确认其中真正可以知道的信息。",
+    label: "仔细观察眼前的场景",
+    description: "推进一次有限的感知节拍；它不会凭空授予尚未明确获得的事实。",
+    action: "我暂时不作决定，先仔细观察眼前能够直接感知的动静和细节。",
     intent: "observe",
     progressChannels: [...progress.channels],
-    threadIds: links.map((thread) => thread.id),
+    threadIds: [focus.id],
     candidate: playerActionCandidateSchema.parse({
-      title: "查明当前事件留下的细节",
+      title: "观察当前场景",
       participants: scene.presentEntityIds.filter((id) => id !== actorId),
       preconditions: [],
       proposedDelta: { version: 1, operations: [] },
-      proposedKnowledge: { version: 1, operations: [{ op: "learn", actorId, claimId: claim.id, status: "knows", confidence: 1 }] },
       requiresKnowledge: [],
       forbidsKnowledge: [],
     }),
-    authorizedKnowledgeClaimIds: [claim.id],
+    authorizedKnowledgeClaimIds: [],
     progress,
     score: 1.05,
   });
@@ -562,12 +592,13 @@ function addGoalAndPlanAffordances(
   const ownGoal = threads.find((thread) => thread.kind === "goal" && thread.goal?.actorId === actorId);
   const focus = ownGoal ?? threads[0];
   if (!focus) return;
-  const plan = ownGoal?.goal?.description ?? focus.summary;
+  // Selecting this affordance authorizes only the generic plan stated in the
+  // player-facing action. A hidden compiler goal must never become character
+  // state merely because the director used it for ranking.
+  const plan = "根据眼前局势确定一个马上可以执行的目标";
   const hasPlanField = scoped.writableStateFields.some((field) => field.key === "character.plan");
   const existingPlan = scoped.selfState["character.plan"];
-  const maySetPlan = ownGoal
-    ? existingPlan !== plan
-    : typeof existingPlan !== "string" || !existingPlan.trim();
+  const maySetPlan = typeof existingPlan !== "string" || !existingPlan.trim();
   const operations: StateOperation[] = hasPlanField && maySetPlan
     ? [{ op: "set", entityId: actorId, field: "character.plan", value: plan }]
     : [];
@@ -745,6 +776,13 @@ function progressFor(input: Omit<NarrativeProgress, "version">): NarrativeProgre
     channels: [...new Set(input.channels)],
     threadIds: [...new Set(input.threadIds)],
   };
+}
+
+function actorVisibleEntityName(
+  scoped: ActorScopedActionContext,
+  entityId: string,
+): string | undefined {
+  return scoped.referenceableEntities.find((entity) => entity.id === entityId)?.name;
 }
 
 function nextMomentumOperation(scoped: ActorScopedActionContext, actorId: string): StateOperation[] {

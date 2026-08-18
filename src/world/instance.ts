@@ -4,6 +4,7 @@ import { WorkspaceStore } from "../storage/workspace-store.js";
 import { stateDeltaSchema } from "./model.js";
 import { InitialWorldStore } from "./initial.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
+import { assertEvidenceExclusiveToSource } from "./source-scope.js";
 
 export type CreatedWorldBranch = {
   head: string;
@@ -18,7 +19,18 @@ export async function createWorldBranch(
   sourceId?: string,
   cacheRoot?: string,
 ): Promise<CreatedWorldBranch> {
-  const source = sourceId ? await (await WorkspaceStore.create(root)).getSource(sourceId) : undefined;
+  const workspace = await WorkspaceStore.create(root);
+  const sources = await workspace.listSources();
+  const source = sourceId
+    ? await workspace.getSource(sourceId)
+    : sources.length === 1
+      ? sources[0]!
+      : undefined;
+  if (sourceId && !source) throw new Error(`Unknown source id: ${sourceId}`);
+  if (!sourceId && sources.length > 1) {
+    throw new Error(`Multiple sources are registered; specify --source. Available: ${sources.map((item) => item.id).join(", ")}`);
+  }
+  const effectiveSourceId = source?.id;
   const prepared = source ? await new PreparedNovelCache(root, cacheRoot).loadFreshActive(source) : null;
   const artifacts = prepared ? {
     entities: prepared.bundle.canonical.entities,
@@ -30,7 +42,7 @@ export async function createWorldBranch(
     possibilities: prepared.bundle.canonical.possibilities,
   } : undefined;
   const { engine } = await openWorkspaceWorld(root, undefined, {
-    ...(sourceId ? { sourceId } : {}),
+    ...(effectiveSourceId ? { sourceId: effectiveSourceId } : {}),
     ...(prepared ? { preparedRevisionHash: prepared.bundleHash, artifacts } : {}),
   });
   const canonicalInitial = seedPath
@@ -39,8 +51,11 @@ export async function createWorldBranch(
   if (!seedPath && !canonicalInitial) {
     throw new Error("No accepted initial world. Review and accept an initial-world proposal before creating a playable branch, or pass --seed explicitly.");
   }
-  if (sourceId && canonicalInitial && !canonicalInitial.evidence.some((reference) => reference.span.sourceId === sourceId)) {
-    throw new Error(`Accepted initial world does not belong to source ${sourceId}.`);
+  if (effectiveSourceId && canonicalInitial) {
+    if (!canonicalInitial.evidence.some((reference) => reference.span.sourceId === effectiveSourceId)) {
+      throw new Error(`Accepted initial world does not belong to source ${effectiveSourceId}.`);
+    }
+    assertEvidenceExclusiveToSource(canonicalInitial.evidence, effectiveSourceId, "Accepted initial world");
   }
   const seed = seedPath
     ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8")))
@@ -67,7 +82,7 @@ export async function createWorldBranch(
     branchId,
     seed,
     seedPath ? undefined : canonicalInitial?.knowledge,
-    sourceId,
+    effectiveSourceId,
     prepared?.bundleHash,
     seedPath ? [] : canonicalInitial?.evidence,
     seedPath ? {} : {

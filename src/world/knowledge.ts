@@ -1,5 +1,7 @@
 import type { Claim, CommitId, EntityId, KnowledgeFact, WorldState } from "./model.js";
 import type { WorldEngine } from "./engine.js";
+import { knownStateFieldKeys, projectActorVisibleState } from "./actor-visible.js";
+import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
 
 export type KnowledgeState = {
   atCommit: CommitId;
@@ -15,6 +17,20 @@ export type ActorWorldView = {
 
 export function isActionableKnowledge(fact: KnowledgeFact): boolean {
   return fact.status !== "disbelieves";
+}
+
+export function actionableKnowledgeEntries(
+  view: ActorWorldView,
+  sourceId?: string,
+): Array<ActorWorldView["knowledge"][number] & { claim: Claim }> {
+  return view.knowledge.filter((entry): entry is ActorWorldView["knowledge"][number] & { claim: Claim } =>
+    Boolean(entry.claim)
+    && isActionableKnowledge(entry.fact)
+    && evidenceBelongsExclusivelyToSource(entry.claim?.evidence ?? [], sourceId));
+}
+
+export function actionableKnowledgeClaimIds(view: ActorWorldView, sourceId?: string): Set<string> {
+  return new Set(actionableKnowledgeEntries(view, sourceId).map((entry) => entry.fact.claimId));
 }
 
 export class KnowledgeProjector {
@@ -69,12 +85,22 @@ export class KnowledgeProjector {
       .sort((left, right) => left.claimId.localeCompare(right.claimId))
       .map((fact) => ({ fact, claim: context.claims?.get(fact.claimId) }))
       .map(({ fact, claim }) => (claim ? { fact, claim } : { fact }));
+    const stateKnowledge = knownStateFieldKeys(
+      actorId,
+      facts
+        .filter((entry) => entry.claim && isActionableKnowledge(entry.fact))
+        .flatMap((entry) => entry.claim ? [entry.claim] : []),
+    );
     return {
       actorId,
       atCommit: commitId,
-      selfState: { ...(state.values[actorId] ?? {}) },
+      selfState: projectActorVisibleState(
+        state.values[actorId] ?? {},
+        context.stateSchema,
+        "self",
+        stateKnowledge,
+      ),
       knowledge: facts,
     };
   }
 }
-

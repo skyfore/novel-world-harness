@@ -6,10 +6,12 @@ import {
   type EffectiveCharacterModel,
 } from "./actors.js";
 import type { WorldEngine } from "./engine.js";
-import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
 import type { LogicalTime, ProgressChannel, StoryTime } from "./model.js";
 import { committedHistory, realizedCanonicalEvents } from "./scene.js";
 import { evaluatePredicate } from "./state.js";
+import { observeCommittedEvent } from "./actor-visible.js";
+import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 
 export type CharacterLifeStage = {
   value: string;
@@ -44,6 +46,18 @@ export type CharacterDevelopmentView = {
   achievedMilestoneIds: string[];
 };
 
+export type ActorVisibleCharacterDevelopment = {
+  storyTime?: StoryTime;
+  elapsedDays: number;
+  ageYears?: number;
+  lifeStage?: CharacterLifeStage;
+  recentExperiences: Array<{
+    summary: string;
+    logicalTime: LogicalTime;
+    progressChannels: ProgressChannel[];
+  }>;
+};
+
 /**
  * A character's growth is a derived view over committed history, private
  * knowledge, and state. It is never a second mutable timeline.
@@ -62,25 +76,37 @@ export async function projectCharacterDevelopment(
   ]);
   const actor = context.entities.get(actorId);
   if (!actor || actor.kind !== "character") throw new Error(`Character development requires a character: ${actorId}`);
+  const effectiveSourceId = await resolveCommitSourceId(engine, context, commitId, undefined, "Character development");
+  if (!evidenceBelongsExclusivelyToSource(actor.evidence, effectiveSourceId)) {
+    throw new Error(`Character ${actorId} is outside the active development source.`);
+  }
 
-  const knownClaimIds = new Set(actorView.knowledge
-    .filter((entry) => isActionableKnowledge(entry.fact))
-    .map((entry) => entry.fact.claimId));
-  const realized = realizedCanonicalEvents(history);
-  const experiencedEntries = history.filter((entry) => entry.event.participants.includes(actorId));
+  const knownClaimIds = actionableKnowledgeClaimIds(actorView, effectiveSourceId);
+  const scopedHistory = history.filter((entry) => !entry.event.evidence.length
+    || evidenceBelongsExclusivelyToSource(entry.event.evidence, effectiveSourceId));
+  const realized = realizedCanonicalEvents(scopedHistory);
+  const experiencedEntries = scopedHistory.filter((entry) => entry.event.participants.includes(actorId));
   const experiencedCanonical = new Set(experiencedEntries.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? []));
   const recentLivedExperiences = experiencedEntries
     .filter((entry) => entry.event.title !== "Genesis")
     .slice(-12)
-    .map((entry) => ({
-      eventId: entry.event.eventId,
-      atCommit: entry.commitId,
-      title: entry.event.title,
-      logicalTime: structuredClone(entry.event.logicalTime),
-      participantIds: [...entry.event.participants],
-      progressChannels: [...(entry.event.progress?.channels ?? [])],
-    }));
-  const model = overrides.model === undefined ? context.actorModels?.get(actorId) : overrides.model;
+    .flatMap((entry) => {
+      const observation = observeCommittedEvent(entry.event, actorId);
+      if (!observation) return [];
+      return [{
+        eventId: entry.event.eventId,
+        atCommit: entry.commitId,
+        title: observation.summary,
+        logicalTime: structuredClone(entry.event.logicalTime),
+        participantIds: [actorId],
+        progressChannels: [...(entry.event.progress?.channels ?? [])],
+      }];
+    });
+  const candidateModel = overrides.model === undefined ? context.actorModels?.get(actorId) : overrides.model;
+  const model = candidateModel
+    && evidenceBelongsExclusivelyToSource(candidateModel.evidence, effectiveSourceId)
+    ? candidateModel
+    : undefined;
   const effectiveModel = model ? resolveCharacterModel(model, {
     state,
     knownClaimIds,
@@ -93,7 +119,9 @@ export async function projectCharacterDevelopment(
   const completedGoalIds: string[] = [];
   const expiredGoalIds: string[] = [];
   const achievedMilestoneIds: string[] = [];
-  const goals = (overrides.goals ?? context.actorGoals ?? []).filter((goal) => goal.actorId === actorId);
+  const goals = (overrides.goals ?? context.actorGoals ?? [])
+    .filter((goal) => goal.actorId === actorId)
+    .filter((goal) => evidenceBelongsExclusivelyToSource(goal.evidence, effectiveSourceId));
   for (const goal of goals) {
     const activation = evaluateCharacterGoal(goal, {
       state,
@@ -133,6 +161,24 @@ export async function projectCharacterDevelopment(
     completedGoalIds: completedGoalIds.sort(),
     expiredGoalIds: expiredGoalIds.sort(),
     achievedMilestoneIds: achievedMilestoneIds.sort(),
+  };
+}
+
+/** Strip policy/goals, canonical IDs, claim IDs and numeric model internals. */
+export function actorVisibleCharacterDevelopment(
+  development: CharacterDevelopmentView,
+  _goals: readonly CharacterGoal[],
+): ActorVisibleCharacterDevelopment {
+  return {
+    ...(development.storyTime ? { storyTime: structuredClone(development.storyTime) } : {}),
+    elapsedDays: development.elapsedDays,
+    ...(development.ageYears !== undefined ? { ageYears: development.ageYears } : {}),
+    ...(development.lifeStage ? { lifeStage: structuredClone(development.lifeStage) } : {}),
+    recentExperiences: development.recentLivedExperiences.map((experience) => ({
+      summary: experience.title,
+      logicalTime: structuredClone(experience.logicalTime),
+      progressChannels: [...experience.progressChannels],
+    })),
   };
 }
 

@@ -75,7 +75,7 @@ export async function worldActorCommand(root: string, branchId: string, actorId:
   const head = await engine.branches.readHead(branchId);
   const context = await engine.contextForCommit(head);
   const [model, goals, view] = await Promise.all([
-    context.actorModels?.get(actorId) ?? actors.getModel(actorId),
+    context.actorModels ? context.actorModels.get(actorId) : actors.getModel(actorId),
     context.actorGoals?.filter((goal) => goal.actorId === actorId) ?? actors.listGoals(actorId),
     new KnowledgeProjector(engine).view(actorId, head),
   ]);

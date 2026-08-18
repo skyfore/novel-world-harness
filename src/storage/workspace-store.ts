@@ -33,6 +33,7 @@ export function defaultProjectForRoot(root: string): HarnessConfig["project"] {
   return {
     name: path.basename(path.resolve(root)) || "novel-world",
     language: "zh-CN",
+    instructions: [],
   };
 }
 

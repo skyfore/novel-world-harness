@@ -14,7 +14,7 @@ export const SAFE_LOGICAL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const idSchema = z.string().regex(
   SAFE_LOGICAL_ID,
   "IDs must start with an ASCII letter or digit and contain only letters, digits, dot, underscore, or hyphen",
-);
+).max(200, "IDs must be at most 200 characters");
 
 export const sourceSpanSchema = z
   .object({
@@ -102,12 +102,20 @@ export type NarrativeContext = z.infer<typeof narrativeContextSchema>;
 export const valueTypeSchema = z.enum(["boolean", "number", "string", "entity-ref", "entity-ref-set", "json-scalar"]);
 export type ValueType = z.infer<typeof valueTypeSchema>;
 
+/**
+ * Visibility is enforced when world state crosses an actor/model boundary.
+ * Missing visibility is treated as engine-only for legacy or custom fields.
+ */
+export const stateFieldVisibilitySchema = z.enum(["public", "self", "owner", "knowledge", "engine"]);
+export type StateFieldVisibility = z.infer<typeof stateFieldVisibilitySchema>;
+
 export const stateFieldSpecSchema = z
   .object({
     key: z.string().min(1),
     appliesTo: z.array(entityKindSchema).min(1),
     valueType: valueTypeSchema,
     cardinality: z.enum(["one", "many"]),
+    visibility: stateFieldVisibilitySchema.optional(),
     required: z.boolean().optional(),
     exclusive: z.boolean().optional(),
     minimum: z.number().finite().optional(),
@@ -256,6 +264,12 @@ export type CanonicalEvent = z.infer<typeof canonicalEventSchema>;
 export const worldRuleSchema = z.object({ id: idSchema, name: z.string().min(1), scope: z.enum(["global", "entity", "location", "faction", "institution"]), appliesWhen: z.array(predicateSchema), forbids: z.array(predicateSchema).optional(), requires: z.array(predicateSchema).optional(), evidence: z.array(evidenceRefSchema) }).strict();
 export type WorldRule = z.infer<typeof worldRuleSchema>;
 
+export const actorEventObservationSchema = z.object({
+  actorId: idSchema,
+  summary: z.string().trim().min(1).max(1_000),
+}).strict();
+export type ActorEventObservation = z.infer<typeof actorEventObservationSchema>;
+
 export const eventProposalSchema = z
   .object({
     proposalId: idSchema,
@@ -264,6 +278,7 @@ export const eventProposalSchema = z
     source: z.enum(["player", "actor", "background", "canon-candidate", "compiler"]),
     actorId: idSchema.optional(),
     title: z.string().min(1),
+    actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
     participants: z.array(idSchema),
     proposedTime: storyTimeSchema,
     timeAdvance: timeAdvanceSchema.optional(),
@@ -288,6 +303,7 @@ export const committedEventSchema = z
     timeAdvance: timeAdvanceSchema.optional(),
     proposalId: idSchema.optional(),
     title: z.string().min(1),
+    actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
     participants: z.array(idSchema),
     deltaHash: idSchema,
     knowledgeDeltaHash: idSchema.optional(),

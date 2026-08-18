@@ -11,16 +11,22 @@ import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
+const novelEvidence = [{
+  span: { sourceId: "novel", startLine: 1, endLine: 1, quoteHash: "actor-policy" },
+  strength: "explicit" as const,
+}];
+
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-actor-"));
   roots.push(root);
   const entities: Entity[] = [
-    { id: "alice", kind: "character", canonicalName: "Alice", aliases: [], evidence: [] },
-    { id: "home", kind: "location", canonicalName: "Home", aliases: [], evidence: [] },
-    { id: "meeting", kind: "location", canonicalName: "Meeting", aliases: [], evidence: [] },
+    { id: "alice", kind: "character", canonicalName: "Alice", aliases: [], evidence: novelEvidence },
+    { id: "home", kind: "location", canonicalName: "Home", aliases: [], evidence: novelEvidence },
+    { id: "meeting", kind: "location", canonicalName: "Meeting", aliases: [], evidence: novelEvidence },
   ];
-  const invitation: Claim = { id: "invited", subject: "alice", predicate: "invited-to-meeting", object: true, epistemicType: "explicit-fact", evidence: [] };
+  const invitation: Claim = { id: "invited", subject: "alice", predicate: "invited-to-meeting", object: true, epistemicType: "explicit-fact", evidence: novelEvidence };
   const context: WorldModelContext = {
+    sourceId: "novel",
     entities: new Map(entities.map((entity) => [entity.id, entity])),
     claims: new Map([[invitation.id, invitation]]),
     rules: new Map(),
@@ -144,11 +150,12 @@ describe("actor policy", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-actor-reaction-"));
     roots.push(root);
     const entities: Entity[] = [
-      { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] },
-      { id: "rival", kind: "character", canonicalName: "Rival", aliases: [], evidence: [] },
-      { id: "room", kind: "location", canonicalName: "Room", aliases: [], evidence: [] },
+      { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: novelEvidence },
+      { id: "rival", kind: "character", canonicalName: "Rival", aliases: [], evidence: novelEvidence },
+      { id: "room", kind: "location", canonicalName: "Room", aliases: [], evidence: novelEvidence },
     ];
     const context: WorldModelContext = {
+      sourceId: "novel",
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       rules: new Map(),
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),

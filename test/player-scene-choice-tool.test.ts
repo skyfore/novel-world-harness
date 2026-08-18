@@ -14,11 +14,14 @@ describe("player scene choice capture tool", () => {
     };
 
     await capture.tool.execute("choices-1", input, undefined, undefined, {} as never);
+    expect(capture.getExecutionAttempts()).toBe(1);
     expect(capture.getChoices()).toEqual(input.choices.map((choice) => ({ ...choice, intent: "act", recommended: false })));
     await expect(capture.tool.execute("choices-2", input, undefined, undefined, {} as never))
       .rejects.toThrow("Only one scene-choice set");
+    expect(capture.getExecutionAttempts()).toBe(2);
 
     capture.reset();
+    expect(capture.getExecutionAttempts()).toBe(0);
     await capture.tool.execute("choices-3", input, undefined, undefined, {} as never);
     expect(capture.getChoices()).toHaveLength(2);
   });
@@ -33,8 +36,8 @@ describe("player scene choice capture tool", () => {
     await expect(capture.tool.execute("choices-2", { choices: [] }, undefined, undefined, {} as never)).rejects.toThrow();
 
     const affordances: PlayerAffordance[] = [
-      { id: "aff-open", label: "开门", description: "试着打开门。", action: "我试着打开门。", intent: "act", progressChannels: ["scene"], threadIds: ["thread-a"], recommended: true },
-      { id: "aff-knock", label: "敲门", description: "先敲一敲门。", action: "我先敲门。", intent: "act", progressChannels: ["consequence"], threadIds: ["thread-a"], recommended: false },
+      { id: "aff-open", label: "开门", description: "试着打开门。", action: "我试着打开门。", intent: "act", recommended: true },
+      { id: "aff-knock", label: "敲门", description: "先敲一敲门。", action: "我先敲门。", intent: "act", recommended: false },
     ];
     expect(defaultPlayerSceneChoices()).toEqual([]);
     expect(defaultPlayerSceneChoices(affordances)).toHaveLength(2);

@@ -6,6 +6,7 @@ import { CanonicalModelStore, ProposalStore, type ProposalSummary } from "../wor
 import { InitialWorldStore, type InitialWorld } from "../world/initial.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import { BranchStore } from "../world/store.js";
+import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 
 export type PreparationStage =
   | "needs-source"
@@ -154,6 +155,7 @@ export async function inspectPreparation(
       next: "nwh compile \"Propose an evidence-backed initial world for the opening state\"",
     };
   }
+  assertEvidenceExclusiveToSource(initialWorld.evidence, source.id, "Prepared opening world");
   const openingBatch = selectOpeningCompilerBatch(batches);
   if (openingBatch && !initialWorld.evidence.some((reference) =>
     openingBatch.evidence.some((opening) => evidenceSpansOverlap(reference, opening)))) {
@@ -170,7 +172,11 @@ export async function inspectPreparation(
 
   const sourceCharacters = (await new CanonicalModelStore(workspaceRoot).listEntities())
     .filter((entity) => entity.kind === "character")
-    .filter((entity) => entity.evidence.some((reference) => reference.span.sourceId === source.id));
+    .filter((entity) => {
+      const matches = entity.evidence.some((reference) => reference.span.sourceId === source.id);
+      if (matches) assertEvidenceExclusiveToSource(entity.evidence, source.id, `Playable character ${entity.id}`);
+      return matches;
+    });
   if (!sourceCharacters.length) {
     return {
       ...shared,

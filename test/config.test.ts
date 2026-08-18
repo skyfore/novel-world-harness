@@ -46,7 +46,7 @@ describe("configSchema", () => {
 
     expect(config).toEqual({
       version: 1,
-      project: { name: "fresh-world", language: "zh-CN" },
+      project: { name: "fresh-world", language: "zh-CN", instructions: [] },
     });
     expect(profileForRole(config, "narrator")).toEqual({ name: undefined, profile: undefined });
   });

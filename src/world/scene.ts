@@ -1,6 +1,8 @@
 import { contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
 import type { CommitId, CommittedEvent, Entity, EntityId, NarrativeProgress, StateDelta, StateValue } from "./model.js";
+import { observeCommittedEvent, projectActorVisibleState } from "./actor-visible.js";
+import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 
 export type SceneEventProjection = {
   eventId: string;
@@ -9,6 +11,7 @@ export type SceneEventProjection = {
   actorId?: string;
   participantIds: string[];
   step: number;
+  storyTime?: CommittedEvent["logicalTime"]["storyTime"];
   progress?: NarrativeProgress;
 };
 
@@ -53,6 +56,10 @@ export async function projectActorScene(
   ]);
   const actor = context.entities.get(actorId);
   if (!actor || actor.kind !== "character") throw new Error(`Scene projection requires a character actor: ${actorId}`);
+  const effectiveSourceId = await resolveCommitSourceId(engine, context, commitId, sourceId, "Scene");
+  if (!evidenceBelongsExclusivelyToSource(actor.evidence, effectiveSourceId)) {
+    throw new Error(`Scene actor ${actorId} is not owned by source ${effectiveSourceId}.`);
+  }
 
   const present = new Set<EntityId>([actorId]);
   let locationId: EntityId | undefined;
@@ -63,13 +70,16 @@ export async function projectActorScene(
   const relevantEvents: SceneEventProjection[] = [];
 
   for (const entry of history) {
+    if (entry.event.evidence.length
+      && !evidenceBelongsExclusivelyToSource(entry.event.evidence, effectiveSourceId)) continue;
     const actorLocationWrite = finalLocationWrite(entry.delta, actorId);
     const progressScene = entry.event.participants.includes(actorId) ? entry.event.progress?.scene : undefined;
     const boundary = actorLocationWrite !== undefined
       || Boolean(progressScene && progressScene.kind !== "stay");
 
     if (actorLocationWrite !== undefined) {
-      locationId = typeof actorLocationWrite === "string" && context.entities.get(actorLocationWrite)?.kind === "location"
+      locationId = typeof actorLocationWrite === "string"
+        && isSourceOwnedLocation(context.entities, actorLocationWrite, effectiveSourceId)
         ? actorLocationWrite
         : undefined;
       label = locationId ? context.entities.get(locationId)?.canonicalName : progressScene?.label;
@@ -77,7 +87,8 @@ export async function projectActorScene(
     }
     if (progressScene) {
       beat = Math.max(beat + (progressScene.kind === "stay" ? 0 : 1), progressScene.beat);
-      if (progressScene.destinationEntityId && context.entities.get(progressScene.destinationEntityId)?.kind === "location") {
+      if (progressScene.destinationEntityId
+        && isSourceOwnedLocation(context.entities, progressScene.destinationEntityId, effectiveSourceId)) {
         locationId = progressScene.destinationEntityId;
         openSceneOverridesStableLocation = false;
       } else if (progressScene.kind === "depart" || progressScene.kind === "explore") {
@@ -103,17 +114,27 @@ export async function projectActorScene(
 
     for (const participantId of entry.event.participants) {
       const entity = context.entities.get(participantId);
-      if (!entity || entity.kind !== "character" || !belongsToSource(entity, sourceId)) continue;
+      if (!entity || entity.kind !== "character" || !evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId)) continue;
       if (isProvenRemote(state.values, actorId, participantId)) continue;
       present.add(participantId);
     }
+    const observation = observeCommittedEvent(entry.event, actorId);
+    if (!observation) continue;
+    const visibleParticipantIds = entry.event.participants.filter((participantId) => {
+      if (participantId === actorId) return true;
+      const participant = context.entities.get(participantId);
+      return participant?.kind === "character"
+        && evidenceBelongsExclusivelyToSource(participant.evidence, effectiveSourceId)
+        && !isProvenRemote(state.values, actorId, participantId);
+    });
     relevantEvents.push({
       eventId: entry.event.eventId,
       eventHash: entry.eventHash,
-      title: entry.event.title,
+      title: observation.summary,
       ...(entry.event.actorId ? { actorId: entry.event.actorId } : {}),
-      participantIds: [...entry.event.participants],
-      step: entry.event.logicalTime.step,
+      participantIds: visibleParticipantIds,
+      step: observation.step,
+      ...(observation.storyTime ? { storyTime: structuredClone(observation.storyTime) } : {}),
       ...(entry.event.progress ? { progress: structuredClone(entry.event.progress) } : {}),
     });
   }
@@ -122,19 +143,19 @@ export async function projectActorScene(
   if (
     !openSceneOverridesStableLocation
     && typeof projectedLocation === "string"
-    && context.entities.get(projectedLocation)?.kind === "location"
+    && isSourceOwnedLocation(context.entities, projectedLocation, effectiveSourceId)
   ) {
     locationId = projectedLocation;
     label = context.entities.get(projectedLocation)?.canonicalName;
     for (const entity of context.entities.values()) {
-      if (entity.kind !== "character" || !belongsToSource(entity, sourceId)) continue;
+      if (entity.kind !== "character" || !evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId)) continue;
       if (state.values[entity.id]?.["character.location"] === projectedLocation) present.add(entity.id);
     }
   }
 
   for (const entityId of [...present]) {
     const entity = context.entities.get(entityId);
-    if (!entity || !belongsToSource(entity, sourceId) || isProvenRemote(state.values, actorId, entityId)) present.delete(entityId);
+    if (!entity || !evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId) || isProvenRemote(state.values, actorId, entityId)) present.delete(entityId);
   }
   present.add(actorId);
 
@@ -148,7 +169,9 @@ export async function projectActorScene(
     : label
       ? `scene:${contentHash(label.normalize("NFKC").trim()).slice(0, 16)}`
       : `scene:${lastBoundaryEventId ?? "opening"}`;
-  const locationState = locationId ? structuredClone(state.values[locationId] ?? {}) : {};
+  const locationState = locationId
+    ? projectActorVisibleState(state.values[locationId] ?? {}, context.stateSchema, "public")
+    : {};
   const signature = contentHash({
     key,
     beat,
@@ -214,6 +237,17 @@ function finalLocationWrite(delta: StateDelta, actorId: string): string | null |
   return found ? result : undefined;
 }
 
+function isSourceOwnedLocation(
+  entities: ReadonlyMap<EntityId, Entity>,
+  entityId: EntityId,
+  sourceId?: string,
+): boolean {
+  const entity = entities.get(entityId);
+  return Boolean(entity
+    && entity.kind === "location"
+    && evidenceBelongsExclusivelyToSource(entity.evidence, sourceId));
+}
+
 function removeCharactersWhoMovedAway(
   delta: StateDelta,
   actorId: string,
@@ -238,8 +272,4 @@ function isProvenRemote(
   const actorLocation = values[actorId]?.["character.location"];
   const otherLocation = values[otherId]?.["character.location"];
   return typeof actorLocation === "string" && typeof otherLocation === "string" && actorLocation !== otherLocation;
-}
-
-function belongsToSource(entity: Entity, sourceId?: string): boolean {
-  return !sourceId || entity.evidence.some((reference) => reference.span.sourceId === sourceId);
 }

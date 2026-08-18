@@ -5,6 +5,8 @@ import { loadWorldContext, type ScopedWorldArtifacts } from "./context.js";
 import { WorldEngine } from "./engine.js";
 import { PossibilityTemplateStore } from "./possibility-model.js";
 import { WorldRuntime, type NarrativeRender, type PossibilitySource } from "./runtime.js";
+import { contextContainsGroundedArtifacts, evidenceBelongsExclusivelyToSource, inferLegacyBranchSourceId } from "./source-scope.js";
+import type { EvidenceRef } from "./model.js";
 
 export type WorkspaceWorld = {
   engine: WorldEngine;
@@ -30,10 +32,28 @@ export async function openWorkspaceWorld(
   const actorModels = new ActorModelStore(workspaceRoot);
   const possibilityTemplates = new PossibilityTemplateStore(workspaceRoot);
   const possibilitySource: PossibilitySource = async ({ branchId, commitId }) => {
-    const commitContext = await engine.contextForCommit(commitId);
+    const [commitContext, branch] = await Promise.all([
+      engine.contextForCommit(commitId),
+      engine.branches.read(branchId),
+    ]);
+    if (branch.sourceId && commitContext.sourceId && branch.sourceId !== commitContext.sourceId) {
+      throw new Error(`Branch source '${branch.sourceId}' does not match committed context '${commitContext.sourceId}'.`);
+    }
+    const sourceId = branch.sourceId
+      ?? commitContext.sourceId
+      ?? await inferLegacyBranchSourceId(engine, commitId);
+    // An unscoped legacy branch in a multi-novel context has no trustworthy
+    // ownership boundary. Disabling automatic possibilities is safer than
+    // scheduling canon or background pressure from an unrelated novel.
+    if (!sourceId && contextContainsGroundedArtifacts(commitContext)) return [];
+    const belongsToActiveWorld = (item: { evidence: readonly EvidenceRef[] }) => sourceId
+      ? evidenceBelongsExclusivelyToSource(item.evidence, sourceId)
+      : item.evidence.length === 0;
     const templates = (commitContext.possibilityTemplates ?? await possibilityTemplates.list())
+      .filter(belongsToActiveWorld)
       .map((template) => ({ ...template, branchId, evaluatedAtCommit: commitId }));
-    const events = [...(commitContext.events?.values() ?? [])];
+    const events = [...(commitContext.events?.values() ?? [])]
+      .filter(belongsToActiveWorld);
     const canonical = events.map((event) => canonicalEventToPossibility(event, branchId, commitId));
     const byId = new Map(canonical.map((possibility) => [possibility.id, possibility]));
     for (const template of templates) {

@@ -91,7 +91,7 @@ function constrainStateFields(value: unknown, stateFields: readonly string[]): v
       : undefined;
     if (
       typeof operation === "string"
-      && ["set", "unset", "add-member", "remove-member", "fact-equals", "fact-exists", "entity-in"].includes(operation)
+      && ["set", "unset", "adjust-number", "add-member", "remove-member", "fact-equals", "fact-exists", "entity-in"].includes(operation)
       && propertyRecord.field
     ) {
       propertyRecord.field = {

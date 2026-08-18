@@ -8,6 +8,7 @@ import { loadWorldContext } from "../src/world/context.js";
 import { WorldEngine } from "../src/world/engine.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { KnowledgeProjector } from "../src/world/knowledge.js";
+import { BranchStore } from "../src/world/store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { worldCreateCommand } from "../src/commands/world.js";
 
@@ -19,6 +20,21 @@ describe("canonical initial world", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-initial-missing-"));
     roots.push(root);
     await expect(worldCreateCommand(root, "main")).rejects.toThrow("No accepted initial world");
+  });
+
+  it("requires an explicit source before creating a branch in a multi-novel workspace", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-initial-source-scope-"));
+    roots.push(root);
+    const first = await createEvidenceFixture(root, "First novel.\n", "first.txt");
+    await createEvidenceFixture(root, "Second novel.\n", "second.txt");
+    const seedPath = path.join(root, "seed.json");
+    await fs.writeFile(seedPath, JSON.stringify({ version: 1, operations: [] }), "utf8");
+
+    await expect(worldCreateCommand(root, "ambiguous", seedPath))
+      .rejects.toThrow("Multiple sources are registered; specify --source");
+    await expect(worldCreateCommand(root, "first", seedPath, first.source.id)).resolves.toBeUndefined();
+    await expect(new BranchStore(root).read("first"))
+      .resolves.toMatchObject({ sourceId: first.source.id });
   });
 
   it("requires canonical entities before accepting the seed and replays it as genesis", async () => {

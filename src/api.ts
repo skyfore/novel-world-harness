@@ -32,12 +32,12 @@ export { InitialWorldStore, initialWorldSchema, openingCheckpointSchema, type In
 export { createWorldBranch, type CreatedWorldBranch } from "./world/instance.js";
 export { KnowledgeProjector, type ActorWorldView } from "./world/knowledge.js";
 export { isNarrativeInterpretation, NarrativeMetaView, type NarrativeObservation, type NarrativeMetaKind } from "./world/meta.js";
-export { modelActorProposalSource, actorActionTemplateSchema, type ActorActionTemplate, type ActorReasoner, type ActorReasoningInput } from "./world/model-actor-policy.js";
+export { modelActorProposalSource, actorActionTemplateSchema, type ActorActionTemplate, type ActorReasoner, type ActorReasoningInput, type ModelActorDevelopmentView, type ModelActorDispositionView, type ModelActorGoalView, type ModelActorWorldView } from "./world/model-actor-policy.js";
 export * from "./world/model.js";
-export { NarrativeRenderer, type ActorNarrativeFrame, type NarrativeAdapter, type NarrativeEvent, type NarrativeFrame, type NarrativeStyle, type OmniscientNarrativeFrame } from "./world/narrative.js";
-export { buildNarrativeDirection, publicPlayerAffordance, resolvePlayerAffordance, type NarrativeDirection, type NarrativeThreadView, type PlayerAffordance, type ResolvedPlayerAffordance } from "./world/narrative-director.js";
+export { NarrativeRenderer, type ActorNarrativeEvent, type ActorNarrativeFrame, type ActorNarrativeView, type NarrativeAdapter, type NarrativeEvent, type NarrativeFrame, type NarrativeStyle, type OmniscientNarrativeFrame } from "./world/narrative.js";
+export { buildNarrativeDirection, publicNarrativeThread, publicPlayerAffordance, resolvePlayerAffordance, type ActorVisibleNarrativeThread, type NarrativeDirection, type NarrativeThreadView, type PlayerAffordance, type ResolvedPlayerAffordance } from "./world/narrative-director.js";
 export { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "./world/possibility-model.js";
-export { buildActorScopedActionContext, deterministicPlayerIntentCandidate, playerActionCandidateSchema, playerActionToKnowledgeAwareAction, playerTurnInputSchema, PlayerTurnService, validatePlayerActionGrounding, validatePlayerActionScope, validatePlayerActionSpatialScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionTranslator, type PlayerProgressCertificate, type PlayerTurnAuthority, type PlayerTurnInput, type PlayerTurnResult, type SafePlayerIntent } from "./world/player-action.js";
+export { buildActorScopedActionContext, createPlayerActionModelBoundary, deterministicPlayerIntentCandidate, playerActionCandidateSchema, playerActionModelContext, playerActionToKnowledgeAwareAction, playerActionTranslationContext, playerTurnInputSchema, PlayerTurnService, validatePlayerActionGrounding, validatePlayerActionScope, validatePlayerActionSpatialScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionModelBoundary, type PlayerActionTranslationContext, type PlayerActionTranslator, type PlayerProgressCertificate, type PlayerTurnAuthority, type PlayerTurnInput, type PlayerTurnResult, type SafePlayerIntent } from "./world/player-action.js";
 export { classifyPlayerInput, renderPlayerMetaResponse, type PlayerInputRoute } from "./world/player-input-route.js";
 export { PlayerTurnAuditStore, type PlayerTurnAudit, type PlayerTurnOrigin } from "./world/player-turn-audit.js";
 export { PlaySessionStore, activePlaySessionSchema, type ActivePlaySession } from "./world/play-session.js";
@@ -45,10 +45,13 @@ export {
   assertPlaySceneNarration,
   buildPlayOpeningFrame,
   playSceneRequestForEntry,
+  playerSceneModelFrame,
   playScenePrompt,
   renderPlaySceneFailure,
   resolvePlayScenePurpose,
   type PlayOpeningFrame,
+  type PlayerSceneNarratorFrame,
+  type PlayerTurnResolution,
   type PlayEntryIntent,
   type PlayScenePurpose,
   type PlaySceneRequest,

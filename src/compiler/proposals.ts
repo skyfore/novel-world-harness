@@ -26,6 +26,7 @@ import {
 } from "../world/model.js";
 import { PossibilityTemplateStore, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
+import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
 import { hasExecutablePossibilityEffect, isMetaKnowledgePredicate } from "./semantics.js";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 
@@ -109,6 +110,14 @@ export class CompilerProposalService {
     const payload = schema.parse(input.payload);
     if (kind !== "entity" && kind !== "claim" && kind !== "character-model") assertCompilerStateFields(payload);
     const evidence = input.evidence === undefined ? [] : evidenceRefSchema.array().parse(input.evidence);
+    const payloadEvidence = payload && typeof payload === "object" && !Array.isArray(payload)
+      && Array.isArray((payload as { evidence?: unknown }).evidence)
+      ? evidenceRefSchema.array().parse((payload as { evidence: unknown[] }).evidence)
+      : [];
+    assertSingleEvidenceSource(
+      [...payloadEvidence, ...evidence],
+      `Compiler proposal ${input.proposalId}`,
+    );
     const proposal: ArtifactProposal<unknown> = {
       id: input.proposalId,
       kind,
@@ -182,8 +191,13 @@ export async function validateCompilerProposalClosure(
     possibilities.list(),
     proposals.list("pending"),
   ]);
-  const fromActiveSource = <T extends { evidence?: readonly EvidenceRef[] }>(item: T) =>
-    !sourceId || item.evidence?.some((reference) => reference.span.sourceId === sourceId);
+  const fromActiveSource = <T extends { id?: string; evidence?: readonly EvidenceRef[] }>(item: T) => {
+    if (!sourceId) return true;
+    const evidence = item.evidence ?? [];
+    const matches = evidence.some((reference) => reference.span.sourceId === sourceId);
+    if (matches) assertEvidenceExclusiveToSource(evidence, sourceId, `Proposal-closure artifact ${item.id ?? "unknown"}`);
+    return matches;
+  };
   const catalog: ProposalClosureCatalog = {
     entities: new Set(canonicalEntities.filter(fromActiveSource).map((item) => item.id)),
     entityKinds: new Map(canonicalEntities.filter(fromActiveSource).map((item) => [item.id, item.kind])),
@@ -233,6 +247,12 @@ export async function validateCompilerProposalClosure(
       issues.add(`${proposalId}: logical artifact '${logicalIdentity}' also has active proposal(s) ${duplicates.filter((id) => id !== proposalId).join(", ")}`);
     }
     const payloadEvidence = (proposal.payload as { evidence?: EvidenceRef[] }).evidence ?? [];
+    if (sourceId) {
+      const proposalSourceIds = evidenceSourceIds([...payloadEvidence, ...proposal.evidence]);
+      if (proposalSourceIds.length !== 1 || proposalSourceIds[0] !== sourceId) {
+        issues.add(`${proposalId}: evidence must belong exclusively to active source '${sourceId}', found ${proposalSourceIds.join(", ") || "none"}`);
+      }
+    }
     const inspected = await evidenceVerifier.inspectAll([...payloadEvidence, ...proposal.evidence]);
     for (const evidenceIssue of inspected.issues) {
       issues.add(`${proposalId}: ${formatGroundingIssue(evidenceIssue)}`);

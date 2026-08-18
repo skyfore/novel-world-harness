@@ -29,8 +29,11 @@ Phase 0 is a Novel World Harness terminal application backed by Pi. The default 
 - `/continue [novel] [character]` resumes that novel's latest source-owned instance, `/switch [novel] [instance] [character]` selects another save, and `/create-instance [novel] [instance] [character]` starts a fresh save from the active prepared revision;
 - `/play [character] [instance] [novel]` opens height-aware, natively scrolling and filterable instance/character selection (with free-form id/name/alias input); `/world-resume` remains a compatibility alias for durable resume;
 - `/scene` asks the isolated narrator to render the current committed moment again without advancing the world;
-- `NOVEL.md` provides checked-in project instructions;
-- `.novel-harness/instructions.md` provides local additions.
+- only files explicitly listed in `project.instructions` are loaded as trusted
+  workspace guidance (the generated default is `NWH.md`);
+- novel sources and conventionally named files such as `NOVEL.md` are evidence,
+  never implicitly promoted to system instructions; one physical file cannot be
+  both a configured instruction and a registered source.
 
 The TUI has a transcript, incremental assistant rendering, explicit tool-call/result rows, a multiline editor, working state, queued messages, a footer, slash-command completion, and keyboard shortcuts. During every main-agent run, an animated NWH owl and randomly rotating phase copy are mounted above the editor from `agent_start` through `agent_settled`; thinking, text streaming, and tool execution receive distinct labels, and shutdown/cancellation always removes the widget. In fullscreen, PageUp/PageDown scroll the transcript, Ctrl+Shift+Up/Down jump between prompts, and Ctrl+Shift+F searches. Pi's native editor owns `↑`/`↓` prompt history, including history restored with a resumed session. Ctrl+O expands tool output and Ctrl+T toggles provider thinking, following Pi's native keybinding and saved-visibility behavior. The first Ctrl+C clears pending input or stops the active model/scene/foreground task and shows a two-second confirmation; the second exits, after which the restored terminal prints the exact current-session resume command. Thinking display defaults to `auto`: the active block remains visible while streaming and collapses on `thinking_end`, with text-start and message-end fallbacks for providers that omit the boundary. Foreground `/reparse` tasks retain only a focused NWH lifecycle/paging shell; their model text, thinking, tools, key hints, and theme use Pi's exported TUI components and the same block-completion behavior. Claude Code is an interaction reference, not a runtime dependency. NWH uses Pi's public `AgentSessionRuntime`, `InteractiveMode`, and TUI components instead of maintaining terminal control sequences itself.
 
@@ -46,8 +49,11 @@ that source, injects the next bounded evidence batch as hidden model context, an
 dynamic compiler toolset exposes the narrow `propose_*` tools plus
 `withdraw_compiler_proposal` and `finish_compiler_batch`. The
 first batch starts immediately; `/compile-next` advances the same source after a
-successful proposal run and explicit `finish_compiler_batch` handshake. Repository code remains available as secondary read-only
-context, but prompts and tool guidance keep the novel world as the primary subject.
+successful proposal run and explicit `finish_compiler_batch` handshake. The
+automated source and opening turns receive only their host-supplied evidence
+slice; they have no repository/workspace read tools or whole-source evidence
+tools. A bounded reconciliation pass can search exact raw text only through
+tools pinned to its active source ID.
 
 ## Retrieval boundary: file search, not RAG
 
@@ -144,7 +150,10 @@ player and artifacts currently owned by that actor. Scene presence is carried
 separately from merely referenceable identities, so a known name no longer
 pretends to prove co-location, while participants in the current committed scene
 remain interactable even when an older prepared revision lacks location fields.
-Its fresh Pi session has no
+Unknown co-present identities remain anonymous. Before the view reaches Pi,
+stable entity and claim IDs become turn-local opaque handles. A bounded initial
+projection carries coverage metadata, and exact read-only retrieval can recover
+omitted records only from that same actor-safe corpus. Its fresh Pi session has no
 file tools, project instructions, compiler extension, source text, future canon,
 or mutation tool. A single capture-only candidate is passed to deterministic
 scope, knowledge, world-rule, invariant, and optimistic-head validation before the
@@ -179,16 +188,18 @@ proposals are never forced into world truth: full preparation preserves them in
 rejected history and continues with validated artifacts. Source batches hide the
 staging-only raw state-delta tool, recover active drafts by stable batch identity,
 and let the host supply the active proposal set to the finish handshake. A missing
-or failed model-generated opening state falls back to an evidence-backed empty
-delta, which asserts no unsupported facts but still permits genesis.
+or failed model-generated opening state falls back to a conservative
+evidence-backed opening-cast proposal; it still passes normal validation before
+genesis.
 
 The TUI `/prepare-all` command presents the same decisions with Pi-native
 selection dialogs. Remaining compiler batches execute sequentially in the current
 session, but each model request sees only the current compiler-batch boundary and
 its evidence/tool exchange. Earlier batch transcripts remain available to the
-human UI without being replayed into later model context. Model-written completion
-claims are replaced with a neutral host-verification message; only the successful
-finish handshake and persisted batch checkpoint determine completion. Internal
+human UI without being replayed into later model context or summaries. Settled
+model prose remains visible unchanged, while a separate host notification reports
+verification; only the successful finish handshake and persisted batch checkpoint
+determine completion. Internal
 continuation instructions are hidden, so they do not replace or masquerade as
 user input. Other prompts, `/compile-next`, and `/clear` are held
 back while full preparation is active to prevent interleaved state machines.

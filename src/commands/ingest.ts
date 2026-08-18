@@ -4,12 +4,14 @@ import { loadOptionalConfig } from "../config/load.js";
 import type { HarnessConfig } from "../config/schema.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { assertSourceIsNotProjectInstruction } from "../workspace/instruction-trust.js";
 
 export async function ingestWorkspaceSource(
   root: string,
   filePath: string,
   project?: HarnessConfig["project"],
 ) {
+  await assertSourceIsNotProjectInstruction(root, filePath, project?.instructions);
   const store = await WorkspaceStore.create(root);
   const storedProject = await store.ensureProject(project);
   const document = await store.registerSource(filePath);

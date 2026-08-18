@@ -33,6 +33,9 @@ import { NarrativeRenderer } from "./narrative.js";
 import type { CanonicalChoiceResolution } from "./runtime.js";
 import { committedHistory, projectActorScene } from "./scene.js";
 import { advanceStoryTime } from "./time.js";
+import { projectActorVisibleState } from "./actor-visible.js";
+import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
+import { deepFreeze, immutableClone } from "../util/immutable.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -72,9 +75,11 @@ const actorScopedEntitySchema = z
   .strict();
 
 /**
- * This is the complete serializable context permitted at the player-action
- * model boundary. It contains no WorldState, frontier, canonical event list,
- * character goals/models, source evidence, or unacquired claims.
+ * This is the complete host-side actor scope used to validate a translated
+ * action. The isolated Pi adapter strips host-only fields and replaces stable
+ * IDs with turn-local opaque handles before crossing the model boundary. It
+ * contains no WorldState, frontier, canonical event list, character
+ * goals/models, source evidence, or unacquired claims.
  */
 export const actorScopedActionContextSchema = z
   .object({
@@ -87,13 +92,41 @@ export const actorScopedActionContextSchema = z
     referenceableEntities: z.array(actorScopedEntitySchema),
     writableEntityIds: z.array(idSchema),
     writableStateFields: z.array(stateFieldSpecSchema),
+    scene: z.object({
+      beat: z.number().int().nonnegative(),
+      label: z.string().optional(),
+      locationId: idSchema.optional(),
+      locationState: z.record(z.string(), stateValueSchema),
+      presentEntityIds: z.array(idSchema),
+    }).strict(),
+    recentVisibleEvents: z.array(z.object({
+      summary: z.string().min(1),
+      step: z.number().int().nonnegative(),
+    }).strict()).max(8),
+    activeThreads: z.array(z.object({
+      kind: z.enum(["scene", "plan"]),
+      summary: z.string().min(1),
+    }).strict()).max(4),
   })
   .strict();
 export type ActorScopedActionContext = z.infer<typeof actorScopedActionContextSchema>;
 
+/**
+ * The callback-facing view is smaller than the host validation scope. Stable
+ * actor capabilities remain available, but replay/chronology identifiers do
+ * not cross into an arbitrary translator implementation.
+ */
+export type PlayerActionTranslationContext = Omit<
+  ActorScopedActionContext,
+  "atCommit" | "scene" | "recentVisibleEvents"
+> & {
+  scene: Omit<ActorScopedActionContext["scene"], "beat">;
+  recentVisibleEvents: Array<Pick<ActorScopedActionContext["recentVisibleEvents"][number], "summary">>;
+};
+
 export type PlayerActionTranslationInput = Readonly<{
   utterance: string;
-  context: ActorScopedActionContext;
+  context: PlayerActionTranslationContext;
 }>;
 
 export type SafePlayerIntent = "observe" | "reflect" | "wait";
@@ -129,6 +162,182 @@ export function deterministicPlayerIntentCandidate(
 export type PlayerActionTranslator = (
   input: PlayerActionTranslationInput,
 ) => Promise<unknown> | unknown;
+
+export function playerActionTranslationContext(
+  context: ActorScopedActionContext,
+): PlayerActionTranslationContext {
+  return {
+    actorId: context.actorId,
+    selfState: structuredClone(context.selfState),
+    ownedEntityState: structuredClone(context.ownedEntityState),
+    knowledge: structuredClone(context.knowledge),
+    presentEntities: structuredClone(context.presentEntities),
+    referenceableEntities: structuredClone(context.referenceableEntities),
+    writableEntityIds: [...context.writableEntityIds],
+    writableStateFields: structuredClone(context.writableStateFields),
+    scene: {
+      ...(context.scene.label ? { label: context.scene.label } : {}),
+      ...(context.scene.locationId ? { locationId: context.scene.locationId } : {}),
+      locationState: structuredClone(context.scene.locationState),
+      presentEntityIds: [...context.scene.presentEntityIds],
+    },
+    recentVisibleEvents: context.recentVisibleEvents.map(({ summary }) => ({ summary })),
+    activeThreads: structuredClone(context.activeThreads),
+  };
+}
+
+export type PlayerActionModelBoundary = {
+  context: Record<string, unknown>;
+  decodeCandidate(candidate: PlayerActionCandidate): PlayerActionCandidate;
+};
+
+export function playerActionModelContext(context: PlayerActionTranslationContext): Record<string, unknown> {
+  return createPlayerActionModelBoundary(context).context;
+}
+
+/**
+ * Replace every admitted stable entity/claim ID with a turn-local opaque
+ * handle. Only the host retains the reverse map used after candidate capture.
+ */
+export function createPlayerActionModelBoundary(context: PlayerActionTranslationContext): PlayerActionModelBoundary {
+  const entityIds = new Set([
+    context.actorId,
+    ...context.referenceableEntities.map((entity) => entity.id),
+    ...context.presentEntities.map((entity) => entity.id),
+    ...context.writableEntityIds,
+    ...context.scene.presentEntityIds,
+    ...(context.scene.locationId ? [context.scene.locationId] : []),
+  ]);
+  const entityHandles = new Map<string, string>([[context.actorId, "actor-self"]]);
+  let entityOrdinal = 0;
+  for (const id of [...entityIds].sort()) {
+    if (entityHandles.has(id)) continue;
+    entityOrdinal += 1;
+    entityHandles.set(id, `entity-${String(entityOrdinal).padStart(3, "0")}`);
+  }
+  const claimHandles = new Map(
+    [...new Set(context.knowledge.map((entry) => entry.claimId))].sort()
+      .map((id, index) => [id, `claim-${String(index + 1).padStart(3, "0")}`] as const),
+  );
+  const reverseEntities = new Map<string, string>([...entityHandles].map(([id, handle]) => [handle, id]));
+  const reverseClaims = new Map<string, string>([...claimHandles].map(([id, handle]) => [handle, id]));
+  const writableFields = new Map(context.writableStateFields.map((field) => [field.key, field]));
+  const entityHandle = (id: string): string => entityHandles.get(id) ?? id;
+  const claimHandle = (id: string): string => claimHandles.get(id) ?? id;
+  const mapEntityRefs = (value: unknown, depth = 0): unknown => {
+    if (typeof value === "string") return entityHandle(value);
+    if (depth >= 8) return "[nested data omitted]";
+    if (Array.isArray(value)) return value.map((item) => mapEntityRefs(item, depth + 1));
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value)
+      .map(([key, item]) => [key, mapEntityRefs(item, depth + 1)]));
+  };
+  const mapState = (values: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+    Object.fromEntries(Object.entries(values).map(([field, value]) => [field, mapEntityRefs(value)]));
+  const modelContext: Record<string, unknown> = {
+    actorId: entityHandle(context.actorId),
+    selfState: mapState(context.selfState),
+    ownedEntityState: Object.fromEntries(Object.entries(context.ownedEntityState)
+      .map(([entityId, values]) => [entityHandle(entityId), mapState(values)])),
+    knowledge: context.knowledge.map((entry) => ({
+      claimId: claimHandle(entry.claimId),
+      status: entry.status,
+      confidence: entry.confidence,
+      ...(entry.sourceActorId ? { sourceActorId: entityHandle(entry.sourceActorId) } : {}),
+      ...(entry.claim ? {
+        claim: {
+          ...structuredClone(entry.claim),
+          id: claimHandle(entry.claim.id),
+          subject: entityHandle(entry.claim.subject),
+          object: mapEntityRefs(entry.claim.object),
+          ...(entry.claim.speaker ? { speaker: entityHandle(entry.claim.speaker) } : {}),
+        },
+      } : {}),
+    })),
+    presentEntities: context.presentEntities.map((entity) => ({ ...entity, id: entityHandle(entity.id) })),
+    referenceableEntities: context.referenceableEntities.map((entity) => ({ ...entity, id: entityHandle(entity.id) })),
+    writableEntityIds: context.writableEntityIds.map(entityHandle),
+    writableStateFields: structuredClone(context.writableStateFields),
+    scene: {
+      ...(context.scene.label ? { label: context.scene.label } : {}),
+      ...(context.scene.locationId ? { locationId: entityHandle(context.scene.locationId) } : {}),
+      locationState: mapState(context.scene.locationState),
+      presentEntityIds: context.scene.presentEntityIds.map(entityHandle),
+    },
+    recentVisibleEvents: context.recentVisibleEvents.map((event) => ({ summary: event.summary })),
+    activeThreads: structuredClone(context.activeThreads),
+  };
+  // Unknown labels must remain available for the open-world movement
+  // normalizer, but a model must not bypass the handle boundary by guessing
+  // an admitted stable ID. Replace such guesses with an ID that is guaranteed
+  // not to be one of the admitted entities/claims so the deterministic scope
+  // gate rejects it.
+  let invalidEntityHandle = "invalid-model-entity-handle";
+  while (entityIds.has(invalidEntityHandle)) invalidEntityHandle += "-x";
+  const knownClaimIds = new Set(claimHandles.keys());
+  let invalidClaimHandle = "invalid-model-claim-handle";
+  while (knownClaimIds.has(invalidClaimHandle)) invalidClaimHandle += "-x";
+  const decodeEntity = (value: string): string =>
+    reverseEntities.get(value) ?? (entityHandles.has(value) ? invalidEntityHandle : value);
+  const decodeClaim = (value: string): string =>
+    reverseClaims.get(value) ?? (claimHandles.has(value) ? invalidClaimHandle : value);
+  const decodeStateValue = (field: string, value: unknown): unknown => {
+    const valueType = writableFields.get(field)?.valueType;
+    if (valueType === "entity-ref" && typeof value === "string") return decodeEntity(value);
+    if (valueType === "entity-ref-set" && Array.isArray(value)) {
+      return value.map((item) => typeof item === "string" ? decodeEntity(item) : item);
+    }
+    return value;
+  };
+  const decodePredicate = (predicate: Record<string, unknown>): Record<string, unknown> => {
+    const decoded = structuredClone(predicate);
+    if ((decoded.op === "all" || decoded.op === "any") && Array.isArray(decoded.items)) {
+      decoded.items = decoded.items.map((item) => decodePredicate(item as Record<string, unknown>));
+      return decoded;
+    }
+    if (decoded.op === "not" && decoded.item && typeof decoded.item === "object") {
+      decoded.item = decodePredicate(decoded.item as Record<string, unknown>);
+      return decoded;
+    }
+    if (typeof decoded.entityId === "string") decoded.entityId = decodeEntity(decoded.entityId);
+    if (typeof decoded.member === "string") decoded.member = decodeEntity(decoded.member);
+    if (typeof decoded.field === "string" && "value" in decoded) {
+      decoded.value = decodeStateValue(decoded.field, decoded.value);
+    }
+    return decoded;
+  };
+  return {
+    context: modelContext,
+    decodeCandidate(candidateInput) {
+      const candidate = structuredClone(candidateInput) as PlayerActionCandidate;
+      candidate.participants = candidate.participants.map(decodeEntity);
+      candidate.preconditions = candidate.preconditions
+        .map((predicate) => decodePredicate(predicate as unknown as Record<string, unknown>) as never);
+      candidate.proposedDelta.operations = candidate.proposedDelta.operations.map((operation) => {
+        const decoded = structuredClone(operation) as Record<string, unknown>;
+        if (typeof decoded.entityId === "string") decoded.entityId = decodeEntity(decoded.entityId);
+        if (typeof decoded.member === "string") decoded.member = decodeEntity(decoded.member);
+        if (typeof decoded.field === "string" && "value" in decoded) {
+          decoded.value = decodeStateValue(decoded.field, decoded.value);
+        }
+        return decoded as never;
+      });
+      if (candidate.proposedKnowledge) {
+        candidate.proposedKnowledge.operations = candidate.proposedKnowledge.operations.map((operation) => ({
+          ...operation,
+          actorId: decodeEntity(operation.actorId),
+          claimId: decodeClaim(operation.claimId),
+          ...(operation.op === "learn" && operation.sourceActorId
+            ? { sourceActorId: decodeEntity(operation.sourceActorId) }
+            : {}),
+        }));
+      }
+      candidate.requiresKnowledge = candidate.requiresKnowledge.map(decodeClaim);
+      candidate.forbidsKnowledge = candidate.forbidsKnowledge.map(decodeClaim);
+      return playerActionCandidateSchema.parse(candidate);
+    },
+  };
+}
 
 export const playerTurnInputSchema = z
   .object({
@@ -180,96 +389,136 @@ export type PlayerTurnRender = (input: Readonly<{
   branchId: string;
   commitId: CommitId;
   actorId: EntityId;
+  sourceId?: string;
 }>) => Promise<string> | string;
 
 export type PlayerCanonResolver = (proposal: EventProposal) => Promise<CanonicalChoiceResolution> | CanonicalChoiceResolution;
 
+const canonicalChoiceResolutionSchema = z.object({
+  realizedPossibilityId: idSchema.optional(),
+  supersedesCanonicalEventIds: z.array(idSchema).max(100),
+  threadIds: z.array(idSchema).max(100).optional(),
+  causalParentEventIds: z.array(idSchema).max(100).optional(),
+}).strict();
+
 /**
- * Derive a model-safe view from committed actor knowledge at one commit.
+ * Derive the host-side actor scope from committed actor knowledge at one commit.
+ * The isolated Pi adapter additionally replaces stable IDs with turn-local
+ * opaque handles before this value crosses the model boundary.
  * Canonical context is used only to resolve names and field types for IDs that
- * are reachable from self state/acquired knowledge or explicitly named by the
- * user. Current WorldState contributes only the ownership fact needed to prove
+ * are reachable from self state or acquired knowledge. Current WorldState
+ * contributes only the ownership fact needed to prove
  * which artifacts the actor may control; no other entity state is exposed.
  */
 export async function buildActorScopedActionContext(
   engine: WorldEngine,
   actorId: EntityId,
   commitId: CommitId,
-  utterance?: string,
+  _utterance?: string,
   sourceId?: string,
 ): Promise<ActorScopedActionContext> {
-  const [context, view, worldState, scene] = await Promise.all([
-    engine.contextForCommit(commitId),
+  const context = await engine.contextForCommit(commitId);
+  const actorEntity = context.entities.get(actorId);
+  const effectiveSourceId = await resolveCommitSourceId(
+    engine,
+    context,
+    commitId,
+    sourceId,
+    "Actor context",
+  );
+  if (!actorEntity || actorEntity.kind !== "character"
+    || !evidenceBelongsExclusivelyToSource(actorEntity.evidence, effectiveSourceId)) {
+    throw new Error(`Actor ${actorId} is not a source-owned character in ${effectiveSourceId ?? "the committed world context"}.`);
+  }
+  const [view, worldState, scene] = await Promise.all([
     new KnowledgeProjector(engine).view(actorId, commitId),
     engine.projector.project(commitId),
-    projectActorScene(engine, actorId, commitId, sourceId),
+    projectActorScene(engine, actorId, commitId, effectiveSourceId),
   ]);
   const referenceable = new Set<EntityId>([actorId]);
+  const knownIdentities = new Set<EntityId>([actorId]);
   const present = new Set<EntityId>([actorId]);
   const writable = new Set<EntityId>([actorId]);
   const ownedEntityState: Record<EntityId, Record<string, StateValue>> = {};
-  const visibleKnowledge = sourceId
-    ? view.knowledge.filter((entry) => entry.claim?.evidence.some((reference) => reference.span.sourceId === sourceId))
+  const visibleKnowledge = effectiveSourceId
+    ? view.knowledge.filter((entry) => entry.claim
+      && evidenceBelongsExclusivelyToSource(entry.claim.evidence, effectiveSourceId)
+      && entityIdBelongsToSource(entry.claim.subject, context.entities, effectiveSourceId)
+      && (!entry.claim.speaker || entityIdBelongsToSource(entry.claim.speaker, context.entities, effectiveSourceId))
+      && claimObjectBelongsToSource(entry.claim.object, context.entities, effectiveSourceId))
     : view.knowledge;
+  const selfState = sourceSafeVisibleState(view.selfState, context.stateSchema, context.entities, effectiveSourceId);
+  const sceneLocationState = sourceSafeVisibleState(scene.locationState, context.stateSchema, context.entities, effectiveSourceId);
 
   for (const participant of scene.presentEntityIds) {
     const entity = context.entities.get(participant);
-    if (!entity || !belongsToSource(entity, sourceId)) continue;
+    if (!entity || !evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId)) continue;
     present.add(participant);
     referenceable.add(participant);
   }
 
-  for (const [field, value] of Object.entries(view.selfState)) {
-    const spec = context.stateSchema.get(field);
-    if (spec.valueType === "entity-ref" && typeof value === "string") addExistingEntity(referenceable, value, context.entities, sourceId);
-    if (spec.valueType === "entity-ref-set" && Array.isArray(value)) {
-      for (const item of value) addExistingEntity(referenceable, item, context.entities, sourceId);
-    }
-  }
+  addStateEntityReferences(referenceable, selfState, context.stateSchema, context.entities, effectiveSourceId, knownIdentities);
+  addStateEntityReferences(referenceable, sceneLocationState, context.stateSchema, context.entities, effectiveSourceId, knownIdentities);
 
   for (const entry of visibleKnowledge) {
-    if (entry.fact.sourceActorId) addExistingEntity(referenceable, entry.fact.sourceActorId, context.entities, sourceId);
+    if (entry.fact.sourceActorId) addExistingEntity(referenceable, entry.fact.sourceActorId, context.entities, effectiveSourceId, knownIdentities);
     if (!entry.claim) continue;
-    addExistingEntity(referenceable, entry.claim.subject, context.entities, sourceId);
-    if (entry.claim.speaker) addExistingEntity(referenceable, entry.claim.speaker, context.entities, sourceId);
-    addClaimObjectEntities(referenceable, entry.claim.object, context.entities, sourceId);
-  }
-
-  if (utterance) {
-    for (const entity of context.entities.values()) {
-      if (!belongsToSource(entity, sourceId)) continue;
-      if ([entity.canonicalName, ...entity.aliases].some((name) => explicitlyMentions(utterance, name))) {
-        referenceable.add(entity.id);
-      }
-    }
+    addExistingEntity(referenceable, entry.claim.subject, context.entities, effectiveSourceId, knownIdentities);
+    if (entry.claim.speaker) addExistingEntity(referenceable, entry.claim.speaker, context.entities, effectiveSourceId, knownIdentities);
+    addClaimObjectEntities(
+      referenceable,
+      sourceSafeClaimObject(entry.claim.object, context.entities, effectiveSourceId),
+      context.entities,
+      effectiveSourceId,
+      knownIdentities,
+    );
   }
 
   for (const entity of context.entities.values()) {
-    if (!belongsToSource(entity, sourceId)) continue;
+    if (!evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId)) continue;
     if (entity.kind === "artifact" && worldState.values[entity.id]?.["artifact.owner"] === actorId) {
       referenceable.add(entity.id);
+      knownIdentities.add(entity.id);
       writable.add(entity.id);
-      ownedEntityState[entity.id] = { "artifact.owner": actorId };
+      const projected = sourceSafeVisibleState(projectActorVisibleState(
+        worldState.values[entity.id] ?? {}, context.stateSchema, "owner"),
+      context.stateSchema, context.entities, effectiveSourceId);
+      ownedEntityState[entity.id] = projected;
+      addStateEntityReferences(referenceable, projected, context.stateSchema, context.entities, effectiveSourceId, knownIdentities);
       continue;
     }
     if (entity.kind === "relationship") {
+      // A relationship involving the actor can itself be secret. Its endpoint
+      // in world truth is not enough to reveal it; the actor must already have
+      // a reference through visible self state or acquired knowledge.
+      if (!referenceable.has(entity.id)) continue;
       const relationshipState = worldState.values[entity.id];
       const from = relationshipState?.["relationship.from"];
       const to = relationshipState?.["relationship.to"];
       if (from !== actorId && to !== actorId) continue;
       referenceable.add(entity.id);
       writable.add(entity.id);
-      ownedEntityState[entity.id] = structuredClone(relationshipState ?? {});
-      if (typeof from === "string") addExistingEntity(referenceable, from, context.entities, sourceId);
-      if (typeof to === "string") addExistingEntity(referenceable, to, context.entities, sourceId);
+      const projected = sourceSafeVisibleState(projectActorVisibleState(
+        relationshipState ?? {}, context.stateSchema, "owner"),
+      context.stateSchema, context.entities, effectiveSourceId);
+      ownedEntityState[entity.id] = projected;
+      addStateEntityReferences(referenceable, projected, context.stateSchema, context.entities, effectiveSourceId, knownIdentities);
+      if (typeof from === "string") addExistingEntity(referenceable, from, context.entities, effectiveSourceId, knownIdentities);
+      if (typeof to === "string") addExistingEntity(referenceable, to, context.entities, effectiveSourceId, knownIdentities);
     }
   }
 
+  const anonymousCounts = new Map<Entity["kind"], number>();
   const referenceableEntities = [...referenceable]
     .map((id) => context.entities.get(id))
     .filter((entity): entity is NonNullable<typeof entity> => Boolean(entity))
-    .map((entity) => ({ id: entity.id, kind: entity.kind, name: entity.canonicalName }))
-    .sort((left, right) => left.id.localeCompare(right.id));
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((entity) => {
+      if (knownIdentities.has(entity.id)) return { id: entity.id, kind: entity.kind, name: entity.canonicalName };
+      const ordinal = (anonymousCounts.get(entity.kind) ?? 0) + 1;
+      anonymousCounts.set(entity.kind, ordinal);
+      return { id: entity.id, kind: entity.kind, name: `Unidentified ${entity.kind} ${ordinal}` };
+    });
   const presentEntities = referenceableEntities.filter((entity) => present.has(entity.id));
   const writableKinds = new Set(
     [...writable]
@@ -278,36 +527,62 @@ export async function buildActorScopedActionContext(
   );
   const writableStateFields = context.stateSchema
     .list()
-    .filter((spec) => spec.appliesTo.some((kind) => writableKinds.has(kind)));
+    .filter((spec) => spec.appliesTo.some((kind) => writableKinds.has(kind)))
+    // Visibility and mutation authority are distinct, but an engine-only,
+    // knowledge-gated, or undeclared field must never become a model write
+    // capability merely because its entity kind is writable.
+    .filter((spec) => spec.visibility !== undefined
+      && spec.visibility !== "engine"
+      && spec.visibility !== "knowledge");
   const knowledge = visibleKnowledge.map((entry) => ({
     claimId: entry.fact.claimId,
     status: entry.fact.status,
     confidence: entry.fact.confidence,
-    ...(entry.fact.sourceActorId ? { sourceActorId: entry.fact.sourceActorId } : {}),
+    ...(entry.fact.sourceActorId
+      && entityIdBelongsToSource(entry.fact.sourceActorId, context.entities, effectiveSourceId)
+      ? { sourceActorId: entry.fact.sourceActorId }
+      : {}),
     ...(entry.claim
       ? {
           claim: {
             id: entry.claim.id,
             subject: entry.claim.subject,
             predicate: entry.claim.predicate,
-            object: structuredClone(entry.claim.object),
+            object: sourceSafeClaimObject(entry.claim.object, context.entities, effectiveSourceId),
             epistemicType: entry.claim.epistemicType,
             ...(entry.claim.speaker ? { speaker: entry.claim.speaker } : {}),
           },
         }
       : {}),
   }));
-
+  const recentVisibleEvents = scene.recentEvents.map((event) => ({
+    summary: event.title,
+    step: event.step,
+  }));
+  const activeThreads: Array<{ kind: "scene" | "plan"; summary: string }> = scene.recentEvents
+    .slice(-3)
+    .map((event) => ({ kind: "scene" as const, summary: event.title }));
+  const plan = view.selfState["character.plan"];
+  if (typeof plan === "string" && plan.trim()) activeThreads.push({ kind: "plan", summary: plan.trim() });
   return actorScopedActionContextSchema.parse({
     actorId,
     atCommit: commitId,
-    selfState: structuredClone(view.selfState),
+    selfState: structuredClone(selfState),
     ownedEntityState,
     knowledge,
     presentEntities,
     referenceableEntities,
     writableEntityIds: [actorId, ...[...writable].filter((id) => id !== actorId).sort()],
     writableStateFields,
+    scene: {
+      beat: scene.beat,
+      ...(scene.label ? { label: scene.label } : {}),
+      ...(scene.locationId ? { locationId: scene.locationId } : {}),
+      locationState: structuredClone(sceneLocationState),
+      presentEntityIds: [...scene.presentEntityIds],
+    },
+    recentVisibleEvents,
+    activeThreads: activeThreads.slice(-4),
   });
 }
 
@@ -441,6 +716,7 @@ export async function validatePlayerActionSpatialScope(
   candidateInput: PlayerActionCandidate,
   actorId: EntityId,
   commitId: CommitId,
+  sourceId?: string,
 ): Promise<ValidationIssue[]> {
   const candidate = playerActionCandidateSchema.parse(candidateInput);
   const [context, state] = await Promise.all([
@@ -468,7 +744,7 @@ export async function validatePlayerActionSpatialScope(
     }
   }
   const actorLocation = state.values[actorId]?.["character.location"];
-  const present = new Set((await projectActorScene(engine, actorId, commitId)).presentEntityIds);
+  const present = new Set((await projectActorScene(engine, actorId, commitId, sourceId)).presentEntityIds);
   const issues: ValidationIssue[] = [];
   for (const characterId of [...interactionCharacters].sort()) {
     const characterLocation = state.values[characterId]?.["character.location"];
@@ -516,7 +792,8 @@ export function playerActionToKnowledgeAwareAction(input: {
     expectedParentCommit: input.expectedParentCommit,
     source: "player",
     actorId: input.actorId,
-    title: candidate.title,
+    title: playerIntentTitle(input.utterance),
+    actorObservations: [{ actorId: input.actorId, summary: playerIntentObservation(input.utterance) }],
     participants: [...new Set([input.actorId, ...candidate.participants])],
     proposedTime: input.proposedTime ?? { kind: "unknown" },
     ...(input.timeAdvance ? { timeAdvance: input.timeAdvance } : {}),
@@ -531,6 +808,19 @@ export function playerActionToKnowledgeAwareAction(input: {
     requiresKnowledge: candidate.requiresKnowledge,
     forbidsKnowledge: candidate.forbidsKnowledge,
   };
+}
+
+function playerIntentObservation(utterance: string): string {
+  const normalized = utterance.normalize("NFKC").trim().replace(/\s+/gu, " ");
+  const characters = Array.from(normalized);
+  const bounded = characters.length <= 800
+    ? normalized
+    : `${characters.slice(0, 800).join("")}…`;
+  return `Attempted player intent (not an asserted outcome): ${bounded}`;
+}
+
+function playerIntentTitle(utterance: string): string {
+  return playerIntentObservation(utterance);
 }
 
 /**
@@ -550,8 +840,8 @@ export class PlayerTurnService {
     if (render) this.render = render;
     else {
       const renderer = new NarrativeRenderer(engine);
-      this.render = ({ branchId, commitId, actorId }) =>
-        renderer.render(branchId, commitId, { pointOfView: "actor", actorId });
+      this.render = ({ branchId, commitId, actorId, sourceId }) =>
+        renderer.render(branchId, commitId, { pointOfView: "actor", actorId }, sourceId);
     }
   }
 
@@ -567,7 +857,7 @@ export class PlayerTurnService {
     try {
       translated = await this.translator(deepFreeze({
         utterance: input.utterance,
-        context: structuredClone(contextBefore),
+        context: playerActionTranslationContext(contextBefore),
       }));
     } catch (error) {
       return this.rejected(input, previousHead, contextBefore, "translation", [
@@ -612,13 +902,17 @@ export class PlayerTurnService {
     if (groundingIssues.length) {
       return this.rejected(input, previousHead, contextBefore, "scope", groundingIssues, candidate, action.proposal);
     }
-    const spatialIssues = await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead);
+    const spatialIssues = await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead, input.sourceId);
     if (spatialIssues.length) {
       return this.rejected(input, previousHead, contextBefore, "scope", spatialIssues, candidate, action.proposal);
     }
     let resolution: CanonicalChoiceResolution = { supersedesCanonicalEventIds: [] };
     if (this.resolveCanon) {
-      resolution = await this.resolveCanon(action.proposal);
+      // The resolver may inspect a proposal but must not edit the already
+      // capability-checked candidate by retaining or mutating its reference.
+      resolution = canonicalChoiceResolutionSchema.parse(
+        await this.resolveCanon(immutableClone(action.proposal)),
+      );
       const supersedesCanonicalEventIds = [...new Set(resolution.supersedesCanonicalEventIds)].sort();
       if (supersedesCanonicalEventIds.length || resolution.realizedPossibilityId || resolution.causalParentEventIds?.length) {
         action = {
@@ -694,7 +988,7 @@ export class PlayerTurnService {
 
     const newHead = committed.result.newHead;
     const contextAfter = await buildActorScopedActionContext(this.engine, input.actorId, newHead, undefined, input.sourceId);
-    const renderedText = await this.renderAt(input.branchId, input.actorId, newHead);
+    const renderedText = await this.renderAt(input.branchId, input.actorId, newHead, input.sourceId);
     return {
       accepted: true,
       stage: "committed",
@@ -733,7 +1027,7 @@ export class PlayerTurnService {
     const contextAfter = newHead === previousHead
       ? contextBefore
       : await buildActorScopedActionContext(this.engine, input.actorId, newHead, undefined, input.sourceId);
-    const renderedText = await this.renderAt(input.branchId, input.actorId, newHead);
+    const renderedText = await this.renderAt(input.branchId, input.actorId, newHead, input.sourceId);
     return {
       accepted: false,
       stage,
@@ -751,12 +1045,13 @@ export class PlayerTurnService {
     };
   }
 
-  private async renderAt(branchId: string, actorId: EntityId, commitId: CommitId): Promise<string> {
+  private async renderAt(branchId: string, actorId: EntityId, commitId: CommitId, sourceId?: string): Promise<string> {
     const before = await this.engine.branches.readHead(branchId);
     if (before !== commitId) throw new Error(`Cannot render player turn at stale commit ${commitId}; current head is ${before}`);
-    const rendered = await this.render(deepFreeze({ branchId, actorId, commitId }));
+    const rendered: unknown = await this.render(deepFreeze({ branchId, actorId, commitId, ...(sourceId ? { sourceId } : {}) }));
     const after = await this.engine.branches.readHead(branchId);
     if (after !== before) throw new Error("Player turn renderer mutated branch truth");
+    if (typeof rendered !== "string") throw new Error("Player turn renderer must return a string");
     return rendered;
   }
 }
@@ -1148,10 +1443,91 @@ function addExistingEntity(
   value: unknown,
   entities: ReadonlyMap<EntityId, Entity>,
   sourceId?: string,
+  knownIdentities?: Set<EntityId>,
 ): void {
   if (typeof value !== "string") return;
   const entity = entities.get(value);
-  if (entity && belongsToSource(entity, sourceId)) target.add(value);
+  if (entity && evidenceBelongsExclusivelyToSource(entity.evidence, sourceId)) {
+    target.add(value);
+    knownIdentities?.add(value);
+  }
+}
+
+function entityIdBelongsToSource(
+  entityId: string,
+  entities: ReadonlyMap<EntityId, Entity>,
+  sourceId?: string,
+): boolean {
+  const entity = entities.get(entityId);
+  return Boolean(entity && evidenceBelongsExclusivelyToSource(entity.evidence, sourceId));
+}
+
+function sourceSafeVisibleState(
+  values: Readonly<Record<string, unknown>>,
+  stateSchema: { get(field: string): StateFieldSpec },
+  entities: ReadonlyMap<EntityId, Entity>,
+  sourceId?: string,
+): Record<string, StateValue> {
+  const safe: Record<string, StateValue> = {};
+  for (const [field, value] of Object.entries(values)) {
+    let spec: StateFieldSpec;
+    try {
+      spec = stateSchema.get(field);
+    } catch {
+      continue;
+    }
+    if (spec.valueType === "entity-ref") {
+      if (typeof value === "string" && entityIdBelongsToSource(value, entities, sourceId)) safe[field] = value;
+      continue;
+    }
+    if (spec.valueType === "entity-ref-set") {
+      if (Array.isArray(value)) {
+        safe[field] = value.filter((item): item is string =>
+          typeof item === "string" && entityIdBelongsToSource(item, entities, sourceId));
+      }
+      continue;
+    }
+    safe[field] = structuredClone(value) as StateValue;
+  }
+  return safe;
+}
+
+function sourceSafeClaimObject(
+  value: unknown,
+  entities: ReadonlyMap<EntityId, Entity>,
+  sourceId?: string,
+  depth = 0,
+): unknown {
+  if (typeof value === "string") {
+    const entity = entities.get(value);
+    return entity && !evidenceBelongsExclusivelyToSource(entity.evidence, sourceId)
+      ? "[cross-source entity reference omitted]"
+      : value;
+  }
+  if (depth >= 8) return "[nested data omitted]";
+  if (Array.isArray(value)) return value.map((item) => sourceSafeClaimObject(item, entities, sourceId, depth + 1));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => [key, sourceSafeClaimObject(item, entities, sourceId, depth + 1)]));
+}
+
+function claimObjectBelongsToSource(
+  value: unknown,
+  entities: ReadonlyMap<EntityId, Entity>,
+  sourceId?: string,
+  depth = 0,
+): boolean {
+  if (typeof value === "string") {
+    const entity = entities.get(value);
+    return !entity || evidenceBelongsExclusivelyToSource(entity.evidence, sourceId);
+  }
+  if (depth >= 8) return false;
+  if (Array.isArray(value)) {
+    return value.every((item) => claimObjectBelongsToSource(item, entities, sourceId, depth + 1));
+  }
+  if (!value || typeof value !== "object") return true;
+  return Object.values(value as Record<string, unknown>)
+    .every((item) => claimObjectBelongsToSource(item, entities, sourceId, depth + 1));
 }
 
 function addClaimObjectEntities(
@@ -1159,36 +1535,40 @@ function addClaimObjectEntities(
   value: unknown,
   entities: ReadonlyMap<EntityId, Entity>,
   sourceId?: string,
+  knownIdentities?: Set<EntityId>,
+  depth = 0,
 ): void {
-  if (typeof value === "string") addExistingEntity(target, value, entities, sourceId);
-  else if (Array.isArray(value)) for (const item of value) addExistingEntity(target, item, entities, sourceId);
-}
-
-function belongsToSource(entity: Entity, sourceId?: string): boolean {
-  return !sourceId || entity.evidence.some((reference) => reference.span.sourceId === sourceId);
-}
-
-const FIRST_PERSON_ENTITY_ALIASES = new Set([
-  "我", "我们", "咱", "咱们", "你", "你们", "他", "他们", "她", "她们", "它", "它们",
-]);
-
-function explicitlyMentions(utterance: string, name: string): boolean {
-  const needle = name.trim().toLocaleLowerCase();
-  if (!needle || FIRST_PERSON_ENTITY_ALIASES.has(needle)) return false;
-  const haystack = utterance.toLocaleLowerCase();
-  let index = haystack.indexOf(needle);
-  while (index >= 0) {
-    const before = index > 0 ? haystack[index - 1] : undefined;
-    const afterIndex = index + needle.length;
-    const after = afterIndex < haystack.length ? haystack[afterIndex] : undefined;
-    const startsAsciiWord = /^[a-z0-9]$/i.test(needle[0]!);
-    const endsAsciiWord = /^[a-z0-9]$/i.test(needle[needle.length - 1]!);
-    const beforeBoundary = !startsAsciiWord || before === undefined || !/[a-z0-9]/i.test(before);
-    const afterBoundary = !endsAsciiWord || after === undefined || !/[a-z0-9]/i.test(after);
-    if (beforeBoundary && afterBoundary) return true;
-    index = haystack.indexOf(needle, index + 1);
+  if (typeof value === "string") {
+    addExistingEntity(target, value, entities, sourceId, knownIdentities);
+    return;
   }
-  return false;
+  if (depth >= 8) return;
+  if (Array.isArray(value)) {
+    for (const item of value) addClaimObjectEntities(target, item, entities, sourceId, knownIdentities, depth + 1);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const item of Object.values(value as Record<string, unknown>)) {
+    addClaimObjectEntities(target, item, entities, sourceId, knownIdentities, depth + 1);
+  }
+}
+
+function addStateEntityReferences(
+  target: Set<EntityId>,
+  values: Readonly<Record<string, unknown>>,
+  stateSchema: { get(field: string): StateFieldSpec },
+  entities: ReadonlyMap<EntityId, Entity>,
+  sourceId?: string,
+  knownIdentities?: Set<EntityId>,
+): void {
+  for (const [field, value] of Object.entries(values)) {
+    const spec = stateSchema.get(field);
+    if (spec.valueType === "entity-ref") {
+      addExistingEntity(target, value, entities, sourceId, knownIdentities);
+    } else if (spec.valueType === "entity-ref-set" && Array.isArray(value)) {
+      for (const item of value) addExistingEntity(target, item, entities, sourceId, knownIdentities);
+    }
+  }
 }
 
 type VisiblePredicateEvaluation = { known: boolean; value: boolean };
@@ -1254,12 +1634,4 @@ async function latestCommittedStoryTime(engine: WorldEngine, commitId: CommitId)
     cursor = commit.parentCommitId;
   }
   return undefined;
-}
-
-function deepFreeze<T>(value: T): T {
-  if (value && typeof value === "object" && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
-  }
-  return value;
 }

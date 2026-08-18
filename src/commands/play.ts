@@ -47,6 +47,9 @@ export async function playCommand(options: PlayCommandOptions): Promise<void> {
     workspace,
     profile,
     model,
+    ...(config?.project.instructions.length
+      ? { projectInstructionPaths: config.project.instructions }
+      : {}),
     continueSession,
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),
     saveSession,

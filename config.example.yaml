@@ -3,3 +3,5 @@ version: 1
 project:
   name: novel-world
   language: zh-CN
+  instructions:
+    - NWH.md

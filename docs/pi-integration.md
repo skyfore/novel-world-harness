@@ -7,12 +7,13 @@ Pi remains in the design because it solves the generic agent-runtime problems th
 - multi-turn agent execution;
 - append-only sessions and continuation;
 - terminal transcript, editor, tool-call rendering, status, and keyboard interaction;
-- thinking-level handling and future compaction support.
+- thinking-level handling, compaction, and branch/tree summarization hooks.
 
 Novel World Harness owns the parts specific to executable fiction:
 
 - the evidence-first system prompt;
-- trusted `NOVEL.md` and local instruction loading;
+- explicitly configured trusted workspace instruction loading; novel evidence is
+  never promoted to instructions by filename;
 - safe local list/search/read tools;
 - bounded compiler batches, typed proposal semantics, and evidence verification;
 - proposal/validation/commit boundaries;
@@ -30,7 +31,24 @@ actor-scoped narrator boundary.
 
 “Remove external services” applies to the external persistence layer in Phase 0: PostgreSQL and other attached databases are removed. It does not require removing Pi or forcing the official Claude API. A remote model is still optional infrastructure selected by the user; all harness state and retrieval stay file-based.
 
-For safety, the Pi session disables built-in model coding tools and external extension discovery. Ordinary sessions expose only Novel Harness's three custom read-only local tools. Explicit compiler sessions add typed compiler tools, which can write pending proposal envelopes, move a defective current-batch envelope to rejected history, and explicitly finish a validated batch. They cannot write arbitrary files, execute a shell as a model tool, access the network as a tool, accept canonical truth, or commit world state. Repeated unchanged finish failures terminate the current tool loop without checkpointing the batch. The TUI's `!command` path is a deliberate user terminal action, not an agent capability.
+For safety, the Pi session disables built-in model coding tools, external
+extension discovery, skills, prompt templates, context files and ambient
+themes. Ordinary sessions expose only Novel Harness's three custom read-only
+local tools. The application system prompt includes an exact capability/trust
+contract but not the host's absolute workspace path. Because Pi appends its cwd
+after a custom prompt, a last, always-on `before_agent_start` privacy interceptor
+also redacts that path from the fully assembled provider-bound prompt, including
+isolated player and narrator sessions. Explicit compiler
+sessions add typed compiler tools, which can write pending proposal envelopes,
+move a defective current-batch envelope to rejected history, and explicitly
+finish a validated batch. Automated source/opening turns have no generic
+workspace read tools. Whole-world reconciliation uses exact evidence
+search/read tools bound to one active source instead. Compiler tools cannot
+write arbitrary files, execute a shell as a model tool, access the network as
+a tool, accept canonical truth, or commit world state. Repeated unchanged
+finish failures terminate the current tool loop without checkpointing the
+batch. The TUI's `!command` path is a deliberate user terminal action, not an
+agent capability.
 
 Source compiler proposals carry a stable compiler-batch ID. A retry reloads the
 batch's pending proposals and receives their exact proposal IDs, so it can repair
@@ -54,3 +72,34 @@ Hidden `/prepare-all` continuation turns carry their complete evidence payload
 directly because Pi custom-message turns do not run ordinary user-prompt hooks.
 Artifact catalogs are source-scoped, size-bounded, and hydrated only for the
 currently executing batch, so a full-book run does not pre-expand every future prompt.
+The bounded catalog is an index rather than a semantic memory boundary: compiler
+turns can search source-scoped canonical/pending artifacts and page one exact
+payload by stable ref. Reconciliation can likewise search/page exact raw evidence,
+but only from its bound source; ordinary source/opening turns cannot use that
+whole-source channel. Retrieval calls share the 40-call compiler circuit-breaker
+budget. Cross-source lookup and evidence outside a supplied source-batch segment
+fail closed.
+
+Any standalone job constructed through `createPiCompilerSession` with a source
+ID, compiler-batch ID, segment IDs, or an explicit no-local-tools boundary is
+forced into a fresh in-memory session and cannot resume or persist a transcript.
+TUI compiler work remains in the human transcript but uses the turn-local
+context projection described below. The standalone unscoped `nwh compile`
+conversation is the intentional administrator exception: it may persist and
+use bounded local reads, while its proposals still remain pending and
+evidence-validated.
+
+Player action and narrator sessions are separate in-memory Pi sessions. Each
+receives a bounded actor-safe initial projection plus two exact read-only
+retrieval tools over the same already-projected corpus and one capture-only tool.
+The action boundary replaces stable entity/claim IDs with turn-local opaque
+handles and the host decodes them before deterministic validation. Neither
+nested session inherits the ordinary transcript, project instructions, local
+tools, compiler context, or future canon.
+
+Persisted sessions are pinned to one NWH context role. Player/narrator entries
+are display-only and compiler spans are turn-local; live provider context,
+compaction inputs, and branch/tree summarization all use the same projection.
+Safe summaries carry a persistent policy marker, and an unmarked legacy
+summary or transcript with private history fails closed instead of being
+silently reused under a new role.

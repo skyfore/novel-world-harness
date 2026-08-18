@@ -152,6 +152,34 @@ describe("WorldEngine", () => {
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
+  it("requires actor-visible event summaries to name unique participating characters", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main");
+    const result = await engine.commitProposal({
+      proposalId: "invalid-observers",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "background",
+      title: "Hidden event title",
+      actorObservations: [
+        { actorId: "cao-cao", summary: "First observation" },
+        { actorId: "cao-cao", summary: "Duplicate observation" },
+        { actorId: "hall", summary: "A location cannot observe" },
+      ],
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(result.report.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "DUPLICATE_EVENT_OBSERVER" }),
+      expect.objectContaining({ code: "INVALID_EVENT_OBSERVER" }),
+    ]));
+    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
+  });
+
   it("rejects ordinary actions by a dead actor", async () => {
     const { engine } = await fixture();
     const genesis = await engine.createBranch("main", "Main", {

@@ -73,6 +73,7 @@ describe("CanonicalModelStore revisions", () => {
     }];
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] });
     await actors.putGoal({ id: "hero-goal", actorId: "hero", description: "Old policy", priority: 0.5, requiresKnowledge: [], evidence });
+    await actors.putGoal({ id: "foreign-goal", actorId: "foreign-actor", description: "Foreign policy", priority: 1, requiresKnowledge: [], evidence });
     const heroRef = await canon.currentRevision("entities", "hero");
     if (!heroRef) throw new Error("missing hero revision");
     const legacySnapshot = {
@@ -93,6 +94,79 @@ describe("CanonicalModelStore revisions", () => {
     await actors.putGoal({ id: "hero-goal", actorId: "hero", description: "New policy", priority: 0.8, requiresKnowledge: [], evidence });
     const reopened = new WorldEngine(root, await contexts.captureCurrent(), (hash) => contexts.load(hash));
     expect((await reopened.contextForCommit(head)).actorGoals?.[0]?.description).toBe("Old policy");
-    expect(reopened.context.actorGoals?.[0]?.description).toBe("New policy");
+    expect((await reopened.contextForCommit(head)).actorGoals?.map((goal) => goal.id)).toEqual(["hero-goal"]);
+    expect(reopened.context.actorGoals?.find((goal) => goal.id === "hero-goal")?.description).toBe("New policy");
+  });
+
+  it("loads an unpinned legacy snapshot without injecting current global policy", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-legacy-context-fail-closed-"));
+    roots.push(root);
+    const canon = new CanonicalModelStore(root);
+    const actors = new ActorModelStore(root);
+    const contexts = new WorldContextStore(root, canon);
+    const evidence = [{
+      span: { sourceId: "current-source", startLine: 1, endLine: 1, startByte: 0, endByte: 4, quoteHash: "b".repeat(64) },
+      strength: "explicit" as const,
+    }];
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] });
+    await actors.putGoal({ id: "current-goal", actorId: "hero", description: "Must not enter legacy context", priority: 1, requiresKnowledge: [], evidence });
+    await actors.putModel({ actorId: "hero", traits: { mustNotEnter: 1 }, decisionBiases: {}, evidence });
+    const heroRef = await canon.currentRevision("entities", "hero");
+    if (!heroRef) throw new Error("missing hero revision");
+    const legacySnapshot = {
+      version: 1 as const,
+      entities: [heroRef],
+      claims: [],
+      events: [],
+      rules: [],
+      stateFields: DEFAULT_STATE_FIELDS,
+    };
+    const legacyHash = contentHash(legacySnapshot);
+    await fs.mkdir(contexts.root, { recursive: true });
+    await fs.writeFile(path.join(contexts.root, `${legacyHash}.json`), `${canonicalJson(legacySnapshot)}\n`);
+
+    const loaded = await contexts.load(legacyHash);
+    expect(loaded.actorGoals).toEqual([]);
+    expect(loaded.actorModels?.size).toBe(0);
+    expect(loaded.possibilityTemplates).toEqual([]);
+  });
+
+  it("rejects a hash-valid source-scoped snapshot that references a foreign-source artifact", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-context-source-integrity-"));
+    roots.push(root);
+    const canon = new CanonicalModelStore(root);
+    const contexts = new WorldContextStore(root, canon);
+    const foreignEvidence = [{
+      span: { sourceId: "novel-b", startLine: 1, endLine: 1, startByte: 0, endByte: 4, quoteHash: "c".repeat(64) },
+      strength: "explicit" as const,
+    }];
+    await canon.putEntity({
+      id: "foreign-hero",
+      kind: "character",
+      canonicalName: "Foreign Hero",
+      aliases: [],
+      evidence: foreignEvidence,
+    });
+    const foreignRef = await canon.currentRevision("entities", "foreign-hero");
+    if (!foreignRef) throw new Error("missing foreign entity revision");
+    const invalidScopedSnapshot = {
+      version: 3 as const,
+      sourceId: "novel-a",
+      entities: [foreignRef],
+      claims: [],
+      events: [],
+      rules: [],
+      actorGoals: [],
+      actorModels: [],
+      possibilities: [],
+      stateFields: DEFAULT_STATE_FIELDS,
+    };
+    const snapshotHash = contentHash(invalidScopedSnapshot);
+    await fs.mkdir(contexts.root, { recursive: true });
+    await fs.writeFile(path.join(contexts.root, `${snapshotHash}.json`), `${canonicalJson(invalidScopedSnapshot)}\n`);
+
+    await expect(contexts.load(snapshotHash)).rejects.toThrow(
+      "World snapshot artifact foreign-hero is not exclusively grounded in active novel source novel-a",
+    );
   });
 });

@@ -6,6 +6,7 @@ import { Compile } from "typebox/compile";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCompilerProposalTools, createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { SegmentStore } from "../src/compiler/segments.js";
 import { ProposalStore } from "../src/world/canonical-model.js";
 import { entitySchema } from "../src/world/model.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
@@ -34,7 +35,7 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(15);
     for (const tool of tools.filter((candidate) => candidate.name.startsWith("propose_"))) {
       const validator = Compile(tool.parameters);
       expect(tool.executionMode).toBe("sequential");
@@ -98,6 +99,84 @@ describe("compiler proposal tools", () => {
     };
     expect(validator.Check({ proposal_id: "entity-liu-bei", payload: { id: "liu-bei", ...base } })).toBe(false);
     expect(validator.Check({ proposal_id: "中文 id", payload: { id: "中文 id", ...base } })).toBe(false);
+  });
+
+  it("rejects one compiler artifact that mixes evidence from different novels", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-source-boundary-"));
+    roots.push(root);
+    const first = await createEvidenceFixture(root, "Hero enters.\n", "first.txt");
+    const second = await createEvidenceFixture(root, "Other hero enters.\n", "second.txt");
+    const service = new CompilerProposalService(root);
+
+    await expect(service.submit("entity", {
+      proposalId: "mixed-hero",
+      payload: {
+        id: "mixed-hero",
+        kind: "character",
+        canonicalName: "Hero",
+        aliases: [],
+        evidence: [...first.evidence("Hero"), ...second.evidence("Other hero")],
+      },
+      generatedBy: { worker: "test" },
+    })).rejects.toThrow("mixes evidence from multiple novel sources");
+  });
+
+  it("rejects evidence outside the host-supplied source segment slice", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-segment-boundary-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "第一章 开端\nHero enters the Hall.\n\n第二章 后事\nVillain reveals the future.\n",
+    );
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], "opening-slice", fixture.source.id);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+
+    await expect(entity.execute("future-entity", {
+      proposal_id: "future-villain",
+      payload: {
+        id: "future-villain",
+        kind: "character",
+        canonicalName: "Villain",
+        aliases: [],
+        evidence: fixture.evidence("Villain reveals the future."),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("outside the host-supplied compiler segment slice");
+    await expect(new ProposalStore(root).list("pending")).resolves.toEqual([]);
+  });
+
+  it("keeps the host-selected evidence boundary after the persisted manifest changes mid-turn", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-frozen-slice-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Chapter 1\nAlice waits.\nChapter 2\nBob arrives.\n");
+    const store = new SegmentStore(root);
+    const manifest = await store.readManifest(fixture.source.id);
+    expect(manifest?.segments).toHaveLength(2);
+    const [first, second] = manifest!.segments;
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([first!.id], "frozen-slice", fixture.source.id);
+
+    await store.write({
+      ...manifest!,
+      segments: [{
+        ...first!,
+        endLine: second!.endLine,
+        endByte: fixture.source.bytes,
+        bytes: fixture.source.bytes - first!.startByte,
+        textSha256: "a".repeat(64),
+      }],
+    });
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    await expect(entity.execute("bob", {
+      proposal_id: "entity-bob",
+      payload: {
+        id: "bob",
+        kind: "character",
+        canonicalName: "Bob",
+        aliases: [],
+        evidence: fixture.evidence("Bob"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("outside the host-supplied compiler segment slice");
   });
 
   it("rejects unregistered or unnamespaced state fields at both tool and service boundaries", async () => {
@@ -607,7 +686,7 @@ describe("compiler proposal tools", () => {
     const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
     const initial = toolset.tools.find((candidate) => candidate.name === "propose_initial_world")!;
     const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
-    await toolset.beginBatch([fixture.segmentId]);
+    await toolset.beginBatch([fixture.segmentId], undefined, fixture.source.id);
     await entity.execute("lin-qi", {
       proposal_id: "entity-lin-qi",
       payload: {
@@ -665,7 +744,7 @@ describe("compiler proposal tools", () => {
     const initial = toolset.tools.find((candidate) => candidate.name === "propose_initial_world")!;
     const withdraw = toolset.tools.find((candidate) => candidate.name === "withdraw_compiler_proposal")!;
     const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
-    await toolset.beginBatch([fixture.segmentId]);
+    await toolset.beginBatch([fixture.segmentId], undefined, fixture.source.id);
     await entity.execute("linqi", {
       proposal_id: "entity-linqi",
       payload: {
@@ -764,7 +843,10 @@ describe("compiler proposal tools", () => {
   it("resets finish state only when the host starts a new compiler batch", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-batches-"));
     roots.push(root);
-    const fixture = await createEvidenceFixture(root, "林岐来到前厅。王安随后到达。\n");
+    const fixture = await createEvidenceFixture(root, "Chapter 1\n林岐来到前厅。\nChapter 2\n王安随后到达。\n");
+    const [firstSegment, secondSegment] = await new SegmentStore(root).list(fixture.source.id);
+    expect(firstSegment).toBeDefined();
+    expect(secondSegment).toBeDefined();
     const toolset = createCompilerProposalToolset(root);
     const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
     const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
@@ -779,7 +861,7 @@ describe("compiler proposal tools", () => {
       },
     };
 
-    await toolset.beginBatch(["segment-1"]);
+    await toolset.beginBatch([firstSegment!.id], undefined, fixture.source.id);
     await entity.execute("batch-1-proposal", input as never, undefined, undefined, {} as ExtensionContext);
     await expect(finish.execute("missing-segment-review", {
       outcome: "complete",
@@ -790,13 +872,13 @@ describe("compiler proposal tools", () => {
     await finish.execute("batch-1-finish", {
       outcome: "complete",
       proposal_ids: ["entity-linqi"],
-      reviewed_segments: [{ segment_id: "segment-1", disposition: "proposed", summary: "Recorded Lin Qi." }],
+      reviewed_segments: [{ segment_id: firstSegment!.id, disposition: "proposed", summary: "Recorded Lin Qi." }],
       summary: "first batch",
     } as never, undefined, undefined, {} as ExtensionContext);
     await expect(entity.execute("same-batch-late", input as never, undefined, undefined, {} as ExtensionContext))
       .rejects.toThrow("already finished");
 
-    await toolset.beginBatch(["segment-2"]);
+    await toolset.beginBatch([secondSegment!.id], undefined, fixture.source.id);
     await expect(entity.execute("batch-2-proposal", {
       proposal_id: "entity-wangan",
       payload: {
@@ -812,10 +894,10 @@ describe("compiler proposal tools", () => {
     await expect(finish.execute("batch-2-finish", {
       outcome: "complete",
       proposal_ids: ["entity-wangan"],
-      reviewed_segments: [{ segment_id: "segment-2", disposition: "proposed", summary: "Reviewed the second segment." }],
+      reviewed_segments: [{ segment_id: secondSegment!.id, disposition: "proposed", summary: "Reviewed the second segment." }],
       summary: "second batch",
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
-      details: { reviewedSegmentIds: ["segment-2"] },
+      details: { reviewedSegmentIds: [secondSegment!.id] },
     });
   });
 

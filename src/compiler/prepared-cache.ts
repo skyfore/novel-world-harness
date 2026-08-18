@@ -9,7 +9,7 @@ import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../w
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema } from "../world/initial.js";
-import { WORLD_ENGINE_VERSION, canonicalEventSchema, claimSchema, entitySchema, worldRuleSchema } from "../world/model.js";
+import { WORLD_ENGINE_VERSION, canonicalEventSchema, claimSchema, entitySchema, worldRuleSchema, type EvidenceRef } from "../world/model.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
@@ -18,6 +18,7 @@ import { SEGMENTER_VERSION } from "./segments.js";
 import { CompilerValidator, type CanonicalProposalKind, type CompilerValidationCatalog } from "./validator.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { auditCompiler } from "./audit.js";
+import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
@@ -54,6 +55,25 @@ const preparedNovelBundleSchema = z.object({
 }).strict();
 
 export type PreparedNovelBundle = z.infer<typeof preparedNovelBundleSchema>;
+
+function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
+  const sourceId = bundle.source.id;
+  const collections = [
+    bundle.canonical.entities,
+    bundle.canonical.claims,
+    bundle.canonical.events,
+    bundle.canonical.rules,
+    bundle.canonical.goals,
+    bundle.canonical.models,
+    bundle.canonical.possibilities,
+  ] as const;
+  for (const items of collections) {
+    for (const item of items as readonly { id?: string; actorId?: string; evidence: readonly EvidenceRef[] }[]) {
+      assertEvidenceExclusiveToSource(item.evidence, sourceId, `Prepared bundle artifact ${item.id ?? item.actorId ?? "unknown"}`);
+    }
+  }
+  assertEvidenceExclusiveToSource(bundle.canonical.initialWorld.evidence, sourceId, "Prepared bundle initial world");
+}
 
 const preparedNovelManifestSchema = z.object({
   version: z.literal(1),
@@ -347,8 +367,13 @@ export class PreparedNovelCache {
     if (!initialWorld || !initialWorld.evidence.some((reference) => reference.span.sourceId === source.id)) {
       throw new Error(`Cannot cache ${source.id}: an evidence-backed initial world for this source is required.`);
     }
-    const fromSource = <T extends { evidence: readonly { span: { sourceId: string } }[] }>(items: readonly T[]) =>
-      items.filter((item) => item.evidence.some((reference) => reference.span.sourceId === source.id));
+    assertEvidenceExclusiveToSource(initialWorld.evidence, source.id, "Prepared initial world");
+    const fromSource = <T extends { id?: string; actorId?: string; evidence: readonly EvidenceRef[] }>(items: readonly T[]) =>
+      items.filter((item) => {
+        const matches = item.evidence.some((reference) => reference.span.sourceId === source.id);
+        if (matches) assertEvidenceExclusiveToSource(item.evidence, source.id, `Prepared artifact ${item.id ?? item.actorId ?? "unknown"}`);
+        return matches;
+      });
     const [entities, claims, events, rules, goals, models, possibilities] = await Promise.all([
       canonical.listEntities(),
       canonical.listClaims(),
@@ -422,8 +447,12 @@ export class PreparedNovelCache {
     const pending = await new ProposalStore(this.workspaceRoot).list("pending", bundle.source.id);
     if (pending.length) return `${pending.length} source proposal(s) are pending`;
     const current = await currentCanonical(this.workspaceRoot);
-    const fromSource = <T extends { evidence: readonly { span: { sourceId: string } }[] }>(items: readonly T[]) =>
-      items.filter((item) => item.evidence.some((reference) => reference.span.sourceId === bundle.source.id));
+    const fromSource = <T extends { id?: string; actorId?: string; evidence: readonly EvidenceRef[] }>(items: readonly T[]) =>
+      items.filter((item) => {
+        const matches = item.evidence.some((reference) => reference.span.sourceId === bundle.source.id);
+        if (matches) assertEvidenceExclusiveToSource(item.evidence, bundle.source.id, `Prepared-cache artifact ${item.id ?? item.actorId ?? "unknown"}`);
+        return matches;
+      });
     const groups = [
       ["entities", fromSource(current.entities), bundle.canonical.entities, (item: { id: string }) => item.id],
       ["claims", fromSource(current.claims), bundle.canonical.claims, (item: { id: string }) => item.id],
@@ -437,6 +466,9 @@ export class PreparedNovelCache {
       reference.span.sourceId === bundle.source.id)
       ? current.initialWorld
       : null;
+    if (currentInitialForSource) {
+      assertEvidenceExclusiveToSource(currentInitialForSource.evidence, bundle.source.id, "Prepared-cache current initial world");
+    }
     // A shared workspace may contain only another novel's material. In that
     // case the active immutable bundle is the source of truth for this new
     // branch, not a "missing" local copy that should be diagnosed as stale.
@@ -582,6 +614,7 @@ export class PreparedNovelCache {
       ]);
       const manifest = preparedNovelManifestSchema.parse(JSON.parse(manifestRaw));
       const bundle = preparedNovelBundleSchema.parse(JSON.parse(bundleRaw));
+      assertPreparedBundleSourceScope(bundle);
       if (manifest.contentMd5 !== contentMd5 || bundle.source.contentMd5 !== contentMd5) throw new Error(`Prepared cache path/digest mismatch: ${directory}`);
       if (
         manifest.contentSha256 !== bundle.source.contentSha256

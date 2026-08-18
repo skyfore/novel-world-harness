@@ -5,7 +5,7 @@ import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
-import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
 import {
   evidenceRefSchema,
   idSchema,
@@ -20,6 +20,7 @@ import {
 } from "./model.js";
 import { evaluatePredicate } from "./state.js";
 import { committedHistory, projectActorScene, realizedCanonicalEvents } from "./scene.js";
+import { AmbiguousLegacySourceError, evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { storyTimesOverlap } from "./time.js";
 
 const goalActionSchema = z
@@ -408,23 +409,41 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
       engine.projector.project(commitId),
       committedHistory(engine, commitId),
     ]);
+    let activeSourceId: string | undefined;
+    try {
+      activeSourceId = await resolveCommitSourceId(engine, context, commitId, undefined, "Actor scheduler");
+    } catch (error) {
+      // Automatic NPC policy has no authority to choose between novels for an
+      // unscoped legacy branch. Disable it without turning a valid player
+      // commit into a background error.
+      if (error instanceof AmbiguousLegacySourceError) return [];
+      throw error;
+    }
+    const belongsToActiveWorld = (evidence: Parameters<typeof evidenceBelongsExclusivelyToSource>[0]) => activeSourceId
+      ? evidenceBelongsExclusivelyToSource(evidence, activeSourceId)
+      : evidence.length === 0;
     const latestPlayerEvent = [...history].reverse().find((entry) => entry.event.actorId);
     if (!latestPlayerEvent?.event.actorId) {
-      const goals = context.actorGoals ?? await actors.listGoals();
-      const realizedCanonicalEventIds = realizedCanonicalEvents(history);
+      const goals = (context.actorGoals ?? await actors.listGoals())
+        .filter((goal) => belongsToActiveWorld(goal.evidence));
       for (const goal of goals) {
+        const entity = context.entities.get(goal.actorId);
+        if (!entity || entity.kind !== "character") continue;
+        if (!belongsToActiveWorld(entity.evidence) || !belongsToActiveWorld(goal.evidence)) continue;
+        const actorHistory = history.filter((entry) => !entry.event.evidence.length
+          || belongsToActiveWorld(entry.event.evidence));
+        const realizedCanonicalEventIds = realizedCanonicalEvents(actorHistory);
         const action = goal.candidateAction ?? goal.actionPatterns?.find((pattern) =>
           pattern.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
-        const entity = context.entities.get(goal.actorId);
-        if (!action || !entity || entity.kind !== "character") continue;
+        if (!action) continue;
         const view = await knowledge.view(goal.actorId, commitId);
-        const known = new Set(view.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
+        const known = actionableKnowledgeClaimIds(view, activeSourceId);
         if (!evaluateCharacterGoal(goal, {
           state,
           knownClaimIds: known,
           realizedCanonicalEventIds,
           storyTime: state.logicalTime.storyTime,
-        }).active || !goalSupportedInCurrentPhase(goal, history, goal.actorId)) continue;
+        }).active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;
         candidates.push({
           goalId: goal.id,
           priority: goal.priority,
@@ -454,25 +473,29 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
       return candidates.sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId));
     }
     const initiatingActorId = latestPlayerEvent.event.actorId;
-    const scene = await projectActorScene(engine, initiatingActorId, commitId, context.sourceId);
+    const scene = await projectActorScene(engine, initiatingActorId, commitId, activeSourceId);
     const localActors = new Set(scene.presentEntityIds);
     localActors.delete(initiatingActorId);
     if (!localActors.size) return candidates;
-    const realizedCanonicalEventIds = realizedCanonicalEvents(history);
-    const goals = context.actorGoals ?? await actors.listGoals();
+    const goals = (context.actorGoals ?? await actors.listGoals())
+      .filter((goal) => belongsToActiveWorld(goal.evidence));
     const goalActors = new Set<string>();
     for (const goal of goals) {
       const entity = context.entities.get(goal.actorId);
       if (!entity || entity.kind !== "character" || !localActors.has(goal.actorId)) continue;
+      if (!belongsToActiveWorld(entity.evidence) || !belongsToActiveWorld(goal.evidence)) continue;
+      const actorHistory = history.filter((entry) => !entry.event.evidence.length
+        || belongsToActiveWorld(entry.event.evidence));
+      const realizedCanonicalEventIds = realizedCanonicalEvents(actorHistory);
       const view = await knowledge.view(goal.actorId, commitId);
-      const known = new Set(view.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
+      const known = actionableKnowledgeClaimIds(view, activeSourceId);
       const activation = evaluateCharacterGoal(goal, {
         state,
         knownClaimIds: known,
         realizedCanonicalEventIds,
         storyTime: state.logicalTime.storyTime,
       });
-      if (!activation.active || !goalSupportedInCurrentPhase(goal, history, goal.actorId)) continue;
+      if (!activation.active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;
       const proposedAction = goal.candidateAction ?? goal.actionPatterns?.find((pattern) =>
         pattern.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
       const action = proposedAction && actorActionIsLocal(
@@ -519,8 +542,12 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
     for (const actorId of [...localActors].sort()) {
       if (goalActors.has(actorId)) continue;
       const entity = context.entities.get(actorId);
-      const model = context.actorModels?.get(actorId) ?? await actors.getModel(actorId);
-      if (!entity || entity.kind !== "character" || !model) continue;
+      const model = context.actorModels
+        ? context.actorModels.get(actorId)
+        : await actors.getModel(actorId);
+      if (!entity || entity.kind !== "character" || !model
+        || !belongsToActiveWorld(entity.evidence)
+        || !belongsToActiveWorld(model.evidence)) continue;
       candidates.push({
         goalId: `model-${actorId}`,
         priority: 0.2,
@@ -550,7 +577,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
   };
 }
 
-function goalSupportedInCurrentPhase(
+export function goalSupportedInCurrentPhase(
   goal: CharacterGoal,
   history: Awaited<ReturnType<typeof committedHistory>>,
   actorId: string,

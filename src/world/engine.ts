@@ -28,6 +28,7 @@ import type { PossibilityTemplate } from "./possibility-model.js";
 import { StateSchemaRegistry, advanceTemporalState, applyStateDelta, emptyWorldState, evaluatePredicate, validateEngineInvariants } from "./state.js";
 import { BranchStore, WorldObjectStore } from "./store.js";
 import { assertMonotonicLogicalTime, nextLogicalTime } from "./time.js";
+import { assertEvidenceExclusiveToSource } from "./source-scope.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -110,6 +111,21 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   if (state.atCommit !== head) errors.push({ code: "STATE_HEAD_MISMATCH", message: `Projected state ${state.atCommit} does not match ${head}` });
   for (const entityId of proposal.participants) if (!context.entities.has(entityId)) errors.push({ code: "UNKNOWN_PARTICIPANT", message: `Unknown participant ${entityId}` });
   if (proposal.actorId && !context.entities.has(proposal.actorId)) errors.push({ code: "UNKNOWN_ACTOR", message: `Unknown actor ${proposal.actorId}` });
+  const observedActors = new Set<string>();
+  for (let index = 0; index < (proposal.actorObservations?.length ?? 0); index += 1) {
+    const observation = proposal.actorObservations![index]!;
+    const observer = context.entities.get(observation.actorId);
+    if (!observer || observer.kind !== "character") {
+      errors.push({ code: "INVALID_EVENT_OBSERVER", message: `Event observer ${observation.actorId} is not a character`, path: `actorObservations.${index}.actorId` });
+    }
+    if (!proposal.participants.includes(observation.actorId)) {
+      errors.push({ code: "INVALID_EVENT_OBSERVER", message: `Event observer ${observation.actorId} must also be a participant`, path: `actorObservations.${index}.actorId` });
+    }
+    if (observedActors.has(observation.actorId)) {
+      errors.push({ code: "DUPLICATE_EVENT_OBSERVER", message: `Event observer ${observation.actorId} has more than one summary`, path: `actorObservations.${index}.actorId` });
+    }
+    observedActors.add(observation.actorId);
+  }
   let evaluationState = state;
   try {
     const logicalTime = nextLogicalTime(state.logicalTime, proposal.proposedTime, proposal.timeAdvance);
@@ -230,6 +246,9 @@ export class WorldEngine {
     }
     const branchSourceId = sourceId ?? this.context.sourceId;
     const branchPreparedRevisionHash = preparedRevisionHash ?? this.context.preparedRevisionHash;
+    if (branchSourceId && initialEvidence.length) {
+      assertEvidenceExclusiveToSource(initialEvidence, branchSourceId, "Genesis evidence");
+    }
     stateDeltaSchema.parse(initialDelta);
     const knowledge = initialKnowledge ? knowledgeDeltaSchema.parse(initialKnowledge) : undefined;
     if (knowledge) validateKnowledgeDeltaForContext(knowledge, this.context);
@@ -278,8 +297,16 @@ export class WorldEngine {
   }
   async commitProposal(proposal: EventProposal): Promise<CommitProposalResult> {
     const parsed = eventProposalSchema.parse(proposal);
-    const head = await this.branches.readHead(parsed.branchId);
+    const branch = await this.branches.read(parsed.branchId);
+    const head = branch.headCommitId;
     const context = await this.contextForCommit(head);
+    if (branch.sourceId && context.sourceId && branch.sourceId !== context.sourceId) {
+      throw new Error(`Branch source '${branch.sourceId}' does not match committed context '${context.sourceId}'.`);
+    }
+    const sourceId = branch.sourceId ?? context.sourceId;
+    if (sourceId && parsed.evidence.length) {
+      assertEvidenceExclusiveToSource(parsed.evidence, sourceId, `Event proposal ${parsed.proposalId}`);
+    }
     const state = await this.projector.project(head);
     const { report, postState } = validateEventProposal(parsed, head, state, context);
     if (!report.accepted) return { report, previousHead: head, newHead: head };
@@ -306,6 +333,7 @@ export class WorldEngine {
       possibilityId: parsed.possibilityId,
       realizesCanonicalEventIds,
       progress: parsed.progress,
+      actorObservations: parsed.actorObservations,
     });
     const event: CommittedEvent = {
       version: 1,
@@ -316,6 +344,7 @@ export class WorldEngine {
       proposalId: parsed.proposalId,
       ...(parsed.actorId ? { actorId: parsed.actorId } : {}),
       title: parsed.title,
+      ...(parsed.actorObservations ? { actorObservations: structuredClone(parsed.actorObservations) } : {}),
       participants: parsed.participants,
       deltaHash,
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),

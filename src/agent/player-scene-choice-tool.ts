@@ -21,6 +21,7 @@ export type PlayerSceneChoice = z.infer<typeof playerSceneChoiceSchema>;
 export type PlayerSceneChoiceCaptureTool = {
   tool: ToolDefinition;
   getChoices(): PlayerSceneChoice[];
+  getExecutionAttempts(): number;
   reset(): void;
 };
 
@@ -43,6 +44,7 @@ function prepareArguments(value: unknown): z.infer<typeof playerSceneChoicesSche
 export function createPlayerSceneChoiceCaptureTool(): PlayerSceneChoiceCaptureTool {
   let choices: PlayerSceneChoice[] = [];
   let captured = false;
+  let executionAttempts = 0;
   const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(playerSceneChoicesSchema);
   const parameters = Type.Unsafe<z.infer<typeof playerSceneChoicesSchema>>(jsonSchema as TSchema);
   const tool = defineTool({
@@ -58,6 +60,7 @@ export function createPlayerSceneChoiceCaptureTool(): PlayerSceneChoiceCaptureTo
     parameters,
     prepareArguments,
     async execute(_id, input, signal) {
+      executionAttempts += 1;
       signal?.throwIfAborted();
       if (captured) throw new Error("Only one scene-choice set may be captured per narration attempt.");
       const parsed = playerSceneChoicesSchema.parse(input);
@@ -75,9 +78,11 @@ export function createPlayerSceneChoiceCaptureTool(): PlayerSceneChoiceCaptureTo
   return {
     tool,
     getChoices: () => structuredClone(choices),
+    getExecutionAttempts: () => executionAttempts,
     reset() {
       choices = [];
       captured = false;
+      executionAttempts = 0;
     },
   };
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import type { Entity, EventProposal, Possibility } from "../src/world/model.js";
-import { WorldRuntime } from "../src/world/runtime.js";
+import { WorldRuntime, type NarrativeRender } from "../src/world/runtime.js";
 import { buildFrontier, selectEligible } from "../src/world/frontier.js";
 import { emptyWorldState } from "../src/world/state.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
@@ -52,6 +52,106 @@ async function fixture() {
 }
 
 describe("WorldRuntime", () => {
+  it("freezes callback input and snapshots validated possibility output", async () => {
+    const { engine } = await fixture();
+    const head = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.location", value: "hall" }],
+    });
+    let callbackInputFrozen = false;
+    let retained!: Possibility;
+    const runtime = new WorldRuntime(engine, (input) => {
+      callbackInputFrozen = Object.isFrozen(input)
+        && Object.isFrozen(input.state)
+        && Object.isFrozen(input.state.values)
+        && Object.isFrozen(input.state.values.hero);
+      retained = {
+        id: "retained-template",
+        branchId: input.branchId,
+        evaluatedAtCommit: input.commitId,
+        kind: "generated",
+        title: "Original title",
+        preconditions: [],
+        blockers: [],
+        participants: ["hero"],
+        causalParents: [],
+        pressure: 1,
+        relevance: 1,
+        proposedDelta: { version: 1, operations: [] },
+        evidence: [],
+      };
+      return [retained];
+    });
+
+    const frontier = await runtime.refreshFrontier("main", head);
+    retained.title = "Mutated after callback";
+    retained.participants.push("hall");
+
+    expect(callbackInputFrozen).toBe(true);
+    expect(frontier.evaluated[0]?.possibility.title).toBe("Original title");
+    expect(frontier.evaluated[0]?.possibility.participants).toEqual(["hero"]);
+  });
+
+  it("rejects malformed possibility callback output before frontier evaluation", async () => {
+    const { engine } = await fixture();
+    const head = await engine.createBranch("main", "Main", { version: 1, operations: [] });
+    const runtime = new WorldRuntime(engine, ({ branchId, commitId }) => [{
+      id: "invalid-template",
+      branchId,
+      evaluatedAtCommit: commitId,
+      kind: "generated",
+      title: "Invalid",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      causalParents: [],
+      pressure: Number.POSITIVE_INFINITY,
+      relevance: 1,
+      evidence: [],
+    } as Possibility]);
+
+    await expect(runtime.refreshFrontier("main", head)).rejects.toThrow();
+  });
+
+  it("freezes the renderer frame and validates its result", async () => {
+    const { engine } = await fixture();
+    const head = await engine.createBranch("main", "Main", { version: 1, operations: [] });
+    let frozen = false;
+    const runtime = new WorldRuntime(engine, () => [], (input) => {
+      frozen = Object.isFrozen(input)
+        && Object.isFrozen(input.state)
+        && Object.isFrozen(input.state.values)
+        && Object.isFrozen(input.committedEvents);
+      return "Rendered scene";
+    });
+
+    const result = await runtime.move({ branchId: "main" });
+
+    expect(result.newHead).toBe(head);
+    expect(result.renderedText).toBe("Rendered scene");
+    expect(frozen).toBe(true);
+
+    const invalidRender = (() => ({ text: "invalid" })) as unknown as NarrativeRender;
+    const invalidRuntime = new WorldRuntime(engine, () => [], invalidRender);
+    await expect(invalidRuntime.move({ branchId: "main" }))
+      .rejects.toThrow("World runtime renderer must return a string or undefined");
+  });
+
+  it("detects a renderer that rewrites committed branch truth", async () => {
+    const { engine } = await fixture();
+    const head = await engine.createBranch("main", "Main", { version: 1, operations: [] });
+    const foreignHead = "a".repeat(64);
+    const runtime = new WorldRuntime(engine, () => [], async ({ branchId, commitId }) => {
+      await engine.branches.updateHead(branchId, commitId, foreignHead);
+      return "Rendered scene";
+    });
+
+    await expect(runtime.move({ branchId: "main" }))
+      .rejects.toThrow("World runtime renderer mutated branch truth");
+    expect(await engine.branches.readHead("main")).toBe(foreignHead);
+    await engine.branches.updateHead("main", foreignHead, head);
+  });
+
   it("keeps player-only choices visible but out of background scheduling", () => {
     const state = emptyWorldState("head");
     const base = {

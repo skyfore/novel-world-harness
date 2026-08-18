@@ -1,0 +1,682 @@
+# Context injection, visibility, and authority audit
+
+Date: 2026-08-17
+
+This is the evidence record for every application-controlled path that can
+place data in a model request, every public callback that could be implemented
+with a model, and every host path that can turn a model result into persistent
+state. It deliberately separates three different questions:
+
+1. what data is constructed on the host;
+2. what data actually crosses a model boundary;
+3. what authority the returned value has after it comes back.
+
+The governing rule is that compiled canon, committed branch truth, actor
+knowledge, and model context are different projections. A value being present
+in host memory does not mean it is sent to a model.
+
+## Audit method and complete boundary inventory
+
+The inventory was built by tracing every `PiAgentSession.create`, every direct
+`ModelRuntime.create`, every prompt constructor, Pi's lifecycle hooks, and the
+exported callback types that accept world data.
+
+There are four application inference roles:
+
+| Inference role | Construction site | Model-visible input | Available model tools | Persistent authority |
+| --- | --- | --- | --- | --- |
+| Ordinary TUI/print assistant | `playCommand` | Harness prompt/contract, allowlisted project instructions, projected ordinary transcript, current user input and explicit safe attachments | bounded `list_files`, `search_files`, `read_file`; extension-owned session rename metadata | no file/world write; session title only |
+| Compiler | `createPiCompilerSession`, or an explicit compiler turn in the TUI | isolated compiler instructions plus a host-selected source/opening/reconciliation payload and source-owned prior-artifact indexes | scope-specific exact retrieval and typed pending-proposal tools | pending/rejected proposal envelopes and a finish handshake; no canonical or branch commit |
+| Player-action translator | `createPiPlayerActionTranslator` | one actor-safe projection with opaque turn handles, one untrusted utterance, and bounded coverage metadata | exact retrieval over the already-safe projection and one in-memory capture tool | none; the host decodes, validates, and constructs the event proposal |
+| Scene narrator | `createPiPlayerOpeningNarrator` | one actor-safe, name-based scene frame and bounded coverage metadata | exact retrieval over that same frame and one in-memory choice-capture tool | none; prose and selected public affordances cannot mutate branch truth |
+
+Evidence: [play.ts](../src/commands/play.ts),
+[pi-compiler.ts](../src/compiler/pi-compiler.ts),
+[pi-player-action.ts](../src/agent/pi-player-action.ts), and
+[pi-player-opening.ts](../src/agent/pi-player-opening.ts). The only other
+direct `ModelRuntime.create` is `doctorCommand`; it reads provider/authentication
+metadata but never constructs a prompt or invokes inference.
+[doctor.ts](../src/commands/doctor.ts)
+
+### Public callback inventory
+
+These API seams must not be confused with the four built-in Pi roles:
+
+| Callback | Data supplied by the harness | Boundary status and returned-value gate |
+| --- | --- | --- |
+| `PlayerActionTranslator` | actor-scoped stable IDs, visible state/knowledge/events, and writable capabilities; no commit chronology | safe for a model adapter after that adapter applies its own transport policy. Input is a frozen clone and output must pass `playerActionCandidateSchema` plus scope, grounding, spatial, knowledge, progress, and engine validation. The built-in Pi adapter additionally replaces stable IDs with opaque handles. |
+| `PlayerOpeningNarrator` | `PlayerSceneNarratorFrame`: names and actor-visible semantics, with branch/commit/time/stable IDs removed | model-safe frame. The TUI validates narration and choices, then binds choices back to host-owned affordances. |
+| `ActorReasoner` | opaque actor view, one currently active goal description/priority/visible targets, active disposition, and committed development | model-safe input snapshot. Output is strict-schema parsed, handle-decoded, and sent through the player capability gates before it can become an actor proposal. |
+| `NarrativeAdapter` in actor POV | actor name, visible self state and acquired claims, and participant-visible event summaries | actor-safe and frozen. Adapter output must be a string; rendering is non-authoritative and branch-head immutability is checked. |
+| `NarrativeAdapter` in explicit omniscient POV | full projected `WorldState`, commit/branch IDs, and committed history | intentionally **not** model-safe for an untrusted/actor model. This is a diagnostic/host-authority API, selected explicitly by the caller. |
+
+Evidence: [player-action.ts](../src/world/player-action.ts),
+[play-opening.ts](../src/world/play-opening.ts),
+[model-actor-policy.ts](../src/world/model-actor-policy.ts),
+[narrative.ts](../src/world/narrative.ts), and tests in
+[player-action.test.ts](../test/player-action.test.ts),
+[model-actor-policy.test.ts](../test/model-actor-policy.test.ts), and
+[narrative.test.ts](../test/narrative.test.ts).
+
+The following are trusted host-authority callbacks, not actor/model-safe
+interfaces: `PossibilitySource` and `NarrativeRender` receive full derived
+world state; `ActorProposalSource` returns commit candidates; `PlayerTurnRender`
+receives branch/commit/actor/source identity; `PlayerCanonResolver` receives the
+fully constructed scoped proposal; compiler `promptTransform` may rewrite the
+complete compiler prompt; and low-level `PiAgentSessionOptions` may add tools or
+replace the system prompt. Inputs are cloned/frozen and structured callback
+outputs are schema checked where the host consumes them as world candidates,
+but arbitrary host code can always use its closure to access more data. These
+interfaces therefore require trusted implementations.
+
+Evidence: [runtime.ts](../src/world/runtime.ts),
+[player-action.ts](../src/world/player-action.ts),
+[batches.ts](../src/compiler/batches.ts),
+[pi-session.ts](../src/agent/pi-session.ts), and mutation/output regression
+tests in [world-runtime.test.ts](../test/world-runtime.test.ts) and
+[player-action.test.ts](../test/player-action.test.ts).
+
+## 1. TUI startup and ordinary assistant injection
+
+### System prompt contents
+
+`buildSystemPrompt` admits only these application-controlled sections:
+
+- the hard-coded NWH evidence/proposal/commit rules;
+- a machine-readable `nwh-context-contract` containing the selected mode,
+  trust classes, disabled Pi resources, active tool names, tool authority and
+  lifecycle policy;
+- project instruction files explicitly named in
+  `project.instructions`;
+- an explicit host-supplied mode appendix.
+
+If a trusted low-level caller supplies `systemPromptOverride`, it replaces the
+hard-coded base and the contract/project instructions/appendix are appended.
+The application prompt tells the model to use workspace-relative paths and does
+not serialize the root. Pi itself appends an absolute current-working-directory
+line after accepting a custom prompt, so an always-on hidden privacy extension
+runs last at `before_agent_start` and redacts that root from the fully assembled
+provider-bound system prompt. That interceptor is also installed in nested
+player/narrator sessions where the domain/workflow NWH extension is disabled.
+Provider credentials and API keys are given to Pi's runtime, not serialized
+into the prompt.
+
+Evidence: `buildNwhContextContract`, `buildSystemPrompt`,
+`createNwhPromptPrivacyExtension`, and `createModelRuntime` in
+[pi-session.ts](../src/agent/pi-session.ts), config validation in
+[schema.ts](../src/config/schema.ts), and the intermediate- and final-prompt
+path tests in [pi-session.test.ts](../test/pi-session.test.ts).
+
+### Trusted project instructions
+
+Project prose is trusted only after explicit configuration. The loader:
+
+- accepts at most eight workspace-relative paths;
+- loads at most 64,000 total characters and fails rather than silently
+  truncating instructions;
+- applies UTF-8, binary, real-path, workspace-containment, and sensitive-path
+  checks;
+- compares real paths against every registered novel source and rejects a
+  source/instruction collision.
+
+The inverse check runs during CLI ingest and TUI path ingest, so a configured
+instruction file cannot later be registered as novel evidence through a normal
+workflow. No conventional filename such as `NOVEL.md`, `AGENTS.md`, or
+`.novel-harness/instructions.md` is implicitly trusted by NWH.
+
+Evidence: `loadProjectInstructions` in
+[pi-session.ts](../src/agent/pi-session.ts),
+`assertSourceIsNotProjectInstruction` in
+[instruction-trust.ts](../src/workspace/instruction-trust.ts), call sites in
+[ingest.ts](../src/commands/ingest.ts) and
+[source-loop.ts](../src/compiler/source-loop.ts), and instruction/source tests
+in [pi-session.test.ts](../test/pi-session.test.ts),
+[ingest.test.ts](../test/ingest.test.ts), and
+[source-loop.test.ts](../test/source-loop.test.ts).
+
+### Harness/Pi capability injection
+
+Session initialization sets the project as untrusted and disables Pi extension
+discovery, skills, prompt templates, themes, context files, and built-in model
+tools. NWH then supplies only the explicitly assembled custom tools. The
+ordinary set is `list_files`, `search_files`, and `read_file`; the hidden NWH
+extension contributes only its separately classified metadata/workflow
+capabilities. Pi tool schemas, descriptions, and prompt guidelines are part of
+the provider context, and their exact names/authority are repeated in the
+context contract.
+
+The filesystem tools are read-only. They enforce real-path containment, reject
+symlink escape, exclude harness state, Git internals, dependencies/build output,
+common credential directories/files and private-key extensions, require valid
+UTF-8, and cap list/search/read results. This is a concrete denylist and size
+boundary, not a claim of general secret-content detection.
+
+Evidence: session resource and tool assembly in
+[pi-session.ts](../src/agent/pi-session.ts), filesystem enforcement in
+[local-files.ts](../src/workspace/local-files.ts), and
+[local-files.test.ts](../test/local-files.test.ts).
+
+### User prompts and attachments
+
+Ordinary user text is untrusted user content. Only an explicit `@path` in that
+text creates an attachment. Expansion reuses the safe workspace reader, allows
+at most eight files and 128,000 attachment characters, escapes tag attributes,
+and embeds file contents as a JSON string. `promptJson` escapes angle brackets
+while preserving valid JSON, so source text cannot manufacture the surrounding
+XML-like control delimiters.
+
+Automatic compiler turns disable generic attachment expansion because it
+would bypass their selected source slice. Explicit standalone manual compiler
+conversation retains ordinary file attachment behavior by design.
+
+Evidence: [file-mentions.ts](../src/agent/file-mentions.ts),
+[prompt-data.ts](../src/util/prompt-data.ts), the `input` and
+`before_agent_start` hooks in [nwh-extension.ts](../src/agent/nwh-extension.ts),
+and attachment/delimiter tests in [nwh-extension.test.ts](../test/nwh-extension.test.ts)
+and [compiler-batches.test.ts](../test/compiler-batches.test.ts).
+
+### Startup restoration is host state, not general-assistant context
+
+Continuing a session restores its Pi transcript. Restoring a saved playable
+world loads and validates the host-side `PlaySessionStore` selection; while
+player mode is active, ordinary input is intercepted before the general model.
+Scene narration and action translation then run in fresh restricted child
+sessions. `nwh-play` and `nwh-narrator` entries are durable display records but
+are removed from later model context.
+
+Evidence: startup/session construction in [play.ts](../src/commands/play.ts)
+and [pi-session.ts](../src/agent/pi-session.ts), player interception and
+restoration in [nwh-extension.ts](../src/agent/nwh-extension.ts), and restored
+world/transcript tests in [nwh-extension.test.ts](../test/nwh-extension.test.ts).
+
+## 2. Novel parsing and compiler injection
+
+### Source identity and segmentation
+
+Ingest archives immutable content-addressed bytes. Before compilation,
+`segmentSource` re-reads those bytes, verifies the source SHA-256, rejects empty,
+binary, or invalid UTF-8 data, and derives bounded segments by lines, bytes,
+and serialized prompt size. A single long physical line is split only at UTF-8
+code-point boundaries. Each segment contains source ID/path, byte/line range,
+text hash, ordinal and optional heading.
+
+Every segment-manifest field can affect model context, including headings and
+line ranges. `prepareCompilerBatches` therefore recomputes the whole manifest
+from immutable bytes and uses deep equality, not only schema validity or slice
+hashes, before constructing a prompt. `beginBatch` repeats this check and
+captures cloned selected-segment metadata before the model turn, preventing a
+persisted-manifest change from widening the live evidence boundary.
+
+Evidence: [segments.ts](../src/compiler/segments.ts),
+`prepareCompilerBatches` in [batches.ts](../src/compiler/batches.ts),
+`beginBatch` in [proposal-tools.ts](../src/compiler/proposal-tools.ts), and
+regressions in [segments.test.ts](../test/segments.test.ts),
+[compiler-batches.test.ts](../test/compiler-batches.test.ts), and
+[proposal-tools.test.ts](../test/proposal-tools.test.ts).
+
+### Ordinary source-batch payload
+
+For each automated source batch the model receives:
+
+- the compiler system prompt and current compiler-turn contract;
+- one or more selected source segments, each JSON-encoded with its exact whole
+  `EvidenceRef`;
+- source ID and relative/content source path, batch/segment IDs, chapter
+  metadata, and extraction policy;
+- a bounded source-owned identity/index catalog for existing canonical and
+  pending entities, claims, events, rules, initial world, goals, character
+  models and possibilities;
+- exact active proposal IDs for retry recovery.
+
+It does **not** receive ordinary assistant conversation, project instructions,
+player/narrator transcript, generic workspace reads, raw staging deltas, or
+whole-source evidence retrieval. The current hidden compiler boundary replaces
+the model system prompt for that turn; if a compiler turn is active without its
+host evidence boundary, context projection returns an empty history rather
+than falling back to unrelated conversation.
+
+Evidence: prompt construction/hydration in
+[batches.ts](../src/compiler/batches.ts), `before_agent_start` and tool-scope
+selection in [nwh-extension.ts](../src/agent/nwh-extension.ts), fail-closed
+projection in [context-policy.ts](../src/agent/context-policy.ts), and tests in
+[compiler-batches.test.ts](../test/compiler-batches.test.ts),
+[nwh-extension.test.ts](../test/nwh-extension.test.ts), and
+[context-policy.test.ts](../test/context-policy.test.ts).
+
+### Opening-world payload
+
+The opening pass receives the selected narrative-opening segment, its exact
+evidence reference, source-owned prior artifacts, and additional temporal
+checkpoint instructions. Its active tool set is restricted to exact artifact
+lookup/read, entity, claim and initial-world proposal, withdrawal, and finish.
+It cannot use whole-source raw retrieval or propose unrelated events/rules/goals.
+The same selected-segment containment check rejects a later-chapter evidence
+reference. A deterministic fallback may create only an evidence-backed opening
+cast after an incomplete model pass; it still enters the normal proposal and
+validation flow.
+
+Evidence: `prepareOpeningWorldCompilerBatch` and
+`proposeMinimalOpeningWorld` in [batches.ts](../src/compiler/batches.ts),
+`compilerToolNamesForScope` and preparation orchestration in
+[nwh-extension.ts](../src/agent/nwh-extension.ts), CLI orchestration in
+[prepare-all.ts](../src/commands/prepare-all.ts), and opening-pass tests in
+[compiler-batches.test.ts](../test/compiler-batches.test.ts) and
+[nwh-extension.test.ts](../test/nwh-extension.test.ts).
+
+### Whole-world reconciliation payload
+
+Reconciliation is the one compiler role that can inspect the complete selected
+novel through exact retrieval. Its initial prompt is a source-exclusive,
+120,000-character-bounded audit/index containing bounded semantic issues,
+coverage, entity/claim/event indexes, weak event/character targets and opening
+metadata. It exposes no generic local file tool.
+
+`find_source_evidence`/`read_source_evidence` bind to one active `sourceId`,
+rederive and deep-compare the source segment manifest, return exact text plus
+its `EvidenceRef`, and page without splitting Unicode surrogate pairs.
+`find_compiler_artifacts`/`read_compiler_artifact` similarly expose only
+canonical/pending artifacts whose evidence belongs exclusively to that source.
+Both channels share the compiler tool-call circuit breaker.
+
+Evidence: [reconcile-world.ts](../src/compiler/reconcile-world.ts),
+[source-evidence-retrieval.ts](../src/compiler/source-evidence-retrieval.ts),
+[artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts), and tests in
+[compiler-source-evidence-retrieval.test.ts](../test/compiler-source-evidence-retrieval.test.ts)
+and [compiler-artifact-retrieval.test.ts](../test/compiler-artifact-retrieval.test.ts).
+
+### Proposal and lifecycle authority
+
+Before any typed proposal is persisted, the host strict-schema parses it,
+requires source evidence where appropriate, rejects mixed-source artifacts,
+checks every evidence span against the captured selected slice, validates
+stable revision identity and typed field/reference rules, and caps a batch at
+24 active proposals and 40 general tool calls plus one final finish call.
+Proposal calls are sequential. `finish_compiler_batch` derives the active set
+on the host, validates graph closure and exact segment review, and merely
+allows the host to checkpoint the batch. Canonical acceptance is a later
+deterministic workflow.
+
+Any standalone session constructed through `createPiCompilerSession` with a
+source ID, batch ID, segment IDs, or `includeLocalTools:false` is forced fresh
+and in-memory; resuming or explicitly persisting it is rejected. TUI compiler
+work intentionally remains visible in the assistant transcript, but the
+turn-local projection above supplies only its current hidden evidence boundary.
+Together these mechanisms prevent an older evidence scope from entering a new
+compiler request.
+
+Evidence: [proposal-tools.ts](../src/compiler/proposal-tools.ts), proposal
+service/acceptance in [proposals.ts](../src/compiler/proposals.ts) and
+[validator.ts](../src/compiler/validator.ts), lifecycle enforcement in
+[pi-compiler.ts](../src/compiler/pi-compiler.ts), and
+[proposal-tools.test.ts](../test/proposal-tools.test.ts),
+[compiler-batches.test.ts](../test/compiler-batches.test.ts), and
+[pi-compiler.test.ts](../test/pi-compiler.test.ts).
+
+### Explicit manual-compiler exception
+
+`nwh compile` without a source/batch/slice scope is an administrator-facing
+compiler conversation. It may persist and may use bounded read-only workspace
+tools. Source/artifact exact-retrieval tools still reject calls until a source
+scope is bound, and typed proposals remain pending and individually evidence
+validated, but the conversation itself is not a single-source confidentiality
+boundary. Automated `compile-source`, opening, reconciliation, reparse and TUI
+compiler jobs must use the isolated lifecycle above.
+
+Evidence: `resolvePiCompilerSessionLifecycle` and the default
+`includeLocalTools` behavior in [pi-compiler.ts](../src/compiler/pi-compiler.ts),
+source requirements in [source-evidence-retrieval.ts](../src/compiler/source-evidence-retrieval.ts)
+and [artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts), and
+[pi-compiler.test.ts](../test/pi-compiler.test.ts).
+
+## 3. Parsed world context versus runtime model context
+
+An accepted prepared revision captures a content-addressed host snapshot of
+source-owned entities, claims, canonical events, world rules, state schema,
+character goals, character models, and possibility templates. The branch pins
+that snapshot, its source ID and prepared revision hash. Commits store event and
+delta hashes plus the snapshot hash; `WorldState(branch, t)` is replayed from
+the commit chain and is not a mutable chat memory.
+
+This complete `WorldModelContext` is used by deterministic host code for
+validation, projection, frontier evaluation and actor-view derivation. It is
+not serialized wholesale into the player-action or narrator requests.
+Source-scoped snapshots reject an artifact collection containing another
+novel's evidence. Legacy branches infer a source only when genesis/context
+evidence has one unambiguous owner; evidence-bearing multi-source ambiguity
+fails closed.
+
+Evidence: snapshot capture/hydration in [context.ts](../src/world/context.ts),
+immutable artifact revisions in [canonical-model.ts](../src/world/canonical-model.ts),
+branch creation/commit/replay in [engine.ts](../src/world/engine.ts), source
+resolution in [source-scope.ts](../src/world/source-scope.ts), and source/world
+tests in [player-source-isolation.test.ts](../test/player-source-isolation.test.ts),
+[initial-world.test.ts](../test/initial-world.test.ts), and
+[world-engine.test.ts](../test/world-engine.test.ts).
+
+Canonical future events are converted host-side into possibility templates.
+The frontier marks them latent, blocked, expired, superseded, invalidated,
+realized, or eligible according to committed state, causal parents, source
+evidence and temporal compatibility. `current-window` refuses later story
+windows without explicit advancement, and unsupported disconnected canon roots
+do not all become “now.” Background selection excludes player-only choices and
+actor plans.
+
+Evidence: [canon-runtime.ts](../src/world/canon-runtime.ts),
+[frontier.ts](../src/world/frontier.ts), and temporal/branch regressions in
+[world-runtime.test.ts](../test/world-runtime.test.ts).
+
+## 4. Actual play: player-action context
+
+### Host actor scope
+
+`buildActorScopedActionContext` starts from exactly one committed head and its
+pinned source. Its host-side schema contains:
+
+- actor ID and current commit ID;
+- actor-visible self state;
+- state of currently owned artifacts and actor-owned known relationships;
+- acquired source-owned knowledge facts and optional claim semantics;
+- present and merely referenceable entity identities;
+- writable entity IDs and writable field specifications;
+- committed scene label/location/public location state/presence;
+- at most eight actor-visible event observations and four scene/plan threads.
+
+It does not contain raw `WorldState`, future canonical events, the frontier,
+compiler evidence text, unacquired claims, inactive goals/models, or another
+actor's general state.
+
+Evidence: the schema and builder in
+[player-action.ts](../src/world/player-action.ts), branch knowledge replay in
+[knowledge.ts](../src/world/knowledge.ts), committed-scene derivation in
+[scene.ts](../src/world/scene.ts), and the “contains only self state...” test in
+[player-action.test.ts](../test/player-action.test.ts).
+
+### State, knowledge, identity, event and time visibility
+
+Every state field is classified `public`, `self`, `owner`, `knowledge`, or
+`engine`. Undeclared/custom fields and engine fields fail closed. A
+knowledge-gated field becomes visible only through an acquired claim whose
+predicate is exactly `state:<field>`; prose predicates are not guessed into
+schema authority.
+
+Knowledge is reconstructed from committed `KnowledgeDelta` history for the
+selected actor. Event participation permits an observation but never reveals
+the omniscient event title; only an explicit actor observation is used,
+otherwise the actor receives a neutral summary. Scene presence is derived from
+committed history and location, not from a model's name mention.
+
+Co-location also does not prove identity knowledge. A present but unknown
+identity is exposed as `Unidentified <kind> N`; canonical names are used only
+for self, owner-visible references or acquired knowledge. The host scope has
+commit step and story time for deterministic work, but the translator view
+removes commit ID, event steps, scene beat and event dates. Time crosses the
+model boundary only if it is already an actor-visible state value or acquired
+claim.
+
+Evidence: [actor-visible.ts](../src/world/actor-visible.ts),
+[knowledge.ts](../src/world/knowledge.ts), `observeCommittedEvent` and scene
+projection in [scene.ts](../src/world/scene.ts), callback projection/anonymity
+in [player-action.ts](../src/world/player-action.ts), and
+[actor-visible.test.ts](../test/actor-visible.test.ts) plus identity/time tests
+in [player-action.test.ts](../test/player-action.test.ts).
+
+### Built-in Pi action boundary
+
+The public translator callback receives the already-safe stable actor scope,
+as a frozen clone. The built-in Pi adapter then removes host-only chronology
+and replaces every admitted entity/claim ID, including references nested in
+state and claims, with turn-local handles such as `actor-self`, `entity-001`
+and `claim-001`. Only the host retains the reverse map. If the model submits an
+admitted stable ID directly instead of its supplied handle, decoding replaces
+it with a guaranteed-invalid sentinel; a guessed hidden world ID remains
+outside the referenceable set and is rejected.
+
+The initial projection is capped at 32,000 characters. Required actor, state,
+scene and capability sections must fit or the turn fails visibly. Optional
+records are relevance-ranked, omissions are declared in `contextCoverage`, and
+two exact tools search/page only the complete already-safe corpus. The corpus
+has record/serialized-size and retrieval-call circuit breakers.
+
+The nested Pi session is fresh/in-memory, excludes project instructions,
+local tools and the domain/workflow NWH extension (the prompt-path privacy
+interceptor remains), and has only actor-context retrieval plus one capture-only
+`propose_player_action`. The untrusted result cannot supply
+branch, parent commit, source, actor authority, event identity, time, causal
+ancestry, evidence or commitment status.
+
+Evidence: [pi-player-action.ts](../src/agent/pi-player-action.ts), opaque
+mapping/decoding in [player-action.ts](../src/world/player-action.ts), bounded
+retrieval in [actor-context-retrieval.ts](../src/agent/actor-context-retrieval.ts),
+capture schema in [player-action-tool.ts](../src/agent/player-action-tool.ts),
+and [player-action.test.ts](../test/player-action.test.ts) plus
+[actor-context-retrieval.test.ts](../test/actor-context-retrieval.test.ts).
+
+### Return path and commit authority
+
+The host strict-schema parses the captured candidate, normalizes only the
+bounded open-scene movement case, and validates reference/write scope,
+actor-visible predicate grounding, physical co-location, knowledge authority,
+progress, world rules, invariants and optimistic parent-head identity. It
+constructs the authoritative title/actor observation from the bounded player
+utterance rather than accepting a model assertion as an outcome. A canon
+resolver receives an immutable proposal snapshot and its result is strict
+schema parsed. Only `commitKnowledgeAwareAction`/the engine can append the
+event and move the branch head.
+
+Evidence: `PlayerTurnService` and validation functions in
+[player-action.ts](../src/world/player-action.ts), engine validation in
+[engine.ts](../src/world/engine.ts), and acceptance/rejection/mutation tests in
+[player-action.test.ts](../test/player-action.test.ts) and
+[world-engine.test.ts](../test/world-engine.test.ts).
+
+## 5. Actual play: scene-narrator context
+
+### Host frame versus model frame
+
+`buildPlayOpeningFrame` constructs a rich host frame containing branch/commit
+identity, logical/story time, elapsed days, stable actor/entity/claim IDs,
+actor-visible state and knowledge, committed visible events, scene key/beat/
+signature, derived development, host-internal threads and preflighted
+affordances. That host frame is retained for choice binding and transcript
+metadata.
+
+`playerSceneModelFrame` is the only narrator callback/model projection. It
+contains exactly:
+
+- actor name;
+- visible self state with admitted entity references replaced by names;
+- visible age/life stage and committed experience summaries, without event or
+  commit IDs/times;
+- named owned entities and visible state;
+- acquired claim semantics expressed through names, without claim IDs;
+- named present and referenceable identities;
+- actor-visible event titles without steps/dates;
+- scene label/public location state, actor-visible public threads, public
+  affordances, and an optional actor-visible blocked/recovery summary.
+
+It omits branch/commit/event hashes, logical steps, host story time and elapsed
+duration, stable entity/claim IDs, scene key/beat/signature, evidence refs,
+candidate deltas, knowledge authorization, scores, internal thread/progress
+IDs, compiler goals/models and future canon effects.
+
+Evidence: the two frame types and `playerSceneModelFrame` in
+[play-opening.ts](../src/world/play-opening.ts), public projection helpers in
+[narrative-director.ts](../src/world/narrative-director.ts) and
+[development.ts](../src/world/development.ts), and frame tests in
+[play-opening.test.ts](../test/play-opening.test.ts) and
+[pi-player-opening.test.ts](../test/pi-player-opening.test.ts).
+
+### Future canon and affordance handling
+
+The deterministic scene director may use an eligible canon analogue or an
+active compiler-authored goal as host-only ranking pressure. `publicNarrativeThread`
+drops both `canon-pressure` and `goal` threads. Canon-analogue deltas are never
+materialized as a player-facing action. Every public affordance removes its
+candidate delta, authorized claims, progress object, score and internal IDs;
+the executable candidate stays on the host and is preflighted through the same
+scope/knowledge/engine gates as free-form input.
+
+Evidence: `buildNarrativeDirection`, `addCanonicalAffordances`,
+`publicNarrativeThread`, and `publicPlayerAffordance` in
+[narrative-director.ts](../src/world/narrative-director.ts), with regressions in
+[narrative-director.test.ts](../test/narrative-director.test.ts).
+
+### Built-in Pi narrator and return path
+
+The narrator uses a fresh, in-memory Pi session with no project guidance,
+local files, compiler tools, domain/workflow NWH extension, ordinary transcript
+or future canon; only the prompt-path privacy interceptor remains. It receives
+a bounded projection plus exact retrieval over that same
+sanitized frame and one capture-only choice tool. `playScenePrompt` has no
+arbitrary third-record override; it serializes only its typed frame.
+
+A completed but invalid draft gets one retry in a brand-new session, so rejected
+prose/tool history cannot enter attempt two. Accepted prose is checked for
+non-empty/length/repeated-paragraph failures; choices are strict-schema parsed
+and may select only supplied affordance IDs. Labels, descriptions and actions
+are rebound from the host's authoritative affordances. A custom narrator
+injected into the TUI passes the same narration/choice validation. Rendering
+failure never advances the branch.
+
+Evidence: [pi-player-opening.ts](../src/agent/pi-player-opening.ts),
+`playScenePrompt`/`assertPlaySceneNarration` in
+[play-opening.ts](../src/world/play-opening.ts), TUI binding in
+[nwh-extension.ts](../src/agent/nwh-extension.ts), and tests in
+[pi-player-opening.test.ts](../test/pi-player-opening.test.ts),
+[player-scene-choice-tool.test.ts](../test/player-scene-choice-tool.test.ts),
+and [nwh-extension.test.ts](../test/nwh-extension.test.ts).
+
+## 6. Model-driven non-player actors and low-level rendering
+
+`modelActorProposalSource` evaluates all goals/models on the host, selects only
+a source-owned currently active and phase-supported goal, projects committed
+development, and gives the reasoner opaque actor handles. The reasoner sees the
+active goal's description/priority and only referenceable target handles; it
+does not see goal IDs, activation/completion predicates, future goal templates,
+canonical event triggers, evidence, inactive model phases, commit/time IDs or
+omniscient state. Its input is an immutable clone. Output is strict-schema
+parsed, decoded and rechecked through actor scope, grounding and spatial gates
+before a host-authored proposal is produced.
+
+Evidence: [model-actor-policy.ts](../src/world/model-actor-policy.ts), goal/model
+phase evaluation in [actors.ts](../src/world/actors.ts), development projection
+in [development.ts](../src/world/development.ts), and
+[model-actor-policy.test.ts](../test/model-actor-policy.test.ts).
+
+`NarrativeRenderer` is a lower-level rendering API, not the TUI Pi narrator.
+Actor POV supplies only actor-visible state/knowledge and neutral/explicit
+event observations, removes the actor ID from adapter style, freezes the frame,
+requires a string result, and checks the branch head before and after rendering.
+Explicit omniscient POV intentionally supplies full state and committed history
+and must be treated as a trusted diagnostic boundary. The separate
+`WorldRuntime` render callback is likewise a full-state host-authority API: its
+snapshot is immutable, its result must be a string or `undefined`, and a stale
+or changed branch head aborts the call. `PlayerTurnRender` receives only frozen
+branch/commit/actor/source identity, requires a string, and has the same
+before/after branch-head check.
+
+Evidence: [narrative.ts](../src/world/narrative.ts),
+[runtime.ts](../src/world/runtime.ts), [player-action.ts](../src/world/player-action.ts),
+[narrative.test.ts](../test/narrative.test.ts), and
+[world-runtime.test.ts](../test/world-runtime.test.ts).
+
+## 7. Transcript continuation, compaction, and tree summaries
+
+Every persisted session is pinned to `assistant` or `compiler` mode with an
+NWH marker. Reopening in the other mode is rejected. An old unmarked transcript
+containing any model-visible or private history also fails closed because its
+role cannot be inferred safely; an empty legacy session may receive a marker.
+
+`context-policy.ts` treats compiler boundary/result spans as turn-local and
+`nwh-play`/`nwh-narrator` as display-only. It removes them from:
+
+- every live provider context;
+- both history and turn-prefix inputs to compaction;
+- raw entries supplied to branch/tree summarization.
+
+Both Pi persistence shapes, `custom_message` and native-stream `custom`, are
+recognized. Each safe compaction/tree summary receives a persisted policy-v2
+marker. If a session ever contained private NWH entries, an unmarked legacy
+compaction or current branch summary is discarded instead of being trusted as
+already sanitized. A current compiler turn without its host boundary returns
+no prior transcript.
+
+Evidence: role binding in [pi-session.ts](../src/agent/pi-session.ts), policy
+implementation in [context-policy.ts](../src/agent/context-policy.ts), Pi hooks
+in [nwh-extension.ts](../src/agent/nwh-extension.ts), and exhaustive regression
+coverage in [context-policy.test.ts](../test/context-policy.test.ts),
+[pi-session.test.ts](../test/pi-session.test.ts), and
+[nwh-extension.test.ts](../test/nwh-extension.test.ts).
+
+## Resolved findings
+
+| Finding | Implemented repair | Code evidence | Regression evidence |
+| --- | --- | --- | --- |
+| Conventional project files could be confused with instructions or novel data | explicit instruction allowlist, real-path source collision checks in both workflow directions | [pi-session.ts](../src/agent/pi-session.ts), [instruction-trust.ts](../src/workspace/instruction-trust.ts) | [pi-session.test.ts](../test/pi-session.test.ts), [ingest.test.ts](../test/ingest.test.ts) |
+| Pi could discover unrelated extensions/resources/tools | all ambient resources and built-in model tools disabled; exact custom tool contract injected | [pi-session.ts](../src/agent/pi-session.ts) | [pi-session.test.ts](../test/pi-session.test.ts) |
+| Pi's fully assembled prompt disclosed the absolute workspace path | root removed from the application prompt and Pi's appended cwd redacted by a last, always-on `before_agent_start` privacy interceptor | [pi-session.ts](../src/agent/pi-session.ts) | [pi-session.test.ts](../test/pi-session.test.ts) |
+| File/source strings could imitate prompt delimiters | JSON serialization escapes angle brackets and attachment attributes | [prompt-data.ts](../src/util/prompt-data.ts), [file-mentions.ts](../src/agent/file-mentions.ts) | [compiler-batches.test.ts](../test/compiler-batches.test.ts), [nwh-extension.test.ts](../test/nwh-extension.test.ts) |
+| Compiler spans could leak into later assistant turns or summaries | live, compaction and tree projections plus persistent summary markers | [context-policy.ts](../src/agent/context-policy.ts), [nwh-extension.ts](../src/agent/nwh-extension.ts) | [context-policy.test.ts](../test/context-policy.test.ts) |
+| A transcript could be reopened under a different authority role | persisted role pin; ambiguous unmarked legacy transcripts rejected | [pi-session.ts](../src/agent/pi-session.ts) | [pi-session.test.ts](../test/pi-session.test.ts) |
+| Missing current compiler boundary could fall back to ordinary chat history | active compiler context now fails closed to an empty projection | [context-policy.ts](../src/agent/context-policy.ts) | [context-policy.test.ts](../test/context-policy.test.ts) |
+| Persisted/stale segment metadata could widen or mislabel evidence | full manifest rederivation/deep equality and captured live slice | [segments.ts](../src/compiler/segments.ts), [batches.ts](../src/compiler/batches.ts), [proposal-tools.ts](../src/compiler/proposal-tools.ts) | [segments.test.ts](../test/segments.test.ts), [proposal-tools.test.ts](../test/proposal-tools.test.ts) |
+| Whole-world compiler retrieval could cross novels | active-source binding and source-exclusive artifact/evidence checks | [source-evidence-retrieval.ts](../src/compiler/source-evidence-retrieval.ts), [artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts) | [compiler-source-evidence-retrieval.test.ts](../test/compiler-source-evidence-retrieval.test.ts), [compiler-artifact-retrieval.test.ts](../test/compiler-artifact-retrieval.test.ts) |
+| Scoped compiler jobs could inherit or persist a differently scoped transcript | source/batch/slice jobs forced fresh and ephemeral | [pi-compiler.ts](../src/compiler/pi-compiler.ts) | [pi-compiler.test.ts](../test/pi-compiler.test.ts) |
+| Runtime branch could silently mix parsed novels | source-owned snapshots/branches, commit evidence checks, fail-closed legacy inference | [context.ts](../src/world/context.ts), [source-scope.ts](../src/world/source-scope.ts), [engine.ts](../src/world/engine.ts) | [player-source-isolation.test.ts](../test/player-source-isolation.test.ts), [initial-world.test.ts](../test/initial-world.test.ts) |
+| Player model could receive hidden state, future canon, stable IDs or engine chronology | state/knowledge/source projection, anonymous identities, opaque handles, chronology stripping and bounded safe retrieval | [actor-visible.ts](../src/world/actor-visible.ts), [player-action.ts](../src/world/player-action.ts), [actor-context-retrieval.ts](../src/agent/actor-context-retrieval.ts) | [actor-visible.test.ts](../test/actor-visible.test.ts), [player-action.test.ts](../test/player-action.test.ts), [actor-context-retrieval.test.ts](../test/actor-context-retrieval.test.ts) |
+| Narrator could receive host frame IDs/time/policy or an arbitrary replacement record | typed name-based narrator frame; internal thread/affordance projection; no third prompt override | [play-opening.ts](../src/world/play-opening.ts), [narrative-director.ts](../src/world/narrative-director.ts) | [play-opening.test.ts](../test/play-opening.test.ts), [pi-player-opening.test.ts](../test/pi-player-opening.test.ts) |
+| Rejected narrator attempt could contaminate retry | independent in-memory session per attempt | [pi-player-opening.ts](../src/agent/pi-player-opening.ts) | [pi-player-opening.test.ts](../test/pi-player-opening.test.ts), [nwh-extension.test.ts](../test/nwh-extension.test.ts) |
+| Model actor could see inactive future goals/model phases or submit stable IDs | host phase activation, minimal active policy view, opaque handles and player capability gates | [model-actor-policy.ts](../src/world/model-actor-policy.ts) | [model-actor-policy.test.ts](../test/model-actor-policy.test.ts) |
+| Public callbacks could mutate retained host objects or return unvalidated candidates | immutable snapshots and strict output schemas at candidate/resolver boundaries | [immutable.ts](../src/util/immutable.ts), [runtime.ts](../src/world/runtime.ts), [player-action.ts](../src/world/player-action.ts) | [world-runtime.test.ts](../test/world-runtime.test.ts), [player-action.test.ts](../test/player-action.test.ts) |
+| General rendering callbacks could return malformed values or move branch truth during rendering | runtime return-type checks plus stale/pre-post branch-head checks reject the render result if the supported branch store changed; render inputs remain frozen snapshots | [runtime.ts](../src/world/runtime.ts), [narrative.ts](../src/world/narrative.ts), [player-action.ts](../src/world/player-action.ts) | [world-runtime.test.ts](../test/world-runtime.test.ts), [narrative.test.ts](../test/narrative.test.ts), [player-action.test.ts](../test/player-action.test.ts) |
+
+## Mechanical guarantees versus assurance limits
+
+Mechanically enforced properties are: active tool availability, resource
+discovery shutdown, filesystem/path/size bounds, transcript projection, session
+role/lifecycle isolation, source/segment identity, source-exclusive artifacts,
+state-field visibility, actor knowledge replay, stable-ID opacity in built-in
+model adapters, strict candidate schemas, validation order, proposal status,
+commit CAS/invariants, and branch-head stability checks around rendering.
+
+The following are explicit limits, not hidden guarantees:
+
+- A probabilistic model can still misunderstand ambiguous literary prose.
+  Compiler output remains a proposal because schema/evidence validation cannot
+  prove semantic interpretation.
+- Prompt injection in novel/tool strings is classified and delimited, but no
+  prompt can mathematically force a model to obey. The authority gates ensure a
+  disobedient response cannot directly commit canonical or branch truth.
+- A narrator may make a semantically unsupported implication in prose. Prose
+  is non-authoritative, length/repetition checked, and actor-scoped, but full
+  literary factuality needs representative evaluations.
+- A pretrained provider may recognize a famous novel from visible names or
+  facts. The harness withholds its own future-canon records; it cannot erase
+  provider pretraining.
+- Explicitly configured project instructions are intentionally trusted and are
+  sent to the ordinary assistant. A malicious instruction allowlisted by the
+  user has that authority.
+- Ordinary read tools are a bounded local workspace capability, not a semantic
+  DLP scanner. Files not matching the credential/path denylist may be read when
+  the model calls the tool.
+- Provider requests necessarily transmit the admitted context to the selected
+  provider/custom endpoint. NWH has no model-side network tool, but the provider
+  API itself is an external trust decision.
+- Trusted host-authority callbacks and explicit omniscient rendering may access
+  full truth through their closures or documented inputs. They must not be
+  wired directly to an untrusted actor model without an additional projection.
+  These callbacks are in-process trusted code, not a sandbox: frozen inputs and
+  post-call head checks reject retained-reference or supported-store misuse,
+  but cannot undo arbitrary filesystem/process side effects performed through a
+  malicious closure.
+- The standalone manual compiler conversation is deliberately broader than
+  automated source-scoped jobs. It is an administrator boundary, not a proof of
+  single-source confidentiality.
+- A local operating-system user who can edit runtime/session files remains
+  inside the local trust boundary. Content hashes and schemas detect many forms
+  of drift, but NWH is not an adversarial filesystem sandbox.
+
+Within those limits, the central architectural claim is code-enforced: no
+built-in player, narrator, or model-actor request receives the compiler's full
+canon or raw world truth, and no model prose/tool result becomes world truth
+without deterministic validation and a committed event.

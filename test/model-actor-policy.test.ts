@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { CharacterGoal } from "../src/world/actors.js";
+import type { CharacterGoal, CharacterModel } from "../src/world/actors.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import { modelActorProposalSource, type ActorReasoningInput } from "../src/world/model-actor-policy.js";
 import type { Claim, Entity } from "../src/world/model.js";
@@ -15,13 +15,18 @@ describe("model actor policy", () => {
   it("passes actor-scoped knowledge rather than compiler omniscience to the reasoner", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-model-actor-"));
     roots.push(root);
+    const sourceEvidence = [{
+      span: { sourceId: "test", startLine: 1, endLine: 1, quoteHash: "model-actor-source" },
+      strength: "explicit" as const,
+    }];
     const entities: Entity[] = [
-      { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] },
-      { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: [] },
+      { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: sourceEvidence },
+      { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: sourceEvidence },
     ];
-    const publicClaim: Claim = { id: "public", subject: "hero", predicate: "invited", object: true, epistemicType: "explicit-fact", evidence: [] };
-    const secretClaim: Claim = { id: "secret", subject: "hero", predicate: "future-betrayal", object: true, epistemicType: "explicit-fact", evidence: [] };
+    const publicClaim: Claim = { id: "public", subject: "hero", predicate: "invited", object: true, epistemicType: "explicit-fact", evidence: sourceEvidence };
+    const secretClaim: Claim = { id: "secret", subject: "hero", predicate: "future-betrayal", object: true, epistemicType: "explicit-fact", evidence: sourceEvidence };
     const context: WorldModelContext = {
+      sourceId: "test",
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       claims: new Map([[publicClaim.id, publicClaim], [secretClaim.id, secretClaim]]),
       rules: new Map(),
@@ -58,10 +63,29 @@ describe("model actor policy", () => {
       requiresKnowledge: ["public"],
       evidence: [{ span: { sourceId: "test", startLine: 1, endLine: 1, quoteHash: "x" }, strength: "strong-inference" }],
     };
+    const model: CharacterModel = {
+      actorId: "hero",
+      traits: { courage: 0.25 },
+      decisionBiases: { caution: 0.5 },
+      developmentPhases: [{
+        id: "future-phase",
+        label: "Future betrayal response",
+        activation: {
+          preconditions: [],
+          afterCanonicalEventIds: ["future-betrayal-event"],
+          afterExperiencedCanonicalEventIds: [],
+          requiresKnowledge: [],
+        },
+        traitModifiers: { courage: -1 },
+        decisionBiasModifiers: {},
+        evidence: [{ span: { sourceId: "test", startLine: 99, endLine: 99, quoteHash: "future-phase-evidence" }, strength: "explicit" }],
+      }],
+      evidence: [{ span: { sourceId: "test", startLine: 1, endLine: 1, quoteHash: "model-evidence" }, strength: "explicit" }],
+    };
     let observed: ActorReasoningInput | undefined;
     const source = modelActorProposalSource(engine, {
       goals: async () => [goal],
-      modelFor: async () => null,
+      modelFor: async () => model,
       reasoner(input) {
         observed = input;
         return {
@@ -74,9 +98,23 @@ describe("model actor policy", () => {
     });
     const candidates = await source({ branchId: "main", commitId: learned.newHead });
     expect(candidates).toHaveLength(1);
-    expect(observed?.actor.knowledge.map((entry) => entry.fact.claimId)).toEqual(["public"]);
-    expect(JSON.stringify(observed)).not.toContain("future-betrayal");
+    expect(candidates[0]?.proposal.title).toBe("Validated actor action by Hero");
+    expect(candidates[0]?.proposal.title).not.toBe("Hero responds");
+    expect(observed?.actor.actorId).toBe("actor-self");
+    expect(observed?.actor.knowledge.map((entry) => entry.claimId)).toEqual(["claim-001"]);
+    expect(observed?.model).toEqual({ traits: { courage: 0.25 }, decisionBiases: { caution: 0.5 } });
+    const serialized = JSON.stringify(observed);
+    expect(serialized).not.toContain("future-betrayal");
+    expect(serialized).not.toContain("future-phase");
+    expect(serialized).not.toContain("model-evidence");
+    expect(serialized).not.toContain("quoteHash");
+    expect(serialized).not.toContain('"actorId":"hero"');
+    expect(serialized).not.toContain('"claimId":"public"');
+    expect(serialized).not.toContain(learned.newHead);
     expect(observed).not.toHaveProperty("worldState");
+    expect(observed?.actor).not.toHaveProperty("atCommit");
+    expect(Object.isFrozen(observed)).toBe(true);
+    expect(Object.isFrozen(observed?.actor.knowledge)).toBe(true);
   });
 
   it("does not invoke model reasoning for a goal whose phase activation is false", async () => {
@@ -120,5 +158,114 @@ describe("model actor policy", () => {
     });
     await expect(source({ branchId: "main", commitId: head })).resolves.toEqual([]);
     expect(reasoned).toBe(false);
+  });
+
+  it("does not expose an untriggered future-only goal to model reasoning", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-model-actor-future-goal-"));
+    roots.push(root);
+    const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] };
+    const engine = new WorldEngine(root, {
+      entities: new Map([[hero.id, hero]]),
+      rules: new Map(),
+      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    });
+    const head = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    }, undefined, undefined, undefined, [{
+      span: { sourceId: "test", startLine: 1, endLine: 1, quoteHash: "opening" },
+      strength: "explicit",
+    }]);
+    const futureGoal: CharacterGoal = {
+      id: "late-revenge",
+      actorId: "hero",
+      description: "Seek revenge revealed only much later",
+      priority: 1,
+      requiresKnowledge: [],
+      evidence: [{ span: { sourceId: "test", startLine: 500, endLine: 500, quoteHash: "late" }, strength: "explicit" }],
+    };
+    let reasoned = false;
+    const source = modelActorProposalSource(engine, {
+      goals: async () => [futureGoal],
+      modelFor: async () => null,
+      reasoner: () => {
+        reasoned = true;
+        return { title: "Should not run", participants: [], preconditions: [], proposedDelta: { version: 1, operations: [] } };
+      },
+    });
+    await expect(source({ branchId: "main", commitId: head })).resolves.toEqual([]);
+    expect(reasoned).toBe(false);
+  });
+
+  it("drops a model-authored action that exceeds the actor capability boundary", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-model-actor-scope-"));
+    roots.push(root);
+    const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] };
+    const hall: Entity = { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: [] };
+    const engine = new WorldEngine(root, {
+      entities: new Map([[hero.id, hero], [hall.id, hall]]),
+      rules: new Map(),
+      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    });
+    const head = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.location", value: "hall" }],
+    });
+    const goal: CharacterGoal = {
+      id: "unsafe-goal",
+      actorId: "hero",
+      description: "Change the hall",
+      priority: 1,
+      requiresKnowledge: [],
+      evidence: [{ span: { sourceId: "test", startLine: 1, endLine: 1, quoteHash: "x" }, strength: "explicit" }],
+    };
+    const source = modelActorProposalSource(engine, {
+      goals: async () => [goal],
+      modelFor: async () => null,
+      reasoner: () => ({
+        title: "Rewrite a location",
+        participants: [],
+        preconditions: [],
+        proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hall", field: "location.open", value: false }] },
+      }),
+    });
+    await expect(source({ branchId: "main", commitId: head })).resolves.toEqual([]);
+  });
+
+  it("rejects a guessed stable actor ID instead of treating it as an opaque handle", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-model-actor-stable-id-"));
+    roots.push(root);
+    const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] };
+    const engine = new WorldEngine(root, {
+      entities: new Map([[hero.id, hero]]),
+      rules: new Map(),
+      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    });
+    const head = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const goal: CharacterGoal = {
+      id: "plan",
+      actorId: "hero",
+      description: "Make a plan",
+      priority: 1,
+      requiresKnowledge: [],
+      evidence: [],
+    };
+    const source = modelActorProposalSource(engine, {
+      goals: async () => [goal],
+      modelFor: async () => null,
+      reasoner: () => ({
+        title: "Use a guessed host identifier",
+        participants: [],
+        preconditions: [],
+        proposedDelta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "Wait" }],
+        },
+      }),
+    });
+    await expect(source({ branchId: "main", commitId: head })).resolves.toEqual([]);
   });
 });

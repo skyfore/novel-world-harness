@@ -117,8 +117,9 @@ restoration with zero narrator calls.
 **Cause.** The prose ended on an actionable beat but did not expose grounded
 actions through the existing AskUserQuestion interaction.
 
-**Repair.** The isolated narrator has one capture-only
-`propose_player_choices` tool. It returns 2-4 immediate actor-visible
+**Repair.** The isolated narrator has two exact read-only tools over its bounded
+actor-safe corpus and one mutation-free capture tool,
+`propose_player_choices`. It returns 2-4 immediate actor-visible
 utterances, or conservative host defaults if the provider omits the tool. The
 TUI presents those choices plus free-form input. Choosing an option schedules
 its utterance through the same restricted translator, scope/knowledge checks,
@@ -236,11 +237,15 @@ tool results returned to the next ordinary assistant context. This increased
 latency/token use and allowed unverified compiler commentary to influence a
 different mode.
 
-**Repair.** `filterNwhModelContext()` keeps only the current compiler boundary
+**Repair.** `projectNwhModelMessages()` keeps only the current compiler boundary
 during a compiler turn and removes completed compiler spans for later ordinary
 turns. A source-path user message is tagged at its hidden boundary and removed
-with that compiler span. The transcript remains visible for human inspection;
-only model context is separated.
+with that compiler span. The same projection runs before compaction and
+branch/tree summarization; safe summaries receive a persistent policy-v2
+marker, while an unmarked legacy summary is discarded when private NWH history
+exists. An active compiler turn with no host boundary fails closed to empty
+context. The transcript remains visible for human inspection; only model
+context is separated.
 
 ## Resulting command behavior
 
@@ -257,15 +262,13 @@ only model context is separated.
 ## Verification status and residual boundary
 
 The repair is gated by TypeScript compilation, the production build, and the
-full test suite. The current suite has 61 test files and 293 passing tests.
+full test suite; this document intentionally does not hard-code a test count
+that becomes stale as boundary regressions are added.
 
 Pi still persists foreground compiler messages in the user-visible session, by
-design, so a user can inspect exactly what streamed. The new context filter
-prevents those messages from reaching later models, but it does not delete them
-from Pi's transcript. Pi restores transcript entries through its
-compaction-aware `buildContextEntries()` path. If future profiling shows that a
-very large number of retained compiler batches makes transcript restoration
-itself expensive, the next architectural step is to run all multi-batch
-compilation in a dedicated managed-task session and persist an inspectable task
-log rather than mutating or truncating the model text at `message_end`. The old
-replacement behavior must not be reintroduced as a shortcut.
+design, so a user can inspect exactly what streamed. Context, compaction, and
+tree-summary hooks prevent those messages from reaching later models or a
+model-generated summary, but they do not delete the human transcript. If
+future profiling shows that retained compiler batches make transcript loading
+itself expensive, the next architectural step is a dedicated inspectable task
+log, not mutation or truncation of settled model text at `message_end`.

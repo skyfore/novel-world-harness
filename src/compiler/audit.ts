@@ -6,6 +6,7 @@ import { SegmentStore } from "./segments.js";
 import { EvidenceVerifier } from "./evidence.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
+import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 
 export type CompilerAuditReport = {
   version: 1;
@@ -117,8 +118,12 @@ export async function auditCompiler(
     actorStore.listGoals(),
     actorStore.listModels(),
   ]);
-  const belongsToSelectedSource = (item: { evidence: readonly EvidenceRef[] }) =>
-    !options.sourceId || item.evidence.some((reference) => reference.span.sourceId === options.sourceId);
+  const belongsToSelectedSource = (item: { evidence: readonly EvidenceRef[] }) => {
+    if (!options.sourceId) return true;
+    const matches = item.evidence.some((reference) => reference.span.sourceId === options.sourceId);
+    if (matches) assertEvidenceExclusiveToSource(item.evidence, options.sourceId, "Audited compiler artifact");
+    return matches;
+  };
   const entities = allEntities.filter(belongsToSelectedSource);
   const claims = allClaims.filter(belongsToSelectedSource);
   const events = allEvents.filter(belongsToSelectedSource);

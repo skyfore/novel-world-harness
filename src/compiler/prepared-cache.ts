@@ -4,7 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { nwhRuntimeDir } from "../agent/runtime-paths.js";
 import { readSourceMaterial, sourceMaterialIdentity } from "../storage/source-material-store.js";
-import type { SourceDocument } from "../storage/workspace-store.js";
+import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
@@ -19,11 +19,12 @@ import { CompilerValidator, type CanonicalProposalKind, type CompilerValidationC
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { auditCompiler } from "./audit.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
+import { ChapterSplitPlanStore, chapterSplitPlanSchema } from "./chapter-split.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 4;
+export const COMPILER_PROMPT_VERSION = 5;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -41,6 +42,7 @@ const preparedNovelBundleSchema = z.object({
     engineVersion: z.string().min(1),
     stateSchemaHash: digestSchema,
   }).strict().optional(),
+  chapterSplitPlan: chapterSplitPlanSchema.optional(),
   batchIds: z.array(z.string().min(1)),
   canonical: z.object({
     entities: z.array(entitySchema),
@@ -58,6 +60,12 @@ export type PreparedNovelBundle = z.infer<typeof preparedNovelBundleSchema>;
 
 function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
   const sourceId = bundle.source.id;
+  if (bundle.chapterSplitPlan && (
+    bundle.chapterSplitPlan.sourceId !== sourceId
+    || bundle.chapterSplitPlan.sourceSha256 !== bundle.source.contentSha256
+  )) {
+    throw new Error("Prepared bundle chapter split plan does not match its source identity.");
+  }
   const collections = [
     bundle.canonical.entities,
     bundle.canonical.claims,
@@ -383,17 +391,19 @@ export class PreparedNovelCache {
       actors.listModels(),
       new PossibilityTemplateStore(this.workspaceRoot).list(),
     ]);
+    const chapterSplitPlan = await new ChapterSplitPlanStore(this.workspaceRoot).read(source.id);
     const bundle = preparedNovelBundleSchema.parse({
       version: 1,
       source: { id: source.id, ...identity },
       segmenterVersion: SEGMENTER_VERSION,
       compilerFingerprint: currentCompilerFingerprint(),
+      ...(chapterSplitPlan ? { chapterSplitPlan } : {}),
       // Boundary calibrations are transient, model-requested workflow checks.
-      // Their accepted artifacts are already captured below; cache compatibility
-      // is keyed only to the deterministic source-review layout so a prepared
-      // revision can be restored without replaying old diagnostic requests.
+      // Their accepted artifacts are already captured below. Structure discovery
+      // is deterministic workflow provenance and is retained with its validated
+      // plan so a prepared revision reproduces the same author-chapter layout.
       batchIds: batches
-        .filter((batch) => batch.purpose === "source-review")
+        .filter((batch) => batch.purpose !== "boundary-calibration")
         .map((batch) => batch.id)
         .sort(),
       canonical: {
@@ -530,6 +540,14 @@ export class PreparedNovelCache {
     for (const goal of bundle.canonical.goals) await actors.putGoal(goal);
     for (const model of bundle.canonical.models) await actors.putModel(model);
     for (const possibility of bundle.canonical.possibilities) await possibilities.put(possibility);
+    const chapterSplits = new ChapterSplitPlanStore(this.workspaceRoot);
+    if (bundle.chapterSplitPlan) await chapterSplits.write(bundle.chapterSplitPlan);
+    else await chapterSplits.remove(sourceId);
+    const source = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(sourceId);
+    if (!source) throw new Error(`Prepared revision source is not registered: ${sourceId}`);
+    await prepareCompilerBatches(this.workspaceRoot, source, {
+      chapterSplitPlan: bundle.chapterSplitPlan ?? null,
+    });
     await new CompilerBatchStore(this.workspaceRoot).replaceCompleted(sourceId, bundle.batchIds);
   }
 
@@ -537,9 +555,11 @@ export class PreparedNovelCache {
     if (canonicalJson(bundle.compilerFingerprint) !== canonicalJson(currentCompilerFingerprint())) {
       return `Cached world was compiled by an incompatible semantic pipeline; reparse is required (cache=${bundle.compilerFingerprint?.pipelineVersion ?? "legacy"}, current=${COMPILER_PIPELINE_VERSION}).`;
     }
-    const batches = await prepareCompilerBatches(this.workspaceRoot, source);
+    const batches = await prepareCompilerBatches(this.workspaceRoot, source, {
+      chapterSplitPlan: bundle.chapterSplitPlan ?? null,
+    });
     const currentBatchIds = batches
-      .filter((batch) => batch.purpose === "source-review")
+      .filter((batch) => batch.purpose !== "boundary-calibration")
       .map((batch) => batch.id)
       .sort();
     if (canonicalJson(currentBatchIds) === canonicalJson([...bundle.batchIds].sort())) return null;

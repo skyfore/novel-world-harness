@@ -26,7 +26,7 @@ There are four application inference roles:
 | Inference role | Construction site | Model-visible input | Available model tools | Persistent authority |
 | --- | --- | --- | --- | --- |
 | Ordinary TUI/print assistant | `playCommand` | Harness prompt/contract, allowlisted project instructions, projected ordinary transcript, current user input and explicit safe attachments | bounded `list_files`, `search_files`, `read_file`; extension-owned session rename metadata | no file/world write; session title only |
-| Compiler | `createPiCompilerSession`, or an explicit compiler turn in the TUI | isolated compiler instructions plus a host-selected source/opening/reconciliation payload and source-owned prior-artifact indexes; a one-segment pass may request one non-citable edge preview, while a separately scheduled pair pass receives both full adjacent segments | scope-specific exact retrieval, boundary-deferral, and typed pending-proposal tools | pending/rejected proposal envelopes, non-canonical calibration requests, and a finish handshake; no canonical or branch commit |
+| Compiler | `createPiCompilerSession`, or an explicit compiler turn in the TUI | isolated compiler instructions plus a host-selected structure/source/opening/reconciliation payload and source-owned prior-artifact indexes; a chapter-bounded pass may request one non-citable edge preview, while a separately scheduled pair pass receives both full adjacent segments | scope-specific chapter-rule, exact-retrieval, boundary-deferral, and typed pending-proposal tools | validated chapter workflow metadata, pending/rejected proposal envelopes, non-canonical calibration requests, and a finish handshake; no canonical or branch commit |
 | Player-action translator | `createPiPlayerActionTranslator` | one actor-safe projection with opaque turn handles, one untrusted utterance, and bounded coverage metadata | exact retrieval over the already-safe projection and one in-memory capture tool | none; the host decodes, validates, and constructs the event proposal |
 | Scene narrator | `createPiPlayerOpeningNarrator` | one actor-safe, name-based scene frame, current effective actor disposition/motivation, and bounded coverage metadata | exact retrieval over that same frame and one in-memory choice-capture tool | none; prose and suggested choices cannot mutate branch truth; a selected suggestion enters the separate player-action boundary |
 
@@ -200,6 +200,24 @@ and serialized prompt size. A single long physical line is split only at UTF-8
 code-point boundaries. Each segment contains source ID/path, byte/line range,
 text hash, ordinal and optional heading.
 
+Built-in Markdown, Chinese, and English heading forms remain deterministic. If a
+longer source has no recognized section structure, NWH schedules a preliminary
+structure-discovery batch containing JSON-escaped line windows near the start,
+quarter points, middle, and end plus a bounded set of isolated short-line
+candidates. That sample is non-citable and exposes only
+`configure_chapter_split` and `finish_compiler_batch`. The model can retain the
+builtin fallback or propose a declarative literal-prefix / number-style /
+literal-suffix matcher with exact sampled examples. It cannot provide executable
+code or regex. The host applies the matcher to immutable source lines, rejects
+non-sample examples, long or overly broad matches, and writes the plan and new
+manifest only at successful finish. The plan is source-hash-bound and included
+in prepared revisions.
+
+The evidence safety limit is 96 KiB / 1,000 lines per segment. Continuation
+segments belonging to the same detected author chapter can be joined into one
+batch up to eight segments and 128 KiB of both source bytes and serialized source
+characters. Grouping never crosses a detected chapter boundary.
+
 Every segment-manifest field can affect model context, including headings and
 line ranges. `prepareCompilerBatches` therefore recomputes the whole manifest
 from immutable bytes and uses deep equality, not only schema validity or slice
@@ -207,11 +225,11 @@ hashes, before constructing a prompt. `beginBatch` repeats this check and
 captures cloned selected-segment metadata before the model turn, preventing a
 persisted-manifest change from widening the live evidence boundary.
 
-Evidence: [segments.ts](../src/compiler/segments.ts),
+Evidence: [chapter-split.ts](../src/compiler/chapter-split.ts), [segments.ts](../src/compiler/segments.ts),
 `prepareCompilerBatches` in [batches.ts](../src/compiler/batches.ts),
 `beginBatch` in [proposal-tools.ts](../src/compiler/proposal-tools.ts), and
 regressions in [segments.test.ts](../test/segments.test.ts),
-[compiler-batches.test.ts](../test/compiler-batches.test.ts), and
+[chapter-split.test.ts](../test/chapter-split.test.ts), [compiler-batches.test.ts](../test/compiler-batches.test.ts), and
 [proposal-tools.test.ts](../test/proposal-tools.test.ts).
 
 ### Ordinary source-batch payload
@@ -642,6 +660,7 @@ coverage in [context-policy.test.ts](../test/context-policy.test.ts),
 | Compiler spans could leak into later assistant turns or summaries | live, compaction and tree projections plus persistent summary markers | [context-policy.ts](../src/agent/context-policy.ts), [nwh-extension.ts](../src/agent/nwh-extension.ts) | [context-policy.test.ts](../test/context-policy.test.ts) |
 | A transcript could be reopened under a different authority role | persisted role pin; ambiguous unmarked legacy transcripts rejected | [pi-session.ts](../src/agent/pi-session.ts) | [pi-session.test.ts](../test/pi-session.test.ts) |
 | Missing current compiler boundary could fall back to ordinary chat history | active compiler context now fails closed to an empty projection | [context-policy.ts](../src/agent/context-policy.ts) | [context-policy.test.ts](../test/context-policy.test.ts) |
+| Model-generated split code or a broad pattern could execute against the novel | no code/regex input; a literal declarative DSL, exact sampled examples, whole-source match limits, source-hash/version binding, and finish-time persistence | [chapter-split.ts](../src/compiler/chapter-split.ts), [proposal-tools.ts](../src/compiler/proposal-tools.ts) | [chapter-split.test.ts](../test/chapter-split.test.ts) |
 | Persisted/stale segment metadata could widen or mislabel evidence | full manifest rederivation/deep equality and captured live slice | [segments.ts](../src/compiler/segments.ts), [batches.ts](../src/compiler/batches.ts), [proposal-tools.ts](../src/compiler/proposal-tools.ts) | [segments.test.ts](../test/segments.test.ts), [proposal-tools.test.ts](../test/proposal-tools.test.ts) |
 | Whole-world compiler retrieval could cross novels | active-source binding and source-exclusive artifact/evidence checks | [source-evidence-retrieval.ts](../src/compiler/source-evidence-retrieval.ts), [artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts) | [compiler-source-evidence-retrieval.test.ts](../test/compiler-source-evidence-retrieval.test.ts), [compiler-artifact-retrieval.test.ts](../test/compiler-artifact-retrieval.test.ts) |
 | Scoped compiler jobs could inherit or persist a differently scoped transcript | source/batch/slice jobs forced fresh and ephemeral | [pi-compiler.ts](../src/compiler/pi-compiler.ts) | [pi-compiler.test.ts](../test/pi-compiler.test.ts) |

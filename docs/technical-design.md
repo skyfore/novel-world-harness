@@ -852,7 +852,7 @@ This distinction should also exist in future CLI commands and model tools.
 
 ## 14. Compiler architecture
 
-The current compiler is source-batch-driven: one bounded evidence batch is analyzed at a time and produces explicit artifact proposals rather than arbitrary JSON blobs. A future gap-driven refinement loop may schedule targeted follow-up batches, but it is not implemented today.
+The current compiler is source-batch-driven: one chapter-bounded evidence batch is analyzed at a time and produces explicit artifact proposals rather than arbitrary JSON blobs. Built-in heading detection remains deterministic. When a longer source lacks recognized headings, one preliminary agentic pass sees only a bounded structural sample and can submit a non-executable declarative chapter rule; deterministic host validation and the finish handshake gate persistence. A future gap-driven refinement loop may schedule targeted follow-up batches, but it is not implemented today.
 
 ### 14.1 Proposal envelope
 
@@ -877,6 +877,8 @@ type ArtifactProposal<T> = {
 
 ```text
 segment-source
+  ↓
+validated chapter-structure discovery when needed
   ↓
 bounded/resumable evidence batches
   ↓
@@ -1174,7 +1176,7 @@ Acceptance: style/POV rewrite changes prose without changing branch head or worl
 
 Only after the vertical slice is stable:
 
-- broaden source segmentation;
+- broaden corpus coverage for safe declarative chapter discovery;
 - improve entity resolution;
 - add epistemic extraction;
 - add causal extraction;

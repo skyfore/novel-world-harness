@@ -34,7 +34,7 @@ describe("source segmentation", () => {
   it("uses chapter headings while preserving exact CRLF byte slices", async () => {
     const { root, source, buffer } = await fixture("序言\r\n第一章 开端\r\n曹操进入大厅。\r\n\r\n第二章 转折\r\n曹操离开。\r\n");
     const manifest = await segmentSource(root, source);
-    expect(manifest.segmenterVersion).toBe(3);
+    expect(manifest.segmenterVersion).toBe(4);
     expect(manifest.segments.length).toBeGreaterThanOrEqual(3);
     expect(manifest.segments.some((segment) => segment.title?.startsWith("第一章"))).toBe(true);
     expect(manifest.segments.some((segment) => segment.title?.startsWith("第二章"))).toBe(true);
@@ -64,23 +64,23 @@ describe("source segmentation", () => {
   });
 
   it("falls back to bounded blocks when no structural headings exist", async () => {
-    const paragraphs = Array.from({ length: 400 }, (_, index) => `line ${index + 1}`).join("\n");
+    const paragraphs = Array.from({ length: 2_400 }, (_, index) => `line ${index + 1}`).join("\n");
     const { root, source } = await fixture(paragraphs);
     const manifest = await segmentSource(root, source);
     expect(manifest.segments.length).toBeGreaterThan(1);
     expect(manifest.segments.every((segment) => segment.kind === "block")).toBe(true);
-    expect(manifest.segments.every((segment) => segment.endLine - segment.startLine + 1 <= 160)).toBe(true);
+    expect(manifest.segments.every((segment) => segment.endLine - segment.startLine + 1 <= 1_000)).toBe(true);
   });
 
   it("splits one physical line by both UTF-8 bytes and escaped prompt size without losing bytes", async () => {
-    const { root, source, buffer } = await fixture(`<${"界".repeat(10_000)}>${"<".repeat(10_000)}`);
+    const { root, source, buffer } = await fixture(`<${"界".repeat(40_000)}>${"<".repeat(40_000)}`);
     const manifest = await segmentSource(root, source);
     expect(manifest.segments.length).toBeGreaterThan(2);
     const pieces: Buffer[] = [];
     for (const segment of manifest.segments) {
       const text = await readSegmentText(root, segment);
       pieces.push(Buffer.from(text, "utf8"));
-      expect(promptJson(text).length).toBeLessThanOrEqual(24 * 1024 + 2);
+      expect(promptJson(text).length).toBeLessThanOrEqual(96 * 1024 + 2);
       expect(segment.startLine).toBe(1);
       expect(segment.endLine).toBe(1);
     }

@@ -1,6 +1,7 @@
 export { auditCompiler, type CompilerAuditReport } from "./compiler/audit.js";
 export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
 export { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./compiler/boundary-calibration.js";
+export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleSchema, chapterSplitPlanSchema, type ChapterHeadingRule, type ChapterSplitPlan, type ChapterStructureSample } from "./compiler/chapter-split.js";
 export { convergeWorldProposals, type WorldConvergenceProgress, type WorldProposalConvergence } from "./compiler/converge.js";
 export { EvidenceVerifier, type EvidenceInspection, type EvidenceVerification } from "./compiler/evidence.js";
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";

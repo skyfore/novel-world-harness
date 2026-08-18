@@ -12,6 +12,7 @@ import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { ChapterSplitPlanStore, evaluateChapterSplitPlan } from "../src/compiler/chapter-split.js";
 
 const roots: string[] = [];
 
@@ -26,6 +27,70 @@ async function temporaryRoot(prefix: string): Promise<string> {
 }
 
 describe("versioned prepared novel cache", () => {
+  it("restores the validated chapter split plan with its deterministic batch layout", async () => {
+    const cacheRoot = await temporaryRoot("nwh-prepared-chapter-split-cache-");
+    const sourceRoot = await temporaryRoot("nwh-prepared-chapter-split-source-");
+    const content = ":: 1 :: Opening\nAlice waits.\n\n:: 2 :: Next\nAlice leaves.\n";
+    const fixture = await createEvidenceFixture(sourceRoot, content);
+    const evaluation = await evaluateChapterSplitPlan(sourceRoot, fixture.source, {
+      mode: "custom",
+      rule: {
+        prefix: ":: ",
+        numberStyle: "arabic",
+        suffix: " ::",
+        caseSensitive: true,
+        allowLeadingWhitespace: false,
+        allowTrailingText: true,
+      },
+      examples: [
+        { line: 1, text: ":: 1 :: Opening" },
+        { line: 4, text: ":: 2 :: Next" },
+      ],
+      reason: "Two exact author headings establish the split form.",
+    }, { compilerBatchId: `structure-${fixture.source.id}-v1`, provider: "test", model: "split" });
+    await new ChapterSplitPlanStore(sourceRoot).write(evaluation.plan);
+
+    const proposals = new CompilerProposalService(sourceRoot);
+    await proposals.submit("entity", {
+      proposalId: "split-alice",
+      payload: { id: "alice", kind: "character", canonicalName: "Alice", aliases: [], evidence: fixture.evidence("Alice") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "split-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "alice", field: "character.alive", value: true }] },
+        evidence: fixture.evidence("Alice waits."),
+      },
+      generatedBy: { worker: "test" },
+    });
+    const sourceBatches = await prepareCompilerBatches(sourceRoot, fixture.source);
+    expect(sourceBatches.map((batch) => batch.purpose)).toEqual([
+      "structure-discovery",
+      "source-review",
+      "source-review",
+    ]);
+    await new CompilerBatchStore(sourceRoot).replaceCompleted(fixture.source.id, sourceBatches.map((batch) => batch.id));
+    await convergeWorldProposals(sourceRoot, fixture.source.id);
+    const published = await new PreparedNovelCache(sourceRoot, cacheRoot).publish(fixture.source);
+
+    const restoredRoot = await temporaryRoot("nwh-prepared-chapter-split-restored-");
+    const restoredFixture = await createEvidenceFixture(restoredRoot, content);
+    await expect(new ChapterSplitPlanStore(restoredRoot).read(restoredFixture.source.id)).resolves.toBeNull();
+    await expect(new PreparedNovelCache(restoredRoot, cacheRoot).restore(restoredFixture.source))
+      .resolves.toMatchObject({ status: "restored", bundleHash: published.bundleHash });
+    await expect(new ChapterSplitPlanStore(restoredRoot).read(restoredFixture.source.id)).resolves.toMatchObject({
+      mode: "custom",
+      rule: { prefix: ":: ", suffix: " ::" },
+    });
+    const restoredBatches = await prepareCompilerBatches(restoredRoot, restoredFixture.source);
+    expect(restoredBatches.map((batch) => batch.id)).toEqual(sourceBatches.map((batch) => batch.id));
+    await expect(new CompilerBatchStore(restoredRoot).read(restoredFixture.source.id)).resolves.toMatchObject({
+      completedBatchIds: sourceBatches.map((batch) => batch.id).sort(),
+    });
+  });
+
   it("stores only deterministic source batches after a transient boundary calibration", async () => {
     const cacheRoot = await temporaryRoot("nwh-prepared-boundary-cache-");
     const sourceRoot = await temporaryRoot("nwh-prepared-boundary-source-");

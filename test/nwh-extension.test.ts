@@ -260,6 +260,7 @@ function preparationContext(notifications: string[], questions: string[]): Exten
 describe("NWH TUI extension", () => {
   it("derives fail-closed compiler capabilities for source, opening, and reconciliation turns", () => {
     const source = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "source");
+    expect(source).not.toContain("configure_chapter_split");
     expect(source).not.toContain("find_source_evidence");
     expect(source).not.toContain("read_source_evidence");
     expect(source).not.toContain("propose_initial_world");
@@ -271,6 +272,9 @@ describe("NWH TUI extension", () => {
     expect(boundary).not.toContain("peek_adjacent_evidence");
     expect(boundary).not.toContain("defer_boundary_artifact");
     expect(boundary).toContain("replace_boundary_proposal");
+
+    const structure = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "source", "structure-discovery");
+    expect(structure).toEqual(["configure_chapter_split", "finish_compiler_batch"]);
 
     const opening = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "opening");
     expect(opening).toContain("propose_initial_world");

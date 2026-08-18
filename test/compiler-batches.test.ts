@@ -245,6 +245,23 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("context-only"))).toBe(true);
   });
 
+  it("keeps continuation segments from one author chapter in one wider batch", async () => {
+    const { root, source } = await fixtureWithContent([
+      "Chapter 1",
+      ...Array.from({ length: 1_100 }, (_, index) => `Short chapter line ${index + 1}.`),
+      "Chapter 2",
+      "The next chapter begins.",
+    ].join("\n"));
+
+    const manifest = await new SegmentStore(root).list(source.id);
+    expect(manifest.filter((segment) => segment.title?.startsWith("Chapter 1"))).toHaveLength(2);
+    const batches = await prepareCompilerBatches(root, source);
+    expect(batches.map((batch) => batch.purpose)).toEqual(["source-review", "source-review"]);
+    expect(batches[0]!.segmentIds).toHaveLength(2);
+    expect(batches[0]).toMatchObject({ chapterOrdinal: 1, chapterTitle: "Chapter 1" });
+    expect(batches[1]).toMatchObject({ chapterOrdinal: 2, chapterTitle: "Chapter 2" });
+  });
+
   it("keeps source delimiters structural when novel text imitates them", async () => {
     const { root, source } = await fixtureWithContent([
       "第1章",
@@ -326,11 +343,20 @@ describe("compiler batches", () => {
     const store = new SegmentStore(root);
     const stale = await store.readManifest(source.id);
     expect(stale).not.toBeNull();
-    await store.write({ ...stale!, segmenterVersion: 1 });
+    await store.write({
+      ...stale!,
+      segmenterVersion: 1,
+      segments: stale!.segments.map((segment) => {
+        const { promptCharacters: _legacyMissingField, ...legacy } = segment;
+        return legacy as typeof segment;
+      }),
+    });
 
     await prepareCompilerBatches(root, source);
 
-    await expect(store.readManifest(source.id)).resolves.toMatchObject({ segmenterVersion: 3 });
+    const repaired = await store.readManifest(source.id);
+    expect(repaired?.segmenterVersion).toBe(4);
+    expect(repaired?.segments.every((segment) => segment.promptCharacters > 0)).toBe(true);
   });
 
   it("marks successful batches and resumes after an interrupted run", async () => {

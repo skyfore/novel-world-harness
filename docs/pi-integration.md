@@ -68,8 +68,9 @@ deadline in addition to provider idle timeouts and abort without checkpointing w
 that deadline expires. Automated source turns
 also omit raw staging-only state deltas, and supplemental opening-state turns are
 given the real opening segment and exact EvidenceRef rather than an ungrounded prompt.
-An ordinary one-segment source turn may read at most one bounded, context-only
-preview from each immediate neighbor. That preview deliberately carries no
+An ordinary chapter-bounded source turn may contain several continuation evidence
+segments from that same author chapter and may read at most one bounded,
+context-only preview from each immediate batch neighbor. That preview deliberately carries no
 EvidenceRef and cannot expand the turn's proposal evidence authority. If it
 confirms that an artifact crosses the deterministic split, the model records a
 non-canonical boundary deferral. The host then schedules a fresh isolated

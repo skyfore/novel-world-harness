@@ -12,7 +12,7 @@ Implemented:
 
 - Claude Code-style TUI with a persistent transcript, streaming responses, rendered tool calls, a multiline editor, status/footer information, and bounded local `list_files`, `search_files`, and `read_file` tools;
 - user-level local state under `$NWH_HOME` (default `~/.novel-harness/`), with no PostgreSQL, vector database, or RAG service;
-- deterministic source registration, hashing, segmentation, and resumable compiler batches;
+- deterministic source registration and hashing, validated agent-assisted chapter discovery when built-in heading rules are insufficient, and resumable chapter-bounded compiler batches;
 - Pi compiler sessions that can only create typed pending proposals;
 - an explicit compiler-batch finish handshake, so failed or partial tool runs remain retryable instead of being checkpointed;
 - cryptographic evidence verification before canonical or possibility acceptance;
@@ -91,7 +91,13 @@ pnpm dev --tui-mode fullscreen
 
 Paste or drag a standalone UTF-8 novel path (`.txt`, `.text`, `.novel`, `.md`, or
 `.markdown`) into the TUI to begin the compiler workflow immediately. NWH
-registers the source, builds bounded evidence segments,
+registers the source and builds bounded evidence segments. Recognized author
+headings become chapter boundaries directly. For a longer heading-free source,
+the first compiler turn receives a bounded structural sample and may configure a
+safe declarative heading rule (literal prefix, numbering style, and literal
+suffix); arbitrary model-generated code and regular expressions are never
+executed. The host checks exact sampled examples and the rule's full-source
+match rate, and commits it only with the normal finish handshake. NWH then
 dynamically enables the typed pending-proposal tools, and processes the first
 compiler batch without first exploring the repository or explaining the CLI:
 
@@ -259,8 +265,12 @@ the novel, scope, chapters, or revision through the native question UI:
 /prepared-cache activate <bundle-hash> --source <source-id>
 ```
 
-Chapter ordinals follow detected heading sections; a heading-free source uses its
-deterministic evidence blocks as the selectable units. Reparse invalidates only
+Chapter ordinals follow built-in or validated agent-discovered heading sections;
+a source without a reliable heading form uses deterministic evidence blocks as
+the selectable units. Evidence segments are bounded at 96 KiB / 1,000 lines,
+while continuation segments from one author chapter may share one compiler batch
+up to a 128 KiB source/prompt safety boundary. Batches never merge across chapter
+boundaries. Reparse invalidates only
 the selected current artifacts, retains their immutable revisions, and publishes
 the result only after compilation, convergence, opening-state preparation, and
 cache validation succeed. A failed run restores the previous active revision.

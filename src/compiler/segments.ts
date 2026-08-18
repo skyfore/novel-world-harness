@@ -7,6 +7,11 @@ import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.
 import { promptJson } from "../util/prompt-data.js";
 import { z } from "zod";
 import { idSchema } from "../world/model.js";
+import {
+  ChapterSplitPlanStore,
+  customChapterBoundaries,
+  type ChapterSplitPlan,
+} from "./chapter-split.js";
 
 export type SourceSegment = {
   version: 1;
@@ -22,6 +27,7 @@ export type SourceSegment = {
   endByte: number;
   textSha256: string;
   bytes: number;
+  promptCharacters: number;
 };
 
 export type SegmentManifest = {
@@ -48,10 +54,13 @@ const HEADING_PATTERNS = [
   /^\s*第[零〇一二三四五六七八九十百千万两\d]+[章节卷回部篇幕](?:\s|$|[：:])/u,
   /^\s*(?:chapter|book|part|volume)\s+[\divxlcdm]+\b/i,
 ];
-const MAX_BLOCK_LINES = 160;
-const MAX_BLOCK_BYTES = 24 * 1024;
-const MAX_BLOCK_PROMPT_CHARS = 24 * 1024;
-export const SEGMENTER_VERSION = 3 as const;
+// Segments remain finite evidence units, but modern model contexts do not need
+// the old ~24 KiB / 160-line cut. Chapters are now preserved up to a much wider
+// safety boundary; batching may join continuation pieces from the same chapter.
+const MAX_BLOCK_LINES = 1_000;
+const MAX_BLOCK_BYTES = 96 * 1024;
+const MAX_BLOCK_PROMPT_CHARS = 96 * 1024;
+export const SEGMENTER_VERSION = 4 as const;
 
 const sourceSegmentSchema = z.object({
   version: z.literal(1),
@@ -67,6 +76,9 @@ const sourceSegmentSchema = z.object({
   endByte: z.number().int().nonnegative(),
   textSha256: z.string().regex(/^[a-f0-9]{64}$/),
   bytes: z.number().int().positive(),
+  // Default only permits older on-disk manifests to be parsed and repaired by
+  // the mandatory fresh derivation/deep comparison before compiler use.
+  promptCharacters: z.number().int().nonnegative().default(0),
 }).strict().superRefine((segment, ctx) => {
   if (segment.endLine < segment.startLine) ctx.addIssue({ code: "custom", path: ["endLine"], message: "endLine must be >= startLine" });
   if (segment.endByte < segment.startByte) ctx.addIssue({ code: "custom", path: ["endByte"], message: "endByte must be >= startByte" });
@@ -162,7 +174,11 @@ export class SegmentStore {
   }
 }
 
-export async function segmentSource(workspaceRoot: string, source: SourceDocument): Promise<SegmentManifest> {
+export async function segmentSource(
+  workspaceRoot: string,
+  source: SourceDocument,
+  options: { chapterSplitPlan?: ChapterSplitPlan | null } = {},
+): Promise<SegmentManifest> {
   const buffer = await readSourceMaterial(workspaceRoot, source);
   const sourceSha256 = sha256(buffer);
   if (sourceSha256 !== source.contentSha256) {
@@ -179,7 +195,20 @@ export async function segmentSource(workspaceRoot: string, source: SourceDocumen
   const text = buffer.toString("utf8");
   const records = parseLines(text);
   const lines = records.map((record) => record.text);
-  const boundaries = findBoundaries(lines);
+  const chapterSplitPlan = Object.hasOwn(options, "chapterSplitPlan")
+    ? options.chapterSplitPlan ?? null
+    : await new ChapterSplitPlanStore(workspaceRoot).read(source.id);
+  if (chapterSplitPlan && chapterSplitPlan.sourceSha256 !== sourceSha256) {
+    throw new Error(`Chapter split plan for ${source.id} targets different source bytes.`);
+  }
+  const customBoundaries = customChapterBoundaries(lines, chapterSplitPlan);
+  if (chapterSplitPlan?.mode === "custom" && customBoundaries.length < 2) {
+    throw new Error(`Custom chapter split plan for ${source.id} no longer identifies at least two headings.`);
+  }
+  const boundaries = withPreambleBoundary(
+    lines,
+    customBoundaries.length ? customBoundaries : findBoundaries(lines),
+  );
   const spans = boundaries.length > 1 ? sectionSpans(lines, records, boundaries) : blockSpans(lines, records);
   const segments = spans.map((span, ordinal) => materializeSegment(source, buffer, records, span, ordinal));
   return {
@@ -240,8 +269,13 @@ function findBoundaries(lines: string[]): number[] {
     const line = lines[index] ?? "";
     if (HEADING_PATTERNS.some((pattern) => pattern.test(line))) boundaries.push(index);
   }
-  if (boundaries.length && boundaries[0] !== 0 && lines.slice(0, boundaries[0]).some((line) => line.trim())) boundaries.unshift(0);
   return boundaries;
+}
+
+function withPreambleBoundary(lines: string[], boundaries: number[]): number[] {
+  const result = [...boundaries];
+  if (result.length && result[0] !== 0 && lines.slice(0, result[0]).some((line) => line.trim())) result.unshift(0);
+  return result;
 }
 
 function sectionSpans(lines: string[], records: LineRecord[], boundaries: number[]): Span[] {
@@ -359,6 +393,7 @@ function materializeSegment(
     endByte,
     textSha256,
     bytes: slice.byteLength,
+    promptCharacters: promptJson(slice.toString("utf8")).length,
   };
 }
 

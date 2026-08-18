@@ -35,6 +35,29 @@ function resultText(result: unknown): string {
 }
 
 describe("compiler boundary calibration", () => {
+  it("peeks beyond the edge of a multi-segment chapter batch", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-boundary-multi-segment-"));
+    roots.push(root);
+    const evidence = await createEvidenceFixture(root, [
+      "Chapter 1",
+      ...Array.from({ length: 1_100 }, (_, index) => `Chapter-one line ${index + 1}.`),
+      "Chapter 2",
+      "The neighboring chapter starts here.",
+    ].join("\n"));
+    const batches = await prepareCompilerBatches(root, evidence.source);
+    const first = batches[0]!;
+    expect(first.segmentIds).toHaveLength(2);
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch(first.segmentIds, first.id, evidence.source.id);
+    const peek = toolset.tools.find((tool) => tool.name === "peek_adjacent_evidence")!;
+
+    const preview = await peek.execute("peek", {
+      direction: "next",
+      reason: "Check the immediate batch boundary.",
+    } as never, undefined, undefined, {} as ExtensionContext);
+    expect(resultText(preview)).toContain("The neighboring chapter starts here");
+  });
+
   it("peeks once without granting citable evidence and queues a durable pair batch", async () => {
     const { root, evidence, segments } = await fixture();
     const regular = (await prepareCompilerBatches(root, evidence.source))[0]!;

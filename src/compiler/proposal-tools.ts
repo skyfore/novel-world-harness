@@ -18,6 +18,12 @@ import { readSegmentText, segmentSource, SegmentStore, type SourceSegment } from
 import { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./boundary-calibration.js";
 import { promptJson } from "../util/prompt-data.js";
 import { safeTextPrefix } from "../util/text-pages.js";
+import {
+  CHAPTER_SPLIT_DISCOVERY_VERSION,
+  ChapterSplitPlanStore,
+  evaluateChapterSplitPlan,
+  type ChapterSplitPlan,
+} from "./chapter-split.js";
 
 function proposalResult(text: string, details: CompilerProposalRecordedDetails) {
   return { content: [{ type: "text" as const, text }], details };
@@ -37,6 +43,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
 
 /** Exact model-tool authority owned by the compiler embedding. */
 export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
+  "configure_chapter_split",
   "find_compiler_artifacts",
   "read_compiler_artifact",
   ...SOURCE_EVIDENCE_TOOL_NAMES,
@@ -182,6 +189,10 @@ type BoundaryReplacementDetails =
   | CompilerBatchBlockedDetails
   | { compilerBoundaryProposalReplaced: true; proposalId: string; replacementProposalId: string; reason: string };
 
+type ChapterSplitDetails =
+  | CompilerBatchBlockedDetails
+  | { compilerChapterSplitConfigured: true; mode: "builtin" | "custom"; headingCount: number };
+
 function safeTextSuffix(text: string, maxChars: number): string {
   let start = Math.max(0, text.length - maxChars);
   if (start > 0 && start < text.length
@@ -206,6 +217,7 @@ export function createCompilerProposalToolset(
   let compilerBatchId: string | undefined;
   let activeSourceId: string | undefined;
   let activeBoundaryCalibration: BoundaryCalibrationRequest | undefined;
+  let pendingChapterSplitPlan: ChapterSplitPlan | undefined;
   let finished = false;
   let circuitBreak: { reason: string; failureCount: number } | undefined;
   let totalFinishFailures = 0;
@@ -255,6 +267,10 @@ export function createCompilerProposalToolset(
     if (finished) throw new Error("Compiler batch was already finished; no more proposals may be submitted in this turn.");
     if (circuitBreak) throw new Error("Compiler batch was stopped by its compiler circuit breaker; start a new batch turn to retry.");
   };
+  const isStructureDiscoveryBatch = () => Boolean(
+    activeSourceId
+    && compilerBatchId === `structure-${activeSourceId}-v${CHAPTER_SPLIT_DISCOVERY_VERSION}`,
+  );
   const assertEvidenceWithinBoundedSlice = async (payload: unknown, envelopeEvidence: unknown): Promise<void> => {
     if (expectedSegmentIds.length === 0) return;
     if (!activeSourceId || boundedSliceSegments.length !== expectedSegmentIds.length) {
@@ -291,13 +307,14 @@ export function createCompilerProposalToolset(
     }
   };
   const adjacentSegment = (direction: "previous" | "next") => {
-    if (!activeSourceId || expectedSegmentIds.length !== 1 || boundedSliceSegments.length !== 1) {
-      throw new Error("Adjacent evidence is available only to a one-segment, source-scoped compiler batch.");
+    if (!activeSourceId || expectedSegmentIds.length === 0 || boundedSliceSegments.length !== expectedSegmentIds.length) {
+      throw new Error("Adjacent evidence requires a non-empty, source-scoped compiler batch.");
     }
     if (!compilerBatchId?.startsWith(`batch-${activeSourceId}-`)) {
       throw new Error("Adjacent evidence is unavailable outside an ordinary source-review batch.");
     }
-    const focus = boundedSliceSegments[0]!;
+    const ordered = [...boundedSliceSegments].sort((left, right) => left.ordinal - right.ordinal);
+    const focus = direction === "previous" ? ordered[0]! : ordered.at(-1)!;
     const focusIndex = validatedSourceSegments.findIndex((segment) => segment.id === focus.id);
     const adjacentIndex = focusIndex + (direction === "previous" ? -1 : 1);
     const adjacent = validatedSourceSegments[adjacentIndex];
@@ -309,6 +326,94 @@ export function createCompilerProposalToolset(
       right: direction === "previous" ? focus : adjacent,
     };
   };
+
+  const configureChapterSplitParameters = Type.Object({
+    mode: Type.Union([Type.Literal("builtin"), Type.Literal("custom")]),
+    rule: Type.Optional(Type.Object({
+      prefix: Type.String({ maxLength: 80 }),
+      number_style: Type.Union([
+        Type.Literal("arabic"),
+        Type.Literal("chinese"),
+        Type.Literal("roman"),
+        Type.Literal("english"),
+        Type.Literal("mixed"),
+      ]),
+      suffix: Type.String({ maxLength: 40 }),
+      case_sensitive: Type.Boolean(),
+      allow_leading_whitespace: Type.Boolean(),
+      allow_trailing_text: Type.Boolean(),
+    }, { additionalProperties: false })),
+    examples: Type.Optional(Type.Array(Type.Object({
+      line: Type.Integer({ minimum: 1 }),
+      text: Type.String({ minLength: 1, maxLength: 240 }),
+    }, { additionalProperties: false }), { minItems: 2, maxItems: 12 })),
+    reason: Type.String({ minLength: 1, maxLength: 1_000 }),
+  }, { additionalProperties: false });
+  const configureChapterSplitTool = defineTool<typeof configureChapterSplitParameters, ChapterSplitDetails>({
+    name: "configure_chapter_split",
+    label: "Configure chapter split",
+    description: "Propose one safe declarative chapter-heading rule from the supplied structural sample, or explicitly retain builtin bounded splitting. The host validates the entire immutable source and commits workflow metadata only during a successful finish handshake.",
+    promptSnippet: "Configure one validated chapter split before source-review batches begin",
+    promptGuidelines: [
+      "Use this only in the preliminary structure-discovery batch.",
+      "Never submit executable code or regex syntax; prefix and suffix are literal author text.",
+      "For a custom rule, copy at least two exact untruncated sampled heading lines and their line numbers.",
+      "Choose builtin when the sample does not demonstrate one reliable repeated heading form.",
+    ],
+    executionMode: "sequential",
+    parameters: configureChapterSplitParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (!isStructureDiscoveryBatch() || !activeSourceId || !compilerBatchId) {
+        throw new Error("Chapter split configuration is available only in the preliminary structure-discovery batch.");
+      }
+      if (pendingChapterSplitPlan) throw new Error("This structure-discovery batch already has a validated chapter split configuration.");
+      if (input.mode === "builtin" && (input.rule || input.examples)) {
+        throw new Error("mode=builtin must omit rule and examples.");
+      }
+      if (input.mode === "custom" && (!input.rule || !input.examples)) {
+        throw new Error("mode=custom requires a rule and at least two exact sampled examples.");
+      }
+      const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
+      if (!source) throw new Error(`Unknown active compiler source: ${activeSourceId}`);
+      const evaluation = await evaluateChapterSplitPlan(workspaceRoot, source, {
+        mode: input.mode,
+        ...(input.rule ? {
+          rule: {
+            prefix: input.rule.prefix,
+            numberStyle: input.rule.number_style,
+            suffix: input.rule.suffix,
+            caseSensitive: input.rule.case_sensitive,
+            allowLeadingWhitespace: input.rule.allow_leading_whitespace,
+            allowTrailingText: input.rule.allow_trailing_text,
+          },
+        } : {}),
+        ...(input.examples ? { examples: input.examples } : {}),
+        reason: input.reason,
+      }, {
+        compilerBatchId,
+        ...generatedBy,
+      });
+      pendingChapterSplitPlan = evaluation.plan;
+      recordProposalProgress();
+      return {
+        content: [{
+          type: "text" as const,
+          text: evaluation.plan.mode === "custom"
+            ? `Validated a declarative chapter rule against the immutable source: ${evaluation.headingLines.length} heading(s) matched. Preview titles (untrusted structural data): ${promptJson(evaluation.headingTitles)}. The plan will be committed only by finish_compiler_batch.`
+            : "Validated the decision to retain builtin bounded splitting. The plan will be committed only by finish_compiler_batch.",
+        }],
+        details: {
+          compilerChapterSplitConfigured: true,
+          mode: evaluation.plan.mode,
+          headingCount: evaluation.headingLines.length,
+        },
+      };
+    },
+  });
 
   const peekAdjacentParameters = Type.Object({
     direction: Type.Union([Type.Literal("previous"), Type.Literal("next")]),
@@ -445,6 +550,9 @@ export function createCompilerProposalToolset(
         const blocked = beginToolCall("mutation");
         if (blocked) return blocked;
         assertBatchWritable();
+        if (isStructureDiscoveryBatch()) {
+          throw new Error("World-artifact proposals are unavailable during chapter structure discovery.");
+        }
         await assertEvidenceWithinBoundedSlice(input.payload, input.evidence);
         await assertStableLogicalRevision(service, kind, input.payload, compilerBatchId);
         if (!successfulProposalIds.has(input.proposal_id) && successfulProposalIds.size >= MAX_ACTIVE_COMPILER_PROPOSALS) {
@@ -613,6 +721,9 @@ export function createCompilerProposalToolset(
       if (blocked) return blocked;
       const expected = [...successfulProposalIds].sort();
       const listed = expected;
+      if (isStructureDiscoveryBatch() && !pendingChapterSplitPlan) {
+        return failFinish("Structure discovery requires one successful configure_chapter_split call before finish.");
+      }
       if (input.outcome === "no-artifacts" && expected.length > 0) {
         return failFinish("no-artifacts cannot be used after active successful proposal submissions.");
       }
@@ -632,6 +743,17 @@ export function createCompilerProposalToolset(
       if (closureIssues.length) {
         return failFinish(`Compiler batch proposal graph is incomplete:\n- ${closureIssues.join("\n- ")}`);
       }
+      if (pendingChapterSplitPlan) {
+        if (!activeSourceId) return failFinish("Structure discovery lost its active source identity.");
+        const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
+        if (!source) return failFinish(`Unknown active compiler source: ${activeSourceId}`);
+        // Write the derived manifest first. If the final atomic plan write
+        // fails, ordinary preparation will repair this provisional manifest
+        // from the still-authoritative prior plan on retry.
+        const manifest = await segmentSource(workspaceRoot, source, { chapterSplitPlan: pendingChapterSplitPlan });
+        await new SegmentStore(workspaceRoot).write(manifest);
+        await new ChapterSplitPlanStore(workspaceRoot).write(pendingChapterSplitPlan);
+      }
       finished = true;
       return {
         content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}).` }],
@@ -641,6 +763,7 @@ export function createCompilerProposalToolset(
   });
   return {
     tools: [
+      configureChapterSplitTool,
       ...retrievalTools,
       peekAdjacentTool,
       deferBoundaryTool,
@@ -658,6 +781,7 @@ export function createCompilerProposalToolset(
       compilerBatchId = nextCompilerBatchId;
       activeSourceId = sourceId;
       activeBoundaryCalibration = undefined;
+      pendingChapterSplitPlan = undefined;
       finished = false;
       circuitBreak = undefined;
       totalFinishFailures = 0;
@@ -665,6 +789,12 @@ export function createCompilerProposalToolset(
       totalToolCalls = 0;
       finishGraceCalls = 0;
       finishFailureCounts.clear();
+      if (isStructureDiscoveryBatch() && activeSourceId && compilerBatchId) {
+        const existingPlan = await new ChapterSplitPlanStore(workspaceRoot).read(activeSourceId);
+        if (existingPlan?.generatedBy.compilerBatchId === compilerBatchId) {
+          pendingChapterSplitPlan = existingPlan;
+        }
+      }
       if (expectedSegmentIds.length && !activeSourceId) {
         throw new Error("A bounded compiler batch requires an active sourceId.");
       }

@@ -44,9 +44,13 @@ non-displayed context. Project or user Pi extensions, skills, prompt templates,
 context files, and built-in model coding tools remain disabled.
 
 When a standalone text novel path (`.txt`, `.text`, `.novel`, `.md`, or
-`.markdown`) is submitted, the extension deterministically registers and segments
-that source, injects the next bounded evidence batch as hidden model context, and
-dynamic compiler toolset exposes the narrow `propose_*` tools plus
+`.markdown`) is submitted, the extension deterministically registers and
+pre-segments that source. Built-in headings are used directly; a longer source
+without recognized headings first receives a bounded, non-citable structure
+sample and the narrow `configure_chapter_split` tool. Its safe declarative rule
+is validated over immutable source lines and becomes active only after the finish
+handshake. The extension then injects the next chapter-bounded evidence batch as
+hidden model context, and the dynamic compiler toolset exposes the narrow `propose_*` tools plus
 `withdraw_compiler_proposal` and `finish_compiler_batch`. The
 first batch starts immediately; `/compile-next` advances the same source after a
 successful proposal run and explicit `finish_compiler_batch` handshake. The
@@ -114,7 +118,8 @@ never copies branch commits, branch heads, or play-session state.
 
 Preparation is not permanently frozen. `nwh reparse --all` rebuilds every
 detected chapter, while `nwh reparse --chapters 1,4-6` invalidates and recompiles
-only those heading sections (or deterministic blocks for heading-free text). A
+only those built-in or validated agent-discovered heading sections (or
+deterministic blocks when no reliable heading form exists). A
 successful run publishes and activates a new revision; a failed run rolls the
 current workspace back to its prior active revision. `nwh prepared-cache list`
 shows retained revisions and `nwh prepared-cache activate <bundle-hash>` selects

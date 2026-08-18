@@ -63,12 +63,13 @@ export async function reparseCommand(
   const source = await resolveSource(root, options.sourceId);
   const batches = await prepareCompilerBatches(root, source);
   options.signal?.throwIfAborted();
-  if (!batches.length) throw new Error(`Source ${source.id} has no compiler batches.`);
-  const availableChapters = [...new Set(batches.map((batch) => batch.chapterOrdinal))].sort((left, right) => left - right);
+  const chapterBatches = batches.filter((batch) => batch.purpose !== "structure-discovery");
+  if (!chapterBatches.length) throw new Error(`Source ${source.id} has no chapter compiler batches.`);
+  const availableChapters = [...new Set(chapterBatches.map((batch) => batch.chapterOrdinal))].sort((left, right) => left - right);
   const selectedChapters = options.all
     ? availableChapters
     : parseOrdinalSelection(options.chapters!, availableChapters, "--chapters");
-  const selected = batches.filter((batch) => selectedChapters.includes(batch.chapterOrdinal));
+  const selected = chapterBatches.filter((batch) => selectedChapters.includes(batch.chapterOrdinal));
   if (!selected.length) throw new Error("The chapter selection did not match any compiler batch.");
 
   const cache = new PreparedNovelCache(root, options.cacheRoot);
@@ -198,6 +199,9 @@ async function recoverInterruptedReparse(
   const selected = new Set(selectedBatchIds);
   const outsideSelection = unfinished.filter((batch) => !selected.has(batch.id));
   if (outsideSelection.length) {
+    if (outsideSelection.some((batch) => batch.purpose === "structure-discovery")) {
+      throw new Error("Cannot start reparse before chapter structure discovery is checkpointed. Resume preparation first.");
+    }
     const chapters = [...new Set(outsideSelection.map((batch) => batch.chapterOrdinal))].sort((left, right) => left - right);
     throw new Error(
       `Cannot start reparse while ${outsideSelection.length} unfinished compiler batch(es) exist outside the selected scope `

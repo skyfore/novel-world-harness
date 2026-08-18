@@ -5,6 +5,7 @@ import { runCompilerBatches } from "../compiler/batches.js";
 import type { CompilerBatch } from "../compiler/batches.js";
 import { compilerBatchFailure } from "../compiler/batch-outcome.js";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
+import { COMPILER_TOOL_NAMES } from "../compiler/proposal-tools.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { startElapsedStatus } from "../util/elapsed-status.js";
@@ -77,9 +78,11 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
     },
     async runner(batch, context) {
       options.signal?.throwIfAborted();
-      const label = batch.purpose === "boundary-calibration"
-        ? `Boundary calibration ${batch.ordinal + 1}/${context.totalBatches}`
-        : `Compiler batch ${batch.ordinal + 1}/${context.totalBatches}`;
+      const label = batch.purpose === "structure-discovery"
+        ? `Chapter structure discovery ${batch.ordinal + 1}/${context.totalBatches}`
+        : batch.purpose === "boundary-calibration"
+          ? `Boundary calibration ${batch.ordinal + 1}/${context.totalBatches}`
+          : `Compiler batch ${batch.ordinal + 1}/${context.totalBatches}`;
       options.onStatus?.(`${label} · creating model session`);
       let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
       let modelTextStreamed = false;
@@ -94,12 +97,15 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         segmentIds: batch.segmentIds,
         compilerBatchId: batch.id,
         sourceId: batch.sourceId,
-        disabledProposalTools: [
-          "propose_initial_world",
-          ...(batch.purpose === "boundary-calibration"
-            ? ["peek_adjacent_evidence", "defer_boundary_artifact"]
-            : ["replace_boundary_proposal"]),
-        ],
+        disabledProposalTools: batch.purpose === "structure-discovery"
+          ? COMPILER_TOOL_NAMES.filter((name) => !["configure_chapter_split", "finish_compiler_batch"].includes(name))
+          : [
+              "configure_chapter_split",
+              "propose_initial_world",
+              ...(batch.purpose === "boundary-calibration"
+                ? ["peek_adjacent_evidence", "defer_boundary_artifact"]
+                : ["replace_boundary_proposal"]),
+            ],
         onRetry(event) {
           const message = formatRetryNotice(event);
           elapsed?.update(`retrying model request: ${message}`);

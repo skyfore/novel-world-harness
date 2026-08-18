@@ -106,12 +106,15 @@ const COMPILER_TOOL_NAME_SET = new Set(COMPILER_TOOL_NAMES);
 export function compilerToolNamesForScope(
   availableNames: readonly string[],
   scope: "source" | "opening" | "reconciliation",
-  sourcePurpose: "source-review" | "boundary-calibration" = "source-review",
+  sourcePurpose: "structure-discovery" | "source-review" | "boundary-calibration" = "source-review",
 ): string[] {
   const known = new Set(COMPILER_TOOL_NAMES);
   return [...new Set(availableNames)]
     .filter((name) => known.has(name))
     .filter((name) => !SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(name))
+    .filter((name) => scope === "source" && sourcePurpose === "structure-discovery"
+      ? name === "configure_chapter_split" || name === "finish_compiler_batch"
+      : name !== "configure_chapter_split")
     .filter((name) => scope === "reconciliation" || !SOURCE_EVIDENCE_TOOL_NAMES.includes(name as typeof SOURCE_EVIDENCE_TOOL_NAMES[number]))
     .filter((name) => scope === "source" || !BOUNDARY_CALIBRATION_TOOL_NAMES.includes(name as typeof BOUNDARY_CALIBRATION_TOOL_NAMES[number]))
     .filter((name) => {
@@ -1193,7 +1196,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     const activateCompilerTools = (
       ctx: ExtensionContext,
       scope: "source" | "opening" | "reconciliation" = "source",
-      sourcePurpose: "source-review" | "boundary-calibration" = "source-review",
+      sourcePurpose: "structure-discovery" | "source-review" | "boundary-calibration" = "source-review",
     ) => {
       if (!compilerToolsRegistered) {
         const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
@@ -1225,7 +1228,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     };
 
     const compilerPromptForTurn = (turn: SourceLoopTurn, retryAttempt = 0) => [
-      `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for source path ${promptJson(turn.source.sourcePath)}. Analyze the supplied evidence now and record typed pending proposals.`,
+      turn.batch.purpose === "structure-discovery"
+        ? `Begin preliminary chapter-structure discovery ${turn.completedBatches + 1}/${turn.totalBatches} for source path ${promptJson(turn.source.sourcePath)}. Infer only a safe declarative split rule from the supplied structural sample.`
+        : `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for source path ${promptJson(turn.source.sourcePath)}. Analyze the supplied evidence now and record typed pending proposals.`,
       ...(retryAttempt > 0 ? [
         `This is provider-recovery attempt ${retryAttempt}/${MAX_PREPARE_ALL_PROVIDER_RETRIES}. Use neutral, concise literary-analysis language; do not reproduce or embellish narrative passages in prose. Prefer typed tool calls and short clinical summaries. Recover active current-batch proposals instead of duplicating them.`,
       ] : []),
@@ -1712,7 +1717,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const compilerTurnContract = compilerActive
         ? `<nwh-compiler-turn-contract>\n${promptJson({
             mode: "compiler",
-            evidence: pendingTurn ? "supplied bounded source segment" : "supplied host reconciliation/opening payload",
+            evidence: pendingTurn?.batch.purpose === "structure-discovery"
+              ? "supplied non-citable bounded source-structure sample"
+              : pendingTurn
+                ? "supplied bounded source segment"
+                : "supplied host reconciliation/opening payload",
             projectInstructions: "disabled",
             ordinaryConversation: "excluded",
             tools: activeCompilerTools,
@@ -1889,7 +1898,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       pendingTurnInitiatedByUserInput = false;
       await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id);
       ctx.ui.notify(
-        completedTurn.remainingAfterBatch > 0
+        completedTurn.batch.purpose === "structure-discovery"
+          ? `Chapter split plan checkpointed for ${completedTurn.source.title}; evidence batches will be regenerated on the next compiler turn.`
+          : completedTurn.remainingAfterBatch > 0
           ? `Compiler batch ${completedTurn.completedBatches + 1}/${completedTurn.totalBatches} checkpointed · ${completedTurn.remainingAfterBatch} remaining · /compile-next to continue`
           : `All ${completedTurn.totalBatches} compiler batches for ${completedTurn.source.title} are checkpointed.`,
         "info",
@@ -2606,7 +2617,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (!source) throw new Error(`Unknown source '${sourceId}'.`);
         if (!batches.length) throw new Error(`Source ${source.id} has no compiler batches.`);
         const chapterMap = new Map<number, { title?: string; batches: number }>();
-        for (const batch of batches) {
+        for (const batch of batches.filter((candidate) => candidate.purpose !== "structure-discovery")) {
           const current = chapterMap.get(batch.chapterOrdinal);
           chapterMap.set(batch.chapterOrdinal, {
             ...(batch.chapterTitle ? { title: batch.chapterTitle } : current?.title ? { title: current.title } : {}),

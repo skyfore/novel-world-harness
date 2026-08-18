@@ -27,7 +27,7 @@ export function createTuiUserQuestion(ui: ExtensionUIContext): AskTuiUserQuestio
     const entries = question.options.map((option, index) => ({
       option,
       index,
-      label: `${index + 1}. ${option.label}${option.recommended ? " (recommended)" : ""} — ${option.description}`,
+      label: `${index + 1}. ${option.label}${option.recommended ? " (recommended)" : ""}${option.description ? ` — ${option.description}` : ""}`,
       search: normalize(`${option.value} ${option.label} ${option.description}`),
     }));
     const nativeResult = await askWithNativeSelectList(ui, question, entries);
@@ -51,13 +51,17 @@ async function askWithNativeSelectList<T extends string>(
         ...filtered.map((entry) => ({
           value: `choice:${entry.index}`,
           label: `${entry.index + 1}. ${entry.option.label}${entry.option.recommended ? " (recommended)" : ""}`,
-          description: entry.option.description,
+          ...(entry.option.description ? { description: entry.option.description } : {}),
         })),
         ...(entries.length > PAGE_SIZE || query
           ? [{ value: "control:filter", label: query ? "Change filter…" : "Filter choices…", description: query ? `Current: ${query}` : "Search by name, id, or description" }]
           : []),
         ...(question.customInput
-          ? [{ value: "control:custom", label: `${question.customInput.label}…`, description: question.customInput.description }]
+          ? [{
+              value: "control:custom",
+              label: `${question.customInput.label}…`,
+              ...(question.customInput.description ? { description: question.customInput.description } : {}),
+            }]
           : []),
       ];
       const container = new Container();
@@ -118,7 +122,7 @@ async function askWithPagedFallback<T extends string>(
   entries: readonly QuestionEntry<T>[],
 ): Promise<T | undefined> {
   const customLabel = question.customInput
-    ? `${question.customInput.label}… — ${question.customInput.description}`
+    ? `${question.customInput.label}…${question.customInput.description ? ` — ${question.customInput.description}` : ""}`
     : undefined;
   let query = "";
   let page = 0;

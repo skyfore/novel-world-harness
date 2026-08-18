@@ -100,12 +100,38 @@ flowchart LR
 | 时间倒退/远期 root 抢跑 | Frontier 加 active/current-window 与 explicit-advance 模式；拒绝过去窗口，未来需显式推进，forward 按时间排序；无场景/条件/因果支持的 root canon 保持 latent | Branch history 是时间权威，future canon 仍在 possibility frontier |
 | Frontier 缓存落错目录/模式互相覆盖 | Engine 保存真实 workspace root；缓存按 workspace、commit、temporal mode 分开，兼容读取旧布局 | 缓存不成为 truth，也不跨 workspace 混淆 |
 | 候选事后不可见 | 每 turn 持久化 utterance、origin/intent、candidate、proposal、validation、issues、heads、background outcome 和 timing | 模型输出仍只是 proposal；audit 不修改 truth |
-| prepared revision 稀疏/落后静默 | 进入实例时告警 actor state 稀疏；branch pinned revision 与 active revision 不同时说明应新建实例而非改写旧分支 | 可重放性和 branch pinning 保持不变 |
+| prepared revision 稀疏/落后静默 | 稀疏 actor/location 状态保留为非玩家诊断并按 unknown 处理；只有 branch pinned revision 与 active revision 不同这种可操作条件才在 TUI 告警并说明应新建实例 | 可重放性和 branch pinning 保持不变 |
 | 中文“我”误命中 narrator 实体 | 第一/第二/第三人称代词不再作为显式实体名匹配 | 玩家第一人称不会意外扩大 reference scope |
+
+## 2026-08-18 玩家选项体验后续
+
+上表记录的是事故后的第一阶段止血方案。它解决了“推荐项不可执行”，
+但把宿主的通用 affordance 文案直接当成玩家选项，又把用于解释校验语义的
+`description` 显示成灰字，产生了“确定关系方向”“寻找新接触点”一类空洞的
+系统语言。
+
+当前方案进一步分离“建议”和“能力”：
+
+- 场景 LLM 根据 committed actor frame、已经历事件、当前有效性格/决策偏好和
+  active motivation，生成 2-4 条角色此刻能直接做出的具体行为或说出的原话；
+- choice schema 只接受 `action`，拒绝系统/meta 语言、已知抽象模板和重复项；
+  不再允许模型提供 label、description、intent、recommendation 或 outcome；
+- TUI 只显示动作/台词正文和自由输入入口，不再显示灰色宿主说明，也不对尚未
+  验证的 LLM 建议标 recommended；
+- 选中建议后才进入普通 player-action 翻译与 deterministic gates。建议本身不
+  是 proposal、capability 或 committed truth，choice 模型也不能借 intent 绕过
+  翻译；
+- narrator/choice 失败时只保留自由输入，不再用空洞宿主模板伪装成角色选项。
+- narrator 正文与 choice 工具严格分栏：正文只呈现当前事实、感受和现场信号，
+  不再用“是……还是……”“下一步由你决定”等话术重复口述选择；命中该类
+  handoff 的首稿会被宿主丢弃并独立重写；
+- actor/location 缺失属于兼容性诊断，不再以黄色 warning 打断沉浸；只有能
+  指向明确用户动作的实例版本差异继续进入 warning surface。
 
 ## 兼容与恢复
 
-- 旧 choices 没有 `intent` 时默认按 `act` 处理；仅对明确以“观察/查看/倾听”“整理/回想/思考”“等待/静候”开头的旧标签升级到窄宿主 intent。
+- 旧 choices 恢复时只迁移其 `action`；历史 `label`、`description`、
+  `intent`、affordance ID 和 recommended 标记都不会重新进入玩家 UI 或取得执行权限。
 - 旧会话若最后一条玩家 transcript 是原始 `Action rejected at ...`，启动时自动从保存的同一 branch head 进入 recovery scene。
 - 旧 frontier cache 仍可按 current-window 只读加载；新缓存文件带 temporal mode，不会互相覆盖。
 - 已有 branch 绝不被换绑到新 prepared revision；告警只建议创建新实例。
@@ -115,4 +141,3 @@ flowchart LR
 - 原事故 head 上的只读验证结果：宿主 observe 候选 participants 为 `jiazhen`，preconditions 和 operations 均为空；scope、grounding、spatial issues 均为空；engine validation accepted。
 - 回归覆盖：嵌套玩家 loading 动画、推荐 observation 不调用模型、rejection scene 恢复、旧 raw-rejection transcript 恢复、稀疏前置条件、scene presence/unknown/remote、代词实体、turn audit、prepared revision 告警、默认零 background、时间窗/场景 root gating、frontier cache root/mode。
 - 最终验证命令：`pnpm run check`、`pnpm test`、`pnpm run build`。
-

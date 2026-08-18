@@ -54,7 +54,10 @@ export type SelectedPlayExperience = {
   source?: SourceDocument;
   actor: PlayableCharacter;
   logicalStep: number;
+  /** Player-facing warnings must describe a condition the player can act on. */
   readinessWarnings: string[];
+  /** Engine/readiness details retained for inspection, never shown in the story UI. */
+  readinessDiagnostics: string[];
 };
 
 export type PlayTurnOutcome = {
@@ -192,14 +195,15 @@ export async function selectPlayExperience(
     actorId: actor.id,
     lastCommitId: branch.headCommitId,
   });
-  const actorState = state.values[actor.id] ?? {};
   const readinessWarnings: string[] = [];
+  const readinessDiagnostics: string[] = [];
+  const actorState = state.values[actor.id] ?? {};
   if (!Object.keys(actorState).length) {
-    readinessWarnings.push(
-      `${branch.preparedRevisionHash ? "当前实例固定的 prepared revision" : "当前实例的 genesis"}没有为 ${actor.canonicalName} 提供完整动态字段；场景导演只会展示经过预检、且能推进场景、关系、计划或任务线程的行动。`,
+    readinessDiagnostics.push(
+      `${branch.preparedRevisionHash ? "当前实例固定的 prepared revision" : "当前实例的 genesis"}没有为 ${actor.canonicalName} 提供动态状态；场景会按 unknown 处理缺失字段。`,
     );
   } else if (typeof actorState["character.location"] !== "string") {
-    readinessWarnings.push(
+    readinessDiagnostics.push(
       `${actor.canonicalName} 的当前位置尚未写入该实例的 committed state；当前事件可以证明同场人物，但跨场景移动会要求更明确的落点。`,
     );
   }
@@ -210,6 +214,7 @@ export async function selectPlayExperience(
     actor,
     logicalStep: state.logicalTime.step,
     readinessWarnings,
+    readinessDiagnostics,
   };
 }
 

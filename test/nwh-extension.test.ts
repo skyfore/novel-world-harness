@@ -171,10 +171,10 @@ async function fixture(
     onSessionShutdown,
     playerTranslator,
     playerOpeningNarrator: playerOpeningNarrator ?? (async (frame, purpose) => purpose === "opening"
-      ? `门外的风声忽远忽近，你的意识落回此刻。${frame.actor.name}所能确认的一切都在眼前，而尚未发生的命运仍旧沉默。周围没有谁替你作出决定，只有这个等待被打破的瞬间。你可以先观察近处，梳理自己的念头，或者立刻尝试心中浮现的行动——故事会从你的选择继续。`
+      ? `门外的风声忽远忽近，你的意识落回此刻。${frame.actor.name}所能确认的一切都在眼前，尚未发生的事仍旧沉默。门缝下的光被什么遮住了一瞬，檐下铜铃却没有响；片刻之后，木板深处又传来一声很轻的摩擦。`
       : purpose === "turn"
-        ? `脚下的路已经把你带离原处，新的位置与刚才的决定一起成为无法抹去的事实。${frame.actor.name}能感到行动留下的余波，却没有谁替你安排下一步。眼前的世界正从这个结果继续展开，你可以观察抵达之处，也可以立即应对最迫近的变化。`
-        : `方才的余波还停在感官里，你重新看清自己所处的这一刻。${frame.actor.name}所知道的事情没有凭空增减，世界也没有趁你离开时替你作出选择。你可以先确认周围的变化，回想刚刚发生的事，或者直接采取此刻最重要的行动——接下来由你决定。`),
+        ? `脚下的路已经把你带离原处，新的位置与刚才的行动一起成为无法抹去的事实。${frame.actor.name}能感到行动留下的余波，鞋底还沾着一路带来的细尘。近处的风向已经变了，陌生墙面把远处的声响折回来，身后的来路渐渐沉入昏暗。`
+        : `方才的余波还停在感官里，你重新看清自己所处的这一刻。${frame.actor.name}所知道的事情没有凭空增减，周围也没有多出未经证实的答案。近处的光线缓慢移动，刚才那阵响动在墙后停住，空气里只留下潮湿木料的气味。`),
     ...(activeWorldScene !== undefined ? { activeWorldScene } : {}),
     ...(restoreSavedWorldOnStartup !== undefined ? { restoreSavedWorldOnStartup } : {}),
     ...(runReparse ? { runReparse } : {}),
@@ -1050,24 +1050,46 @@ describe("NWH TUI extension", () => {
     expect(notifications).toContainEqual(expect.stringContaining("scope/PLAYER_PRECONDITION_UNSATISFIED"));
   });
 
-  it("executes the recommended preflighted affordance without invoking the model translator", async () => {
+  it("routes an LLM-suggested concrete action through translation and deterministic validation", async () => {
     const turnNarrated = deferred();
-    let translatorCalls = 0;
-    const opening = "冷风从门缝里钻进来，你听见近处细碎的响动，眼前的一切仍停在决定之前。光影落在脚边，已经知道的事没有凭空改变，也没有任何命运替你选择。你可以先观察这个片刻，再决定是否采取更具体的行动。";
-    const afterObserve = "你把注意力收回眼前，细小的风声、光影和近处动静重新有了层次。没有新的世界事实被凭空补上，但这一刻已经因你的主动观察而继续。仍有足够的余地让你追问、等待，或采取更明确的下一步。";
+    const translatedUtterances: string[] = [];
+    const opening = "冷风从门缝里钻进来，你听见近处细碎的响动。光影落在脚边，已经知道的事没有凭空改变；门板深处的摩擦声停了片刻，又比先前更近地响了一次。墙角薄灰被风卷出一道弯曲的痕迹。";
+    const afterObserve = "你把注意力收回眼前，细小的风声、光影和近处动静重新有了层次。门缝右侧留着一道新鲜划痕，细灰在边缘堆成浅线；木板另一侧的呼吸声忽然停住，走廊也随之安静下来。";
     const { commands, root } = await fixture(
       undefined,
-      () => {
-        translatorCalls += 1;
-        throw new Error("safe choice must not invoke the model translator");
+      (input) => {
+        translatedUtterances.push(input.utterance);
+        return {
+          title: "福贵贴近门边倾听",
+          participants: [],
+          preconditions: [],
+          proposedDelta: {
+            version: 1,
+            operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "听清门外是谁" }],
+          },
+          requiresKnowledge: [],
+          forbidsKnowledge: [],
+        };
       },
       undefined,
       async (_frame, purpose) => {
         if (purpose === "opening") {
-          return opening;
+          return {
+            narration: opening,
+            choices: [
+              { action: "贴近门缝，听清外面那阵细碎的响动。" },
+              { action: "朝门外喊一句：“谁在那里？”" },
+            ],
+          };
         }
         turnNarrated.resolve();
-        return afterObserve;
+        return {
+          narration: afterObserve,
+          choices: [
+            { action: "退开半步，看看门槛上有没有新留下的痕迹。" },
+            { action: "伸手敲两下门板。" },
+          ],
+        };
       },
     );
     await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
@@ -1084,7 +1106,7 @@ describe("NWH TUI extension", () => {
         notify: () => undefined,
         async select(_title: string, choices: string[]) {
           offered.push(...choices);
-          return choices.find((choice) => choice.includes("(recommended)"));
+          return choices.find((choice) => choice.includes("贴近门缝"));
         },
         setStatus: () => undefined,
         setWidget: (key: string, content: string[] | undefined) => widgets.push({ key, content }),
@@ -1095,8 +1117,10 @@ describe("NWH TUI extension", () => {
 
     await commands.get("play")!.handler("hero main", ctx);
     await turnNarrated.promise;
-    expect(translatorCalls).toBe(0);
-    expect(offered.some((choice) => choice.includes("(recommended)"))).toBe(true);
+    expect(translatedUtterances).toEqual(["贴近门缝，听清外面那阵细碎的响动。"]);
+    expect(offered).toContain("1. 贴近门缝，听清外面那阵细碎的响动。");
+    expect(offered.some((choice) => choice.includes(" — "))).toBe(false);
+    expect(offered.some((choice) => choice.includes("(recommended)"))).toBe(false);
     expect(widgets.some((widget) => widget.key === "nwh-model-loading" && widget.content?.join("\n").includes("正在理解你的行动"))).toBe(true);
     await expect.poll(() => widgets.at(-1), { timeout: 1_000 }).toMatchObject({ key: "nwh-model-loading", content: undefined });
     expect((await engine.projector.project(await engine.branches.readHead("main"))).logicalTime.step).toBe(1);
@@ -1233,6 +1257,7 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages[0]).toContain("/scene");
     expect(sentVisibleMessages[0]).not.toContain("故事正从已提交的起点开始");
     expect(notifications).toContainEqual(expect.stringContaining("Scene narration failed: provider unavailable"));
+    expect(notifications.join("\n")).not.toContain("当前位置尚未写入");
     expect(narratorFrame).not.toHaveProperty("branchId");
     expect(narratorFrame).not.toHaveProperty("commitId");
     expect(narratorFrame).not.toHaveProperty("logicalStep");
@@ -1244,7 +1269,7 @@ describe("NWH TUI extension", () => {
   it("bridges isolated narrator deltas into the active TUI before persisting the final scene", async () => {
     const started = deferred();
     const release = deferred();
-    const finalNarration = "黄昏的微光沿着门边慢慢退去，你听见近处的风声在停顿之间改变方向。眼前这一刻还没有被任何行动推动，熟悉与陌生的感觉却同时压在心口。你可以先观察周围留下的痕迹，也可以整理脑中最迫切的念头，或者立即尝试自己的选择——下一步正等待你亲手落下。";
+    const finalNarration = "黄昏的微光沿着门边慢慢退去，你听见近处的风声在停顿之间改变方向。熟悉与陌生的感觉同时压在心口，门框投下的影子越拉越长。檐角忽然落下一滴水，正砸在脚边那枚尚未干透的泥印中央。";
     const { commands, root, sentMessages } = await fixture(
       undefined,
       undefined,
@@ -1317,7 +1342,7 @@ describe("NWH TUI extension", () => {
     const started = deferred();
     const release = deferred();
     const completed = deferred();
-    const finalNarration = "风声从看不见的地方穿过来，你重新意识到脚下的世界仍停在原处。没有事件替你越过这一刻，也没有旁人为你决定方向。你可以先确认眼前能够感知的细节，回想自己已经知道的事情，或者直接尝试最迫切的行动——这个世界会等你的选择真正发生后才继续。";
+    const finalNarration = "风声从看不见的地方穿过来，你重新意识到脚下的世界仍停在原处。眼前能够确认的细节没有变化，记忆里已经知道的事情也没有多出答案。墙后传来一声压低的咳嗽，随即被木门合页细长的轻响盖住。";
     const { events, root, sentMessages } = await fixture(
       undefined,
       undefined,
@@ -1569,7 +1594,7 @@ describe("NWH TUI extension", () => {
       undefined,
       async () => {
         narratorCalls += 1;
-        return "风从院墙上缓慢压下来，你站在尚未发生下一步的时刻里。眼前的门窗、脚下的尘土和远处模糊的响动都没有替你作出决定。你可以观察周围，整理已经知道的事，或者立即尝试自己的行动，让世界从真正的选择之后继续。";
+        return "风从院墙上缓慢压下来，你站在门窗投下的阴影里。脚下的尘土被吹开一小片，远处模糊的响动隔着墙时断时续。窗纸忽然向内凹了一下，又慢慢恢复原状，院角那串铜片始终没有发出声音。";
       },
     );
     const canon = new CanonicalModelStore(root);
@@ -1659,11 +1684,14 @@ describe("NWH TUI extension", () => {
     } as unknown as ExtensionContext;
 
     await events.get("session_start")?.({ type: "session_start" }, ctx);
-    await expect.poll(() => questions, { timeout: 1_000 }).toContain("福贵，你接下来准备怎么做？");
+    await expect.poll(() => questions, { timeout: 1_000 }).toContain("福贵，你接下来准备怎么做或怎么说？");
 
     expect(narratorCalls).toBe(0);
-    expect(offered.some((choice) => choice.includes("(recommended)"))).toBe(true);
-    expect(offered.some((choice) => choice.includes("观察 (recommended)"))).toBe(false);
+    expect(offered).toContain("1. 我先观察周围。");
+    expect(offered).toContain("2. 我先等待片刻。");
+    expect(offered.some((choice) => choice.includes("看看周围"))).toBe(false);
+    expect(offered.some((choice) => choice.includes(" — "))).toBe(false);
+    expect(offered.some((choice) => choice.includes("(recommended)"))).toBe(false);
   });
 
   it("automatically recovers a legacy transcript that ended on a raw engine rejection", async () => {
@@ -1714,7 +1742,7 @@ describe("NWH TUI extension", () => {
   });
 
   it("renders native narrator text and thinking deltas and persists exactly the streamed final text", async () => {
-    const narration = "雨声沿着屋檐一寸寸落下，你站在尚未被下一步行动改变的门槛前。眼前能确认的痕迹都留在昏暗光线里，远处的动静却还没有给出答案。你可以先观察近处，也可以整理心里的疑问，或者立刻采取此刻最重要的行动。";
+    const narration = "雨声沿着屋檐一寸寸落下，你站在昏暗的门槛前。眼前能确认的痕迹都留在湿润光线里，远处的动静却还没有给出答案。檐角最后一滴水砸进石缝，门内随即传来衣料擦过木板的窸窣声。";
     const { commands, root, sentMessages } = await fixture(
       undefined,
       undefined,
@@ -1814,7 +1842,7 @@ describe("NWH TUI extension", () => {
 
   it("disposes a rejected scene stream before mounting the replacement attempt", async () => {
     const rejected = "首稿只是一段不足以成立的场景。";
-    const accepted = "夜色压低了远处的轮廓，你仍站在尚未被下一次行动改变的位置。近处能够确认的声音和光线都属于此刻，没有隐藏的命运替你越过选择。你可以先观察眼前，也可以整理已知线索，或者立即采取最迫切的行动。";
+    const accepted = "夜色压低了远处的轮廓，你仍站在原来的位置。近处能够确认的声音和光线都属于此刻，墙上的影子随着灯芯轻轻摇晃。门外传来一声鞋底碾过碎石的脆响，随后停在离门槛很近的地方。";
     const { commands, root, sentMessages } = await fixture(
       undefined,
       undefined,
@@ -1873,7 +1901,7 @@ describe("NWH TUI extension", () => {
   });
 
   it("rejects a settled narrator result that differs from the native text stream", async () => {
-    const streamed = "雨停在门槛之外，你能听见檐角最后几滴水落下。屋里没有新的事实凭空出现，眼前仍只有已经看见的门、微暗的光和等待决定的片刻。你可以先观察，也可以依照自己的判断采取行动。";
+    const streamed = "雨停在门槛之外，你能听见檐角最后几滴水落下。屋里没有新的事实凭空出现，眼前仍只有已经看见的门和微暗的光。靠近门轴的位置泛着一线湿亮，木板另一侧忽然传来短促的呼吸声。";
     const settled = "这是一段与用户实际看到的流不相同、因此绝不能写入会话的替代文本。它即使看起来完整，也不能越过真实流与最终消息必须一致的校验边界。用户应当得到明确失败，而不是被悄悄替换输出。";
     const { commands, root, sentMessages } = await fixture(
       undefined,
@@ -1920,7 +1948,7 @@ describe("NWH TUI extension", () => {
   it("keeps free-form input available beside grounded host choices and routes it through the normal player gate", async () => {
     const translated = deferred();
     const utterances: string[] = [];
-    const narratorText = "冷风卷过空地，你听见脚边细碎的沙石声，眼前这一刻仍停在你的决定之前。近处的光影和记忆里已经知道的事情彼此交错，却没有替你指出唯一道路。你可以先靠近门边观察，也可以停下来梳理线索，或者选择完全不同的行动。";
+    const narratorText = "冷风卷过空地，你听见脚边细碎的沙石声。近处的光影和记忆里已经知道的事情彼此交错，却没有带来新的答案。门边压着半片被雨浸透的叶子，叶脉上的水珠正沿着石阶一格一格滚落。";
     const { commands, root } = await fixture(
       undefined,
       async (input) => {
@@ -1945,7 +1973,7 @@ describe("NWH TUI extension", () => {
         notify: () => undefined,
         async select(title: string, choices: string[]) {
           questions.push(title);
-          return choices.find((choice) => choice.includes("自由输入行动"));
+          return choices.find((choice) => choice.includes("自由输入行动或台词"));
         },
         async input() {
           return "我靠近门边，仔细听外面的声音。";
@@ -1960,7 +1988,7 @@ describe("NWH TUI extension", () => {
     await commands.get("play")!.handler("hero main", ctx);
     await translated.promise;
 
-    expect(questions).toContain("福贵，你接下来准备怎么做？");
+    expect(questions).toContain("福贵，你接下来准备怎么做或怎么说？");
     expect(utterances).toEqual(["我靠近门边，仔细听外面的声音。"]);
   });
 
@@ -2000,7 +2028,7 @@ describe("NWH TUI extension", () => {
     await commands.get("play")?.handler("", ctx);
 
     expect(questions[0]).toBe("Who do you want to play on 'main'?");
-    expect(questions).toContain("宿敌，你接下来准备怎么做？");
+    expect(questions).toContain("宿敌，你接下来准备怎么做或怎么说？");
     expect(inputs).toEqual(["Character id, name, or alias"]);
     await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ branchId: "main", actorId: "rival" });
     expect(getSessionName()).toBe("Novel world · 宿敌 · main");

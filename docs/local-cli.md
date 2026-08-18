@@ -158,10 +158,22 @@ file tools, project instructions, compiler extension, source text, future canon,
 or mutation tool. A single capture-only candidate is passed to deterministic
 scope, knowledge, world-rule, invariant, and optimistic-head validation before the
 host may commit it. Missing sparse-state fields are treated as unknown and cannot
-be fabricated into positive preconditions. Observation, reflection, and short-wait
-choices are narrow host-owned intents with empty deltas and no invented
-preconditions; only a host-safe observation is marked recommended. The same
-animated working indicator is used while translating, validating, and rendering.
+be fabricated into positive preconditions. The scene model proposes 2-4 concrete
+actor actions or exact spoken lines from the committed scene, lived development,
+and effective disposition. The selector displays only those action/line texts,
+without host rationale or a recommendation badge. They remain unvalidated
+suggestions until selected; selection then enters the ordinary translation and
+deterministic gates. The choice model supplies action text only and cannot choose
+a privileged host intent or bypass translation. The same animated working
+indicator is used while translating, validating, and rendering.
+Narration and choices are separate channels: the prose contains only the current
+actor-visible scene and ends on a concrete fact or in-world signal. Embedded
+action suggestions, “what next” questions, and decision handoffs fail validation
+and trigger the same fresh one-shot rewrite; possible actions appear only in the
+choice selector. Missing actor/location fields remain available as readiness
+diagnostics but do not produce a yellow player-facing warning. Only actionable
+instance conditions, such as a pinned revision differing from the active prepared
+revision, enter that warning surface.
 After an accepted commit, a separate isolated narrator streams the actor-visible
 consequence from the new committed head; deterministic commit metadata and
 invisible background events are not presented as story prose. Ordinary player

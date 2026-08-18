@@ -119,11 +119,22 @@ actions through the existing AskUserQuestion interaction.
 
 **Repair.** The isolated narrator has two exact read-only tools over its bounded
 actor-safe corpus and one mutation-free capture tool,
-`propose_player_choices`. It returns 2-4 immediate actor-visible
-utterances, or conservative host defaults if the provider omits the tool. The
-TUI presents those choices plus free-form input. Choosing an option schedules
-its utterance through the same restricted translator, scope/knowledge checks,
-engine validation, and commit path as typed player input.
+`propose_player_choices`. It returns 2-4 immediate actor-visible actions or
+exact spoken lines shaped by the actor's current effective disposition and
+committed development. The strict choice contract rejects system/meta language,
+abstract relationship/branch directions, and duplicate choices. The TUI presents
+only the action/line itself (no internal rationale or unvalidated recommendation)
+plus free-form input. If narration or choice capture fails, the TUI keeps the
+free-form path instead of substituting hollow host templates. Choosing an option
+schedules its utterance through the same restricted translator, scope/knowledge
+checks, engine validation, and commit path as typed player input.
+
+The prose and choice channels are also separate. The narrator may end on a
+concrete current fact, sensation, motion, spoken cue, or unresolved signal, but
+may not append “你可以……”, “是……还是……”, “下一步由你决定”, or equivalent
+player-facing action scaffolding. The host rejects such a settled draft and the
+existing fresh-session retry disposes its transient stream before replacement;
+only `propose_player_choices` may carry possible actions.
 
 ### 4. Player action translation looked hung and could run forever
 

@@ -46,14 +46,18 @@ prints a result.
   stream before that same native component is committed as a durable,
   model-context-excluded scene. Thinking and player choices persist with it; no
   duplicate narrator copy is mounted. A rejected attempt is removed before its
-  one automatic retry streams.
+  one automatic retry streams. Scene prose contains only the current in-world
+  moment and ends on a concrete fact/signal; embedded action lists, “what next”
+  questions, and decision-handoff rhetoric fail validation.
 - Thinking defaults to `auto`: an active block is visible, `thinking_end`
   collapses it, text-start and message-end are fallbacks, and Pi's existing
   Ctrl+T binding expands completed blocks without an NWH key interceptor.
 - Every accepted scene opens an AskUserQuestion-style next-move dialog with
-  2-4 actor-scoped suggestions and a free-form action path. Suggestions are
-  capture-only proposals; selection still enters the normal deterministic
-  player-action validation and commit boundary.
+  2-4 actor-scoped concrete actions or exact spoken lines and a free-form action
+  path. The dialog shows no system rationale or recommendation for these
+  unvalidated suggestions. Choice capture is mutation-free; selection still
+  enters the normal translation, deterministic player-action validation, and
+  commit boundary.
 - Managed long-running operations use the NWH task overlay for host progress,
   assistant messages, thinking, and tool calls. A compact dock remains while a
   task is in the background.

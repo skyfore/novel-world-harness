@@ -37,11 +37,11 @@ export const askUserQuestion: AskUserQuestion = async <T extends string>(questio
     stdout.write(`\n${question.header}\n${question.question}\n`);
     question.options.forEach((option, index) => {
       stdout.write(`  ${index + 1}. ${option.label}${option.recommended ? " (recommended)" : ""}\n`);
-      stdout.write(`     ${option.description}\n`);
+      if (option.description) stdout.write(`     ${option.description}\n`);
     });
     if (question.customInput) {
       stdout.write(`  ${question.options.length + 1}. ${question.customInput.label}\n`);
-      stdout.write(`     ${question.customInput.description}\n`);
+      if (question.customInput.description) stdout.write(`     ${question.customInput.description}\n`);
     }
     while (true) {
       const answer = (await terminal.question("Choose an option: ")).trim();

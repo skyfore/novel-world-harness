@@ -28,7 +28,7 @@ There are four application inference roles:
 | Ordinary TUI/print assistant | `playCommand` | Harness prompt/contract, allowlisted project instructions, projected ordinary transcript, current user input and explicit safe attachments | bounded `list_files`, `search_files`, `read_file`; extension-owned session rename metadata | no file/world write; session title only |
 | Compiler | `createPiCompilerSession`, or an explicit compiler turn in the TUI | isolated compiler instructions plus a host-selected source/opening/reconciliation payload and source-owned prior-artifact indexes; a one-segment pass may request one non-citable edge preview, while a separately scheduled pair pass receives both full adjacent segments | scope-specific exact retrieval, boundary-deferral, and typed pending-proposal tools | pending/rejected proposal envelopes, non-canonical calibration requests, and a finish handshake; no canonical or branch commit |
 | Player-action translator | `createPiPlayerActionTranslator` | one actor-safe projection with opaque turn handles, one untrusted utterance, and bounded coverage metadata | exact retrieval over the already-safe projection and one in-memory capture tool | none; the host decodes, validates, and constructs the event proposal |
-| Scene narrator | `createPiPlayerOpeningNarrator` | one actor-safe, name-based scene frame and bounded coverage metadata | exact retrieval over that same frame and one in-memory choice-capture tool | none; prose and selected public affordances cannot mutate branch truth |
+| Scene narrator | `createPiPlayerOpeningNarrator` | one actor-safe, name-based scene frame, current effective actor disposition/motivation, and bounded coverage metadata | exact retrieval over that same frame and one in-memory choice-capture tool | none; prose and suggested choices cannot mutate branch truth; a selected suggestion enters the separate player-action boundary |
 
 Evidence: [play.ts](../src/commands/play.ts),
 [pi-compiler.ts](../src/compiler/pi-compiler.ts),
@@ -45,7 +45,7 @@ These API seams must not be confused with the four built-in Pi roles:
 | Callback | Data supplied by the harness | Boundary status and returned-value gate |
 | --- | --- | --- |
 | `PlayerActionTranslator` | actor-scoped stable IDs, visible state/knowledge/events, and writable capabilities; no commit chronology | safe for a model adapter after that adapter applies its own transport policy. Input is a frozen clone and output must pass `playerActionCandidateSchema` plus scope, grounding, spatial, knowledge, progress, and engine validation. The built-in Pi adapter additionally replaces stable IDs with opaque handles. |
-| `PlayerOpeningNarrator` | `PlayerSceneNarratorFrame`: names and actor-visible semantics, with branch/commit/time/stable IDs removed | model-safe frame. The TUI validates narration and choices, then binds choices back to host-owned affordances. |
+| `PlayerOpeningNarrator` | `PlayerSceneNarratorFrame`: names and actor-visible semantics plus current effective disposition/active motivation, with branch/commit/time/stable IDs removed | model-safe frame. The TUI validates narration and concrete choice text; a selected suggestion is translated and deterministically validated like free-form input. |
 | `ActorReasoner` | opaque actor view, one currently active goal description/priority/visible targets, active disposition, and committed development | model-safe input snapshot. Output is strict-schema parsed, handle-decoded, and sent through the player capability gates before it can become an actor proposal. |
 | `NarrativeAdapter` in actor POV | actor name, visible self state and acquired claims, and participant-visible event summaries | actor-safe and frozen. Adapter output must be a string; rendering is non-authoritative and branch-head immutability is checked. |
 | `NarrativeAdapter` in explicit omniscient POV | full projected `WorldState`, commit/branch IDs, and committed history | intentionally **not** model-safe for an untrusted/actor model. This is a diagnostic/host-authority API, selected explicitly by the caller. |
@@ -476,9 +476,10 @@ Evidence: `PlayerTurnService` and validation functions in
 `buildPlayOpeningFrame` constructs a rich host frame containing branch/commit
 identity, logical/story time, elapsed days, stable actor/entity/claim IDs,
 actor-visible state and knowledge, committed visible events, scene key/beat/
-signature, derived development, host-internal threads and preflighted
-affordances. That host frame is retained for choice binding and transcript
-metadata.
+signature, derived development, current effective character policy,
+host-internal threads and preflighted affordances. The host frame retains those
+affordances for internal direction and low-level callers; they are not copied
+into the scene model's choice output.
 
 `playerSceneModelFrame` is the only narrator callback/model projection. It
 contains exactly:
@@ -491,13 +492,17 @@ contains exactly:
 - acquired claim semantics expressed through names, without claim IDs;
 - named present and referenceable identities;
 - actor-visible event titles without steps/dates;
-- scene label/public location state, actor-visible public threads, public
-  affordances, and an optional actor-visible blocked/recovery summary.
+- scene label/public location state and actor-visible public threads;
+- effective current-head traits, decision biases, and active goal descriptions
+  as non-factual behavioral guidance used only to shape plausible alternatives;
+- an optional actor-visible blocked/recovery summary.
 
 It omits branch/commit/event hashes, logical steps, host story time and elapsed
 duration, stable entity/claim IDs, scene key/beat/signature, evidence refs,
 candidate deltas, knowledge authorization, scores, internal thread/progress
-IDs, compiler goals/models and future canon effects.
+IDs, all public/internal affordance copy, inactive goals/model phases, and future
+canon effects. Prompts forbid exposing the behavioral-guidance metadata or using
+it as evidence for narration.
 
 Evidence: the two frame types and `playerSceneModelFrame` in
 [play-opening.ts](../src/world/play-opening.ts), public projection helpers in
@@ -506,7 +511,7 @@ Evidence: the two frame types and `playerSceneModelFrame` in
 [play-opening.test.ts](../test/play-opening.test.ts) and
 [pi-player-opening.test.ts](../test/pi-player-opening.test.ts).
 
-### Future canon and affordance handling
+### Future canon, actor policy, and affordance handling
 
 The deterministic scene director may use an eligible canon analogue or an
 active compiler-authored goal as host-only ranking pressure. `publicNarrativeThread`
@@ -515,6 +520,22 @@ materialized as a player-facing action. Every public affordance removes its
 candidate delta, authorized claims, progress object, score and internal IDs;
 the executable candidate stays on the host and is preflighted through the same
 scope/knowledge/engine gates as free-form input.
+
+The scene narrator no longer receives or copies those generic affordances into
+the player UI. Instead it receives only the actor's effective current-head
+disposition and active motivations alongside actor-visible scene data, then
+suggests concrete acts or exact spoken lines. This does not turn policy into
+world truth: inactive/future phases stay excluded, the guidance may not be
+stated in prose, and a suggestion has no capability status until the player
+selects it and the ordinary translator and deterministic gates accept it.
+
+Narration and suggestions are separate output channels. Prose may render only
+the current actor-visible facts, perceptions, pressure, and unresolved in-world
+signals; it may not enumerate or hint at next actions, ask what the player will
+do, or close with choice/decision rhetoric. A deterministic narration check
+rejects common Chinese and English agency handoffs while leaving quoted in-world
+dialogue intact, causing the first streamed draft to be discarded before one
+fresh retry. `propose_player_choices` is the sole channel for possible actions.
 
 Evidence: `buildNarrativeDirection`, `addCanonicalAffordances`,
 `publicNarrativeThread`, and `publicPlayerAffordance` in
@@ -532,11 +553,13 @@ arbitrary third-record override; it serializes only its typed frame.
 
 A completed but invalid draft gets one retry in a brand-new session, so rejected
 prose/tool history cannot enter attempt two. Accepted prose is checked for
-non-empty/length/repeated-paragraph failures; choices are strict-schema parsed
-and may select only supplied affordance IDs. Labels, descriptions and actions
-are rebound from the host's authoritative affordances. A custom narrator
-injected into the TUI passes the same narration/choice validation. Rendering
-failure never advances the branch.
+non-empty/length/repeated-paragraph failures. The strict choice schema accepts
+only 2-4 distinct action-only objects and rejects system/meta terms, duplicate
+wording, and known abstract host-template language. There is no model-authored
+label, description, intent, recommendation, candidate, or outcome field. A custom
+narrator injected into the TUI passes the same narration/choice validation.
+Rendering and choice capture never advance the branch; selecting a suggestion
+starts the separate player-action translation/validation path.
 
 Evidence: [pi-player-opening.ts](../src/agent/pi-player-opening.ts),
 `playScenePrompt`/`assertPlaySceneNarration` in
@@ -624,7 +647,7 @@ coverage in [context-policy.test.ts](../test/context-policy.test.ts),
 | Scoped compiler jobs could inherit or persist a differently scoped transcript | source/batch/slice jobs forced fresh and ephemeral | [pi-compiler.ts](../src/compiler/pi-compiler.ts) | [pi-compiler.test.ts](../test/pi-compiler.test.ts) |
 | Runtime branch could silently mix parsed novels | source-owned snapshots/branches, commit evidence checks, fail-closed legacy inference | [context.ts](../src/world/context.ts), [source-scope.ts](../src/world/source-scope.ts), [engine.ts](../src/world/engine.ts) | [player-source-isolation.test.ts](../test/player-source-isolation.test.ts), [initial-world.test.ts](../test/initial-world.test.ts) |
 | Player model could receive hidden state, future canon, stable IDs or engine chronology | state/knowledge/source projection, anonymous identities, opaque handles, chronology stripping and bounded safe retrieval | [actor-visible.ts](../src/world/actor-visible.ts), [player-action.ts](../src/world/player-action.ts), [actor-context-retrieval.ts](../src/agent/actor-context-retrieval.ts) | [actor-visible.test.ts](../test/actor-visible.test.ts), [player-action.test.ts](../test/player-action.test.ts), [actor-context-retrieval.test.ts](../test/actor-context-retrieval.test.ts) |
-| Narrator could receive host frame IDs/time/policy or an arbitrary replacement record | typed name-based narrator frame; internal thread/affordance projection; no third prompt override | [play-opening.ts](../src/world/play-opening.ts), [narrative-director.ts](../src/world/narrative-director.ts) | [play-opening.test.ts](../test/play-opening.test.ts), [pi-player-opening.test.ts](../test/pi-player-opening.test.ts) |
+| Narrator could receive host frame IDs/time, inactive/future policy, affordance copy, or an arbitrary replacement record | typed name-based narrator frame; only current effective disposition/active motivation is admitted as non-factual choice guidance; no affordances or third prompt override | [play-opening.ts](../src/world/play-opening.ts), [narrative-director.ts](../src/world/narrative-director.ts) | [play-opening.test.ts](../test/play-opening.test.ts), [pi-player-opening.test.ts](../test/pi-player-opening.test.ts) |
 | Rejected narrator attempt could contaminate retry | independent in-memory session per attempt | [pi-player-opening.ts](../src/agent/pi-player-opening.ts) | [pi-player-opening.test.ts](../test/pi-player-opening.test.ts), [nwh-extension.test.ts](../test/nwh-extension.test.ts) |
 | Model actor could see inactive future goals/model phases or submit stable IDs | host phase activation, minimal active policy view, opaque handles and player capability gates | [model-actor-policy.ts](../src/world/model-actor-policy.ts) | [model-actor-policy.test.ts](../test/model-actor-policy.test.ts) |
 | Public callbacks could mutate retained host objects or return unvalidated candidates | immutable snapshots and strict output schemas at candidate/resolver boundaries | [immutable.ts](../src/util/immutable.ts), [runtime.ts](../src/world/runtime.ts), [player-action.ts](../src/world/player-action.ts) | [world-runtime.test.ts](../test/world-runtime.test.ts), [player-action.test.ts](../test/player-action.test.ts) |

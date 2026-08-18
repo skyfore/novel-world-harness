@@ -203,7 +203,7 @@ export async function choosePlayExperience(
         );
       }
     } catch (error) {
-      selection.readinessWarnings.push(
+      selection.readinessDiagnostics.push(
         `无法核对当前实例与 active prepared revision：${error instanceof Error ? error.message : String(error)}`,
       );
     }

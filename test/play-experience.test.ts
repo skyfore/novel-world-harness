@@ -63,7 +63,8 @@ describe("play experience catalog", () => {
 
     const selection = await selectPlayExperience(root, { branchId: "main", source: first.source.id, character: "Hero" });
     expect(selection.session).toMatchObject({ branchId: "main", sourceId: first.source.id, actorId: "hero" });
-    expect(selection.readinessWarnings).toContainEqual(expect.stringContaining("当前位置尚未写入"));
+    expect(selection.readinessWarnings).toEqual([]);
+    expect(selection.readinessDiagnostics).toContainEqual(expect.stringContaining("当前位置尚未写入"));
     const outcome = await performPlayTurn({
       root,
       branchId: "main",

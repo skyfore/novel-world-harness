@@ -287,7 +287,69 @@ nwh world validate ./player-action.json --branch main
 nwh world move --branch main --player ./player-action.json
 ```
 
-The primary natural-language path is the full TUI entered by `nwh continue [novel]`, `nwh switch [novel]`, `nwh create [novel]`, `nwh resume`, `nwh play`, or the equivalent slash commands. `continue` selects that novel's most recently played/updated instance; `switch` asks when several source-owned instances exist; `create` starts a fresh instance from the novel's active prepared revision. If a selected prepared novel has no instance, NWH creates one automatically instead of falling back to an unrelated `main`. Branch ownership and prepared-revision identity are persisted, and each genesis snapshot contains only that novel's artifacts. Existing branches remain pinned to their original prepared revision; the TUI warns when that revision is stale or its actor state is sparse instead of silently rewriting history. Scene narration follows the command's intent: `play` makes the narrator speak first for the chosen character, `create` opens a new story, and an actual `switch` establishes the selected current moment. `continue`, `resume`, and ordinary process restart add no duplicate narration. A fresh transcript opened through an explicit player-entry command gets one orientation; an unbound `--new-session` or `/clear` remains at the Harness welcome, and `/scene` explicitly re-renders a selected current moment. The narrator runs in a fresh isolated session with a bounded committed actor frame, exact read-only retrieval over that same actor-safe corpus, and one capture-only next-choice tool; it streams its actual Pi events into the current TUI, automatically revises a short/generic first draft once, and reports final model failure with direct recovery commands instead of displaying a canned pseudo-opening. Its 2-4 suggested utterances and the free-form alternative enter the restricted player-action boundary. Observation, reflection, and short waiting are host-owned empty-delta intents, so a recommended observation remains valid even in a sparse world; only such a verified-safe observation receives the recommended badge. Rendering and choice capture never advance the branch or act for the player. Long TUI selectors use Pi's native height-aware scrolling window and remain filterable, with an additional free-form id/name/alias input instead of forwarding the decision to the model; RPC clients fall back to bounded pages. Every free-form player action uses a fresh Pi session with no novel-file tools, project instructions, compiler extension, future canon, or branch-write capability. Its actor-safe corpus is bounded with exact read-only retrieval, and stable entity/claim IDs become turn-local opaque handles. The model can only capture one candidate in memory; the host decodes those handles, supplies branch/head/source/actor identity, and commits only after deterministic validation. Missing state fields remain unknown and cannot be invented as positive preconditions. While translation, validation, and scene rendering run, the TUI uses the same animated working indicator. An accepted action is then rendered by the isolated narrator from the new committed actor frame; raw commit IDs and hidden background events are not shown as narrative. Ordinary turns do not automatically commit background canon; `--advance-background` explicitly opts into temporally ordered advancement. If rendering fails, the action remains committed and `/scene` safely retries only the prose. A rejected proposal leaves the branch head unchanged, persists its diagnostic audit, and automatically returns the player to a live narration/choice loop instead of ending on an engine notice. Novel and character selection is persisted per instance, with one active pointer that ordinary `nwh` startup resumes automatically. `play-world --action` remains the compact script/legacy readline path.
+The primary natural-language path is the full TUI entered by
+`nwh continue [novel]`, `nwh switch [novel]`, `nwh create [novel]`,
+`nwh resume`, `nwh play`, or the equivalent slash commands. `continue` selects that novel's most recently
+played/updated instance; `switch` asks when several source-owned instances exist;
+`create` starts a fresh instance from the novel's active prepared revision. If a
+selected prepared novel has no instance, NWH creates one automatically instead
+of falling back to an unrelated `main`. Branch ownership and prepared-revision
+identity are persisted, and each genesis snapshot contains only that novel's
+artifacts. Existing branches remain pinned to their original prepared revision.
+The TUI warns when a pinned revision differs from the active revision and tells
+the player to create a new instance. Sparse actor/location fields remain
+readiness diagnostics and are treated as unknown; they are not shown as
+unactionable story-entry warnings or used to rewrite history.
+
+Scene narration follows the command's intent: `play` makes the narrator speak
+first for the chosen character, `create` opens a new story, and an actual
+`switch` establishes the selected current moment. `continue`, `resume`, and
+ordinary process restart add no duplicate narration. A fresh transcript opened
+through an explicit player-entry command gets one orientation; an unbound
+`--new-session` or `/clear` remains at the Harness welcome, and `/scene`
+explicitly re-renders a selected current moment. The narrator runs in a fresh
+isolated session with a bounded committed actor frame, exact read-only retrieval
+over that same actor-safe corpus, effective current-head character disposition
+and motivation, and one capture-only next-choice tool. It streams its actual Pi
+events into the current TUI, automatically revises a short/generic first draft
+or prose containing player-action menus once, and reports final model failure
+with direct recovery commands instead of displaying canned pseudo-prose. Scene
+prose contains only the current actor-visible moment and ends on a concrete
+in-world fact or signal; possible actions appear only in the choice tool output.
+
+The choice tool generates 2-4 concrete things the inhabited actor could do or
+exact words they could say. The TUI shows only those action/line texts—no system
+rationale and no unvalidated recommendation badge—plus a free-form alternative.
+These suggestions do not claim capability or outcome: selecting one enters the
+same restricted player-action translation and deterministic validation boundary
+as free-form input. The choice model cannot select a privileged intent or bypass
+translation. Rendering and choice capture never advance the branch or act for
+the player.
+
+Long TUI selectors use Pi's native height-aware scrolling window and remain
+filterable, with an additional free-form id/name/alias input instead of forwarding
+the decision to the model; RPC clients fall back to bounded pages. Every
+free-form player action uses a fresh Pi session with no novel-file tools, project
+instructions, compiler extension, future canon, or branch-write capability. Its
+actor-safe corpus is bounded with exact read-only retrieval, and stable
+entity/claim IDs become turn-local opaque handles. The model can only capture one
+candidate in memory; the host decodes those handles, supplies branch, head,
+source, and actor identity, and commits only after deterministic validation. Missing state
+fields remain unknown and cannot be invented as positive preconditions. While
+translation, validation, and scene rendering run, the TUI uses the same animated
+working indicator.
+
+An accepted action is rendered by the isolated narrator from the new committed
+actor frame; raw commit IDs and hidden background events are not shown as
+narrative. Ordinary turns do not automatically commit background canon;
+`--advance-background` explicitly opts into temporally ordered advancement. If
+rendering fails, the action remains committed and `/scene` safely retries only
+the prose. A rejected proposal leaves the branch head unchanged, persists its
+diagnostic audit, and automatically returns the player to a live narration/choice
+loop instead of ending on an engine notice. Novel and character selection is
+persisted per instance, with one active pointer that ordinary `nwh` startup
+resumes automatically. `play-world --action` remains the compact script/legacy
+readline path.
 
 Branch and integrity workflows:
 

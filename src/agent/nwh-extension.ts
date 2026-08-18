@@ -1169,11 +1169,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           [character.canonicalName, ...character.aliases]
             .some((name) => text.normalize("NFKC").toLocaleLowerCase().includes(name.normalize("NFKC").toLocaleLowerCase())),
         );
-        const actor = matches.length === 1
-          ? matches[0]
-          : available.characters.length === 1
-            ? available.characters[0]
-            : undefined;
+        const actor = matches.length === 1 ? matches[0] : undefined;
         activity.update("Entering the selected character");
         await activatePlayer(ctx, {
           branchId: available.branchId,

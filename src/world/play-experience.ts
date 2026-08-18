@@ -7,7 +7,6 @@ import { BranchStore } from "./store.js";
 import { WorkspaceStore, type SourceDocument, type StoredProject } from "../storage/workspace-store.js";
 import { PlayerTurnAuditStore, type PlayerTurnOrigin } from "./player-turn-audit.js";
 import { resolvePlayerAffordance } from "./narrative-director.js";
-import { committedHistory } from "./scene.js";
 import { evidenceBelongsExclusivelyToSource, inferLegacyBranchSourceId, resolveCommitSourceId } from "./source-scope.js";
 
 export type PlayableCharacter = {
@@ -136,11 +135,10 @@ export async function listPlayableCharacters(
   const branchId = await resolveBranchId(new BranchStore(root), options.branchId, active?.branchId);
   const { engine } = await openWorkspaceWorld(root);
   const head = await engine.branches.readHead(branchId);
-  const [branch, context, state, playableIds] = await Promise.all([
+  const [branch, context, state] = await Promise.all([
     engine.branches.read(branchId),
     engine.contextForCommit(head),
     engine.projector.project(head),
-    committedPlayableCharacterIds(engine, head),
   ]);
   const activeSourceId = await resolveCommitSourceId(
     engine,
@@ -149,14 +147,7 @@ export async function listPlayableCharacters(
     source?.id ?? branch.sourceId,
     "Playable character listing",
   );
-  const characters = [...context.entities.values()]
-    .filter((entity) => entity.kind === "character")
-    .filter((entity) => activeSourceId
-      ? evidenceBelongsExclusivelyToSource(entity.evidence, activeSourceId)
-      : entity.evidence.length === 0)
-    .filter((entity) => playableIds.has(entity.id) && state.values[entity.id]?.["character.alive"] !== false)
-    .map((entity) => characterSummary(entity, state.values[entity.id] ?? {}, context.entities))
-    .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
+  const characters = playableCharactersForContext(context.entities, state.values, activeSourceId);
   return { branchId, ...(source ? { source } : {}), characters };
 }
 
@@ -170,10 +161,9 @@ export async function selectPlayExperience(
   const saved = await sessionStore.readInstance(branchId);
   const { engine } = await openWorkspaceWorld(root);
   const branch = await engine.branches.read(branchId);
-  const [context, state, playableIds] = await Promise.all([
+  const [context, state] = await Promise.all([
     engine.contextForCommit(branch.headCommitId),
     engine.projector.project(branch.headCommitId),
-    committedPlayableCharacterIds(engine, branch.headCommitId),
   ]);
   const store = await WorkspaceStore.create(root);
   const explicitlyRequestedSource = options.source ? await resolveNovelSource(store, options.source) : undefined;
@@ -186,17 +176,8 @@ export async function selectPlayExperience(
     `Instance '${branchId}'`,
   );
   const source = explicitlyRequestedSource ?? (activeSourceId ? await resolveNovelSource(store, activeSourceId) : undefined);
-  const characters = [...context.entities.values()]
-    .filter((entity) => entity.kind === "character")
-    .filter((entity) => activeSourceId
-      ? evidenceBelongsExclusivelyToSource(entity.evidence, activeSourceId)
-      : entity.evidence.length === 0)
-    .filter((entity) => playableIds.has(entity.id) && state.values[entity.id]?.["character.alive"] !== false)
-    .map((entity) => characterSummary(entity, state.values[entity.id] ?? {}, context.entities))
-    .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
-  const requestedActor = options.character
-    ?? saved?.actorId
-    ?? (characters.length === 1 ? characters[0]!.id : undefined);
+  const characters = playableCharactersForContext(context.entities, state.values, activeSourceId);
+  const requestedActor = options.character;
   if (!requestedActor) {
     throw new Error(`Choose a character for '${branchId}'. Available: ${characterChoices(characters)}`);
   }
@@ -230,20 +211,6 @@ export async function selectPlayExperience(
     logicalStep: state.logicalTime.step,
     readinessWarnings,
   };
-}
-
-async function committedPlayableCharacterIds(
-  engine: Awaited<ReturnType<typeof openWorkspaceWorld>>["engine"],
-  headCommitId: string,
-): Promise<ReadonlySet<string>> {
-  const context = await engine.contextForCommit(headCommitId);
-  const active = new Set<string>();
-  for (const entry of await committedHistory(engine, headCommitId)) {
-    for (const participantId of entry.event.participants) {
-      if (context.entities.get(participantId)?.kind === "character") active.add(participantId);
-    }
-  }
-  return active;
 }
 
 export async function performPlayTurn(options: {
@@ -485,6 +452,24 @@ function characterSummary(
     ...(locationId ? { locationId, locationName: entities.get(locationId)?.canonicalName ?? locationId } : {}),
     sourceIds,
   };
+}
+
+function playableCharactersForContext(
+  entities: ReadonlyMap<string, Entity>,
+  state: Readonly<Record<string, Record<string, unknown>>>,
+  sourceId?: string,
+): PlayableCharacter[] {
+  return [...entities.values()]
+    .filter((entity) => entity.kind === "character")
+    .filter((entity) => sourceId
+      ? evidenceBelongsExclusivelyToSource(entity.evidence, sourceId)
+      : entity.evidence.length === 0)
+    // A canonical character does not need to have participated in branch history
+    // before the player may inhabit it. Scene and thread membership do not gate
+    // role choice; only an explicit committed death excludes the character here.
+    .filter((entity) => state[entity.id]?.["character.alive"] !== false)
+    .map((entity) => characterSummary(entity, state[entity.id] ?? {}, entities))
+    .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
 }
 
 function characterChoices(characters: readonly PlayableCharacter[]): string {

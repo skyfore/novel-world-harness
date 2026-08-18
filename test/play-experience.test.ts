@@ -24,11 +24,12 @@ describe("play experience catalog", () => {
   it("lists novels, filters branch-pinned characters by source, and reports durable progress", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-experience-"));
     roots.push(root);
-    const first = await createEvidenceFixture(root, "Hero waits.\n", "first.txt");
+    const first = await createEvidenceFixture(root, "Hero waits. Witness listens.\n", "first.txt");
     const second = await createEvidenceFixture(root, "Rival waits.\n", "second.txt");
     await (await WorkspaceStore.create(root)).ensureProject({ name: "Two Stories", language: "en" });
     const canon = new CanonicalModelStore(root);
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: first.evidence("Hero") });
+    await canon.putEntity({ id: "witness", kind: "character", canonicalName: "Witness", aliases: [], evidence: first.evidence("Witness") });
     await canon.putEntity({ id: "rival", kind: "character", canonicalName: "Rival", aliases: [], evidence: second.evidence("Rival") });
     const { engine } = await openWorkspaceWorld(root);
     await engine.createBranch("main", "Main", {
@@ -48,8 +49,17 @@ describe("play experience catalog", () => {
     await expect(listPlayableCharacters(root, { source: first.source.title })).resolves.toMatchObject({
       branchId: "main",
       source: { id: first.source.id },
-      characters: [{ id: "hero", canonicalName: "Hero" }],
+      characters: [
+        { id: "hero", canonicalName: "Hero" },
+        { id: "witness", canonicalName: "Witness" },
+      ],
     });
+
+    await expect(selectPlayExperience(root, {
+      branchId: "main",
+      source: first.source.id,
+      character: "Witness",
+    })).resolves.toMatchObject({ actor: { id: "witness" } });
 
     const selection = await selectPlayExperience(root, { branchId: "main", source: first.source.id, character: "Hero" });
     expect(selection.session).toMatchObject({ branchId: "main", sourceId: first.source.id, actorId: "hero" });
@@ -148,11 +158,11 @@ describe("play experience catalog", () => {
     await expect(selectPlayExperience(root, { character: "hero" })).rejects.toThrow("Choose an instance");
     await expect(selectPlayExperience(root, { branchId: "alpha", character: "hero" })).resolves.toMatchObject({ actor: { id: "hero" } });
     await expect(selectPlayExperience(root, { branchId: "beta", character: "rival" })).resolves.toMatchObject({ actor: { id: "rival" } });
-    await expect(selectPlayExperience(root, { branchId: "alpha" })).resolves.toMatchObject({ actor: { id: "hero" } });
+    await expect(selectPlayExperience(root, { branchId: "alpha" })).rejects.toThrow("Choose a character");
 
     const catalog = await inspectPlayExperience(root);
-    expect(catalog.instances.find((instance) => instance.branchId === "alpha")).toMatchObject({ actorId: "hero", active: true });
-    expect(catalog.instances.find((instance) => instance.branchId === "beta")).toMatchObject({ actorId: "rival", active: false });
+    expect(catalog.instances.find((instance) => instance.branchId === "alpha")).toMatchObject({ actorId: "hero", active: false });
+    expect(catalog.instances.find((instance) => instance.branchId === "beta")).toMatchObject({ actorId: "rival", active: true });
   });
 
   it("reports persisted novel ownership and preserves it across forks", async () => {

@@ -153,7 +153,7 @@ export async function choosePlayExperience(
   }
   const listed = await listPlayableCharacters(root, { branchId, ...(sourceId ? { source: sourceId } : {}) });
   const playable = listed.characters.filter((character) => character.alive !== false);
-  if (!playable.length) throw new Error(`No living committed characters are playable on '${branchId}'.`);
+  if (!playable.length) throw new Error(`No committed characters are available to play on '${branchId}'.`);
   const saved = catalog.savedSessions.find((session) => session.branchId === branchId);
   const requestedCharacter = options.character;
   let character = requestedCharacter ? resolveCharacter(playable, requestedCharacter)?.id : undefined;
@@ -163,33 +163,31 @@ export async function choosePlayExperience(
     && saved
     && playable.some((candidate) => candidate.id === saved.actorId)
   ) character = saved.actorId;
-  if (!requestedCharacter && !character && playable.length === 1) character = playable[0]!.id;
   if (!character) {
     character = await ask({
       header: "Character",
       question: requestedCharacter
-        ? `No unique living character matches '${requestedCharacter}'. Who do you want to play on '${branchId}'?`
+        ? `No unique available character matches '${requestedCharacter}'. Who do you want to play on '${branchId}'?`
         : `Who do you want to play on '${branchId}'?`,
-      options: playable.map((candidate, index) => ({
+      options: playable.map((candidate) => ({
         value: candidate.id,
         label: `${candidate.canonicalName} (${candidate.id})`,
         description: [
           candidate.aliases.length ? `aliases: ${candidate.aliases.join(", ")}` : undefined,
           candidate.locationName ? `location: ${candidate.locationName}` : undefined,
         ].filter(Boolean).join("; ") || "committed playable character",
-        recommended: index === 0,
       })),
       customInput: {
         label: "Enter a character",
         description: "Type a character id, canonical name, or alias.",
         prompt: "Character id, name, or alias",
         placeholder: playable[0]?.canonicalName,
-        invalidMessage: `No unique living character on '${branchId}' matches that value.`,
+        invalidMessage: `No unique available character on '${branchId}' matches that value.`,
         resolve: (value) => resolveCharacter(playable, value)?.id,
       },
       nonInteractiveHint: requestedCharacter
         ? `Character '${requestedCharacter}' is not uniquely playable on '${branchId}'. Pass a valid --character <id-or-name>.`
-        : `Multiple playable characters exist on '${branchId}'. Pass --character <id-or-name> explicitly.`,
+        : `Character selection is required on '${branchId}'. Pass --character <id-or-name> explicitly.`,
     });
   }
   if (!character) return undefined;

@@ -1998,6 +1998,40 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages.join("\n")).toContain("门外的风声忽远忽近");
   });
 
+  it("asks which character to inhabit for /play even when only one is available", async () => {
+    const { commands, root } = await fixture();
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const questions: string[] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        async select(title: string, choices: string[]) {
+          questions.push(title);
+          if (title.startsWith("Who do you want to play")) {
+            return choices.find((choice) => choice.includes("林岐"));
+          }
+          return undefined;
+        },
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")?.handler("", ctx);
+
+    expect(questions[0]).toBe("Who do you want to play on 'main'?");
+    await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({ branchId: "main", actorId: "hero" });
+  });
+
   it("chooses a novel before showing a filtered, bounded character picker for /play", async () => {
     const { commands, root } = await fixture();
     const first = await createEvidenceFixture(root, "First Hero waits.\n", "first-world.txt");

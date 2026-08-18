@@ -44,8 +44,9 @@ describe("structured play choices", () => {
       return question.header === "Instance" ? "beta" : "rival";
     });
 
-    expect(questions.map((question) => question.header)).toEqual(["Novel", "Instance"]);
+    expect(questions.map((question) => question.header)).toEqual(["Novel", "Instance", "Character"]);
     expect(questions[0]?.options.map((option) => option.value)).toEqual([heroNovel.source.id, rivalNovel.source.id]);
+    expect(questions[2]?.options.every((option) => option.recommended !== true)).toBe(true);
     expect(selected).toMatchObject({
       source: { id: rivalNovel.source.id },
       session: { branchId: "beta", sourceId: rivalNovel.source.id, actorId: "rival" },
@@ -82,7 +83,7 @@ describe("structured play choices", () => {
     expect(prompts).toEqual([
       "No unique novel matches 'missing'. Which novel do you want to enter?",
       "No unique instance matches 'missing'. Which novel-world instance do you want to use?",
-      "No unique living character matches 'unknown'. Who do you want to play on 'beta'?",
+      "No unique available character matches 'unknown'. Who do you want to play on 'beta'?",
     ]);
     expect(selected).toMatchObject({ session: { branchId: "beta", sourceId: rivalNovel.source.id, actorId: "rival" } });
   });
@@ -106,8 +107,9 @@ describe("structured play choices", () => {
       operations: [{ op: "set", entityId: "rival", field: "character.alive", value: true }],
     }, undefined, second.source.id);
 
-    const selected = await choosePlayExperience(root, { source: second.source.id }, async () => {
-      throw new Error("source-scoped single branch and character should not prompt");
+    const selected = await choosePlayExperience(root, { source: second.source.id }, async (question) => {
+      expect(question.header).toBe("Character");
+      return "rival";
     });
 
     expect(selected).toMatchObject({
@@ -181,8 +183,9 @@ describe("structured play choices", () => {
       instanceMode: "continue",
       preparedCacheRoot: cacheRoot,
       onInstanceLifecycle: (event) => lifecycle.push({ type: event.type, branchId: event.branchId }),
-    }, async () => {
-      throw new Error("a prepared novel with one character should be created without prompting");
+    }, async (question) => {
+      expect(question.header).toBe("Character");
+      return "fugui";
     });
     expect(first?.session.branchId).not.toBe("main");
     expect(lifecycle).toEqual([{ type: "created", branchId: first!.session.branchId }]);
@@ -206,8 +209,9 @@ describe("structured play choices", () => {
       instanceMode: "create",
       preparedCacheRoot: cacheRoot,
       onInstanceLifecycle: (event) => lifecycle.push({ type: event.type, branchId: event.branchId }),
-    }, async () => {
-      throw new Error("fresh instance creation should not prompt when there is one character");
+    }, async (question) => {
+      expect(question.header).toBe("Character");
+      return "fugui";
     });
     expect(fresh!.session.branchId).not.toBe(first!.session.branchId);
     expect(lifecycle).toEqual([{ type: "created", branchId: fresh!.session.branchId }]);

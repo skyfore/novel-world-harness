@@ -130,6 +130,13 @@ characters cannot be directly rewritten. Rich physical, combat, and social
 effects still need validated consequence proposals and stronger domain evals,
 not broader mutation authority.
 
+The interpreter also separates an actor-controlled act from its desired world
+effect. World-resolution protocol misses receive one fresh isolated retry. If
+both attempts fail, only a deterministic, write-free `observe`/`stay` primitive
+may be committed; its desired discovery remains audit-only. All wider intents
+remain uncommitted and recover out of character rather than masquerading as an
+in-world blockage. This fallback never writes knowledge or active rules.
+
 ### 3. Model actor policy is not connected to the product CLI
 
 `modelActorProposalSource` limits a reasoner to turn-local opaque actor handles,

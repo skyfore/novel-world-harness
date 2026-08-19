@@ -61,6 +61,11 @@ prints a result.
 - Natural-language input in player mode is always treated as in-world. The only
   meta route is the explicit `/ooc [question]` UI protocol, so host code never
   guesses from Chinese or English wording that a sentence is “system-level.”
+- Player interpretation separates the actor-controlled act from its desired
+  world effect. A missing adjudication capture gets one fresh isolated retry;
+  after that, only a write-free current-scene observation may fall back to a
+  host-defined committed beat. Wider failures use an explicitly out-of-character
+  recovery notice and are never dramatized as fictional resistance.
 - Managed long-running operations use the NWH task overlay for host progress,
   assistant messages, thinking, and tool calls. A compact dock remains while a
   task is in the background.
@@ -87,8 +92,8 @@ prints a result.
   and shutdown joining.
 - Tests invoke conflicting slash commands while a compiler turn is active and
   require an immediate explanatory rejection.
-- Player tests cover cancellation before commit and narration failure after
-  commit as distinct outcomes.
+- Player tests cover cancellation before commit—including cancellation during
+  adjudication—and narration failure after commit as distinct outcomes.
 - Player tests verify that historical custom transcripts do not trigger a new
   narrator, native scene deltas match the persisted prose exactly, stored
   current-head choices resume without a model call, and selected choices pass

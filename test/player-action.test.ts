@@ -142,6 +142,11 @@ function moveToCamp(): PlayerActionCandidate {
     intent: {
       kind: "act",
       summary: "Walk from the Hall to Camp",
+      controlledAct: {
+        eventTitle: "Hero starts walking from the Hall toward Camp",
+        actorObservation: "You leave the Hall behind and start along the road toward Camp.",
+      },
+      desiredEffect: "Reach Camp",
       targets: [{ kind: "entity", entityId: "camp" }],
       sceneTransition: { kind: "arrive", destination: { kind: "entity", entityId: "camp" } },
     },
@@ -217,6 +222,11 @@ describe("actor-scoped player action context", () => {
       intent: {
         kind: "act",
         summary: "Walk from the Hall to Camp",
+        controlledAct: {
+          eventTitle: "Hero starts walking from the Hall toward Camp",
+          actorObservation: "You leave the Hall behind and start along the road toward Camp.",
+        },
+        desiredEffect: "Reach Camp",
         targets: [{ kind: "entity", entityId: campHandle }],
         sceneTransition: { kind: "arrive", destination: { kind: "entity", entityId: campHandle } },
       },
@@ -392,6 +402,108 @@ describe("PlayerTurnService", () => {
     expect(result.proposal?.title).toBe("Hero reaches Camp");
     expect(result.proposal?.progress?.outcome).toBe("succeeded");
     expect((await engine.projector.project(result.newHead)).values.hero?.["character.location"]).toBe("camp");
+  });
+
+  it("commits only a host-defined observe/stay act when adjudication fails", async () => {
+    const { engine, head } = await fixture();
+    const stateBefore = await engine.projector.project(head);
+    const service = new PlayerTurnService(
+      engine,
+      () => ({
+        title: "Stop and look up to confirm the reception-room direction",
+        intent: {
+          kind: "observe",
+          summary: "Stop, look up, and try to confirm which way the reception room is",
+          controlledAct: {
+            eventTitle: "The hero stops and looks up",
+            actorObservation: "You stop and lift your eyes toward the surrounding signs.",
+          },
+          desiredEffect: "Confirm which direction leads to the reception room",
+          targets: [{ kind: "described", description: "the reception room direction" }],
+          sceneTransition: { kind: "stay" },
+        },
+        participants: [],
+        preconditions: [],
+        proposedDelta: { version: 1, operations: [] },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+      undefined,
+      undefined,
+      undefined,
+      () => { throw new Error("Expected exactly one valid resolution call; observed 0."); },
+    );
+
+    const result = await service.turn({
+      branchId: "main",
+      actorId: "hero",
+      utterance: "停下来，抬眼确认传达室所在的方向。",
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.stage).toBe("committed");
+    expect(result.previousHead).toBe(head);
+    expect(result.newHead).not.toBe(head);
+    expect(result.adjudication).toBeUndefined();
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: "PLAYER_WORLD_ADJUDICATION_CONTROLLED_ACT_FALLBACK",
+      path: "intent.controlledAct",
+    }));
+    expect(result.intendedCandidate?.intent?.desiredEffect).toBe("Confirm which direction leads to the reception room");
+    expect(result.candidate?.intent?.desiredEffect).toBeUndefined();
+    expect(result.candidate?.intent?.controlledAct).toEqual({
+      eventTitle: "观察当前场景",
+      actorObservation: "你把注意力放回当前场景，仔细观察眼前能够确认的事物。",
+    });
+    expect(result.proposal).toMatchObject({
+      title: "观察当前场景",
+      actorObservations: [{ actorId: "hero", summary: "你把注意力放回当前场景，仔细观察眼前能够确认的事物。" }],
+      proposedDelta: { version: 1, operations: [] },
+      progress: { scene: { kind: "stay" } },
+    });
+    expect(result.proposal?.proposedKnowledge).toBeUndefined();
+    expect(result.proposal?.progress?.scene?.beat).toBe(result.contextBefore.scene.beat + 1);
+    expect(result.contextAfter.recentVisibleEvents.at(-1)?.summary)
+      .toBe("你把注意力放回当前场景，仔细观察眼前能够确认的事物。");
+    const stateAfter = await engine.projector.project(result.newHead);
+    expect(stateAfter.values).toEqual(stateBefore.values);
+    expect(stateAfter.activeRuleIds).toEqual(stateBefore.activeRuleIds);
+  });
+
+  it("does not use the observation fallback for an unresolved external effect", async () => {
+    const { engine, head } = await fixture();
+    const service = new PlayerTurnService(
+      engine,
+      () => moveToCamp(),
+      undefined,
+      undefined,
+      undefined,
+      () => { throw new Error("Expected exactly one valid resolution call; observed 0."); },
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "Head for Camp." });
+
+    expect(result.accepted).toBe(false);
+    expect(result.stage).toBe("adjudication");
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_WORLD_ADJUDICATION_FAILED" }));
+    expect(result.newHead).toBe(head);
+    expect(await engine.branches.readHead("main")).toBe(head);
+  });
+
+  it("never turns cancellation into a committed observation fallback", async () => {
+    const { engine, head } = await fixture();
+    const service = new PlayerTurnService(
+      engine,
+      (input) => deterministicPlayerIntentCandidate("observe", input),
+      undefined,
+      undefined,
+      undefined,
+      () => { throw new DOMException("Player turn cancelled", "AbortError"); },
+    );
+
+    await expect(service.turn({ branchId: "main", actorId: "hero", utterance: "Observe." }))
+      .rejects.toMatchObject({ name: "AbortError" });
+    expect(await engine.branches.readHead("main")).toBe(head);
   });
 
   it("validates the player renderer result and detects branch mutation", async () => {
@@ -1088,6 +1200,16 @@ describe("player action capture tool", () => {
     const candidate = moveToCamp();
 
     expect(validator.Check(candidate)).toBe(true);
+    expect(validator.Check({
+      ...candidate,
+      intent: {
+        kind: "act",
+        summary: "Walk from the Hall to Camp",
+        desiredEffect: "Reach Camp",
+        targets: [{ kind: "entity", entityId: "camp" }],
+        sceneTransition: { kind: "arrive", destination: { kind: "entity", entityId: "camp" } },
+      },
+    })).toBe(false);
     expect(validator.Check({ ...candidate, branchId: "main", expectedParentCommit: "head" })).toBe(false);
     expect(validator.Check({
       ...candidate,

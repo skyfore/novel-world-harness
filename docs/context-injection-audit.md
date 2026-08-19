@@ -475,7 +475,9 @@ and [player-action.test.ts](../test/player-action.test.ts) plus
 ### Return path and commit authority
 
 The host strict-schema parses the captured typed intent without reparsing the
-utterance. A separate fresh world-adjudication session receives the relevant
+utterance. The typed intent distinguishes the actor-controlled act from a
+desired effect that depends on the world. A separate fresh world-adjudication
+session receives the relevant
 current committed state, applicable active rules, and deterministic preview
 issues but no future canon. It must propose either ordinary realization or a
 direct-contradiction transformation. Transformations carry a certificate citing
@@ -489,6 +491,14 @@ canonical IDs or labels recovered from text. A canon resolver receives an
 immutable proposal snapshot and its result is strict-schema parsed. Only
 `commitKnowledgeAwareAction`/the engine can append the event and move the branch
 head.
+
+If the adjudicator returns no valid capture, its adapter retries once with a new
+in-memory session. A repeated protocol miss does not turn desired-effect prose
+into truth. The host can commit only its own write-free current-scene
+observe/stay primitive when all deterministic checks are already clean; the
+model-authored controlled-act copy and desired effect remain audit evidence.
+Every other miss leaves the branch head unchanged, and none can add character
+knowledge or world rules.
 
 Evidence: `PlayerTurnService` and validation functions in
 [player-action.ts](../src/world/player-action.ts), the isolated adapter in

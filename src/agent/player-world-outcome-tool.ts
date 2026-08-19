@@ -38,6 +38,7 @@ export function createPlayerWorldResolutionCaptureTool(
     description: "Resolve one player intent as either its ordinary realization or a contradiction-grounded in-world consequence. This capture-only tool cannot commit world truth.",
     promptSnippet: "Propose exactly one immediate world resolution",
     promptGuidelines: [
+      "Distinguish intendedCandidate.intent.controlledAct from intent.desiredEffect; performing the former alone does not prove the latter.",
       "Choose transform only for a direct contradiction with committed state, an active rule, or unavoidable immediate causality/capability.",
       "Every transform must cite at least one supplied state field, active rule, deterministic issue code, or explicit ordinary causal/capability principle in contradiction.basis.",
       "A transformed replacement is the immediate event that actually occurs, not a system refusal and not the impossible desired effect.",

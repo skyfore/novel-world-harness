@@ -155,7 +155,8 @@ deterministic commitment, cancellation is disabled and shutdown waits for the
 commit boundary to finish. `performPlayTurn()` normalizes translator failures
 into a rejected result, so the extension also checks the original abort signal
 after that call and reports a user cancellation rather than a misleading model
-rejection.
+rejection. Adjudicator aborts are rethrown rather than being mistaken for an
+eligible observation fallback.
 
 **Evidence.** The cancellation test holds an injected translator indefinitely,
 invokes `/leave`, and verifies the branch head is unchanged and the user gets an

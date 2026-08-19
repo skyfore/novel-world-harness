@@ -172,6 +172,17 @@ interpretation, current-world adjudication, and deterministic gates. The choice
 model supplies action text only and cannot choose a privileged host intent or
 bypass interpretation. The same animated working indicator is used while
 interpreting, adjudicating, validating, and rendering.
+
+The interpreter explicitly separates what the selected character can do from
+the result they hope the world will provide. If world adjudication omits its
+structured response, NWH retries once in a fresh isolated session. A second
+failure can still commit a pure current-scene observation with no state,
+knowledge, time, or movement effect; the hoped-for result stays uncommitted and
+the new observation becomes part of replayable character context. Broader acts
+remain at the prior head and use an explicitly out-of-character recovery notice
+instead of being dramatized as resistance. A protocol failure never creates a
+world rule.
+
 Narration and choices are separate channels: the model is instructed to keep
 prose inside the current actor-visible scene and end on a concrete fact or
 in-world signal. The host validates structural shape and repetition but does not

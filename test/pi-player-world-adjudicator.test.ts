@@ -21,6 +21,11 @@ function input(): PlayerWorldAdjudicationInput {
       intent: {
         kind: "act",
         summary: "Immediately restore the fallen friend to life",
+        controlledAct: {
+          eventTitle: "The traveler attempts resuscitation",
+          actorObservation: "You begin an ordinary attempt to resuscitate your fallen friend.",
+        },
+        desiredEffect: "Restore the fallen friend to life",
         targets: [{ kind: "entity", entityId: "fallen-friend" }],
       },
       participants: [],
@@ -129,5 +134,46 @@ describe("Pi player world adjudicator", () => {
     expect(prompt).not.toContain("hero-stable-id");
     expect(prompt).not.toContain("fallen-friend");
     expect(disposed).toBe(true);
+  });
+
+  it("retries once in a fresh isolated session when the first response omits the capture call", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-player-world-adjudicator-retry-"));
+    roots.push(root);
+    const statuses: string[] = [];
+    let created = 0;
+    let disposed = 0;
+    vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
+      created += 1;
+      const attempt = created;
+      const tool = options.additionalTools![0]!;
+      return {
+        abort: async () => undefined,
+        dispose: async () => { disposed += 1; },
+        promptWithReport: async (prompt: string) => {
+          if (attempt === 1) {
+            expect(prompt).toContain("Resolve the intended immediate action");
+          } else {
+            expect(prompt).toContain("Fresh protocol-recovery attempt");
+            await tool.execute("resolution-retry", {
+              decision: "realize",
+              status: "succeeded",
+              eventTitle: "The traveler begins the attempt",
+              actorObservation: "Your hands begin the work, with the outcome not yet assumed.",
+            } as never, undefined, undefined, {} as never);
+          }
+          return { text: "" } as never;
+        },
+      } as unknown as PiAgentSession;
+    });
+
+    const result = await createPiPlayerWorldAdjudicator({ root, onStatus: (status) => statuses.push(status) })(input());
+
+    expect(result).toMatchObject({
+      decision: "realize",
+      eventTitle: "The traveler begins the attempt",
+    });
+    expect(created).toBe(2);
+    expect(disposed).toBe(2);
+    expect(statuses).toContain("行动后果尚未收束，正在重新推演…");
   });
 });

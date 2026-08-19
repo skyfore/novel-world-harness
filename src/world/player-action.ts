@@ -69,6 +69,19 @@ export const playerIntentSceneTransitionSchema = z
 export type PlayerIntentSceneTransition = z.infer<typeof playerIntentSceneTransitionSchema>;
 
 /**
+ * The part of an intent the selected actor can perform without assuming that
+ * the surrounding world, another entity, or an unknown fact cooperates. These
+ * strings remain proposal/audit data. Their separate shape helps identify an
+ * eligible typed fallback, but failed adjudication never makes the strings
+ * themselves authoritative.
+ */
+export const playerControlledActSchema = z.object({
+  eventTitle: z.string().trim().min(1).max(500),
+  actorObservation: z.string().trim().min(1).max(1_000),
+}).strict();
+export type PlayerControlledAct = z.infer<typeof playerControlledActSchema>;
+
+/**
  * Language-neutral semantic intent proposed by the interpreter. `summary` is
  * explanatory data for another model, never an authority-bearing world fact.
  * Engine-relevant effects are represented by typed targets, scene movement,
@@ -79,6 +92,8 @@ export const playerIntentSchema = z
   .object({
     kind: z.enum(["act", "observe", "reflect", "wait"]),
     summary: z.string().trim().min(1).max(1_000),
+    controlledAct: playerControlledActSchema.optional(),
+    desiredEffect: z.string().trim().min(1).max(1_000).optional(),
     targets: z.array(playerIntentTargetSchema).max(32).default([]),
     sceneTransition: playerIntentSceneTransitionSchema.optional(),
     requestedTimeAdvance: timeAdvanceSchema.optional(),
@@ -101,10 +116,14 @@ export const playerActionCandidateSchema = z
   .strict();
 export type PlayerActionCandidate = z.infer<typeof playerActionCandidateSchema>;
 
-const playerWorldEventCopySchema = z.object({
-  eventTitle: z.string().trim().min(1).max(500),
-  actorObservation: z.string().trim().min(1).max(1_000),
+/** Model translators must make the controllable/effect boundary explicit. */
+export const playerActionModelCandidateSchema = playerActionCandidateSchema.extend({
+  intent: playerIntentSchema.extend({
+    controlledAct: playerControlledActSchema,
+  }).strict(),
 }).strict();
+
+const playerWorldEventCopySchema = playerControlledActSchema;
 
 export const playerContradictionBasisSchema = z.discriminatedUnion("source", [
   z.object({
@@ -255,6 +274,18 @@ export type PlayerActionTranslationInput = Readonly<{
 
 export type SafePlayerIntent = "observe" | "reflect" | "wait";
 
+const SAFE_PLAYER_INTENT_TITLES: Record<SafePlayerIntent, string> = {
+  observe: "观察当前场景",
+  reflect: "整理已知线索",
+  wait: "短暂等待并留意变化",
+};
+
+const SAFE_PLAYER_INTENT_ACTOR_OBSERVATIONS: Record<SafePlayerIntent, string> = {
+  observe: "你把注意力放回当前场景，仔细观察眼前能够确认的事物。",
+  reflect: "你暂时收拢思绪，重新整理自己已经知道的线索。",
+  wait: "你暂时没有采取别的行动，只留意时间流逝和周围变化。",
+};
+
 /**
  * Convert an already-typed host affordance without asking a model to recover
  * semantics from its display text. Free-form input never uses this shortcut.
@@ -264,16 +295,15 @@ export function deterministicPlayerIntentCandidate(
   input: PlayerActionTranslationInput,
   requestedTimeAdvance?: TimeAdvance,
 ): PlayerActionCandidate {
-  const titles: Record<SafePlayerIntent, string> = {
-    observe: "观察当前场景",
-    reflect: "整理已知线索",
-    wait: "短暂等待并留意变化",
-  };
   return playerActionCandidateSchema.parse({
-    title: titles[intent],
+    title: SAFE_PLAYER_INTENT_TITLES[intent],
     intent: {
       kind: intent,
-      summary: titles[intent],
+      summary: SAFE_PLAYER_INTENT_TITLES[intent],
+      controlledAct: {
+        eventTitle: SAFE_PLAYER_INTENT_TITLES[intent],
+        actorObservation: SAFE_PLAYER_INTENT_ACTOR_OBSERVATIONS[intent],
+      },
       targets: [],
       ...(intent === "observe" ? { sceneTransition: { kind: "stay" } } : {}),
       ...(intent === "wait"
@@ -1170,6 +1200,7 @@ export class PlayerTurnService {
     let eventTitle: string | undefined;
     let actorObservation: string | undefined;
     let adjudication: PlayerWorldResolution | undefined;
+    const nonFatalIssues: ValidationIssue[] = [];
 
     if (this.adjudicator) {
       const intendedTiming = playerCandidateTiming(intendedCandidate, storyTime);
@@ -1215,6 +1246,7 @@ export class PlayerTurnService {
         deterministicIssues,
       );
       let proposedResolution: unknown;
+      let resolutionFailure: ValidationIssue[] | undefined;
       try {
         proposedResolution = await this.adjudicator(deepFreeze({
           utterance: input.utterance,
@@ -1223,53 +1255,80 @@ export class PlayerTurnService {
           world: adjudicationWorld,
         }));
       } catch (error) {
-        return this.rejected(input, previousHead, contextBefore, "adjudication", [
+        if (isAbortError(error)) throw error;
+        resolutionFailure = [
           issue("PLAYER_WORLD_ADJUDICATION_FAILED", error instanceof Error ? error.message : String(error)),
-        ], intendedCandidate, previewAction.proposal);
-      }
-      const parsedResolution = playerWorldResolutionSchema.safeParse(proposedResolution);
-      if (!parsedResolution.success) {
-        return this.rejected(input, previousHead, contextBefore, "adjudication", parsedResolution.error.issues.map((entry) => issue(
-          "INVALID_PLAYER_WORLD_RESOLUTION",
-          entry.message,
-          entry.path.length ? entry.path.join(".") : undefined,
-        )), intendedCandidate, previewAction.proposal);
-      }
-      adjudication = parsedResolution.data;
-      eventTitle = adjudication.eventTitle;
-      actorObservation = adjudication.actorObservation;
-      outcomeStatus = adjudication.status;
-      if (adjudication.decision === "realize") {
-        if (deterministicIssues.length) {
-          return this.rejected(input, previousHead, contextBefore, "adjudication", [
-            issue(
-              "PLAYER_WORLD_CONTRADICTION_UNRESOLVED",
-              "The world adjudicator tried to realize an intent that still contradicts committed state or active rules.",
-            ),
-            ...deterministicIssues,
-          ], intendedCandidate, previewAction.proposal);
-        }
-      } else {
-        const contradictionIssues = validatePlayerWorldContradiction(adjudication, adjudicationWorld);
-        if (contradictionIssues.length) {
-          return this.rejected(input, previousHead, contextBefore, "adjudication", contradictionIssues, intendedCandidate);
-        }
-        candidate = normalizeStructuredPlayerCandidate(adjudication.replacement, undefined);
-        const replacementIssues = [
-          ...validatePlayerActionScope(candidate, contextBefore, authorizedKnowledgeClaimIds),
-          ...validatePlayerIntentConsistency(candidate, input.actorId),
-          ...validatePlayerActionGrounding(candidate, contextBefore),
-          ...await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead, input.sourceId),
         ];
-        if (replacementIssues.length) {
-          return this.rejected(input, previousHead, contextBefore, "adjudication", [
-            issue(
-              "PLAYER_WORLD_REPLACEMENT_INVALID",
-              "The proposed in-world consequence did not satisfy the same capability and grounding boundary as every other event.",
-            ),
-            ...replacementIssues,
-          ], intendedCandidate);
+      }
+      if (!resolutionFailure) {
+        const parsedResolution = playerWorldResolutionSchema.safeParse(proposedResolution);
+        if (!parsedResolution.success) {
+          resolutionFailure = parsedResolution.error.issues.map((entry) => issue(
+            "INVALID_PLAYER_WORLD_RESOLUTION",
+            entry.message,
+            entry.path.length ? entry.path.join(".") : undefined,
+          ));
+        } else {
+          adjudication = parsedResolution.data;
+          eventTitle = adjudication.eventTitle;
+          actorObservation = adjudication.actorObservation;
+          outcomeStatus = adjudication.status;
+          if (adjudication.decision === "realize") {
+            if (deterministicIssues.length) {
+              return this.rejected(input, previousHead, contextBefore, "adjudication", [
+                issue(
+                  "PLAYER_WORLD_CONTRADICTION_UNRESOLVED",
+                  "The world adjudicator tried to realize an intent that still contradicts committed state or active rules.",
+                ),
+                ...deterministicIssues,
+              ], intendedCandidate, previewAction.proposal);
+            }
+          } else {
+            const contradictionIssues = validatePlayerWorldContradiction(adjudication, adjudicationWorld);
+            if (contradictionIssues.length) {
+              return this.rejected(input, previousHead, contextBefore, "adjudication", contradictionIssues, intendedCandidate);
+            }
+            candidate = normalizeStructuredPlayerCandidate(adjudication.replacement, undefined);
+            const replacementIssues = [
+              ...validatePlayerActionScope(candidate, contextBefore, authorizedKnowledgeClaimIds),
+              ...validatePlayerIntentConsistency(candidate, input.actorId),
+              ...validatePlayerActionGrounding(candidate, contextBefore),
+              ...await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead, input.sourceId),
+            ];
+            if (replacementIssues.length) {
+              return this.rejected(input, previousHead, contextBefore, "adjudication", [
+                issue(
+                  "PLAYER_WORLD_REPLACEMENT_INVALID",
+                  "The proposed in-world consequence did not satisfy the same capability and grounding boundary as every other event.",
+                ),
+                ...replacementIssues,
+              ], intendedCandidate);
+            }
+          }
         }
+      }
+      if (resolutionFailure) {
+        const fallback = controlledObservationFallback(intendedCandidate, deterministicIssues);
+        if (!fallback) {
+          return this.rejected(
+            input,
+            previousHead,
+            contextBefore,
+            "adjudication",
+            resolutionFailure,
+            intendedCandidate,
+            previewAction.proposal,
+          );
+        }
+        candidate = fallback.candidate;
+        eventTitle = fallback.eventTitle;
+        actorObservation = fallback.actorObservation;
+        outcomeStatus = "succeeded";
+        nonFatalIssues.push(issue(
+          "PLAYER_WORLD_ADJUDICATION_CONTROLLED_ACT_FALLBACK",
+          `World adjudication did not return a valid resolution (${resolutionFailure[0]?.code ?? "unknown"}); only the deterministically validated actor-controlled observation was committed.`,
+          "intent.controlledAct",
+        ));
       }
     } else {
       if (groundingIssues.length || intentConsistencyIssues.length) {
@@ -1386,7 +1445,7 @@ export class PlayerTurnService {
       actorId: input.actorId,
       previousHead,
       newHead,
-      issues: committed.result.report.warnings,
+      issues: uniqueIssues([...nonFatalIssues, ...committed.result.report.warnings]),
       contextBefore,
       contextAfter,
       renderedText,
@@ -1469,6 +1528,65 @@ function normalizeStructuredPlayerCandidate(
     candidate.intent.requestedTimeAdvance = { amount: 5, unit: "minute" };
   }
   return playerActionCandidateSchema.parse(candidate);
+}
+
+/**
+ * A missing/malformed adjudicator response cannot authorize a desired effect.
+ * It may, however, leave enough deterministic evidence to commit the selected
+ * actor's own bounded observation. Keep this deliberately narrower than normal
+ * realization: no writes, knowledge effects, time advance, or scene movement.
+ */
+function controlledObservationFallback(
+  candidateInput: PlayerActionCandidate,
+  deterministicIssues: readonly ValidationIssue[],
+): { candidate: PlayerActionCandidate; eventTitle: string; actorObservation: string } | undefined {
+  const candidate = playerActionCandidateSchema.parse(candidateInput);
+  const intent = candidate.intent;
+  if (
+    deterministicIssues.length
+    || intent?.kind !== "observe"
+    || !intent.controlledAct
+    || intent.sceneTransition?.kind !== "stay"
+    || intent.requestedTimeAdvance
+    || candidate.proposedDelta.operations.length
+    || (candidate.proposedKnowledge?.operations.length ?? 0)
+    || candidate.requiresKnowledge.length
+    || candidate.forbidsKnowledge.length
+  ) return undefined;
+
+  // Do not commit model-authored copy after the semantic adjudicator failed:
+  // controlledAct is useful evidence for adjudication/audit, but its prose
+  // could still overclaim the desired effect. Materialize only the typed,
+  // host-defined observe/stay primitive here.
+  const deterministicAct = {
+    eventTitle: SAFE_PLAYER_INTENT_TITLES.observe,
+    actorObservation: SAFE_PLAYER_INTENT_ACTOR_OBSERVATIONS.observe,
+  };
+  const fallbackCandidate = playerActionCandidateSchema.parse({
+    title: deterministicAct.eventTitle,
+    intent: {
+      kind: "observe",
+      summary: deterministicAct.eventTitle,
+      controlledAct: deterministicAct,
+      targets: [],
+      sceneTransition: { kind: "stay" },
+    },
+    participants: [],
+    preconditions: [],
+    proposedDelta: { version: 1, operations: [] },
+    requiresKnowledge: [],
+    forbidsKnowledge: [],
+  });
+  return {
+    candidate: fallbackCandidate,
+    eventTitle: deterministicAct.eventTitle,
+    actorObservation: deterministicAct.actorObservation,
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error
+    && (error.name === "AbortError" || /\babort(?:ed|ing)?\b/iu.test(error.message));
 }
 
 function playerCandidateTiming(

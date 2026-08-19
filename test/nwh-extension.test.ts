@@ -1052,10 +1052,86 @@ describe("NWH TUI extension", () => {
     )).resolves.toEqual({ action: "handled" });
 
     expect(await engine.branches.readHead("main")).toBe(genesis);
-    expect(sentVisibleMessages.join("\n")).toContain("当前场景和已提交事实保持不变");
+    expect(sentVisibleMessages.join("\n")).toContain("当前场景保持不变");
     expect(sentVisibleMessages.join("\n")).toContain("方才的余波还停在感官里");
     expect(sentVisibleMessages.join("\n")).not.toContain("Action rejected at");
     expect(notifications).toContainEqual(expect.stringContaining("scope/PLAYER_PRECONDITION_UNSATISFIED"));
+  });
+
+  it("keeps an observe/stay choice immersive by committing its safe act when adjudication fails", async () => {
+    const purposes: string[] = [];
+    const turnFrames: string[] = [];
+    const translator: PlayerActionTranslator = () => ({
+      title: "停下来确认传达室方向",
+      intent: {
+        kind: "observe",
+        summary: "停下来，抬眼尝试确认传达室所在的方向",
+        controlledAct: {
+          eventTitle: "福贵停下来抬眼观察",
+          actorObservation: "你停下来，抬眼查看周围。",
+        },
+        desiredEffect: "确认传达室所在的方向",
+        targets: [{ kind: "described", description: "传达室的方向" }],
+        sceneTransition: { kind: "stay" },
+      },
+      participants: [],
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    });
+    const { commands, events, root, sentVisibleMessages } = await fixture(
+      undefined,
+      translator,
+      undefined,
+      async (frame, purpose) => {
+        purposes.push(purpose);
+        if (purpose === "turn") turnFrames.push(JSON.stringify(frame));
+        return purpose === "opening"
+          ? "冷风从门缝里钻进来，你的意识落回眼前。屋檐下的光影正在缓慢移动，远处的声音被墙面折回，方向仍隐在没有看清的细节里。门板深处又传来一声很轻的摩擦。"
+          : "你停在当前的位置，把注意力收回眼前。风声、光影和墙面转角依次进入视野，几处门框的轮廓在明暗之间分开，更远的字迹仍被阴影遮住。走廊尽头，一片窄窄的光斑正落在墙角。";
+      },
+      undefined,
+      undefined,
+      {
+        playerWorldAdjudicator: () => {
+          throw new Error("Expected exactly one valid propose_player_world_resolution call; observed 0.");
+        },
+      },
+    );
+    await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const notifications: string[] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await commands.get("play")!.handler("hero main", ctx as unknown as ExtensionCommandContext);
+    await expect(events.get("input")!(
+      { type: "input", text: "停下来，抬眼确认传达室所在的方向。", source: "interactive" } as InputEvent,
+      ctx,
+    )).resolves.toEqual({ action: "handled" });
+
+    const newHead = await engine.branches.readHead("main");
+    expect(newHead).not.toBe(genesis);
+    expect((await engine.projector.project(newHead)).logicalTime.step).toBe(1);
+    expect(purposes).toEqual(["opening", "turn"]);
+    expect(turnFrames.join("\n")).toContain("你把注意力放回当前场景，仔细观察眼前能够确认的事物。");
+    expect(turnFrames.join("\n")).not.toContain("传达室");
+    expect(sentVisibleMessages.join("\n")).not.toContain("场外提示");
+    expect(sentVisibleMessages.join("\n")).not.toContain("没有形成可验证的新进展");
+    expect(notifications).not.toContainEqual(expect.stringContaining("行动未提交"));
   });
 
   it("routes an LLM-suggested concrete action through translation and deterministic validation", async () => {

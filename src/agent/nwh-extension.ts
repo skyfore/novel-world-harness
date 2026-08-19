@@ -1057,21 +1057,18 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (outcome.auditError) ctx.ui.notify(`Player-turn audit could not be persisted: ${outcome.auditError}`, "warning");
       if (!outcome.result.accepted) {
         const issueCode = outcome.result.issues[0]?.code ?? "UNKNOWN";
-        showPlayMessage("刚才的请求没有形成可验证的新进展，因此没有写入世界；当前场景和已提交事实保持不变。系统会从同一时刻重新给出可执行且能推进场景、关系、计划或任务线程的行动。");
+        showPlayMessage(outcome.result.stage === "adjudication"
+          ? "**场外提示：** 世界裁决暂时未能安全完成。这次意图没有成为世界事件，场景仍停在行动前；你可以直接重试。"
+          : "**场外提示：** 这次输入未能通过世界提交边界，因此没有在剧情中发生；当前场景保持不变。");
         ctx.ui.notify(`行动未提交（${outcome.result.stage}/${issueCode}）；正在从同一场景恢复。`, "warning");
-        const purpose: PlayScenePurpose = outcome.result.stage === "translation" || outcome.result.stage === "scope"
-          ? "recovery"
-          : "blocked";
         await narratePlayerScene(
           ctx,
           selectedPlay,
-          purpose,
+          "recovery",
           {
-            kind: purpose === "blocked" ? "blocked" : "unresolved",
+            kind: "unresolved",
             utterance,
-            actorVisibleSummary: purpose === "blocked"
-              ? "这项意图没有在可确认的当前世界里产生效果；现场仍停留在原有的 committed state。"
-              : "这项请求没有被解释为一个可靠的世界事件；它没有在场景中发生。",
+            actorVisibleSummary: "这项请求没有成为世界事件；角色没有执行它，当前世界仍处于请求之前的已提交时刻。",
           },
           input.fallbackChoices?.length ? input.fallbackChoices : [],
         );

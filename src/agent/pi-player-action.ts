@@ -37,7 +37,7 @@ Security and truth boundaries:
 - Entity and claim IDs are turn-local opaque handles. Use them exactly as supplied; they carry no semantic meaning and are decoded only by the host after capture.
 - Naming a character does not prove physical presence. Include another character as a participant or artifact recipient only for an immediate co-located interaction; the host rejects remote interaction.
 - Submit exactly one propose_player_action tool call. Do not claim success: the host will scope-check, knowledge-check, validate, and commit it.
-- Always fill intent. intent.summary describes the desired immediate act, not its outcome. intent.targets identifies known entities by supplied handles and unknown/open-world referents as described targets. intent.sceneTransition and intent.requestedTimeAdvance are the only way to express scene movement or duration; the host never recovers either by matching words in the utterance.
+- Always fill intent. intent.summary describes the complete desired immediate intent. Split it into controlledAct and, when distinct, desiredEffect. controlledAct.eventTitle states only the immediate act the selected actor can perform regardless of external cooperation; controlledAct.actorObservation states that same act in actor-visible second person without claiming the desired result. desiredEffect records a hoped-for discovery, response, arrival, or world effect that still requires adjudication. intent.targets identifies known entities by supplied handles and unknown/open-world referents as described targets. intent.sceneTransition and intent.requestedTimeAdvance are the only way to express scene movement or duration; the host never recovers either by matching words in the utterance.
 - For a compiled destination, use an entity target and write character.location when that field and destination handle are writable/referenceable. For an uncompiled destination, use a described destination with depart/explore and do not invent an entity ID or location write.
 - proposedDelta contains only immediate effects the actor can directly control. If the player asks for a result whose success depends on world law or another entity, preserve that desire in intent and propose only the actor-controlled part (possibly an empty delta). A separate world adjudicator will decide realization or the actual consequence.
 - Describe the intended immediate transition, not a distant chain of consequences. Include a precondition only when its exact field and current value are present in selfState or ownedEntityState. An absent field is unknown: never invent character.alive, character.location, ownership, or any other positive precondition from identity, prose, genre expectations, or common sense.
@@ -115,6 +115,9 @@ export function createPiPlayerActionTranslator(options: PiPlayerActionTranslator
       }
       if (!candidate.intent) {
         throw new Error("propose_player_action must include a structured intent; the host does not infer semantics from player text.");
+      }
+      if (!candidate.intent.controlledAct) {
+        throw new Error("propose_player_action must separate the actor-controlled act from any desired world effect.");
       }
       return modelBoundary.decodeCandidate(candidate);
     } finally {

@@ -23,7 +23,9 @@ Player execution uses two isolated model proposals followed by one deterministic
 commit boundary:
 
 1. The actor-scoped interpreter proposes a typed `PlayerIntent` and only the
-   immediate state/knowledge effects the actor is authorized to control.
+   immediate state/knowledge effects the actor is authorized to control. It
+   separates the actor's `controlledAct` from any `desiredEffect` that still
+   depends on discovery, another entity, or the surrounding world.
 2. A world adjudicator receives that intent, the relevant current committed
    world state, applicable active rules, and deterministic preview issues. It
    proposes exactly one `PlayerWorldResolution`:
@@ -81,6 +83,21 @@ for technical/model-contract failure, security/capability boundary violation,
 stale concurrency, or a consequence proposal that still fails deterministic
 validation. An auxiliary scene-choice tool failure does not discard otherwise
 valid narration or undo a committed turn.
+
+A missing or malformed world-resolution tool call first receives one retry in a
+fresh isolated adjudication session. If that retry also fails, the host may still
+commit one deliberately narrow fallback: a typed `observe` intent that stays in
+the current scene, has no state or knowledge operations, advances no story time,
+requires no knowledge, and has no deterministic validation issue. The committed
+event uses a host-defined observe/stay primitive, not model-authored copy; the
+unrealized `desiredEffect` remains only in the turn audit. This makes the
+actor-controlled observation available to replay and later character context
+without asserting that the hoped-for discovery occurred.
+
+No other adjudication failure authorizes a synthetic consequence, knowledge
+fact, active rule, or world-state change. Those turns leave the head unchanged
+and re-establish the scene as technical recovery, never as fictional resistance.
+Any unavoidable explanatory message is explicitly marked out of character.
 
 ## Consequences
 

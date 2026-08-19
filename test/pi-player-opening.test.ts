@@ -48,7 +48,31 @@ function frame(): PlayOpeningFrame {
 }
 
 describe("Pi player scene narrator", () => {
-  it("retries an action-menu draft in a fresh isolated session with the full actor frame", async () => {
+  it("keeps valid scene prose when the provider omits the auxiliary choice call", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-opening-no-choices-"));
+    roots.push(root);
+    const narration = "闷热的风贴着走廊缓慢移动，你朝前迈出的脚步把身后的嘈杂一点点推远。墙内断续的说话声听不真切，传达室的方向却比刚才明确了些；鞋底擦过水泥地面时，那声短促的金属碰响又从前方落了下来，近得像有什么刚刚碰上门框。";
+    let created = 0;
+    vi.spyOn(PiAgentSession, "create").mockImplementation(async () => {
+      created += 1;
+      return {
+        abort: async () => undefined,
+        dispose: async () => undefined,
+        promptWithReport: async () => ({ text: narration }) as never,
+      } as unknown as PiAgentSession;
+    });
+    const attempts: number[] = [];
+
+    const result = await createPiPlayerOpeningNarrator({ root })(playerSceneModelFrame(frame()), "turn", {
+      onAttempt: (attempt) => attempts.push(attempt),
+    });
+
+    expect(result).toEqual({ narration, choices: [] });
+    expect(created).toBe(1);
+    expect(attempts).toEqual([1]);
+  });
+
+  it("does not use host language matching to reject an otherwise structural scene draft", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-opening-retry-"));
     roots.push(root);
     const prompts: string[] = [];
@@ -86,25 +110,22 @@ describe("Pi player scene narrator", () => {
     });
 
     expect(result).toMatchObject({
-      narration: drafts[1],
+      narration: drafts[0],
       choices: [
         { action: "贴近门缝，听听外面是谁在走动。" },
         { action: "隔着门喊一句：“谁啊？”" },
       ],
     });
-    expect(created).toBe(2);
-    expect(choiceTools[0]).not.toBe(choiceTools[1]);
-    expect(disposed.sort()).toEqual([0, 1]);
-    expect(attempts).toEqual([1, 2]);
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain("<committed-actor-frame>");
-    expect(prompts[1]).toContain("fresh independent rendering attempt");
-    expect(prompts[1]).toContain("without any action suggestion or decision handoff");
-    expect(prompts[1]).not.toContain("REJECTED_DRAFT_SENTINEL");
+    expect(created).toBe(1);
+    expect(choiceTools).toHaveLength(1);
+    expect(disposed).toEqual([0]);
+    expect(attempts).toEqual([1]);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("<committed-actor-frame>");
     expect(prompts.join("\n")).not.toContain("branch-stable-id");
     expect(prompts.join("\n")).not.toContain("commit-stable-id");
     expect(prompts.join("\n")).not.toContain("hero-stable-id");
-    expect(prompts[1]).toContain("concrete thing the actor could do now");
-    expect(prompts[1]).not.toContain("aff-observe");
+    expect(prompts[0]).toContain("concrete thing the actor could do now");
+    expect(prompts[0]).not.toContain("aff-observe");
   });
 });

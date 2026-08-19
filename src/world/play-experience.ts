@@ -1,4 +1,4 @@
-import type { PlayerActionTranslator, PlayerTurnResult } from "./player-action.js";
+import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "./player-action.js";
 import { PlayerTurnService } from "./player-action.js";
 import type { Entity } from "./model.js";
 import { PlaySessionStore, type ActivePlaySession } from "./play-session.js";
@@ -224,6 +224,7 @@ export async function performPlayTurn(options: {
   actorId: string;
   utterance: string;
   translator: PlayerActionTranslator;
+  adjudicator?: PlayerWorldAdjudicator;
   advanceBackground?: number;
   origin?: PlayerTurnOrigin;
   intent?: "act" | "observe" | "reflect" | "wait";
@@ -284,6 +285,7 @@ export async function performPlayTurn(options: {
     undefined,
     (proposal) => runtime.resolveEligibleCanonicalEvents(proposal),
     options.beforeCommit,
+    options.adjudicator,
   );
   const result = await turns.turn({
     branchId: options.branchId,
@@ -349,7 +351,9 @@ export async function performPlayTurn(options: {
       stage: result.stage,
       accepted: result.accepted,
       issues: structuredClone(result.issues),
+      ...(result.intendedCandidate ? { intendedCandidate: structuredClone(result.intendedCandidate) } : {}),
       ...(result.candidate ? { candidate: structuredClone(result.candidate) } : {}),
+      ...(result.adjudication ? { adjudication: structuredClone(result.adjudication) } : {}),
       ...(result.proposal ? { proposal: structuredClone(result.proposal) } : {}),
       ...(result.validation ? { validation: structuredClone(result.validation) } : {}),
       ...(result.eventHash ? { eventHash: result.eventHash } : {}),

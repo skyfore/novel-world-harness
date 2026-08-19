@@ -35,7 +35,7 @@ The governing invariant is:
 proposal -> validate -> commit -> render
 ```
 
-See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
+See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [ADR 0004](docs/adr/0004-model-first-player-intent-and-world-adjudication.md) for model-first player intent and world consequences, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
 
 ## Install
 

@@ -139,6 +139,12 @@ async function fixture() {
 function moveToCamp(): PlayerActionCandidate {
   return {
     title: "Hero walks from the Hall to Camp",
+    intent: {
+      kind: "act",
+      summary: "Walk from the Hall to Camp",
+      targets: [{ kind: "entity", entityId: "camp" }],
+      sceneTransition: { kind: "arrive", destination: { kind: "entity", entityId: "camp" } },
+    },
     participants: ["camp"],
     preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
     proposedDelta: {
@@ -208,6 +214,12 @@ describe("actor-scoped player action context", () => {
     const campHandle = entities.find((entity) => entity.name === "Camp")!.id;
     const decoded = boundary.decodeCandidate({
       title: "Hero walks from the Hall to Camp",
+      intent: {
+        kind: "act",
+        summary: "Walk from the Hall to Camp",
+        targets: [{ kind: "entity", entityId: campHandle }],
+        sceneTransition: { kind: "arrive", destination: { kind: "entity", entityId: campHandle } },
+      },
       participants: [campHandle],
       preconditions: [{ op: "fact-equals", entityId: actorHandle, field: "character.location", value: hallHandle }],
       proposedDelta: {
@@ -353,6 +365,35 @@ describe("PlayerTurnService", () => {
     expect(observedContext).not.toContain("future-ambush");
   });
 
+  it("realizes an ordinary typed intent through world adjudication before commitment", async () => {
+    const { engine } = await fixture();
+    const service = new PlayerTurnService(
+      engine,
+      () => moveToCamp(),
+      undefined,
+      undefined,
+      undefined,
+      (input) => {
+        expect(input.world.deterministicIssues).toEqual([]);
+        expect(input.world.entities.map((entity) => entity.id)).toEqual(expect.arrayContaining(["hero", "camp"]));
+        return {
+          decision: "realize",
+          status: "succeeded",
+          eventTitle: "Hero reaches Camp",
+          actorObservation: "The Hall falls behind you as Camp opens ahead.",
+        };
+      },
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "Head for Camp." });
+
+    expect(result.accepted).toBe(true);
+    expect(result.adjudication).toMatchObject({ decision: "realize", status: "succeeded" });
+    expect(result.proposal?.title).toBe("Hero reaches Camp");
+    expect(result.proposal?.progress?.outcome).toBe("succeeded");
+    expect((await engine.projector.project(result.newHead)).values.hero?.["character.location"]).toBe("camp");
+  });
+
   it("validates the player renderer result and detects branch mutation", async () => {
     const invalidFixture = await fixture();
     const invalidRender = (() => ({ text: "not a string" })) as unknown as NonNullable<ConstructorParameters<typeof PlayerTurnService>[2]>;
@@ -380,7 +421,7 @@ describe("PlayerTurnService", () => {
     await mutationFixture.engine.branches.updateHead("main", foreignHead, committedHead);
   });
 
-  it("preserves the story-time anchor but rejects a repeated perception beat that would loop", async () => {
+  it("preserves the story-time anchor and lets repeated perception become a new world beat", async () => {
     const { engine, head } = await fixture();
     const anchored = await engine.commitProposal({
       proposalId: "anchor-1950",
@@ -398,6 +439,7 @@ describe("PlayerTurnService", () => {
     expect(anchored.report.accepted).toBe(true);
     const service = new PlayerTurnService(engine, () => ({
       title: "Hero observes",
+      intent: { kind: "observe", summary: "Observe the current scene", targets: [], sceneTransition: { kind: "stay" } },
       participants: [],
       preconditions: [],
       proposedDelta: { version: 1, operations: [] },
@@ -408,9 +450,9 @@ describe("PlayerTurnService", () => {
     const second = await service.turn({ branchId: "main", actorId: "hero", utterance: "Observe again." });
     expect(first.accepted).toBe(true);
     expect(first.progressCertificate?.channels).toContain("scene");
-    expect(second.accepted).toBe(false);
-    expect(second.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_ACTION_REPEATS_NO_PROGRESS" }));
-    expect(second.newHead).toBe(first.newHead);
+    expect(second.accepted).toBe(true);
+    expect(second.newHead).not.toBe(first.newHead);
+    expect(second.proposal?.progress?.noveltyKey).not.toBe(first.proposal?.progress?.noveltyKey);
     expect(first.proposal?.proposedTime).toEqual({ kind: "exact", value: "1950", precision: "year" });
     expect(second.proposal?.proposedTime).toEqual({ kind: "exact", value: "1950", precision: "year" });
   });
@@ -432,7 +474,7 @@ describe("PlayerTurnService", () => {
     });
     expect(anchored.report.accepted).toBe(true);
     const service = new PlayerTurnService(engine, ({ context }) =>
-      deterministicPlayerIntentCandidate("wait", { utterance: "等待1年", context }));
+      deterministicPlayerIntentCandidate("wait", { utterance: "等待1年", context }, { amount: 1, unit: "year" }));
 
     const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "等待1年" });
 
@@ -476,12 +518,15 @@ describe("PlayerTurnService", () => {
     const { engine } = await fixture();
     const service = new PlayerTurnService(engine, () => ({
       title: "Hero walks out toward the street",
-      participants: ["uncompiled-street"],
-      preconditions: [],
-      proposedDelta: {
-        version: 1,
-        operations: [{ op: "set", entityId: "hero", field: "character.location", value: "uncompiled-street" }],
+      intent: {
+        kind: "act",
+        summary: "Walk out toward the street",
+        targets: [{ kind: "described", description: "街上" }],
+        sceneTransition: { kind: "depart", destination: { kind: "described", description: "街上" } },
       },
+      participants: [],
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
       requiresKnowledge: [],
       forbidsKnowledge: [],
     }));
@@ -489,14 +534,166 @@ describe("PlayerTurnService", () => {
     const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "我出门去街上走走。" });
 
     expect(result.accepted).toBe(true);
-    expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_DESTINATION_GENERALIZED" }));
+    expect(result.issues).toEqual([]);
     expect(result.proposal?.proposedDelta.operations).toEqual([]);
     expect(result.progressCertificate).toMatchObject({ sceneChanged: true, effectiveStateOperations: 0 });
-    expect(result.proposal?.progress?.scene).toMatchObject({ kind: "depart", label: "街上" });
+    expect(result.proposal?.progress?.scene).toMatchObject({ kind: "depart", label: "街上", sceneId: expect.stringMatching(/^open-/) });
     const scene = await projectActorScene(engine, "hero", result.newHead);
     expect(scene.locationId).toBeUndefined();
     expect(scene.label).toBe("街上");
     expect(scene.presentEntityIds).toEqual(["hero"]);
+  });
+
+  it("uses typed scene intent instead of matching destination words in any language", async () => {
+    const { engine } = await fixture();
+    const service = new PlayerTurnService(engine, () => ({
+      title: "Hero walks toward the reception room",
+      intent: {
+        kind: "act",
+        summary: "Approach the reception room",
+        targets: [{ kind: "described", description: "传达室" }],
+        sceneTransition: { kind: "explore", destination: { kind: "described", description: "传达室" } },
+      },
+      participants: [],
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      requiresKnowledge: [],
+      forbidsKnowledge: [],
+    }));
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "Proceed with it." });
+
+    expect(result.accepted).toBe(true);
+    expect(result.issues).toEqual([]);
+    expect(result.proposal?.progress?.scene).toMatchObject({ kind: "explore", label: "传达室", sceneId: expect.stringMatching(/^open-/) });
+    const scene = await projectActorScene(engine, "hero", result.newHead);
+    expect(scene.label).toBe("传达室");
+  });
+
+  it("commits an LLM-proposed in-world consequence when a desired result directly contradicts world state", async () => {
+    const { engine, head } = await fixture();
+    const death = await engine.commitProposal({
+      proposalId: "mo-yan-dies",
+      branchId: "main",
+      expectedParentCommit: head,
+      source: "background",
+      title: "墨砚停止了呼吸",
+      actorObservations: [{ actorId: "hero", summary: "墨砚的呼吸停了，身体再没有回应。" }],
+      participants: ["hero", "mo-yan"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "mo-yan", field: "character.alive", value: false }],
+      },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(death.report.accepted).toBe(true);
+    let adjudicated = false;
+    const service = new PlayerTurnService(
+      engine,
+      () => ({
+        title: "尝试让墨砚复活",
+        intent: {
+          kind: "act",
+          summary: "立刻让已经死亡的墨砚恢复生命",
+          targets: [{ kind: "entity", entityId: "mo-yan" }],
+        },
+        participants: [],
+        preconditions: [],
+        proposedDelta: { version: 1, operations: [] },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+      undefined,
+      undefined,
+      undefined,
+      (input) => {
+        adjudicated = true;
+        expect(input.world.entities.find((entity) => entity.id === "mo-yan")?.state["character.alive"]).toBe(false);
+        expect(JSON.stringify(input.world)).not.toContain("future-ambush");
+        return {
+          decision: "transform",
+          status: "blocked",
+          contradiction: {
+            kind: "capability",
+            summary: "当前世界没有能以普通行动逆转死亡的能力。",
+            basis: [
+              { source: "state", entityId: "mo-yan", field: "character.alive" },
+              { source: "causal-principle", principle: "普通人的即时行动不能让死亡者恢复生命。" },
+            ],
+          },
+          replacement: {
+            title: "徒劳的急救",
+            intent: {
+              kind: "act",
+              summary: "跪下反复施救，却只能确认墨砚没有生命反应",
+              targets: [{ kind: "entity", entityId: "mo-yan" }],
+            },
+            participants: [],
+            preconditions: [],
+            proposedDelta: { version: 1, operations: [] },
+            requiresKnowledge: [],
+            forbidsKnowledge: [],
+          },
+          eventTitle: "徒劳的急救没有唤回墨砚",
+          actorObservation: "你一遍遍按压、呼喊，掌下的身体依旧冰冷而沉默。",
+        };
+      },
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "我要复活墨砚。" });
+
+    expect(adjudicated).toBe(true);
+    expect(result.accepted).toBe(true);
+    expect(result.adjudication).toMatchObject({ decision: "transform", status: "blocked" });
+    expect(result.proposal?.title).toBe("徒劳的急救没有唤回墨砚");
+    expect(result.proposal?.actorObservations).toEqual([{
+      actorId: "hero",
+      summary: "你一遍遍按压、呼喊，掌下的身体依旧冰冷而沉默。",
+    }]);
+    expect(result.proposal?.progress).toMatchObject({ outcome: "blocked", channels: expect.arrayContaining(["consequence"]) });
+    expect(result.renderedText).toContain("掌下的身体依旧冰冷而沉默");
+    expect((await engine.projector.project(result.newHead)).values["mo-yan"]?.["character.alive"]).toBe(false);
+  });
+
+  it("refuses an ungrounded transform certificate instead of letting adjudication invent a contradiction", async () => {
+    const { engine, head } = await fixture();
+    const service = new PlayerTurnService(
+      engine,
+      () => moveToCamp(),
+      undefined,
+      undefined,
+      undefined,
+      () => ({
+        decision: "transform",
+        status: "blocked",
+        contradiction: {
+          kind: "state",
+          summary: "Invented blocker",
+          basis: [{ source: "state", entityId: "hero", field: "character.nonexistent" }],
+        },
+        replacement: {
+          title: "Nothing happens",
+          intent: { kind: "act", summary: "Nothing happens", targets: [] },
+          participants: [],
+          preconditions: [],
+          proposedDelta: { version: 1, operations: [] },
+          requiresKnowledge: [],
+          forbidsKnowledge: [],
+        },
+        eventTitle: "Nothing happens",
+        actorObservation: "Nothing changes.",
+      }),
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "Walk to Camp." });
+
+    expect(result.accepted).toBe(false);
+    expect(result.stage).toBe("adjudication");
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_WORLD_CONTRADICTION_UNGROUNDED" }));
+    expect(await engine.branches.readHead("main")).toBe(head);
   });
 
   it("allows an actor-owned artifact to be transferred to an explicitly named character", async () => {

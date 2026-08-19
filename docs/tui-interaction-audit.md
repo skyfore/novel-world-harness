@@ -121,13 +121,17 @@ actions through the existing AskUserQuestion interaction.
 actor-safe corpus and one mutation-free capture tool,
 `propose_player_choices`. It returns 2-4 immediate actor-visible actions or
 exact spoken lines shaped by the actor's current effective disposition and
-committed development. The strict choice contract rejects system/meta language,
-abstract relationship/branch directions, and duplicate choices. The TUI presents
-only the action/line itself (no internal rationale or unvalidated recommendation)
-plus free-form input. If narration or choice capture fails, the TUI keeps the
-free-form path instead of substituting hollow host templates. Choosing an option
-schedules its utterance through the same restricted translator, scope/knowledge
-checks, engine validation, and commit path as typed player input.
+committed development. The structural choice contract enforces only action-only
+object shape, bounded count/length, and duplicate removal; behavioral semantics
+remain the isolated model's responsibility rather than a Chinese/English phrase
+list in host code. The TUI presents only the action/line itself (no internal
+rationale or unvalidated recommendation) plus free-form input. Narration and choice capture settle independently: valid
+scene prose is committed to the transcript even when the provider omits or
+malforms the choice call, and the TUI keeps the free-form path instead of
+interrupting play or substituting hollow host templates. Choosing an option
+schedules its utterance through the same restricted typed interpreter,
+current-world adjudicator, scope/knowledge checks, engine validation, and commit
+path as typed player input.
 
 The prose and choice channels are also separate. The narrator may end on a
 concrete current fact, sensation, motion, spoken cue, or unresolved signal, but

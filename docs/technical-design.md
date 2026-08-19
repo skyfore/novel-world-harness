@@ -3,7 +3,7 @@
 - **Status:** Proposed implementation blueprint
 - **Date:** 2026-08-11
 - **Applies to:** Phase 1–3 world compiler/runtime work
-- **Architecture decisions:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
+- **Architecture decisions:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0003](adr/0003-world-time-character-development-and-divergence.md), [ADR 0004](adr/0004-model-first-player-intent-and-world-adjudication.md)
 
 ## 1. Purpose
 
@@ -1206,8 +1206,8 @@ The semantic core and typed compiler proposal boundary now exist. The next miles
 
 1. check in one annotated end-to-end novel slice and expose its compiler evaluation as a repeatable command;
 2. orchestrate ingest, bounded compile, proposal review summary, audit, and branch creation without bypassing explicit acceptance;
-3. translate a natural-language player action into a pending typed event proposal using only the actor-scoped view;
-4. add an interactive character session that shows perception, validation results, committed consequences, and the next prompt;
+3. evaluate the actor-scoped intent interpreter and current-world adjudicator on multilingual paraphrases, open destinations, direct contradictions, and impossible desired effects without adding host phrase lists;
+4. broaden narrow typed consequence capabilities for physical and social effects only where corpus failures show that committed event progress is insufficient;
 5. connect one Pi-backed actor reasoner behind the opaque `ActorReasoningInput` projection (actor-visible state/knowledge, one active goal, active disposition, and committed development);
 6. connect one Pi-backed narrative adapter behind the immutable `NarrativeFrame` contract;
 7. measure epistemic leakage, event/state-delta fidelity, divergence durability, and narrative quality on several genres;

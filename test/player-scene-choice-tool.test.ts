@@ -24,47 +24,35 @@ describe("player scene choice capture tool", () => {
     expect(capture.getChoices()).toHaveLength(2);
   });
 
-  it("rejects undersized, duplicate, meta, and abstract choice sets", async () => {
-    const capture = createPlayerSceneChoiceCaptureTool();
-    await expect(capture.tool.execute("choices-1", {
+  it("enforces only structural size, shape, and distinctness independent of language", async () => {
+    await expect(createPlayerSceneChoiceCaptureTool().tool.execute("choices-1", {
       choices: [{ action: "走到窗边看看。" }],
     }, undefined, undefined, {} as never)).rejects.toThrow();
-    await expect(capture.tool.execute("choices-2", { choices: [] }, undefined, undefined, {} as never)).rejects.toThrow();
-    await expect(capture.tool.execute("choices-3", {
+    await expect(createPlayerSceneChoiceCaptureTool().tool.execute("choices-2", { choices: [] }, undefined, undefined, {} as never)).rejects.toThrow();
+    const semanticCopy = createPlayerSceneChoiceCaptureTool();
+    await expect(semanticCopy.tool.execute("choices-3", {
       choices: [
         { action: "离开原地寻找新接触点" },
-        { action: "观察门外的动静。" },
+        { action: "看看系统给了什么选项。" },
       ],
-    }, undefined, undefined, {} as never)).rejects.toThrow("concrete immediate act");
-    await expect(capture.tool.execute("choices-4", {
+    }, undefined, undefined, {} as never)).resolves.toBeDefined();
+    await expect(createPlayerSceneChoiceCaptureTool().tool.execute("choices-4", {
       choices: [
         { action: "观察门外的动静。" },
         { action: "观察门外的动静!" },
       ],
     }, undefined, undefined, {} as never)).rejects.toThrow("distinct");
-    await expect(capture.tool.execute("choices-5", {
-      choices: [
-        { action: "看看系统给了什么选项。" },
-        { action: "走到门边听声音。" },
-      ],
-    }, undefined, undefined, {} as never)).rejects.toThrow("stay in character");
-    await expect(capture.tool.execute("choices-6", {
+    await expect(createPlayerSceneChoiceCaptureTool().tool.execute("choices-6", {
       choices: [
         { action: "走到门边听声音。", intent: "observe" },
         { action: "敲两下门板。", intent: "act" },
       ],
     }, undefined, undefined, {} as never)).rejects.toThrow("Unrecognized key");
-    await expect(capture.tool.execute("choices-7", {
-      choices: [
-        { action: "考虑下一步该怎么做。" },
-        { action: "敲两下门板。" },
-      ],
-    }, undefined, undefined, {} as never)).rejects.toThrow("concrete immediate act");
-    await expect(capture.tool.execute("choices-8", {
+    await expect(createPlayerSceneChoiceCaptureTool().tool.execute("choices-8", {
       choices: [
         { action: "我把与老唐之间现有的关系作为眼下要处理的事情，先确定一种符合当前处境的接触方式。" },
         { action: "我离开原地，到附近走动，并主动寻找能让当前局势产生变化的人、事或线索。" },
       ],
-    }, undefined, undefined, {} as never)).rejects.toThrow("concrete immediate act");
+    }, undefined, undefined, {} as never)).resolves.toBeDefined();
   });
 });

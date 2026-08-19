@@ -2,15 +2,16 @@ import type { PlayOpeningFrame } from "./play-opening.js";
 
 export type PlayerInputRoute = "in-world" | "meta";
 
-const EXPLICIT_META_PREFIX = /^(?:\/?ooc\s*[:：]|场外\s*[:：]|系统\s*[:：]|元问题\s*[:：])/iu;
-const META_STATUS_PATTERN = /(?:当前时间线|时间线.*(?:哪里|什么|何时)|小说(?:刚)?开头|原作(?:第几|哪一).{0,4}(?:章|段|阶段)|现在是第几.{0,3}(?:章|回)|当前(?:存档|提交|commit|分支|世界状态)|系统为什么|为什么(?:不能|无法).{0,12}(?:继续|行动|选择)|what\s+(?:chapter|timeline)|current\s+(?:timeline|commit|branch)|is\s+this\s+the\s+beginning)/iu;
-
-/** Ordinary role-play remains in-world. Only explicit or strongly system-level
- * wording is intercepted, so a character can still ask another person what
- * time it is without accidentally leaving the fiction. */
+/** World text is never semantically classified by host code. Leaving the
+ * fiction is an explicit UI protocol (`/ooc`), independent of language. */
 export function classifyPlayerInput(value: string): PlayerInputRoute {
   const text = value.normalize("NFKC").trim();
-  return EXPLICIT_META_PREFIX.test(text) || META_STATUS_PATTERN.test(text) ? "meta" : "in-world";
+  const lower = text.toLocaleLowerCase();
+  return lower === "/ooc"
+    || lower.startsWith("/ooc ")
+    || lower.startsWith("/ooc:")
+    ? "meta"
+    : "in-world";
 }
 
 export function renderPlayerMetaResponse(frame: PlayOpeningFrame, question: string): string {

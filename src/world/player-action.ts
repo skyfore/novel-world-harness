@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { commitKnowledgeAwareAction, type KnowledgeAwareAction } from "./action-gate.js";
+import { commitKnowledgeAwareAction, validateActionKnowledge, type KnowledgeAwareAction } from "./action-gate.js";
 import { contentHash } from "./canonical.js";
-import type { WorldEngine } from "./engine.js";
+import { validateEventProposal, type WorldEngine, type WorldModelContext } from "./engine.js";
 import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import {
   claimSchema,
@@ -15,9 +15,11 @@ import {
   stateDeltaSchema,
   stateFieldSpecSchema,
   stateValueSchema,
+  timeAdvanceSchema,
   type CommitId,
   type Entity,
   type EntityId,
+  type EventOutcomeStatus,
   type EventProposal,
   type NarrativeProgress,
   type ProgressChannel,
@@ -28,12 +30,14 @@ import {
   type StateValue,
   type ValidationIssue,
   type ValidationReport,
+  type WorldState,
 } from "./model.js";
 import { NarrativeRenderer } from "./narrative.js";
 import type { CanonicalChoiceResolution } from "./runtime.js";
-import { committedHistory, projectActorScene } from "./scene.js";
+import { projectActorScene } from "./scene.js";
 import { advanceStoryTime } from "./time.js";
 import { projectActorVisibleState } from "./actor-visible.js";
+import { evaluatePredicate } from "./state.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { deepFreeze, immutableClone } from "../util/immutable.js";
 
@@ -42,9 +46,51 @@ import { deepFreeze, immutableClone } from "../util/immutable.js";
  * EventProposal field. The host supplies identity, branch/head, source, actor,
  * time, causal ancestry, and evidence after this candidate is captured.
  */
+export const playerIntentTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("entity"), entityId: idSchema }).strict(),
+  z.object({ kind: z.literal("described"), description: z.string().trim().min(1).max(240) }).strict(),
+]);
+export type PlayerIntentTarget = z.infer<typeof playerIntentTargetSchema>;
+
+export const playerIntentSceneTransitionSchema = z
+  .object({
+    kind: z.enum(["stay", "depart", "arrive", "explore"]),
+    destination: playerIntentTargetSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.kind === "arrive" && value.destination?.kind !== "entity") {
+      ctx.addIssue({ code: "custom", message: "Arrival requires a compiled location entity; use depart/explore for a described open destination", path: ["destination"] });
+    }
+    if (value.kind === "stay" && value.destination) {
+      ctx.addIssue({ code: "custom", message: "A stay transition cannot name a destination", path: ["destination"] });
+    }
+  });
+export type PlayerIntentSceneTransition = z.infer<typeof playerIntentSceneTransitionSchema>;
+
+/**
+ * Language-neutral semantic intent proposed by the interpreter. `summary` is
+ * explanatory data for another model, never an authority-bearing world fact.
+ * Engine-relevant effects are represented by typed targets, scene movement,
+ * time and the candidate deltas rather than by matching words in the player's
+ * utterance.
+ */
+export const playerIntentSchema = z
+  .object({
+    kind: z.enum(["act", "observe", "reflect", "wait"]),
+    summary: z.string().trim().min(1).max(1_000),
+    targets: z.array(playerIntentTargetSchema).max(32).default([]),
+    sceneTransition: playerIntentSceneTransitionSchema.optional(),
+    requestedTimeAdvance: timeAdvanceSchema.optional(),
+  })
+  .strict();
+export type PlayerIntent = z.infer<typeof playerIntentSchema>;
+
 export const playerActionCandidateSchema = z
   .object({
     title: z.string().trim().min(1).max(500),
+    /** Optional only for host/test compatibility; model adapters require it. */
+    intent: playerIntentSchema.optional(),
     participants: z.array(idSchema).default([]),
     preconditions: z.array(predicateSchema).default([]),
     proposedDelta: stateDeltaSchema,
@@ -54,6 +100,84 @@ export const playerActionCandidateSchema = z
   })
   .strict();
 export type PlayerActionCandidate = z.infer<typeof playerActionCandidateSchema>;
+
+const playerWorldEventCopySchema = z.object({
+  eventTitle: z.string().trim().min(1).max(500),
+  actorObservation: z.string().trim().min(1).max(1_000),
+}).strict();
+
+export const playerContradictionBasisSchema = z.discriminatedUnion("source", [
+  z.object({
+    source: z.literal("state"),
+    entityId: idSchema,
+    field: z.string().trim().min(1).max(240),
+  }).strict(),
+  z.object({
+    source: z.literal("active-rule"),
+    name: z.string().trim().min(1).max(500),
+  }).strict(),
+  z.object({
+    source: z.literal("deterministic-issue"),
+    code: z.string().trim().min(1).max(240),
+  }).strict(),
+  z.object({
+    source: z.literal("causal-principle"),
+    principle: z.string().trim().min(1).max(1_000),
+  }).strict(),
+]);
+export type PlayerContradictionBasis = z.infer<typeof playerContradictionBasisSchema>;
+
+export const playerWorldResolutionSchema = z.discriminatedUnion("decision", [
+  playerWorldEventCopySchema.extend({
+    decision: z.literal("realize"),
+    status: z.literal("succeeded"),
+  }).strict(),
+  playerWorldEventCopySchema.extend({
+    decision: z.literal("transform"),
+    status: z.enum(["partial", "blocked", "interrupted"]),
+    contradiction: z.object({
+      kind: z.enum(["state", "world-rule", "causality", "capability", "spatial", "knowledge"]),
+      summary: z.string().trim().min(1).max(1_000),
+      basis: z.array(playerContradictionBasisSchema).min(1).max(16),
+    }).strict(),
+    replacement: playerActionCandidateSchema,
+  }).strict(),
+]);
+export type PlayerWorldResolution = z.infer<typeof playerWorldResolutionSchema>;
+
+export type PlayerWorldAdjudicationContext = Readonly<{
+  entities: Array<{
+    id: EntityId;
+    kind: z.infer<typeof entityKindSchema>;
+    name: string;
+    state: Readonly<Record<string, StateValue>>;
+  }>;
+  activeRules: Array<{
+    name: string;
+    scope: "global" | "entity" | "location" | "faction" | "institution";
+    appliesWhen: Predicate[];
+    requires: Predicate[];
+    forbids: Predicate[];
+  }>;
+  scene: {
+    label?: string;
+    locationId?: EntityId;
+    presentEntityIds: EntityId[];
+  };
+  deterministicIssues: ValidationIssue[];
+}>;
+
+export type PlayerWorldAdjudicationInput = Readonly<{
+  utterance: string;
+  candidate: PlayerActionCandidate;
+  actorContext: PlayerActionTranslationContext;
+  world: PlayerWorldAdjudicationContext;
+}>;
+
+/** A world model may resolve an intent, but it still returns only a proposal. */
+export type PlayerWorldAdjudicator = (
+  input: PlayerWorldAdjudicationInput,
+) => Promise<unknown> | unknown;
 
 const actorScopedClaimSchema = claimSchema.omit({ evidence: true });
 const actorScopedKnowledgeSchema = z
@@ -132,14 +256,13 @@ export type PlayerActionTranslationInput = Readonly<{
 export type SafePlayerIntent = "observe" | "reflect" | "wait";
 
 /**
- * Convert a narrow host-owned intent without asking a model to invent state
- * predicates. The progress gate still decides whether the current scene can
- * support it; for example, unpressured waiting is rejected instead of becoming
- * an endless empty commit.
+ * Convert an already-typed host affordance without asking a model to recover
+ * semantics from its display text. Free-form input never uses this shortcut.
  */
 export function deterministicPlayerIntentCandidate(
   intent: SafePlayerIntent,
   input: PlayerActionTranslationInput,
+  requestedTimeAdvance?: TimeAdvance,
 ): PlayerActionCandidate {
   const titles: Record<SafePlayerIntent, string> = {
     observe: "观察当前场景",
@@ -148,6 +271,15 @@ export function deterministicPlayerIntentCandidate(
   };
   return playerActionCandidateSchema.parse({
     title: titles[intent],
+    intent: {
+      kind: intent,
+      summary: titles[intent],
+      targets: [],
+      ...(intent === "observe" ? { sceneTransition: { kind: "stay" } } : {}),
+      ...(intent === "wait"
+        ? { requestedTimeAdvance: requestedTimeAdvance ?? { amount: 5, unit: "minute" } }
+        : {}),
+    },
     participants: input.context.presentEntities
       .map((entity) => entity.id)
       .filter((entityId) => entityId !== input.context.actorId),
@@ -188,6 +320,12 @@ export function playerActionTranslationContext(
 
 export type PlayerActionModelBoundary = {
   context: Record<string, unknown>;
+  encodeEntityId(entityId: string): string;
+  encodeClaimId(claimId: string): string;
+  encodeState(values: Readonly<Record<string, StateValue>>): Record<string, unknown>;
+  encodePredicate(predicate: Predicate): Predicate;
+  encodeCandidate(candidate: PlayerActionCandidate): PlayerActionCandidate;
+  decodeEntityId(entityId: string): string;
   decodeCandidate(candidate: PlayerActionCandidate): PlayerActionCandidate;
 };
 
@@ -223,7 +361,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
   const reverseClaims = new Map<string, string>([...claimHandles].map(([id, handle]) => [handle, id]));
   const writableFields = new Map(context.writableStateFields.map((field) => [field.key, field]));
   const entityHandle = (id: string): string => entityHandles.get(id) ?? id;
+  const scopedEntityHandle = (id: string): string => entityHandles.get(id) ?? "entity-unavailable";
   const claimHandle = (id: string): string => claimHandles.get(id) ?? id;
+  const scopedClaimHandle = (id: string): string => claimHandles.get(id) ?? "claim-unavailable";
   const mapEntityRefs = (value: unknown, depth = 0): unknown => {
     if (typeof value === "string") return entityHandle(value);
     if (depth >= 8) return "[nested data omitted]";
@@ -234,6 +374,63 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
   };
   const mapState = (values: Readonly<Record<string, unknown>>): Record<string, unknown> =>
     Object.fromEntries(Object.entries(values).map(([field, value]) => [field, mapEntityRefs(value)]));
+  const encodePredicate = (predicate: Predicate): Predicate => {
+    const encoded = structuredClone(predicate) as Record<string, unknown>;
+    if ((encoded.op === "all" || encoded.op === "any") && Array.isArray(encoded.items)) {
+      encoded.items = encoded.items.map((item) => encodePredicate(item as Predicate));
+      return encoded as Predicate;
+    }
+    if (encoded.op === "not" && encoded.item && typeof encoded.item === "object") {
+      encoded.item = encodePredicate(encoded.item as Predicate);
+      return encoded as Predicate;
+    }
+    if (typeof encoded.entityId === "string") encoded.entityId = scopedEntityHandle(encoded.entityId);
+    if (typeof encoded.member === "string") encoded.member = scopedEntityHandle(encoded.member);
+    if (typeof encoded.ruleId === "string") encoded.ruleId = "rule-opaque";
+    if (encoded.time && typeof encoded.time === "object" && !Array.isArray(encoded.time)) {
+      const time = encoded.time as Record<string, unknown>;
+      if (typeof time.anchorEventId === "string") time.anchorEventId = "event-opaque";
+    }
+    if ("value" in encoded) encoded.value = mapEntityRefs(encoded.value);
+    return encoded as Predicate;
+  };
+  const encodeCandidate = (candidateInput: PlayerActionCandidate): PlayerActionCandidate => {
+    const candidate = structuredClone(playerActionCandidateSchema.parse(candidateInput));
+    candidate.participants = candidate.participants.map(scopedEntityHandle);
+    candidate.preconditions = candidate.preconditions.map(encodePredicate);
+    candidate.proposedDelta.operations = candidate.proposedDelta.operations.map((operation) => {
+      const encoded = structuredClone(operation) as Record<string, unknown>;
+      if (typeof encoded.entityId === "string") encoded.entityId = scopedEntityHandle(encoded.entityId);
+      if (typeof encoded.member === "string") encoded.member = scopedEntityHandle(encoded.member);
+      if ("value" in encoded) encoded.value = mapEntityRefs(encoded.value);
+      return encoded as never;
+    });
+    if (candidate.proposedKnowledge) {
+      candidate.proposedKnowledge.operations = candidate.proposedKnowledge.operations.map((operation) => ({
+        ...operation,
+        actorId: scopedEntityHandle(operation.actorId),
+        claimId: scopedClaimHandle(operation.claimId),
+        ...(operation.op === "learn" && operation.sourceActorId
+          ? { sourceActorId: scopedEntityHandle(operation.sourceActorId) }
+          : {}),
+      }));
+    }
+    candidate.requiresKnowledge = candidate.requiresKnowledge.map(scopedClaimHandle);
+    candidate.forbidsKnowledge = candidate.forbidsKnowledge.map(scopedClaimHandle);
+    if (candidate.intent) {
+      candidate.intent.targets = candidate.intent.targets.map((target) => target.kind === "entity"
+        ? { ...target, entityId: scopedEntityHandle(target.entityId) }
+        : target);
+      const destination = candidate.intent.sceneTransition?.destination;
+      if (destination?.kind === "entity") {
+        candidate.intent.sceneTransition = {
+          kind: candidate.intent.sceneTransition!.kind,
+          destination: { ...destination, entityId: scopedEntityHandle(destination.entityId) },
+        };
+      }
+    }
+    return playerActionCandidateSchema.parse(candidate);
+  };
   const modelContext: Record<string, unknown> = {
     actorId: entityHandle(context.actorId),
     selfState: mapState(context.selfState),
@@ -267,11 +464,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
     recentVisibleEvents: context.recentVisibleEvents.map((event) => ({ summary: event.summary })),
     activeThreads: structuredClone(context.activeThreads),
   };
-  // Unknown labels must remain available for the open-world movement
-  // normalizer, but a model must not bypass the handle boundary by guessing
-  // an admitted stable ID. Replace such guesses with an ID that is guaranteed
-  // not to be one of the admitted entities/claims so the deterministic scope
-  // gate rejects it.
+  // Described targets remain ordinary text data. A model must not bypass the
+  // handle boundary by guessing an admitted stable ID, so unknown ID-shaped
+  // references are decoded to a value the deterministic scope gate rejects.
   let invalidEntityHandle = "invalid-model-entity-handle";
   while (entityIds.has(invalidEntityHandle)) invalidEntityHandle += "-x";
   const knownClaimIds = new Set(claimHandles.keys());
@@ -308,6 +503,12 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
   };
   return {
     context: modelContext,
+    encodeEntityId: scopedEntityHandle,
+    encodeClaimId: scopedClaimHandle,
+    encodeState: (values) => mapState(values),
+    encodePredicate,
+    encodeCandidate,
+    decodeEntityId: decodeEntity,
     decodeCandidate(candidateInput) {
       const candidate = structuredClone(candidateInput) as PlayerActionCandidate;
       candidate.participants = candidate.participants.map(decodeEntity);
@@ -334,6 +535,18 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
       }
       candidate.requiresKnowledge = candidate.requiresKnowledge.map(decodeClaim);
       candidate.forbidsKnowledge = candidate.forbidsKnowledge.map(decodeClaim);
+      if (candidate.intent) {
+        candidate.intent.targets = candidate.intent.targets.map((target) => target.kind === "entity"
+          ? { ...target, entityId: decodeEntity(target.entityId) }
+          : target);
+        const destination = candidate.intent.sceneTransition?.destination;
+        if (destination?.kind === "entity") {
+          candidate.intent.sceneTransition = {
+            kind: candidate.intent.sceneTransition!.kind,
+            destination: { ...destination, entityId: decodeEntity(destination.entityId) },
+          };
+        }
+      }
       return playerActionCandidateSchema.parse(candidate);
     },
   };
@@ -349,7 +562,7 @@ export const playerTurnInputSchema = z
   .strict();
 export type PlayerTurnInput = z.infer<typeof playerTurnInputSchema>;
 
-export type PlayerTurnStage = "translation" | "scope" | "knowledge" | "engine" | "committed";
+export type PlayerTurnStage = "translation" | "scope" | "adjudication" | "knowledge" | "engine" | "committed";
 
 export type PlayerTurnResult = {
   accepted: boolean;
@@ -362,7 +575,9 @@ export type PlayerTurnResult = {
   contextBefore: ActorScopedActionContext;
   contextAfter: ActorScopedActionContext;
   renderedText: string;
+  intendedCandidate?: PlayerActionCandidate;
   candidate?: PlayerActionCandidate;
+  adjudication?: PlayerWorldResolution;
   proposal?: EventProposal;
   validation?: ValidationReport;
   eventHash?: string;
@@ -609,6 +824,24 @@ export function validatePlayerActionScope(
   for (let index = 0; index < candidate.participants.length; index += 1) {
     requireReferenceable(candidate.participants[index]!, `participants.${index}`, referenceable, issues);
   }
+  for (let index = 0; index < (candidate.intent?.targets.length ?? 0); index += 1) {
+    const target = candidate.intent!.targets[index]!;
+    if (target.kind === "entity") {
+      requireReferenceable(target.entityId, `intent.targets.${index}.entityId`, referenceable, issues);
+    }
+  }
+  const sceneDestination = candidate.intent?.sceneTransition?.destination;
+  if (sceneDestination?.kind === "entity") {
+    requireReferenceable(sceneDestination.entityId, "intent.sceneTransition.destination.entityId", referenceable, issues);
+    const destinationKind = entityKinds.get(sceneDestination.entityId);
+    if (destinationKind && destinationKind !== "location") {
+      issues.push(issue(
+        "PLAYER_SCENE_DESTINATION_INVALID",
+        `Scene destination ${sceneDestination.entityId} is ${destinationKind}, not a location`,
+        "intent.sceneTransition.destination.entityId",
+      ));
+    }
+  }
   for (let index = 0; index < candidate.preconditions.length; index += 1) {
     validatePredicateScope(candidate.preconditions[index]!, `preconditions.${index}`, writable, referenceable, fieldSpecs, entityKinds, issues);
   }
@@ -721,6 +954,26 @@ export function validatePlayerActionGrounding(
   return issues;
 }
 
+/** Keep typed scene semantics and committed location state in one event model. */
+function validatePlayerIntentConsistency(
+  candidate: PlayerActionCandidate,
+  actorId: EntityId,
+): ValidationIssue[] {
+  const transition = candidate.intent?.sceneTransition;
+  if (transition?.kind !== "arrive" || transition.destination?.kind !== "entity") return [];
+  const destinationEntityId = transition.destination.entityId;
+  const writesDestination = candidate.proposedDelta.operations.some((operation) =>
+    operation.op === "set"
+    && operation.entityId === actorId
+    && operation.field === "character.location"
+    && operation.value === destinationEntityId);
+  return writesDestination ? [] : [issue(
+    "PLAYER_ARRIVAL_REQUIRES_LOCATION_WRITE",
+    "A compiled-location arrival must propose the matching character.location state transition.",
+    "intent.sceneTransition",
+  )];
+}
+
 /**
  * Host-only physical interaction gate. Naming an entity makes its identity
  * referenceable, but never proves that a distant character is present. The
@@ -793,6 +1046,8 @@ export function playerActionToKnowledgeAwareAction(input: {
   candidate: PlayerActionCandidate;
   proposedTime?: StoryTime;
   timeAdvance?: TimeAdvance;
+  eventTitle?: string;
+  actorObservation?: string;
 }): KnowledgeAwareAction {
   const candidate = playerActionCandidateSchema.parse(input.candidate);
   const proposalId = `player-${contentHash({
@@ -808,8 +1063,8 @@ export function playerActionToKnowledgeAwareAction(input: {
     expectedParentCommit: input.expectedParentCommit,
     source: "player",
     actorId: input.actorId,
-    title: playerIntentTitle(input.utterance),
-    actorObservations: [{ actorId: input.actorId, summary: playerIntentObservation(input.utterance) }],
+    title: input.eventTitle ?? playerIntentTitle(input.utterance),
+    actorObservations: [{ actorId: input.actorId, summary: input.actorObservation ?? playerIntentObservation(input.utterance) }],
     participants: [...new Set([input.actorId, ...candidate.participants])],
     proposedTime: input.proposedTime ?? { kind: "unknown" },
     ...(input.timeAdvance ? { timeAdvance: input.timeAdvance } : {}),
@@ -840,8 +1095,8 @@ function playerIntentTitle(utterance: string): string {
 }
 
 /**
- * One player turn: scoped context -> untrusted translation -> capability gate
- * -> knowledge gate -> deterministic engine validation/commit -> actor render.
+ * One player turn: actor-scoped intent proposal -> current-world adjudication
+ * -> capability/knowledge/invariant validation -> commit -> actor rendering.
  */
 export class PlayerTurnService {
   private readonly render: PlayerTurnRender;
@@ -852,6 +1107,7 @@ export class PlayerTurnService {
     render?: PlayerTurnRender,
     private readonly resolveCanon?: PlayerCanonResolver,
     private readonly beforeCommit?: () => void,
+    private readonly adjudicator?: PlayerWorldAdjudicator,
   ) {
     if (render) this.render = render;
     else {
@@ -864,10 +1120,11 @@ export class PlayerTurnService {
   async turn(inputValue: PlayerTurnInput, authority: PlayerTurnAuthority = {}): Promise<PlayerTurnResult> {
     const input = playerTurnInputSchema.parse(inputValue);
     const previousHead = await this.engine.branches.readHead(input.branchId);
-    const [contextBefore, storyTime, worldContext] = await Promise.all([
+    const [contextBefore, storyTime, worldContext, worldState] = await Promise.all([
       buildActorScopedActionContext(this.engine, input.actorId, previousHead, input.utterance, input.sourceId),
       latestCommittedStoryTime(this.engine, previousHead),
       this.engine.contextForCommit(previousHead),
+      this.engine.projector.project(previousHead),
     ]);
     let translated: unknown;
     try {
@@ -895,33 +1152,150 @@ export class PlayerTurnService {
         )),
       );
     }
-    const normalization = normalizePlayerCandidate(parsedCandidate.data, contextBefore, worldContext.entities, input.utterance);
-    const candidate = normalization.candidate;
+    const intendedCandidate = normalizeStructuredPlayerCandidate(parsedCandidate.data, authority.intent);
     const authorizedKnowledgeClaimIds = new Set(authority.authorizedKnowledgeClaimIds ?? []);
-    const turnIntent = authority.intent ?? inferPlayerIntent(input.utterance);
-    const timeAdvance = turnIntent === "wait" ? waitTimeAdvance(input.utterance) : undefined;
-    const proposedTime = storyTime && timeAdvance ? advanceStoryTime(storyTime, timeAdvance) : storyTime;
+    const scopeIssues = validatePlayerActionScope(intendedCandidate, contextBefore, authorizedKnowledgeClaimIds);
+    if (scopeIssues.length) {
+      return this.rejected(input, previousHead, contextBefore, "scope", scopeIssues, intendedCandidate);
+    }
+    const groundingIssues = validatePlayerActionGrounding(intendedCandidate, contextBefore);
+    const intentConsistencyIssues = validatePlayerIntentConsistency(intendedCandidate, input.actorId);
+    const ungroundedIssues = groundingIssues.filter((entry) => entry.code === "PLAYER_PRECONDITION_UNGROUNDED");
+    if (ungroundedIssues.length) {
+      return this.rejected(input, previousHead, contextBefore, "scope", groundingIssues, intendedCandidate);
+    }
+
+    let candidate = intendedCandidate;
+    let outcomeStatus: EventOutcomeStatus = "succeeded";
+    let eventTitle: string | undefined;
+    let actorObservation: string | undefined;
+    let adjudication: PlayerWorldResolution | undefined;
+
+    if (this.adjudicator) {
+      const intendedTiming = playerCandidateTiming(intendedCandidate, storyTime);
+      let previewAction = playerActionToKnowledgeAwareAction({
+        branchId: input.branchId,
+        actorId: input.actorId,
+        expectedParentCommit: previousHead,
+        utterance: input.utterance,
+        candidate: intendedCandidate,
+        ...(intendedTiming.proposedTime ? { proposedTime: intendedTiming.proposedTime } : {}),
+        ...(intendedTiming.timeAdvance ? { timeAdvance: intendedTiming.timeAdvance } : {}),
+      });
+      const previewProgress = await derivePlayerProgress(
+        this.engine,
+        input,
+        intendedCandidate,
+        contextBefore,
+        { supersedesCanonicalEventIds: [] },
+        authority,
+        "succeeded",
+      );
+      previewAction = {
+        ...previewAction,
+        proposal: eventProposalSchema.parse({ ...previewAction.proposal, progress: previewProgress.value }),
+      };
+      const [spatialIssues, knowledgePreview] = await Promise.all([
+        validatePlayerActionSpatialScope(this.engine, intendedCandidate, input.actorId, previousHead, input.sourceId),
+        validateActionKnowledge(this.engine, previewAction),
+      ]);
+      const enginePreview = validateEventProposal(previewAction.proposal, previousHead, worldState, worldContext).report;
+      const deterministicIssues = uniqueIssues([
+        ...intentConsistencyIssues,
+        ...groundingIssues,
+        ...spatialIssues,
+        ...knowledgePreview.errors,
+        ...enginePreview.errors,
+      ]);
+      const adjudicationWorld = buildPlayerWorldAdjudicationContext(
+        contextBefore,
+        intendedCandidate,
+        worldContext,
+        worldState,
+        deterministicIssues,
+      );
+      let proposedResolution: unknown;
+      try {
+        proposedResolution = await this.adjudicator(deepFreeze({
+          utterance: input.utterance,
+          candidate: structuredClone(intendedCandidate),
+          actorContext: playerActionTranslationContext(contextBefore),
+          world: adjudicationWorld,
+        }));
+      } catch (error) {
+        return this.rejected(input, previousHead, contextBefore, "adjudication", [
+          issue("PLAYER_WORLD_ADJUDICATION_FAILED", error instanceof Error ? error.message : String(error)),
+        ], intendedCandidate, previewAction.proposal);
+      }
+      const parsedResolution = playerWorldResolutionSchema.safeParse(proposedResolution);
+      if (!parsedResolution.success) {
+        return this.rejected(input, previousHead, contextBefore, "adjudication", parsedResolution.error.issues.map((entry) => issue(
+          "INVALID_PLAYER_WORLD_RESOLUTION",
+          entry.message,
+          entry.path.length ? entry.path.join(".") : undefined,
+        )), intendedCandidate, previewAction.proposal);
+      }
+      adjudication = parsedResolution.data;
+      eventTitle = adjudication.eventTitle;
+      actorObservation = adjudication.actorObservation;
+      outcomeStatus = adjudication.status;
+      if (adjudication.decision === "realize") {
+        if (deterministicIssues.length) {
+          return this.rejected(input, previousHead, contextBefore, "adjudication", [
+            issue(
+              "PLAYER_WORLD_CONTRADICTION_UNRESOLVED",
+              "The world adjudicator tried to realize an intent that still contradicts committed state or active rules.",
+            ),
+            ...deterministicIssues,
+          ], intendedCandidate, previewAction.proposal);
+        }
+      } else {
+        const contradictionIssues = validatePlayerWorldContradiction(adjudication, adjudicationWorld);
+        if (contradictionIssues.length) {
+          return this.rejected(input, previousHead, contextBefore, "adjudication", contradictionIssues, intendedCandidate);
+        }
+        candidate = normalizeStructuredPlayerCandidate(adjudication.replacement, undefined);
+        const replacementIssues = [
+          ...validatePlayerActionScope(candidate, contextBefore, authorizedKnowledgeClaimIds),
+          ...validatePlayerIntentConsistency(candidate, input.actorId),
+          ...validatePlayerActionGrounding(candidate, contextBefore),
+          ...await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead, input.sourceId),
+        ];
+        if (replacementIssues.length) {
+          return this.rejected(input, previousHead, contextBefore, "adjudication", [
+            issue(
+              "PLAYER_WORLD_REPLACEMENT_INVALID",
+              "The proposed in-world consequence did not satisfy the same capability and grounding boundary as every other event.",
+            ),
+            ...replacementIssues,
+          ], intendedCandidate);
+        }
+      }
+    } else {
+      if (groundingIssues.length || intentConsistencyIssues.length) {
+        return this.rejected(input, previousHead, contextBefore, "scope", [
+          ...groundingIssues,
+          ...intentConsistencyIssues,
+        ], intendedCandidate);
+      }
+      const spatialIssues = await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead, input.sourceId);
+      if (spatialIssues.length) {
+        return this.rejected(input, previousHead, contextBefore, "scope", spatialIssues, intendedCandidate);
+      }
+    }
+
+    const timing = playerCandidateTiming(candidate, storyTime);
     let action = playerActionToKnowledgeAwareAction({
       branchId: input.branchId,
       actorId: input.actorId,
       expectedParentCommit: previousHead,
       utterance: input.utterance,
       candidate,
-      ...(proposedTime ? { proposedTime } : {}),
-      ...(timeAdvance ? { timeAdvance } : {}),
+      ...(timing.proposedTime ? { proposedTime: timing.proposedTime } : {}),
+      ...(timing.timeAdvance ? { timeAdvance: timing.timeAdvance } : {}),
+      ...(eventTitle ? { eventTitle } : {}),
+      ...(actorObservation ? { actorObservation } : {}),
     });
-    const scopeIssues = validatePlayerActionScope(candidate, contextBefore, authorizedKnowledgeClaimIds);
-    if (scopeIssues.length) {
-      return this.rejected(input, previousHead, contextBefore, "scope", scopeIssues, candidate, action.proposal);
-    }
-    const groundingIssues = validatePlayerActionGrounding(candidate, contextBefore);
-    if (groundingIssues.length) {
-      return this.rejected(input, previousHead, contextBefore, "scope", groundingIssues, candidate, action.proposal);
-    }
-    const spatialIssues = await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead, input.sourceId);
-    if (spatialIssues.length) {
-      return this.rejected(input, previousHead, contextBefore, "scope", spatialIssues, candidate, action.proposal);
-    }
     let resolution: CanonicalChoiceResolution = { supersedesCanonicalEventIds: [] };
     if (this.resolveCanon) {
       // The resolver may inspect a proposal but must not edit the already
@@ -948,11 +1322,11 @@ export class PlayerTurnService {
 
     let progress: { value: NarrativeProgress; certificate: PlayerProgressCertificate };
     try {
-      progress = await derivePlayerProgress(this.engine, input, candidate, contextBefore, resolution, authority, normalization.generalizedDestinationLabel);
+      progress = await derivePlayerProgress(this.engine, input, candidate, contextBefore, resolution, authority, outcomeStatus);
     } catch (error) {
       return this.rejected(input, previousHead, contextBefore, "scope", [
         issue(
-          error instanceof PlayerProgressError ? error.code : "INVALID_PLAYER_PROGRESS_AUTHORITY",
+          "INVALID_PLAYER_PROGRESS_AUTHORITY",
           error instanceof Error ? error.message : String(error),
         ),
       ], candidate, action.proposal);
@@ -1012,11 +1386,13 @@ export class PlayerTurnService {
       actorId: input.actorId,
       previousHead,
       newHead,
-      issues: [...normalization.warnings, ...committed.result.report.warnings],
+      issues: committed.result.report.warnings,
       contextBefore,
       contextAfter,
       renderedText,
+      intendedCandidate,
       candidate,
+      ...(adjudication ? { adjudication } : {}),
       proposal: action.proposal,
       validation: committed.result.report,
       progressCertificate: progress.certificate,
@@ -1072,55 +1448,38 @@ export class PlayerTurnService {
   }
 }
 
-class PlayerProgressError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
-    this.name = "PlayerProgressError";
+function normalizeStructuredPlayerCandidate(
+  candidateInput: PlayerActionCandidate,
+  authorityIntent?: "act" | SafePlayerIntent,
+): PlayerActionCandidate {
+  const candidate = structuredClone(playerActionCandidateSchema.parse(candidateInput));
+  const kind = authorityIntent ?? candidate.intent?.kind ?? "act";
+  candidate.intent = {
+    ...(candidate.intent ?? {
+      kind,
+      summary: candidate.title,
+      targets: [],
+    }),
+    kind,
+  };
+  if (kind === "observe" && !candidate.intent.sceneTransition) {
+    candidate.intent.sceneTransition = { kind: "stay" };
   }
+  if (kind === "wait" && !candidate.intent.requestedTimeAdvance) {
+    candidate.intent.requestedTimeAdvance = { amount: 5, unit: "minute" };
+  }
+  return playerActionCandidateSchema.parse(candidate);
 }
 
-function normalizePlayerCandidate(
-  candidateInput: PlayerActionCandidate,
-  context: ActorScopedActionContext,
-  worldEntities: ReadonlyMap<string, Entity>,
-  utterance: string,
-): {
-  candidate: PlayerActionCandidate;
-  warnings: ValidationIssue[];
-  generalizedDestinationLabel?: string;
-} {
-  const candidate = structuredClone(playerActionCandidateSchema.parse(candidateInput));
-  const referenceable = new Set(context.referenceableEntities.map((entity) => entity.id));
-  const unknownDestinations = new Set<string>();
-  for (const operation of candidate.proposedDelta.operations) {
-    if (
-      operation.op === "set"
-      && operation.entityId === context.actorId
-      && operation.field === "character.location"
-      && typeof operation.value === "string"
-      && !referenceable.has(operation.value)
-      && !worldEntities.has(operation.value)
-    ) unknownDestinations.add(operation.value);
-  }
-  if (!unknownDestinations.size || !MOVEMENT_PATTERN.test(utterance)) return { candidate, warnings: [] };
-
-  candidate.proposedDelta.operations = candidate.proposedDelta.operations.filter((operation) => !(
-    operation.op === "set"
-    && operation.entityId === context.actorId
-    && operation.field === "character.location"
-    && typeof operation.value === "string"
-    && unknownDestinations.has(operation.value)
-  ));
-  candidate.participants = candidate.participants.filter((participantId) => !unknownDestinations.has(participantId));
-  const generalizedDestinationLabel = extractMovementLabel(utterance) ?? "一个尚未命名的邻近场景";
+function playerCandidateTiming(
+  candidate: PlayerActionCandidate,
+  storyTime?: StoryTime,
+): { proposedTime?: StoryTime; timeAdvance?: TimeAdvance } {
+  const timeAdvance = candidate.intent?.requestedTimeAdvance;
+  const proposedTime = storyTime && timeAdvance ? advanceStoryTime(storyTime, timeAdvance) : storyTime;
   return {
-    candidate: playerActionCandidateSchema.parse(candidate),
-    warnings: [issue(
-      "PLAYER_DESTINATION_GENERALIZED",
-      `The requested destination was not a stable canonical entity; it will be committed as the open scene '${generalizedDestinationLabel}' instead of being rejected or invented as canon.`,
-      "proposedDelta.operations",
-    )],
-    generalizedDestinationLabel,
+    ...(proposedTime ? { proposedTime } : {}),
+    ...(timeAdvance ? { timeAdvance } : {}),
   };
 }
 
@@ -1131,17 +1490,16 @@ async function derivePlayerProgress(
   context: ActorScopedActionContext,
   resolution: CanonicalChoiceResolution,
   authority: PlayerTurnAuthority,
-  generalizedDestinationLabel?: string,
+  outcomeStatus: EventOutcomeStatus,
 ): Promise<{ value: NarrativeProgress; certificate: PlayerProgressCertificate }> {
-  const [state, scene, worldContext, history] = await Promise.all([
+  const [state, scene, worldContext] = await Promise.all([
     engine.projector.project(context.atCommit),
     projectActorScene(engine, input.actorId, context.atCommit, input.sourceId),
     engine.contextForCommit(context.atCommit),
-    committedHistory(engine, context.atCommit),
   ]);
   const effectiveOperations = candidate.proposedDelta.operations.filter((operation) => stateOperationChangesState(operation, state));
   const knowledgeOperations = candidate.proposedKnowledge?.operations.length ?? 0;
-  const intent = authority.intent ?? inferPlayerIntent(input.utterance);
+  const intent = candidate.intent ?? normalizeStructuredPlayerCandidate(candidate, authority.intent).intent!;
   let progress: NarrativeProgress;
 
   if (authority.progress) {
@@ -1149,12 +1507,14 @@ async function derivePlayerProgress(
     const channels = new Set(parsed.channels);
     if (effectiveOperations.length) channels.add("state");
     if (knowledgeOperations) channels.add("knowledge");
+    if (outcomeStatus !== "succeeded") channels.add("consequence");
     const threadIds = [...new Set([...parsed.threadIds, ...(resolution.threadIds ?? [])])];
     if (threadIds.length) channels.add("thread");
     progress = narrativeProgressSchema.parse({
       ...parsed,
       channels: [...channels],
       threadIds,
+      outcome: outcomeStatus,
     });
   } else {
     const channels = new Set<ProgressChannel>();
@@ -1180,27 +1540,58 @@ async function derivePlayerProgress(
       && operation.entityId === input.actorId
       && operation.field === "character.location"
       && typeof operation.value === "string");
-    const movement = Boolean(generalizedDestinationLabel || knownMovement || MOVEMENT_PATTERN.test(input.utterance));
     let sceneTransition: NarrativeProgress["scene"];
-    if (movement) {
+    if (knownMovement?.op === "set" && typeof knownMovement.value === "string") {
       channels.add("scene");
       channels.add("consequence");
-      const destinationEntityId = knownMovement?.op === "set" && typeof knownMovement.value === "string"
-        ? knownMovement.value
-        : undefined;
-      const label = generalizedDestinationLabel
-        ?? (destinationEntityId ? worldContext.entities.get(destinationEntityId)?.canonicalName : undefined)
-        ?? extractMovementLabel(input.utterance)
-        ?? "当前场景之外的邻近区域";
+      const destinationEntityId = knownMovement.value;
       sceneTransition = {
-        kind: destinationEntityId ? "arrive" : LEAVING_PATTERN.test(input.utterance) ? "depart" : "explore",
-        label,
+        kind: "arrive",
+        ...(worldContext.entities.get(destinationEntityId)?.canonicalName
+          ? { label: worldContext.entities.get(destinationEntityId)!.canonicalName }
+          : {}),
+        destinationEntityId,
+        beat: scene.beat + 1,
+      };
+    } else if (intent.sceneTransition) {
+      channels.add("scene");
+      if (intent.sceneTransition.kind !== "stay") channels.add("consequence");
+      const destination = intent.sceneTransition.destination;
+      const destinationEntityId = destination?.kind === "entity"
+        && worldContext.entities.get(destination.entityId)?.kind === "location"
+        ? destination.entityId
+        : undefined;
+      const openTransition = intent.sceneTransition.kind !== "stay" && !destinationEntityId;
+      sceneTransition = {
+        kind: destinationEntityId && intent.sceneTransition.kind === "arrive"
+          ? "arrive"
+          : intent.sceneTransition.kind === "arrive"
+            ? "explore"
+            : intent.sceneTransition.kind,
+        ...(destination?.kind === "described"
+          ? { label: destination.description }
+          : destinationEntityId
+            ? { label: worldContext.entities.get(destinationEntityId)!.canonicalName }
+            : intent.sceneTransition.kind === "stay" && scene.label
+              ? { label: scene.label }
+              : {}),
         ...(destinationEntityId ? { destinationEntityId } : {}),
+        ...(openTransition
+          ? {
+              sceneId: `open-${contentHash({
+                branchId: input.branchId,
+                parentCommit: context.atCommit,
+                actorId: input.actorId,
+                beat: scene.beat + 1,
+                kind: intent.sceneTransition.kind,
+              }).slice(0, 24)}`,
+            }
+          : {}),
         beat: scene.beat + 1,
       };
     }
 
-    if (intent === "observe" && knowledgeOperations === 0 && !sceneTransition) {
+    if (intent.kind === "observe" && !sceneTransition) {
       channels.add("scene");
       sceneTransition = {
         kind: "stay",
@@ -1208,60 +1599,36 @@ async function derivePlayerProgress(
         beat: scene.beat + 1,
       };
     }
-    if (intent === "reflect") channels.add("plan");
-    if (intent === "wait") {
-      const groundedPressure = Boolean(
-        resolution.threadIds?.length
-        || scene.presentEntityIds.some((entityId) => entityId !== input.actorId && worldContext.entities.get(entityId)?.kind === "character")
-        || scene.recentEvents.at(-1)?.progress?.channels.some((channel) => channel === "time-pressure" || channel === "consequence"),
-      );
-      if (!groundedPressure) {
-        throw new PlayerProgressError(
-          "PLAYER_WAIT_WITHOUT_PRESSURE",
-          "Waiting can advance a turn only when a committed local character, consequence, or active canonical thread can respond.",
-        );
-      }
+    if (intent.kind === "reflect") channels.add("plan");
+    if (intent.kind === "wait") {
       channels.add("time-pressure");
       channels.add("consequence");
     }
-    if (intent === "act" && characterParticipants.length) {
+    if (intent.kind === "act" && characterParticipants.length) {
       channels.add("relationship");
-      channels.add("consequence");
     }
-    if (intent === "act" && ACTION_CONSEQUENCE_PATTERN.test(input.utterance)) channels.add("consequence");
-    if (intent !== "observe" && (channels.size > 0 || threadIds.length)) channels.add("thread");
-
-    if (!channels.size || (channels.size === 1 && channels.has("thread"))) {
-      throw new PlayerProgressError(
-        "PLAYER_ACTION_NO_PROGRESS",
-        "The interpreted action would not change state, knowledge, scene, relationship, plan, pressure, or a grounded narrative consequence.",
-      );
-    }
-    const noveltyKey = semanticNoveltyKey({
-      intent,
-      utterance: input.utterance,
-      participantIds: characterParticipants,
-      operationKeys: effectiveOperations.map(operationKey),
-      knowledgeClaimIds: candidate.proposedKnowledge?.operations.map((operation) => operation.claimId) ?? [],
-      threadIds,
-      sceneKey: scene.key,
-      movementLabel: sceneTransition?.label,
-    });
+    if (intent.kind === "act" || outcomeStatus !== "succeeded") channels.add("consequence");
+    if (intent.kind !== "observe" && (channels.size > 0 || threadIds.length)) channels.add("thread");
+    const noveltyKey = `player-${contentHash({
+      parentCommit: context.atCommit,
+      actorId: input.actorId,
+      intent: intent.kind,
+      outcome: outcomeStatus,
+      participants: [...characterParticipants].sort(),
+      operations: effectiveOperations.map(operationKey).sort(),
+      claims: (candidate.proposedKnowledge?.operations.map((operation) => operation.claimId) ?? []).sort(),
+      threads: [...threadIds].sort(),
+      sceneId: sceneTransition?.sceneId,
+      destinationEntityId: sceneTransition?.destinationEntityId,
+    }).slice(0, 32)}`;
     progress = narrativeProgressSchema.parse({
       version: 1,
       channels: [...channels],
       threadIds,
       noveltyKey,
+      outcome: outcomeStatus,
       ...(sceneTransition ? { scene: sceneTransition } : {}),
     });
-  }
-
-  const repeated = history.some((entry) => entry.event.progress?.noveltyKey === progress.noveltyKey);
-  if (repeated && effectiveOperations.length === 0 && knowledgeOperations === 0) {
-    throw new PlayerProgressError(
-      "PLAYER_ACTION_REPEATS_NO_PROGRESS",
-      "This action repeats the same unresolved beat without a new state, knowledge, scene, relationship, plan, pressure, or consequence. Choose a different affordance or make the intended change more concrete.",
-    );
   }
   const certificate: PlayerProgressCertificate = {
     channels: [...progress.channels],
@@ -1272,55 +1639,6 @@ async function derivePlayerProgress(
     sceneChanged: Boolean(progress.scene),
   };
   return { value: progress, certificate };
-}
-
-const MOVEMENT_PATTERN = /(?:离开|出门|出去|走走|走去|走向|前往|去往|径直走|赶往|进入|来到|到达|闲逛|漫步|move|walk|leave|go\s+to|head\s+to|enter)/iu;
-const LEAVING_PATTERN = /(?:离开|出门|出去|摔门|leave|walk\s+out|go\s+out)/iu;
-const ACTION_CONSEQUENCE_PATTERN = /(?:说|问|答|道歉|拒绝|答应|拿|放|给|推|拉|开|关|坐|站|找|查|做|帮|阻止|攻击|敲|喊|追|躲|买|卖|ask|tell|say|apolog|refuse|accept|take|give|open|close|sit|stand|find|help|stop|attack|knock|call|buy|sell)/iu;
-
-function inferPlayerIntent(utterance: string): "act" | SafePlayerIntent {
-  const normalized = utterance.normalize("NFKC").trim();
-  if (/^(?:我)?(?:先|仔细|悄悄|认真|再)?(?:观察|查看|环顾|打量|倾听|看看)|^(?:i\s+)?(?:look|observe|listen)\b/iu.test(normalized)) return "observe";
-  if (/^(?:我)?(?:先|认真|重新|再)?(?:思考|回想|整理思绪|反省|梳理)|^(?:i\s+)?(?:reflect|think|remember)\b/iu.test(normalized)) return "reflect";
-  if (/^(?:我)?(?:先|暂时|什么也不做地)?(?:在[^，。！？,.!?]{1,24})?(?:等待|等(?:上)?(?:一会|片刻|\d+(?:\.\d+)?(?:分钟|小时|天|周|个月|月|年))|静候|按兵不动)|^(?:i\s+)?(?:wait|pause)\b/iu.test(normalized)) return "wait";
-  return "act";
-}
-
-function waitTimeAdvance(utterance: string): TimeAdvance {
-  const normalized = utterance.normalize("NFKC").toLocaleLowerCase();
-  const match = normalized.match(/(\d+(?:\.\d+)?)\s*(分钟|分|小时|天|周|个月|月|年|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?)/iu);
-  if (!match) return { amount: 5, unit: "minute" };
-  const requested = Number(match[1]);
-  const rawUnit = match[2]!.toLocaleLowerCase();
-  const unit: TimeAdvance["unit"] = /分钟|^分$|minute|mins?/.test(rawUnit)
-    ? "minute"
-    : /小时|hour|hrs?/.test(rawUnit)
-      ? "hour"
-      : /周|week/.test(rawUnit)
-        ? "week"
-        : /个月|^月$|month/.test(rawUnit)
-          ? "month"
-          : /年|year/.test(rawUnit)
-            ? "year"
-            : "day";
-  const maximum: Record<TimeAdvance["unit"], number> = {
-    minute: 525_960,
-    hour: 8_766,
-    day: 365.25,
-    week: 52,
-    month: 12,
-    year: 1,
-  };
-  return { amount: Math.min(requested, maximum[unit]), unit };
-}
-
-function extractMovementLabel(utterance: string): string | undefined {
-  const normalized = utterance.normalize("NFKC").trim();
-  const chinese = normalized.match(/(?:前往|去往|走向|赶往|进入|来到|到达|去|到)([^，。！？,.!?]{1,32})/u)?.[1]
-    ?? normalized.match(/(街上|路上|城里|城外|村里|村外|附近|茶馆|酒楼|客栈|市场|河边|院外)/u)?.[1];
-  const english = normalized.match(/(?:go|head|walk|move)\s+(?:to|toward|into)\s+([^,.!?]{1,40})/iu)?.[1];
-  const label = (chinese ?? english)?.trim().replace(/(?:走走|看看|去看看|并.*)$/u, "").trim();
-  return label ? label.slice(0, 80) : undefined;
 }
 
 function stateOperationChangesState(
@@ -1350,37 +1668,156 @@ function operationKey(operation: PlayerActionCandidate["proposedDelta"]["operati
   return `${operation.entityId}:${operation.field}:${operation.op}`;
 }
 
-function semanticNoveltyKey(input: {
-  intent: "act" | SafePlayerIntent;
-  utterance: string;
-  participantIds: string[];
-  operationKeys: string[];
-  knowledgeClaimIds: string[];
-  threadIds: string[];
-  sceneKey: string;
-  movementLabel?: string;
-}): string {
-  const semanticUtterance = input.utterance.normalize("NFKC").toLocaleLowerCase()
-    .replace(/[\s，。！？、,.!?;；:："'“”‘’]/g, "")
-    .slice(0, 160);
-  const category = input.movementLabel
-    ? `move:${input.movementLabel.normalize("NFKC").toLocaleLowerCase()}`
-    : input.intent === "wait"
-      ? "wait"
-      : input.intent === "reflect"
-        ? "plan"
-        : input.intent === "observe"
-          ? `observe:${input.knowledgeClaimIds.sort().join("+")}`
-          : semanticUtterance;
-  return `player:${contentHash({
-    intent: input.intent,
-    category,
-    participants: [...input.participantIds].sort(),
-    operations: [...input.operationKeys].sort(),
-    claims: [...input.knowledgeClaimIds].sort(),
-    threads: [...input.threadIds].sort(),
-    scene: input.sceneKey,
-  }).slice(0, 32)}`;
+
+function buildPlayerWorldAdjudicationContext(
+  actorContext: ActorScopedActionContext,
+  candidate: PlayerActionCandidate,
+  worldContext: WorldModelContext,
+  worldState: WorldState,
+  deterministicIssues: ValidationIssue[],
+): PlayerWorldAdjudicationContext {
+  const relevantEntityIds = new Set<EntityId>([
+    actorContext.actorId,
+    ...actorContext.scene.presentEntityIds,
+    ...(actorContext.scene.locationId ? [actorContext.scene.locationId] : []),
+    ...candidate.participants,
+    ...(candidate.intent?.targets.flatMap((target) => target.kind === "entity" ? [target.entityId] : []) ?? []),
+    ...(candidate.intent?.sceneTransition?.destination?.kind === "entity"
+      ? [candidate.intent.sceneTransition.destination.entityId]
+      : []),
+  ]);
+  for (const operation of candidate.proposedDelta.operations) {
+    if ("entityId" in operation) relevantEntityIds.add(operation.entityId);
+    if ("member" in operation) relevantEntityIds.add(operation.member);
+  }
+  for (const operation of candidate.proposedKnowledge?.operations ?? []) {
+    relevantEntityIds.add(operation.actorId);
+    if (operation.op === "learn" && operation.sourceActorId) relevantEntityIds.add(operation.sourceActorId);
+  }
+  const safeState = (entityId: EntityId): Record<string, StateValue> => {
+    const result: Record<string, StateValue> = {};
+    for (const [field, value] of Object.entries(worldState.values[entityId] ?? {})) {
+      let spec: StateFieldSpec;
+      try {
+        spec = worldContext.stateSchema.get(field);
+      } catch {
+        continue;
+      }
+      if (spec.valueType === "entity-ref") {
+        if (typeof value === "string" && relevantEntityIds.has(value)) result[field] = value;
+        continue;
+      }
+      if (spec.valueType === "entity-ref-set") {
+        if (Array.isArray(value)) result[field] = value.filter((entry) => relevantEntityIds.has(entry));
+        continue;
+      }
+      result[field] = structuredClone(value);
+    }
+    return result;
+  };
+  return {
+    entities: actorContext.referenceableEntities
+      .filter((entity) => relevantEntityIds.has(entity.id))
+      .map((entity) => ({
+        id: entity.id,
+        kind: entity.kind,
+        name: entity.name,
+        state: safeState(entity.id),
+      })),
+    activeRules: worldState.activeRuleIds.flatMap((ruleId) => {
+      const rule = worldContext.rules.get(ruleId);
+      return rule && rule.appliesWhen.every((predicate) => evaluatePredicate(worldState, predicate)) ? [{
+        name: rule.name,
+        scope: rule.scope,
+        appliesWhen: structuredClone(rule.appliesWhen),
+        requires: structuredClone(rule.requires ?? []),
+        forbids: structuredClone(rule.forbids ?? []),
+      }] : [];
+    }),
+    scene: {
+      ...(actorContext.scene.label ? { label: actorContext.scene.label } : {}),
+      ...(actorContext.scene.locationId ? { locationId: actorContext.scene.locationId } : {}),
+      presentEntityIds: [...actorContext.scene.presentEntityIds],
+    },
+    deterministicIssues: structuredClone(deterministicIssues),
+  };
+}
+
+function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
+  const seen = new Set<string>();
+  return issues.filter((entry) => {
+    const key = JSON.stringify([entry.code, entry.path, entry.message]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function validatePlayerWorldContradiction(
+  resolution: Extract<PlayerWorldResolution, { decision: "transform" }>,
+  world: PlayerWorldAdjudicationContext,
+): ValidationIssue[] {
+  const entities = new Map(world.entities.map((entity) => [entity.id, entity]));
+  const activeRuleNames = new Set(world.activeRules.map((rule) => rule.name));
+  const deterministicCodes = new Set(world.deterministicIssues.map((entry) => entry.code));
+  const issues: ValidationIssue[] = [];
+  resolution.contradiction.basis.forEach((basis, index) => {
+    const path = `contradiction.basis.${index}`;
+    if (basis.source === "state") {
+      const entity = entities.get(basis.entityId);
+      if (!entity || !Object.hasOwn(entity.state, basis.field)) {
+        issues.push(issue(
+          "PLAYER_WORLD_CONTRADICTION_UNGROUNDED",
+          "A state contradiction basis must name a supplied entity field that exists in committed world state.",
+          path,
+        ));
+      }
+      return;
+    }
+    if (basis.source === "active-rule") {
+      if (!activeRuleNames.has(basis.name)) {
+        issues.push(issue(
+          "PLAYER_WORLD_CONTRADICTION_UNGROUNDED",
+          "A rule contradiction basis must name a rule active in the supplied world slice.",
+          path,
+        ));
+      }
+      return;
+    }
+    if (basis.source === "deterministic-issue") {
+      if (!deterministicCodes.has(basis.code)) {
+        issues.push(issue(
+          "PLAYER_WORLD_CONTRADICTION_UNGROUNDED",
+          "A deterministic contradiction basis must cite an issue produced for this exact candidate.",
+          path,
+        ));
+      }
+      return;
+    }
+    if (resolution.contradiction.kind !== "causality" && resolution.contradiction.kind !== "capability") {
+      issues.push(issue(
+        "PLAYER_WORLD_CONTRADICTION_UNGROUNDED",
+        "A causal-principle basis is valid only for a direct causality or capability contradiction.",
+        path,
+      ));
+    }
+  });
+  const sources = new Set(resolution.contradiction.basis.map((basis) => basis.source));
+  const kindIsGrounded = resolution.contradiction.kind === "state"
+    ? sources.has("state")
+    : resolution.contradiction.kind === "world-rule"
+      ? sources.has("active-rule")
+      : resolution.contradiction.kind === "spatial" || resolution.contradiction.kind === "knowledge"
+        ? sources.has("deterministic-issue") || sources.has("state")
+        : sources.has("causal-principle") || sources.has("state") || sources.has("active-rule");
+  if (!kindIsGrounded) {
+    issues.push(issue(
+      "PLAYER_WORLD_CONTRADICTION_UNGROUNDED",
+      `Contradiction kind ${resolution.contradiction.kind} is not supported by a corresponding basis source.`,
+      "contradiction.basis",
+    ));
+  }
+  return issues;
 }
 
 function validatePredicateScope(

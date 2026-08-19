@@ -116,9 +116,19 @@ Readiness is no longer inferred from artifact counts or arbitrary percentages. `
 
 `nwh prepare` derives and advances the safe state machine, but intentionally stops whenever pending proposals require semantic judgment. It points to `proposals show`; the user must accept or reject candidates. Repair suggestions are still coarse rather than proposal-specific.
 
-### 2. Player action semantics are deliberately narrow
+### 2. Player mutation capabilities are deliberately narrow
 
-The TUI player mode and `play-world` connect natural language to deterministic commitment, but the current capability closure allows changes only to the selected actor and artifacts the actor owns. Explicitly named entities may be referenced but other characters cannot be directly rewritten. Rich physical affordances, dialogue consequences, combat, and social mechanics need dedicated deterministic rules rather than broader model authority.
+The TUI player mode and `play-world` now interpret free-form input into typed
+intent and pass it through an isolated current-world adjudicator before
+deterministic commitment. The host no longer derives movement, destination,
+duration, or consequence from language-specific text patterns. Direct
+contradictions become model-proposed, contradiction-certified in-world
+consequences rather than canned invalid-action results. The capability closure
+still allows direct state changes only to the selected actor and artifacts the
+actor owns. Explicitly named entities may be targeted or referenced, but other
+characters cannot be directly rewritten. Rich physical, combat, and social
+effects still need validated consequence proposals and stronger domain evals,
+not broader mutation authority.
 
 ### 3. Model actor policy is not connected to the product CLI
 

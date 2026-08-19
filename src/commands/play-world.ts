@@ -1,8 +1,9 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { createPiPlayerActionTranslator } from "../agent/pi-player-action.js";
+import { createPiPlayerWorldAdjudicator } from "../agent/pi-player-world-adjudicator.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
-import type { PlayerActionTranslator, PlayerTurnResult } from "../world/player-action.js";
+import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "../world/player-action.js";
 import {
   inspectPlayExperience,
   listPlayableCharacters,
@@ -23,6 +24,7 @@ export type PlayWorldCommandOptions = {
   listCharacters?: boolean;
   model?: string;
   translator?: PlayerActionTranslator;
+  adjudicator?: PlayerWorldAdjudicator;
   advanceBackground?: number;
   ask?: AskPlayQuestion;
 };
@@ -65,12 +67,19 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
     ...(profile ? { profile } : {}),
     ...(options.model ? { model: options.model } : {}),
   });
+  const adjudicator = options.adjudicator ?? (!options.translator
+    ? createPiPlayerWorldAdjudicator({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
   const advanceBackground = options.advanceBackground ?? 0;
   if (!Number.isInteger(advanceBackground) || advanceBackground < 0 || advanceBackground > 100) {
     throw new Error("advanceBackground must be an integer between 0 and 100");
   }
   if (options.action !== undefined) {
-    return runAndPrintTurn(options.root, selection, translator, options.action, advanceBackground);
+    return runAndPrintTurn(options.root, selection, translator, adjudicator, options.action, advanceBackground);
   }
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error("Pass --action <text> for non-interactive play.");
@@ -83,7 +92,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
       const utterance = (await terminal.question(`${selection.actor.canonicalName}> `)).trim();
       if (!utterance) continue;
       if (utterance === "/exit" || utterance === "/quit") break;
-      await runAndPrintTurn(options.root, selection, translator, utterance, advanceBackground);
+      await runAndPrintTurn(options.root, selection, translator, adjudicator, utterance, advanceBackground);
     }
   } finally {
     terminal.close();
@@ -95,6 +104,7 @@ async function runAndPrintTurn(
   root: string,
   selection: SelectedPlayExperience,
   translator: PlayerActionTranslator,
+  adjudicator: PlayerWorldAdjudicator | undefined,
   utterance: string,
   advanceBackground: number,
 ): Promise<PlayerTurnResult> {
@@ -104,6 +114,7 @@ async function runAndPrintTurn(
     actorId: selection.actor.id,
     utterance,
     translator,
+    ...(adjudicator ? { adjudicator } : {}),
     advanceBackground,
     origin: "cli",
   });

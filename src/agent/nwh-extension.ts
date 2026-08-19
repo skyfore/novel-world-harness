@@ -35,10 +35,12 @@ import { WorkspaceStore } from "../storage/workspace-store.js";
 import { PlaySessionStore } from "../world/play-session.js";
 import { workspaceStateDir } from "./runtime-paths.js";
 import { createPiPlayerActionTranslator } from "./pi-player-action.js";
+import { createPiPlayerWorldAdjudicator } from "./pi-player-world-adjudicator.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
   deterministicPlayerIntentCandidate,
   type PlayerActionTranslator,
+  type PlayerWorldAdjudicator,
   type SafePlayerIntent,
 } from "../world/player-action.js";
 import {
@@ -141,6 +143,7 @@ export type NwhExtensionOptions = {
   mode: NwhInteractionMode;
   profile?: LlmProfile;
   playerTranslator?: PlayerActionTranslator;
+  playerWorldAdjudicator?: PlayerWorldAdjudicator;
   advanceBackground?: number;
   onSessionShutdown?: () => Promise<void>;
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
@@ -163,6 +166,7 @@ const COMMAND_HELP = `NWH commands:
   /create-instance [novel] [instance] [character] create a fresh world instance
   /scene                    render the current scene again without advancing it
   /progress [instance]      show committed progress for an instance
+  /ooc [question]           inspect actor-visible committed state without advancing
   /leave                    leave player mode without deleting resume state
   /files [path filter]       list safe workspace files
   /search <text>             search local files for fixed text
@@ -829,9 +833,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         });
         const output = await narrator(playerSceneModelFrame(frame), purpose, stream.observer);
         const narration = assertPlaySceneNarration(typeof output === "string" ? output : output.narration);
-        const rawChoices = typeof output === "string"
-          ? []
-          : playerSceneChoicesSchema.parse({ choices: output.choices }).choices;
+        const parsedChoices = typeof output === "string"
+          ? undefined
+          : playerSceneChoicesSchema.safeParse({ choices: output.choices });
+        const rawChoices = parsedChoices?.success ? parsedChoices.data.choices : [];
         // Scene choices are actor-flavored utterance suggestions, not host
         // capabilities. Keep only their schema-validated text; selection later enters
         // the same translation and deterministic gates as free-form input.
@@ -1000,6 +1005,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         controller.signal.throwIfAborted();
         return candidate;
       };
+      const adjudicator = options.playerWorldAdjudicator ?? (!options.playerTranslator
+        ? createPiPlayerWorldAdjudicator({
+            root: workspace.root,
+            ...(options.profile ? { profile: options.profile } : {}),
+            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+            onStatus: showTurnActivity,
+            signal: controller.signal,
+          })
+        : undefined);
       showTurnActivity("正在理解你的行动…");
       let outcome: Awaited<ReturnType<typeof performPlayTurn>>;
       try {
@@ -1009,6 +1023,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           actorId: selection.actor.id,
           utterance,
           translator,
+          ...(adjudicator ? { adjudicator } : {}),
           advanceBackground: options.advanceBackground ?? 0,
           origin: input.origin ?? "freeform",
           ...(input.intent ? { intent: input.intent } : {}),
@@ -2358,6 +2373,32 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         const instance = catalog.instances.find((candidate) => candidate.branchId === branchId);
         if (!instance) throw new Error(`Unknown instance '${branchId}'.`);
         ctx.ui.notify(formatProgress(instance), "info");
+        } finally {
+          activity.close();
+        }
+      },
+    });
+
+    pi.registerCommand("ooc", {
+      description: "Ask an explicit out-of-character question without advancing the world",
+      handler: async (args, ctx) => {
+        if (!guardForegroundIdle(ctx, "inspect the current player state", { includeTask: false })) return;
+        const selection = selectedPlay;
+        if (!playerMode || !selection) {
+          ctx.ui.notify("/ooc is available while inhabiting a character; use /play or /world-resume first.", "warning");
+          return;
+        }
+        const activity = beginHostActivity(ctx, "player-meta", "Reading the committed actor-visible timeline");
+        try {
+          const question = args.trim() || "/ooc";
+          showPlayMessage(`**场外：** ${question}`);
+          const frame = await buildPlayOpeningFrame(
+            workspace.root,
+            selection.session.branchId,
+            selection.actor.id,
+            selection.source?.id,
+          );
+          showPlayMessage(renderPlayerMetaResponse(frame, question));
         } finally {
           activity.close();
         }

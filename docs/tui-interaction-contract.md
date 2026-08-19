@@ -45,10 +45,10 @@ prints a result.
   use compact footer status. The accepted text is checked against the live
   stream before that same native component is committed as a durable,
   model-context-excluded scene. Thinking and player choices persist with it; no
-  duplicate narrator copy is mounted. A rejected attempt is removed before its
-  one automatic retry streams. Scene prose contains only the current in-world
-  moment and ends on a concrete fact/signal; embedded action lists, “what next”
-  questions, and decision-handoff rhetoric fail validation.
+  duplicate narrator copy is mounted. A structurally rejected attempt is removed
+  before its one automatic retry streams. Scene prose is model-directed to contain
+  only the current in-world moment and end on a concrete fact/signal; host code
+  does not classify prose semantics through language-specific phrase matching.
 - Thinking defaults to `auto`: an active block is visible, `thinking_end`
   collapses it, text-start and message-end are fallbacks, and Pi's existing
   Ctrl+T binding expands completed blocks without an NWH key interceptor.
@@ -56,8 +56,11 @@ prints a result.
   2-4 actor-scoped concrete actions or exact spoken lines and a free-form action
   path. The dialog shows no system rationale or recommendation for these
   unvalidated suggestions. Choice capture is mutation-free; selection still
-  enters the normal translation, deterministic player-action validation, and
-  commit boundary.
+  enters the normal typed interpretation, current-world adjudication,
+  deterministic player-action validation, and commit boundary.
+- Natural-language input in player mode is always treated as in-world. The only
+  meta route is the explicit `/ooc [question]` UI protocol, so host code never
+  guesses from Chinese or English wording that a sentence is “system-level.”
 - Managed long-running operations use the NWH task overlay for host progress,
   assistant messages, thinking, and tool calls. A compact dock remains while a
   task is in the background.

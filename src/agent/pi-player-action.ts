@@ -37,9 +37,12 @@ Security and truth boundaries:
 - Entity and claim IDs are turn-local opaque handles. Use them exactly as supplied; they carry no semantic meaning and are decoded only by the host after capture.
 - Naming a character does not prove physical presence. Include another character as a participant or artifact recipient only for an immediate co-located interaction; the host rejects remote interaction.
 - Submit exactly one propose_player_action tool call. Do not claim success: the host will scope-check, knowledge-check, validate, and commit it.
+- Always fill intent. intent.summary describes the desired immediate act, not its outcome. intent.targets identifies known entities by supplied handles and unknown/open-world referents as described targets. intent.sceneTransition and intent.requestedTimeAdvance are the only way to express scene movement or duration; the host never recovers either by matching words in the utterance.
+- For a compiled destination, use an entity target and write character.location when that field and destination handle are writable/referenceable. For an uncompiled destination, use a described destination with depart/explore and do not invent an entity ID or location write.
+- proposedDelta contains only immediate effects the actor can directly control. If the player asks for a result whose success depends on world law or another entity, preserve that desire in intent and propose only the actor-controlled part (possibly an empty delta). A separate world adjudicator will decide realization or the actual consequence.
 - Describe the intended immediate transition, not a distant chain of consequences. Include a precondition only when its exact field and current value are present in selfState or ownedEntityState. An absent field is unknown: never invent character.alive, character.location, ownership, or any other positive precondition from identity, prose, genre expectations, or common sense.
 - Use scene, ordered recentVisibleEvents, and activeThreads only to understand the committed present and choose one immediate act. Engine chronology is intentionally withheld unless the character knows it through selfState or an acquired claim; never invent a date or elapsed duration. These fields do not authorize hidden entities, arbitrary absolute-time predicates, or writes outside writableEntityIds/writableStateFields.
-- Observation may use an empty proposedDelta; the host permits at most a bounded perception beat unless it has independently authorized a discoverable claim. Never invent knowledge. For a concrete reflection or decision, write character.plan to the player's explicit immediate plan when that field is writable. Waiting may use an empty delta, but include only genuinely present participants that could respond; the host rejects unpressured empty waiting instead of creating a loop.
+- Observation may use an empty proposedDelta; the host permits at most a bounded perception beat unless it has independently authorized a discoverable claim. Never invent knowledge. For a concrete reflection or decision, write character.plan to the player's explicit immediate plan when that field is writable. Waiting may use an empty delta and must put its requested duration in intent.requestedTimeAdvance.
 - A spoken or physical interaction should include the co-located character it directly addresses. Describe one concrete immediate act, not generic prose such as "do something that advances the story".
 - When refusing an immediate state-changing choice, preserve the controlled current value explicitly in proposedDelta so deterministic code can recognize the conflict; never fabricate a write outside the actor's capabilities.`;
 
@@ -109,6 +112,9 @@ export function createPiPlayerActionTranslator(options: PiPlayerActionTranslator
       const candidate = capture.getCandidate();
       if (!candidate || capture.getExecutionAttempts() !== 1) {
         throw new Error(`Expected exactly one valid propose_player_action call; observed ${capture.getExecutionAttempts()}.`);
+      }
+      if (!candidate.intent) {
+        throw new Error("propose_player_action must include a structured intent; the host does not infer semantics from player text.");
       }
       return modelBoundary.decodeCandidate(candidate);
     } finally {

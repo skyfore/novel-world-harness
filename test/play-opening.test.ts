@@ -156,8 +156,9 @@ describe("player opening narration", () => {
     }, "recovery")).toContain("did not become an in-world event");
     expect(() => assertPlaySceneNarration("你现在是福贵。故事开始。你要做什么？")).toThrow("underspecified");
     const menuInProse = "你把传达室那封也许存在的信压在心里，走廊里的声音忽远忽近。老唐和路鸣泽的名字一前一后浮出来。你停在原地，意识到先处理哪一条牵扯会改变寻找答案的方式。是把目光投向老唐，还是路鸣泽，或者干脆走出去，让新的线索自己撞上来？";
-    expect(() => assertPlaySceneNarration(menuInProse)).toThrow("meta-agency handoff");
-    expect(() => assertPlaySceneNarration("风从门缝里挤进来，卷起脚边一层薄灰。走廊深处传来两次短促的摩擦声，门板随之轻轻震动，昏黄灯光沿着墙角晃了一下。那道新鲜划痕还留在鞋尖前，木板另一侧的呼吸声却忽然停住。你可以先观察门前，也可以整理线索，或者径直离开——下一步由你决定。")).toThrow("meta-agency handoff");
+    expect(assertPlaySceneNarration(menuInProse)).toBe(menuInProse);
+    const handoffCopy = "风从门缝里挤进来，卷起脚边一层薄灰。走廊深处传来两次短促的摩擦声，门板随之轻轻震动，昏黄灯光沿着墙角晃了一下。那道新鲜划痕还留在鞋尖前，木板另一侧的呼吸声却忽然停住。你可以先观察门前，也可以整理线索，或者径直离开——下一步由你决定。";
+    expect(assertPlaySceneNarration(handoffCopy)).toBe(handoffCopy);
     const streamed = "\n风从门缝里挤进来，带着一点凉意。走廊深处传来两次短促的摩擦声，门板随之轻轻震动。昏黄灯光在地面晃了一下，墙角的薄灰还没有落定。门外忽然有人压低声音问：“你是走还是留？”随后只剩指节抵住木板的轻响。\n";
     expect(assertPlaySceneNarration(streamed)).toBe(streamed);
     await expect(engine.branches.readHead("main")).resolves.toBe(committed.newHead);

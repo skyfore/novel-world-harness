@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
-import type { PlayerActionCandidate, PlayerProgressCertificate, PlayerTurnStage } from "./player-action.js";
+import type { PlayerActionCandidate, PlayerProgressCertificate, PlayerTurnStage, PlayerWorldResolution } from "./player-action.js";
 import type { EventProposal, ValidationIssue, ValidationReport } from "./model.js";
 
 export type PlayerTurnOrigin = "freeform" | "scene-choice" | "host-safe-choice" | "cli";
@@ -24,7 +24,9 @@ export type PlayerTurnAudit = {
   stage: PlayerTurnStage;
   accepted: boolean;
   issues: ValidationIssue[];
+  intendedCandidate?: PlayerActionCandidate;
   candidate?: PlayerActionCandidate;
+  adjudication?: PlayerWorldResolution;
   proposal?: EventProposal;
   validation?: ValidationReport;
   eventHash?: string;

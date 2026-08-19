@@ -330,19 +330,7 @@ function proposalPossibilityAffinity(proposal: EventProposal, possibility: Possi
   const sharedWrites = [...proposalWrites].filter((key) => possibilityWrites.has(key)).length;
   const writeUnion = new Set([...proposalWrites, ...possibilityWrites]).size;
   const writeScore = writeUnion ? sharedWrites / writeUnion : 0;
-  const titleScore = lexicalAffinity(proposal.title, possibility.title);
-  return participantScore * 0.35 + writeScore * 0.45 + titleScore * 0.2;
-}
-
-function lexicalAffinity(left: string, right: string): number {
-  const tokens = (value: string) => new Set(
-    value.normalize("NFKC").toLocaleLowerCase().split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 1),
-  );
-  const leftTokens = tokens(left);
-  const rightTokens = tokens(right);
-  if (!leftTokens.size || !rightTokens.size) return 0;
-  const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
-  return intersection / new Set([...leftTokens, ...rightTokens]).size;
+  return participantScore * 0.4 + writeScore * 0.6;
 }
 
 export function adjudicateActorCandidates(candidates: readonly ActorProposalCandidate[], limit: number): { selected: ActorProposalCandidate[]; conflicts: AdjudicationConflict[] } {

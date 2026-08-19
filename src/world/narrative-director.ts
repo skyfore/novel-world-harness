@@ -789,7 +789,12 @@ function addExplorationAffordances(
     channels: ["scene", "thread", "consequence"],
     threadIds: [focus.linkId],
     noveltyKey: `explore:${scene.key}`,
-    scene: { kind: "explore", label, beat: scene.beat + 1 },
+    scene: {
+      kind: "explore",
+      sceneId: `open-${contentHash({ actorId, from: scene.key, beat: scene.beat + 1, thread: focus.linkId, mode: "explore" }).slice(0, 24)}`,
+      label,
+      beat: scene.beat + 1,
+    },
   });
   drafts.push({
     label: "离开原地寻找新接触点",
@@ -850,7 +855,12 @@ function fallbackAffordances(
     channels: ["scene", "thread", "consequence"],
     threadIds: [focus.linkId],
     noveltyKey: `redirect:${scene.key}`,
-    scene: { kind: "explore", label: "与当前方向不同的邻近区域", beat: scene.beat + 1 },
+    scene: {
+      kind: "explore",
+      sceneId: `open-${contentHash({ actorId, from: scene.key, beat: scene.beat + 1, thread: focus.linkId, mode: "redirect" }).slice(0, 24)}`,
+      label: "与当前方向不同的邻近区域",
+      beat: scene.beat + 1,
+    },
   });
   return [
     {

@@ -313,10 +313,6 @@ export function assertPlaySceneNarration(text: string): string {
   if (!narration) throw new Error("Scene narrator returned no text.");
   if (Array.from(narration).length < 80) throw new Error("Scene narrator returned an underspecified response instead of a rendered scene.");
   if (Array.from(narration).length > 4_000) throw new Error("Scene narrator returned an excessively long scene.");
-  const narratorCopy = stripQuotedDialogue(narration);
-  if (PLAYER_ACTION_HANDOFF_PATTERNS.some((pattern) => pattern.test(narratorCopy))) {
-    throw new Error("Scene narrator put player-action options or a meta-agency handoff inside the prose.");
-  }
   const paragraphs = narration.split(/\n\s*\n+/u).map(normalizeNarrativeParagraph).filter((value) => value.length >= 20);
   for (let left = 0; left < paragraphs.length; left += 1) {
     for (let right = left + 1; right < paragraphs.length; right += 1) {
@@ -328,26 +324,6 @@ export function assertPlaySceneNarration(text: string): string {
   // Validate normalized prose, but preserve the provider's exact streamed
   // bytes so the settled transcript cannot silently rewrite what was shown.
   return text;
-}
-
-const PLAYER_ACTION_HANDOFF_PATTERNS: readonly RegExp[] = [
-  /你(?:现在|接下来)?(?:可以|不妨|何不|应该|应当)(?=[^。！？\n]{0,100}(?:也可以|或者|还是|选择|决定|行动|下一步))/u,
-  /(?:^|[。！？；\n])\s*(?:是|究竟是|到底是)[^。！？\n]{0,120}还是[^。！？\n]{0,120}(?:或者|还是|[？?])/u,
-  /先(?:处理|解决|选择|决定)[^。！？\n]{0,24}(?:哪一|哪条|什么|如何|怎么)/u,
-  /让(?:一条|新的?|某个)?(?:线索|机会|答案)[^。！？\n]{0,16}(?:自己)?(?:撞上来|找上门)/u,
-  /(?:下一步|接下来)[^。！？\n]{0,40}(?:由你|你来|选择|决定|行动|怎么做|做什么)/u,
-  /没有[^。！？\n]{0,32}(?:替你|为你)[^。！？\n]{0,16}(?:做?决定|选择|安排(?:下一步)?)/u,
-  /(?:故事|世界|命运)[^。！？\n]{0,40}(?:会?等|等待|等着|将?从)[^。！？\n]{0,40}(?:你|选择|决定|行动)/u,
-  /(?:what (?:do|will|would) you do|the choice is yours|it(?:'s| is) up to you|you can (?:now )?[^.!?\n]{0,100}\bor\b|will you [^.!?\n]{0,100}\bor\b)/iu,
-];
-
-function stripQuotedDialogue(value: string): string {
-  return value
-    .replace(/“[^”\n]*”/gu, "")
-    .replace(/「[^」\n]*」/gu, "")
-    .replace(/『[^』\n]*』/gu, "")
-    .replace(/"[^"\n]*"/gu, "")
-    .replace(/'[^'\n]*'/gu, "");
 }
 
 function normalizeNarrativeParagraph(value: string): string {

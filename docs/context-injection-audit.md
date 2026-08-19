@@ -1,6 +1,6 @@
 # Context injection, visibility, and authority audit
 
-Date: 2026-08-17
+Date: 2026-08-19
 
 This is the evidence record for every application-controlled path that can
 place data in a model request, every public callback that could be implemented
@@ -21,18 +21,20 @@ The inventory was built by tracing every `PiAgentSession.create`, every direct
 `ModelRuntime.create`, every prompt constructor, Pi's lifecycle hooks, and the
 exported callback types that accept world data.
 
-There are four application inference roles:
+There are five application inference roles:
 
 | Inference role | Construction site | Model-visible input | Available model tools | Persistent authority |
 | --- | --- | --- | --- | --- |
 | Ordinary TUI/print assistant | `playCommand` | Harness prompt/contract, allowlisted project instructions, projected ordinary transcript, current user input and explicit safe attachments | bounded `list_files`, `search_files`, `read_file`; extension-owned session rename metadata | no file/world write; session title only |
 | Compiler | `createPiCompilerSession`, or an explicit compiler turn in the TUI | isolated compiler instructions plus a host-selected structure/source/opening/reconciliation payload and source-owned prior-artifact indexes; a chapter-bounded pass may request one non-citable edge preview, while a separately scheduled pair pass receives both full adjacent segments | scope-specific chapter-rule, exact-retrieval, boundary-deferral, and typed pending-proposal tools | validated chapter workflow metadata, pending/rejected proposal envelopes, non-canonical calibration requests, and a finish handshake; no canonical or branch commit |
 | Player-action translator | `createPiPlayerActionTranslator` | one actor-safe projection with opaque turn handles, one untrusted utterance, and bounded coverage metadata | exact retrieval over the already-safe projection and one in-memory capture tool | none; the host decodes, validates, and constructs the event proposal |
+| Player-world adjudicator | `createPiPlayerWorldAdjudicator` | the typed intended candidate, relevant current committed entity state, applicable active rules, deterministic preview issue codes, and actor write capabilities, all with opaque handles and no future canon | one in-memory resolution-capture tool | none; realization/transformation and its contradiction certificate are revalidated before the host can construct or commit an event |
 | Scene narrator | `createPiPlayerOpeningNarrator` | one actor-safe, name-based scene frame, current effective actor disposition/motivation, and bounded coverage metadata | exact retrieval over that same frame and one in-memory choice-capture tool | none; prose and suggested choices cannot mutate branch truth; a selected suggestion enters the separate player-action boundary |
 
 Evidence: [play.ts](../src/commands/play.ts),
 [pi-compiler.ts](../src/compiler/pi-compiler.ts),
-[pi-player-action.ts](../src/agent/pi-player-action.ts), and
+[pi-player-action.ts](../src/agent/pi-player-action.ts),
+[pi-player-world-adjudicator.ts](../src/agent/pi-player-world-adjudicator.ts), and
 [pi-player-opening.ts](../src/agent/pi-player-opening.ts). The only other
 direct `ModelRuntime.create` is `doctorCommand`; it reads provider/authentication
 metadata but never constructs a prompt or invokes inference.
@@ -40,12 +42,13 @@ metadata but never constructs a prompt or invokes inference.
 
 ### Public callback inventory
 
-These API seams must not be confused with the four built-in Pi roles:
+These API seams must not be confused with the five built-in Pi roles:
 
 | Callback | Data supplied by the harness | Boundary status and returned-value gate |
 | --- | --- | --- |
-| `PlayerActionTranslator` | actor-scoped stable IDs, visible state/knowledge/events, and writable capabilities; no commit chronology | safe for a model adapter after that adapter applies its own transport policy. Input is a frozen clone and output must pass `playerActionCandidateSchema` plus scope, grounding, spatial, knowledge, progress, and engine validation. The built-in Pi adapter additionally replaces stable IDs with opaque handles. |
-| `PlayerOpeningNarrator` | `PlayerSceneNarratorFrame`: names and actor-visible semantics plus current effective disposition/active motivation, with branch/commit/time/stable IDs removed | model-safe frame. The TUI validates narration and concrete choice text; a selected suggestion is translated and deterministically validated like free-form input. |
+| `PlayerActionTranslator` | actor-scoped stable IDs, visible state/knowledge/events, and writable capabilities; no commit chronology | safe for a model adapter after that adapter applies its own transport policy. Input is a frozen clone and output must pass `playerActionCandidateSchema` plus scope and grounding. The built-in Pi adapter additionally replaces stable IDs with opaque handles; world realization is a separate boundary. |
+| `PlayerWorldAdjudicator` | typed intent/candidate, relevant current committed state, applicable rules, and preview issue codes; no future canon | host-authority callback over current world truth, not actor-safe reasoning. Output is frozen/captured proposal data and must pass the resolution schema, contradiction-certificate checks, replacement scope/grounding/spatial checks, knowledge gates, and engine validation. The built-in adapter uses opaque handles. |
+| `PlayerOpeningNarrator` | `PlayerSceneNarratorFrame`: names and actor-visible semantics plus current effective disposition/active motivation, with branch/commit/time/stable IDs removed | model-safe frame. The TUI validates language-neutral narration/choice structure; a selected suggestion is interpreted, adjudicated, and deterministically validated like free-form input. |
 | `ActorReasoner` | opaque actor view, one currently active goal description/priority/visible targets, active disposition, and committed development | model-safe input snapshot. Output is strict-schema parsed, handle-decoded, and sent through the player capability gates before it can become an actor proposal. |
 | `NarrativeAdapter` in actor POV | actor name, visible self state and acquired claims, and participant-visible event summaries | actor-safe and frozen. Adapter output must be a string; rendering is non-authoritative and branch-head immutability is checked. |
 | `NarrativeAdapter` in explicit omniscient POV | full projected `WorldState`, commit/branch IDs, and committed history | intentionally **not** model-safe for an untrusted/actor model. This is a diagnostic/host-authority API, selected explicitly by the caller. |
@@ -471,21 +474,31 @@ and [player-action.test.ts](../test/player-action.test.ts) plus
 
 ### Return path and commit authority
 
-The host strict-schema parses the captured candidate, normalizes only the
-bounded open-scene movement case, and validates reference/write scope,
+The host strict-schema parses the captured typed intent without reparsing the
+utterance. A separate fresh world-adjudication session receives the relevant
+current committed state, applicable active rules, and deterministic preview
+issues but no future canon. It must propose either ordinary realization or a
+direct-contradiction transformation. Transformations carry a certificate citing
+an existing state field, applicable active rule, exact preview issue, or explicit
+ordinary causal/capability principle; host code verifies every checkable citation.
+The proposed consequence is then subjected to the same reference/write scope,
 actor-visible predicate grounding, physical co-location, knowledge authority,
-progress, world rules, invariants and optimistic parent-head identity. It
-constructs the authoritative title/actor observation from the bounded player
-utterance rather than accepting a model assertion as an outcome. A canon
-resolver receives an immutable proposal snapshot and its result is strict
-schema parsed. Only `commitKnowledgeAwareAction`/the engine can append the
-event and move the branch head.
+world-rule, invariant, time, and optimistic parent-head checks. Open destinations
+use described targets and branch-local structural scene IDs rather than guessed
+canonical IDs or labels recovered from text. A canon resolver receives an
+immutable proposal snapshot and its result is strict-schema parsed. Only
+`commitKnowledgeAwareAction`/the engine can append the event and move the branch
+head.
 
 Evidence: `PlayerTurnService` and validation functions in
-[player-action.ts](../src/world/player-action.ts), engine validation in
-[engine.ts](../src/world/engine.ts), and acceptance/rejection/mutation tests in
-[player-action.test.ts](../test/player-action.test.ts) and
-[world-engine.test.ts](../test/world-engine.test.ts).
+[player-action.ts](../src/world/player-action.ts), the isolated adapter in
+[pi-player-world-adjudicator.ts](../src/agent/pi-player-world-adjudicator.ts),
+the capture-only schema in
+[player-world-outcome-tool.ts](../src/agent/player-world-outcome-tool.ts), engine
+validation in [engine.ts](../src/world/engine.ts), and regressions in
+[player-action.test.ts](../test/player-action.test.ts),
+[player-world-outcome-tool.test.ts](../test/player-world-outcome-tool.test.ts),
+and [world-engine.test.ts](../test/world-engine.test.ts).
 
 ## 5. Actual play: scene-narrator context
 
@@ -547,13 +560,14 @@ world truth: inactive/future phases stay excluded, the guidance may not be
 stated in prose, and a suggestion has no capability status until the player
 selects it and the ordinary translator and deterministic gates accept it.
 
-Narration and suggestions are separate output channels. Prose may render only
-the current actor-visible facts, perceptions, pressure, and unresolved in-world
-signals; it may not enumerate or hint at next actions, ask what the player will
-do, or close with choice/decision rhetoric. A deterministic narration check
-rejects common Chinese and English agency handoffs while leaving quoted in-world
-dialogue intact, causing the first streamed draft to be discarded before one
-fresh retry. `propose_player_choices` is the sole channel for possible actions.
+Narration and suggestions are separate output channels. The model contract asks
+prose to render only current actor-visible facts, perceptions, pressure, and
+unresolved in-world signals, while `propose_player_choices` is the dedicated
+suggestion channel. Host validation enforces language-neutral structural limits
+(non-empty/length/repeated paragraphs and structural choice object shape/count/
+distinctness); it does not search Chinese or English prose for semantic handoff
+phrases. This keeps style guidance in the model layer instead of turning a fixed
+vocabulary into world or rendering authority.
 
 Evidence: `buildNarrativeDirection`, `addCanonicalAffordances`,
 `publicNarrativeThread`, and `publicPlayerAffordance` in
@@ -569,15 +583,16 @@ a bounded projection plus exact retrieval over that same
 sanitized frame and one capture-only choice tool. `playScenePrompt` has no
 arbitrary third-record override; it serializes only its typed frame.
 
-A completed but invalid draft gets one retry in a brand-new session, so rejected
-prose/tool history cannot enter attempt two. Accepted prose is checked for
-non-empty/length/repeated-paragraph failures. The strict choice schema accepts
-only 2-4 distinct action-only objects and rejects system/meta terms, duplicate
-wording, and known abstract host-template language. There is no model-authored
-label, description, intent, recommendation, candidate, or outcome field. A custom
-narrator injected into the TUI passes the same narration/choice validation.
-Rendering and choice capture never advance the branch; selecting a suggestion
-starts the separate player-action translation/validation path.
+A completed but structurally invalid draft gets one retry in a brand-new session,
+so rejected prose/tool history cannot enter attempt two. Accepted prose is checked
+for non-empty/length/repeated-paragraph failures. The structural choice schema accepts
+only 2-4 distinct action-only objects; it does not classify their natural-language
+semantics with a host phrase list. There is no model-authored label, description,
+intent, recommendation, candidate, or outcome field. Missing or malformed choice
+capture does not discard otherwise valid scene prose. A custom narrator injected
+into the TUI passes the same structural validation. Rendering and choice capture
+never advance the branch; selecting a suggestion starts the separate player-action
+interpretation/adjudication/validation path.
 
 Evidence: [pi-player-opening.ts](../src/agent/pi-player-opening.ts),
 `playScenePrompt`/`assertPlaySceneNarration` in

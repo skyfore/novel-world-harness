@@ -63,6 +63,7 @@ export async function projectActorScene(
 
   const present = new Set<EntityId>([actorId]);
   let locationId: EntityId | undefined;
+  let openSceneId: string | undefined;
   let label: string | undefined;
   let beat = 0;
   let lastBoundaryEventId: string | undefined;
@@ -83,6 +84,7 @@ export async function projectActorScene(
         ? actorLocationWrite
         : undefined;
       label = locationId ? context.entities.get(locationId)?.canonicalName : progressScene?.label;
+      openSceneId = undefined;
       openSceneOverridesStableLocation = false;
     }
     if (progressScene) {
@@ -90,6 +92,7 @@ export async function projectActorScene(
       if (progressScene.destinationEntityId
         && isSourceOwnedLocation(context.entities, progressScene.destinationEntityId, effectiveSourceId)) {
         locationId = progressScene.destinationEntityId;
+        openSceneId = undefined;
         openSceneOverridesStableLocation = false;
       } else if (progressScene.kind === "depart" || progressScene.kind === "explore") {
         // An open-world move may intentionally leave the stable canonical
@@ -97,6 +100,8 @@ export async function projectActorScene(
         // The committed scene transition still moves the lived scene forward;
         // otherwise the old state value would visually snap the player back.
         locationId = undefined;
+        openSceneId = progressScene.sceneId ?? openSceneId;
+        label = progressScene.label;
         openSceneOverridesStableLocation = true;
       }
       if (progressScene.label) label = progressScene.label;
@@ -146,6 +151,7 @@ export async function projectActorScene(
     && isSourceOwnedLocation(context.entities, projectedLocation, effectiveSourceId)
   ) {
     locationId = projectedLocation;
+    openSceneId = undefined;
     label = context.entities.get(projectedLocation)?.canonicalName;
     for (const entity of context.entities.values()) {
       if (entity.kind !== "character" || !evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId)) continue;
@@ -166,9 +172,13 @@ export async function projectActorScene(
     .slice(-8);
   const key = locationId
     ? `location:${locationId}`
-    : label
-      ? `scene:${contentHash(label.normalize("NFKC").trim()).slice(0, 16)}`
-      : `scene:${lastBoundaryEventId ?? "opening"}`;
+    : openSceneId
+      ? `scene:${openSceneId}`
+      // Read compatibility for events committed before open scenes acquired
+      // structural IDs. New player events never derive identity from labels.
+      : label
+        ? `scene:${contentHash(label.normalize("NFKC").trim()).slice(0, 16)}`
+        : `scene:${lastBoundaryEventId ?? "opening"}`;
   const locationState = locationId
     ? projectActorVisibleState(state.values[locationId] ?? {}, context.stateSchema, "public")
     : {};

@@ -18,7 +18,7 @@ import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { BranchStore } from "../src/world/store.js";
 import { SourceMaterialStore } from "../src/storage/source-material-store.js";
-import type { PlayerActionTranslator } from "../src/world/player-action.js";
+import type { PlayerActionTranslator, PlayerWorldAdjudicator } from "../src/world/player-action.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { PlaySessionStore } from "../src/world/play-session.js";
@@ -88,6 +88,7 @@ async function fixture(
   extensionConfig: {
     mode?: NwhExtensionOptions["mode"];
     preRegisteredToolNames?: readonly string[];
+    playerWorldAdjudicator?: PlayerWorldAdjudicator;
   } = {},
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-tui-extension-"));
@@ -170,6 +171,9 @@ async function fixture(
     mode: extensionConfig.mode ?? "assistant",
     onSessionShutdown,
     playerTranslator,
+    ...(extensionConfig.playerWorldAdjudicator
+      ? { playerWorldAdjudicator: extensionConfig.playerWorldAdjudicator }
+      : {}),
     playerOpeningNarrator: playerOpeningNarrator ?? (async (frame, purpose) => purpose === "opening"
       ? `门外的风声忽远忽近，你的意识落回此刻。${frame.actor.name}所能确认的一切都在眼前，尚未发生的事仍旧沉默。门缝下的光被什么遮住了一瞬，檐下铜铃却没有响；片刻之后，木板深处又传来一声很轻的摩擦。`
       : purpose === "turn"
@@ -292,7 +296,7 @@ describe("NWH TUI extension", () => {
     const { commands, sentUserMessages, markdownTransformers, messageRenderers } = await fixture();
     expect(markdownTransformers).toHaveLength(0);
     expect([...messageRenderers.keys()]).toEqual(["nwh-narrator", "nwh-play"]);
-    expect([...commands.keys()]).toEqual(["novels", "instances", "remove", "characters", "play", "world-resume", "continue", "switch", "create-instance", "scene", "progress", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
+    expect([...commands.keys()]).toEqual(["novels", "instances", "remove", "characters", "play", "world-resume", "continue", "switch", "create-instance", "scene", "progress", "ooc", "leave", "files", "search", "read", "prepare-content", "compile-next", "prepare-all", "reparse", "tasks", "audit", "prepared-cache", "status", "clear", "help", "exit"]);
     const notifications: string[] = [];
     const actions = { cleared: false, shutdown: false };
     const ctx = commandContext(notifications, actions);
@@ -1057,6 +1061,7 @@ describe("NWH TUI extension", () => {
   it("routes an LLM-suggested concrete action through translation and deterministic validation", async () => {
     const turnNarrated = deferred();
     const translatedUtterances: string[] = [];
+    let adjudicationCalls = 0;
     const opening = "冷风从门缝里钻进来，你听见近处细碎的响动。光影落在脚边，已经知道的事没有凭空改变；门板深处的摩擦声停了片刻，又比先前更近地响了一次。墙角薄灰被风卷出一道弯曲的痕迹。";
     const afterObserve = "你把注意力收回眼前，细小的风声、光影和近处动静重新有了层次。门缝右侧留着一道新鲜划痕，细灰在边缘堆成浅线；木板另一侧的呼吸声忽然停住，走廊也随之安静下来。";
     const { commands, root } = await fixture(
@@ -1095,6 +1100,19 @@ describe("NWH TUI extension", () => {
           ],
         };
       },
+      undefined,
+      undefined,
+      {
+        playerWorldAdjudicator: () => {
+          adjudicationCalls += 1;
+          return {
+            decision: "realize",
+            status: "succeeded",
+            eventTitle: "福贵贴近门边倾听",
+            actorObservation: "你贴近门边，细碎的响动隔着木板传来。",
+          };
+        },
+      },
     );
     await new CanonicalModelStore(root).putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
     const { engine } = await openWorkspaceWorld(root);
@@ -1122,6 +1140,7 @@ describe("NWH TUI extension", () => {
     await commands.get("play")!.handler("hero main", ctx);
     await turnNarrated.promise;
     expect(translatedUtterances).toEqual(["贴近门缝，听清外面那阵细碎的响动。"]);
+    expect(adjudicationCalls).toBe(1);
     expect(offered).toContain("1. 贴近门缝，听清外面那阵细碎的响动。");
     expect(offered.some((choice) => choice.includes(" — "))).toBe(false);
     expect(offered.some((choice) => choice.includes("(recommended)"))).toBe(false);
@@ -1158,7 +1177,7 @@ describe("NWH TUI extension", () => {
 
     await commands.get("play")!.handler("hero main", ctx as unknown as ExtensionCommandContext);
     await expect(events.get("input")!(
-      { type: "input", text: "OOC: 当前时间线在哪里？", source: "interactive" } as InputEvent,
+      { type: "input", text: "/ooc: 当前时间线在哪里？", source: "interactive" } as InputEvent,
       ctx,
     )).resolves.toEqual({ action: "handled" });
 
@@ -1267,6 +1286,47 @@ describe("NWH TUI extension", () => {
     expect(narratorFrame).not.toHaveProperty("logicalStep");
     expect(narratorFrame).not.toHaveProperty("storyTime");
     expect(narratorFrame?.actor).toEqual({ name: "福贵" });
+    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
+  });
+
+  it("persists valid narration and keeps free-form play when structured choices are absent", async () => {
+    const narration = "热风从门廊里缓缓挤过来，你听见脚边的沙粒被吹得轻轻滚动。眼前已经发生的事情没有退回原处，近处的光影却仍在一点点变化；墙后忽然传来一声短促的碰响，随后又只剩下压低了的说话声。";
+    const { commands, root, sentVisibleMessages } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async () => ({ narration, choices: [] }),
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const notifications: string[] = [];
+    const offered: string[][] = [];
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: (message: string) => notifications.push(message),
+        async select(_title: string, choices: string[]) {
+          offered.push(choices);
+          return undefined;
+        },
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")?.handler("hero main", ctx);
+
+    expect(sentVisibleMessages).toEqual([narration]);
+    expect(notifications.some((message) => message.includes("Scene narration failed"))).toBe(false);
+    expect(offered).toHaveLength(1);
+    expect(offered[0]).toEqual(["自由输入行动或台词…"]);
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 

@@ -114,17 +114,19 @@ flowchart LR
 
 - 场景 LLM 根据 committed actor frame、已经历事件、当前有效性格/决策偏好和
   active motivation，生成 2-4 条角色此刻能直接做出的具体行为或说出的原话；
-- choice schema 只接受 `action`，拒绝系统/meta 语言、已知抽象模板和重复项；
+- choice schema 只接受 `action`，并只校验数量、长度、结构和重复项；是否具体、
+  是否留在角色内由隔离的 LLM 依据完整场景语义判断，不再由中文/英文词表决定；
   不再允许模型提供 label、description、intent、recommendation 或 outcome；
 - TUI 只显示动作/台词正文和自由输入入口，不再显示灰色宿主说明，也不对尚未
   验证的 LLM 建议标 recommended；
 - 选中建议后才进入普通 player-action 翻译与 deterministic gates。建议本身不
   是 proposal、capability 或 committed truth，choice 模型也不能借 intent 绕过
   翻译；
-- narrator/choice 失败时只保留自由输入，不再用空洞宿主模板伪装成角色选项。
-- narrator 正文与 choice 工具严格分栏：正文只呈现当前事实、感受和现场信号，
-  不再用“是……还是……”“下一步由你决定”等话术重复口述选择；命中该类
-  handoff 的首稿会被宿主丢弃并独立重写；
+- choice capture 缺失或不合法时保留已经通过校验的场景正文，并只保留自由输入；
+  不再把辅助选项协议失败升级成整段 narration 失败，也不再用空洞宿主模板伪装成角色选项。
+- narrator 正文与 choice 工具严格分栏：提示契约要求正文只呈现当前事实、
+  感受和现场信号，choice 工具承载建议；宿主只做语言无关的长度、空值和重复
+  段落校验，不再搜索“是……还是……”或其他特定语言 handoff 词句；
 - actor/location 缺失属于兼容性诊断，不再以黄色 warning 打断沉浸；只有能
   指向明确用户动作的实例版本差异继续进入 warning surface。
 

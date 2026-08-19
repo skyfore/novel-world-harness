@@ -147,16 +147,22 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       }
     };
     const settle = (attempt: Awaited<ReturnType<typeof runAttempt>>): PlayerSceneNarrationResult => {
-      if (attempt.executionAttempts !== 1) {
-        throw new Error(`Expected exactly one valid propose_player_choices call; observed ${attempt.executionAttempts}.`);
-      }
+      // Narration is the authoritative player-facing rendering of the
+      // committed head. Choice capture is an auxiliary suggestion channel: a
+      // provider omitting or malformed-calling that tool must not discard an
+      // otherwise valid scene or replace it with a technical recovery prompt.
+      const narration = assertPlaySceneNarration(attempt.text);
+      const parsedChoices = attempt.executionAttempts === 1
+        ? playerSceneChoicesSchema.safeParse({ choices: attempt.choices })
+        : undefined;
       return {
-        narration: assertPlaySceneNarration(attempt.text),
-        choices: finalizePlayerSceneChoices(attempt.choices),
+        narration,
+        choices: parsedChoices?.success ? structuredClone(parsedChoices.data.choices) : [],
       };
     };
-    // Provider/session failures are surfaced directly. Only a completed but
-    // invalid draft gets one independent retry.
+    // Provider/session failures are surfaced directly. Only invalid prose gets
+    // one independent retry; missing suggestions leave the valid scene intact
+    // and the TUI continues through its free-form action path.
     const firstAttempt = await runAttempt(1);
     try {
       return settle(firstAttempt);

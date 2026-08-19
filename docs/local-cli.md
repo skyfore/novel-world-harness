@@ -167,18 +167,23 @@ be fabricated into positive preconditions. The scene model proposes 2-4 concrete
 actor actions or exact spoken lines from the committed scene, lived development,
 and effective disposition. The selector displays only those action/line texts,
 without host rationale or a recommendation badge. They remain unvalidated
-suggestions until selected; selection then enters the ordinary translation and
-deterministic gates. The choice model supplies action text only and cannot choose
-a privileged host intent or bypass translation. The same animated working
-indicator is used while translating, validating, and rendering.
-Narration and choices are separate channels: the prose contains only the current
-actor-visible scene and ends on a concrete fact or in-world signal. Embedded
-action suggestions, “what next” questions, and decision handoffs fail validation
-and trigger the same fresh one-shot rewrite; possible actions appear only in the
-choice selector. Missing actor/location fields remain available as readiness
-diagnostics but do not produce a yellow player-facing warning. Only actionable
+suggestions until selected; selection then enters the ordinary typed
+interpretation, current-world adjudication, and deterministic gates. The choice
+model supplies action text only and cannot choose a privileged host intent or
+bypass interpretation. The same animated working indicator is used while
+interpreting, adjudicating, validating, and rendering.
+Narration and choices are separate channels: the model is instructed to keep
+prose inside the current actor-visible scene and end on a concrete fact or
+in-world signal. The host validates structural shape and repetition but does not
+match language-specific “what next” or handoff phrases. Possible actions normally
+appear in the choice selector; missing/malformed auxiliary choices leave valid
+prose and free-form input intact. Missing actor/location fields remain available
+as readiness diagnostics but do not produce a yellow player-facing warning. Only actionable
 instance conditions, such as a pinned revision differing from the active prepared
 revision, enter that warning surface.
+Use `/ooc <question>` for an explicit actor-visible timeline/status query that
+must not advance the world. Ordinary prose is never reclassified as meta by a
+language-specific phrase matcher.
 After an accepted commit, a separate isolated narrator streams the actor-visible
 consequence from the new committed head; deterministic commit metadata and
 invisible background events are not presented as story prose. Ordinary player

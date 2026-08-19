@@ -196,9 +196,10 @@ export type KnowledgeDelta = z.infer<typeof knowledgeDeltaSchema>;
 
 /**
  * A committed event may advance the playable narrative without changing a
- * canonical state field.  These tags are host-derived authority metadata, not
- * model-authored prose: they make scene movement, relationships, plans,
- * pressures, and thread attachment replayable from branch history.
+ * canonical state field. These tags are typed, validated commit metadata rather
+ * than prose: the host derives channels/identity, while a world adjudication may
+ * propose the outcome status. They make scene movement, relationships, plans,
+ * pressures, consequences, and thread attachment replayable from branch history.
  */
 export const progressChannelSchema = z.enum([
   "state",
@@ -213,14 +214,31 @@ export const progressChannelSchema = z.enum([
 ]);
 export type ProgressChannel = z.infer<typeof progressChannelSchema>;
 
+export const eventOutcomeStatusSchema = z.enum(["succeeded", "partial", "blocked", "interrupted"]);
+export type EventOutcomeStatus = z.infer<typeof eventOutcomeStatusSchema>;
+
 export const sceneTransitionSchema = z
   .object({
     kind: z.enum(["stay", "depart", "arrive", "explore"]),
+    /**
+     * Branch-local identity for an open scene that has not been reconciled to
+     * a compiled location entity. Labels are presentation and localization;
+     * they must never be used as scene identity for new events.
+     */
+    sceneId: idSchema.optional(),
     label: z.string().trim().min(1).max(240).optional(),
     destinationEntityId: idSchema.optional(),
     beat: z.number().int().nonnegative(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.sceneId && value.kind !== "depart" && value.kind !== "explore") {
+      ctx.addIssue({ code: "custom", message: "sceneId is reserved for open depart/explore transitions", path: ["sceneId"] });
+    }
+    if (value.destinationEntityId && value.kind !== "arrive") {
+      ctx.addIssue({ code: "custom", message: "destinationEntityId requires an arrive transition", path: ["destinationEntityId"] });
+    }
+  });
 export type SceneTransition = z.infer<typeof sceneTransitionSchema>;
 
 export const narrativeProgressSchema = z
@@ -229,6 +247,7 @@ export const narrativeProgressSchema = z
     channels: z.array(progressChannelSchema).min(1),
     threadIds: z.array(idSchema).default([]),
     noveltyKey: z.string().trim().min(1).max(500),
+    outcome: eventOutcomeStatusSchema.optional(),
     scene: sceneTransitionSchema.optional(),
   })
   .strict()

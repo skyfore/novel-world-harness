@@ -2,27 +2,9 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 
-const OUT_OF_WORLD_CHOICE_LANGUAGE = /(?:玩家|选项|剧情|故事线|支线|任务线程|世界(?:状态|条件)|已提交|可回放|语言模型|\bllm\b|\bsystem\b|\bcommitted\b|\baffordance\b)/iu;
-const ABSTRACT_CHOICE_LANGUAGE = /(?:如何(?:回应|处理).{0,20}关系|重新界定.{0,20}关系方向|落实.{0,20}接触计划|离开原地寻找新接触点|选定处理当前局势的立场|把既定立场变成实际行动|迫使当前分歧进入决定阶段|换一个方向建立支线|确定一个可执行目标|让压力先走一步|确定.{0,30}(?:接触方式|关系方向)|(?:决定|考虑|思考|确定)(?:一下)?(?:下一步|如何).{0,20}(?:做|行动|处理|回应)|(?:采取|开始|落实)(?:下一步|具体|实际)?行动|推进(?:当前)?(?:局势|关系|任务)|寻找.{0,30}(?:能让当前局势|接触点|支线)|建立(?:新的?)?支线|关系方向|可执行目标)/u;
-
 export const playerSceneChoiceSchema = z.object({
   action: z.string().trim().min(2).max(240),
-}).strict().superRefine((choice, ctx) => {
-  if (OUT_OF_WORLD_CHOICE_LANGUAGE.test(choice.action)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["action"],
-      message: "A player choice must stay in character and must not expose story, system, or world-model terminology.",
-    });
-  }
-  if (ABSTRACT_CHOICE_LANGUAGE.test(choice.action)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["action"],
-      message: "A player choice must be a concrete immediate act or spoken line, not an abstract direction or plan category.",
-    });
-  }
-});
+}).strict();
 
 export const playerSceneChoicesSchema = z.object({
   choices: z.array(playerSceneChoiceSchema).min(2).max(4),

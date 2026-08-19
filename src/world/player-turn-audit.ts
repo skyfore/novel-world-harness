@@ -4,6 +4,7 @@ import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
 import type { PlayerActionCandidate, PlayerProgressCertificate, PlayerTurnStage, PlayerWorldResolution } from "./player-action.js";
 import type { EventProposal, ValidationIssue, ValidationReport } from "./model.js";
+import type { PlayerWorldResponseOption, PlayerWorldResponseResolution } from "./runtime.js";
 
 export type PlayerTurnOrigin = "freeform" | "scene-choice" | "host-safe-choice" | "cli";
 
@@ -31,6 +32,11 @@ export type PlayerTurnAudit = {
   validation?: ValidationReport;
   eventHash?: string;
   progressCertificate?: PlayerProgressCertificate;
+  worldResponseResolution?: PlayerWorldResponseResolution;
+  /** Present on audits written by runtimes with immediate-response tracing. */
+  worldResponseCandidates?: PlayerWorldResponseOption[];
+  worldResponseEvents?: Array<{ eventHash: string; title: string; possibilityId: string }>;
+  worldResponseError?: string;
   reactionEvents: Array<{ eventHash: string; title: string; actorId: string }>;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
   backgroundError?: string;

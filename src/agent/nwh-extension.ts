@@ -36,6 +36,7 @@ import { PlaySessionStore } from "../world/play-session.js";
 import { workspaceStateDir } from "./runtime-paths.js";
 import { createPiPlayerActionTranslator } from "./pi-player-action.js";
 import { createPiPlayerWorldAdjudicator } from "./pi-player-world-adjudicator.js";
+import { createPiPlayerWorldResponseResolver } from "./pi-player-world-response.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
   deterministicPlayerIntentCandidate,
@@ -83,6 +84,7 @@ import {
   type PlayerSceneNarrationObserver,
 } from "./pi-player-opening.js";
 import { playerSceneChoicesSchema, type PlayerSceneChoice } from "./player-scene-choice-tool.js";
+import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import { formatElapsed } from "../util/elapsed-status.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/removal.js";
 import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
@@ -144,6 +146,7 @@ export type NwhExtensionOptions = {
   profile?: LlmProfile;
   playerTranslator?: PlayerActionTranslator;
   playerWorldAdjudicator?: PlayerWorldAdjudicator;
+  playerWorldResponseResolver?: PlayerWorldResponseResolver;
   advanceBackground?: number;
   onSessionShutdown?: () => Promise<void>;
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
@@ -213,6 +216,8 @@ type TuiPrepareAllState = {
 };
 
 const MAX_PREPARE_ALL_PROVIDER_RETRIES = 1;
+
+type PresentedPlayerChoice = PlayerSceneChoice & { affordanceId?: string };
 
 const PLAY_INTENT = /(?:体验|扮演|饰演|想玩|游玩|代入|(?:选择|挑选|切换).{0,8}(?:人物|角色)|进入.{0,8}(?:世界|角色)|以.{0,12}(?:身份|视角)|play\s+as|inhabit|resume\s+as)/iu;
 const CHARACTER_LIST_INTENT = /(?:有哪些|列出|查看|显示|选择|什么|哪些).{0,12}(?:人物|角色)|(?:characters|cast|who\s+can\s+i\s+play)/iu;
@@ -389,7 +394,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let selectedPlay: SelectedPlayExperience | undefined;
     let activePlayerScene: {
       controller: AbortController;
-      promise: Promise<PlayerSceneChoice[]>;
+      promise: Promise<PresentedPlayerChoice[]>;
     } | undefined;
     let activePlayerTurn: { controller: AbortController; cancellable: boolean; completion: Promise<void> } | undefined;
     let activePlayerChoicePrompt: symbol | undefined;
@@ -772,8 +777,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       purpose: PlayScenePurpose,
       controller: AbortController,
       turnResolution?: Awaited<ReturnType<typeof buildPlayOpeningFrame>>["turnResolution"],
-      fallbackChoices: readonly PlayerSceneChoice[] = [],
-    ): Promise<PlayerSceneChoice[]> => {
+      fallbackChoices: readonly PresentedPlayerChoice[] = [],
+    ): Promise<PresentedPlayerChoice[]> => {
       let frame: Awaited<ReturnType<typeof buildPlayOpeningFrame>> = {
         branchId: selection.session.branchId,
         commitId: selection.session.lastCommitId,
@@ -836,11 +841,18 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         const parsedChoices = typeof output === "string"
           ? undefined
           : playerSceneChoicesSchema.safeParse({ choices: output.choices });
-        const rawChoices = parsedChoices?.success ? parsedChoices.data.choices : [];
-        // Scene choices are actor-flavored utterance suggestions, not host
-        // capabilities. Keep only their schema-validated text; selection later enters
-        // the same translation and deterministic gates as free-form input.
-        const choices = structuredClone(rawChoices);
+        const narratedChoices: PresentedPlayerChoice[] = parsedChoices?.success
+          ? parsedChoices.data.choices
+          : [];
+        // A missing/invalid narrator tool call must not collapse the UI to a
+        // blank prompt. Host affordances were generated from committed truth and
+        // already passed deterministic preflight, so they are the safe fallback.
+        const choices: PresentedPlayerChoice[] = structuredClone(narratedChoices.length
+          ? narratedChoices
+          : frame.affordances.map((affordance) => ({
+              action: affordance.action,
+              affordanceId: affordance.id,
+            })));
         stream.verifyFinalText(narration);
         if (controller.signal.aborted) return [];
         const stillSelected = playerMode
@@ -853,7 +865,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             actorId: frame.actor.id,
             commitId: frame.commitId,
             purpose,
-            choices: structuredClone(choices),
+            choices: choices.map(({ action }) => ({ action })),
           } as const;
           if (!stream.commit(narration, details)) showNarratorMessage(narration, details);
           return choices;
@@ -878,7 +890,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       selection: SelectedPlayExperience,
       purpose: PlayScenePurpose,
       turnResolution?: Awaited<ReturnType<typeof buildPlayOpeningFrame>>["turnResolution"],
-      fallbackChoices: readonly PlayerSceneChoice[] = [],
+      fallbackChoices: readonly PresentedPlayerChoice[] = [],
     ): Promise<void> => {
       const previous = activePlayerScene;
       if (previous) {
@@ -889,7 +901,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const promise = runPlayerScene(ctx, selection, purpose, controller, turnResolution, fallbackChoices);
       const active = { controller, promise };
       activePlayerScene = active;
-      let choices: PlayerSceneChoice[] = [];
+      let choices: PresentedPlayerChoice[] = [];
       try {
         choices = await promise;
       } finally {
@@ -962,7 +974,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       input: {
         intent?: "act" | SafePlayerIntent;
         origin?: "freeform" | "scene-choice" | "host-safe-choice";
-        fallbackChoices?: readonly PlayerSceneChoice[];
+        fallbackChoices?: readonly PresentedPlayerChoice[];
+        affordanceId?: string;
       } = {},
     ): Promise<void> => {
       if (shuttingDown) return;
@@ -1014,6 +1027,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             signal: controller.signal,
           })
         : undefined);
+      const worldResponseResolver = options.playerWorldResponseResolver ?? (!options.playerTranslator
+        ? createPiPlayerWorldResponseResolver({
+            root: workspace.root,
+            ...(options.profile ? { profile: options.profile } : {}),
+            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+            onStatus: showTurnActivity,
+            signal: controller.signal,
+          })
+        : undefined);
       showTurnActivity("正在理解你的行动…");
       let outcome: Awaited<ReturnType<typeof performPlayTurn>>;
       try {
@@ -1024,9 +1046,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           utterance,
           translator,
           ...(adjudicator ? { adjudicator } : {}),
+          ...(worldResponseResolver ? { worldResponseResolver } : {}),
           advanceBackground: options.advanceBackground ?? 0,
           origin: input.origin ?? "freeform",
           ...(input.intent ? { intent: input.intent } : {}),
+          ...(input.affordanceId ? { affordanceId: input.affordanceId } : {}),
           beforeCommit: () => { activeTurn.cancellable = false; },
         });
       } catch (error) {
@@ -1077,13 +1101,16 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (outcome.backgroundError) {
         ctx.ui.notify(`Background advancement stopped: ${outcome.backgroundError}`, "warning");
       }
+      if (outcome.worldResponseError) {
+        ctx.ui.notify(`Immediate world response stopped: ${outcome.worldResponseError}`, "warning");
+      }
       await narratePlayerScene(ctx, selectedPlay, "turn");
     };
 
     const offerPlayerChoices = async (
       ctx: ExtensionContext,
       selection: SelectedPlayExperience,
-      choices: readonly PlayerSceneChoice[],
+      choices: readonly PresentedPlayerChoice[],
     ): Promise<void> => {
       if (
         ctx.mode !== "tui"
@@ -1129,7 +1156,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (!utterance) return;
       const timer = setTimeout(() => {
         void runPlayerInput(utterance, ctx, {
-          origin: selectedChoice ? "scene-choice" : "freeform",
+          origin: selectedChoice?.affordanceId ? "host-safe-choice" : selectedChoice ? "scene-choice" : "freeform",
+          ...(selectedChoice?.affordanceId ? { affordanceId: selectedChoice.affordanceId } : {}),
           fallbackChoices: bounded,
         }).catch((error) => {
           ctx.ui.notify(`Cannot perform player action: ${error instanceof Error ? error.message : String(error)}`, "error");

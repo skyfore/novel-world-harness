@@ -170,7 +170,10 @@ without host rationale or a recommendation badge. They remain unvalidated
 suggestions until selected; selection then enters the ordinary typed
 interpretation, current-world adjudication, and deterministic gates. The choice
 model supplies action text only and cannot choose a privileged host intent or
-bypass interpretation. The same animated working indicator is used while
+bypass interpretation. If its auxiliary call is absent or malformed, the host
+uses the current frame's already-preflighted affordances rather than leaving an
+empty selector; their opaque affordance IDs survive selection, so display text is
+not reinterpreted. The same animated working indicator is used while
 interpreting, adjudicating, validating, and rendering.
 
 The interpreter explicitly separates what the selected character can do from
@@ -188,7 +191,8 @@ prose inside the current actor-visible scene and end on a concrete fact or
 in-world signal. The host validates structural shape and repetition but does not
 match language-specific “what next” or handoff phrases. Possible actions normally
 appear in the choice selector; missing/malformed auxiliary choices leave valid
-prose and free-form input intact. Missing actor/location fields remain available
+prose intact and deterministically fall back to host-preflighted actions plus
+free-form input. Missing actor/location fields remain available
 as readiness diagnostics but do not produce a yellow player-facing warning. Only actionable
 instance conditions, such as a pinned revision differing from the active prepared
 revision, enter that warning surface.
@@ -196,9 +200,16 @@ Use `/ooc <question>` for an explicit actor-visible timeline/status query that
 must not advance the world. Ordinary prose is never reclassified as meta by a
 language-specific phrase matcher.
 After an accepted commit, a separate isolated narrator streams the actor-visible
-consequence from the new committed head; deterministic commit metadata and
+consequence from the final committed head. Between the player event and that
+narration, a fresh isolated host-private causal linker receives the structured
+intent and a bounded set of currently eligible world-side developments. It may
+select one opaque offered handle or none; selection is rechecked and committed as
+a distinct typed event. This handles direct triggers such as opening/reading an
+offered letter without making every eligible canonical event automatic. The
+offered set, decision, event, and errors are persisted in the private turn audit,
+but are never actor or narrator context. Deterministic commit metadata and
 invisible background events are not presented as story prose. Ordinary player
-turns default to zero automatic background/canon events. `play-world
+turns default to zero automatic unrelated background/canon events. `play-world
 --advance-background <n>` is an explicit opt-in, and the frontier rejects temporal
 regression and orders forward candidates by their story window. If rendering
 fails, NWH states that the action is already committed and tells the player to use

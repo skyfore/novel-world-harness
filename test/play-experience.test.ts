@@ -13,6 +13,7 @@ import {
   selectPlayExperience,
 } from "../src/world/play-experience.js";
 import { workspaceStateDir } from "../src/agent/runtime-paths.js";
+import { KnowledgeProjector } from "../src/world/knowledge.js";
 
 const roots: string[] = [];
 
@@ -21,6 +22,152 @@ afterEach(async () => {
 });
 
 describe("play experience catalog", () => {
+  it("turns a player's direct narrative cue into a separately validated immediate world event", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-response-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "路明非拆开信封。卡塞尔学院邀请路明非参加面试。\n",
+      "dragon-opening.txt",
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "lu-mingfei",
+      kind: "character",
+      canonicalName: "路明非",
+      aliases: [],
+      evidence: fixture.evidence("路明非"),
+    });
+    await canon.putEntity({
+      id: "interview-letter",
+      kind: "artifact",
+      canonicalName: "卡塞尔学院面试邀请信",
+      aliases: ["信封"],
+      evidence: fixture.evidence("信封"),
+    });
+    await canon.putEntity({
+      id: "cassell-college",
+      kind: "institution",
+      canonicalName: "卡塞尔学院",
+      aliases: [],
+      evidence: fixture.evidence("卡塞尔学院"),
+    });
+    await canon.putClaim({
+      id: "cassell-invites-lu",
+      subject: "cassell-college",
+      predicate: "邀请参加面试",
+      object: "lu-mingfei",
+      epistemicType: "explicit-fact",
+      evidence: fixture.evidence("卡塞尔学院邀请路明非参加面试"),
+    });
+    await canon.putEvent({
+      id: "lu-receives-interview-letter",
+      title: "路明非收到卡塞尔学院的面试邀请信",
+      participants: ["lu-mingfei", "interview-letter", "cassell-college"],
+      storyTime: { kind: "ordinal", label: "opening" },
+      preconditions: [{ op: "fact-equals", entityId: "lu-mingfei", field: "character.alive", value: true }],
+      observedOutcome: {
+        version: 1,
+        operations: [
+          { op: "set", entityId: "interview-letter", field: "artifact.owner", value: "lu-mingfei" },
+          { op: "set", entityId: "interview-letter", field: "artifact.delivered", value: true },
+        ],
+      },
+      observedKnowledge: {
+        version: 1,
+        operations: [{
+          op: "learn",
+          actorId: "lu-mingfei",
+          claimId: "cassell-invites-lu",
+          status: "knows",
+          confidence: 1,
+        }],
+      },
+      evidence: fixture.evidence("卡塞尔学院邀请路明非参加面试"),
+      causalParents: [],
+      confidence: 1,
+    });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "lu-mingfei", field: "character.alive", value: true }],
+    }, undefined, fixture.source.id);
+
+    let offeredResponseTitle: string | undefined;
+    const outcome = await performPlayTurn({
+      root,
+      branchId: "main",
+      actorId: "lu-mingfei",
+      utterance: "我拿起那个信封，拆开看看里面写了什么。",
+      advanceActors: 0,
+      advanceBackground: 0,
+      translator: () => ({
+        title: "路明非拆开信封",
+        intent: {
+          kind: "act",
+          summary: "拆开指向自己的信封并阅读内容",
+          controlledAct: {
+            eventTitle: "路明非拆开信封",
+            actorObservation: "你拿起信封，拆开封口，准备阅读里面的文字。",
+          },
+          desiredEffect: "看清信里的内容并知道寄信方的来意",
+          targets: [{ kind: "described", description: "那个信封" }],
+        },
+        participants: [],
+        preconditions: [],
+        proposedDelta: { version: 1, operations: [] },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+      worldResponseResolver: (input) => {
+        expect(input.candidate.intent?.desiredEffect).toContain("信里的内容");
+        expect(input.eligibleResponses).toHaveLength(1);
+        offeredResponseTitle = input.eligibleResponses[0]?.title;
+        return { decision: "select", possibilityId: input.eligibleResponses[0]!.possibilityId };
+      },
+    });
+
+    expect(outcome.result.accepted).toBe(true);
+    expect(outcome.result.contextBefore.referenceableEntities.map((entity) => entity.id)).not.toContain("interview-letter");
+    expect(outcome.result.contextBefore.knowledge).toEqual([]);
+    expect(offeredResponseTitle).toBe("路明非收到卡塞尔学院的面试邀请信");
+    expect(outcome.worldResponseCandidates).toEqual([
+      expect.objectContaining({
+        title: "路明非收到卡塞尔学院的面试邀请信",
+        knowledgeEffects: [expect.stringContaining("路明非 learns")],
+      }),
+    ]);
+    expect(outcome.worldResponseEvents).toEqual([
+      expect.objectContaining({
+        title: "路明非收到卡塞尔学院的面试邀请信",
+        possibilityId: "canon-lu-receives-interview-letter",
+      }),
+    ]);
+    expect(outcome.finalHead).not.toBe(outcome.result.newHead);
+    expect(outcome.logicalStep).toBe(2);
+    const reopened = await openWorkspaceWorld(root);
+    const state = await reopened.engine.projector.project(outcome.finalHead);
+    expect(state.values["interview-letter"]).toMatchObject({
+      "artifact.owner": "lu-mingfei",
+      "artifact.delivered": true,
+    });
+    const knowledge = await new KnowledgeProjector(reopened.engine).view("lu-mingfei", outcome.finalHead);
+    expect(knowledge.knowledge).toContainEqual(expect.objectContaining({
+      fact: expect.objectContaining({ claimId: "cassell-invites-lu", status: "knows" }),
+    }));
+    const responseEvent = await reopened.engine.objects.getEvent(outcome.worldResponseEvents[0]!.eventHash);
+    expect(responseEvent.realizesCanonicalEventIds).toEqual(["lu-receives-interview-letter"]);
+
+    const auditDirectory = path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main");
+    const [auditFile] = await fs.readdir(auditDirectory);
+    const audit = JSON.parse(await fs.readFile(path.join(auditDirectory, auditFile!), "utf8")) as Record<string, unknown>;
+    expect(audit).toMatchObject({
+      worldResponseResolution: { decision: "select", possibilityId: "canon-lu-receives-interview-letter" },
+      worldResponseCandidates: [expect.objectContaining({ title: "路明非收到卡塞尔学院的面试邀请信" })],
+      worldResponseEvents: [expect.objectContaining({ title: "路明非收到卡塞尔学院的面试邀请信" })],
+    });
+  });
+
   it("lists novels, filters branch-pinned characters by source, and reports durable progress", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-experience-"));
     roots.push(root);

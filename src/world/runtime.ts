@@ -16,8 +16,10 @@ import { buildFrontier, FrontierStore, possibilityToProposal, selectEligible, ty
 import { WorldEngine } from "./engine.js";
 import { committedHistory } from "./scene.js";
 import { immutableClone } from "../util/immutable.js";
+import type { PlayerActionCandidate } from "./player-action.js";
 
 const MAX_CALLBACK_CANDIDATES = 10_000;
+const MAX_PLAYER_WORLD_RESPONSES = 64;
 const actorProposalCandidateSchema = z.object({
   proposal: eventProposalSchema,
   priority: z.number().finite().min(0).max(1),
@@ -59,6 +61,50 @@ export type CanonicalChoiceResolution = {
   supersedesCanonicalEventIds: string[];
   threadIds?: string[];
   causalParentEventIds?: string[];
+};
+
+export const playerWorldResponseResolutionSchema = z.discriminatedUnion("decision", [
+  z.object({ decision: z.literal("none") }).strict(),
+  z.object({ decision: z.literal("select"), possibilityId: idSchema }).strict(),
+]);
+export type PlayerWorldResponseResolution = z.infer<typeof playerWorldResponseResolutionSchema>;
+
+/**
+ * Host-private semantic description of an eligible development. The callback
+ * may choose one offered ID, but it cannot invent effects or commit world truth.
+ */
+export type PlayerWorldResponseOption = Readonly<{
+  possibilityId: string;
+  kind: Possibility["kind"];
+  title: string;
+  participantNames: string[];
+  stateEffects: string[];
+  knowledgeEffects: string[];
+  timeEffect?: string;
+}>;
+
+export type PlayerWorldResponseResolverInput = Readonly<{
+  utterance: string;
+  actor: { id: string; name: string };
+  scene: {
+    label?: string;
+    presentEntities: Array<{ id: string; name: string; kind: string }>;
+  };
+  candidate: PlayerActionCandidate;
+  eligibleResponses: PlayerWorldResponseOption[];
+}>;
+
+export type PlayerWorldResponseResolver = (
+  input: PlayerWorldResponseResolverInput,
+) => Promise<unknown> | unknown;
+
+export type PlayerWorldResponseResult = {
+  resolution: PlayerWorldResponseResolution;
+  previousHead: CommitId;
+  newHead: CommitId;
+  possibilityId?: string;
+  title?: string;
+  eventHash?: string;
 };
 
 export type NarrativeRender = (input: {
@@ -256,6 +302,107 @@ export class WorldRuntime {
     };
   }
 
+  /**
+   * Resolves an immediate world-side response to an already committed player
+   * action. This is deliberately separate from canonical-choice matching:
+   * opening a letter is not effect-equivalent to the outside world delivering
+   * that letter. The resolver can only select a currently eligible, offered
+   * possibility; the engine remains the sole authority that validates and
+   * commits its typed effects as a second event.
+   */
+  async respondToPlayer(input: {
+    branchId: BranchId;
+    actorId: string;
+    utterance: string;
+    candidate: PlayerActionCandidate;
+    scene: PlayerWorldResponseResolverInput["scene"];
+    expectedHead: CommitId;
+    resolver: PlayerWorldResponseResolver;
+    causalParentEventId?: string;
+  }): Promise<PlayerWorldResponseResult> {
+    const actualHead = await this.engine.branches.readHead(input.branchId);
+    if (actualHead !== input.expectedHead) {
+      throw new Error(`Cannot resolve player world response at stale commit ${input.expectedHead}; current head is ${actualHead}`);
+    }
+
+    const [frontier, context] = await Promise.all([
+      this.refreshFrontier(input.branchId, input.expectedHead, { temporalMode: "current-window" }),
+      this.engine.contextForCommit(input.expectedHead),
+    ]);
+    const actor = context.entities.get(input.actorId);
+    if (!actor || actor.kind !== "character") throw new Error(`Unknown player actor ${input.actorId}`);
+    const offered = frontier.evaluated
+      .filter((entry) =>
+        entry.status === "eligible"
+        && entry.possibility.participants.includes(input.actorId)
+        && entry.possibility.kind !== "player-choice"
+        && entry.possibility.kind !== "actor-plan"
+        && Boolean(entry.possibility.proposedDelta)
+        && Boolean(
+          entry.possibility.proposedDelta?.operations.length
+          || entry.possibility.proposedKnowledge?.operations.length
+          || entry.possibility.timeAdvance,
+        ),
+      )
+      .slice(0, MAX_PLAYER_WORLD_RESPONSES);
+    if (!offered.length) {
+      return {
+        resolution: { decision: "none" },
+        previousHead: input.expectedHead,
+        newHead: input.expectedHead,
+      };
+    }
+
+    const eligibleResponses = offered.map(({ possibility }) => describePlayerWorldResponse(possibility, context));
+    const rawResolution = await input.resolver(immutableClone({
+      utterance: input.utterance,
+      actor: { id: actor.id, name: actor.canonicalName },
+      scene: input.scene,
+      candidate: input.candidate,
+      eligibleResponses,
+    }));
+    const resolution = playerWorldResponseResolutionSchema.parse(structuredClone(rawResolution));
+    if (resolution.decision === "none") {
+      return {
+        resolution,
+        previousHead: input.expectedHead,
+        newHead: input.expectedHead,
+      };
+    }
+
+    const selected = offered.find(({ possibility }) => possibility.id === resolution.possibilityId);
+    if (!selected) {
+      throw new Error(`Player world response selected a possibility that was not offered: ${resolution.possibilityId}`);
+    }
+    const headBeforeCommit = await this.engine.branches.readHead(input.branchId);
+    if (headBeforeCommit !== input.expectedHead) {
+      throw new Error(`Cannot commit player world response at stale commit ${input.expectedHead}; current head is ${headBeforeCommit}`);
+    }
+    const baseProposal = possibilityToProposal(selected);
+    if (!baseProposal) throw new Error(`Selected possibility ${resolution.possibilityId} has no committable effect`);
+    const proposal = eventProposalSchema.parse({
+      ...baseProposal,
+      expectedParentCommit: input.expectedHead,
+      causalParents: [...new Set([
+        ...baseProposal.causalParents,
+        ...(input.causalParentEventId ? [input.causalParentEventId] : []),
+      ])],
+    });
+    const committed = await this.engine.commitProposal(proposal);
+    if (!committed.report.accepted) {
+      const details = committed.report.errors.map((issue) => `${issue.code}: ${issue.message}`).join("; ");
+      throw new Error(`Selected player world response was rejected: ${details || "unknown validation failure"}`);
+    }
+    return {
+      resolution,
+      previousHead: input.expectedHead,
+      newHead: committed.newHead,
+      possibilityId: selected.possibility.id,
+      title: selected.possibility.title,
+      ...(committed.eventHash ? { eventHash: committed.eventHash } : {}),
+    };
+  }
+
   private async possibilityHistory(commitId: CommitId): Promise<{ realizedIds: ReadonlySet<string>; supersededIds: ReadonlySet<string> }> {
     const realized = new Set<string>();
     const superseded = new Set<string>();
@@ -316,6 +463,48 @@ export class WorldRuntime {
     }
     return false;
   }
+}
+
+function describePlayerWorldResponse(
+  possibility: Possibility,
+  context: Awaited<ReturnType<WorldEngine["contextForCommit"]>>,
+): PlayerWorldResponseOption {
+  const entityName = (entityId: string): string => context.entities.get(entityId)?.canonicalName ?? "unknown entity";
+  const renderValue = (value: unknown): string => {
+    if (typeof value === "string") return context.entities.get(value)?.canonicalName ?? value;
+    if (Array.isArray(value)) return `[${value.map((item) => typeof item === "string"
+      ? context.entities.get(item)?.canonicalName ?? item
+      : JSON.stringify(item)).join(", ")}]`;
+    return JSON.stringify(value);
+  };
+  const stateEffects = (possibility.proposedDelta?.operations ?? []).map((operation) => {
+    if (operation.op === "activate-rule") return `activate rule ${context.rules.get(operation.ruleId)?.name ?? "unknown rule"}`;
+    if (operation.op === "deactivate-rule") return `deactivate rule ${context.rules.get(operation.ruleId)?.name ?? "unknown rule"}`;
+    if (operation.op === "set") return `${entityName(operation.entityId)}.${operation.field} = ${renderValue(operation.value)}`;
+    if (operation.op === "unset") return `unset ${entityName(operation.entityId)}.${operation.field}`;
+    if (operation.op === "adjust-number") return `adjust ${entityName(operation.entityId)}.${operation.field} by ${operation.amount}`;
+    return `${operation.op} ${entityName(operation.member)} in ${entityName(operation.entityId)}.${operation.field}`;
+  });
+  const knowledgeEffects = (possibility.proposedKnowledge?.operations ?? []).map((operation) => {
+    const claim = context.claims?.get(operation.claimId);
+    const claimSummary = claim
+      ? `${entityName(claim.subject)} ${claim.predicate} ${renderValue(claim.object)}`
+      : "an unresolved knowledge claim";
+    return operation.op === "learn"
+      ? `${entityName(operation.actorId)} learns (${operation.status}, ${operation.confidence}): ${claimSummary}`
+      : `${entityName(operation.actorId)} forgets: ${claimSummary}`;
+  });
+  return {
+    possibilityId: possibility.id,
+    kind: possibility.kind,
+    title: possibility.title,
+    participantNames: possibility.participants.map(entityName),
+    stateEffects,
+    knowledgeEffects,
+    ...(possibility.timeAdvance
+      ? { timeEffect: `${possibility.timeAdvance.amount} ${possibility.timeAdvance.unit}` }
+      : {}),
+  };
 }
 
 function proposalPossibilityAffinity(proposal: EventProposal, possibility: Possibility): number {

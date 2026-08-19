@@ -8,6 +8,7 @@ import { WorkspaceStore, type SourceDocument, type StoredProject } from "../stor
 import { PlayerTurnAuditStore, type PlayerTurnOrigin } from "./player-turn-audit.js";
 import { resolvePlayerAffordance } from "./narrative-director.js";
 import { evidenceBelongsExclusivelyToSource, inferLegacyBranchSourceId, resolveCommitSourceId } from "./source-scope.js";
+import type { PlayerWorldResponseOption, PlayerWorldResponseResolver, PlayerWorldResponseResolution } from "./runtime.js";
 
 export type PlayableCharacter = {
   id: string;
@@ -64,6 +65,10 @@ export type PlayTurnOutcome = {
   result: PlayerTurnResult;
   finalHead: string;
   logicalStep: number;
+  worldResponseEvents: Array<{ eventHash: string; title: string; possibilityId: string }>;
+  worldResponseCandidates: PlayerWorldResponseOption[];
+  worldResponseResolution?: PlayerWorldResponseResolution;
+  worldResponseError?: string;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
   reactionEvents: Array<{ eventHash: string; title: string; actorId: string }>;
   backgroundError?: string;
@@ -225,6 +230,7 @@ export async function performPlayTurn(options: {
   utterance: string;
   translator: PlayerActionTranslator;
   adjudicator?: PlayerWorldAdjudicator;
+  worldResponseResolver?: PlayerWorldResponseResolver;
   advanceBackground?: number;
   origin?: PlayerTurnOrigin;
   intent?: "act" | "observe" | "reflect" | "wait";
@@ -303,10 +309,55 @@ export async function performPlayTurn(options: {
       : {}),
   });
   let finalHead = result.newHead;
+  const worldResponseEvents: PlayTurnOutcome["worldResponseEvents"] = [];
+  let worldResponseCandidates: PlayerWorldResponseOption[] = [];
   const backgroundEvents: PlayTurnOutcome["backgroundEvents"] = [];
   const reactionEvents: PlayTurnOutcome["reactionEvents"] = [];
+  let worldResponseResolution: PlayerWorldResponseResolution | undefined;
+  let worldResponseError: string | undefined;
   let backgroundError: string | undefined;
   if (result.accepted) {
+    if (options.worldResponseResolver && result.candidate) {
+      try {
+        const playerEvent = result.eventHash ? await engine.objects.getEvent(result.eventHash) : undefined;
+        const presentEntities = result.contextAfter.presentEntities.map((entity) => ({
+          id: entity.id,
+          name: entity.name,
+          kind: entity.kind,
+        }));
+        if (!presentEntities.some((entity) => entity.id === actor.id)) {
+          presentEntities.unshift({ id: actor.id, name: actor.canonicalName, kind: actor.kind });
+        }
+        const response = await runtime.respondToPlayer({
+          branchId: options.branchId,
+          actorId: options.actorId,
+          utterance: options.utterance,
+          candidate: result.candidate,
+          scene: {
+            ...(result.contextAfter.scene.label ? { label: result.contextAfter.scene.label } : {}),
+            presentEntities,
+          },
+          expectedHead: result.newHead,
+          resolver: async (input) => {
+            worldResponseCandidates = structuredClone(input.eligibleResponses);
+            return options.worldResponseResolver!(input);
+          },
+          ...(playerEvent ? { causalParentEventId: playerEvent.eventId } : {}),
+        });
+        worldResponseResolution = response.resolution;
+        finalHead = response.newHead;
+        if (response.eventHash && response.possibilityId && response.title) {
+          worldResponseEvents.push({
+            eventHash: response.eventHash,
+            title: response.title,
+            possibilityId: response.possibilityId,
+          });
+        }
+      } catch (error) {
+        finalHead = await engine.branches.readHead(options.branchId);
+        worldResponseError = error instanceof Error ? error.message : String(error);
+      }
+    }
     try {
       const advanced = await runtime.move({
         branchId: options.branchId,
@@ -358,6 +409,10 @@ export async function performPlayTurn(options: {
       ...(result.validation ? { validation: structuredClone(result.validation) } : {}),
       ...(result.eventHash ? { eventHash: result.eventHash } : {}),
       ...(result.progressCertificate ? { progressCertificate: structuredClone(result.progressCertificate) } : {}),
+      ...(worldResponseResolution ? { worldResponseResolution: structuredClone(worldResponseResolution) } : {}),
+      worldResponseCandidates: structuredClone(worldResponseCandidates),
+      worldResponseEvents: structuredClone(worldResponseEvents),
+      ...(worldResponseError ? { worldResponseError } : {}),
       reactionEvents: structuredClone(reactionEvents),
       backgroundEvents: structuredClone(backgroundEvents),
       ...(backgroundError ? { backgroundError } : {}),
@@ -370,6 +425,10 @@ export async function performPlayTurn(options: {
     result,
     finalHead,
     logicalStep: finalState.logicalTime.step,
+    worldResponseCandidates,
+    worldResponseEvents,
+    ...(worldResponseResolution ? { worldResponseResolution } : {}),
+    ...(worldResponseError ? { worldResponseError } : {}),
     backgroundEvents,
     reactionEvents,
     ...(backgroundError ? { backgroundError } : {}),

@@ -127,11 +127,13 @@ remain the isolated model's responsibility rather than a Chinese/English phrase
 list in host code. The TUI presents only the action/line itself (no internal
 rationale or unvalidated recommendation) plus free-form input. Narration and choice capture settle independently: valid
 scene prose is committed to the transcript even when the provider omits or
-malforms the choice call, and the TUI keeps the free-form path instead of
-interrupting play or substituting hollow host templates. Choosing an option
+malforms the choice call. In that case the TUI uses the frame's deterministic,
+preflighted host affordances and preserves their opaque IDs through selection,
+alongside the free-form path. Choosing a model suggestion
 schedules its utterance through the same restricted typed interpreter,
 current-world adjudicator, scope/knowledge checks, engine validation, and commit
-path as typed player input.
+path as typed player input; choosing a host fallback uses its already-typed
+candidate but still repeats current-head resolution and all deterministic gates.
 
 The prose and choice channels are also separate. The narrator may end on a
 concrete current fact, sensation, motion, spoken cue, or unresolved signal, but
@@ -169,10 +171,16 @@ It exposed engine-oriented commit information and did not run the scene
 narrator against the new committed actor frame.
 
 **Repair.** An accepted action reloads durable play-session state and renders a
-`turn` scene from the new committed head. The narrator may dramatize only the
+`turn` scene from the final committed head. The narrator may dramatize only the
 actor-visible result. If narration fails, NWH says the action is already
 committed and directs the user to `/scene`; it never asks the player to repeat
-the action. Rendering itself never changes branch truth.
+the action. Rendering itself never changes branch truth. Before narration, an
+isolated host-private causal linker receives the structured committed intent and
+currently eligible world-side developments. It may return one offered opaque
+handle or none; the host rejects stale/unoffered handles and commits a selection
+as a separately validated event. Thus an explicit action such as opening an
+offered letter can produce its external effect without enabling automatic canon
+advancement on unrelated movement, observation, or waiting turns.
 
 ### 6. Reparse streaming performed excessive work per token
 

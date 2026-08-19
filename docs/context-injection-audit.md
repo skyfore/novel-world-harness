@@ -21,7 +21,7 @@ The inventory was built by tracing every `PiAgentSession.create`, every direct
 `ModelRuntime.create`, every prompt constructor, Pi's lifecycle hooks, and the
 exported callback types that accept world data.
 
-There are five application inference roles:
+There are six application inference roles:
 
 | Inference role | Construction site | Model-visible input | Available model tools | Persistent authority |
 | --- | --- | --- | --- | --- |
@@ -29,13 +29,15 @@ There are five application inference roles:
 | Compiler | `createPiCompilerSession`, or an explicit compiler turn in the TUI | isolated compiler instructions plus a host-selected structure/source/opening/reconciliation payload and source-owned prior-artifact indexes; a chapter-bounded pass may request one non-citable edge preview, while a separately scheduled pair pass receives both full adjacent segments | scope-specific chapter-rule, exact-retrieval, boundary-deferral, and typed pending-proposal tools | validated chapter workflow metadata, pending/rejected proposal envelopes, non-canonical calibration requests, and a finish handshake; no canonical or branch commit |
 | Player-action translator | `createPiPlayerActionTranslator` | one actor-safe projection with opaque turn handles, one untrusted utterance, and bounded coverage metadata | exact retrieval over the already-safe projection and one in-memory capture tool | none; the host decodes, validates, and constructs the event proposal |
 | Player-world adjudicator | `createPiPlayerWorldAdjudicator` | the typed intended candidate, relevant current committed entity state, applicable active rules, deterministic preview issue codes, and actor write capabilities, all with opaque handles and no future canon | one in-memory resolution-capture tool | none; realization/transformation and its contradiction certificate are revalidated before the host can construct or commit an event |
+| Player-world response linker | `createPiPlayerWorldResponseResolver` | one already-committed structured player intent plus a bounded host-private list of currently eligible world-side developments; stable possibility/entity IDs are replaced or omitted, and this future-facing input never reaches the actor or narrator | one in-memory selection-capture tool accepting one offered opaque handle or none | none; the host records the offered set, rejects unoffered/stale selections, and submits the selected typed possibility through normal engine validation as a separate event |
 | Scene narrator | `createPiPlayerOpeningNarrator` | one actor-safe, name-based scene frame, current effective actor disposition/motivation, and bounded coverage metadata | exact retrieval over that same frame and one in-memory choice-capture tool | none; prose and suggested choices cannot mutate branch truth; a selected suggestion enters the separate player-action boundary |
 
 Evidence: [play.ts](../src/commands/play.ts),
 [pi-compiler.ts](../src/compiler/pi-compiler.ts),
 [pi-player-action.ts](../src/agent/pi-player-action.ts),
-[pi-player-world-adjudicator.ts](../src/agent/pi-player-world-adjudicator.ts), and
-[pi-player-opening.ts](../src/agent/pi-player-opening.ts). The only other
+[pi-player-world-adjudicator.ts](../src/agent/pi-player-world-adjudicator.ts),
+[pi-player-world-response.ts](../src/agent/pi-player-world-response.ts),
+and [pi-player-opening.ts](../src/agent/pi-player-opening.ts). The only other
 direct `ModelRuntime.create` is `doctorCommand`; it reads provider/authentication
 metadata but never constructs a prompt or invokes inference.
 [doctor.ts](../src/commands/doctor.ts)

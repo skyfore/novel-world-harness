@@ -23,6 +23,7 @@ import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { PlaySessionStore } from "../src/world/play-session.js";
 import { COMPILER_TOOL_NAMES } from "../src/compiler/proposal-tools.js";
+import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -1365,7 +1366,7 @@ describe("NWH TUI extension", () => {
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
-  it("persists valid narration and keeps free-form play when structured choices are absent", async () => {
+  it("falls back to preflighted host guidance when structured narrator choices are absent", async () => {
     const narration = "热风从门廊里缓缓挤过来，你听见脚边的沙粒被吹得轻轻滚动。眼前已经发生的事情没有退回原处，近处的光影却仍在一点点变化；墙后忽然传来一声短促的碰响，随后又只剩下压低了的说话声。";
     const { commands, root, sentVisibleMessages } = await fixture(
       undefined,
@@ -1402,8 +1403,61 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages).toEqual([narration]);
     expect(notifications.some((message) => message.includes("Scene narration failed"))).toBe(false);
     expect(offered).toHaveLength(1);
-    expect(offered[0]).toEqual(["自由输入行动或台词…"]);
+    expect(offered[0]?.length).toBeGreaterThan(1);
+    expect(offered[0]?.at(-1)).toBe("自由输入行动或台词…");
+    expect(offered[0]?.slice(0, -1).every((choice) => choice.trim().length > 0)).toBe(true);
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
+  });
+
+  it("executes a selected host fallback by its preflighted affordance instead of retranslating text", async () => {
+    const turnNarrated = deferred();
+    let translatorCalled = false;
+    let questionCount = 0;
+    const narration = "热风从门廊里缓缓挤过来，你听见脚边的沙粒被吹得轻轻滚动。眼前已经发生的事情没有退回原处，近处的光影却仍在一点点变化；墙后忽然传来一声短促的碰响，随后又只剩下压低了的说话声。门框投下的影子正沿着地板缓慢伸长，檐角的一滴水落在石阶边缘，又很快被风吹散。";
+    const { commands, root } = await fixture(
+      undefined,
+      () => {
+        translatorCalled = true;
+        throw new Error("host fallback must not be translated again");
+      },
+      undefined,
+      async (_frame, purpose) => {
+        if (purpose === "turn") turnNarrated.resolve();
+        return { narration, choices: [] };
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const ctx = {
+      mode: "tui",
+      ui: {
+        notify: () => undefined,
+        async select(_title: string, choices: string[]) {
+          questionCount += 1;
+          return questionCount === 1 ? choices[0] : undefined;
+        },
+        setStatus: () => undefined,
+        setWidget: () => undefined,
+        setWorkingMessage: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionCommandContext;
+
+    await commands.get("play")?.handler("hero main", ctx);
+    await turnNarrated.promise;
+
+    expect(translatorCalled).toBe(false);
+    expect(await engine.branches.readHead("main")).not.toBe(genesis);
+    const auditDirectory = path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main");
+    const [auditFile] = await fs.readdir(auditDirectory);
+    const audit = JSON.parse(await fs.readFile(path.join(auditDirectory, auditFile!), "utf8")) as Record<string, unknown>;
+    expect(audit).toMatchObject({ origin: "host-safe-choice" });
+    expect(audit.affordanceId).toMatch(/^aff-/);
   });
 
   it("bridges isolated narrator deltas into the active TUI before persisting the final scene", async () => {

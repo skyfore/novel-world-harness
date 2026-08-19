@@ -9,6 +9,7 @@ import { buildFrontier, selectEligible } from "../src/world/frontier.js";
 import { emptyWorldState } from "../src/world/state.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 import { workspaceStateDir } from "../src/agent/runtime-paths.js";
+import type { PlayerActionCandidate } from "../src/world/player-action.js";
 
 const roots: string[] = [];
 
@@ -52,6 +53,25 @@ async function fixture() {
 }
 
 describe("WorldRuntime", () => {
+  const readPromotionCandidate = (): PlayerActionCandidate => ({
+    title: "Read the sealed commission",
+    intent: {
+      kind: "act",
+      summary: "Open and read the sealed commission addressed to the hero",
+      controlledAct: {
+        eventTitle: "Open the sealed commission",
+        actorObservation: "The hero opens the sealed commission and reads it.",
+      },
+      desiredEffect: "Learn what appointment the commission contains",
+      targets: [{ kind: "described", description: "the sealed commission" }],
+    },
+    participants: [],
+    preconditions: [],
+    proposedDelta: { version: 1, operations: [] },
+    requiresKnowledge: [],
+    forbidsKnowledge: [],
+  });
+
   it("freezes callback input and snapshots validated possibility output", async () => {
     const { engine } = await fixture();
     const head = await engine.createBranch("main", "Main", {
@@ -286,6 +306,83 @@ describe("WorldRuntime", () => {
     expect(second.newHead).toBe(result.newHead);
     expect(second.committedEvents).toEqual([]);
     expect(second.frontier.evaluated.find((entry) => entry.possibility.id === "canon-promotion")?.status).toBe("realized");
+  });
+
+  it("commits a selected eligible development as a separate immediate world response", async () => {
+    const { engine, runtime } = await fixture();
+    const playerHead = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+      ],
+    });
+    let callbackWasFrozen = false;
+    const response = await runtime.respondToPlayer({
+      branchId: "main",
+      actorId: "hero",
+      utterance: "I open the sealed commission and read it.",
+      candidate: readPromotionCandidate(),
+      scene: {
+        label: "Hall",
+        presentEntities: [
+          { id: "hero", name: "Hero", kind: "character" },
+          { id: "hall", name: "Hall", kind: "location" },
+        ],
+      },
+      expectedHead: playerHead,
+      resolver: (input) => {
+        callbackWasFrozen = Object.isFrozen(input)
+          && Object.isFrozen(input.candidate)
+          && Object.isFrozen(input.eligibleResponses)
+          && Object.isFrozen(input.eligibleResponses[0]?.stateEffects);
+        expect(input.eligibleResponses).toHaveLength(1);
+        expect(input.eligibleResponses[0]?.stateEffects).toContain("Hero.character.title = Commander");
+        return { decision: "select", possibilityId: input.eligibleResponses[0]!.possibilityId };
+      },
+      causalParentEventId: "player-opened-commission",
+    });
+
+    expect(callbackWasFrozen).toBe(true);
+    expect(response.previousHead).toBe(playerHead);
+    expect(response.newHead).not.toBe(playerHead);
+    expect(response.possibilityId).toBe("canon-promotion");
+    expect((await engine.projector.project(response.newHead)).values.hero?.["character.title"]).toBe("Commander");
+    const event = await engine.objects.getEvent(response.eventHash!);
+    expect(event.causalParents).toContain("player-opened-commission");
+    expect(event.possibilityId).toBe("canon-promotion");
+    expect((await runtime.refreshFrontier("main", response.newHead)).evaluated
+      .find((entry) => entry.possibility.id === "canon-promotion")?.status).toBe("realized");
+  });
+
+  it("cannot select an unoffered player-world response and leaves the branch unchanged", async () => {
+    const { engine, runtime } = await fixture();
+    const head = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.location", value: "hall" }],
+    });
+
+    await expect(runtime.respondToPlayer({
+      branchId: "main",
+      actorId: "hero",
+      utterance: "I read the commission.",
+      candidate: readPromotionCandidate(),
+      scene: { presentEntities: [{ id: "hero", name: "Hero", kind: "character" }] },
+      expectedHead: head,
+      resolver: () => ({ decision: "select", possibilityId: "invented-future" }),
+    })).rejects.toThrow("was not offered");
+    expect(await engine.branches.readHead("main")).toBe(head);
+
+    const none = await runtime.respondToPlayer({
+      branchId: "main",
+      actorId: "hero",
+      utterance: "I look around.",
+      candidate: readPromotionCandidate(),
+      scene: { presentEntities: [{ id: "hero", name: "Hero", kind: "character" }] },
+      expectedHead: head,
+      resolver: () => ({ decision: "none" }),
+    });
+    expect(none.newHead).toBe(head);
   });
 
   it("keeps past and future roots outside the active scene, then advances in chronological order only when explicit", () => {

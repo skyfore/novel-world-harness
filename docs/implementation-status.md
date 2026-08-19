@@ -22,7 +22,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
 | Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation |
 | Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
-| Player experience | Implemented vertical slice | Restricted Pi translation of natural language and model-proposed/free-form next-move choices into a host-owned validated player event |
+| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, separately validated immediate world responses, and narrator choices with preflighted host fallback |
 | Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, per-instance character memory, and durable active resume |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
@@ -70,6 +70,7 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 - Temporal world rules are evaluated against pre-state and proposed post-state.
 - Canonical future events and generic background pressures enter the same possibility frontier.
 - Possibility selection alone does not create truth; the resulting event proposal must pass the commit boundary.
+- An accepted player event may causally select one currently eligible offered development through an isolated host-private linker; the response is a separate validated event, while unrelated background advancement remains opt-in.
 - Knowledge is reconstructed per actor and per commit.
 - A director-generated observation cannot learn a claim merely because its
   source citation overlaps a recent event; character knowledge changes require

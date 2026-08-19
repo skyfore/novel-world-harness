@@ -2,8 +2,10 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { createPiPlayerActionTranslator } from "../agent/pi-player-action.js";
 import { createPiPlayerWorldAdjudicator } from "../agent/pi-player-world-adjudicator.js";
+import { createPiPlayerWorldResponseResolver } from "../agent/pi-player-world-response.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "../world/player-action.js";
+import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import {
   inspectPlayExperience,
   listPlayableCharacters,
@@ -25,6 +27,7 @@ export type PlayWorldCommandOptions = {
   model?: string;
   translator?: PlayerActionTranslator;
   adjudicator?: PlayerWorldAdjudicator;
+  worldResponseResolver?: PlayerWorldResponseResolver;
   advanceBackground?: number;
   ask?: AskPlayQuestion;
 };
@@ -74,12 +77,19 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
         ...(options.model ? { model: options.model } : {}),
       })
     : undefined);
+  const worldResponseResolver = options.worldResponseResolver ?? (!options.translator
+    ? createPiPlayerWorldResponseResolver({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
   const advanceBackground = options.advanceBackground ?? 0;
   if (!Number.isInteger(advanceBackground) || advanceBackground < 0 || advanceBackground > 100) {
     throw new Error("advanceBackground must be an integer between 0 and 100");
   }
   if (options.action !== undefined) {
-    return runAndPrintTurn(options.root, selection, translator, adjudicator, options.action, advanceBackground);
+    return runAndPrintTurn(options.root, selection, translator, adjudicator, worldResponseResolver, options.action, advanceBackground);
   }
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error("Pass --action <text> for non-interactive play.");
@@ -92,7 +102,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
       const utterance = (await terminal.question(`${selection.actor.canonicalName}> `)).trim();
       if (!utterance) continue;
       if (utterance === "/exit" || utterance === "/quit") break;
-      await runAndPrintTurn(options.root, selection, translator, adjudicator, utterance, advanceBackground);
+      await runAndPrintTurn(options.root, selection, translator, adjudicator, worldResponseResolver, utterance, advanceBackground);
     }
   } finally {
     terminal.close();
@@ -105,6 +115,7 @@ async function runAndPrintTurn(
   selection: SelectedPlayExperience,
   translator: PlayerActionTranslator,
   adjudicator: PlayerWorldAdjudicator | undefined,
+  worldResponseResolver: PlayerWorldResponseResolver | undefined,
   utterance: string,
   advanceBackground: number,
 ): Promise<PlayerTurnResult> {
@@ -115,6 +126,7 @@ async function runAndPrintTurn(
     utterance,
     translator,
     ...(adjudicator ? { adjudicator } : {}),
+    ...(worldResponseResolver ? { worldResponseResolver } : {}),
     advanceBackground,
     origin: "cli",
   });
@@ -126,8 +138,10 @@ async function runAndPrintTurn(
   }
   stdout.write(`${result.renderedText}\n`);
   stdout.write(`Committed player action at ${result.newHead}.\n`);
+  for (const event of outcome.worldResponseEvents) stdout.write(`Immediate world response: ${event.title}\n`);
   for (const event of outcome.reactionEvents) stdout.write(`World responded: ${event.title}\n`);
   for (const event of outcome.backgroundEvents) stdout.write(`World advanced: ${event.title}\n`);
   if (outcome.backgroundError) stdout.write(`Background advancement stopped: ${outcome.backgroundError}\n`);
+  if (outcome.worldResponseError) stdout.write(`Immediate world response stopped: ${outcome.worldResponseError}\n`);
   return result;
 }

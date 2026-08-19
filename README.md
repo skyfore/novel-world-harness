@@ -333,8 +333,11 @@ rationale and no unvalidated recommendation badge—plus a free-form alternative
 These suggestions do not claim capability or outcome: selecting one enters the
 same restricted player-action translation and deterministic validation boundary
 as free-form input. The choice model cannot select a privileged intent or bypass
-translation. Rendering and choice capture never advance the branch or act for
-the player.
+translation. If the narrator omits or malforms the auxiliary choice call, the
+selector instead shows the host director's already-preflighted current-head
+affordances; selecting one carries its opaque affordance identity through the
+same commit gates without trying to reconstruct it from display text. Rendering
+and choice capture never advance the branch or act for the player.
 
 Long TUI selectors use Pi's native height-aware scrolling window and remain
 filterable, with an additional free-form id/name/alias input instead of forwarding
@@ -350,8 +353,14 @@ translation, validation, and scene rendering run, the TUI uses the same animated
 working indicator.
 
 An accepted action is rendered by the isolated narrator from the new committed
-actor frame; raw commit IDs and hidden background events are not shown as
-narrative. Ordinary turns do not automatically commit background canon;
+actor frame. Before rendering, a separate host-private causal linker may select
+at most one currently eligible world development that the structured player
+intent directly triggers. The host rechecks the offered identity and branch head,
+then validates and commits that development as a second event; mere eligibility,
+shared characters, or canonical order is insufficient. Its candidate set and
+decision are retained in the private turn audit, while future canon, raw commit
+IDs, and hidden background events are not shown as narrative. Ordinary turns do
+not automatically commit unrelated background canon;
 `--advance-background` explicitly opts into temporally ordered advancement. If
 rendering fails, the action remains committed and `/scene` safely retries only
 the prose. A rejected proposal leaves the branch head unchanged, persists its

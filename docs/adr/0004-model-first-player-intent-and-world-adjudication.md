@@ -82,7 +82,9 @@ Ordinary world resistance is an immersive committed event. Rejection is reserved
 for technical/model-contract failure, security/capability boundary violation,
 stale concurrency, or a consequence proposal that still fails deterministic
 validation. An auxiliary scene-choice tool failure does not discard otherwise
-valid narration or undo a committed turn.
+valid narration or undo a committed turn. It also does not trigger a repair
+request or authorize host-generated substitute choices; the player continues
+through free-form input.
 
 A missing or malformed world-resolution tool call first receives one retry in a
 fresh isolated adjudication session. If that retry also fails, the host may still

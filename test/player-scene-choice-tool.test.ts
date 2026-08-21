@@ -4,6 +4,8 @@ import { createPlayerSceneChoiceCaptureTool } from "../src/agent/player-scene-ch
 describe("player scene choice capture tool", () => {
   it("captures concrete actor actions or dialogue and can reset between narration attempts", async () => {
     const capture = createPlayerSceneChoiceCaptureTool();
+    expect(JSON.stringify(capture.tool.parameters)).toContain("complete player command for the very next beat");
+    expect(JSON.stringify(capture.tool.parameters)).toContain("Not a plan, intention");
     const input = {
       choices: [
         { action: "走到门边，侧耳听外面的脚步声。" },

@@ -106,16 +106,24 @@ is consumed only by the first Pi runtime, and `auto` is suppressed when the
 selected actor/instance is already active. Explicit `/scene`, a new instance,
 or an actual switch remain deliberate narration triggers. Scene choices are
 stored with branch, actor, and commit identity; history restores them only when
-that identity still matches, without requesting another narrator.
+that identity and the current narrator-choice contract still match, without
+requesting another narrator. Older unmarked choice records are treated as empty;
+they are neither restored nor rebuilt from host affordances.
 
 **Evidence.** Tests cover historical player-only transcripts even with an
 explicit startup `auto`, repeated `/play` selection, and current-head choice
-restoration with zero narrator calls.
+restoration with zero narrator calls. A pre-contract menu regression proves that
+only free-form input remains and no host choice is synthesized.
 
 ### 3b. Narration handed agency back as an empty text box
 
-**Cause.** The prose ended on an actionable beat but did not expose grounded
-actions through the existing AskUserQuestion interaction.
+**Cause.** The narrator originally had to stream scene prose and then remember a
+trailing `propose_player_choices` call in the same assistant response. Pi exposed
+the tool correctly, but the generic agent path left provider tool selection at
+`auto`. A model could therefore satisfy the prose objective and finish normally
+without a tool call; this is what the inspected harness session did. The TUI then
+mistook deterministic director affordances for narrator choices, which is why
+strategic plan copy appeared in the menu.
 
 **Repair.** The isolated narrator has two exact read-only tools over its bounded
 actor-safe corpus and one mutation-free capture tool,
@@ -127,20 +135,21 @@ remain the isolated model's responsibility rather than a Chinese/English phrase
 list in host code. The TUI presents only the action/line itself (no internal
 rationale or unvalidated recommendation) plus free-form input. Narration and choice capture settle independently: valid
 scene prose is committed to the transcript even when the provider omits or
-malforms the choice call. In that case the TUI uses the frame's deterministic,
-preflighted host affordances and preserves their opaque IDs through selection,
-alongside the free-form path. Choosing a model suggestion
+malforms the choice call. The normal narrator protocol now makes choice capture
+the first, tool-only phase; after its successful tool result, the same isolated
+agent streams scene prose. If the model still omits or malforms the call, the
+host performs no repair turn and supplies no deterministic fallback choices—the
+dialog contains only free-form input. Choosing a model suggestion
 schedules its utterance through the same restricted typed interpreter,
 current-world adjudicator, scope/knowledge checks, engine validation, and commit
-path as typed player input; choosing a host fallback uses its already-typed
-candidate but still repeats current-head resolution and all deterministic gates.
+path as typed player input.
 
 The prose and choice channels are also separate. The narrator may end on a
 concrete current fact, sensation, motion, spoken cue, or unresolved signal, but
 may not append “你可以……”, “是……还是……”, “下一步由你决定”, or equivalent
-player-facing action scaffolding. The host rejects such a settled draft and the
-existing fresh-session retry disposes its transient stream before replacement;
-only `propose_player_choices` may carry possible actions.
+player-facing action scaffolding. This is a model-layer semantic constraint;
+host validation remains language-neutral and checks only structural narration
+properties. Only `propose_player_choices` may carry possible actions.
 
 ### 4. Player action translation looked hung and could run forever
 

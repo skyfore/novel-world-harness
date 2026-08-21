@@ -218,6 +218,7 @@ type TuiPrepareAllState = {
 const MAX_PREPARE_ALL_PROVIDER_RETRIES = 1;
 
 type PresentedPlayerChoice = PlayerSceneChoice & { affordanceId?: string };
+const PLAYER_CHOICE_CONTRACT_VERSION = 2;
 
 const PLAY_INTENT = /(?:体验|扮演|饰演|想玩|游玩|代入|(?:选择|挑选|切换).{0,8}(?:人物|角色)|进入.{0,8}(?:世界|角色)|以.{0,12}(?:身份|视角)|play\s+as|inhabit|resume\s+as)/iu;
 const CHARACTER_LIST_INTENT = /(?:有哪些|列出|查看|显示|选择|什么|哪些).{0,12}(?:人物|角色)|(?:characters|cast|who\s+can\s+i\s+play)/iu;
@@ -325,6 +326,7 @@ function restoredPlayerChoices(
     record.branchId !== selection.session.branchId
     || record.actorId !== selection.actor.id
     || record.commitId !== selection.session.lastCommitId
+    || record.choiceContractVersion !== PLAYER_CHOICE_CONTRACT_VERSION
   ) return [];
   const parsed = playerSceneChoicesSchema.safeParse({ choices: upgradeLegacyPlayerChoices(record.choices) });
   return parsed.success ? parsed.data.choices : [];
@@ -548,6 +550,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       content: string,
       details: {
         version: 1;
+        choiceContractVersion: 2;
         branchId: string;
         actorId: string;
         commitId: string;
@@ -678,6 +681,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             const merged = mergedMessage();
             if (merged) currentStream?.update(merged);
             retryNotice = "";
+            toolActivity = "";
             sceneLoading?.setPhase("thinking", title());
             updateStatus();
             return;
@@ -844,15 +848,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         const narratedChoices: PresentedPlayerChoice[] = parsedChoices?.success
           ? parsedChoices.data.choices
           : [];
-        // A missing/invalid narrator tool call must not collapse the UI to a
-        // blank prompt. Host affordances were generated from committed truth and
-        // already passed deterministic preflight, so they are the safe fallback.
-        const choices: PresentedPlayerChoice[] = structuredClone(narratedChoices.length
-          ? narratedChoices
-          : frame.affordances.map((affordance) => ({
-              action: affordance.action,
-              affordanceId: affordance.id,
-            })));
+        // Choice capture is advisory and deliberately has no host substitute.
+        // When the model omits or malforms the tool call, the empty set reaches
+        // the selector unchanged and its sole path is free-form player input.
+        const choices: PresentedPlayerChoice[] = structuredClone(narratedChoices);
         stream.verifyFinalText(narration);
         if (controller.signal.aborted) return [];
         const stillSelected = playerMode
@@ -861,6 +860,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (stillSelected) {
           const details = {
             version: 1,
+            choiceContractVersion: PLAYER_CHOICE_CONTRACT_VERSION,
             branchId: frame.branchId,
             actorId: frame.actor.id,
             commitId: frame.commitId,

@@ -3,7 +3,9 @@ import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 
 export const playerSceneChoiceSchema = z.object({
-  action: z.string().trim().min(2).max(240),
+  action: z.string().trim().min(2).max(240).describe(
+    "The complete player command for the very next beat: the resolved physical act, specific observation, concrete wait, or exact spoken words. Not a plan, intention, heading, or placeholder for deciding an action later.",
+  ),
 }).strict();
 
 export const playerSceneChoicesSchema = z.object({
@@ -52,11 +54,13 @@ export function createPlayerSceneChoiceCaptureTool(): PlayerSceneChoiceCaptureTo
   const tool = defineTool({
     name: "propose_player_choices",
     label: "Propose player choices",
-    description: "Capture 2-4 concrete actor-grounded actions or spoken lines. These are suggestions only and cannot commit or mutate world truth.",
-    promptSnippet: "After the streamed scene prose, capture concrete in-character actions or dialogue",
+    description: "Capture 2-4 complete player commands for the next beat: grounded physical/observational acts, concrete waits, or exact spoken lines. Never capture a plan for deciding an action later. Suggestions cannot commit or mutate world truth.",
+    promptSnippet: "Before scene prose, capture the resolved next actions themselves, never plans for finding actions",
     promptGuidelines: [
       "Base every choice only on the supplied committed actor frame.",
-      "Write the exact immediate action or spoken line the actor could perform now; do not write labels, explanations, outcomes, or abstract directions.",
+      "The action string is sent unchanged as the player's next command. Write the exact immediate act or spoken line, not a promise to decide, plan, find a way, start implementing a plan, or take an unspecified next action.",
+      "If the choice still makes a reader ask what the actor physically does, observes, waits for, or says, replace it before calling this tool.",
+      "An absent person is not a valid dialogue/contact target unless the frame grounds a communication medium the actor can use now.",
       "Use behavioralContext as characterization guidance only. Never expose its trait, bias, or goal metadata in a choice.",
       "Never predict another character's response, invent an entity, or duplicate a choice.",
     ],
@@ -72,7 +76,7 @@ export function createPlayerSceneChoiceCaptureTool(): PlayerSceneChoiceCaptureTo
       return {
         content: [{
           type: "text" as const,
-          text: "Concrete player choices captured. End the response now without adding more narration.",
+          text: "Concrete player choices captured. Now stream only the requested scene narration. Do not mention or enumerate these choices, and do not call this tool again.",
         }],
         details: { captured: choices.length },
       };

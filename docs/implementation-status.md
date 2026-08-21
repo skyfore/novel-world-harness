@@ -22,7 +22,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
 | Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation |
 | Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
-| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, separately validated immediate world responses, and narrator choices with preflighted host fallback |
+| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, separately validated immediate world responses, and tool-first narrator choices with free-form-only handling when capture is absent |
 | Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, per-instance character memory, and durable active resume |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |

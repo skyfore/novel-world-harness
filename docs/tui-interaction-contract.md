@@ -53,11 +53,14 @@ prints a result.
   collapses it, text-start and message-end are fallbacks, and Pi's existing
   Ctrl+T binding expands completed blocks without an NWH key interceptor.
 - Every accepted scene opens an AskUserQuestion-style next-move dialog with
-  2-4 actor-scoped concrete actions or exact spoken lines and a free-form action
-  path. The dialog shows no system rationale or recommendation for these
+  free-form input and, when choice capture succeeds, 2-4 actor-scoped concrete
+  actions or exact spoken lines. The dialog shows no system rationale or recommendation for these
   unvalidated suggestions. Choice capture is mutation-free; selection still
   enters the normal typed interpretation, current-world adjudication,
-  deterministic player-action validation, and commit boundary.
+  deterministic player-action validation, and commit boundary. Choice capture
+  is the first, tool-only narrator phase. A missing or malformed call receives no
+  repair and no host-generated substitute; the dialog then contains only its
+  free-form path.
 - Natural-language input in player mode is always treated as in-world. The only
   meta route is the explicit `/ooc [question]` UI protocol, so host code never
   guesses from Chinese or English wording that a sentence is “system-level.”
@@ -96,5 +99,6 @@ prints a result.
   adjudication—and narration failure after commit as distinct outcomes.
 - Player tests verify that historical custom transcripts do not trigger a new
   narrator, native scene deltas match the persisted prose exactly, stored
-  current-head choices resume without a model call, and selected choices pass
-  through the ordinary player-action translator.
+  current-head narrator choices resume without a model call, pre-contract choices
+  are not restored or rebuilt, and selected choices pass through the ordinary
+  player-action translator.

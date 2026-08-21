@@ -595,14 +595,23 @@ a bounded projection plus exact retrieval over that same
 sanitized frame and one capture-only choice tool. `playScenePrompt` has no
 arbitrary third-record override; it serializes only its typed frame.
 
+Pi registers that tool correctly, but its generic agent request leaves provider
+tool selection optional. The previous prose-first contract therefore allowed a
+normal completed response to stop after narration without ever calling the
+tool. The narrator now makes choice capture its first, tool-only phase and emits
+scene prose only after the capture result, avoiding a mixed prose-plus-trailing-
+tool objective without introducing a repair request.
+
 A completed but structurally invalid draft gets one retry in a brand-new session,
 so rejected prose/tool history cannot enter attempt two. Accepted prose is checked
 for non-empty/length/repeated-paragraph failures. The structural choice schema accepts
 only 2-4 distinct action-only objects; it does not classify their natural-language
 semantics with a host phrase list. There is no model-authored label, description,
 intent, recommendation, candidate, or outcome field. Missing or malformed choice
-capture does not discard otherwise valid scene prose. A custom narrator injected
-into the TUI passes the same structural validation. Rendering and choice capture
+capture does not discard otherwise valid scene prose, trigger another choice
+request, or admit host affordance copy. The selector then exposes only free-form
+input. A custom narrator injected into the TUI passes the
+same structural validation. Rendering and choice capture
 never advance the branch; selecting a suggestion starts the separate player-action
 interpretation/adjudication/validation path.
 

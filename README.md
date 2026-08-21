@@ -321,8 +321,8 @@ explicitly re-renders a selected current moment. The narrator runs in a fresh
 isolated session with a bounded committed actor frame, exact read-only retrieval
 over that same actor-safe corpus, effective current-head character disposition
 and motivation, and one capture-only next-choice tool. It streams its actual Pi
-events into the current TUI, automatically revises a short/generic first draft
-or prose containing player-action menus once, and reports final model failure
+events into the current TUI, automatically retries a structurally invalid short
+or repetitive first draft once, and reports final model failure
 with direct recovery commands instead of displaying canned pseudo-prose. Scene
 prose contains only the current actor-visible moment and ends on a concrete
 in-world fact or signal; possible actions appear only in the choice tool output.
@@ -330,14 +330,17 @@ in-world fact or signal; possible actions appear only in the choice tool output.
 The choice tool generates 2-4 concrete things the inhabited actor could do or
 exact words they could say. The TUI shows only those action/line texts—no system
 rationale and no unvalidated recommendation badge—plus a free-form alternative.
+Choice capture is the first, tool-only phase of the isolated narrator turn; scene
+prose begins only after that tool succeeds. This avoids asking one optional-tool
+response to finish prose and remember a trailing call.
 These suggestions do not claim capability or outcome: selecting one enters the
 same restricted player-action translation and deterministic validation boundary
 as free-form input. The choice model cannot select a privileged intent or bypass
 translation. If the narrator omits or malforms the auxiliary choice call, the
-selector instead shows the host director's already-preflighted current-head
-affordances; selecting one carries its opaque affordance identity through the
-same commit gates without trying to reconstruct it from display text. Rendering
-and choice capture never advance the branch or act for the player.
+host neither retries the choice request nor substitutes deterministic director
+copy. Valid scene prose remains accepted and the selector contains only its
+free-form input. Rendering and choice capture never advance the branch or act
+for the player.
 
 Long TUI selectors use Pi's native height-aware scrolling window and remain
 filterable, with an additional free-form id/name/alias input instead of forwarding

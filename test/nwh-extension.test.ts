@@ -23,7 +23,6 @@ import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { PlaySessionStore } from "../src/world/play-session.js";
 import { COMPILER_TOOL_NAMES } from "../src/compiler/proposal-tools.js";
-import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -1366,11 +1365,15 @@ describe("NWH TUI extension", () => {
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
-  it("falls back to preflighted host guidance when structured narrator choices are absent", async () => {
+  it("offers only free-form input when the narrator choice tool is empty", async () => {
     const narration = "热风从门廊里缓缓挤过来，你听见脚边的沙粒被吹得轻轻滚动。眼前已经发生的事情没有退回原处，近处的光影却仍在一点点变化；墙后忽然传来一声短促的碰响，随后又只剩下压低了的说话声。";
+    let translatorCalled = false;
     const { commands, root, sentVisibleMessages } = await fixture(
       undefined,
-      undefined,
+      async () => {
+        translatorCalled = true;
+        throw new Error("empty choices must wait for free-form input");
+      },
       undefined,
       async () => ({ narration, choices: [] }),
     );
@@ -1403,61 +1406,9 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages).toEqual([narration]);
     expect(notifications.some((message) => message.includes("Scene narration failed"))).toBe(false);
     expect(offered).toHaveLength(1);
-    expect(offered[0]?.length).toBeGreaterThan(1);
-    expect(offered[0]?.at(-1)).toBe("自由输入行动或台词…");
-    expect(offered[0]?.slice(0, -1).every((choice) => choice.trim().length > 0)).toBe(true);
-    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
-  });
-
-  it("executes a selected host fallback by its preflighted affordance instead of retranslating text", async () => {
-    const turnNarrated = deferred();
-    let translatorCalled = false;
-    let questionCount = 0;
-    const narration = "热风从门廊里缓缓挤过来，你听见脚边的沙粒被吹得轻轻滚动。眼前已经发生的事情没有退回原处，近处的光影却仍在一点点变化；墙后忽然传来一声短促的碰响，随后又只剩下压低了的说话声。门框投下的影子正沿着地板缓慢伸长，檐角的一滴水落在石阶边缘，又很快被风吹散。";
-    const { commands, root } = await fixture(
-      undefined,
-      () => {
-        translatorCalled = true;
-        throw new Error("host fallback must not be translated again");
-      },
-      undefined,
-      async (_frame, purpose) => {
-        if (purpose === "turn") turnNarrated.resolve();
-        return { narration, choices: [] };
-      },
-    );
-    const canon = new CanonicalModelStore(root);
-    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "福贵", aliases: [], evidence: [] });
-    const { engine } = await openWorkspaceWorld(root);
-    const genesis = await engine.createBranch("main", "Main", {
-      version: 1,
-      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
-    });
-    const ctx = {
-      mode: "tui",
-      ui: {
-        notify: () => undefined,
-        async select(_title: string, choices: string[]) {
-          questionCount += 1;
-          return questionCount === 1 ? choices[0] : undefined;
-        },
-        setStatus: () => undefined,
-        setWidget: () => undefined,
-        setWorkingMessage: () => undefined,
-        theme: { fg: (_color: string, text: string) => text },
-      },
-    } as unknown as ExtensionCommandContext;
-
-    await commands.get("play")?.handler("hero main", ctx);
-    await turnNarrated.promise;
-
+    expect(offered[0]).toEqual(["自由输入行动或台词…"]);
     expect(translatorCalled).toBe(false);
-    expect(await engine.branches.readHead("main")).not.toBe(genesis);
-    const auditDirectory = path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main");
-    const [auditFile] = await fs.readdir(auditDirectory);
-    const audit = JSON.parse(await fs.readFile(path.join(auditDirectory, auditFile!), "utf8")) as Record<string, unknown>;
-    expect(audit).toMatchObject({ origin: "host-safe-choice" });
-    expect(audit.affordanceId).toMatch(/^aff-/);
+    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
   it("bridges isolated narrator deltas into the active TUI before persisting the final scene", async () => {
@@ -1847,6 +1798,7 @@ describe("NWH TUI extension", () => {
             message: fauxAssistantMessage([fauxThinking("旧思考"), fauxText("旧场景")]),
             details: {
               version: 1,
+              choiceContractVersion: 2,
               branchId: "main",
               actorId: "hero",
               commitId: genesis,
@@ -1886,6 +1838,84 @@ describe("NWH TUI extension", () => {
     expect(offered.some((choice) => choice.includes("看看周围"))).toBe(false);
     expect(offered.some((choice) => choice.includes(" — "))).toBe(false);
     expect(offered.some((choice) => choice.includes("(recommended)"))).toBe(false);
+  });
+
+  it("does not restore a pre-contract plan menu or rebuild host choices", async () => {
+    let narratorCalls = 0;
+    const { events, root } = await fixture(
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        narratorCalls += 1;
+        return "不应重新生成";
+      },
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "路明非", aliases: [], evidence: [] });
+    await canon.putEntity({ id: "remote-friend", kind: "character", canonicalName: "老唐", aliases: [], evidence: [] });
+    await canon.putEntity({ id: "remote-bond", kind: "relationship", canonicalName: "网友关系", aliases: [], evidence: [] });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "remote-friend", field: "character.alive", value: true },
+        { op: "set", entityId: "hero", field: "character.relationships", value: ["remote-bond"] },
+        { op: "set", entityId: "remote-bond", field: "relationship.from", value: "hero" },
+        { op: "set", entityId: "remote-bond", field: "relationship.to", value: "remote-friend" },
+        { op: "set", entityId: "remote-bond", field: "relationship.active", value: true },
+      ],
+    });
+    await new PlaySessionStore(root).write({ branchId: "main", actorId: "hero", lastCommitId: genesis });
+    const offered: string[] = [];
+    const ctx = {
+      mode: "tui",
+      sessionManager: {
+        getEntries: () => [{
+          type: "custom",
+          customType: "nwh-narrator",
+          data: {
+            __piAssistantStream: 1,
+            message: fauxAssistantMessage([fauxText("旧场景")]),
+            details: {
+              version: 1,
+              branchId: "main",
+              actorId: "hero",
+              commitId: genesis,
+              purpose: "turn",
+              choices: [
+                { action: "我不再只想着与老唐之间的关系，开始落实一个不会越过当前世界条件的接触计划。" },
+                { action: "我沿着刚才确定的立场采取下一项实际行动，不让局势退回原点。" },
+              ],
+            },
+          },
+        }],
+      },
+      ui: {
+        notify: () => undefined,
+        async select(_title: string, choices: string[]) {
+          offered.push(...choices);
+          return undefined;
+        },
+        setTitle: () => undefined,
+        setWorkingMessage: () => undefined,
+        setWorkingIndicator: () => undefined,
+        setHiddenThinkingLabel: () => undefined,
+        setStatus: () => undefined,
+        setHeader: () => undefined,
+        setWidget: () => undefined,
+        theme: { fg: (_color: string, text: string) => text },
+      },
+    } as unknown as ExtensionContext;
+
+    await events.get("session_start")?.({ type: "session_start" }, ctx);
+    await expect.poll(() => offered, { timeout: 1_000 }).toContain("自由输入行动或台词…");
+
+    expect(narratorCalls).toBe(0);
+    expect(offered).toEqual(["自由输入行动或台词…"]);
+    expect(offered.join("\n")).not.toContain("接触计划");
+    expect(offered.join("\n")).not.toContain("采取下一项实际行动");
   });
 
   it("automatically recovers a legacy transcript that ended on a raw engine rejection", async () => {

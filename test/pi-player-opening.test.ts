@@ -53,12 +53,18 @@ describe("Pi player scene narrator", () => {
     roots.push(root);
     const narration = "闷热的风贴着走廊缓慢移动，你朝前迈出的脚步把身后的嘈杂一点点推远。墙内断续的说话声听不真切，传达室的方向却比刚才明确了些；鞋底擦过水泥地面时，那声短促的金属碰响又从前方落了下来，近得像有什么刚刚碰上门框。";
     let created = 0;
-    vi.spyOn(PiAgentSession, "create").mockImplementation(async () => {
+    const prompts: string[] = [];
+    const systemPrompts: string[] = [];
+    vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
       created += 1;
+      systemPrompts.push(options.systemPromptOverride ?? "");
       return {
         abort: async () => undefined,
         dispose: async () => undefined,
-        promptWithReport: async () => ({ text: narration }) as never,
+        promptWithReport: async (prompt: string) => {
+          prompts.push(prompt);
+          return { text: narration } as never;
+        },
       } as unknown as PiAgentSession;
     });
     const attempts: number[] = [];
@@ -70,6 +76,53 @@ describe("Pi player scene narrator", () => {
     expect(result).toEqual({ narration, choices: [] });
     expect(created).toBe(1);
     expect(attempts).toEqual([1]);
+    expect(prompts).toHaveLength(1);
+    expect(systemPrompts[0]).toContain("Before any narration");
+    expect(systemPrompts[0]).toContain("must contain tool calls only");
+    expect(prompts[0]).toContain("Phase 1 — choices");
+    expect(prompts[0]).not.toContain("host-choice-repair");
+  });
+
+  it("makes choice capture the tool-only first phase before scene narration", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-opening-choice-first-"));
+    roots.push(root);
+    const narration = "门缝里的风卷起脚边一层薄灰，你站在原地，听见木板另一侧传来两次短促的摩擦声。昏黄灯光沿着门框轻轻晃动，那道新鲜划痕仍停在鞋尖前；片刻之后，门外有人压低声音咳了一下，又立刻安静下来。";
+    const prompts: string[] = [];
+    const toolResults: string[] = [];
+    vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
+      const choiceTool = options.additionalTools?.find((tool) => tool.name === "propose_player_choices");
+      if (!choiceTool) throw new Error("missing choice tool");
+      return {
+        abort: async () => undefined,
+        dispose: async () => undefined,
+        promptWithReport: async (prompt: string) => {
+          prompts.push(prompt);
+          const result = await choiceTool.execute("choice-first", {
+            choices: [
+              { action: "蹲下来，用指尖沿着鞋尖前的划痕摸一遍。" },
+              { action: "贴近门板，对门外说：“我听见你了。”" },
+            ],
+          } as never, undefined, undefined, {} as never);
+          toolResults.push(result.content.flatMap((item) => item.type === "text" ? [item.text] : []).join(""));
+          return { text: narration } as never;
+        },
+      } as unknown as PiAgentSession;
+    });
+
+    const result = await createPiPlayerOpeningNarrator({ root })(playerSceneModelFrame(frame()), "turn");
+
+    expect(result).toEqual({
+      narration,
+      choices: [
+        { action: "蹲下来，用指尖沿着鞋尖前的划痕摸一遍。" },
+        { action: "贴近门板，对门外说：“我听见你了。”" },
+      ],
+    });
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("before emitting any narration");
+    expect(prompts[0]).toContain("complete player command");
+    expect(prompts[0]).toContain("<committed-actor-frame>");
+    expect(toolResults).toEqual([expect.stringContaining("Now stream only the requested scene narration")]);
   });
 
   it("does not use host language matching to reject an otherwise structural scene draft", async () => {
@@ -126,6 +179,8 @@ describe("Pi player scene narrator", () => {
     expect(prompts.join("\n")).not.toContain("commit-stable-id");
     expect(prompts.join("\n")).not.toContain("hero-stable-id");
     expect(prompts[0]).toContain("concrete thing the actor could do now");
+    expect(prompts[0]).toContain("complete player command");
+    expect(prompts[0]).toContain("leaves a later model to decide");
     expect(prompts[0]).not.toContain("aff-observe");
   });
 });

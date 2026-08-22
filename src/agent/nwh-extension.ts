@@ -70,6 +70,7 @@ import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
 import { createWorldBranch } from "../world/instance.js";
+import { formatReaderEntryContext } from "../world/entry-context.js";
 import {
   assertPlaySceneNarration,
   buildPlayOpeningFrame,
@@ -203,7 +204,7 @@ TUI shortcuts:
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
 const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
-const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.`;
+const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Establish an actionable lived state only for characters bodily present at the opening, with location, plan, or momentum whenever supported; a catalog-wide alive list is not a scene. Later characters receive separate source-backed entry checkpoints on their first embodied canonical events. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.`;
 
 type TuiPrepareAllState = {
   sourceId: string;
@@ -223,6 +224,25 @@ const MAX_PREPARE_ALL_PROVIDER_RETRIES = 1;
 
 type PresentedPlayerChoice = PlayerSceneChoice & { affordanceId?: string };
 const PLAYER_CHOICE_CONTRACT_VERSION = 2;
+
+function mergePresentedPlayerChoices(
+  hostChoices: readonly PresentedPlayerChoice[],
+  narratedChoices: readonly PresentedPlayerChoice[],
+): PresentedPlayerChoice[] {
+  const result: PresentedPlayerChoice[] = [];
+  const seen = new Set<string>();
+  const add = (choice: PresentedPlayerChoice | undefined) => {
+    if (!choice || result.length >= 4) return;
+    const key = choice.action.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    result.push(structuredClone(choice));
+  };
+  add(hostChoices[0]);
+  for (const choice of narratedChoices) add(choice);
+  for (const choice of hostChoices.slice(1)) add(choice);
+  return result;
+}
 
 const PLAY_INTENT = /(?:体验|扮演|饰演|想玩|游玩|代入|(?:选择|挑选|切换).{0,8}(?:人物|角色)|进入.{0,8}(?:世界|角色)|以.{0,12}(?:身份|视角)|play\s+as|inhabit|resume\s+as)/iu;
 const CHARACTER_LIST_INTENT = /(?:有哪些|列出|查看|显示|选择|什么|哪些).{0,12}(?:人物|角色)|(?:characters|cast|who\s+can\s+i\s+play)/iu;
@@ -316,7 +336,7 @@ function transcriptCustomMessage(entry: PlayerTranscriptEntry): { customType?: s
 function restoredPlayerChoices(
   entries: readonly PlayerTranscriptEntry[],
   selection: SelectedPlayExperience,
-): PlayerSceneChoice[] {
+): PresentedPlayerChoice[] {
   const latestPlayerEntry = [...entries].reverse().find((entry) => {
     const { customType } = transcriptCustomMessage(entry);
     return customType === "nwh-play" || customType === "nwh-narrator";
@@ -333,7 +353,17 @@ function restoredPlayerChoices(
     || record.choiceContractVersion !== PLAYER_CHOICE_CONTRACT_VERSION
   ) return [];
   const parsed = playerSceneChoicesSchema.safeParse({ choices: upgradeLegacyPlayerChoices(record.choices) });
-  return parsed.success ? parsed.data.choices : [];
+  if (!parsed.success) return [];
+  const rawChoices = Array.isArray(record.choices) ? record.choices : [];
+  return parsed.data.choices.map((choice, index) => {
+    const raw = rawChoices[index];
+    const affordanceId = raw && typeof raw === "object" && !Array.isArray(raw)
+      && typeof (raw as Record<string, unknown>).affordanceId === "string"
+      && /^aff-[a-f0-9]{24}$/.test((raw as Record<string, unknown>).affordanceId as string)
+      ? (raw as Record<string, string>).affordanceId
+      : undefined;
+    return affordanceId ? { ...choice, affordanceId } : choice;
+  });
 }
 
 function playerTranscriptNeedsRecovery(entries: readonly PlayerTranscriptEntry[]): boolean {
@@ -559,7 +589,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         actorId: string;
         commitId: string;
         purpose: PlayScenePurpose;
-        choices: PlayerSceneChoice[];
+        choices: PresentedPlayerChoice[];
       },
     ) => {
       pi.sendMessage({ customType: "nwh-narrator", content, display: true, details });
@@ -859,10 +889,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         const narratedChoices: PresentedPlayerChoice[] = parsedChoices?.success
           ? parsedChoices.data.choices
           : [];
-        // Choice capture is advisory and deliberately has no host substitute.
-        // When the model omits or malforms the tool call, the empty set reaches
-        // the selector unchanged and its sole path is free-form player input.
-        const choices: PresentedPlayerChoice[] = structuredClone(narratedChoices);
+        // Model choices improve presentation, while host affordances are the
+        // preflighted escape routes that keep a scene executable when narration
+        // omits choices or drifts into a conversational loop.
+        const hostChoices: PresentedPlayerChoice[] = frame.affordances.map((affordance) => ({
+          action: affordance.action,
+          affordanceId: affordance.id,
+        }));
+        const choices = mergePresentedPlayerChoices(hostChoices, narratedChoices);
         stream.verifyFinalText(narration);
         if (controller.signal.aborted) return [];
         const stillSelected = playerMode
@@ -876,7 +910,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             actorId: frame.actor.id,
             commitId: frame.commitId,
             purpose,
-            choices: choices.map(({ action }) => ({ action })),
+            choices: choices.map(({ action, affordanceId }) => ({
+              action,
+              ...(affordanceId ? { affordanceId } : {}),
+            })),
           } as const;
           if (!stream.commit(narration, details)) showNarratorMessage(narration, details);
           try {
@@ -980,6 +1017,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         || previousSelection.actor.id !== selection.actor.id;
       if (selectionChanged) {
         for (const warning of selection.readinessWarnings) ctx.ui.notify(warning, "warning");
+        if (selection.readerContext) {
+          showPlayMessage(formatReaderEntryContext(selection.readerContext, selection.actor.canonicalName));
+        }
       }
       const requestedScene = input.scene ?? "none";
       const purpose = resolvePlayScenePurpose(requestedScene, {
@@ -1482,7 +1522,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           const fallbackId = await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
           const result = await convergeWorldProposals(workspace.root, state.sourceId);
           await quarantineUncommittableProposals(workspace.root, result);
-          ctx.ui.notify(`The model did not leave a valid opening state; accepted a conservative evidence-backed opening-cast fallback ${fallbackId}.`, "warning");
+          ctx.ui.notify(`The model did not leave a valid opening state; accepted the restricted single-character opening fallback ${fallbackId}.`, "warning");
           const afterFallback = await inspectPreparation(workspace.root, {
             sourceId: state.sourceId,
             branchId: state.branchId,

@@ -9,6 +9,7 @@ import {
   evidenceRefSchema,
   idSchema,
   possibilitySchema,
+  validateParticipantPresence,
   stateDeltaSchema,
   stateOperationSchema,
   stateValueSchema,
@@ -68,6 +69,7 @@ const compilerClaimSchema = claimSchema.extend({ evidence: evidenceRefSchema.arr
   }
 });
 const compilerPossibilitySchema = possibilityTemplateSchema.extend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
+  validateParticipantPresence(possibility, ctx);
   if (possibility.kind === "player-choice" && !hasExecutablePossibilityEffect(possibility)) {
     ctx.addIssue({
       code: "custom",
@@ -85,7 +87,9 @@ const stateFieldOperations = new Set(["set", "unset", "add-member", "remove-memb
 export const compilerProposalSchemas = {
   entity: entitySchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   claim: compilerClaimSchema,
-  "canonical-event": compilerCanonicalEventSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
+  "canonical-event": compilerCanonicalEventSchema
+    .extend({ evidence: evidenceRefSchema.array().min(1) })
+    .superRefine(validateParticipantPresence),
   "world-rule": compilerWorldRuleSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "initial-world": initialWorldSchema,
   "character-goal": characterGoalSchema,
@@ -304,6 +308,15 @@ function collectProposalClosureIssues(
     event.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `preconditions.${index}`, missing, fieldReference));
     collectStateDeltaIssues(event.observedOutcome, "observedOutcome", missing, fieldReference);
     if (event.observedKnowledge) collectKnowledgeDeltaIssues(event.observedKnowledge, "observedKnowledge", missing);
+    for (let index = 0; index < (event.characterEntryCheckpoints?.length ?? 0); index += 1) {
+      const checkpoint = event.characterEntryCheckpoints![index]!;
+      const prefix = `characterEntryCheckpoints.${index}`;
+      missing("entities", checkpoint.actorId, `${prefix}.actorId`);
+      checkpoint.participantPresence.forEach((presence, presenceIndex) =>
+        missing("entities", presence.entityId, `${prefix}.participantPresence.${presenceIndex}.entityId`));
+      collectStateDeltaIssues(checkpoint.delta, `${prefix}.delta`, missing, fieldReference);
+      if (checkpoint.knowledge) collectKnowledgeDeltaIssues(checkpoint.knowledge, `${prefix}.knowledge`, missing);
+    }
     return;
   }
   if (proposal.kind === "world-rule") {
@@ -314,6 +327,8 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "initial-world") {
     const initial = payload as z.infer<typeof initialWorldSchema>;
+    initial.participantPresence?.forEach((presence, index) =>
+      missing("entities", presence.entityId, `participantPresence.${index}.entityId`));
     collectStateDeltaIssues(initial.delta, "delta", missing, fieldReference);
     if (initial.knowledge) collectKnowledgeDeltaIssues(initial.knowledge, "knowledge", missing);
     if (initial.checkpoint?.beforeCanonicalEventId) missing("events", initial.checkpoint.beforeCanonicalEventId, "checkpoint.beforeCanonicalEventId");

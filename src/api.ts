@@ -32,6 +32,17 @@ export {
 } from "./world/development.js";
 export { InitialWorldStore, initialWorldSchema, openingCheckpointSchema, type InitialWorld, type OpeningCheckpoint } from "./world/initial.js";
 export { createWorldBranch, type CreatedWorldBranch } from "./world/instance.js";
+export {
+  deriveCharacterEntryOptions,
+  deriveCharacterEntrySeed,
+  formatReaderEntryContext,
+  readerContextForEntry,
+  type CharacterEntryOption,
+  type CharacterEntryPoint,
+  type CharacterEntrySeed,
+  type ReaderContextBeat,
+  type ReaderEntryContext,
+} from "./world/entry-context.js";
 export { KnowledgeProjector, type ActorWorldView } from "./world/knowledge.js";
 export { isNarrativeInterpretation, NarrativeMetaView, type NarrativeObservation, type NarrativeMetaKind } from "./world/meta.js";
 export { modelActorProposalSource, actorActionTemplateSchema, type ActorActionTemplate, type ActorReasoner, type ActorReasoningInput, type ModelActorDevelopmentView, type ModelActorDispositionView, type ModelActorGoalView, type ModelActorWorldView } from "./world/model-actor-policy.js";

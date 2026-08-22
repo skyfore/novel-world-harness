@@ -115,18 +115,23 @@ export async function projectActorScene(
     }
 
     removeCharactersWhoMovedAway(entry.delta, actorId, locationId, present);
-    if (!entry.event.participants.includes(actorId) || entry.event.title === "Genesis") continue;
-
-    for (const participantId of entry.event.participants) {
+    if (!entry.event.participants.includes(actorId)) continue;
+    const physicalParticipants = physicallyPresentCharacters(entry.event);
+    for (const participantId of physicalParticipants) {
       const entity = context.entities.get(participantId);
       if (!entity || entity.kind !== "character" || !evidenceBelongsExclusivelyToSource(entity.evidence, effectiveSourceId)) continue;
       if (isProvenRemote(state.values, actorId, participantId)) continue;
       present.add(participantId);
     }
+    if (
+      entry.event.title === "Genesis"
+      && !entry.event.actorObservations?.some((observation) => observation.actorId === actorId)
+    ) continue;
     const observation = observeCommittedEvent(entry.event, actorId);
     if (!observation) continue;
     const visibleParticipantIds = entry.event.participants.filter((participantId) => {
       if (participantId === actorId) return true;
+      if (!physicalParticipants.has(participantId)) return false;
       const participant = context.entities.get(participantId);
       return participant?.kind === "character"
         && evidenceBelongsExclusivelyToSource(participant.evidence, effectiveSourceId)
@@ -202,6 +207,22 @@ export async function projectActorScene(
     recentNoveltyKeys,
     signature,
   };
+}
+
+/**
+ * New events state presence explicitly. Legacy interactive events remain
+ * readable because an acting/observing character made their local involvement
+ * explicit; legacy canonical/background participant lists fail closed instead
+ * of teleporting every mentioned person into one room.
+ */
+function physicallyPresentCharacters(event: CommittedEvent): ReadonlySet<string> {
+  if (event.participantPresence) {
+    return new Set(event.participantPresence
+      .filter((presence) => presence.mode === "physical")
+      .map((presence) => presence.entityId));
+  }
+  if (event.actorId || event.actorObservations?.length) return new Set(event.participants);
+  return new Set();
 }
 
 export async function committedHistory(engine: WorldEngine, commitId: CommitId): Promise<CommittedHistoryEntry[]> {

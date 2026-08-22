@@ -14,6 +14,12 @@ import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prepare.js";
 import { createWorldBranch } from "./instance.js";
 import { BranchStore } from "./store.js";
+import {
+  deriveCharacterEntryOptions,
+  deriveCharacterEntrySeed,
+  type CharacterEntryOption,
+  type ReaderEntryContext,
+} from "./entry-context.js";
 
 export type AskPlayQuestion = (question: UserQuestion<string>) => Promise<string | undefined>;
 export type PlayInstanceMode = "continue" | "switch" | "create";
@@ -100,6 +106,8 @@ export async function choosePlayExperience(
   const mode = options.instanceMode ?? "switch";
   let createdInstance = false;
   let createdBranchId: string | undefined;
+  let createdActorId: string | undefined;
+  let createdReaderContext: ReaderEntryContext | undefined;
   let instanceCatalog = sourceId ? catalogForSource(catalog, sourceId) : catalog;
   if (options.branchId) {
     const requested = requestedInstance;
@@ -109,10 +117,22 @@ export async function choosePlayExperience(
     }
   }
   if (sourceId && (mode === "create" || (!instanceCatalog.instances.length && (options.createIfMissing ?? true)))) {
+    const source = catalog.novels.find((novel) => novel.id === sourceId);
+    if (!source) throw new Error(`Unknown novel source '${sourceId}'.`);
+    const prepared = await new PreparedNovelCache(root, options.preparedCacheRoot).loadFreshActive(source);
+    if (!prepared) throw new Error(`Novel '${source.title}' has no active prepared revision with character entry checkpoints.`);
+    const entryOptions = deriveCharacterEntryOptions(prepared.bundle);
+    if (!entryOptions.length) {
+      throw new Error(`Novel '${source.title}' has no grounded embodied character entry with complete prior reader context. Recompile its opening and canonical scenes before play.`);
+    }
+    createdActorId = await chooseCharacterEntry(entryOptions, options.character, source.title, ask);
+    if (!createdActorId) return undefined;
+    createdReaderContext = deriveCharacterEntrySeed(prepared.bundle, createdActorId).readerContext;
     const created = await createSourcePlayInstance(root, catalog, sourceId, {
       ...(mode === "create" ? { alwaysCreate: true } : {}),
       ...(mode === "create" && options.branchId ? { requestedBranchId: options.branchId } : {}),
       ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}),
+      entryActorId: createdActorId,
     });
     options.onInstanceLifecycle?.({
       type: "created",
@@ -132,7 +152,7 @@ export async function choosePlayExperience(
   }
   const preferredBranch = createdBranchId ?? options.branchId
     ?? (mode === "continue" ? instanceCatalog.instances[0]?.branchId : undefined);
-  const branchId = await choosePlayInstance(
+  let branchId = await choosePlayInstance(
     root,
     preferredBranch,
     ask,
@@ -140,50 +160,66 @@ export async function choosePlayExperience(
     { forcePrompt: mode === "switch" && !options.branchId && instanceCatalog.instances.length > 1 },
   );
   if (!branchId) return undefined;
-  if (mode !== "create" && !createdInstance) {
-    const selectedInstance = instanceCatalog.instances.find((instance) => instance.branchId === branchId);
-    const source = catalog.novels.find((novel) => novel.id === sourceId);
-    if (sourceId && source) options.onInstanceLifecycle?.({
-      type: mode === "continue" ? "continued" : "switched",
-      branchId,
-      sourceId,
-      sourceTitle: source.title,
-      ...(selectedInstance?.preparedRevisionHash ? { preparedRevisionHash: selectedInstance.preparedRevisionHash } : {}),
-    });
+  let selectedInstance = instanceCatalog.instances.find((instance) => instance.branchId === branchId);
+  let saved = catalog.savedSessions.find((session) => session.branchId === branchId);
+  let listed = await listPlayableCharacters(root, { branchId, ...(sourceId ? { source: sourceId } : {}) });
+  let playable = listed.characters.filter((character) => character.alive !== false);
+  let branchEntryOptions: CharacterEntryOption[] = [];
+  let branchPrepared: Awaited<ReturnType<PreparedNovelCache["loadRevision"]>> | null = null;
+  const source = sourceId ? catalog.novels.find((novel) => novel.id === sourceId) : undefined;
+  if (!createdActorId && source && selectedInstance?.logicalStep === 0 && selectedInstance.preparedRevisionHash) {
+    try {
+      branchPrepared = await new PreparedNovelCache(root, options.preparedCacheRoot)
+        .loadRevision(source, selectedInstance.preparedRevisionHash);
+      if (branchPrepared) branchEntryOptions = deriveCharacterEntryOptions(branchPrepared.bundle);
+    } catch {
+      // A pinned legacy revision stays replayable, but incompatible compiler
+      // semantics cannot be used to synthesize a new character checkpoint.
+    }
   }
-  const listed = await listPlayableCharacters(root, { branchId, ...(sourceId ? { source: sourceId } : {}) });
-  const playable = listed.characters.filter((character) => character.alive !== false);
-  if (!playable.length) throw new Error(`No committed characters are available to play on '${branchId}'.`);
-  const saved = catalog.savedSessions.find((session) => session.branchId === branchId);
-  const requestedCharacter = options.character;
-  let character = requestedCharacter ? resolveCharacter(playable, requestedCharacter)?.id : undefined;
+  if (!playable.length && !branchEntryOptions.length) {
+    throw new Error(`No committed characters or grounded entry checkpoints are available to play on '${branchId}'.`);
+  }
+  const requestedCharacter = createdActorId ?? options.character;
+  const resolveAvailableCharacter = (value: string): string | undefined =>
+    resolveCharacter(playable, value)?.id ?? resolveEntryCharacter(branchEntryOptions, value)?.actorId;
+  let character = requestedCharacter ? resolveAvailableCharacter(requestedCharacter) : undefined;
+  const savedActorId = saved?.actorId;
   if (
     !requestedCharacter
     && (options.preferSavedCharacter ?? true)
-    && saved
-    && playable.some((candidate) => candidate.id === saved.actorId)
-  ) character = saved.actorId;
+    && savedActorId
+    && playable.some((candidate) => candidate.id === savedActorId)
+  ) character = savedActorId;
   if (!character) {
+    const entryOnly = branchEntryOptions.filter((entry) => !playable.some((candidate) => candidate.id === entry.actorId));
     character = await ask({
       header: "Character",
       question: requestedCharacter
         ? `No unique available character matches '${requestedCharacter}'. Who do you want to play on '${branchId}'?`
         : `Who do you want to play on '${branchId}'?`,
-      options: playable.map((candidate) => ({
-        value: candidate.id,
-        label: `${candidate.canonicalName} (${candidate.id})`,
-        description: [
-          candidate.aliases.length ? `aliases: ${candidate.aliases.join(", ")}` : undefined,
-          candidate.locationName ? `location: ${candidate.locationName}` : undefined,
-        ].filter(Boolean).join("; ") || "committed playable character",
-      })),
+      options: [
+        ...playable.map((candidate) => ({
+          value: candidate.id,
+          label: `${candidate.canonicalName} (${candidate.id})`,
+          description: [
+            candidate.aliases.length ? `aliases: ${candidate.aliases.join(", ")}` : undefined,
+            candidate.locationName ? `location: ${candidate.locationName}` : undefined,
+          ].filter(Boolean).join("; ") || "committed playable character",
+        })),
+        ...entryOnly.map((entry) => ({
+          value: entry.actorId,
+          label: `${entry.canonicalName} (${entry.actorId})`,
+          description: `creates a fresh checkpoint at first embodied scene: ${entry.entry.title}`,
+        })),
+      ],
       customInput: {
         label: "Enter a character",
         description: "Type a character id, canonical name, or alias.",
         prompt: "Character id, name, or alias",
         placeholder: playable[0]?.canonicalName,
         invalidMessage: `No unique available character on '${branchId}' matches that value.`,
-        resolve: (value) => resolveCharacter(playable, value)?.id,
+        resolve: resolveAvailableCharacter,
       },
       nonInteractiveHint: requestedCharacter
         ? `Character '${requestedCharacter}' is not uniquely playable on '${branchId}'. Pass a valid --character <id-or-name>.`
@@ -191,9 +227,62 @@ export async function choosePlayExperience(
     });
   }
   if (!character) return undefined;
+  const selectedEntry = branchEntryOptions.find((entry) => entry.actorId === character);
+  if (
+    !createdActorId
+    && sourceId
+    && selectedEntry
+    && !playable.some((candidate) => candidate.id === character)
+    && selectedInstance?.logicalStep === 0
+    && branchPrepared
+  ) {
+    const created = await createSourcePlayInstance(root, catalog, sourceId, {
+      alwaysCreate: true,
+      ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}),
+      entryActorId: character,
+    });
+    branchId = created.branchId;
+    selectedInstance = created;
+    createdInstance = true;
+    createdActorId = character;
+    createdReaderContext = deriveCharacterEntrySeed(branchPrepared.bundle, character).readerContext;
+    options.onInstanceLifecycle?.({
+      type: "created",
+      branchId,
+      sourceId,
+      sourceTitle: created.sourceTitle ?? sourceId,
+      ...(created.preparedRevisionHash ? { preparedRevisionHash: created.preparedRevisionHash } : {}),
+    });
+    listed = await listPlayableCharacters(root, { branchId, source: sourceId });
+    playable = listed.characters.filter((candidate) => candidate.alive !== false);
+    saved = undefined;
+  }
+  if (!playable.some((candidate) => candidate.id === character)) {
+    throw new Error(`Character '${character}' is not embodied at branch '${branchId}' head.`);
+  }
+  if (mode !== "create" && !createdInstance && sourceId && source) {
+    options.onInstanceLifecycle?.({
+      type: mode === "continue" ? "continued" : "switched",
+      branchId,
+      sourceId,
+      sourceTitle: source.title,
+      ...(selectedInstance?.preparedRevisionHash ? { preparedRevisionHash: selectedInstance.preparedRevisionHash } : {}),
+    });
+  }
   const selection = await selectPlayExperience(root, { branchId, character, ...(sourceId ? { source: sourceId } : {}) });
-  const selectedInstance = instanceCatalog.instances.find((instance) => instance.branchId === branchId);
-  const source = sourceId ? catalog.novels.find((novel) => novel.id === sourceId) : undefined;
+  if (createdReaderContext) selection.readerContext = createdReaderContext;
+  else if (selection.logicalStep === 0 && source && selectedInstance?.preparedRevisionHash) {
+    try {
+      const pinned = branchPrepared?.bundleHash === selectedInstance.preparedRevisionHash
+        ? branchPrepared
+        : await new PreparedNovelCache(root, options.preparedCacheRoot)
+          .loadRevision(source, selectedInstance.preparedRevisionHash);
+      if (pinned) selection.readerContext = deriveCharacterEntrySeed(pinned.bundle, character).readerContext;
+    } catch {
+      // Replay remains available even when a legacy pinned bundle cannot supply
+      // the newer reader-context contract.
+    }
+  }
   if (source && selectedInstance?.preparedRevisionHash) {
     try {
       const active = await new PreparedNovelCache(root, options.preparedCacheRoot).loadActive(source);
@@ -203,6 +292,9 @@ export async function choosePlayExperience(
         );
       }
     } catch (error) {
+      selection.readinessWarnings.unshift(
+        `实例 '${branchId}' 固定在旧版或不兼容的 prepared 语义上；系统不会改写其历史。请重新 prepare-all，并创建新实例以获得序幕、角色在场和推进修复。`,
+      );
       selection.readinessDiagnostics.push(
         `无法核对当前实例与 active prepared revision：${error instanceof Error ? error.message : String(error)}`,
       );
@@ -222,7 +314,7 @@ export async function createSourcePlayInstance(
   root: string,
   catalog: PlayExperienceCatalog,
   sourceId: string,
-  options: { alwaysCreate?: boolean; requestedBranchId?: string; cacheRoot?: string } = {},
+  options: { alwaysCreate?: boolean; requestedBranchId?: string; cacheRoot?: string; entryActorId?: string } = {},
 ): Promise<PlayInstanceSummary> {
   const source = catalog.novels.find((novel) => novel.id === sourceId);
   if (!source) throw new Error(`Unknown novel source '${sourceId}'.`);
@@ -251,11 +343,58 @@ export async function createSourcePlayInstance(
       ].filter(Boolean).join(" "));
     }
   }
-  await createWorldBranch(root, branchId, undefined, sourceId, options.cacheRoot);
+  await createWorldBranch(root, branchId, undefined, sourceId, options.cacheRoot, options.entryActorId);
   const refreshed = await inspectPlayExperience(root);
   const created = refreshed.instances.find((instance) => instance.branchId === branchId);
   if (!created) throw new Error(`Created instance '${branchId}' was not discoverable.`);
   return created;
+}
+
+async function chooseCharacterEntry(
+  entries: readonly CharacterEntryOption[],
+  requested: string | undefined,
+  sourceTitle: string,
+  ask: AskPlayQuestion,
+): Promise<string | undefined> {
+  const resolved = requested ? resolveEntryCharacter(entries, requested) : undefined;
+  if (resolved) return resolved.actorId;
+  return ask({
+    header: "Character",
+    question: requested
+      ? `No unique grounded entry matches '${requested}'. Who do you want to inhabit in '${sourceTitle}'?`
+      : `Who do you want to inhabit in '${sourceTitle}'? Each role starts at that character's first grounded lived scene.`,
+    options: entries.map((entry, index) => ({
+      value: entry.actorId,
+      label: `${entry.canonicalName} (${entry.actorId})`,
+      description: entry.entry.kind === "opening"
+        ? "starts at the novel's opening checkpoint"
+        : `starts at first embodied scene: ${entry.entry.title}`,
+      recommended: index === 0,
+    })),
+    customInput: {
+      label: "Enter a character",
+      description: "Type a character id, canonical name, or alias.",
+      prompt: "Character id, name, or alias",
+      placeholder: entries[0]?.canonicalName,
+      invalidMessage: "No unique character with a grounded lived entry matches that value.",
+      resolve: (value) => resolveEntryCharacter(entries, value)?.actorId,
+    },
+    nonInteractiveHint: requested
+      ? `Character '${requested}' has no unique grounded entry in '${sourceTitle}'. Pass a valid --character <id-or-name>.`
+      : `Character selection is required for a new '${sourceTitle}' instance. Pass --character <id-or-name>.`,
+  });
+}
+
+function resolveEntryCharacter(
+  entries: readonly CharacterEntryOption[],
+  value: string,
+): CharacterEntryOption | undefined {
+  const exact = entries.find((entry) => entry.actorId === value);
+  if (exact) return exact;
+  const normalized = normalize(value);
+  const matches = entries.filter((entry) =>
+    [entry.canonicalName, ...entry.aliases].some((name) => normalize(name) === normalized));
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function nextSourceInstanceId(source: SourceDocument, existingIds: readonly string[]): string {

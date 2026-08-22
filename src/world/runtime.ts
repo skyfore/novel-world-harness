@@ -3,12 +3,14 @@ import type { ActorProposalCandidate, ActorProposalSource } from "./actors.js";
 import {
   eventProposalSchema,
   idSchema,
+  possibilityKindSchema,
   possibilitySchema,
   type BranchId,
   type CommitId,
   type EventProposal,
   type EvidenceRef,
   type Possibility,
+  type PossibilityKind,
   type StoryTime,
   type WorldState,
 } from "./model.js";
@@ -39,6 +41,8 @@ export type MoveInput = {
   maxActorCandidates?: number;
   maxBackgroundCandidates?: number;
   temporalMode?: FrontierTemporalMode;
+  /** Optional allowlist for background scheduling; actor proposals are unaffected. */
+  backgroundKinds?: readonly PossibilityKind[];
 };
 
 export type AdjudicationConflict = {
@@ -191,10 +195,25 @@ export class WorldRuntime {
     }
 
     const backgroundLimit = boundedLimit(input.maxBackgroundCandidates ?? 0, "maxBackgroundCandidates");
+    const backgroundKinds = input.backgroundKinds
+      ? new Set(possibilityKindSchema.array().max(8).parse(input.backgroundKinds))
+      : undefined;
     const temporalMode = backgroundLimit > 0 ? input.temporalMode ?? "advance" : "current-window";
     let latestFrontier = await this.refreshFrontier(input.branchId, currentHead, { temporalMode });
     for (let index = 0; index < backgroundLimit; index += 1) {
-      const candidate = selectEligible(latestFrontier, 1)[0];
+      const candidate = selectEligible(
+        backgroundKinds
+          ? {
+              ...latestFrontier,
+              evaluated: latestFrontier.evaluated.filter((entry) =>
+                backgroundKinds.has(entry.possibility.kind) && Boolean(possibilityToProposal(entry))),
+            }
+          : {
+              ...latestFrontier,
+              evaluated: latestFrontier.evaluated.filter((entry) => Boolean(possibilityToProposal(entry))),
+            },
+        1,
+      )[0];
       if (!candidate) break;
       const proposal = possibilityToProposal(candidate);
       if (!proposal) break;

@@ -105,7 +105,7 @@ async function fixture(
   const sentUserMessages: string[] = [];
   const sentHiddenMessages: string[] = [];
   const sentVisibleMessages: string[] = [];
-  const sentMessages: Array<{ customType?: string; content: string; display?: boolean }> = [];
+  const sentMessages: Array<{ customType?: string; content: string; display?: boolean; details?: unknown }> = [];
   const markdownTransformers: MarkdownTransformer[] = [];
   const messageRenderers = new Map<string, MessageRenderer>();
   const appendedEntries: Array<{ customType: string; data?: unknown }> = [];
@@ -148,7 +148,7 @@ async function fixture(
     sendUserMessage(message: string) {
       sentUserMessages.push(message);
     },
-    sendMessage(message: { content: string; display?: boolean }, options?: { triggerTurn?: boolean }) {
+    sendMessage(message: { customType?: string; content: string; display?: boolean; details?: unknown }, options?: { triggerTurn?: boolean }) {
       sentMessages.push(message);
       if (options?.triggerTurn) sentHiddenMessages.push(message.content);
       else if (message.display) sentVisibleMessages.push(message.content);
@@ -1228,7 +1228,7 @@ describe("NWH TUI extension", () => {
     await turnNarrated.promise;
     expect(translatedUtterances).toEqual(["贴近门缝，听清外面那阵细碎的响动。"]);
     expect(adjudicationCalls).toBe(1);
-    expect(offered).toContain("1. 贴近门缝，听清外面那阵细碎的响动。");
+    expect(offered.some((choice) => choice.includes("贴近门缝，听清外面那阵细碎的响动。"))).toBe(true);
     expect(offered.some((choice) => choice.includes(" — "))).toBe(false);
     expect(offered.some((choice) => choice.includes("(recommended)"))).toBe(false);
     expect(widgets.some((widget) => widget.key === "nwh-model-loading" && widget.content?.join("\n").includes("正在理解你的行动"))).toBe(true);
@@ -1376,10 +1376,10 @@ describe("NWH TUI extension", () => {
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
-  it("offers only free-form input when the narrator choice tool is empty", async () => {
+  it("retains preflighted host actions when the narrator choice tool is empty", async () => {
     const narration = "热风从门廊里缓缓挤过来，你听见脚边的沙粒被吹得轻轻滚动。眼前已经发生的事情没有退回原处，近处的光影却仍在一点点变化；墙后忽然传来一声短促的碰响，随后又只剩下压低了的说话声。";
     let translatorCalled = false;
-    const { commands, root, sentVisibleMessages } = await fixture(
+    const { commands, root, sentVisibleMessages, sentMessages } = await fixture(
       undefined,
       async () => {
         translatorCalled = true;
@@ -1417,7 +1417,12 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages).toEqual([narration]);
     expect(notifications.some((message) => message.includes("Scene narration failed"))).toBe(false);
     expect(offered).toHaveLength(1);
-    expect(offered[0]).toEqual(["自由输入行动或台词…"]);
+    expect(offered[0]).toContain("自由输入行动或台词…");
+    expect(offered[0]!.some((choice) => choice.includes("离开原地"))).toBe(true);
+    const narratorDetails = sentMessages.find((message) => message.customType === "nwh-narrator")?.details as {
+      choices?: Array<{ affordanceId?: string }>;
+    } | undefined;
+    expect(narratorDetails?.choices?.[0]?.affordanceId).toMatch(/^aff-[a-f0-9]{24}$/);
     expect(translatorCalled).toBe(false);
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
@@ -2582,7 +2587,7 @@ describe("NWH TUI extension", () => {
 
     expect(questions).toEqual(["Generate opening world?", "Create playable branch?"]);
     expect(notifications.some((message) => message.includes("Opening-state compiler did not complete") && message.includes("explicitly finish"))).toBe(true);
-    expect(notifications.some((message) => message.includes("conservative evidence-backed opening-cast fallback"))).toBe(true);
+    expect(notifications.some((message) => message.includes("restricted single-character opening fallback"))).toBe(true);
     await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toContainEqual(
       expect.objectContaining({ id: "partial-opening" }),
     );

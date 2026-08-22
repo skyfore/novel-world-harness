@@ -60,6 +60,7 @@ function input(): NpcReactionReasoningInput {
     },
     activeGoals: [],
     activeWorldRules: [],
+    repetitionDepth: 0,
     recentPerceivedMessages: [{ kind: "perceived-event", text: "Where did the letter come from?", order: 4, speaker: "Visitor" }],
     relatedPerceivedMessages: [
       { kind: "perceived-event", text: "Earlier, the visitor mentioned a sealed envelope.", order: 0, speaker: "Visitor" },

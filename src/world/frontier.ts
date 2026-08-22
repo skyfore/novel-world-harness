@@ -198,6 +198,7 @@ export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: str
     ...(actorId ? { actorId } : {}),
     title: possibility.title,
     participants: possibility.participants,
+    ...(possibility.participantPresence ? { participantPresence: structuredClone(possibility.participantPresence) } : {}),
     proposedTime: possibility.candidateWindow ?? { kind: "unknown" },
     ...(possibility.timeAdvance ? { timeAdvance: possibility.timeAdvance } : {}),
     preconditions: possibility.preconditions,

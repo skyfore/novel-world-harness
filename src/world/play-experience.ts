@@ -1,6 +1,6 @@
 import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "./player-action.js";
 import { buildActorScopedActionContext, PlayerTurnService } from "./player-action.js";
-import type { Entity } from "./model.js";
+import { AUTONOMOUS_BACKGROUND_KINDS, type Entity } from "./model.js";
 import { PlaySessionStore, type ActivePlaySession } from "./play-session.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
 import { BranchStore } from "./store.js";
@@ -22,6 +22,8 @@ import {
   type NpcReactionReasoner,
   type NpcResponseKind,
 } from "./npc-reaction.js";
+import type { ReaderEntryContext } from "./entry-context.js";
+import { committedHistory } from "./scene.js";
 
 export type PlayableCharacter = {
   id: string;
@@ -72,6 +74,8 @@ export type SelectedPlayExperience = {
   readinessWarnings: string[];
   /** Engine/readiness details retained for inspection, never shown in the story UI. */
   readinessDiagnostics: string[];
+  /** Reader-only recap for a newly created character checkpoint. Never model/actor knowledge. */
+  readerContext?: ReaderEntryContext;
 };
 
 export type PlayTurnOutcome = {
@@ -165,10 +169,11 @@ export async function listPlayableCharacters(
   const branchId = await resolveBranchId(new BranchStore(root), options.branchId, active?.branchId);
   const { engine } = await openWorkspaceWorld(root);
   const head = await engine.branches.readHead(branchId);
-  const [branch, context, state] = await Promise.all([
+  const [branch, context, state, history] = await Promise.all([
     engine.branches.read(branchId),
     engine.contextForCommit(head),
     engine.projector.project(head),
+    committedHistory(engine, head),
   ]);
   const activeSourceId = await resolveCommitSourceId(
     engine,
@@ -177,7 +182,13 @@ export async function listPlayableCharacters(
     source?.id ?? branch.sourceId,
     "Playable character listing",
   );
-  const characters = playableCharactersForContext(context.entities, state.values, activeSourceId);
+  const characters = playableCharactersForContext(
+    context.entities,
+    state.values,
+    activeSourceId,
+    embodiedCharacterIds(history),
+    !branch.preparedRevisionHash,
+  );
   return { branchId, ...(source ? { source } : {}), characters };
 }
 
@@ -191,9 +202,10 @@ export async function selectPlayExperience(
   const saved = await sessionStore.readInstance(branchId);
   const { engine } = await openWorkspaceWorld(root);
   const branch = await engine.branches.read(branchId);
-  const [context, state] = await Promise.all([
+  const [context, state, history] = await Promise.all([
     engine.contextForCommit(branch.headCommitId),
     engine.projector.project(branch.headCommitId),
+    committedHistory(engine, branch.headCommitId),
   ]);
   const store = await WorkspaceStore.create(root);
   const explicitlyRequestedSource = options.source ? await resolveNovelSource(store, options.source) : undefined;
@@ -206,7 +218,13 @@ export async function selectPlayExperience(
     `Instance '${branchId}'`,
   );
   const source = explicitlyRequestedSource ?? (activeSourceId ? await resolveNovelSource(store, activeSourceId) : undefined);
-  const characters = playableCharactersForContext(context.entities, state.values, activeSourceId);
+  const characters = playableCharactersForContext(
+    context.entities,
+    state.values,
+    activeSourceId,
+    embodiedCharacterIds(history),
+    !branch.preparedRevisionHash,
+  );
   const requestedActor = options.character;
   if (!requestedActor) {
     throw new Error(`Choose a character for '${branchId}'. Available: ${characterChoices(characters)}`);
@@ -322,7 +340,7 @@ export async function performPlayTurn(options: {
     actorId: options.actorId,
     utterance: options.utterance,
   }, {
-    ...(options.intent ? { intent: options.intent } : {}),
+    ...(options.intent ?? affordance?.intent ? { intent: options.intent ?? affordance!.intent } : {}),
     ...(affordance
       ? {
           affordanceId: affordance.id,
@@ -356,6 +374,8 @@ export async function performPlayTurn(options: {
   let npcResponseError: string | undefined;
   let backgroundError: string | undefined;
   if (result.accepted) {
+    const explicitWait = result.candidate?.intent?.kind === "wait";
+    const effectiveAdvanceBackground = explicitWait ? 1 : advanceBackground;
     let directNpcAttempts = 0;
     if (options.npcResponseReasoner && result.candidate && result.eventHash) {
       const interaction = result.candidate.intent?.controlledAct?.interaction;
@@ -440,8 +460,9 @@ export async function performPlayTurn(options: {
       const advanced = await runtime.move({
         branchId: options.branchId,
         maxActorCandidates: Math.max(0, advanceActors - directNpcAttempts),
-        maxBackgroundCandidates: advanceBackground,
-        temporalMode: advanceBackground > 0 ? "advance" : "current-window",
+        maxBackgroundCandidates: effectiveAdvanceBackground,
+        temporalMode: explicitWait ? "current-window" : effectiveAdvanceBackground > 0 ? "advance" : "current-window",
+        ...(explicitWait ? { backgroundKinds: AUTONOMOUS_BACKGROUND_KINDS } : {}),
       });
       finalHead = advanced.newHead;
       for (const eventHash of advanced.committedEvents) {
@@ -608,18 +629,38 @@ function playableCharactersForContext(
   entities: ReadonlyMap<string, Entity>,
   state: Readonly<Record<string, Record<string, unknown>>>,
   sourceId?: string,
+  embodiedIds: ReadonlySet<string> = new Set(),
+  allowLegacyStateFallback = true,
 ): PlayableCharacter[] {
-  return [...entities.values()]
+  const sourceCharacters = [...entities.values()]
     .filter((entity) => entity.kind === "character")
     .filter((entity) => sourceId
       ? evidenceBelongsExclusivelyToSource(entity.evidence, sourceId)
-      : entity.evidence.length === 0)
-    // A canonical character does not need to have participated in branch history
-    // before the player may inhabit it. Scene and thread membership do not gate
-    // role choice; only an explicit committed death excludes the character here.
+      : entity.evidence.length === 0);
+  return sourceCharacters
     .filter((entity) => state[entity.id]?.["character.alive"] !== false)
+    .filter((entity) => embodiedIds.has(entity.id)
+      || (allowLegacyStateFallback && Object.keys(state[entity.id] ?? {}).length > 0))
     .map((entity) => characterSummary(entity, state[entity.id] ?? {}, entities))
     .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
+}
+
+function embodiedCharacterIds(
+  history: readonly Awaited<ReturnType<typeof committedHistory>>[number][],
+): ReadonlySet<string> {
+  const result = new Set<string>();
+  for (const { event } of history) {
+    if (event.actorId) result.add(event.actorId);
+    for (const presence of event.participantPresence ?? []) {
+      if (presence.mode === "physical") result.add(presence.entityId);
+    }
+    // Legacy interactive commits made local participation explicit through
+    // actor observations even before participantPresence existed.
+    if (!event.participantPresence && (event.actorId || event.actorObservations?.length)) {
+      for (const participantId of event.participants) result.add(participantId);
+    }
+  }
+  return result;
 }
 
 function characterChoices(characters: readonly PlayableCharacter[]): string {

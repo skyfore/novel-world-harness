@@ -109,6 +109,47 @@ describe("CompilerCommitService", () => {
     await expect(commits.proposals.read("pending", "bad-event", (await import("../src/world/model.js")).canonicalEventSchema)).resolves.toMatchObject({ id: "bad-event" });
   });
 
+  it("rejects a later-character checkpoint that has presence but no actionable pre-event state", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entry-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "entry-cao")).accepted).toBe(true);
+    await proposals.submit("canonical-event", {
+      proposalId: "inactionable-entry-event",
+      payload: {
+        id: "cao-appears",
+        title: "曹操 appears",
+        readerSummary: "曹操 appears at the northern gate.",
+        participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+        characterEntryCheckpoints: [{
+          actorId: "cao-cao",
+          readerSetup: "曹操 is about to enter the scene.",
+          actorObservation: "You can see the northern gate.",
+          participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+          delta: {
+            version: 1,
+            operations: [{ op: "set", entityId: "cao-cao", field: "character.alive", value: true }],
+          },
+        }],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("canonical-event", "inactionable-entry-event");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "INACTIONABLE_CHARACTER_ENTRY" }));
+  });
+
   it("rejects an empty opening snapshot that cannot produce a playable character", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {
@@ -130,6 +171,40 @@ describe("CompilerCommitService", () => {
     const validation = await commits.accept("initial-world", "empty-opening");
     expect(validation.accepted).toBe(false);
     expect(validation.errors).toContainEqual(expect.objectContaining({ code: "UNPLAYABLE_INITIAL_WORLD" }));
+  });
+
+  it("rejects an alive-only opening inventory for a multi-character source", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [proposalId, id, name] of [
+      ["opening-cao", "cao-cao", "曹操"],
+      ["opening-stranger", "stranger", "Unknown person"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind: "character", canonicalName: name, aliases: [], evidence: evidence(name) },
+        generatedBy: { worker: "test" },
+      });
+      expect((await commits.accept("entity", proposalId)).accepted).toBe(true);
+    }
+    await proposals.submit("initial-world", {
+      proposalId: "alive-inventory-opening",
+      payload: {
+        version: 1,
+        delta: {
+          version: 1,
+          operations: [
+            { op: "set", entityId: "cao-cao", field: "character.alive", value: true },
+            { op: "set", entityId: "stranger", field: "character.alive", value: true },
+          ],
+        },
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("initial-world", "alive-inventory-opening");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "INACTIONABLE_INITIAL_WORLD" }));
   });
 
   it("rejects character IDs stored as relationship references in an initial world", async () => {

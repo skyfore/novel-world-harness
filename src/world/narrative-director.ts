@@ -3,6 +3,7 @@ import { evaluateCharacterGoal, type CharacterGoal } from "./actors.js";
 import { contentHash } from "./canonical.js";
 import { validateEventProposal, type WorldEngine } from "./engine.js";
 import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
+import { AUTONOMOUS_BACKGROUND_KINDS } from "./model.js";
 import type {
   NarrativeProgress,
   Possibility,
@@ -164,16 +165,27 @@ export async function buildNarrativeDirection(
   for (const entry of frontier.evaluated) {
     if (entry.possibility.evidence.length
       && !evidenceBelongsExclusivelyToSource(entry.possibility.evidence, effectiveSourceId)) continue;
-    if (entry.status !== "eligible" || !entry.possibility.participants.includes(actorId)) continue;
+    if (entry.status !== "eligible") continue;
+    const involvesActor = entry.possibility.participants.includes(actorId);
     const otherCharacters = entry.possibility.participants.filter((id) =>
       id !== actorId && context.entities.get(id)?.kind === "character");
-    if (otherCharacters.some((id) => !scene.presentEntityIds.includes(id))) continue;
+    const locallyActionable = involvesActor
+      && !otherCharacters.some((id) => !scene.presentEntityIds.includes(id));
+    const autonomous = AUTONOMOUS_BACKGROUND_KINDS.includes(entry.possibility.kind as typeof AUTONOMOUS_BACKGROUND_KINDS[number])
+      && Boolean(
+        entry.possibility.proposedDelta?.operations.length
+        || entry.possibility.proposedKnowledge?.operations.length
+        || entry.possibility.timeAdvance,
+      );
+    if (!locallyActionable && !autonomous) continue;
     const named = otherCharacters.map((id) => context.entities.get(id)?.canonicalName).filter(Boolean).join("、");
     internalThreads.push({
       id: opaqueThreadId(`possibility:${entry.possibility.id}`),
       linkId: entry.possibility.id,
       kind: "canon-pressure",
-      summary: named
+      summary: !locallyActionable
+        ? "场景之外有一项已经具备条件的世界进程；只有明确让时间流逝，才可能使它成为分支事实。"
+        : named
         ? `你与${named}之间存在一个已经具备条件、但尚未被决定的节点。`
         : "当前局势中有一个已经具备条件、但尚未被决定的节点。",
       participantIds: [...entry.possibility.participants],
@@ -205,6 +217,17 @@ export async function buildNarrativeDirection(
   addGoalAndPlanAffordances(drafts, uniqueThreads, scoped, scene, actorId);
   addPressureWaitAffordance(drafts, uniqueThreads, scoped, scene, actorId);
   addExplorationAffordances(drafts, uniqueThreads, scoped, scene, actorId);
+
+  const stagnationDepth = trailingStagnationDepth(scopedHistory, actorId);
+  if (stagnationDepth >= 2) {
+    for (const draft of drafts) {
+      const structural = draft.progress.scene?.kind !== undefined && draft.progress.scene.kind !== "stay";
+      const changesState = draft.candidate.proposedDelta.operations.length > 0
+        || (draft.candidate.proposedKnowledge?.operations.length ?? 0) > 0;
+      if (structural || changesState || draft.intent === "wait") draft.score += 2;
+      else draft.score -= 1.5;
+    }
+  }
 
   const committedNoveltyKeys = new Set(scopedHistory.flatMap((entry) =>
     entry.event.progress?.noveltyKey ? [entry.event.progress.noveltyKey] : []));
@@ -747,24 +770,33 @@ function addPressureWaitAffordance(
   scene: ActorSceneProjection,
   actorId: string,
 ): void {
-  const pressure = threads.find((thread) => thread.pressure >= 0.65 && thread.participantIds.some((id) => id !== actorId && scene.presentEntityIds.includes(id)));
-  if (!pressure) return;
+  const pressure = threads.find((thread) => thread.kind === "canon-pressure")
+    ?? threads.find((thread) => thread.pressure >= 0.65
+      && thread.participantIds.some((id) => id !== actorId && scene.presentEntityIds.includes(id)));
+  const focus = pressure ?? threads[0];
+  if (!focus) return;
   const operations = nextMomentumOperation(scoped, actorId);
   const progress = progressFor({
     channels: ["time-pressure", "thread", "consequence", ...(operations.length ? ["state" as const] : [])],
-    threadIds: [pressure.linkId],
-    noveltyKey: `wait-pressure:${pressure.linkId}:stage-${pressure.stage}`,
+    threadIds: [focus.linkId],
+    noveltyKey: `wait-pressure:${focus.linkId}:stage-${focus.stage}`,
   });
   drafts.push({
-    label: "让压力先走一步",
-    description: "短暂不行动会触发现有压力或同场人物的回应；没有压力可推进时不会提供此选项。",
-    action: "我暂时按住动作，让眼前的压力或对方先暴露下一步。",
+    label: pressure ? "让压力先走一步" : "明确等待五分钟",
+    description: pressure
+      ? "明确让五分钟世界时间流逝，并允许一个已经具备条件的世界压力产生后果。"
+      : "即使暂时没有可提交的后台进程，也让世界时钟真实前进，而不是再进行一轮空对话。",
+    action: pressure
+      ? "我等待五分钟，留意现有压力或对方会先造成什么变化。"
+      : "我明确等待五分钟，观察这段时间里环境和局势是否发生变化。",
     intent: "wait",
     progressChannels: [...progress.channels],
-    threadIds: [pressure.id],
+    threadIds: [focus.id],
     candidate: playerActionCandidateSchema.parse({
-      title: "让当前压力先产生后果",
-      participants: pressure.participantIds.filter((id) => id !== actorId && scene.presentEntityIds.includes(id)),
+      title: pressure ? "让当前压力先产生后果" : "明确让世界时间流逝五分钟",
+      participants: pressure
+        ? pressure.participantIds.filter((id) => id !== actorId && scene.presentEntityIds.includes(id))
+        : [],
       preconditions: [],
       proposedDelta: { version: 1, operations },
       requiresKnowledge: [],
@@ -772,8 +804,28 @@ function addPressureWaitAffordance(
     }),
     authorizedKnowledgeClaimIds: [],
     progress,
-    score: 0.64 + pressure.pressure / 5,
+    score: pressure ? 0.64 + pressure.pressure / 5 : 0.46,
   });
+}
+
+function trailingStagnationDepth(
+  history: Awaited<ReturnType<typeof committedHistory>>,
+  actorId: string,
+): number {
+  let depth = 0;
+  for (const entry of [...history].reverse()) {
+    const { event, delta } = entry;
+    if (event.title === "Genesis") break;
+    if (!event.participants.includes(actorId) && event.actorId !== actorId) continue;
+    const sceneMoved = Boolean(event.progress?.scene && event.progress.scene.kind !== "stay");
+    const materiallyAdvanced = delta.operations.length > 0
+      || Boolean(event.knowledgeDeltaHash)
+      || Boolean(event.timeAdvance)
+      || sceneMoved;
+    if (materiallyAdvanced) break;
+    depth += 1;
+  }
+  return depth;
 }
 
 function addExplorationAffordances(

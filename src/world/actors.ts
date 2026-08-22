@@ -455,6 +455,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
             actorId: goal.actorId,
             title: action.title,
             participants: [...new Set([goal.actorId, ...(action.participants ?? [])])],
+            participantPresence: [{ entityId: goal.actorId, mode: "physical" }],
             proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
             preconditions: action.preconditions,
             proposedDelta: action.proposedDelta,
@@ -527,6 +528,9 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           actorId: goal.actorId,
           title: action?.title ?? `${entity.canonicalName}回应当前局势`,
           participants,
+          participantPresence: participants
+            .filter((participantId) => context.entities.get(participantId)?.kind === "character")
+            .map((entityId) => ({ entityId, mode: "physical" as const })),
           proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
           preconditions: action?.preconditions ?? [],
           proposedDelta: action?.proposedDelta ?? { version: 1, operations: [] },
@@ -559,6 +563,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           actorId,
           title: `${entity.canonicalName}对当前变化作出回应`,
           participants: [actorId, initiatingActorId],
+          participantPresence: [actorId, initiatingActorId].map((entityId) => ({ entityId, mode: "physical" as const })),
           proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
           preconditions: [],
           proposedDelta: { version: 1, operations: [] },

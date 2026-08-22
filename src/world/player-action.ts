@@ -681,6 +681,8 @@ export type PlayerProgressCertificate = {
   effectiveStateOperations: number;
   knowledgeOperations: number;
   sceneChanged: boolean;
+  timeAdvanced: boolean;
+  materiallyAdvanced: boolean;
 };
 
 export type PlayerTurnAuthority = Readonly<{
@@ -1172,6 +1174,10 @@ export function playerActionToKnowledgeAwareAction(input: {
     summary: input.actorObservation ?? playerIntentObservation(input.utterance),
   }];
   const interaction = candidate.intent?.controlledAct?.interaction;
+  const physicalParticipantIds = [...new Set([
+    input.actorId,
+    ...(interaction?.addresseeIds ?? []),
+  ])].sort();
   for (const addresseeId of [...new Set(interaction?.addresseeIds ?? [])].sort()) {
     if (addresseeId === input.actorId) continue;
     const perceived = interaction?.kind === "speech"
@@ -1192,6 +1198,7 @@ export function playerActionToKnowledgeAwareAction(input: {
     title: input.eventTitle ?? playerIntentTitle(input.utterance),
     actorObservations,
     participants: [...new Set([input.actorId, ...candidate.participants])],
+    participantPresence: physicalParticipantIds.map((entityId) => ({ entityId, mode: "physical" as const })),
     proposedTime: input.proposedTime ?? { kind: "unknown" },
     ...(input.timeAdvance ? { timeAdvance: input.timeAdvance } : {}),
     preconditions: candidate.preconditions,
@@ -1856,13 +1863,24 @@ async function derivePlayerProgress(
       ...(sceneTransition ? { scene: sceneTransition } : {}),
     });
   }
+  const sceneChanged = Boolean(progress.scene && (
+    progress.scene.kind !== "stay"
+    || (progress.scene.destinationEntityId !== undefined && progress.scene.destinationEntityId !== scene.locationId)
+    || (progress.scene.sceneId !== undefined && progress.scene.sceneId !== scene.key.replace(/^scene:/, ""))
+  ));
+  const timeAdvanced = Boolean(intent.requestedTimeAdvance);
   const certificate: PlayerProgressCertificate = {
     channels: [...progress.channels],
     threadIds: [...progress.threadIds],
     noveltyKey: progress.noveltyKey,
     effectiveStateOperations: effectiveOperations.length,
     knowledgeOperations,
-    sceneChanged: Boolean(progress.scene),
+    sceneChanged,
+    timeAdvanced,
+    materiallyAdvanced: effectiveOperations.length > 0
+      || knowledgeOperations > 0
+      || sceneChanged
+      || timeAdvanced,
   };
   return { value: progress, certificate };
 }

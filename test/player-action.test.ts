@@ -932,6 +932,10 @@ describe("PlayerTurnService", () => {
       source: "background",
       title: "Hero and Mo Yan remain in the same immediate scene",
       participants: ["hero", "mo-yan"],
+      participantPresence: [
+        { entityId: "hero", mode: "physical" },
+        { entityId: "mo-yan", mode: "physical" },
+      ],
       proposedTime: { kind: "unknown" },
       preconditions: [],
       proposedDelta: {

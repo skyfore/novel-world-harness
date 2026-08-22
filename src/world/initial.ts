@@ -4,7 +4,14 @@ import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
-import { evidenceRefSchema, idSchema, knowledgeDeltaSchema, stateDeltaSchema, storyTimeSchema } from "./model.js";
+import {
+  evidenceRefSchema,
+  idSchema,
+  knowledgeDeltaSchema,
+  participantPresenceSchema,
+  stateDeltaSchema,
+  storyTimeSchema,
+} from "./model.js";
 
 export const openingCheckpointSchema = z
   .object({
@@ -20,6 +27,10 @@ export type OpeningCheckpoint = z.infer<typeof openingCheckpointSchema>;
 export const initialWorldSchema = z
   .object({
     version: z.literal(1),
+    /** Display-only, source-grounded orientation for an unread human player. */
+    readerSetup: z.string().trim().min(1).max(2000).optional(),
+    /** Character appearance mode at the opening checkpoint; only physical roles are playable there. */
+    participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     delta: stateDeltaSchema,
     knowledge: knowledgeDeltaSchema.optional(),
     checkpoint: openingCheckpointSchema.optional(),

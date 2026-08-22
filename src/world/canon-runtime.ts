@@ -14,6 +14,7 @@ export function canonicalEventToPossibility(event: CanonicalEvent, branchId: str
     preconditions: event.preconditions,
     blockers: [],
     participants: event.participants,
+    ...(event.participantPresence ? { participantPresence: structuredClone(event.participantPresence) } : {}),
     causalParents: event.causalParents,
     canonicalEventId: event.id,
     pressure: event.confidence,

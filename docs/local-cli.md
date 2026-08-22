@@ -149,14 +149,66 @@ startup enters player mode; ordinary input is intercepted before the general mod
 and routed through the restricted boundary below. `/leave` returns to the read-only
 assistant without deleting durable resume state.
 
-`nwh continue|switch|create`, `nwh resume`, TUI player commands, and the compact `nwh play-world` command share a separate character-embodiment boundary. Instance lookup is scoped by novel ownership: continue chooses the newest matching save, switch asks among matching saves, and a missing save is created from the selected novel's active prepared revision. The scene timing follows player intent: `play` renders the selected character's current scene, `create` opens the new story, and a real `switch` re-orients the player at the selected head. `continue`, `resume`, and an ordinary restart preserve the existing time/conversation context without inserting another narrator message. Player-only custom transcript entries count as existing context, including when the launch command carried an automatic scene request. A fresh transcript created by an explicit player-entry command renders one orientation because no prior screen context exists; a plain `--new-session`, `/new`, or `/clear` stays unbound and renders no scene. Startup never waits for an optional narrator before letting Pi render the transcript. The isolated narrator is mounted as one assistant stream in Pi's scrollable transcript, while provider/model, retry, and choice-tool phases use compact footer status. The accepted text must match the observed stream before that same native component is committed as the durable scene; no duplicate narrator message is mounted. Thinking and current-head choice metadata are stored with it outside parent-model context and restore with the transcript. A rejected underspecified attempt is removed before one automatic retry streams. When choice capture succeeds, an accepted scene is followed by 2-4 contextual actions and free-form input; when capture is empty, the dialog contains free-form input only. Current-contract narrator choices restore only when branch, actor, and commit still match. Older unmarked choice records are not restored or rebuilt. A final provider failure is shown explicitly with `/scene`, `/login`, and `/model` recovery guidance instead of masquerading as generic story prose. None of these rendering paths moves the branch head. Each natural-language
+`nwh continue|switch|create`, `nwh resume`, TUI player commands, and the compact
+`nwh play-world` command share a separate character-embodiment boundary.
+Instance lookup is scoped by novel ownership: continue chooses the newest
+matching save, switch asks among matching saves, and a missing save is created
+from the selected novel's active prepared revision. When a new instance is
+needed, NWH asks for a grounded role before creating its branch. An opening role
+uses the novel's opening checkpoint; a later role starts immediately before that
+character's first source-backed embodied scene. Main-timeline canonical effects
+before the checkpoint seed genesis, followed by only the entry checkpoint's
+already-true state and knowledge. That checkpoint also supplies physical presence
+and a direct actor-visible scene observation; the target event and its outcome
+remain unrealized so the player can act. If a step-zero opening instance already
+exists—even if it has been viewed or saved—selecting a later role creates a
+sibling instance instead of rewriting or jumping the old branch.
+
+Before an opening-role scene, NWH displays the initial world's source-grounded,
+spoiler-free reader setup: where, when, who, the premise needed to understand the
+scene, and its immediate unresolved situation. The opening role must also have
+explicit physical presence plus grounded location, plan, or momentum. Before a later-role scene, NWH
+displays the complete ordered source-event synopsis preceding that role entry as
+**reader context**. Every beat includes its
+source-grounded recap, participants, narrative mode/time, and available causal
+links; a later role is not offered if any prior recap is missing. Reader context
+is explicitly not character knowledge and is never sent to the narrator,
+translator, NPC reasoner, or world state. The scene timing then follows player intent: `play` renders the selected
+character's current scene, `create` opens the new story, and a real `switch`
+re-orients the player at the selected head. `continue`, `resume`, and an ordinary
+restart preserve the existing time/conversation context without inserting
+another narrator message. Player-only custom transcript entries count as
+existing context, including when the launch command carried an automatic scene
+request. A fresh transcript created by an explicit player-entry command renders
+one orientation because no prior screen context exists; a plain `--new-session`,
+`/new`, or `/clear` stays unbound and renders no scene.
+
+Startup never waits for an optional narrator before letting Pi render the
+transcript. The isolated narrator is mounted as one assistant stream in Pi's
+scrollable transcript, while provider/model, retry, and choice-tool phases use
+compact footer status. The accepted text must match the observed stream before
+that same native component is committed as the durable scene; no duplicate
+narrator message is mounted. Thinking and current-head choice metadata are
+stored with it outside parent-model context and restore with the transcript. A
+rejected underspecified attempt is removed before one automatic retry streams.
+The action dialog merges narrator suggestions with bounded, current-head
+host-preflighted exits and free-form input. It therefore retains an executable
+route even when choice capture is empty or malformed. Current-contract choices
+restore only when branch, actor, commit, and choice contract still match. Older
+unmarked choice records are not restored or rebuilt. A final provider failure is
+shown explicitly with `/scene`, `/login`, and `/model` recovery guidance instead
+of masquerading as generic story prose. None of these rendering paths moves the
+branch head. Each natural-language
 action receives only an actor-scoped view plus entities explicitly named by the
 player and artifacts currently owned by that actor. Scene presence is carried
 separately from merely referenceable identities, so a known name no longer
-pretends to prove co-location, while participants in the current committed scene
-remain interactable even when an older prepared revision lacks location fields.
-Unknown co-present identities remain anonymous. Before the view reaches Pi,
-stable entity and claim IDs become turn-local opaque handles. A bounded initial
+pretends to prove co-location. New revisions distinguish physical, remote,
+mentioned, represented, dream, and memory participation; only physical presence
+makes a canonical/background participant co-present. Legacy interactive actor
+events remain usable when an older prepared revision lacks location fields,
+while legacy flat canonical/background participant lists fail closed. Unknown
+co-present identities remain anonymous. Before the view reaches Pi, stable
+entity and claim IDs become turn-local opaque handles. A bounded initial
 projection carries coverage metadata, and exact read-only retrieval can recover
 omitted records only from that same actor-safe corpus. Its fresh Pi session has no
 file tools, project instructions, compiler extension, source text, future canon,
@@ -172,8 +224,8 @@ interpretation, current-world adjudication, and deterministic gates. The choice
 model supplies action text only and cannot choose a privileged host intent or
 bypass interpretation. Choice capture is the tool-only first phase and scene
 prose starts only after its result. If that call is absent or malformed, the host
-does not retry it or replace it with current-frame affordances: accepted prose is
-kept and the dialog exposes only free-form input. The same animated working indicator is used while
+does not retry it; accepted prose is kept and the dialog still includes bounded
+current-head host-preflighted actions. The same animated working indicator is used while
 interpreting, adjudicating, validating, and rendering.
 
 The interpreter explicitly separates what the selected character can do from
@@ -191,8 +243,8 @@ prose inside the current actor-visible scene and end on a concrete fact or
 in-world signal. The host validates structural shape and repetition but does not
 match language-specific “what next” or handoff phrases. Possible actions normally
 appear in the choice selector; missing/malformed auxiliary choices leave valid
-prose intact and leave only free-form input, with no choice retry or host
-substitution. Missing actor/location fields remain available
+prose intact and retain at least one preflighted host action, with no choice
+retry. Missing actor/location fields remain available
 as readiness diagnostics but do not produce a yellow player-facing warning. Only actionable
 instance conditions, such as a pinned revision differing from the active prepared
 revision, enter that warning surface.
@@ -209,7 +261,12 @@ offered letter without making every eligible canonical event automatic. The
 offered set, decision, event, and errors are persisted in the private turn audit,
 but are never actor or narrator context. Deterministic commit metadata and
 invisible background events are not presented as story prose. Ordinary player
-turns default to zero automatic unrelated background/canon events. `play-world
+turns default to zero automatic unrelated background/canon events. Selecting the
+explicit wait affordance advances five minutes and permits at most one currently
+eligible autonomous obligation, causal consequence, background pressure, or
+environmental process to commit; it does not schedule a forward canon analogue.
+If none is eligible, elapsed time still changes. This is an opt-in to world
+motion, not an automatic canon scheduler. `play-world
 --advance-background <n>` is an explicit opt-in, and the frontier rejects temporal
 regression and orders forward candidates by their story window. If rendering
 fails, NWH states that the action is already committed and tells the player to use
@@ -232,9 +289,10 @@ proposals are never forced into world truth: full preparation preserves them in
 rejected history and continues with validated artifacts. Source batches hide the
 staging-only raw state-delta tool, recover active drafts by stable batch identity,
 and let the host supply the active proposal set to the finish handshake. A missing
-or failed model-generated opening state falls back to a conservative
-evidence-backed opening-cast proposal; it still passes normal validation before
-genesis.
+or failed model-generated opening state may use an alive-only fallback only for
+a source with exactly one accepted character. Multi-character novels fail closed
+until the compiler supplies an evidence-backed location, plan, or momentum for
+an actionable opening role.
 
 The TUI `/prepare-all` command presents the same decisions with Pi-native
 selection dialogs. Remaining compiler batches execute sequentially in the current

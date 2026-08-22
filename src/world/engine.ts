@@ -3,9 +3,12 @@ import type { CharacterGoal, CharacterModel } from "./actors.js";
 import {
   WORLD_ENGINE_VERSION,
   WORLD_SCHEMA_VERSION,
+  actorEventObservationSchema,
   eventProposalSchema,
   knowledgeDeltaSchema,
+  participantPresenceSchema,
   stateDeltaSchema,
+  type ActorEventObservation,
   type BranchId,
   type CanonicalEvent,
   type Claim,
@@ -18,6 +21,7 @@ import {
   type KnowledgeDelta,
   type LogicalTime,
   type ObjectHash,
+  type ParticipantPresence,
   type StateDelta,
   type ValidationIssue,
   type ValidationReport,
@@ -111,6 +115,33 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   if (state.atCommit !== head) errors.push({ code: "STATE_HEAD_MISMATCH", message: `Projected state ${state.atCommit} does not match ${head}` });
   for (const entityId of proposal.participants) if (!context.entities.has(entityId)) errors.push({ code: "UNKNOWN_PARTICIPANT", message: `Unknown participant ${entityId}` });
   if (proposal.actorId && !context.entities.has(proposal.actorId)) errors.push({ code: "UNKNOWN_ACTOR", message: `Unknown actor ${proposal.actorId}` });
+  const presenceIds = new Set<string>();
+  for (let index = 0; index < (proposal.participantPresence?.length ?? 0); index += 1) {
+    const presence = proposal.participantPresence![index]!;
+    const entity = context.entities.get(presence.entityId);
+    if (!entity || entity.kind !== "character") {
+      errors.push({
+        code: "INVALID_PARTICIPANT_PRESENCE",
+        message: `Participant presence ${presence.entityId} must refer to a character`,
+        path: `participantPresence.${index}.entityId`,
+      });
+    }
+    if (!proposal.participants.includes(presence.entityId)) {
+      errors.push({
+        code: "PARTICIPANT_PRESENCE_NOT_PARTICIPANT",
+        message: `Participant presence ${presence.entityId} is not in participants`,
+        path: `participantPresence.${index}.entityId`,
+      });
+    }
+    if (presenceIds.has(presence.entityId)) {
+      errors.push({
+        code: "DUPLICATE_PARTICIPANT_PRESENCE",
+        message: `Participant presence ${presence.entityId} is duplicated`,
+        path: `participantPresence.${index}.entityId`,
+      });
+    }
+    presenceIds.add(presence.entityId);
+  }
   const observedActors = new Set<string>();
   for (let index = 0; index < (proposal.actorObservations?.length ?? 0); index += 1) {
     const observation = proposal.actorObservations![index]!;
@@ -252,6 +283,12 @@ export class WorldEngine {
     preparedRevisionHash?: string,
     initialEvidence: readonly EvidenceRef[] = [],
     initialTime: Omit<LogicalTime, "step"> = {},
+    genesisOptions: {
+      entryActorId?: EntityId;
+      realizesCanonicalEventIds?: readonly string[];
+      participantPresence?: readonly ParticipantPresence[];
+      actorObservations?: readonly ActorEventObservation[];
+    } = {},
   ): Promise<CommitId> {
     if (sourceId && this.context.sourceId && sourceId !== this.context.sourceId) {
       throw new Error(`Cannot create source '${sourceId}' branch from '${this.context.sourceId}' world context.`);
@@ -268,6 +305,51 @@ export class WorldEngine {
     const knowledge = initialKnowledge ? knowledgeDeltaSchema.parse(initialKnowledge) : undefined;
     if (knowledge) validateKnowledgeDeltaForContext(knowledge, this.context);
     const logicalTime: LogicalTime = { step: 0, ...initialTime };
+    if (genesisOptions.entryActorId) {
+      const entryActor = this.context.entities.get(genesisOptions.entryActorId);
+      if (!entryActor || entryActor.kind !== "character") {
+        throw new Error(`Genesis entry actor is not a character: ${genesisOptions.entryActorId}`);
+      }
+    }
+    const suppliedPresence = (genesisOptions.participantPresence ?? [])
+      .map((presence) => participantPresenceSchema.parse(presence));
+    if (suppliedPresence.length > 128) throw new Error("Genesis participant presence exceeds 128 entries.");
+    if (
+      genesisOptions.entryActorId
+      && suppliedPresence.length
+      && !suppliedPresence.some((presence) =>
+        presence.entityId === genesisOptions.entryActorId && presence.mode === "physical")
+    ) {
+      throw new Error(`Genesis entry actor ${genesisOptions.entryActorId} must be physically present at its entry checkpoint.`);
+    }
+    const participantPresence = suppliedPresence.length
+      ? suppliedPresence
+      : genesisOptions.entryActorId
+        ? [{ entityId: genesisOptions.entryActorId, mode: "physical" as const }]
+        : [];
+    const presenceIds = new Set<string>();
+    for (const presence of participantPresence) {
+      const entity = this.context.entities.get(presence.entityId);
+      if (!entity || entity.kind !== "character") {
+        throw new Error(`Genesis presence entity is not a character: ${presence.entityId}`);
+      }
+      if (presenceIds.has(presence.entityId)) throw new Error(`Genesis presence is duplicated: ${presence.entityId}`);
+      presenceIds.add(presence.entityId);
+    }
+    const actorObservations = (genesisOptions.actorObservations ?? [])
+      .map((observation) => actorEventObservationSchema.parse(observation));
+    if (actorObservations.length > 128) throw new Error("Genesis actor observations exceed 128 entries.");
+    const observationActors = new Set<string>();
+    for (const observation of actorObservations) {
+      const actor = this.context.entities.get(observation.actorId);
+      if (!actor || actor.kind !== "character") {
+        throw new Error(`Genesis observer is not a character: ${observation.actorId}`);
+      }
+      if (observationActors.has(observation.actorId)) {
+        throw new Error(`Genesis observer is duplicated: ${observation.actorId}`);
+      }
+      observationActors.add(observation.actorId);
+    }
     const initialState = applyStateDelta(
       { ...emptyWorldState("genesis", 0), logicalTime },
       initialDelta,
@@ -279,19 +361,45 @@ export class WorldEngine {
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
     const deltaHash = await this.objects.putDelta(initialDelta);
     const knowledgeDeltaHash = knowledge ? await this.objects.putKnowledgeDelta(knowledge) : undefined;
-    const realizesCanonicalEventIds = [...(this.context.events?.values() ?? [])]
+    const inferredRealizations = [...(this.context.events?.values() ?? [])]
       .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge))
-      .map((event) => event.id)
-      .sort();
+      .map((event) => event.id);
+    const realizesCanonicalEventIds = [...new Set([
+      ...inferredRealizations,
+      ...(genesisOptions.realizesCanonicalEventIds ?? []),
+    ])].sort();
+    for (const eventId of realizesCanonicalEventIds) {
+      if (!this.context.events?.has(eventId)) throw new Error(`Genesis realizes unknown canonical event: ${eventId}`);
+    }
     const evidence: EvidenceRef[] = structuredClone([...initialEvidence]);
-    const eventId = contentHash({ kind: "genesis", branchId, logicalTime, deltaHash, knowledgeDeltaHash, realizesCanonicalEventIds, evidence });
+    const eventId = contentHash({
+      kind: "genesis",
+      branchId,
+      logicalTime,
+      deltaHash,
+      knowledgeDeltaHash,
+      realizesCanonicalEventIds,
+      evidence,
+      entryActorId: genesisOptions.entryActorId,
+      participantPresence,
+      actorObservations,
+    });
+    const participants = [...new Set([
+      ...touchedEntities(initialDelta),
+      ...touchedKnowledgeEntities(knowledge),
+      ...participantPresence.map((presence) => presence.entityId),
+      ...actorObservations.map((observation) => observation.actorId),
+      ...(genesisOptions.entryActorId ? [genesisOptions.entryActorId] : []),
+    ])].sort();
     const event: CommittedEvent = {
       version: 1,
       eventId,
       branchId,
       logicalTime,
       title: "Genesis",
-      participants: [...new Set([...touchedEntities(initialDelta), ...touchedKnowledgeEntities(knowledge)])].sort(),
+      ...(actorObservations.length ? { actorObservations } : {}),
+      participants,
+      ...(participantPresence.length ? { participantPresence } : {}),
       deltaHash,
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
       evidence,
@@ -348,6 +456,7 @@ export class WorldEngine {
       possibilityId: parsed.possibilityId,
       realizesCanonicalEventIds,
       progress: parsed.progress,
+      participantPresence: parsed.participantPresence,
       actorObservations: parsed.actorObservations,
       actorAffects: parsed.actorAffects,
     });
@@ -363,6 +472,7 @@ export class WorldEngine {
       ...(parsed.actorObservations ? { actorObservations: structuredClone(parsed.actorObservations) } : {}),
       ...(parsed.actorAffects ? { actorAffects: structuredClone(parsed.actorAffects) } : {}),
       participants: parsed.participants,
+      ...(parsed.participantPresence ? { participantPresence: structuredClone(parsed.participantPresence) } : {}),
       deltaHash,
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
       evidence: parsed.evidence,

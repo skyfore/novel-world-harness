@@ -52,6 +52,7 @@ type Span = {
 const HEADING_PATTERNS = [
   /^\s{0,3}#{1,6}\s+\S/,
   /^\s*第[零〇一二三四五六七八九十百千万两\d]+[章节卷回部篇幕](?:\s|$|[：:])/u,
+  /^\s*(?:prologue|preface|序章|序幕|序言|前言|楔子|引子)(?:\s|$|[：:])/iu,
   /^\s*(?:chapter|book|part|volume)\s+[\divxlcdm]+\b/i,
 ];
 // Segments remain finite evidence units, but modern model contexts do not need
@@ -60,7 +61,7 @@ const HEADING_PATTERNS = [
 const MAX_BLOCK_LINES = 1_000;
 const MAX_BLOCK_BYTES = 96 * 1024;
 const MAX_BLOCK_PROMPT_CHARS = 96 * 1024;
-export const SEGMENTER_VERSION = 4 as const;
+export const SEGMENTER_VERSION = 6 as const;
 
 const sourceSegmentSchema = z.object({
   version: z.literal(1),

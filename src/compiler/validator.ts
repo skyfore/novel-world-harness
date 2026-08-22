@@ -107,6 +107,20 @@ export class CompilerValidator {
       errors.push(issue("OVERSIZED_CANONICAL_EVENT", `Event ${event.id} contains more than 16 typed state effects and must be split at a genuine causal boundary`, "observedOutcome.operations"));
     }
     for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
+    const presenceActors = new Set<string>();
+    for (let index = 0; index < (event.participantPresence?.length ?? 0); index += 1) {
+      const presence = event.participantPresence![index]!;
+      if (!event.participants.includes(presence.entityId)) {
+        errors.push(issue("INVALID_PARTICIPANT_PRESENCE", `Event presence ${presence.entityId} is not an event participant`, `participantPresence.${index}.entityId`));
+      }
+      if (entities.get(presence.entityId)?.kind !== "character") {
+        errors.push(issue("INVALID_PARTICIPANT_PRESENCE", `Event presence ${presence.entityId} is not a canonical character`, `participantPresence.${index}.entityId`));
+      }
+      if (presenceActors.has(presence.entityId)) {
+        errors.push(issue("DUPLICATE_PARTICIPANT_PRESENCE", `Event presence ${presence.entityId} is duplicated`, `participantPresence.${index}.entityId`));
+      }
+      presenceActors.add(presence.entityId);
+    }
     for (const parentId of event.causalParents) {
       const parent = events.get(parentId);
       if (!parent) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parentId}`, "causalParents"));
@@ -128,6 +142,56 @@ export class CompilerValidator {
         if (operation.sourceActorId) {
           const source = entities.get(operation.sourceActorId);
           if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Event knowledge source ${operation.sourceActorId} is not a canonical character`, `observedKnowledge.operations.${index}`));
+        }
+      }
+    }
+    const entryActors = new Set<string>();
+    for (let index = 0; index < (event.characterEntryCheckpoints?.length ?? 0); index += 1) {
+      const checkpoint = event.characterEntryCheckpoints![index]!;
+      const prefix = `characterEntryCheckpoints.${index}`;
+      const actor = entities.get(checkpoint.actorId);
+      if (!actor || actor.kind !== "character") {
+        errors.push(issue("INVALID_ENTRY_ACTOR", `Entry actor ${checkpoint.actorId} is not a canonical character`, `${prefix}.actorId`));
+      }
+      if (!event.participants.includes(checkpoint.actorId)) {
+        errors.push(issue("INVALID_ENTRY_ACTOR", `Entry actor ${checkpoint.actorId} must be an event participant`, `${prefix}.actorId`));
+      }
+      if (entryActors.has(checkpoint.actorId)) {
+        errors.push(issue("DUPLICATE_CHARACTER_ENTRY", `Event ${event.id} has multiple entry checkpoints for ${checkpoint.actorId}`, `${prefix}.actorId`));
+      }
+      entryActors.add(checkpoint.actorId);
+      if (checkpoint.delta.operations.length > 16) {
+        errors.push(issue("OVERSIZED_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} contains more than 16 state operations`, `${prefix}.delta.operations`));
+      }
+      if (!checkpoint.delta.operations.some((operation) =>
+        "entityId" in operation
+        && operation.entityId === checkpoint.actorId
+        && ["character.location", "character.plan", "character.momentum"].includes(operation.field))) {
+        errors.push(issue("INACTIONABLE_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} must establish that actor's location, plan, or momentum before the event`, `${prefix}.delta.operations`));
+      }
+      for (let presenceIndex = 0; presenceIndex < checkpoint.participantPresence.length; presenceIndex += 1) {
+        const presence = checkpoint.participantPresence[presenceIndex]!;
+        if (!event.participants.includes(presence.entityId)) {
+          errors.push(issue("INVALID_ENTRY_PRESENCE", `Entry presence ${presence.entityId} is not an event participant`, `${prefix}.participantPresence.${presenceIndex}.entityId`));
+        }
+        if (entities.get(presence.entityId)?.kind !== "character") {
+          errors.push(issue("INVALID_ENTRY_PRESENCE", `Entry presence ${presence.entityId} is not a canonical character`, `${prefix}.participantPresence.${presenceIndex}.entityId`));
+        }
+      }
+      this.validateOperations(checkpoint.delta.operations, entities, rules, errors, `${prefix}.delta.operations`);
+      for (let knowledgeIndex = 0; knowledgeIndex < (checkpoint.knowledge?.operations.length ?? 0); knowledgeIndex += 1) {
+        const operation = checkpoint.knowledge!.operations[knowledgeIndex]!;
+        const knowledgePath = `${prefix}.knowledge.operations.${knowledgeIndex}`;
+        const knowledgeActor = entities.get(operation.actorId);
+        if (!knowledgeActor || knowledgeActor.kind !== "character") {
+          errors.push(issue("INVALID_KNOWLEDGE_ACTOR", `Entry knowledge actor ${operation.actorId} is not a canonical character`, knowledgePath));
+        }
+        if (operation.op === "learn") {
+          if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Entry knowledge references unknown claim ${operation.claimId}`, knowledgePath));
+          if (operation.sourceActorId) {
+            const source = entities.get(operation.sourceActorId);
+            if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Entry knowledge source ${operation.sourceActorId} is not a canonical character`, knowledgePath));
+          }
         }
       }
     }
@@ -177,6 +241,20 @@ export class CompilerValidator {
     }
     const representedCharacters = new Set<string>();
     const explicitlyDead = new Set<string>();
+    const openingPresenceIds = new Set<string>();
+    const physicalOpeningIds = new Set<string>();
+    for (let index = 0; index < (initial.participantPresence?.length ?? 0); index += 1) {
+      const presence = initial.participantPresence![index]!;
+      const entity = entities.get(presence.entityId);
+      if (!entity || entity.kind !== "character") {
+        errors.push(issue("INVALID_OPENING_PRESENCE", `Opening presence ${presence.entityId} is not a canonical character`, `participantPresence.${index}.entityId`));
+      }
+      if (openingPresenceIds.has(presence.entityId)) {
+        errors.push(issue("DUPLICATE_OPENING_PRESENCE", `Opening presence ${presence.entityId} is duplicated`, `participantPresence.${index}.entityId`));
+      }
+      openingPresenceIds.add(presence.entityId);
+      if (presence.mode === "physical") physicalOpeningIds.add(presence.entityId);
+    }
     for (const operation of initial.delta.operations) {
       if ("entityId" in operation && entities.get(operation.entityId)?.kind === "character") {
         representedCharacters.add(operation.entityId);
@@ -196,6 +274,32 @@ export class CompilerValidator {
       errors.push(issue(
         "UNPLAYABLE_INITIAL_WORLD",
         "Initial world must represent at least one non-dead opening character in committed state or knowledge; an evidence-backed empty or all-dead delta cannot create a playable cast.",
+        "delta.operations",
+      ));
+    }
+    const initialSourceIds = new Set(initial.evidence.map((reference) => reference.span.sourceId));
+    const sourceCharacterIds = [...entities.values()]
+      .filter((entity) => entity.kind === "character")
+      .filter((entity) => entity.evidence.some((reference) => initialSourceIds.has(reference.span.sourceId)))
+      .map((entity) => entity.id);
+    const actionableOpening = initial.delta.operations.some((operation) =>
+      "entityId" in operation
+      && sourceCharacterIds.includes(operation.entityId)
+      && physicalOpeningIds.has(operation.entityId)
+      && !explicitlyDead.has(operation.entityId)
+      && ["character.location", "character.plan", "character.momentum"].includes(operation.field)
+      && (operation.op !== "set" || operation.value !== null));
+    if (sourceCharacterIds.length > 1 && !physicalOpeningIds.size) {
+      errors.push(issue(
+        "MISSING_OPENING_PRESENCE",
+        "A multi-character source must explicitly identify at least one physically present opening role; identity, mention, or alive state is not presence.",
+        "participantPresence",
+      ));
+    }
+    if (sourceCharacterIds.length > 1 && !actionableOpening) {
+      errors.push(issue(
+        "INACTIONABLE_INITIAL_WORLD",
+        "A multi-character source must establish a bodily present opening role through a grounded location, plan, or momentum; a bare alive inventory cannot create a playable scene.",
         "delta.operations",
       ));
     }

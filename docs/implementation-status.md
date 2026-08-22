@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-21
+Date: 2026-08-22
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
@@ -22,8 +22,8 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
 | Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation |
 | Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
-| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, latest-ten exact branch conversation continuity plus bounded recall, explicit reactive NPC responses, separately validated immediate world developments, and tool-first narrator choices with free-form-only handling when capture is absent |
-| Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, per-instance character memory, and durable active resume |
+| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, exact bounded continuity, reactive NPC responses, validated immediate developments, merged model suggestions plus host-preflighted exits, stagnation detection, and an explicit material-progress wait route |
+| Character embodiment | Implemented vertical slice | Role-before-branch selection, spoiler-free opening setup, reader-only complete prior-event recaps, source-backed first-embodied-scene checkpoints for later roles, actor-scoped perception, sibling entry branches, and durable active resume |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
 
@@ -57,7 +57,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 - Each source/opening proposal is rejected before storage when its evidence lies
   outside the host-supplied segment. Reconciliation can page the whole source,
   but cannot address another registered novel or general workspace files.
-- Guided `prepare-all` quarantines uncommittable drafts in rejected history and uses a conservative evidence-backed opening-cast proposal only when the dedicated opening model pass produces no valid initial world; the fallback still passes normal validation.
+- Guided `prepare-all` quarantines uncommittable drafts in rejected history. If the dedicated opening model pass produces no valid initial world, the deterministic alive-only fallback is restricted to a genuinely single-character source; multi-character novels fail closed until the compiler supplies an evidence-backed actionable opening role.
 
 Model interpretation is still probabilistic. These checks can reject unsupported or structurally invalid output, but cannot prove that an ambiguous passage was interpreted correctly.
 
@@ -71,6 +71,7 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 - Canonical future events and generic background pressures enter the same possibility frontier.
 - Possibility selection alone does not create truth; the resulting event proposal must pass the commit boundary.
 - An accepted player event may causally select one currently eligible offered development through an isolated host-private linker; the response is a separate validated event, while unrelated background advancement remains opt-in.
+- Explicit waiting advances committed time by five minutes and may schedule at most one eligible autonomous non-canon process in the current temporal window. With no eligible process, time still advances; forward canon analogues are excluded.
 - Knowledge is reconstructed per actor and per commit.
 - A director-generated observation cannot learn a claim merely because its
   source citation overlaps a recent event; character knowledge changes require
@@ -104,6 +105,12 @@ nwh play-world --list-characters|--character|--action
 ```
 
 The general model inside `nwh` / `nwh play` remains read-only with respect to files and world truth; its only metadata mutation is the narrow `rename_session` tool used to give transcripts target-specific selector titles. The host TUI can enter player mode through `/continue`, `/switch`, `/create-instance`, `/play`, a natural character-selection request, `nwh resume`, or a saved active selection. Instances persist their owning source and prepared revision; new genesis snapshots are source-scoped, and legacy branches are inferred only when their genesis has one unambiguous source. `/remove` supports confirmed removal of one leaf instance, a novel's mutable analysis, or both the novel registration and all owned instances while retaining immutable archived source evidence. Interactive CLI startup continues the last transcript explicitly recorded as opened; first-run migration derives logical conversation activity without counting metadata-only touches, and Pi's recent-file lookup remains a final fallback. Exact `--session <id>` restoration is available and is printed after exit. Ctrl+C uses a visible two-press, two-second exit gate while retaining first-press cancellation/clear behavior. A plain `--new-session`, `/new`, or `/clear` preserves compiled and committed world progress but starts an unbound conversation; explicit player-entry commands can still open their selected world in a fresh transcript. Main-agent requests show an animated, randomly worded owl indicator above the editor until the run fully settles, so provider thinking, text streaming, and tool waits never resemble a frozen CLI. While player mode is active, ordinary input is intercepted before the general agent and delegated to a fresh restricted player-action session; it therefore cannot inherit compiler omniscience, source access, or local-file context. The action model receives turn-local opaque IDs and a bounded actor-safe projection with exact retrieval over that same corpus.
+
+For a new instance, the role is resolved before genesis. An opening role uses the
+accepted opening cut; a later role receives a sibling branch at its first
+source-backed embodied checkpoint plus a display-only recap of every preceding
+discourse event. That reader recap never enters actor knowledge, the player-action
+model, NPC reasoning, or scene narration input.
 
 ## Removed obsolete scaffold
 
@@ -164,9 +171,13 @@ candidates only.
 
 The repository includes an evaluator API, but not a checked-in annotated corpus or a repeatable model evaluation command. Full-source batching proves bounded processing, not complete or correct world extraction.
 
-### 6. Long-running evolution is still simplistic
+### 6. Long-running evolution still needs broader evaluation
 
-The scheduler is deterministic and explainable, but pressure scoring, expiry, actor relevance, background cadence, and conflict policy have only small-fixture coverage. Large branch histories and multi-actor scenes have not been profiled.
+Material-progress certification, stagnation-aware exits, and an explicit
+five-minute autonomous wait path are connected. The scheduler remains
+deterministic and explainable, but pressure scoring, expiry, actor relevance,
+background cadence, and conflict policy have only small-fixture coverage. Large
+branch histories and multi-actor scenes have not been profiled.
 
 ## Recommended next milestone
 

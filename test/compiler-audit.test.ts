@@ -140,10 +140,16 @@ describe("compiler audit", () => {
       timelineAnchoring: 1,
       eventEffectExplicitness: 0,
       characterDevelopmentCoverage: 0,
+      participantPresenceCoverage: 0,
+      readerSummaryCoverage: 0,
+      autonomousDriverCoverage: 0,
     });
     expect(report.consistency.semanticIssues).toEqual(expect.arrayContaining([
       expect.stringContaining("typed state or knowledge effect"),
       expect.stringContaining("phase-bounded goals or development phases"),
+      expect.stringContaining("participant slots declare"),
+      expect.stringContaining("source-grounded reader recap"),
+      expect.stringContaining("no executable actor goal or non-canonical autonomous possibility"),
     ]));
   });
 });

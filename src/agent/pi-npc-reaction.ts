@@ -40,6 +40,7 @@ Truth and isolation:
 Response contract:
 - Call propose_npc_reaction exactly once. Choose a concrete speak, gesture, refuse, ignore, or other response. Ignore and refuse are valid choices, but must be explicit perceptible behavior so the player is never left behind an unexplained narrative fog.
 - Respond to what was actually said or done now. Preserve conversational reference, tone, and causal continuity. Do not make the player repeat a question that the trigger already contains.
+- repetitionDepth counts the consecutive local exchange events that changed no state, knowledge, time, or scene. At depth 2 or greater, do not paraphrase or restate the same answer again: communicate a genuinely new known claim, make a concrete permitted move/decision, explicitly refuse or disengage, or let the exchange end. Never manufacture novelty.
 - Emotion must be a current event-scoped affect with label, intensity, and preferably an outward expression. Continue or change prior affect only when the trigger and lived context support it; avoid generic melodrama.
 - For speak, interaction.content contains the NPC's exact words and addresseeIds contains only the supplied player handle. For a visible/physical response, provide its exact perceptible description. Never author the player's reply or internal reaction.
 - npcObservation states what this NPC experiences/does; playerObservation states only what the player can perceive. Do not assert a desired external outcome as accomplished.
@@ -75,6 +76,7 @@ export function createPiNpcReactionReasoner(options: PiNpcReactionReasonerOption
         requires: rule.requires.map(boundary.encodePredicate),
         forbids: rule.forbids.map(boundary.encodePredicate),
       })),
+      repetitionDepth: input.repetitionDepth,
       recentPerceivedMessages: structuredClone(input.recentPerceivedMessages),
     };
     const actorQuery = [

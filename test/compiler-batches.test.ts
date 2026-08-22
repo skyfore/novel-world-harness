@@ -18,7 +18,7 @@ import {
 } from "../src/compiler/batch-outcome.js";
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import type { SourceDocument } from "../src/storage/workspace-store.js";
-import { ProposalStore } from "../src/world/canonical-model.js";
+import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
 import { claimSchema, entitySchema } from "../src/world/model.js";
 import { initialWorldSchema } from "../src/world/initial.js";
 import { characterGoalSchema, characterModelSchema } from "../src/world/actors.js";
@@ -307,6 +307,9 @@ describe("compiler batches", () => {
 
     expect(opening.prompt).toContain("may propose exactly one initial-world");
     expect(opening.prompt).toContain("one world-time cut");
+    expect(opening.prompt).toContain("readerSetup");
+    expect(opening.prompt).toContain("human who has never read the novel");
+    expect(opening.prompt).toContain("participantPresence");
     expect(opening.prompt).toContain("later discourse is not automatically future world truth");
     expect(opening.prompt).toContain("never put the counterpart character ID in character.relationships");
     expect(opening.prompt).not.toContain("peek_adjacent_evidence");
@@ -338,6 +341,40 @@ describe("compiler batches", () => {
     expect(opening.prompt).not.toContain("The author discusses writing the novel.");
   });
 
+  it("uses an evidence-grounded narrative event when a preface itself is the lived prologue", async () => {
+    const { root, source } = await fixtureWithContent([
+      "# Collected edition",
+      "Author and publication metadata.",
+      "",
+      "# Preface",
+      "The traveler wakes inside the burning village.",
+      "",
+      "# Chapter 1",
+      "The traveler reaches the road at dawn.",
+    ].join("\n"));
+    await new CanonicalModelStore(root).putEvent({
+      id: "preface-awakening",
+      title: "The traveler wakes in the burning village",
+      readerSummary: "The traveler wakes in a burning village before reaching the road.",
+      participants: [],
+      storyTime: { kind: "ordinal", label: "prologue", orderHint: 0 },
+      narrativeContext: { layerId: "main", discourseOrder: 0, mode: "scene" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: [{
+        span: { sourceId: source.id, startLine: 5, endLine: 5, quoteHash: "preface-event" },
+        strength: "explicit",
+      }],
+      causalParents: [],
+      confidence: 1,
+    });
+
+    const opening = await prepareOpeningWorldCompilerBatch(root, source);
+    expect(opening.startLine).toBe(4);
+    expect(opening.prompt).toContain("The traveler wakes inside the burning village.");
+    expect(opening.prompt).not.toContain("The traveler reaches the road at dawn.");
+  });
+
   it("rebuilds a stale segmenter manifest even when source bytes are unchanged", async () => {
     const { root, source } = await fixture();
     const store = new SegmentStore(root);
@@ -355,7 +392,7 @@ describe("compiler batches", () => {
     await prepareCompilerBatches(root, source);
 
     const repaired = await store.readManifest(source.id);
-    expect(repaired?.segmenterVersion).toBe(4);
+    expect(repaired?.segmenterVersion).toBe(6);
     expect(repaired?.segments.every((segment) => segment.promptCharacters > 0)).toBe(true);
   });
 

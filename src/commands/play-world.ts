@@ -18,6 +18,7 @@ import {
 import { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayNovel, createSourcePlayInstance, type AskPlayQuestion } from "../world/play-choice.js";
 import { askUserQuestion } from "../util/ask-user-question.js";
 import { formatCharacters } from "./catalog.js";
+import { formatReaderEntryContext } from "../world/entry-context.js";
 
 export type PlayWorldCommandOptions = {
   root: string;
@@ -66,6 +67,9 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
     instanceMode: "continue",
   }, ask);
   if (!selection) return undefined;
+  if (selection.readerContext) {
+    stdout.write(`${formatReaderEntryContext(selection.readerContext, selection.actor.canonicalName)}\n\n`);
+  }
 
   const config = await loadOptionalConfig(options.configPath);
   const profile = config ? profileForRole(config, "narrator").profile : undefined;

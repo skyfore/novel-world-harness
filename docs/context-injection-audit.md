@@ -1,6 +1,6 @@
 # Context injection, visibility, and authority audit
 
-Date: 2026-08-21
+Date: 2026-08-22
 
 This is the evidence record for every application-controlled path that can
 place data in a model request, every public callback that could be implemented
@@ -198,10 +198,34 @@ related-message tools. This presentation log is never used to project state or
 knowledge and does not retroactively promote legacy display transcripts to
 world truth.
 
+Fresh role entry has a second display-only record. At the novel opening,
+`InitialWorld.readerSetup` gives an unread human a concise source-grounded,
+spoiler-free orientation to where, when, who, the needed premise, and the
+immediate unresolved situation. `InitialWorld.participantPresence` separately
+proves that an actionable opening role is bodily present. For a later role,
+`ReaderEntryContext` lists
+every canonical event presented in source discourse before the selected
+character's grounded entry checkpoint, including its source-grounded completed-
+event recap, named participants, narrative mode/time, and known causal-parent
+titles. A later role is not offered if any preceding recap is missing. The
+TUI/compact command prints it as
+“读者前情（不等于角色知识）” before the first scene. It is not a `KnowledgeDelta`,
+is not persisted as an actor observation, and is not included in narrator,
+player-action, adjudicator, NPC, or world-response model frames. A later-role
+genesis separately applies deterministic initial/main-timeline effects before
+the checkpoint and then only the checkpoint's already-true state/knowledge,
+physical presence, and direct actor observation. The reader setup does not enter
+that actor observation, and the target entry event remains unrealized. Thus
+reader orientation, character knowledge, actor perception, and branch truth are
+separate channels.
+
 Evidence: startup/session construction in [play.ts](../src/commands/play.ts)
 and [pi-session.ts](../src/agent/pi-session.ts), player interception and
-restoration in [nwh-extension.ts](../src/agent/nwh-extension.ts), and restored
-world/transcript tests in [nwh-extension.test.ts](../test/nwh-extension.test.ts).
+restoration in [nwh-extension.ts](../src/agent/nwh-extension.ts), entry derivation
+in [entry-context.ts](../src/world/entry-context.ts), and regressions in
+[nwh-extension.test.ts](../test/nwh-extension.test.ts),
+[entry-context.test.ts](../test/entry-context.test.ts), and
+[character-entry-play.test.ts](../test/character-entry-play.test.ts).
 
 ## 2. Novel parsing and compiler injection
 
@@ -385,6 +409,22 @@ tests in [player-source-isolation.test.ts](../test/player-source-isolation.test.
 [initial-world.test.ts](../test/initial-world.test.ts), and
 [world-engine.test.ts](../test/world-engine.test.ts).
 
+Participant membership is not scene presence. New canonical/possibility/event
+records may classify character participation as `physical`, `remote`,
+`mentioned`, `represented`, `dream`, or `memory`; only `physical` establishes
+co-presence. Legacy interactive actor events retain a bounded compatibility
+path, while legacy canonical/background flat participant lists fail closed.
+Role-entry derivation uses the same embodied-scene rule and additionally requires
+a source-backed per-character pre-event checkpoint with actionable actor state.
+Thus a signature, letter, report, mention, or outcome-only event cannot become
+either a playable checkpoint or a room occupant.
+
+Evidence: presence schema/validation in [model.ts](../src/world/model.ts) and
+[engine.ts](../src/world/engine.ts), scene projection in
+[scene.ts](../src/world/scene.ts), and regressions in
+[scene-presence.test.ts](../test/scene-presence.test.ts) and
+[entry-context.test.ts](../test/entry-context.test.ts).
+
 Canonical future events are converted host-side into possibility templates.
 The frontier marks them latent, blocked, expired, superseded, invalidated,
 realized, or eligible according to committed state, causal parents, source
@@ -530,8 +570,8 @@ identity, logical/story time, elapsed days, stable actor/entity/claim IDs,
 actor-visible state and knowledge, committed visible events, scene key/beat/
 signature, derived development, current effective character policy,
 host-internal threads and preflighted affordances. The host frame retains those
-affordances for internal direction and low-level callers; they are not copied
-into the scene model's choice output.
+affordances for internal direction, post-narration UI assembly, and low-level
+callers; they are not copied into the scene model input.
 
 `playerSceneModelFrame` is the only narrator callback/model projection. It
 contains exactly:
@@ -573,13 +613,18 @@ candidate delta, authorized claims, progress object, score and internal IDs;
 the executable candidate stays on the host and is preflighted through the same
 scope/knowledge/engine gates as free-form input.
 
-The scene narrator no longer receives or copies those generic affordances into
-the player UI. Instead it receives only the actor's effective current-head
+The scene narrator does not receive those generic affordances. Instead it
+receives only the actor's effective current-head
 disposition and active motivations alongside actor-visible scene data, then
 suggests concrete acts or exact spoken lines. This does not turn policy into
 world truth: inactive/future phases stay excluded, the guidance may not be
 stated in prose, and a suggestion has no capability status until the player
-selects it and the ordinary translator and deterministic gates accept it.
+selects it and the ordinary translator and deterministic gates accept it. After
+the narrator returns, the host merges bounded public action text from the
+retained, preflighted affordances into the selector. Hidden deltas, claims,
+scores, progress metadata, and internal IDs still never enter the narrator. A
+selected host route is re-resolved by its opaque ID at the current head and must
+pass the normal deterministic gates; stale routes fail closed.
 
 Narration and suggestions are separate output channels. The model contract asks
 prose to render only current actor-visible facts, perceptions, pressure, and
@@ -618,9 +663,11 @@ for non-empty/length/repeated-paragraph failures. The structural choice schema a
 only 2-4 distinct action-only objects; it does not classify their natural-language
 semantics with a host phrase list. There is no model-authored label, description,
 intent, recommendation, candidate, or outcome field. Missing or malformed choice
-capture does not discard otherwise valid scene prose, trigger another choice
-request, or admit host affordance copy. The selector then exposes only free-form
-input. A custom narrator injected into the TUI passes the
+capture does not discard otherwise valid scene prose or trigger another choice
+request. The host then merges up to four distinct options, beginning with one
+current-head preflighted action, followed by narrator suggestions and any
+remaining host exits; free-form input remains available. A custom narrator
+injected into the TUI passes the
 same structural validation. Rendering and choice capture
 never advance the branch; selecting a suggestion starts the separate player-action
 interpretation/adjudication/validation path.
@@ -632,6 +679,36 @@ Evidence: [pi-player-opening.ts](../src/agent/pi-player-opening.ts),
 [pi-player-opening.test.ts](../test/pi-player-opening.test.ts),
 [player-scene-choice-tool.test.ts](../test/player-scene-choice-tool.test.ts),
 and [nwh-extension.test.ts](../test/nwh-extension.test.ts).
+
+### Material progress without automatic canon scheduling
+
+An accepted event is not counted as material progress merely because it has a
+title or progress label. The host checks effective state operations, learned
+knowledge, explicit time advance, and a non-`stay` scene transition. Repeated
+actor events with none of those effects increase a trailing stagnation depth;
+the deterministic director then ranks structural movement, stateful action, and
+waiting above another empty exchange. NPC reasoning receives its own bounded
+repetition depth and must choose a source-grounded new claim, concrete permitted
+decision, refusal/disengagement, or exchange termination instead of paraphrasing
+the same answer.
+
+Ordinary turns still schedule zero unrelated canon/background events. The
+explicit wait route advances five minutes and opts into at most one currently
+eligible autonomous obligation, causal consequence, background pressure,
+environmental process, or generated process. Its background allowlist excludes
+canon analogues and stays in the current temporal window. If none is eligible,
+the committed five-minute time advance still constitutes material progress. A
+pressure remains subject to its compiled conditions, source scope, and engine
+validation. This permits autonomous world motion while preserving the invariant
+that future canon is a possibility frontier rather than an active branch
+scheduler.
+
+Evidence: progress certification in [player-action.ts](../src/world/player-action.ts),
+stagnation-aware direction in [narrative-director.ts](../src/world/narrative-director.ts),
+wait execution in [play-experience.ts](../src/world/play-experience.ts), and NPC
+repetition policy in [npc-reaction.ts](../src/world/npc-reaction.ts), with
+regressions in [open-world-progression.test.ts](../test/open-world-progression.test.ts)
+and [pi-npc-reaction.test.ts](../test/pi-npc-reaction.test.ts).
 
 ## 6. Model-driven non-player actors and low-level rendering
 
@@ -711,6 +788,9 @@ coverage in [context-policy.test.ts](../test/context-policy.test.ts),
 | Whole-world compiler retrieval could cross novels | active-source binding and source-exclusive artifact/evidence checks | [source-evidence-retrieval.ts](../src/compiler/source-evidence-retrieval.ts), [artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts) | [compiler-source-evidence-retrieval.test.ts](../test/compiler-source-evidence-retrieval.test.ts), [compiler-artifact-retrieval.test.ts](../test/compiler-artifact-retrieval.test.ts) |
 | Scoped compiler jobs could inherit or persist a differently scoped transcript | source/batch/slice jobs forced fresh and ephemeral | [pi-compiler.ts](../src/compiler/pi-compiler.ts) | [pi-compiler.test.ts](../test/pi-compiler.test.ts) |
 | Runtime branch could silently mix parsed novels | source-owned snapshots/branches, commit evidence checks, fail-closed legacy inference | [context.ts](../src/world/context.ts), [source-scope.ts](../src/world/source-scope.ts), [engine.ts](../src/world/engine.ts) | [player-source-isolation.test.ts](../test/player-source-isolation.test.ts), [initial-world.test.ts](../test/initial-world.test.ts) |
+| An unread player lacked opening/prior-story orientation, while giving it to the actor would leak knowledge | display-only spoiler-free opening setup plus complete prior-discourse recaps; actor knowledge and model frames remain unchanged | [initial.ts](../src/world/initial.ts), [entry-context.ts](../src/world/entry-context.ts), [play-choice.ts](../src/world/play-choice.ts) | [entry-context.test.ts](../test/entry-context.test.ts), [character-entry-play.test.ts](../test/character-entry-play.test.ts) |
+| A supporting character could start before appearing, or a mentioned/represented character could look co-present | grounded per-character entry checkpoints plus explicit participation mode; later entry creates a sibling branch and flat legacy background presence fails closed | [entry-context.ts](../src/world/entry-context.ts), [scene.ts](../src/world/scene.ts), [instance.ts](../src/world/instance.ts) | [character-entry-play.test.ts](../test/character-entry-play.test.ts), [scene-presence.test.ts](../test/scene-presence.test.ts) |
+| Valid no-op dialogue could loop forever while optional narrator choices removed every exit | material-progress/stagnation certificates, retained preflighted host actions, explicit bounded wait pressure, and NPC repetition policy | [player-action.ts](../src/world/player-action.ts), [narrative-director.ts](../src/world/narrative-director.ts), [nwh-extension.ts](../src/agent/nwh-extension.ts), [npc-reaction.ts](../src/world/npc-reaction.ts) | [open-world-progression.test.ts](../test/open-world-progression.test.ts), [nwh-extension.test.ts](../test/nwh-extension.test.ts), [pi-npc-reaction.test.ts](../test/pi-npc-reaction.test.ts) |
 | Player model could receive hidden state, future canon, stable IDs or engine chronology | state/knowledge/source projection, anonymous identities, opaque handles, chronology stripping and bounded safe retrieval | [actor-visible.ts](../src/world/actor-visible.ts), [player-action.ts](../src/world/player-action.ts), [actor-context-retrieval.ts](../src/agent/actor-context-retrieval.ts) | [actor-visible.test.ts](../test/actor-visible.test.ts), [player-action.test.ts](../test/player-action.test.ts), [actor-context-retrieval.test.ts](../test/actor-context-retrieval.test.ts) |
 | Narrator could receive host frame IDs/time, inactive/future policy, affordance copy, or an arbitrary replacement record | typed name-based narrator frame; only current effective disposition/active motivation is admitted as non-factual choice guidance; no affordances or third prompt override | [play-opening.ts](../src/world/play-opening.ts), [narrative-director.ts](../src/world/narrative-director.ts) | [play-opening.test.ts](../test/play-opening.test.ts), [pi-player-opening.test.ts](../test/pi-player-opening.test.ts) |
 | Rejected narrator attempt could contaminate retry | independent in-memory session per attempt | [pi-player-opening.ts](../src/agent/pi-player-opening.ts) | [pi-player-opening.test.ts](../test/pi-player-opening.test.ts), [nwh-extension.test.ts](../test/nwh-extension.test.ts) |

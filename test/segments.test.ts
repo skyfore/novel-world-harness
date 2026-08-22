@@ -34,7 +34,7 @@ describe("source segmentation", () => {
   it("uses chapter headings while preserving exact CRLF byte slices", async () => {
     const { root, source, buffer } = await fixture("序言\r\n第一章 开端\r\n曹操进入大厅。\r\n\r\n第二章 转折\r\n曹操离开。\r\n");
     const manifest = await segmentSource(root, source);
-    expect(manifest.segmenterVersion).toBe(4);
+    expect(manifest.segmenterVersion).toBe(6);
     expect(manifest.segments.length).toBeGreaterThanOrEqual(3);
     expect(manifest.segments.some((segment) => segment.title?.startsWith("第一章"))).toBe(true);
     expect(manifest.segments.some((segment) => segment.title?.startsWith("第二章"))).toBe(true);
@@ -54,6 +54,27 @@ describe("source segmentation", () => {
       "标题",
       "第一幕：开端",
       "第二幕：转折",
+    ]);
+  });
+
+  it("separates title front matter from a Chinese prologue before the first act", async () => {
+    const { root, source } = await fixture("龙族\n作者：示例\n\n序幕 白帝城\n序幕中的事件。\n\n第一幕 卡塞尔之门\n主线开始。\n");
+    const manifest = await segmentSource(root, source);
+    expect(manifest.segments.map((segment) => segment.title)).toEqual([
+      "龙族",
+      "序幕 白帝城",
+      "第一幕 卡塞尔之门",
+    ]);
+    expect(await readSegmentText(root, manifest.segments[1]!)).toContain("序幕中的事件");
+  });
+
+  it.each(["序言", "前言", "引子", "Preface"])("recognizes %s as a prologue boundary", async (heading) => {
+    const { root, source } = await fixture(`书名\n作者\n\n${heading}\n开篇上下文。\n\n第一章 正文\n故事开始。\n`);
+    const manifest = await segmentSource(root, source);
+    expect(manifest.segments.map((segment) => segment.title)).toEqual([
+      "书名",
+      heading,
+      "第一章 正文",
     ]);
   });
 

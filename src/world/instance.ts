@@ -5,11 +5,13 @@ import { stateDeltaSchema } from "./model.js";
 import { InitialWorldStore } from "./initial.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
 import { assertEvidenceExclusiveToSource } from "./source-scope.js";
+import { deriveCharacterEntrySeed, type ReaderEntryContext } from "./entry-context.js";
 
 export type CreatedWorldBranch = {
   head: string;
   usedCanonicalInitial: boolean;
   preparedRevisionHash?: string;
+  readerContext?: ReaderEntryContext;
 };
 
 export async function createWorldBranch(
@@ -18,6 +20,7 @@ export async function createWorldBranch(
   seedPath?: string,
   sourceId?: string,
   cacheRoot?: string,
+  entryActorId?: string,
 ): Promise<CreatedWorldBranch> {
   const workspace = await WorkspaceStore.create(root);
   const sources = await workspace.listSources();
@@ -48,6 +51,13 @@ export async function createWorldBranch(
   const canonicalInitial = seedPath
     ? null
     : prepared?.bundle.canonical.initialWorld ?? await new InitialWorldStore(root).get();
+  if (seedPath && entryActorId) throw new Error("A character entry checkpoint cannot be combined with an explicit seed file.");
+  if (entryActorId && !prepared) {
+    throw new Error("Character-specific entry requires an active prepared novel revision.");
+  }
+  const entrySeed = entryActorId && prepared
+    ? deriveCharacterEntrySeed(prepared.bundle, entryActorId)
+    : undefined;
   if (!seedPath && !canonicalInitial) {
     throw new Error("No accepted initial world. Review and accept an initial-world proposal before creating a playable branch, or pass --seed explicitly.");
   }
@@ -59,7 +69,12 @@ export async function createWorldBranch(
   }
   const seed = seedPath
     ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8")))
-    : canonicalInitial!.delta;
+    : entrySeed?.delta ?? canonicalInitial!.delta;
+  const checkpointPresence = entrySeed?.participantPresence?.length
+    ? entrySeed.participantPresence
+    : canonicalInitial?.participantPresence?.length
+      ? canonicalInitial.participantPresence
+      : undefined;
   if (!seedPath) {
     const represented = new Set(seed.operations.flatMap((operation) => "entityId" in operation ? [operation.entityId] : []));
     const explicitlyDead = new Set<string>();
@@ -81,18 +96,33 @@ export async function createWorldBranch(
     branchId,
     branchId,
     seed,
-    seedPath ? undefined : canonicalInitial?.knowledge,
+    seedPath ? undefined : entrySeed?.knowledge ?? canonicalInitial?.knowledge,
     effectiveSourceId,
     prepared?.bundleHash,
-    seedPath ? [] : canonicalInitial?.evidence,
+    seedPath ? [] : entrySeed?.evidence ?? canonicalInitial?.evidence,
     seedPath ? {} : {
-      ...(canonicalInitial?.checkpoint?.storyTime ? { storyTime: canonicalInitial.checkpoint.storyTime } : {}),
+      ...(entrySeed?.storyTime
+        ? { storyTime: entrySeed.storyTime }
+        : canonicalInitial?.checkpoint?.storyTime
+          ? { storyTime: canonicalInitial.checkpoint.storyTime }
+          : {}),
       elapsedDays: 0,
+    },
+    seedPath ? {} : {
+      ...(entryActorId ? { entryActorId } : {}),
+      ...(entrySeed?.realizesCanonicalEventIds.length
+        ? { realizesCanonicalEventIds: entrySeed.realizesCanonicalEventIds }
+        : {}),
+      ...(checkpointPresence ? { participantPresence: checkpointPresence } : {}),
+      ...(entryActorId && entrySeed?.actorObservation
+        ? { actorObservations: [{ actorId: entryActorId, summary: entrySeed.actorObservation }] }
+        : {}),
     },
   );
   return {
     head,
     usedCanonicalInitial: Boolean(canonicalInitial && !seedPath),
     ...(prepared ? { preparedRevisionHash: prepared.bundleHash } : {}),
+    ...(entrySeed ? { readerContext: entrySeed.readerContext } : {}),
   };
 }

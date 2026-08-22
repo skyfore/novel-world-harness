@@ -52,7 +52,18 @@ describe("explicit prepared-novel reparsing", () => {
     });
     await proposals.submit("initial-world", {
       proposalId: "opening-v1",
-      payload: { version: 1, delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] }, evidence: batches[0]!.evidence },
+      payload: {
+        version: 1,
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        delta: {
+          version: 1,
+          operations: [
+            { op: "set", entityId: "hero", field: "character.alive", value: true },
+            { op: "set", entityId: "hero", field: "character.plan", value: "wait" },
+          ],
+        },
+        evidence: batches[0]!.evidence,
+      },
       generatedBy: { worker: "test", compilerBatchId: `opening-${batches[0]!.id}` },
     });
     await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));

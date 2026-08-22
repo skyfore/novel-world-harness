@@ -7,6 +7,8 @@ import { EvidenceVerifier } from "./evidence.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
+import { PossibilityTemplateStore } from "../world/possibility-model.js";
+import { hasExecutablePossibilityEffect } from "./semantics.js";
 
 export type CompilerAuditReport = {
   version: 1;
@@ -30,6 +32,8 @@ export type CompilerAuditReport = {
     initialWorld: boolean;
     characterGoals: number;
     characterModels: number;
+    possibilities: number;
+    autonomousWorldDrivers: number;
   };
   evidence: {
     artifactsChecked: number;
@@ -63,6 +67,13 @@ export type CompilerAuditReport = {
     eventEffectExplicitness: number | null;
     characterDevelopmentCoverage: number | null;
     openingCheckpointDeclared: number | null;
+    participantPresenceCoverage: number | null;
+    readerSummaryCoverage: number | null;
+    characterEntryCheckpointCoverage: number | null;
+    openingReaderSetup: number | null;
+    openingPhysicalPresence: number | null;
+    openingActionability: number | null;
+    autonomousDriverCoverage: number | null;
   };
   notes: string[];
 };
@@ -109,7 +120,7 @@ export async function auditCompiler(
 
   const canon = new CanonicalModelStore(workspaceRoot);
   const actorStore = new ActorModelStore(workspaceRoot);
-  const [allEntities, allClaims, allEvents, allRules, storedInitialWorld, allGoals, allModels] = await Promise.all([
+  const [allEntities, allClaims, allEvents, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
     canon.listEntities(),
     canon.listClaims(),
     canon.listEvents(),
@@ -117,6 +128,7 @@ export async function auditCompiler(
     new InitialWorldStore(workspaceRoot).get(),
     actorStore.listGoals(),
     actorStore.listModels(),
+    new PossibilityTemplateStore(workspaceRoot).list(),
   ]);
   const belongsToSelectedSource = (item: { evidence: readonly EvidenceRef[] }) => {
     if (!options.sourceId) return true;
@@ -131,6 +143,7 @@ export async function auditCompiler(
   const initialWorld = storedInitialWorld && belongsToSelectedSource(storedInitialWorld) ? storedInitialWorld : null;
   const goals = allGoals.filter(belongsToSelectedSource);
   const models = allModels.filter(belongsToSelectedSource);
+  const possibilities = allPossibilities.filter(belongsToSelectedSource);
 
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
   const evidenceArtifacts: Array<{ name: string; evidence: EvidenceRef[] }> = [
@@ -141,6 +154,7 @@ export async function auditCompiler(
     ...(initialWorld ? [{ name: "initial-world", evidence: initialWorld.evidence }] : []),
     ...goals.map((item) => ({ name: `goal:${item.id}`, evidence: item.evidence })),
     ...models.map((item) => ({ name: `model:${item.actorId}`, evidence: item.evidence })),
+    ...possibilities.map((item) => ({ name: `possibility:${item.id}`, evidence: item.evidence })),
   ];
   const evidenceErrors: CompilerAuditReport["evidence"]["errors"] = [];
   let referencesChecked = 0;
@@ -174,6 +188,74 @@ export async function auditCompiler(
   const characterDevelopmentCoverage = recurringCharacters.length
     ? recurringCharacters.filter((actorId) => growthActors.has(actorId)).length / recurringCharacters.length
     : null;
+  const characterIds = new Set(entities.filter((entity) => entity.kind === "character").map((entity) => entity.id));
+  const characterParticipantSlots = events.flatMap((event) =>
+    event.participants.filter((participantId) => characterIds.has(participantId)).map((participantId) => ({ event, participantId })));
+  const participantPresenceCoverage = characterParticipantSlots.length
+    ? characterParticipantSlots.filter(({ event, participantId }) =>
+        event.participantPresence?.some((presence) => presence.entityId === participantId)).length / characterParticipantSlots.length
+    : null;
+  const readerSummaryCoverage = events.length
+    ? events.filter((event) => Boolean(event.readerSummary?.trim())).length / events.length
+    : null;
+  const actionableOpeningFields = new Set(["character.location", "character.plan", "character.momentum"]);
+  const physicalOpeningActorIds = new Set(initialWorld?.participantPresence
+    ?.filter((presence) => presence.mode === "physical" && characterIds.has(presence.entityId))
+    .map((presence) => presence.entityId) ?? []);
+  const openingActorIds = new Set(initialWorld?.delta.operations.flatMap((operation) =>
+    "entityId" in operation
+    && characterIds.has(operation.entityId)
+    && physicalOpeningActorIds.has(operation.entityId)
+    && actionableOpeningFields.has(operation.field)
+      ? [operation.entityId]
+      : []) ?? []);
+  const openingActionability = initialWorld
+    ? initialWorld.delta.operations.some((operation) =>
+        "entityId" in operation
+        && characterIds.has(operation.entityId)
+        && physicalOpeningActorIds.has(operation.entityId)
+        && actionableOpeningFields.has(operation.field)) ? 1 : 0
+    : null;
+  const openingReaderSetup = initialWorld
+    ? (initialWorld.readerSetup?.trim() ? 1 : 0)
+    : null;
+  const openingPhysicalPresence = initialWorld
+    ? (physicalOpeningActorIds.size ? 1 : 0)
+    : null;
+  const eventsByDiscourse = [...events].sort((left, right) =>
+    (left.narrativeContext?.discourseOrder ?? earliestEvidenceLine(left))
+    - (right.narrativeContext?.discourseOrder ?? earliestEvidenceLine(right))
+    || left.id.localeCompare(right.id));
+  const firstEmbodiedEventByActor = new Map<string, CanonicalEvent>();
+  for (const event of eventsByDiscourse) {
+    if (event.narrativeContext?.mode && event.narrativeContext.mode !== "scene") continue;
+    for (const presence of event.participantPresence ?? []) {
+      if (presence.mode !== "physical" || openingActorIds.has(presence.entityId)) continue;
+      if (!firstEmbodiedEventByActor.has(presence.entityId)) firstEmbodiedEventByActor.set(presence.entityId, event);
+    }
+  }
+  const laterEntryActors = [...firstEmbodiedEventByActor.keys()];
+  const characterEntryCheckpointCoverage = laterEntryActors.length
+    ? laterEntryActors.filter((actorId) =>
+        firstEmbodiedEventByActor.get(actorId)?.characterEntryCheckpoints?.some((checkpoint) =>
+          checkpoint.actorId === actorId
+          && checkpoint.participantPresence.some((presence) =>
+            presence.entityId === actorId && presence.mode === "physical")
+          && checkpoint.delta.operations.some((operation) =>
+            "entityId" in operation
+            && operation.entityId === actorId
+            && actionableOpeningFields.has(operation.field))))
+      .length / laterEntryActors.length
+    : null;
+  const autonomousPossibilities = possibilities.filter((possibility) =>
+    !["canon-analogue", "player-choice", "actor-plan"].includes(possibility.kind)
+    && hasExecutablePossibilityEffect(possibility));
+  const executableGoals = goals.filter((goal) => [goal.candidateAction, ...(goal.actionPatterns ?? [])]
+    .filter(Boolean)
+    .some((action) => (action!.proposedDelta.operations.length > 0)
+      || ((action!.proposedKnowledge?.operations.length ?? 0) > 0)));
+  const autonomousWorldDrivers = autonomousPossibilities.length + executableGoals.length;
+  const autonomousDriverCoverage = events.length ? (autonomousWorldDrivers > 0 ? 1 : 0) : null;
   const semanticIssues: string[] = [];
   // Small fixtures and short stories may intentionally be sparse. The hard
   // semantic gate targets novel-scale compilations where omissions compound.
@@ -182,6 +264,13 @@ export async function auditCompiler(
     if ((timelineAnchoring ?? 0) < 0.75) semanticIssues.push(`Only ${formatRatio(timelineAnchoring)} of canonical events have a story-time anchor (minimum 75%).`);
     if (recurringCharacters.length && (characterDevelopmentCoverage ?? 0) < 0.5) semanticIssues.push(`Only ${formatRatio(characterDevelopmentCoverage)} of recurring characters have phase-bounded goals or development phases (minimum 50%).`);
     if (initialWorld && !initialWorld.checkpoint) semanticIssues.push("The initial world does not declare a temporal/narrative checkpoint.");
+    if ((participantPresenceCoverage ?? 0) < 0.8) semanticIssues.push(`Only ${formatRatio(participantPresenceCoverage)} of character participant slots declare physical/remote/mentioned/represented/dream/memory presence (minimum 80%).`);
+    if (readerSummaryCoverage !== 1) semanticIssues.push(`Only ${formatRatio(readerSummaryCoverage)} of canonical events have a source-grounded reader recap (required 100% for complete later-role context).`);
+    if (laterEntryActors.length && characterEntryCheckpointCoverage !== 1) semanticIssues.push(`Only ${formatRatio(characterEntryCheckpointCoverage)} of later embodied characters have a complete pre-event entry checkpoint (required 100%).`);
+    if (initialWorld && openingReaderSetup !== 1) semanticIssues.push("The initial world has no source-grounded spoiler-free readerSetup, so an unread player cannot orient before the opening scene.");
+    if (initialWorld && openingPhysicalPresence !== 1) semanticIssues.push("The initial world does not explicitly identify a physically present opening role; identity or state alone is not bodily presence.");
+    if (initialWorld && openingActionability !== 1) semanticIssues.push("The initial world has no grounded opening character location, plan, or momentum; it is not an actionable lived checkpoint.");
+    if (autonomousWorldDrivers === 0) semanticIssues.push("The compiled world has no executable actor goal or non-canonical autonomous possibility, so divergence can only wait for canon or repeat local dialogue.");
   }
   const sourceIndexing = sources.length
     ? changedSinceIngest.length
@@ -204,6 +293,8 @@ export async function auditCompiler(
       initialWorld: Boolean(initialWorld),
       characterGoals: goals.length,
       characterModels: models.length,
+      possibilities: possibilities.length,
+      autonomousWorldDrivers,
     },
     evidence: {
       artifactsChecked: evidenceArtifacts.length,
@@ -237,6 +328,13 @@ export async function auditCompiler(
       eventEffectExplicitness,
       characterDevelopmentCoverage,
       openingCheckpointDeclared: initialWorld ? (initialWorld.checkpoint ? 1 : 0) : null,
+      participantPresenceCoverage,
+      readerSummaryCoverage,
+      characterEntryCheckpointCoverage,
+      openingReaderSetup,
+      openingPhysicalPresence,
+      openingActionability,
+      autonomousDriverCoverage,
     },
     notes: [
       ...(options.sourceId ? [`Audit is scoped to source ${options.sourceId}; unrelated registered sources and artifacts are excluded.`] : []),
@@ -253,6 +351,13 @@ export async function auditCompiler(
 
 function formatRatio(value: number | null): string {
   return value === null ? "n/a" : `${Math.round(value * 100)}%`;
+}
+
+function earliestEvidenceLine(event: CanonicalEvent): number {
+  return Math.min(
+    ...event.evidence.map((reference) => reference.span.startLine),
+    Number.MAX_SAFE_INTEGER,
+  );
 }
 
 function auditCausalGraph(events: readonly CanonicalEvent[]): {

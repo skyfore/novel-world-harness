@@ -199,7 +199,6 @@ describe("play experience catalog", () => {
       source: { id: first.source.id },
       characters: [
         { id: "hero", canonicalName: "Hero" },
-        { id: "witness", canonicalName: "Witness" },
       ],
     });
 
@@ -207,7 +206,7 @@ describe("play experience catalog", () => {
       branchId: "main",
       source: first.source.id,
       character: "Witness",
-    })).resolves.toMatchObject({ actor: { id: "witness" } });
+    })).rejects.toThrow("Available: Hero (hero)");
 
     const selection = await selectPlayExperience(root, { branchId: "main", source: first.source.id, character: "Hero" });
     expect(selection.session).toMatchObject({ branchId: "main", sourceId: first.source.id, actorId: "hero" });

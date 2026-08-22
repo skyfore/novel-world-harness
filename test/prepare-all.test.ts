@@ -419,7 +419,7 @@ describe("prepare-all command", () => {
     });
   });
 
-  it("uses a conservative evidence-backed opening fallback when the model pass fails", async () => {
+  it("uses the restricted single-character opening fallback when the model pass fails", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-initial-fallback-"));
     roots.push(root);
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);

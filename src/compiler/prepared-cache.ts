@@ -24,7 +24,7 @@ import { ChapterSplitPlanStore, chapterSplitPlanSchema } from "./chapter-split.j
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 5;
+export const COMPILER_PROMPT_VERSION = 7;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -159,6 +159,22 @@ export class PreparedNovelCache {
   async loadActive(source: SourceDocument): Promise<ActivePreparedNovel | null> {
     const identity = await sourceIdentity(this.workspaceRoot, source);
     const cached = await this.readCached(identity.contentMd5);
+    if (!cached) return null;
+    assertSourceIdentity(cached.bundle, identity);
+    const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
+    if (layoutIssue) throw new Error(layoutIssue);
+    return {
+      bundleHash: cached.manifest.bundleHash,
+      bundle: cached.bundle,
+      cachePath: cached.cachePath,
+    };
+  }
+
+  /** Load an immutable branch-pinned revision without consulting the active ref. */
+  async loadRevision(source: SourceDocument, bundleHash: string): Promise<ActivePreparedNovel | null> {
+    if (!/^[a-f0-9]{64}$/.test(bundleHash)) throw new Error(`Invalid prepared revision hash: ${bundleHash}`);
+    const identity = await sourceIdentity(this.workspaceRoot, source);
+    const cached = await this.readCached(identity.contentMd5, bundleHash);
     if (!cached) return null;
     assertSourceIdentity(cached.bundle, identity);
     const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);

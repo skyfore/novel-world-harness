@@ -104,6 +104,8 @@ export type NpcReactionReasoningInput = Readonly<{
   }>;
   /** Exact latest actor-perceived events, not the player-only scene transcript. */
   recentPerceivedMessages: readonly NpcPerceivedMessage[];
+  /** Consecutive local exchange events with no state, knowledge, time, or scene movement. */
+  repetitionDepth: number;
   /** Complete actor-perceived archive for read-only related-message retrieval. */
   relatedPerceivedMessages: readonly NpcPerceivedMessage[];
 }>;
@@ -244,6 +246,7 @@ async function respondOneNpc(input: {
   const currentAffect = [...history].reverse()
     .flatMap(({ event }) => event.actorAffects ?? [])
     .find((affect) => affect.actorId === input.npcId);
+  const repetitionDepth = npcExchangeStagnationDepth(history, input.playerId, input.npcId);
   const rawProposal = await input.reasoner(deepFreeze({
     npc: { id: npc.id, name: npc.canonicalName },
     player: { id: input.playerId, name: playerIdentity.name },
@@ -277,6 +280,7 @@ async function respondOneNpc(input: {
     },
     activeGoals,
     activeWorldRules,
+    repetitionDepth,
     recentPerceivedMessages: perceivedMessages.slice(-10),
     relatedPerceivedMessages: perceivedMessages,
   } satisfies NpcReactionReasoningInput));
@@ -340,6 +344,7 @@ async function respondOneNpc(input: {
     ],
     actorAffects: [{ actorId: input.npcId, ...reaction.emotion }],
     participants: [input.npcId, input.playerId],
+    participantPresence: [input.npcId, input.playerId].map((entityId) => ({ entityId, mode: "physical" as const })),
     proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
     preconditions: reaction.preconditions,
     proposedDelta: reaction.proposedDelta,
@@ -380,6 +385,22 @@ async function respondOneNpc(input: {
       },
     },
   };
+}
+
+function npcExchangeStagnationDepth(
+  history: Awaited<ReturnType<typeof committedHistory>>,
+  playerId: string,
+  npcId: string,
+): number {
+  let depth = 0;
+  for (const { event, delta } of [...history].reverse()) {
+    if (event.title === "Genesis") break;
+    if (!event.participants.includes(playerId) || !event.participants.includes(npcId)) continue;
+    const sceneMoved = Boolean(event.progress?.scene && event.progress.scene.kind !== "stay");
+    if (delta.operations.length || event.knowledgeDeltaHash || event.timeAdvance || sceneMoved) break;
+    depth += 1;
+  }
+  return depth;
 }
 
 function reactionAsPlayerCandidate(reaction: NpcReactionCandidate, playerId: string): PlayerActionCandidate {

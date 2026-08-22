@@ -21,6 +21,7 @@ Implemented:
 - canonical and non-canonical possibilities, counterfactual branches, checkpoint replay, and deterministic actor-goal policies.
 - a derived `prepare` workflow that guides ingest, bounded compilation, explicit review, audit, and branch creation without automatically accepting model output;
 - a world-aware TUI and catalog commands (`novels`, `instances`, `characters`, `progress`, `resume`) that select a committed character and route play through an actor-scoped, capture-only model boundary before deterministic scope, knowledge, engine, and commit gates;
+- reader-only prior-story recaps, source-grounded per-character entry checkpoints, explicit physical-presence semantics, and material-progress exits that keep later roles and open-world play from collapsing into an opening-cast chat loop;
 
 Still intentionally limited:
 
@@ -35,7 +36,7 @@ The governing invariant is:
 proposal -> validate -> commit -> render
 ```
 
-See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [ADR 0004](docs/adr/0004-model-first-player-intent-and-world-adjudication.md) for model-first player intent and world consequences, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
+See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [ADR 0004](docs/adr/0004-model-first-player-intent-and-world-adjudication.md) for model-first player intent and world consequences, [ADR 0006](docs/adr/0006-reader-context-character-entry-and-progress.md) for reader context, role entry, presence, and material progression, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
 
 ## Install
 
@@ -205,8 +206,10 @@ nwh prepare-all ./books/novel.txt --yes
 `prepare-all` never force-accepts a blocked proposal. After the user authorizes
 safe convergence, invalid and staging-only drafts move to immutable rejected
 history while validated artifacts continue. If the dedicated opening-state model
-pass leaves no valid initial world, NWH proposes a conservative evidence-backed
-opening cast and runs it through normal validation before branch creation.
+pass leaves no valid initial world, the deterministic alive-only fallback is
+restricted to a source with exactly one accepted character. Multi-character
+novels fail closed until the compiler supplies an evidence-backed actionable
+opening role instead of creating an unusable cast inventory.
 The existing `prepare` flow below remains the review-first path.
 
 ```bash
@@ -311,6 +314,20 @@ the player to create a new instance. Sparse actor/location fields remain
 readiness diagnostics and are treated as unknown; they are not shown as
 unactionable story-entry warnings or used to rewrite history.
 
+For a new instance, role selection occurs before branch creation. An opening
+role uses the accepted opening cut; a supporting role begins at its first
+source-backed embodied scene, with prior main-timeline effects and an explicit
+pre-event actor checkpoint but without realizing that scene's canonical outcome.
+A step-zero opening instance is preserved and a sibling is created when a later
+role is selected. Before opening narration, the UI shows a source-grounded,
+spoiler-free reader setup for the novel's place, time, people, needed premise,
+and unresolved situation. The opening role additionally requires explicit
+physical presence and grounded location, plan, or momentum. For a later role it also shows every prior discourse
+event as a source-grounded recap with participants, time/mode, and causal links.
+That context is display-only—not actor knowledge or model context—and a later role
+is unavailable until all of its prior recaps and actionable entry checkpoint are
+complete.
+
 Scene narration follows the command's intent: `play` makes the narrator speak
 first for the chosen character, `create` opens a new story, and an actual
 `switch` establishes the selected current moment. `continue`, `resume`, and
@@ -325,22 +342,23 @@ events into the current TUI, automatically retries a structurally invalid short
 or repetitive first draft once, and reports final model failure
 with direct recovery commands instead of displaying canned pseudo-prose. Scene
 prose contains only the current actor-visible moment and ends on a concrete
-in-world fact or signal; possible actions appear only in the choice tool output.
+in-world fact or signal; the narrator never receives private host affordances.
 
 The choice tool generates 2-4 concrete things the inhabited actor could do or
-exact words they could say. The TUI shows only those action/line texts—no system
-rationale and no unvalidated recommendation badge—plus a free-form alternative.
+exact words they could say. After narration, the TUI merges those suggestions
+with bounded current-head host-preflighted exits and a free-form alternative,
+showing only action/line text—no system rationale or recommendation badge.
 Choice capture is the first, tool-only phase of the isolated narrator turn; scene
 prose begins only after that tool succeeds. This avoids asking one optional-tool
 response to finish prose and remember a trailing call.
-These suggestions do not claim capability or outcome: selecting one enters the
+Model suggestions do not claim capability or outcome: selecting one enters the
 same restricted player-action translation and deterministic validation boundary
-as free-form input. The choice model cannot select a privileged intent or bypass
-translation. If the narrator omits or malforms the auxiliary choice call, the
-host neither retries the choice request nor substitutes deterministic director
-copy. Valid scene prose remains accepted and the selector contains only its
-free-form input. Rendering and choice capture never advance the branch or act
-for the player.
+as free-form input. A host route retains an opaque current-head affordance ID,
+bypasses only probabilistic translation, and is re-resolved through deterministic
+scope/knowledge/engine gates. If the narrator omits or malforms the auxiliary
+choice call, the host does not retry it; valid scene prose remains accepted and
+at least one preflighted exit remains beside free-form input. Rendering and
+choice capture never advance the branch or act for the player.
 
 Long TUI selectors use Pi's native height-aware scrolling window and remain
 filterable, with an additional free-form id/name/alias input instead of forwarding
@@ -363,8 +381,14 @@ then validates and commits that development as a second event; mere eligibility,
 shared characters, or canonical order is insufficient. Its candidate set and
 decision are retained in the private turn audit, while future canon, raw commit
 IDs, and hidden background events are not shown as narrative. Ordinary turns do
-not automatically commit unrelated background canon;
-`--advance-background` explicitly opts into temporally ordered advancement. If
+not automatically commit unrelated background or canon events. The explicit
+wait route always advances five minutes and may commit at most one currently
+eligible autonomous obligation, causal consequence, background pressure,
+environmental process, or generated world process from the current temporal
+window; it never schedules a forward canon analogue. If no process is eligible,
+elapsed time still changes, so waiting cannot collapse into another conversational
+no-op. `--advance-background` remains an explicit low-level opt-in to temporally
+ordered advancement. If
 rendering fails, the action remains committed and `/scene` safely retries only
 the prose. A rejected proposal leaves the branch head unchanged, persists its
 diagnostic audit, and automatically returns the player to a live narration/choice

@@ -107,13 +107,15 @@ selected actor/instance is already active. Explicit `/scene`, a new instance,
 or an actual switch remain deliberate narration triggers. Scene choices are
 stored with branch, actor, and commit identity; history restores them only when
 that identity and the current narrator-choice contract still match, without
-requesting another narrator. Older unmarked choice records are treated as empty;
-they are neither restored nor rebuilt from host affordances.
+requesting another narrator. Older unmarked narrator-choice records are treated
+as empty and are never restored as model suggestions; any host exits shown beside
+them are freshly preflighted from the current branch head, not reconstructed from
+the old record.
 
 **Evidence.** Tests cover historical player-only transcripts even with an
 explicit startup `auto`, repeated `/play` selection, and current-head choice
-restoration with zero narrator calls. A pre-contract menu regression proves that
-only free-form input remains and no host choice is synthesized.
+restoration with zero narrator calls. Pre-contract menu records are not trusted
+as current choices; the host recomputes bounded current-head exits instead.
 
 ### 3b. Narration handed agency back as an empty text box
 
@@ -138,8 +140,10 @@ scene prose is committed to the transcript even when the provider omits or
 malforms the choice call. The normal narrator protocol now makes choice capture
 the first, tool-only phase; after its successful tool result, the same isolated
 agent streams scene prose. If the model still omits or malforms the call, the
-host performs no repair turn and supplies no deterministic fallback choices—the
-dialog contains only free-form input. Choosing a model suggestion
+host performs no repair turn; valid prose remains accepted, while bounded
+current-head host-preflighted exits remain available beside free-form input.
+These exits are not narrator-authored outcome promises and selecting one bypasses
+only probabilistic translation before the usual deterministic gates. Choosing a model suggestion
 schedules its utterance through the same restricted typed interpreter,
 current-world adjudicator, scope/knowledge checks, engine validation, and commit
 path as typed player input.
@@ -149,7 +153,9 @@ concrete current fact, sensation, motion, spoken cue, or unresolved signal, but
 may not append “你可以……”, “是……还是……”, “下一步由你决定”, or equivalent
 player-facing action scaffolding. This is a model-layer semantic constraint;
 host validation remains language-neutral and checks only structural narration
-properties. Only `propose_player_choices` may carry possible actions.
+properties. Narrator-authored possible actions may appear only in
+`propose_player_choices`; private host exits are merged later and never enter the
+narrator prompt.
 
 ### 4. Player action translation looked hung and could run forever
 

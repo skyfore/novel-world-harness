@@ -99,6 +99,17 @@ export const narrativeContextSchema = z
   .strict();
 export type NarrativeContext = z.infer<typeof narrativeContextSchema>;
 
+/**
+ * Participation and bodily presence are deliberately separate. A character can
+ * cause or receive an event through a letter, memory, report, or remote channel
+ * without sharing the actor's scene.
+ */
+export const participantPresenceSchema = z.object({
+  entityId: idSchema,
+  mode: z.enum(["physical", "remote", "mentioned", "represented", "dream", "memory"]),
+}).strict();
+export type ParticipantPresence = z.infer<typeof participantPresenceSchema>;
+
 export const valueTypeSchema = z.enum(["boolean", "number", "string", "entity-ref", "entity-ref-set", "json-scalar"]);
 export type ValueType = z.infer<typeof valueTypeSchema>;
 
@@ -195,6 +206,47 @@ export const knowledgeDeltaSchema = z.object({ version: z.literal(1), operations
 export type KnowledgeDelta = z.infer<typeof knowledgeDeltaSchema>;
 
 /**
+ * A source-grounded cut immediately before one character's first embodied
+ * canonical scene. It is distinct from the event outcome: the delta/knowledge
+ * describe facts already true at the cut, actorObservation is limited to what
+ * that character can perceive, and readerSetup is presentation-only context.
+ */
+export const characterEntryCheckpointSchema = z
+  .object({
+    actorId: idSchema,
+    readerSetup: z.string().trim().min(1).max(1_500),
+    actorObservation: z.string().trim().min(1).max(1_000),
+    participantPresence: z.array(participantPresenceSchema).min(1).max(128),
+    delta: stateDeltaSchema,
+    knowledge: knowledgeDeltaSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const seen = new Set<string>();
+    let actorIsPhysical = false;
+    for (let index = 0; index < value.participantPresence.length; index += 1) {
+      const presence = value.participantPresence[index]!;
+      if (seen.has(presence.entityId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Entry checkpoint presence entries must have unique entity IDs",
+          path: ["participantPresence", index, "entityId"],
+        });
+      }
+      seen.add(presence.entityId);
+      if (presence.entityId === value.actorId && presence.mode === "physical") actorIsPhysical = true;
+    }
+    if (!actorIsPhysical) {
+      ctx.addIssue({
+        code: "custom",
+        message: "An entry checkpoint must establish its selected actor as physically present",
+        path: ["participantPresence"],
+      });
+    }
+  });
+export type CharacterEntryCheckpoint = z.infer<typeof characterEntryCheckpointSchema>;
+
+/**
  * A committed event may advance the playable narrative without changing a
  * canonical state field. These tags are typed, validated commit metadata rather
  * than prose: the host derives channels/identity, while a world adjudication may
@@ -267,7 +319,11 @@ export type NarrativeProgress = z.infer<typeof narrativeProgressSchema>;
 export const canonicalEventSchema = z.object({
   id: idSchema,
   title: z.string().min(1),
+  /** Completed-event recap for a reader who enters at a later source scene. */
+  readerSummary: z.string().trim().min(1).max(1_500).optional(),
   participants: z.array(idSchema),
+  participantPresence: z.array(participantPresenceSchema).max(128).optional(),
+  characterEntryCheckpoints: z.array(characterEntryCheckpointSchema).max(128).optional(),
   storyTime: storyTimeSchema,
   timeAdvance: timeAdvanceSchema.optional(),
   narrativeContext: narrativeContextSchema.optional(),
@@ -309,6 +365,7 @@ export const eventProposalSchema = z
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
     actorAffects: z.array(actorAffectSchema).max(128).optional(),
     participants: z.array(idSchema),
+    participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     proposedTime: storyTimeSchema,
     timeAdvance: timeAdvanceSchema.optional(),
     preconditions: z.array(predicateSchema),
@@ -335,6 +392,7 @@ export const committedEventSchema = z
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
     actorAffects: z.array(actorAffectSchema).max(128).optional(),
     participants: z.array(idSchema),
+    participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     deltaHash: idSchema,
     knowledgeDeltaHash: idSchema.optional(),
     evidence: z.array(evidenceRefSchema),
@@ -345,7 +403,8 @@ export const committedEventSchema = z
     actorId: idSchema.optional(),
     progress: narrativeProgressSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(validateParticipantPresence);
 export type CommittedEvent = z.infer<typeof committedEventSchema>;
 
 export const branchSchema = z.object({
@@ -364,12 +423,31 @@ export type WorldCommit = z.infer<typeof worldCommitSchema>;
 export const worldStateSchema = z.object({ atCommit: idSchema, logicalTime: logicalTimeSchema, values: z.record(z.string(), z.record(z.string(), stateValueSchema)), activeRuleIds: z.array(idSchema) }).strict();
 export type WorldState = z.infer<typeof worldStateSchema>;
 
+export const possibilityKindSchema = z.enum([
+  "canon-analogue",
+  "player-choice",
+  "actor-plan",
+  "obligation",
+  "causal-consequence",
+  "background-pressure",
+  "environmental",
+  "generated",
+]);
+export type PossibilityKind = z.infer<typeof possibilityKindSchema>;
+export const AUTONOMOUS_BACKGROUND_KINDS = [
+  "obligation",
+  "causal-consequence",
+  "background-pressure",
+  "environmental",
+  "generated",
+] as const satisfies readonly PossibilityKind[];
+
 export const possibilitySchema = z
   .object({
     id: idSchema,
     branchId: idSchema,
     evaluatedAtCommit: idSchema,
-    kind: z.enum(["canon-analogue", "player-choice", "actor-plan", "obligation", "causal-consequence", "background-pressure", "environmental", "generated"]),
+    kind: possibilityKindSchema,
     title: z.string().min(1),
     candidateWindow: storyTimeSchema.optional(),
     timeAdvance: timeAdvanceSchema.optional(),
@@ -377,6 +455,7 @@ export const possibilitySchema = z
     blockers: z.array(predicateSchema),
     expiry: z.array(predicateSchema).optional(),
     participants: z.array(idSchema),
+    participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     causalParents: z.array(idSchema),
     canonicalEventId: idSchema.optional(),
     pressure: z.number().min(0),
@@ -387,6 +466,31 @@ export const possibilitySchema = z
   })
   .strict();
 export type Possibility = z.infer<typeof possibilitySchema>;
+
+export function validateParticipantPresence(
+  value: { participants: readonly string[]; participantPresence?: readonly ParticipantPresence[] },
+  ctx: z.RefinementCtx,
+): void {
+  const seen = new Set<string>();
+  for (let index = 0; index < (value.participantPresence?.length ?? 0); index += 1) {
+    const presence = value.participantPresence![index]!;
+    if (!value.participants.includes(presence.entityId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Participant presence must refer to an event participant",
+        path: ["participantPresence", index, "entityId"],
+      });
+    }
+    if (seen.has(presence.entityId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Participant presence entries must have unique entity IDs",
+        path: ["participantPresence", index, "entityId"],
+      });
+    }
+    seen.add(presence.entityId);
+  }
+}
 
 export const knowledgeFactSchema = z.object({ actorId: idSchema, claimId: idSchema, status: knowledgeStatusSchema, confidence: z.number().min(0).max(1), acquiredAtCommit: idSchema, sourceActorId: idSchema.optional() }).strict();
 export type KnowledgeFact = z.infer<typeof knowledgeFactSchema>;

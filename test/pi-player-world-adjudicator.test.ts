@@ -16,6 +16,8 @@ afterEach(async () => {
 function input(): PlayerWorldAdjudicationInput {
   return {
     utterance: "Attempt the impossible result now.",
+    recentMessages: [{ role: "scene", text: "The friend lies motionless before you.", worldStatus: "rendered", authority: "presentation-only", order: 0 }],
+    relatedMessages: [{ role: "player", text: "Earlier I promised not to abandon them.", worldStatus: "accepted", authority: "untrusted-player-text", order: 0 }],
     candidate: {
       title: "Try to restore life",
       intent: {
@@ -81,9 +83,12 @@ describe("Pi player world adjudicator", () => {
       expect(options.includeProjectInstructions).toBe(false);
       expect(options.includeLocalTools).toBe(false);
       expect(options.includeNwhExtension).toBe(false);
-      expect(options.additionalTools).toHaveLength(1);
-      const tool = options.additionalTools![0]!;
-      expect(tool.name).toBe("propose_player_world_resolution");
+      expect(options.additionalTools?.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+        "find_related_messages",
+        "read_related_message",
+        "propose_player_world_resolution",
+      ]));
+      const tool = options.additionalTools!.find((candidate) => candidate.name === "propose_player_world_resolution")!;
       return {
         abort: async () => undefined,
         dispose: async () => { disposed = true; },
@@ -131,6 +136,7 @@ describe("Pi player world adjudicator", () => {
       { source: "state", entityId: "fallen-friend", field: "character.alive" },
     ]));
     expect(prompt).toContain("character.alive");
+    expect(prompt).toContain("The friend lies motionless before you");
     expect(prompt).not.toContain("hero-stable-id");
     expect(prompt).not.toContain("fallen-friend");
     expect(disposed).toBe(true);
@@ -145,7 +151,7 @@ describe("Pi player world adjudicator", () => {
     vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
       created += 1;
       const attempt = created;
-      const tool = options.additionalTools![0]!;
+      const tool = options.additionalTools!.find((candidate) => candidate.name === "propose_player_world_resolution")!;
       return {
         abort: async () => undefined,
         dispose: async () => { disposed += 1; },

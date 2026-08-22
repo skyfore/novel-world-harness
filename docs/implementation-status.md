@@ -1,6 +1,6 @@
 # Implementation status
 
-Date: 2026-08-17
+Date: 2026-08-21
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
@@ -17,12 +17,12 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
 | Canon replay and branching | Implemented vertical slice | Predicate checkpoints, fork, diff, divergent possibility eligibility |
-| Actor behavior | Partial | Deterministic goal actions are connected; model reasoner exists only as an adapter/API |
+| Actor behavior | Partial | Direct typed player interactions invoke a Pi-backed, actor-scoped NPC response lane with perceived-history retrieval, development/goals/affect context, and validated causal commits; unrelated proactive behavior still uses deterministic candidates |
 | Narrative | Implemented vertical slice | Actor-scoped Pi scene narrator receives a bounded actor-safe frame plus exact retrieval, streams native provider/model, thinking, text, retry, and capture-tool events; accepted prose cannot mutate world truth |
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
 | Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation |
 | Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
-| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, separately validated immediate world responses, and tool-first narrator choices with free-form-only handling when capture is absent |
+| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, latest-ten exact branch conversation continuity plus bounded recall, explicit reactive NPC responses, separately validated immediate world developments, and tool-first narrator choices with free-form-only handling when capture is absent |
 | Character embodiment | Implemented vertical slice | Character listing/selection, actor-scoped perception, repeatable actions, per-instance character memory, and durable active resume |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
@@ -138,19 +138,27 @@ may be committed; its desired discovery remains audit-only. All wider intents
 remain uncommitted and recover out of character rather than masquerading as an
 in-world blockage. This fallback never writes knowledge or active rules.
 
-### 3. Model actor policy is not connected to the product CLI
+### 3. Proactive model actor policy is not connected to the product CLI
 
-`modelActorProposalSource` limits a reasoner to turn-local opaque actor handles,
+The product now connects a separate reactive Pi lane for NPCs directly
+addressed by typed player speech, gesture, or physical interaction. That lane
+receives only the NPC's perceived history, knowledge, current
+development/goals/affect and bounded capabilities, and commits explicit speech,
+gesture, refusal, or silence through normal deterministic gates with the player
+event as causal parent.
+
+`modelActorProposalSource` limits an unrelated proactive reasoner to turn-local opaque actor handles,
 actor-visible state/knowledge, one currently active goal's description,
 priority and visible targets, the active disposition, and committed development.
 Inactive/future policy phases, goal IDs/triggers, canonical IDs, evidence and
 engine chronology are excluded, and the returned action crosses the normal
-actor capability gates. No Pi-backed `ActorReasoner` is constructed by
-`world move`; the CLI still uses deterministic pre-authored candidates only.
+actor capability gates. No Pi-backed proactive `ActorReasoner` is constructed
+by `world move`; unrelated initiative still uses deterministic pre-authored
+candidates only.
 
 ### 4. The low-level renderer remains diagnostic
 
-`NarrativeRenderer` still provides deterministic event-title rendering for low-level CLI/API inspection. The TUI player path now adds an isolated Pi narrator over a bounded committed actor frame, two exact read-only retrieval tools, and a capture-only choice tool. Broader prose-quality, parametric-canon recall, and epistemic-leakage evaluation across representative novels is still required.
+`NarrativeRenderer` still provides deterministic event-title rendering for low-level CLI/API inspection. The TUI player path now adds an isolated Pi narrator over a bounded committed actor frame, exact actor-frame and related-message retrieval, and a capture-only choice tool. Broader prose-quality, parametric-canon recall, and epistemic-leakage evaluation across representative novels is still required.
 
 ### 5. Compilation quality has no representative benchmark
 

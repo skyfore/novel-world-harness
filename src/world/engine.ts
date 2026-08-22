@@ -126,6 +126,21 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
     }
     observedActors.add(observation.actorId);
   }
+  const affectedActors = new Set<string>();
+  for (let index = 0; index < (proposal.actorAffects?.length ?? 0); index += 1) {
+    const affect = proposal.actorAffects![index]!;
+    const actor = context.entities.get(affect.actorId);
+    if (!actor || actor.kind !== "character") {
+      errors.push({ code: "INVALID_EVENT_AFFECT_ACTOR", message: `Event affect actor ${affect.actorId} is not a character`, path: `actorAffects.${index}.actorId` });
+    }
+    if (!proposal.participants.includes(affect.actorId)) {
+      errors.push({ code: "INVALID_EVENT_AFFECT_ACTOR", message: `Event affect actor ${affect.actorId} must also be a participant`, path: `actorAffects.${index}.actorId` });
+    }
+    if (affectedActors.has(affect.actorId)) {
+      errors.push({ code: "DUPLICATE_EVENT_AFFECT_ACTOR", message: `Event affect actor ${affect.actorId} has more than one affect`, path: `actorAffects.${index}.actorId` });
+    }
+    affectedActors.add(affect.actorId);
+  }
   let evaluationState = state;
   try {
     const logicalTime = nextLogicalTime(state.logicalTime, proposal.proposedTime, proposal.timeAdvance);
@@ -334,6 +349,7 @@ export class WorldEngine {
       realizesCanonicalEventIds,
       progress: parsed.progress,
       actorObservations: parsed.actorObservations,
+      actorAffects: parsed.actorAffects,
     });
     const event: CommittedEvent = {
       version: 1,
@@ -345,6 +361,7 @@ export class WorldEngine {
       ...(parsed.actorId ? { actorId: parsed.actorId } : {}),
       title: parsed.title,
       ...(parsed.actorObservations ? { actorObservations: structuredClone(parsed.actorObservations) } : {}),
+      ...(parsed.actorAffects ? { actorAffects: structuredClone(parsed.actorAffects) } : {}),
       participants: parsed.participants,
       deltaHash,
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),

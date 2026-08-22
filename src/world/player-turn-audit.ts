@@ -5,6 +5,7 @@ import { contentHash } from "./canonical.js";
 import type { PlayerActionCandidate, PlayerProgressCertificate, PlayerTurnStage, PlayerWorldResolution } from "./player-action.js";
 import type { EventProposal, ValidationIssue, ValidationReport } from "./model.js";
 import type { PlayerWorldResponseOption, PlayerWorldResponseResolution } from "./runtime.js";
+import type { NpcReactionEmotion, NpcReactionEvent, NpcResponseKind } from "./npc-reaction.js";
 
 export type PlayerTurnOrigin = "freeform" | "scene-choice" | "host-safe-choice" | "cli";
 
@@ -37,9 +38,19 @@ export type PlayerTurnAudit = {
   worldResponseCandidates?: PlayerWorldResponseOption[];
   worldResponseEvents?: Array<{ eventHash: string; title: string; possibilityId: string }>;
   worldResponseError?: string;
-  reactionEvents: Array<{ eventHash: string; title: string; actorId: string }>;
+  reactionEvents: Array<{
+    eventHash: string;
+    title: string;
+    actorId: string;
+    responseKind?: NpcResponseKind;
+    emotion?: NpcReactionEmotion;
+    trace?: NpcReactionEvent["trace"];
+  }>;
+  npcResponseError?: string;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
   backgroundError?: string;
+  /** Presentation-memory failure; committed world truth remains unaffected. */
+  conversationError?: string;
 };
 
 export class PlayerTurnAuditStore {

@@ -10,6 +10,7 @@ import { ActorModelStore } from "../src/world/actors.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { PlaySessionStore } from "../src/world/play-session.js";
+import { PlayConversationStore } from "../src/world/play-conversation.js";
 import { inspectPlayExperience, listPlayableCharacters } from "../src/world/play-experience.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../src/world/removal.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
@@ -47,6 +48,8 @@ describe("novel-world removal", () => {
     const sessions = new PlaySessionStore(root);
     await sessions.write({ branchId: "main", sourceId: fixture.source.id, actorId: "hero", lastCommitId: head });
     await sessions.write({ branchId: "child", sourceId: fixture.source.id, actorId: "hero", lastCommitId: head });
+    const conversations = new PlayConversationStore(root);
+    await conversations.append({ branchId: "child", actorId: "hero", atCommit: head, role: "player", status: "accepted", text: "child-only action" });
 
     await expect(removeWorldInstance(root, "main")).rejects.toThrow("child instance 'child'");
     await expect(removeWorldInstance(root, "child")).resolves.toMatchObject({
@@ -55,6 +58,7 @@ describe("novel-world removal", () => {
     });
     await expect(engine.branches.read("child")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(sessions.read()).resolves.toMatchObject({ branchId: "main" });
+    await expect(conversations.list("child")).resolves.toEqual([]);
 
     await expect(removeWorldInstance(root, "main")).resolves.toMatchObject({
       branchId: "main",

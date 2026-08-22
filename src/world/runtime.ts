@@ -17,6 +17,7 @@ import { WorldEngine } from "./engine.js";
 import { committedHistory } from "./scene.js";
 import { immutableClone } from "../util/immutable.js";
 import type { PlayerActionCandidate } from "./player-action.js";
+import type { ModelPlayConversationMessage } from "./play-conversation.js";
 
 const MAX_CALLBACK_CANDIDATES = 10_000;
 const MAX_PLAYER_WORLD_RESPONSES = 64;
@@ -85,10 +86,13 @@ export type PlayerWorldResponseOption = Readonly<{
 
 export type PlayerWorldResponseResolverInput = Readonly<{
   utterance: string;
+  recentMessages: readonly ModelPlayConversationMessage[];
+  relatedMessages: readonly ModelPlayConversationMessage[];
   actor: { id: string; name: string };
   scene: {
     label?: string;
     presentEntities: Array<{ id: string; name: string; kind: string }>;
+    recentEvents?: Array<{ summary: string }>;
   };
   candidate: PlayerActionCandidate;
   eligibleResponses: PlayerWorldResponseOption[];
@@ -319,6 +323,8 @@ export class WorldRuntime {
     expectedHead: CommitId;
     resolver: PlayerWorldResponseResolver;
     causalParentEventId?: string;
+    recentMessages?: readonly ModelPlayConversationMessage[];
+    relatedMessages?: readonly ModelPlayConversationMessage[];
   }): Promise<PlayerWorldResponseResult> {
     const actualHead = await this.engine.branches.readHead(input.branchId);
     if (actualHead !== input.expectedHead) {
@@ -356,6 +362,8 @@ export class WorldRuntime {
     const eligibleResponses = offered.map(({ possibility }) => describePlayerWorldResponse(possibility, context));
     const rawResolution = await input.resolver(immutableClone({
       utterance: input.utterance,
+      recentMessages: input.recentMessages ?? [],
+      relatedMessages: input.relatedMessages ?? [],
       actor: { id: actor.id, name: actor.canonicalName },
       scene: input.scene,
       candidate: input.candidate,

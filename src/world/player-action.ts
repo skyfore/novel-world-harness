@@ -40,6 +40,12 @@ import { projectActorVisibleState } from "./actor-visible.js";
 import { evaluatePredicate } from "./state.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { deepFreeze, immutableClone } from "../util/immutable.js";
+import {
+  modelPlayConversation,
+  playConversationAtCommit,
+  recentPlayConversation,
+  type ModelPlayConversationMessage,
+} from "./play-conversation.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -68,6 +74,28 @@ export const playerIntentSceneTransitionSchema = z
   });
 export type PlayerIntentSceneTransition = z.infer<typeof playerIntentSceneTransitionSchema>;
 
+export const playerInteractionSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("speech"),
+    content: z.string().trim().min(1).max(800),
+    addresseeIds: z.array(idSchema).min(1).max(4),
+    channel: z.literal("audible").default("audible"),
+  }).strict(),
+  z.object({
+    kind: z.literal("gesture"),
+    description: z.string().trim().min(1).max(800),
+    addresseeIds: z.array(idSchema).min(1).max(4),
+    channel: z.literal("visible").default("visible"),
+  }).strict(),
+  z.object({
+    kind: z.literal("physical"),
+    description: z.string().trim().min(1).max(800),
+    addresseeIds: z.array(idSchema).min(1).max(4),
+    channel: z.literal("physical").default("physical"),
+  }).strict(),
+]);
+export type PlayerInteraction = z.infer<typeof playerInteractionSchema>;
+
 /**
  * The part of an intent the selected actor can perform without assuming that
  * the surrounding world, another entity, or an unknown fact cooperates. These
@@ -78,6 +106,10 @@ export type PlayerIntentSceneTransition = z.infer<typeof playerIntentSceneTransi
 export const playerControlledActSchema = z.object({
   eventTitle: z.string().trim().min(1).max(500),
   actorObservation: z.string().trim().min(1).max(1_000),
+  /** Required at the model boundary so omission cannot silently mean "not directed". */
+  interactionMode: z.enum(["none", "direct"]).optional(),
+  /** Typed perceptible interaction; desired responses remain outside player control. */
+  interaction: playerInteractionSchema.optional(),
 }).strict();
 export type PlayerControlledAct = z.infer<typeof playerControlledActSchema>;
 
@@ -116,10 +148,20 @@ export const playerActionCandidateSchema = z
   .strict();
 export type PlayerActionCandidate = z.infer<typeof playerActionCandidateSchema>;
 
+const playerControlledActModelSchema = z.discriminatedUnion("interactionMode", [
+  playerControlledActSchema.omit({ interactionMode: true, interaction: true }).extend({
+    interactionMode: z.literal("none"),
+  }).strict(),
+  playerControlledActSchema.omit({ interactionMode: true, interaction: true }).extend({
+    interactionMode: z.literal("direct"),
+    interaction: playerInteractionSchema,
+  }).strict(),
+]);
+
 /** Model translators must make the controllable/effect boundary explicit. */
 export const playerActionModelCandidateSchema = playerActionCandidateSchema.extend({
   intent: playerIntentSchema.extend({
-    controlledAct: playerControlledActSchema,
+    controlledAct: playerControlledActModelSchema,
   }).strict(),
 }).strict();
 
@@ -191,6 +233,10 @@ export type PlayerWorldAdjudicationInput = Readonly<{
   candidate: PlayerActionCandidate;
   actorContext: PlayerActionTranslationContext;
   world: PlayerWorldAdjudicationContext;
+  /** Presentation continuity only; currentWorld remains authoritative. */
+  recentMessages: readonly ModelPlayConversationMessage[];
+  /** Complete safe archive for adapter-owned read-only retrieval. */
+  relatedMessages: readonly ModelPlayConversationMessage[];
 }>;
 
 /** A world model may resolve an intent, but it still returns only a proposal. */
@@ -270,6 +316,10 @@ export type PlayerActionTranslationContext = Omit<
 export type PlayerActionTranslationInput = Readonly<{
   utterance: string;
   context: PlayerActionTranslationContext;
+  /** Exact short-term presentation memory; never authoritative world truth. */
+  recentMessages: readonly ModelPlayConversationMessage[];
+  /** Complete branch/commit-scoped archive, exposed to model adapters only through read-only retrieval. */
+  relatedMessages: readonly ModelPlayConversationMessage[];
 }>;
 
 export type SafePlayerIntent = "observe" | "reflect" | "wait";
@@ -292,7 +342,7 @@ const SAFE_PLAYER_INTENT_ACTOR_OBSERVATIONS: Record<SafePlayerIntent, string> = 
  */
 export function deterministicPlayerIntentCandidate(
   intent: SafePlayerIntent,
-  input: PlayerActionTranslationInput,
+  input: Pick<PlayerActionTranslationInput, "utterance" | "context">,
   requestedTimeAdvance?: TimeAdvance,
 ): PlayerActionCandidate {
   return playerActionCandidateSchema.parse({
@@ -356,6 +406,7 @@ export type PlayerActionModelBoundary = {
   encodePredicate(predicate: Predicate): Predicate;
   encodeCandidate(candidate: PlayerActionCandidate): PlayerActionCandidate;
   decodeEntityId(entityId: string): string;
+  decodeClaimId(claimId: string): string;
   decodeCandidate(candidate: PlayerActionCandidate): PlayerActionCandidate;
 };
 
@@ -458,6 +509,10 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
           destination: { ...destination, entityId: scopedEntityHandle(destination.entityId) },
         };
       }
+      const interaction = candidate.intent.controlledAct?.interaction;
+      if (interaction) {
+        interaction.addresseeIds = interaction.addresseeIds.map(scopedEntityHandle);
+      }
     }
     return playerActionCandidateSchema.parse(candidate);
   };
@@ -539,6 +594,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
     encodePredicate,
     encodeCandidate,
     decodeEntityId: decodeEntity,
+    decodeClaimId: decodeClaim,
     decodeCandidate(candidateInput) {
       const candidate = structuredClone(candidateInput) as PlayerActionCandidate;
       candidate.participants = candidate.participants.map(decodeEntity);
@@ -575,6 +631,10 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
             kind: candidate.intent.sceneTransition!.kind,
             destination: { ...destination, entityId: decodeEntity(destination.entityId) },
           };
+        }
+        const interaction = candidate.intent.controlledAct?.interaction;
+        if (interaction) {
+          interaction.addresseeIds = interaction.addresseeIds.map(decodeEntity);
         }
       }
       return playerActionCandidateSchema.parse(candidate);
@@ -860,6 +920,26 @@ export function validatePlayerActionScope(
       requireReferenceable(target.entityId, `intent.targets.${index}.entityId`, referenceable, issues);
     }
   }
+  const interaction = candidate.intent?.controlledAct?.interaction;
+  for (let index = 0; index < (interaction?.addresseeIds.length ?? 0); index += 1) {
+    const addresseeId = interaction!.addresseeIds[index]!;
+    requireReferenceable(addresseeId, `intent.controlledAct.interaction.addresseeIds.${index}`, referenceable, issues);
+    const addresseeKind = entityKinds.get(addresseeId);
+    if (addresseeKind && addresseeKind !== "character") {
+      issues.push(issue(
+        "PLAYER_INTERACTION_ADDRESSEE_NOT_CHARACTER",
+        `Interaction addressee ${addresseeId} is ${addresseeKind}, not a character`,
+        `intent.controlledAct.interaction.addresseeIds.${index}`,
+      ));
+    }
+    if (!candidate.participants.includes(addresseeId)) {
+      issues.push(issue(
+        "PLAYER_INTERACTION_ADDRESSEE_NOT_PARTICIPANT",
+        `Interaction addressee ${addresseeId} must be a participant in the controlled act`,
+        `intent.controlledAct.interaction.addresseeIds.${index}`,
+      ));
+    }
+  }
   const sceneDestination = candidate.intent?.sceneTransition?.destination;
   if (sceneDestination?.kind === "entity") {
     requireReferenceable(sceneDestination.entityId, "intent.sceneTransition.destination.entityId", referenceable, issues);
@@ -1087,6 +1167,22 @@ export function playerActionToKnowledgeAwareAction(input: {
     utterance: input.utterance,
     candidate,
   }).slice(0, 24)}`;
+  const actorObservations = [{
+    actorId: input.actorId,
+    summary: input.actorObservation ?? playerIntentObservation(input.utterance),
+  }];
+  const interaction = candidate.intent?.controlledAct?.interaction;
+  for (const addresseeId of [...new Set(interaction?.addresseeIds ?? [])].sort()) {
+    if (addresseeId === input.actorId) continue;
+    const perceived = interaction?.kind === "speech"
+      ? `面前的人对你说：“${interaction.content}”`
+      : interaction?.kind === "gesture"
+        ? `面前的人向你做出动作：${interaction.description}`
+        : interaction?.kind === "physical"
+          ? `面前的人与你发生直接互动：${interaction.description}`
+          : undefined;
+    if (perceived) actorObservations.push({ actorId: addresseeId, summary: boundedObservation(perceived) });
+  }
   const proposal = eventProposalSchema.parse({
     proposalId,
     branchId: input.branchId,
@@ -1094,7 +1190,7 @@ export function playerActionToKnowledgeAwareAction(input: {
     source: "player",
     actorId: input.actorId,
     title: input.eventTitle ?? playerIntentTitle(input.utterance),
-    actorObservations: [{ actorId: input.actorId, summary: input.actorObservation ?? playerIntentObservation(input.utterance) }],
+    actorObservations,
     participants: [...new Set([input.actorId, ...candidate.participants])],
     proposedTime: input.proposedTime ?? { kind: "unknown" },
     ...(input.timeAdvance ? { timeAdvance: input.timeAdvance } : {}),
@@ -1109,6 +1205,11 @@ export function playerActionToKnowledgeAwareAction(input: {
     requiresKnowledge: candidate.requiresKnowledge,
     forbidsKnowledge: candidate.forbidsKnowledge,
   };
+}
+
+function boundedObservation(value: string): string {
+  const characters = Array.from(value.trim());
+  return characters.length <= 1_000 ? characters.join("") : `${characters.slice(0, 999).join("")}…`;
 }
 
 function playerIntentObservation(utterance: string): string {
@@ -1150,17 +1251,22 @@ export class PlayerTurnService {
   async turn(inputValue: PlayerTurnInput, authority: PlayerTurnAuthority = {}): Promise<PlayerTurnResult> {
     const input = playerTurnInputSchema.parse(inputValue);
     const previousHead = await this.engine.branches.readHead(input.branchId);
-    const [contextBefore, storyTime, worldContext, worldState] = await Promise.all([
+    const [contextBefore, storyTime, worldContext, worldState, conversation] = await Promise.all([
       buildActorScopedActionContext(this.engine, input.actorId, previousHead, input.utterance, input.sourceId),
       latestCommittedStoryTime(this.engine, previousHead),
       this.engine.contextForCommit(previousHead),
       this.engine.projector.project(previousHead),
+      playConversationAtCommit(this.engine, input.branchId, previousHead, input.actorId),
     ]);
+    const relatedMessages = modelPlayConversation(conversation);
+    const recentMessages = modelPlayConversation(recentPlayConversation(conversation));
     let translated: unknown;
     try {
       translated = await this.translator(deepFreeze({
         utterance: input.utterance,
         context: playerActionTranslationContext(contextBefore),
+        recentMessages,
+        relatedMessages,
       }));
     } catch (error) {
       return this.rejected(input, previousHead, contextBefore, "translation", [
@@ -1253,6 +1359,8 @@ export class PlayerTurnService {
           candidate: structuredClone(intendedCandidate),
           actorContext: playerActionTranslationContext(contextBefore),
           world: adjudicationWorld,
+          recentMessages,
+          relatedMessages,
         }));
       } catch (error) {
         if (isAbortError(error)) throw error;

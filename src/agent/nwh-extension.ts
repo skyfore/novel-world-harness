@@ -33,10 +33,12 @@ import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prep
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { PlaySessionStore } from "../world/play-session.js";
+import { modelPlayConversation, PlayConversationStore } from "../world/play-conversation.js";
 import { workspaceStateDir } from "./runtime-paths.js";
 import { createPiPlayerActionTranslator } from "./pi-player-action.js";
 import { createPiPlayerWorldAdjudicator } from "./pi-player-world-adjudicator.js";
 import { createPiPlayerWorldResponseResolver } from "./pi-player-world-response.js";
+import { createPiNpcReactionReasoner } from "./pi-npc-reaction.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
   deterministicPlayerIntentCandidate,
@@ -85,6 +87,7 @@ import {
 } from "./pi-player-opening.js";
 import { playerSceneChoicesSchema, type PlayerSceneChoice } from "./player-scene-choice-tool.js";
 import type { PlayerWorldResponseResolver } from "../world/runtime.js";
+import type { NpcReactionReasoner } from "../world/npc-reaction.js";
 import { formatElapsed } from "../util/elapsed-status.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/removal.js";
 import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
@@ -147,6 +150,7 @@ export type NwhExtensionOptions = {
   playerTranslator?: PlayerActionTranslator;
   playerWorldAdjudicator?: PlayerWorldAdjudicator;
   playerWorldResponseResolver?: PlayerWorldResponseResolver;
+  npcResponseReasoner?: NpcReactionReasoner;
   advanceBackground?: number;
   onSessionShutdown?: () => Promise<void>;
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
@@ -804,6 +808,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         activeThreads: [],
         behavioralContext: { traits: {}, decisionBiases: {}, activeGoals: [] },
         affordances: [],
+        messageHistory: [],
+        recentMessages: [],
         ...(turnResolution ? { turnResolution } : {}),
       };
       const stream = createPlayerSceneObserver(ctx, purpose, controller.signal);
@@ -840,7 +846,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(options.profile ? { profile: options.profile } : {}),
           ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
         });
-        const output = await narrator(playerSceneModelFrame(frame), purpose, stream.observer);
+        const output = await narrator(
+          playerSceneModelFrame(frame),
+          purpose,
+          stream.observer,
+          modelPlayConversation(frame.messageHistory),
+        );
         const narration = assertPlaySceneNarration(typeof output === "string" ? output : output.narration);
         const parsedChoices = typeof output === "string"
           ? undefined
@@ -868,6 +879,18 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             choices: choices.map(({ action }) => ({ action })),
           } as const;
           if (!stream.commit(narration, details)) showNarratorMessage(narration, details);
+          try {
+            await new PlayConversationStore(workspace.root).append({
+              branchId: frame.branchId,
+              actorId: frame.actor.id,
+              atCommit: frame.commitId,
+              role: "scene",
+              status: "rendered",
+              text: narration,
+            });
+          } catch (error) {
+            ctx.ui.notify(`Scene memory could not be persisted: ${error instanceof Error ? error.message : String(error)}`, "warning");
+          }
           return choices;
         }
       } catch (error) {
@@ -1036,6 +1059,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             signal: controller.signal,
           })
         : undefined);
+      const npcResponseReasoner = options.npcResponseReasoner ?? (!options.playerTranslator
+        ? createPiNpcReactionReasoner({
+            root: workspace.root,
+            ...(options.profile ? { profile: options.profile } : {}),
+            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+            onStatus: showTurnActivity,
+            signal: controller.signal,
+          })
+        : undefined);
       showTurnActivity("正在理解你的行动…");
       let outcome: Awaited<ReturnType<typeof performPlayTurn>>;
       try {
@@ -1047,6 +1079,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           translator,
           ...(adjudicator ? { adjudicator } : {}),
           ...(worldResponseResolver ? { worldResponseResolver } : {}),
+          ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
           advanceBackground: options.advanceBackground ?? 0,
           origin: input.origin ?? "freeform",
           ...(input.intent ? { intent: input.intent } : {}),
@@ -1079,6 +1112,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       };
       setPlayerStatus(ctx, selectedPlay);
       if (outcome.auditError) ctx.ui.notify(`Player-turn audit could not be persisted: ${outcome.auditError}`, "warning");
+      if (outcome.conversationError) ctx.ui.notify(`Conversation memory could not be persisted: ${outcome.conversationError}`, "warning");
       if (!outcome.result.accepted) {
         const issueCode = outcome.result.issues[0]?.code ?? "UNKNOWN";
         showPlayMessage(outcome.result.stage === "adjudication"
@@ -1103,6 +1137,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
       if (outcome.worldResponseError) {
         ctx.ui.notify(`Immediate world response stopped: ${outcome.worldResponseError}`, "warning");
+      }
+      if (outcome.npcResponseError) {
+        showPlayMessage("**场外提示：** 你对在场人物的互动已经发生，但至少一位 NPC 的即时回应未能通过生成或世界校验；系统没有把失败伪装成沉默。你可以用 **/scene** 查看当前已提交时刻，或继续行动。");
+        ctx.ui.notify(`NPC response stopped: ${outcome.npcResponseError}`, "warning");
       }
       await narratePlayerScene(ctx, selectedPlay, "turn");
     };

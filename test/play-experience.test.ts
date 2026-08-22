@@ -14,6 +14,7 @@ import {
 } from "../src/world/play-experience.js";
 import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 import { KnowledgeProjector } from "../src/world/knowledge.js";
+import { PlayConversationStore } from "../src/world/play-conversation.js";
 
 const roots: string[] = [];
 
@@ -257,6 +258,10 @@ describe("play experience catalog", () => {
       }),
     });
     expect(rejected.result.accepted).toBe(false);
+    expect(await new PlayConversationStore(root).list("main")).toEqual([
+      expect.objectContaining({ text: "I ask Rival to wait.", status: "accepted", role: "player" }),
+      expect.objectContaining({ text: "Act on an impossible condition.", status: "rejected", role: "player" }),
+    ]);
     const allAuditFiles = await fs.readdir(auditDirectory);
     const rejectedAudits = await Promise.all(allAuditFiles.map(async (file) =>
       JSON.parse(await fs.readFile(path.join(auditDirectory, file), "utf8")) as {

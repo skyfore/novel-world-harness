@@ -11,6 +11,7 @@ import { ActorModelStore } from "./actors.js";
 import { CanonicalModelStore, ProposalStore } from "./canonical-model.js";
 import { InitialWorldStore } from "./initial.js";
 import { PlaySessionStore, type ActivePlaySession } from "./play-session.js";
+import { PlayConversationStore } from "./play-conversation.js";
 import { inspectPlayExperience, resolveNovelSource } from "./play-experience.js";
 import { PossibilityTemplateStore } from "./possibility-model.js";
 import { BranchStore } from "./store.js";
@@ -47,6 +48,7 @@ export async function removeWorldInstance(root: string, branchId: string): Promi
 
   await new BranchStore(root).remove(branchId);
   const nextActiveSession = await new PlaySessionStore(root).removeInstance(branchId);
+  await new PlayConversationStore(root).remove(branchId);
   await fs.rm(path.join(workspaceStateDir(root), "world", "v1", "frontier", branchId), {
     recursive: true,
     force: true,

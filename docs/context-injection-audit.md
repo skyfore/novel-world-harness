@@ -1,6 +1,6 @@
 # Context injection, visibility, and authority audit
 
-Date: 2026-08-19
+Date: 2026-08-21
 
 This is the evidence record for every application-controlled path that can
 place data in a model request, every public callback that could be implemented
@@ -21,35 +21,38 @@ The inventory was built by tracing every `PiAgentSession.create`, every direct
 `ModelRuntime.create`, every prompt constructor, Pi's lifecycle hooks, and the
 exported callback types that accept world data.
 
-There are six application inference roles:
+There are seven application inference roles:
 
 | Inference role | Construction site | Model-visible input | Available model tools | Persistent authority |
 | --- | --- | --- | --- | --- |
 | Ordinary TUI/print assistant | `playCommand` | Harness prompt/contract, allowlisted project instructions, projected ordinary transcript, current user input and explicit safe attachments | bounded `list_files`, `search_files`, `read_file`; extension-owned session rename metadata | no file/world write; session title only |
 | Compiler | `createPiCompilerSession`, or an explicit compiler turn in the TUI | isolated compiler instructions plus a host-selected structure/source/opening/reconciliation payload and source-owned prior-artifact indexes; a chapter-bounded pass may request one non-citable edge preview, while a separately scheduled pair pass receives both full adjacent segments | scope-specific chapter-rule, exact-retrieval, boundary-deferral, and typed pending-proposal tools | validated chapter workflow metadata, pending/rejected proposal envelopes, non-canonical calibration requests, and a finish handshake; no canonical or branch commit |
-| Player-action translator | `createPiPlayerActionTranslator` | one actor-safe projection with opaque turn handles, one untrusted utterance, and bounded coverage metadata | exact retrieval over the already-safe projection and one in-memory capture tool | none; the host decodes, validates, and constructs the event proposal |
-| Player-world adjudicator | `createPiPlayerWorldAdjudicator` | the typed intended candidate, relevant current committed entity state, applicable active rules, deterministic preview issue codes, and actor write capabilities, all with opaque handles and no future canon | one in-memory resolution-capture tool | none; realization/transformation and its contradiction certificate are revalidated before the host can construct or commit an event |
-| Player-world response linker | `createPiPlayerWorldResponseResolver` | one already-committed structured player intent plus a bounded host-private list of currently eligible world-side developments; stable possibility/entity IDs are replaced or omitted, and this future-facing input never reaches the actor or narrator | one in-memory selection-capture tool accepting one offered opaque handle or none | none; the host records the offered set, rejects unoffered/stale selections, and submits the selected typed possibility through normal engine validation as a separate event |
-| Scene narrator | `createPiPlayerOpeningNarrator` | one actor-safe, name-based scene frame, current effective actor disposition/motivation, and bounded coverage metadata | exact retrieval over that same frame and one in-memory choice-capture tool | none; prose and suggested choices cannot mutate branch truth; a selected suggestion enters the separate player-action boundary |
+| Player-action translator | `createPiPlayerActionTranslator` | one actor-safe projection with opaque turn handles, one untrusted utterance, the latest ten exact presentation messages for the selected embodied actor, and bounded coverage metadata | exact retrieval over the already-safe actor projection, actor/branch-safe related-message retrieval, and one in-memory capture tool | none; the host decodes, validates, and constructs the event proposal |
+| Player-world adjudicator | `createPiPlayerWorldAdjudicator` | the typed intended candidate, relevant current committed entity state, applicable active rules, deterministic preview issue codes, actor write capabilities, and the latest ten presentation messages, all with opaque handles and no future canon | branch-safe related-message retrieval and one in-memory resolution-capture tool | none; realization/transformation and its contradiction certificate are revalidated before the host can construct or commit an event |
+| Reactive NPC reasoner | `createPiNpcReactionReasoner` | one addressed NPC's actor-safe state/knowledge, exact perceived trigger, latest ten actor-perceived events, effective development/goals/affect, and active rules explicitly marked as private constraints | exact actor-context retrieval, retrieval over only that NPC's perceived event archive, and one in-memory reaction-capture tool | none; the host decodes and validates actor scope, knowledge, space, rules, invariants, head, and causal parent before a separate actor event can commit |
+| Player-world response linker | `createPiPlayerWorldResponseResolver` | one already-committed structured player intent, the latest ten presentation messages, and a bounded host-private list of currently eligible world-side developments; stable possibility/entity IDs are replaced or omitted, and this future-facing input never reaches the actor or narrator | branch-safe related-message retrieval and one in-memory selection-capture tool accepting one offered opaque handle or none | none; the host records the offered set, rejects unoffered/stale selections, and submits the selected typed possibility through normal engine validation as a separate event |
+| Scene narrator | `createPiPlayerOpeningNarrator` | one actor-safe, name-based scene frame, current effective actor disposition/motivation, the latest ten exact presentation messages for the selected embodied actor, and bounded coverage metadata | exact retrieval over that same actor frame, actor/branch-safe related-message retrieval, and one in-memory choice-capture tool | none; prose and suggested choices cannot mutate branch truth; a selected suggestion enters the separate player-action boundary |
 
 Evidence: [play.ts](../src/commands/play.ts),
 [pi-compiler.ts](../src/compiler/pi-compiler.ts),
 [pi-player-action.ts](../src/agent/pi-player-action.ts),
 [pi-player-world-adjudicator.ts](../src/agent/pi-player-world-adjudicator.ts),
 [pi-player-world-response.ts](../src/agent/pi-player-world-response.ts),
-and [pi-player-opening.ts](../src/agent/pi-player-opening.ts). The only other
+and [pi-player-opening.ts](../src/agent/pi-player-opening.ts), plus
+[pi-npc-reaction.ts](../src/agent/pi-npc-reaction.ts). The only other
 direct `ModelRuntime.create` is `doctorCommand`; it reads provider/authentication
 metadata but never constructs a prompt or invokes inference.
 [doctor.ts](../src/commands/doctor.ts)
 
 ### Public callback inventory
 
-These API seams must not be confused with the five built-in Pi roles:
+These API seams must not be confused with the built-in Pi roles:
 
 | Callback | Data supplied by the harness | Boundary status and returned-value gate |
 | --- | --- | --- |
 | `PlayerActionTranslator` | actor-scoped stable IDs, visible state/knowledge/events, and writable capabilities; no commit chronology | safe for a model adapter after that adapter applies its own transport policy. Input is a frozen clone and output must pass `playerActionCandidateSchema` plus scope and grounding. The built-in Pi adapter additionally replaces stable IDs with opaque handles; world realization is a separate boundary. |
 | `PlayerWorldAdjudicator` | typed intent/candidate, relevant current committed state, applicable rules, and preview issue codes; no future canon | host-authority callback over current world truth, not actor-safe reasoning. Output is frozen/captured proposal data and must pass the resolution schema, contradiction-certificate checks, replacement scope/grounding/spatial checks, knowledge gates, and engine validation. The built-in adapter uses opaque handles. |
+| `NpcReactionReasoner` | one NPC's actor-safe context, perceived trigger/history, effective current development/goals/affect, and active rules marked as host-only constraints | model-safe only after transport applies opaque handles. The response is schema-captured and must pass actor scope, grounding, spatial, knowledge, engine, head, and causal validation. Missing model/goal data never grants access to wider context. |
 | `PlayerOpeningNarrator` | `PlayerSceneNarratorFrame`: names and actor-visible semantics plus current effective disposition/active motivation, with branch/commit/time/stable IDs removed | model-safe frame. The TUI validates language-neutral narration/choice structure; a selected suggestion is interpreted, adjudicated, and deterministically validated like free-form input. |
 | `ActorReasoner` | opaque actor view, one currently active goal description/priority/visible targets, active disposition, and committed development | model-safe input snapshot. Output is strict-schema parsed, handle-decoded, and sent through the player capability gates before it can become an actor proposal. |
 | `NarrativeAdapter` in actor POV | actor name, visible self state and acquired claims, and participant-visible event summaries | actor-safe and frozen. Adapter output must be a string; rendering is non-authoritative and branch-head immutability is checked. |
@@ -187,7 +190,13 @@ world loads and validates the host-side `PlaySessionStore` selection; while
 player mode is active, ordinary input is intercepted before the general model.
 Scene narration and action translation then run in fresh restricted child
 sessions. `nwh-play` and `nwh-narrator` entries are durable display records but
-are removed from later model context.
+are removed from the general assistant's later model context. New player/scene
+text is also recorded in a separate branch/commit-scoped `PlayConversationStore`.
+Only its latest ten authority-labelled records enter runtime role prompts; the
+complete lineage-safe archive is reachable solely through the bounded
+related-message tools. This presentation log is never used to project state or
+knowledge and does not retroactively promote legacy display transcripts to
+world truth.
 
 Evidence: startup/session construction in [play.ts](../src/commands/play.ts)
 and [pi-session.ts](../src/agent/pi-session.ts), player interception and
@@ -591,8 +600,9 @@ Evidence: `buildNarrativeDirection`, `addCanonicalAffordances`,
 The narrator uses a fresh, in-memory Pi session with no project guidance,
 local files, compiler tools, domain/workflow NWH extension, ordinary transcript
 or future canon; only the prompt-path privacy interceptor remains. It receives
-a bounded projection plus exact retrieval over that same
-sanitized frame and one capture-only choice tool. `playScenePrompt` has no
+a bounded projection, the latest ten presentation messages, exact retrieval
+over that same sanitized actor frame, branch-safe related-message retrieval,
+and one capture-only choice tool. `playScenePrompt` has no
 arbitrary third-record override; it serializes only its typed frame.
 
 Pi registers that tool correctly, but its generic agent request leaves provider

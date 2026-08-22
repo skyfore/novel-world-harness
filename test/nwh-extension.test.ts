@@ -1128,7 +1128,18 @@ describe("NWH TUI extension", () => {
     expect((await engine.projector.project(newHead)).logicalTime.step).toBe(1);
     expect(purposes).toEqual(["opening", "turn"]);
     expect(turnFrames.join("\n")).toContain("你把注意力放回当前场景，仔细观察眼前能够确认的事物。");
-    expect(turnFrames.join("\n")).not.toContain("传达室");
+    const turnFrame = JSON.parse(turnFrames[0]!) as {
+      recentVisibleEvents: Array<{ title: string }>;
+      recentMessages: Array<{ text: string; authority: string; worldStatus: string }>;
+    };
+    expect(JSON.stringify(turnFrame.recentVisibleEvents)).not.toContain("传达室");
+    expect(turnFrame.recentMessages).toContainEqual({
+      text: "停下来，抬眼确认传达室所在的方向。",
+      authority: "untrusted-player-text",
+      worldStatus: "accepted",
+      role: "player",
+      order: 0,
+    });
     expect(sentVisibleMessages.join("\n")).not.toContain("场外提示");
     expect(sentVisibleMessages.join("\n")).not.toContain("没有形成可验证的新进展");
     expect(notifications).not.toContainEqual(expect.stringContaining("行动未提交"));

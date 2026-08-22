@@ -50,6 +50,7 @@ export function createPlayerActionCaptureTool(
       "Do not claim the action succeeded. The host validates and commits after this tool returns.",
       "Always provide intent and controlledAct; put any hoped-for result that is not controlled by the actor in desiredEffect.",
       "controlledAct describes only what the actor immediately does, with an in-world eventTitle and actor-visible actorObservation that assert no external result.",
+      "Always set controlledAct.interactionMode. Use direct and fill exact interaction/addressee data whenever a present character is addressed; use none only when nobody is directly addressed. Their response remains a desiredEffect.",
       "Scene transitions and durations must be typed in intent rather than implied by wording.",
       "Submit exactly one candidate and do not invent entity or claim IDs outside the supplied scope.",
     ],

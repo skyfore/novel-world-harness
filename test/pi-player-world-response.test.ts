@@ -16,6 +16,8 @@ afterEach(async () => {
 function input(): PlayerWorldResponseResolverInput {
   return {
     utterance: "I open the letter and read what it says.",
+    recentMessages: [{ role: "scene", text: "The sealed letter rests on the desk.", worldStatus: "rendered", authority: "presentation-only", order: 0 }],
+    relatedMessages: [{ role: "player", text: "Earlier I asked who delivered the letter.", worldStatus: "accepted", authority: "untrusted-player-text", order: 0 }],
     actor: { id: "hero-stable-id", name: "The student" },
     scene: {
       label: "Bedroom",
@@ -64,9 +66,12 @@ describe("Pi player-world response resolver", () => {
       expect(options.includeProjectInstructions).toBe(false);
       expect(options.includeLocalTools).toBe(false);
       expect(options.includeNwhExtension).toBe(false);
-      expect(options.additionalTools).toHaveLength(1);
-      const tool = options.additionalTools![0]!;
-      expect(tool.name).toBe("select_player_world_response");
+      expect(options.additionalTools?.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+        "find_related_messages",
+        "read_related_message",
+        "select_player_world_response",
+      ]));
+      const tool = options.additionalTools!.find((candidate) => candidate.name === "select_player_world_response")!;
       return {
         abort: async () => undefined,
         dispose: async () => { disposed = true; },
@@ -86,6 +91,7 @@ describe("Pi player-world response resolver", () => {
     expect(result).toEqual({ decision: "select", possibilityId: "canon-secret-letter-event" });
     expect(prompt).toContain("response-001");
     expect(prompt).toContain("The student receives the academy invitation");
+    expect(prompt).toContain("The sealed letter rests on the desk");
     expect(prompt).not.toContain("canon-secret-letter-event");
     expect(prompt).not.toContain("hero-stable-id");
     expect(prompt).not.toContain("letter-stable-id");
@@ -101,7 +107,7 @@ describe("Pi player-world response resolver", () => {
     vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
       created += 1;
       const attempt = created;
-      const tool = options.additionalTools![0]!;
+      const tool = options.additionalTools!.find((candidate) => candidate.name === "select_player_world_response")!;
       return {
         abort: async () => undefined,
         dispose: async () => { disposed += 1; },

@@ -1,5 +1,5 @@
 import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "./player-action.js";
-import { PlayerTurnService } from "./player-action.js";
+import { buildActorScopedActionContext, PlayerTurnService } from "./player-action.js";
 import type { Entity } from "./model.js";
 import { PlaySessionStore, type ActivePlaySession } from "./play-session.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
@@ -9,6 +9,19 @@ import { PlayerTurnAuditStore, type PlayerTurnOrigin } from "./player-turn-audit
 import { resolvePlayerAffordance } from "./narrative-director.js";
 import { evidenceBelongsExclusivelyToSource, inferLegacyBranchSourceId, resolveCommitSourceId } from "./source-scope.js";
 import type { PlayerWorldResponseOption, PlayerWorldResponseResolver, PlayerWorldResponseResolution } from "./runtime.js";
+import {
+  modelPlayConversation,
+  playConversationAtCommit,
+  PlayConversationStore,
+  recentPlayConversation,
+} from "./play-conversation.js";
+import {
+  respondToNpcInteractions,
+  type NpcReactionEmotion,
+  type NpcReactionEvent,
+  type NpcReactionReasoner,
+  type NpcResponseKind,
+} from "./npc-reaction.js";
 
 export type PlayableCharacter = {
   id: string;
@@ -70,8 +83,17 @@ export type PlayTurnOutcome = {
   worldResponseResolution?: PlayerWorldResponseResolution;
   worldResponseError?: string;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
-  reactionEvents: Array<{ eventHash: string; title: string; actorId: string }>;
+  reactionEvents: Array<{
+    eventHash: string;
+    title: string;
+    actorId: string;
+    responseKind?: NpcResponseKind;
+    emotion?: NpcReactionEmotion;
+    trace?: NpcReactionEvent["trace"];
+  }>;
+  npcResponseError?: string;
   backgroundError?: string;
+  conversationError?: string;
   auditId?: string;
   auditError?: string;
 };
@@ -231,6 +253,7 @@ export async function performPlayTurn(options: {
   translator: PlayerActionTranslator;
   adjudicator?: PlayerWorldAdjudicator;
   worldResponseResolver?: PlayerWorldResponseResolver;
+  npcResponseReasoner?: NpcReactionReasoner;
   advanceBackground?: number;
   origin?: PlayerTurnOrigin;
   intent?: "act" | "observe" | "reflect" | "wait";
@@ -308,6 +331,21 @@ export async function performPlayTurn(options: {
         }
       : {}),
   });
+  let conversationError: string | undefined;
+  try {
+    const playerEvent = result.eventHash ? await engine.objects.getEvent(result.eventHash) : undefined;
+    await new PlayConversationStore(options.root).append({
+      branchId: options.branchId,
+      actorId: options.actorId,
+      atCommit: result.newHead,
+      ...(playerEvent ? { eventId: playerEvent.eventId } : {}),
+      role: "player",
+      status: result.accepted ? "accepted" : "rejected",
+      text: options.utterance,
+    });
+  } catch (error) {
+    conversationError = error instanceof Error ? error.message : String(error);
+  }
   let finalHead = result.newHead;
   const worldResponseEvents: PlayTurnOutcome["worldResponseEvents"] = [];
   let worldResponseCandidates: PlayerWorldResponseOption[] = [];
@@ -315,12 +353,47 @@ export async function performPlayTurn(options: {
   const reactionEvents: PlayTurnOutcome["reactionEvents"] = [];
   let worldResponseResolution: PlayerWorldResponseResolution | undefined;
   let worldResponseError: string | undefined;
+  let npcResponseError: string | undefined;
   let backgroundError: string | undefined;
   if (result.accepted) {
+    let directNpcAttempts = 0;
+    if (options.npcResponseReasoner && result.candidate && result.eventHash) {
+      const interaction = result.candidate.intent?.controlledAct?.interaction;
+      directNpcAttempts = new Set(
+        (interaction?.addresseeIds ?? []).filter((id) => id !== options.actorId),
+      ).size;
+      if (directNpcAttempts > 0) {
+        try {
+          const playerEvent = await engine.objects.getEvent(result.eventHash);
+          const npcResponses = await respondToNpcInteractions({
+            engine,
+            branchId: options.branchId,
+            playerId: options.actorId,
+            ...(sourceId ? { sourceId } : {}),
+            playerCandidate: result.candidate,
+            triggerEvent: playerEvent,
+            reasoner: options.npcResponseReasoner,
+          });
+          finalHead = npcResponses.newHead;
+          reactionEvents.push(...npcResponses.responses);
+          if (npcResponses.failures.length) {
+            npcResponseError = npcResponses.failures
+              .map((failure) => `${failure.actorId}: ${failure.error}`)
+              .join("; ");
+          }
+        } catch (error) {
+          finalHead = await engine.branches.readHead(options.branchId);
+          npcResponseError = error instanceof Error ? error.message : String(error);
+        }
+      }
+    }
     if (options.worldResponseResolver && result.candidate) {
       try {
         const playerEvent = result.eventHash ? await engine.objects.getEvent(result.eventHash) : undefined;
-        const presentEntities = result.contextAfter.presentEntities.map((entity) => ({
+        const currentPlayerContext = finalHead === result.newHead
+          ? result.contextAfter
+          : await buildActorScopedActionContext(engine, options.actorId, finalHead, undefined, sourceId);
+        const presentEntities = currentPlayerContext.presentEntities.map((entity) => ({
           id: entity.id,
           name: entity.name,
           kind: entity.kind,
@@ -328,16 +401,21 @@ export async function performPlayTurn(options: {
         if (!presentEntities.some((entity) => entity.id === actor.id)) {
           presentEntities.unshift({ id: actor.id, name: actor.canonicalName, kind: actor.kind });
         }
+        const responseConversation = await playConversationAtCommit(engine, options.branchId, finalHead, options.actorId);
+        const relatedMessages = modelPlayConversation(responseConversation);
         const response = await runtime.respondToPlayer({
           branchId: options.branchId,
           actorId: options.actorId,
           utterance: options.utterance,
           candidate: result.candidate,
           scene: {
-            ...(result.contextAfter.scene.label ? { label: result.contextAfter.scene.label } : {}),
+            ...(currentPlayerContext.scene.label ? { label: currentPlayerContext.scene.label } : {}),
             presentEntities,
+            recentEvents: currentPlayerContext.recentVisibleEvents.map(({ summary }) => ({ summary })),
           },
-          expectedHead: result.newHead,
+          expectedHead: finalHead,
+          recentMessages: modelPlayConversation(recentPlayConversation(responseConversation)),
+          relatedMessages,
           resolver: async (input) => {
             worldResponseCandidates = structuredClone(input.eligibleResponses);
             return options.worldResponseResolver!(input);
@@ -361,7 +439,7 @@ export async function performPlayTurn(options: {
     try {
       const advanced = await runtime.move({
         branchId: options.branchId,
-        maxActorCandidates: advanceActors,
+        maxActorCandidates: Math.max(0, advanceActors - directNpcAttempts),
         maxBackgroundCandidates: advanceBackground,
         temporalMode: advanceBackground > 0 ? "advance" : "current-window",
       });
@@ -413,9 +491,11 @@ export async function performPlayTurn(options: {
       worldResponseCandidates: structuredClone(worldResponseCandidates),
       worldResponseEvents: structuredClone(worldResponseEvents),
       ...(worldResponseError ? { worldResponseError } : {}),
+      ...(npcResponseError ? { npcResponseError } : {}),
       reactionEvents: structuredClone(reactionEvents),
       backgroundEvents: structuredClone(backgroundEvents),
       ...(backgroundError ? { backgroundError } : {}),
+      ...(conversationError ? { conversationError } : {}),
     });
     auditId = audit.id;
   } catch (error) {
@@ -429,9 +509,11 @@ export async function performPlayTurn(options: {
     worldResponseEvents,
     ...(worldResponseResolution ? { worldResponseResolution } : {}),
     ...(worldResponseError ? { worldResponseError } : {}),
+    ...(npcResponseError ? { npcResponseError } : {}),
     backgroundEvents,
     reactionEvents,
     ...(backgroundError ? { backgroundError } : {}),
+    ...(conversationError ? { conversationError } : {}),
     ...(auditId ? { auditId } : {}),
     ...(auditError ? { auditError } : {}),
   };

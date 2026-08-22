@@ -44,6 +44,14 @@ function frame(): PlayOpeningFrame {
       intent: "observe",
       recommended: true,
     }],
+    messageHistory: [],
+    recentMessages: [{
+      role: "player",
+      text: "我刚才问过门外是谁。",
+      worldStatus: "accepted",
+      authority: "untrusted-player-text",
+      order: 0,
+    }],
   };
 }
 
@@ -55,9 +63,11 @@ describe("Pi player scene narrator", () => {
     let created = 0;
     const prompts: string[] = [];
     const systemPrompts: string[] = [];
+    const toolNames: string[][] = [];
     vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
       created += 1;
       systemPrompts.push(options.systemPromptOverride ?? "");
+      toolNames.push(options.additionalTools?.map((tool) => tool.name) ?? []);
       return {
         abort: async () => undefined,
         dispose: async () => undefined,
@@ -80,6 +90,8 @@ describe("Pi player scene narrator", () => {
     expect(systemPrompts[0]).toContain("Before any narration");
     expect(systemPrompts[0]).toContain("must contain tool calls only");
     expect(prompts[0]).toContain("Phase 1 — choices");
+    expect(prompts[0]).toContain("我刚才问过门外是谁");
+    expect(toolNames[0]).toEqual(expect.arrayContaining(["find_related_messages", "read_related_message"]));
     expect(prompts[0]).not.toContain("host-choice-repair");
   });
 

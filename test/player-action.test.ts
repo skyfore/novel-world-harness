@@ -1198,10 +1198,64 @@ describe("player action capture tool", () => {
     const capture = createPlayerActionCaptureTool();
     const validator = Compile(capture.tool.parameters);
     const candidate = moveToCamp();
-
-    expect(validator.Check(candidate)).toBe(true);
-    expect(validator.Check({
+    const modelCandidate = {
       ...candidate,
+      intent: {
+        ...candidate.intent!,
+        controlledAct: {
+          ...candidate.intent!.controlledAct!,
+          interactionMode: "none" as const,
+        },
+      },
+    };
+
+    expect(validator.Check(candidate)).toBe(false);
+    expect(validator.Check(modelCandidate)).toBe(true);
+    expect(validator.Check({
+      ...modelCandidate,
+      intent: {
+        ...modelCandidate.intent,
+        controlledAct: {
+          ...modelCandidate.intent.controlledAct,
+          interactionMode: "direct",
+        },
+      },
+    })).toBe(false);
+    expect(validator.Check({
+      ...modelCandidate,
+      intent: {
+        ...modelCandidate.intent,
+        controlledAct: {
+          ...modelCandidate.intent.controlledAct,
+          interactionMode: "direct",
+          interaction: {
+            kind: "speech",
+            content: "Are you coming with me?",
+            addresseeIds: ["rival"],
+            channel: "audible",
+          },
+        },
+      },
+      participants: ["rival"],
+    })).toBe(true);
+    expect(validator.Check({
+      ...modelCandidate,
+      intent: {
+        ...modelCandidate.intent,
+        controlledAct: {
+          ...modelCandidate.intent.controlledAct,
+          interaction: {
+            kind: "speech",
+            content: "Are you coming with me?",
+            addresseeIds: ["rival"],
+            channel: "audible",
+          },
+        },
+      },
+      participants: ["rival"],
+    })).toBe(false);
+    expect(validator.Check({
+      ...modelCandidate,
       intent: {
         kind: "act",
         summary: "Walk from the Hall to Camp",
@@ -1210,14 +1264,14 @@ describe("player action capture tool", () => {
         sceneTransition: { kind: "arrive", destination: { kind: "entity", entityId: "camp" } },
       },
     })).toBe(false);
-    expect(validator.Check({ ...candidate, branchId: "main", expectedParentCommit: "head" })).toBe(false);
+    expect(validator.Check({ ...modelCandidate, branchId: "main", expectedParentCommit: "head" })).toBe(false);
     expect(validator.Check({
-      ...candidate,
+      ...modelCandidate,
       proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "location", value: "camp" }] },
     })).toBe(false);
     expect(JSON.stringify(capture.tool.parameters)).not.toContain("expectedParentCommit");
-    const prepared = capture.tool.prepareArguments?.(JSON.stringify(candidate));
-    expect(prepared).toEqual(candidate);
+    const prepared = capture.tool.prepareArguments?.(JSON.stringify(modelCandidate));
+    expect(prepared).toEqual(modelCandidate);
 
     await capture.tool.execute(
       "player-call-1",
@@ -1226,11 +1280,11 @@ describe("player action capture tool", () => {
       undefined,
       {} as ExtensionContext,
     );
-    expect(capture.getCandidate()).toEqual(candidate);
+    expect(capture.getCandidate()).toEqual(modelCandidate);
     expect(capture.getExecutionAttempts()).toBe(1);
     await expect(capture.tool.execute(
       "player-call-2",
-      candidate as never,
+      modelCandidate as never,
       undefined,
       undefined,
       {} as ExtensionContext,
@@ -1243,6 +1297,13 @@ describe("player action capture tool", () => {
     const validator = Compile(capture.tool.parameters);
     const adjusted = {
       ...moveToCamp(),
+      intent: {
+        ...moveToCamp().intent!,
+        controlledAct: {
+          ...moveToCamp().intent!.controlledAct!,
+          interactionMode: "none" as const,
+        },
+      },
       preconditions: [],
       proposedDelta: {
         version: 1,

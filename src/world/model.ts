@@ -289,6 +289,15 @@ export const actorEventObservationSchema = z.object({
 }).strict();
 export type ActorEventObservation = z.infer<typeof actorEventObservationSchema>;
 
+/** Event-scoped affect. Continuity is derived from history; this is not a second mutable character state. */
+export const actorAffectSchema = z.object({
+  actorId: idSchema,
+  label: z.string().trim().min(1).max(120),
+  intensity: z.number().min(0).max(1),
+  expression: z.string().trim().min(1).max(500).optional(),
+}).strict();
+export type ActorAffect = z.infer<typeof actorAffectSchema>;
+
 export const eventProposalSchema = z
   .object({
     proposalId: idSchema,
@@ -298,6 +307,7 @@ export const eventProposalSchema = z
     actorId: idSchema.optional(),
     title: z.string().min(1),
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
+    actorAffects: z.array(actorAffectSchema).max(128).optional(),
     participants: z.array(idSchema),
     proposedTime: storyTimeSchema,
     timeAdvance: timeAdvanceSchema.optional(),
@@ -323,6 +333,7 @@ export const committedEventSchema = z
     proposalId: idSchema.optional(),
     title: z.string().min(1),
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
+    actorAffects: z.array(actorAffectSchema).max(128).optional(),
     participants: z.array(idSchema),
     deltaHash: idSchema,
     knowledgeDeltaHash: idSchema.optional(),

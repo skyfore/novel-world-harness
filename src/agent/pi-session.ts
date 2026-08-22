@@ -371,6 +371,7 @@ function toolAuthority(name: string): "read-only" | "pending-proposal" | "captur
     "propose_player_choices",
     "propose_player_world_resolution",
     "select_player_world_response",
+    "propose_npc_reaction",
   ].includes(name)) return "capture-only";
   if (name.startsWith("propose_")
     || name === "configure_chapter_split"
@@ -386,6 +387,8 @@ function toolAuthority(name: string): "read-only" | "pending-proposal" | "captur
     "read_file",
     "find_actor_context",
     "read_actor_context",
+    "find_related_messages",
+    "read_related_message",
     "find_compiler_artifacts",
     "read_compiler_artifact",
     "find_source_evidence",

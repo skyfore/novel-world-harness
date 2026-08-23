@@ -59,6 +59,20 @@ export { createPiPlayerWorldAdjudicator, type PiPlayerWorldAdjudicatorOptions } 
 export { createPlayerWorldResolutionCaptureTool, type PlayerWorldResolutionCaptureTool } from "./agent/player-world-outcome-tool.js";
 export { createPiPlayerWorldResponseResolver, type PiPlayerWorldResponseResolverOptions } from "./agent/pi-player-world-response.js";
 export { createPlayerWorldResponseCaptureTool, playerWorldResponseSelectionSchema, type PlayerWorldResponseCaptureTool, type PlayerWorldResponseSelection } from "./agent/player-world-response-tool.js";
+export { createPiCanonicalAttachmentResolver, type PiCanonicalAttachmentResolverOptions } from "./agent/pi-canonical-attachment.js";
+export { createCanonicalAttachmentCaptureTool, type CanonicalAttachmentCaptureTool } from "./agent/canonical-attachment-tool.js";
+export {
+  canonicalAttachmentResolutionSchema,
+  evaluateCanonicalBindingOptions,
+  instantiateCanonicalScaffold,
+  type CanonicalAttachmentResolution,
+  type CanonicalAttachmentResolver,
+  type CanonicalAttachmentResolverInput,
+  type CanonicalBindingEvaluation,
+  type CanonicalBindingOption,
+  type CanonicalBindingOptionView,
+  type InstantiatedCanonicalScaffold,
+} from "./world/canonical-adaptation.js";
 export { classifyPlayerInput, renderPlayerMetaResponse, type PlayerInputRoute } from "./world/player-input-route.js";
 export { PlayerTurnAuditStore, type PlayerTurnAudit, type PlayerTurnOrigin } from "./world/player-turn-audit.js";
 export { PlaySessionStore, activePlaySessionSchema, type ActivePlaySession } from "./world/play-session.js";
@@ -81,7 +95,7 @@ export { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayN
 export { inspectPlayExperience, listPlayableCharacters, performPlayTurn, resolveCharacter, resolveNovelSource, selectPlayExperience, type PlayExperienceCatalog, type PlayableCharacter, type PlayInstanceSummary, type PlayTurnOutcome, type SelectedPlayExperience } from "./world/play-experience.js";
 export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type CanonReplayResult, type IsolatedCanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";
 export { committedHistory, projectActorScene, realizedCanonicalEvents, type ActorSceneProjection, type CommittedHistoryEntry, type SceneEventProjection } from "./world/scene.js";
-export { WorldRuntime, adjudicateActorCandidates, playerWorldResponseResolutionSchema, type MoveInput, type MoveResult, type PlayerWorldResponseOption, type PlayerWorldResponseResolution, type PlayerWorldResponseResolver, type PlayerWorldResponseResolverInput, type PlayerWorldResponseResult } from "./world/runtime.js";
+export { WorldRuntime, adjudicateActorCandidates, playerWorldResponseResolutionSchema, type CanonicalRecoveryResult, type CanonicalRecoveryTrace, type MoveInput, type MoveResult, type PlayerWorldResponseOption, type PlayerWorldResponseResolution, type PlayerWorldResponseResolver, type PlayerWorldResponseResolverInput, type PlayerWorldResponseResult } from "./world/runtime.js";
 export { WorldSnapshotStore, type WorldSnapshot } from "./world/snapshot.js";
 export { StateSchemaRegistry, DEFAULT_STATE_FIELDS, advanceTemporalState, applyStateDelta, evaluatePredicate, validateEngineInvariants } from "./world/state.js";
 export {

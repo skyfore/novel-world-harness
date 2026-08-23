@@ -4,10 +4,12 @@ import { createPiPlayerActionTranslator } from "../agent/pi-player-action.js";
 import { createPiPlayerWorldAdjudicator } from "../agent/pi-player-world-adjudicator.js";
 import { createPiPlayerWorldResponseResolver } from "../agent/pi-player-world-response.js";
 import { createPiNpcReactionReasoner } from "../agent/pi-npc-reaction.js";
+import { createPiCanonicalAttachmentResolver } from "../agent/pi-canonical-attachment.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "../world/player-action.js";
 import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
+import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
 import { PlayConversationStore } from "../world/play-conversation.js";
 import {
   inspectPlayExperience,
@@ -32,6 +34,7 @@ export type PlayWorldCommandOptions = {
   translator?: PlayerActionTranslator;
   adjudicator?: PlayerWorldAdjudicator;
   worldResponseResolver?: PlayerWorldResponseResolver;
+  canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
   advanceBackground?: number;
   ask?: AskPlayQuestion;
@@ -99,12 +102,19 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
         ...(options.model ? { model: options.model } : {}),
       })
     : undefined);
+  const canonicalAttachmentResolver = options.canonicalAttachmentResolver ?? (!options.translator
+    ? createPiCanonicalAttachmentResolver({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
   const advanceBackground = options.advanceBackground ?? 0;
   if (!Number.isInteger(advanceBackground) || advanceBackground < 0 || advanceBackground > 100) {
     throw new Error("advanceBackground must be an integer between 0 and 100");
   }
   if (options.action !== undefined) {
-    return runAndPrintTurn(options.root, selection, translator, adjudicator, worldResponseResolver, npcResponseReasoner, options.action, advanceBackground);
+    return runAndPrintTurn(options.root, selection, translator, adjudicator, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, options.action, advanceBackground);
   }
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error("Pass --action <text> for non-interactive play.");
@@ -117,7 +127,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
       const utterance = (await terminal.question(`${selection.actor.canonicalName}> `)).trim();
       if (!utterance) continue;
       if (utterance === "/exit" || utterance === "/quit") break;
-      await runAndPrintTurn(options.root, selection, translator, adjudicator, worldResponseResolver, npcResponseReasoner, utterance, advanceBackground);
+      await runAndPrintTurn(options.root, selection, translator, adjudicator, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, utterance, advanceBackground);
     }
   } finally {
     terminal.close();
@@ -131,6 +141,7 @@ async function runAndPrintTurn(
   translator: PlayerActionTranslator,
   adjudicator: PlayerWorldAdjudicator | undefined,
   worldResponseResolver: PlayerWorldResponseResolver | undefined,
+  canonicalAttachmentResolver: CanonicalAttachmentResolver | undefined,
   npcResponseReasoner: NpcReactionReasoner | undefined,
   utterance: string,
   advanceBackground: number,
@@ -143,6 +154,7 @@ async function runAndPrintTurn(
     translator,
     ...(adjudicator ? { adjudicator } : {}),
     ...(worldResponseResolver ? { worldResponseResolver } : {}),
+    ...(canonicalAttachmentResolver ? { canonicalAttachmentResolver } : {}),
     ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
     advanceBackground,
     origin: "cli",
@@ -168,10 +180,12 @@ async function runAndPrintTurn(
   }
   stdout.write(`Committed player action at ${result.newHead}.\n`);
   for (const event of outcome.worldResponseEvents) stdout.write(`Immediate world response: ${event.title}\n`);
+  for (const event of outcome.canonicalRecoveryEvents) stdout.write(`Canon scaffold adapted: ${event.title}\n`);
   for (const event of outcome.reactionEvents) stdout.write(`World responded: ${event.title}\n`);
   for (const event of outcome.backgroundEvents) stdout.write(`World advanced: ${event.title}\n`);
   if (outcome.backgroundError) stdout.write(`Background advancement stopped: ${outcome.backgroundError}\n`);
   if (outcome.worldResponseError) stdout.write(`Immediate world response stopped: ${outcome.worldResponseError}\n`);
+  if (outcome.canonicalRecoveryError) stdout.write(`Canonical scaffold recovery stopped: ${outcome.canonicalRecoveryError}\n`);
   if (outcome.npcResponseError) stdout.write(`NPC response stopped (not treated as in-world silence): ${outcome.npcResponseError}\n`);
   if (outcome.conversationError) stdout.write(`Conversation memory could not be persisted: ${outcome.conversationError}\n`);
   return result;

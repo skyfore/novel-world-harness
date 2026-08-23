@@ -6,6 +6,8 @@ import type { PlayerActionCandidate, PlayerProgressCertificate, PlayerTurnStage,
 import type { EventProposal, ValidationIssue, ValidationReport } from "./model.js";
 import type { PlayerWorldResponseOption, PlayerWorldResponseResolution } from "./runtime.js";
 import type { NpcReactionEmotion, NpcReactionEvent, NpcResponseKind } from "./npc-reaction.js";
+import type { CanonicalAttachmentResolution } from "./canonical-adaptation.js";
+import type { CanonicalRecoveryTrace } from "./runtime.js";
 
 export type PlayerTurnOrigin = "freeform" | "scene-choice" | "host-safe-choice" | "cli";
 
@@ -38,6 +40,16 @@ export type PlayerTurnAudit = {
   worldResponseCandidates?: PlayerWorldResponseOption[];
   worldResponseEvents?: Array<{ eventHash: string; title: string; possibilityId: string }>;
   worldResponseError?: string;
+  canonicalRecoveryResolution?: CanonicalAttachmentResolution;
+  canonicalRecoveryTraces?: CanonicalRecoveryTrace[];
+  excludedCanonicalPossibilityIds?: string[];
+  canonicalRecoveryEvents?: Array<{
+    eventHash: string;
+    title: string;
+    scaffoldPossibilityId: string;
+    canonicalEventId: string;
+  }>;
+  canonicalRecoveryError?: string;
   reactionEvents: Array<{
     eventHash: string;
     title: string;

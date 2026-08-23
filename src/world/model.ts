@@ -206,6 +206,86 @@ export const knowledgeDeltaSchema = z.object({ version: z.literal(1), operations
 export type KnowledgeDelta = z.infer<typeof knowledgeDeltaSchema>;
 
 /**
+ * A source-backed canonical possibility may expose a small number of semantic
+ * roles that can be rebound after branch divergence.  This policy belongs to
+ * the possibility layer, not to CanonicalEvent: the source event remains a
+ * fixed record of who actually participated on the canonical trajectory.
+ */
+export const canonicalScaffoldRoleSchema = z.object({
+  roleId: idSchema,
+  canonicalEntityId: idSchema,
+  description: z.string().trim().min(1).max(500),
+  allowedEntityKinds: z.array(entityKindSchema).min(1).max(8),
+  presence: z.enum(["anywhere", "active-scene"]),
+  requiredState: z.array(predicateSchema).max(16),
+  requiresKnowledge: z.array(idSchema).max(16),
+}).strict().superRefine((value, ctx) => {
+  if (new Set(value.allowedEntityKinds).size !== value.allowedEntityKinds.length) {
+    ctx.addIssue({ code: "custom", message: "allowedEntityKinds must be unique", path: ["allowedEntityKinds"] });
+  }
+  if (new Set(value.requiresKnowledge).size !== value.requiresKnowledge.length) {
+    ctx.addIssue({ code: "custom", message: "requiresKnowledge must be unique", path: ["requiresKnowledge"] });
+  }
+});
+export type CanonicalScaffoldRole = z.infer<typeof canonicalScaffoldRoleSchema>;
+
+export const canonicalScaffoldSchema = z.object({
+  version: z.literal(1),
+  mode: z.literal("participant-remap"),
+  roles: z.array(canonicalScaffoldRoleSchema).min(1).max(4),
+}).strict().superRefine((value, ctx) => {
+  const roleIds = new Set<string>();
+  const canonicalEntityIds = new Set<string>();
+  value.roles.forEach((role, index) => {
+    if (roleIds.has(role.roleId)) {
+      ctx.addIssue({ code: "custom", message: `Duplicate scaffold role ${role.roleId}`, path: ["roles", index, "roleId"] });
+    }
+    if (canonicalEntityIds.has(role.canonicalEntityId)) {
+      ctx.addIssue({ code: "custom", message: `Canonical entity ${role.canonicalEntityId} is assigned to more than one scaffold role`, path: ["roles", index, "canonicalEntityId"] });
+    }
+    roleIds.add(role.roleId);
+    canonicalEntityIds.add(role.canonicalEntityId);
+  });
+});
+export type CanonicalScaffold = z.infer<typeof canonicalScaffoldSchema>;
+
+export const canonicalRoleBindingSchema = z.object({
+  roleId: idSchema,
+  canonicalEntityId: idSchema,
+  boundEntityId: idSchema,
+}).strict();
+export type CanonicalRoleBinding = z.infer<typeof canonicalRoleBindingSchema>;
+
+/** Replay/audit lineage for a committed scaffold instantiation. */
+export const canonicalAdaptationSchema = z.object({
+  version: z.literal(1),
+  scaffoldPossibilityId: idSchema,
+  adaptedFromCanonicalEventId: idSchema,
+  sceneActorId: idSchema,
+  roleBindings: z.array(canonicalRoleBindingSchema).min(1).max(4),
+  coreEffectHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict().superRefine((value, ctx) => {
+  const roleIds = new Set<string>();
+  const canonicalEntityIds = new Set<string>();
+  const boundEntityIds = new Set<string>();
+  value.roleBindings.forEach((binding, index) => {
+    if (roleIds.has(binding.roleId)) {
+      ctx.addIssue({ code: "custom", message: `Duplicate adaptation role ${binding.roleId}`, path: ["roleBindings", index, "roleId"] });
+    }
+    if (canonicalEntityIds.has(binding.canonicalEntityId)) {
+      ctx.addIssue({ code: "custom", message: `Canonical entity ${binding.canonicalEntityId} is rebound more than once`, path: ["roleBindings", index, "canonicalEntityId"] });
+    }
+    if (boundEntityIds.has(binding.boundEntityId)) {
+      ctx.addIssue({ code: "custom", message: `Bound entity ${binding.boundEntityId} fills more than one role`, path: ["roleBindings", index, "boundEntityId"] });
+    }
+    roleIds.add(binding.roleId);
+    canonicalEntityIds.add(binding.canonicalEntityId);
+    boundEntityIds.add(binding.boundEntityId);
+  });
+});
+export type CanonicalAdaptation = z.infer<typeof canonicalAdaptationSchema>;
+
+/**
  * A source-grounded cut immediately before one character's first embodied
  * canonical scene. It is distinct from the event outcome: the delta/knowledge
  * describe facts already true at the cut, actorObservation is limited to what
@@ -354,7 +434,7 @@ export const actorAffectSchema = z.object({
 }).strict();
 export type ActorAffect = z.infer<typeof actorAffectSchema>;
 
-export const eventProposalSchema = z
+export const eventProposalBaseSchema = z
   .object({
     proposalId: idSchema,
     branchId: idSchema,
@@ -375,9 +455,26 @@ export const eventProposalSchema = z
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     evidence: z.array(evidenceRefSchema),
     possibilityId: idSchema.optional(),
+    canonicalAdaptation: canonicalAdaptationSchema.optional(),
     progress: narrativeProgressSchema.optional(),
   })
   .strict();
+export type EventProposalBase = z.infer<typeof eventProposalBaseSchema>;
+
+export function validateCanonicalAdaptationProposalEnvelope(
+  value: Pick<EventProposalBase, "possibilityId" | "canonicalAdaptation">,
+  ctx: z.RefinementCtx,
+): void {
+  if (value.canonicalAdaptation && value.possibilityId !== value.canonicalAdaptation.scaffoldPossibilityId) {
+    ctx.addIssue({
+      code: "custom",
+      message: "A canonical adaptation must use its scaffold possibility as possibilityId",
+      path: ["possibilityId"],
+    });
+  }
+}
+
+export const eventProposalSchema = eventProposalBaseSchema.superRefine(validateCanonicalAdaptationProposalEnvelope);
 export type EventProposal = z.infer<typeof eventProposalSchema>;
 
 export const committedEventSchema = z
@@ -400,11 +497,28 @@ export const committedEventSchema = z
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     realizesCanonicalEventIds: z.array(idSchema).optional(),
     possibilityId: idSchema.optional(),
+    canonicalAdaptation: canonicalAdaptationSchema.optional(),
     actorId: idSchema.optional(),
     progress: narrativeProgressSchema.optional(),
   })
   .strict()
-  .superRefine(validateParticipantPresence);
+  .superRefine(validateParticipantPresence)
+  .superRefine((value, ctx) => {
+    if (value.canonicalAdaptation && value.possibilityId !== value.canonicalAdaptation.scaffoldPossibilityId) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A committed canonical adaptation must retain its scaffold possibilityId",
+        path: ["possibilityId"],
+      });
+    }
+    if (value.canonicalAdaptation && value.realizesCanonicalEventIds?.includes(value.canonicalAdaptation.adaptedFromCanonicalEventId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "An adapted analogue cannot claim exact realization of its source canonical event",
+        path: ["realizesCanonicalEventIds"],
+      });
+    }
+  });
 export type CommittedEvent = z.infer<typeof committedEventSchema>;
 
 export const branchSchema = z.object({
@@ -442,7 +556,7 @@ export const AUTONOMOUS_BACKGROUND_KINDS = [
   "generated",
 ] as const satisfies readonly PossibilityKind[];
 
-export const possibilitySchema = z
+export const possibilityBaseSchema = z
   .object({
     id: idSchema,
     branchId: idSchema,
@@ -462,9 +576,40 @@ export const possibilitySchema = z
     relevance: z.number().min(0),
     proposedDelta: stateDeltaSchema.optional(),
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    canonicalScaffold: canonicalScaffoldSchema.optional(),
     evidence: z.array(evidenceRefSchema),
   })
   .strict();
+export type PossibilityBase = z.infer<typeof possibilityBaseSchema>;
+
+type CanonicalScaffoldPossibilityShape = Pick<
+  PossibilityBase,
+  "kind" | "canonicalEventId" | "proposedDelta" | "participants" | "canonicalScaffold"
+>;
+
+export function validateCanonicalScaffoldPossibility(value: CanonicalScaffoldPossibilityShape, ctx: z.RefinementCtx): void {
+  if (!value.canonicalScaffold) return;
+  if (value.kind !== "canon-analogue") {
+    ctx.addIssue({ code: "custom", message: "A canonical scaffold must use kind=canon-analogue", path: ["kind"] });
+  }
+  if (!value.canonicalEventId) {
+    ctx.addIssue({ code: "custom", message: "A canonical scaffold must reference canonicalEventId", path: ["canonicalEventId"] });
+  }
+  if (!value.proposedDelta) {
+    ctx.addIssue({ code: "custom", message: "A canonical scaffold requires a typed core effect", path: ["proposedDelta"] });
+  }
+  value.canonicalScaffold.roles.forEach((role, index) => {
+    if (!value.participants.includes(role.canonicalEntityId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Scaffold role ${role.roleId} canonical entity must be an event participant`,
+        path: ["canonicalScaffold", "roles", index, "canonicalEntityId"],
+      });
+    }
+  });
+}
+
+export const possibilitySchema = possibilityBaseSchema.superRefine(validateCanonicalScaffoldPossibility);
 export type Possibility = z.infer<typeof possibilitySchema>;
 
 export function validateParticipantPresence(

@@ -24,7 +24,7 @@ import { ChapterSplitPlanStore, chapterSplitPlanSchema } from "./chapter-split.j
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 7;
+export const COMPILER_PROMPT_VERSION = 8;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 

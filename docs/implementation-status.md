@@ -22,7 +22,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
 | Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation |
 | Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
-| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, exact bounded continuity, reactive NPC responses, validated immediate developments, merged model suggestions plus host-preflighted exits, stagnation detection, and an explicit material-progress wait route |
+| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, exact bounded continuity, reactive NPC responses, validated immediate developments, bounded post-divergence canonical scaffold recovery, merged model suggestions plus host-preflighted exits, stagnation detection, and an explicit material-progress wait route |
 | Character embodiment | Implemented vertical slice | Role-before-branch selection, spoiler-free opening setup, reader-only complete prior-event recaps, source-backed first-embodied-scene checkpoints for later roles, actor-scoped perception, sibling entry branches, and durable active resume |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
@@ -71,6 +71,9 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 - Canonical future events and generic background pressures enter the same possibility frontier.
 - Possibility selection alone does not create truth; the resulting event proposal must pass the commit boundary.
 - An accepted player event may causally select one currently eligible offered development through an isolated host-private linker; the response is a separate validated event, while unrelated background advancement remains opt-in.
+- When the accepted player event directly conflicts with and supersedes a currently eligible canonical event, that turn receives one bounded progression slot. The runtime scans accepted canonical scaffolds in story-time/evidence order, records and skips candidates with failed hard dependencies, and prefers an exact event only when its canonical-self role binding also passes the stronger scaffold gates.
+- A scaffold exposes at most four explicitly compiled functional roles. The host enumerates only branch-present, non-dead, kind-compatible bindings satisfying the pinned state, knowledge, causal, time, blocker, and active-scene gates. An isolated capture-only Pi call may select one opaque binding and add title/participant observation/affect; it cannot propose participants, time, dependencies, state, knowledge, or evidence.
+- The engine independently reloads the pinned scaffold and compares all locked fields before commitment, then rechecks branch availability, scene presence, required knowledge, and causal parents at the current head. An exact candidate that fails only the stronger role gates is denied for that move and recorded in the turn audit. A committed analogue is tracked as `adapted`, not exact canon: it prevents duplicate canon and can satisfy downstream causal dependencies without writing `realizesCanonicalEventIds`.
 - Explicit waiting advances committed time by five minutes and may schedule at most one eligible autonomous non-canon process in the current temporal window. With no eligible process, time still advances; forward canon analogues are excluded.
 - Knowledge is reconstructed per actor and per commit.
 - A director-generated observation cannot learn a claim merely because its
@@ -178,6 +181,16 @@ five-minute autonomous wait path are connected. The scheduler remains
 deterministic and explainable, but pressure scoring, expiry, actor relevance,
 background cadence, and conflict policy have only small-fixture coverage. Large
 branch histories and multi-actor scenes have not been profiled.
+
+Canonical scaffold recovery is implemented and covered by constrained fixtures,
+including dependency skipping, participant remapping, downstream causal
+continuation, locked-effect forgery rejection, scene-presence rejection, and
+future-entity rejection; opaque role-specific strings are also rejected rather
+than textually rewritten. What remains unestablished is compiler recall and
+precision on real novels: no representative benchmark yet measures whether the
+model identifies functional roles without incorrectly treating identity-bound
+roles as substitutable. Prepared revisions compiled before pipeline version 9
+remain playable but contain no newly inferred scaffolds until reparsed.
 
 ## Recommended next milestone
 

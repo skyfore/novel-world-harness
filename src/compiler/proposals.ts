@@ -8,7 +8,6 @@ import {
   entitySchema,
   evidenceRefSchema,
   idSchema,
-  possibilitySchema,
   validateParticipantPresence,
   stateDeltaSchema,
   stateOperationSchema,
@@ -25,13 +24,12 @@ import {
   type StoryTime,
   type WorldRule,
 } from "../world/model.js";
-import { PossibilityTemplateStore, type PossibilityTemplate } from "../world/possibility-model.js";
+import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
 import { hasExecutablePossibilityEffect, isMetaKnowledgePredicate } from "./semantics.js";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 
-const possibilityTemplateSchema = possibilitySchema.omit({ branchId: true, evaluatedAtCommit: true });
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
     z.object({ op: z.literal("fact-equals"), entityId: idSchema, field: z.string().min(1), value: stateValueSchema }).strict(),
@@ -68,7 +66,7 @@ const compilerClaimSchema = claimSchema.extend({ evidence: evidenceRefSchema.arr
     });
   }
 });
-const compilerPossibilitySchema = possibilityTemplateSchema.extend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
+const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
   validateParticipantPresence(possibility, ctx);
   if (possibility.kind === "player-choice" && !hasExecutablePossibilityEffect(possibility)) {
     ctx.addIssue({
@@ -399,6 +397,22 @@ function collectProposalClosureIssues(
     .forEach((predicate, index) => collectPredicateIssues(predicate, `predicates.${index}`, missing, fieldReference));
   if (possibility.proposedDelta) collectStateDeltaIssues(possibility.proposedDelta, "proposedDelta", missing, fieldReference);
   if (possibility.proposedKnowledge) collectKnowledgeDeltaIssues(possibility.proposedKnowledge, "proposedKnowledge", missing);
+  possibility.canonicalScaffold?.roles.forEach((role, roleIndex) => {
+    missing("entities", role.canonicalEntityId, `canonicalScaffold.roles.${roleIndex}.canonicalEntityId`);
+    const canonicalKind = catalog.entityKinds.get(role.canonicalEntityId);
+    if (canonicalKind && !role.allowedEntityKinds.includes(canonicalKind as never)) {
+      issues.add(`${proposalId}: canonicalScaffold.roles.${roleIndex}.allowedEntityKinds does not include canonical entity kind '${canonicalKind}'`);
+    }
+    role.requiredState.forEach((predicate, predicateIndex) =>
+      collectPredicateIssues(
+        predicate,
+        `canonicalScaffold.roles.${roleIndex}.requiredState.${predicateIndex}`,
+        missing,
+        fieldReference,
+      ));
+    role.requiresKnowledge.forEach((claimId, claimIndex) =>
+      missing("claims", claimId, `canonicalScaffold.roles.${roleIndex}.requiresKnowledge.${claimIndex}`));
+  });
 }
 
 type MissingReference = (kind: Exclude<keyof ProposalClosureCatalog, "entityKinds">, id: string, path: string) => void;

@@ -4,6 +4,8 @@ import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTe
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { EvidenceVerifier } from "./evidence.js";
 import { hasExecutablePossibilityEffect } from "./semantics.js";
+import { canonicalJson } from "../world/canonical.js";
+import { canonicalScaffoldRoleNeutralityIssues } from "../world/canonical-adaptation.js";
 
 export type PossibilityValidation = {
   accepted: boolean;
@@ -36,6 +38,8 @@ export class PossibilityCommitService {
     ]);
     const entityMap = new Map(entities.map((entity) => [entity.id, entity]));
     const ruleMap = new Map(rules.map((rule) => [rule.id, rule]));
+    const eventMap = new Map(events.map((event) => [event.id, event]));
+    const claimMap = new Map(claims.map((claim) => [claim.id, claim]));
     const eventIds = new Set(events.map((event) => event.id));
     const claimIds = new Set(claims.map((claim) => claim.id));
     const templateIds = new Set(templates.map((candidate) => candidate.id));
@@ -63,6 +67,56 @@ export class PossibilityCommitService {
     }
     if (template.kind === "player-choice" && !hasExecutablePossibilityEffect(template)) {
       errors.push(issue("INERT_PLAYER_CHOICE", `Player-choice possibility ${template.id} has no concrete state or knowledge effect and cannot diverge from canon`, "proposedDelta"));
+    }
+    if (template.canonicalScaffold && template.canonicalEventId) {
+      const canonicalEvent = eventMap.get(template.canonicalEventId);
+      if (canonicalEvent) {
+        const compare = (actual: unknown, expected: unknown, code: string, path: string, label: string) => {
+          if (canonicalJson(actual) !== canonicalJson(expected)) {
+            errors.push(issue(code, `Canonical scaffold ${template.id} must preserve the source event ${label}`, path));
+          }
+        };
+        compare(template.participants, canonicalEvent.participants, "SCAFFOLD_PARTICIPANTS_MISMATCH", "participants", "participants");
+        compare(template.participantPresence, canonicalEvent.participantPresence, "SCAFFOLD_PRESENCE_MISMATCH", "participantPresence", "participant presence");
+        compare(template.candidateWindow, canonicalEvent.storyTime, "SCAFFOLD_TIME_MISMATCH", "candidateWindow", "story time");
+        compare(template.timeAdvance, canonicalEvent.timeAdvance, "SCAFFOLD_TIME_ADVANCE_MISMATCH", "timeAdvance", "time advance");
+        compare(template.preconditions, canonicalEvent.preconditions, "SCAFFOLD_PRECONDITIONS_MISMATCH", "preconditions", "preconditions");
+        compare(template.proposedDelta, canonicalEvent.observedOutcome, "SCAFFOLD_EFFECT_MISMATCH", "proposedDelta", "typed outcome");
+        compare(template.proposedKnowledge, canonicalEvent.observedKnowledge, "SCAFFOLD_KNOWLEDGE_MISMATCH", "proposedKnowledge", "knowledge outcome");
+        compare(template.causalParents, canonicalEvent.causalParents, "SCAFFOLD_CAUSAL_PARENT_MISMATCH", "causalParents", "causal parents");
+      }
+      for (let roleIndex = 0; roleIndex < template.canonicalScaffold.roles.length; roleIndex += 1) {
+        const role = template.canonicalScaffold.roles[roleIndex]!;
+        const entity = entityMap.get(role.canonicalEntityId);
+        if (entity && !role.allowedEntityKinds.includes(entity.kind)) {
+          errors.push(issue(
+            "SCAFFOLD_ROLE_KIND_MISMATCH",
+            `Canonical role ${role.roleId} does not admit source entity kind ${entity.kind}`,
+            `canonicalScaffold.roles.${roleIndex}.allowedEntityKinds`,
+          ));
+        }
+        role.requiredState.forEach((predicate) => validatePredicate(predicate, entityMap, ruleMap, this.stateSchema, errors));
+        role.requiresKnowledge.forEach((claimId, claimIndex) => {
+          if (!claimIds.has(claimId)) {
+            errors.push(issue(
+              "UNKNOWN_SCAFFOLD_ROLE_CLAIM",
+              `Canonical role ${role.roleId} requires unknown claim ${claimId}`,
+              `canonicalScaffold.roles.${roleIndex}.requiresKnowledge.${claimIndex}`,
+            ));
+          }
+        });
+      }
+      for (const neutralityIssue of canonicalScaffoldRoleNeutralityIssues(template, {
+        entities: entityMap,
+        claims: claimMap,
+        stateSchema: this.stateSchema,
+      })) {
+        errors.push(issue(
+          "SCAFFOLD_OPAQUE_ROLE_REFERENCE",
+          `Canonical scaffold ${template.id} is not structurally role-neutral: ${neutralityIssue}`,
+          "canonicalScaffold.roles",
+        ));
+      }
     }
     for (let index = 0; index < template.causalParents.length; index += 1) {
       const parent = template.causalParents[index]!;

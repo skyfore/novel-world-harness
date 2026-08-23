@@ -12,6 +12,164 @@ const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
 describe("open-world progression", () => {
+  it("recovers a superseded canonical chain by attaching the next viable scaffold to a valid current participant", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-open-world-canon-recovery-"));
+    roots.push(root);
+    const canon = new CanonicalModelStore(root);
+    for (const entity of [
+      { id: "hero", kind: "character" as const, canonicalName: "Hero" },
+      { id: "mo-yan", kind: "character" as const, canonicalName: "Mo Yan" },
+      { id: "courier", kind: "character" as const, canonicalName: "The Courier" },
+      { id: "hall", kind: "location" as const, canonicalName: "Hall" },
+      { id: "order-letter", kind: "artifact" as const, canonicalName: "Order Letter" },
+    ]) {
+      await canon.putEntity({ ...entity, aliases: [], evidence: [] });
+    }
+    await canon.putEvent({
+      id: "give-key",
+      title: "Hero plans to give the key to Mo Yan",
+      participants: ["hero", "mo-yan"],
+      participantPresence: [
+        { entityId: "hero", mode: "physical" },
+        { entityId: "mo-yan", mode: "physical" },
+      ],
+      storyTime: { kind: "ordinal", label: "key transfer", orderHint: 0 },
+      preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.alive", value: true }],
+      observedOutcome: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "give the key to Mo Yan" }],
+      },
+      evidence: [],
+      causalParents: [],
+      confidence: 1,
+    });
+    await canon.putEvent({
+      id: "deliver-order",
+      title: "Mo Yan takes custody of the order letter",
+      participants: ["mo-yan", "order-letter"],
+      participantPresence: [{ entityId: "mo-yan", mode: "physical" }],
+      storyTime: { kind: "ordinal", label: "order delivery", orderHint: 2 },
+      preconditions: [],
+      observedOutcome: {
+        version: 1,
+        operations: [{ op: "set", entityId: "order-letter", field: "artifact.owner", value: "mo-yan" }],
+      },
+      evidence: [],
+      causalParents: [],
+      confidence: 1,
+    });
+    await new PossibilityTemplateStore(root).put({
+      id: "deliver-order-scaffold",
+      kind: "canon-analogue",
+      title: "A qualified messenger takes custody of the order letter",
+      candidateWindow: { kind: "ordinal", label: "order delivery", orderHint: 2 },
+      preconditions: [],
+      blockers: [],
+      participants: ["mo-yan", "order-letter"],
+      participantPresence: [{ entityId: "mo-yan", mode: "physical" }],
+      causalParents: [],
+      canonicalEventId: "deliver-order",
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "order-letter", field: "artifact.owner", value: "mo-yan" }],
+      },
+      canonicalScaffold: {
+        version: 1,
+        mode: "participant-remap",
+        roles: [{
+          roleId: "messenger",
+          canonicalEntityId: "mo-yan",
+          description: "the living messenger physically present to accept custody",
+          allowedEntityKinds: ["character"],
+          presence: "active-scene",
+          requiredState: [{ op: "fact-equals", entityId: "mo-yan", field: "character.plan", value: "accept courier duty" }],
+          requiresKnowledge: [],
+        }],
+      },
+      evidence: [],
+    });
+    const { engine } = await openWorkspaceWorld(root);
+    await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "mo-yan", field: "character.alive", value: true },
+        { op: "set", entityId: "courier", field: "character.alive", value: true },
+        { op: "set", entityId: "mo-yan", field: "character.plan", value: "unavailable for courier duty" },
+        { op: "set", entityId: "courier", field: "character.plan", value: "accept courier duty" },
+        { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+        { op: "set", entityId: "mo-yan", field: "character.location", value: "hall" },
+        { op: "set", entityId: "courier", field: "character.location", value: "hall" },
+        { op: "set", entityId: "order-letter", field: "artifact.owner", value: "hero" },
+      ],
+    }, undefined, undefined, undefined, [], {
+      storyTime: { kind: "ordinal", label: "opening", orderHint: 0 },
+    }, {
+      entryActorId: "hero",
+      participantPresence: [
+        { entityId: "hero", mode: "physical" },
+        { entityId: "mo-yan", mode: "physical" },
+        { entityId: "courier", mode: "physical" },
+      ],
+    });
+
+    const outcome = await performPlayTurn({
+      root,
+      branchId: "main",
+      actorId: "hero",
+      utterance: "I refuse the planned transfer and keep the key.",
+      advanceActors: 0,
+      advanceBackground: 0,
+      translator: () => ({
+        title: "Hero refuses the key transfer",
+        participants: [],
+        preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.alive", value: true }],
+        proposedDelta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "keep the key" }],
+        },
+        requiresKnowledge: [],
+        forbidsKnowledge: [],
+      }),
+      canonicalAttachmentResolver: (input) => {
+        const courier = input.bindingOptions.find((option) =>
+          option.roles.some((role) => role.roleId === "messenger" && role.boundName === "The Courier"));
+        expect(courier?.stateEffects).toEqual(["Order Letter.artifact.owner = The Courier"]);
+        return {
+          decision: "attach",
+          bindingOptionId: courier!.bindingOptionId,
+          title: "The Courier takes custody after Hero refuses the transfer",
+          roleObservations: [{ roleId: "messenger", summary: "The Courier accepts the order letter." }],
+          roleAffects: [],
+        };
+      },
+    });
+
+    expect(outcome.result.accepted).toBe(true);
+    expect(outcome.result.proposal?.supersedesCanonicalEventIds).toEqual(["give-key"]);
+    expect(outcome.canonicalRecoveryEvents).toEqual([
+      expect.objectContaining({
+        title: "The Courier takes custody after Hero refuses the transfer",
+        scaffoldPossibilityId: "deliver-order-scaffold",
+        canonicalEventId: "deliver-order",
+      }),
+    ]);
+    expect(outcome.canonicalRecoveryTraces.at(-1)).toMatchObject({ status: "attached" });
+    expect(outcome.excludedCanonicalPossibilityIds).toEqual(["canon-deliver-order"]);
+    expect(outcome.backgroundEvents).toEqual([]);
+    const finalState = await engine.projector.project(outcome.finalHead);
+    expect(finalState.values.hero?.["character.plan"]).toBe("keep the key");
+    expect(finalState.values["order-letter"]?.["artifact.owner"]).toBe("courier");
+    const adapted = await engine.objects.getEvent(outcome.canonicalRecoveryEvents[0]!.eventHash);
+    expect(adapted.realizesCanonicalEventIds).toBeUndefined();
+    expect(adapted.canonicalAdaptation).toMatchObject({
+      adaptedFromCanonicalEventId: "deliver-order",
+      roleBindings: [{ canonicalEntityId: "mo-yan", boundEntityId: "courier" }],
+    });
+  });
+
   it("turns an explicit wait affordance into elapsed time and one autonomous world consequence", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-open-world-"));
     roots.push(root);

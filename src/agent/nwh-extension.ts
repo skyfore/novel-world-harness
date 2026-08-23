@@ -39,6 +39,7 @@ import { createPiPlayerActionTranslator } from "./pi-player-action.js";
 import { createPiPlayerWorldAdjudicator } from "./pi-player-world-adjudicator.js";
 import { createPiPlayerWorldResponseResolver } from "./pi-player-world-response.js";
 import { createPiNpcReactionReasoner } from "./pi-npc-reaction.js";
+import { createPiCanonicalAttachmentResolver } from "./pi-canonical-attachment.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
   deterministicPlayerIntentCandidate,
@@ -89,6 +90,7 @@ import {
 import { playerSceneChoicesSchema, type PlayerSceneChoice } from "./player-scene-choice-tool.js";
 import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
+import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
 import { formatElapsed } from "../util/elapsed-status.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/removal.js";
 import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
@@ -151,6 +153,7 @@ export type NwhExtensionOptions = {
   playerTranslator?: PlayerActionTranslator;
   playerWorldAdjudicator?: PlayerWorldAdjudicator;
   playerWorldResponseResolver?: PlayerWorldResponseResolver;
+  canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
   advanceBackground?: number;
   onSessionShutdown?: () => Promise<void>;
@@ -1108,6 +1111,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             signal: controller.signal,
           })
         : undefined);
+      const canonicalAttachmentResolver = options.canonicalAttachmentResolver ?? (!options.playerTranslator
+        ? createPiCanonicalAttachmentResolver({
+            root: workspace.root,
+            ...(options.profile ? { profile: options.profile } : {}),
+            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+            onStatus: showTurnActivity,
+            signal: controller.signal,
+          })
+        : undefined);
       showTurnActivity("正在理解你的行动…");
       let outcome: Awaited<ReturnType<typeof performPlayTurn>>;
       try {
@@ -1119,6 +1131,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           translator,
           ...(adjudicator ? { adjudicator } : {}),
           ...(worldResponseResolver ? { worldResponseResolver } : {}),
+          ...(canonicalAttachmentResolver ? { canonicalAttachmentResolver } : {}),
           ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
           advanceBackground: options.advanceBackground ?? 0,
           origin: input.origin ?? "freeform",
@@ -1177,6 +1190,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
       if (outcome.worldResponseError) {
         ctx.ui.notify(`Immediate world response stopped: ${outcome.worldResponseError}`, "warning");
+      }
+      if (outcome.canonicalRecoveryError) {
+        ctx.ui.notify(`Canonical scaffold recovery stopped: ${outcome.canonicalRecoveryError}`, "warning");
       }
       if (outcome.npcResponseError) {
         showPlayMessage("**场外提示：** 你对在场人物的互动已经发生，但至少一位 NPC 的即时回应未能通过生成或世界校验；系统没有把失败伪装成沉默。你可以用 **/scene** 查看当前已提交时刻，或继续行动。");

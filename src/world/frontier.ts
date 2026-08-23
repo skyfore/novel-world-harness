@@ -6,7 +6,7 @@ import type { BranchId, CommitId, EventProposal, EvidenceRef, Possibility, Story
 import { evaluatePredicate } from "./state.js";
 import { comparableStoryTime } from "./time.js";
 
-export type PossibilityStatus = "latent" | "eligible" | "blocked" | "expired" | "superseded" | "invalidated" | "realized";
+export type PossibilityStatus = "latent" | "eligible" | "blocked" | "expired" | "superseded" | "invalidated" | "adapted" | "realized";
 export type SchedulerFactors = { urgency: number; causalSupport: number; actorPressure: number; runtimeRelevance: number; conditionStrength: number; canonAffinity: number };
 export type EvaluatedPossibility = { possibility: Possibility; status: PossibilityStatus; reasons: string[]; factors: SchedulerFactors; score: number };
 export type FrontierTemporalMode = "current-window" | "advance";
@@ -20,6 +20,8 @@ export type Frontier = {
 
 type FrontierEvaluationOptions = {
   realizedIds?: ReadonlySet<string>;
+  /** Canonical possibility IDs fulfilled by a committed functional analogue. */
+  adaptedIds?: ReadonlySet<string>;
   supersededIds?: ReadonlySet<string>;
   canonAffinity?: number;
   temporalMode?: FrontierTemporalMode;
@@ -31,7 +33,7 @@ type FrontierEvaluationOptions = {
 export function evaluatePossibility(state: WorldState, possibility: Possibility, options: FrontierEvaluationOptions = {}): EvaluatedPossibility {
   const reasons: string[] = [];
   const unresolvedParents = possibility.causalParents.filter((parent) =>
-    !options.realizedIds?.has(parent) && !options.realizedIds?.has(`canon-${parent}`),
+    !possibilityIdAliases(parent).some((id) => options.realizedIds?.has(id) || options.adaptedIds?.has(id)),
   );
   const causalParentsSatisfied = unresolvedParents.length === 0;
   const temporal = assessTemporalCompatibility(
@@ -53,6 +55,9 @@ export function evaluatePossibility(state: WorldState, possibility: Possibility,
   if (options.realizedIds?.has(possibility.id)) {
     status = "realized";
     reasons.push("linked event is committed");
+  } else if (options.adaptedIds?.has(possibility.id)) {
+    status = "adapted";
+    reasons.push("a committed functional analogue fulfills this canonical development");
   } else if (options.supersededIds?.has(possibility.id)) {
     status = "superseded";
     reasons.push("replaced by another committed development");
@@ -103,6 +108,7 @@ export function evaluatePossibility(state: WorldState, possibility: Possibility,
 
 export function buildFrontier(branchId: BranchId, commitId: CommitId, state: WorldState, templates: readonly Possibility[], options: {
   realizedIds?: ReadonlySet<string>;
+  adaptedIds?: ReadonlySet<string>;
   supersededIds?: ReadonlySet<string>;
   canonAffinity?: ReadonlyMap<string, number>;
   temporalMode?: FrontierTemporalMode;
@@ -115,6 +121,7 @@ export function buildFrontier(branchId: BranchId, commitId: CommitId, state: Wor
     const possibility: Possibility = { ...template, branchId, evaluatedAtCommit: commitId };
     return evaluatePossibility(state, possibility, {
       realizedIds: options.realizedIds,
+      adaptedIds: options.adaptedIds,
       supersededIds: options.supersededIds,
       canonAffinity: possibility.canonicalEventId ? options.canonAffinity?.get(possibility.canonicalEventId) : undefined,
       temporalMode: options.temporalMode,
@@ -189,7 +196,10 @@ export function selectEligible(frontier: Frontier, limit = 10, options: { includ
 export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: string): EventProposal | null {
   const possibility = entry.possibility;
   const proposedDelta = possibility.proposedDelta;
-  if (entry.status !== "eligible" || !proposedDelta) return null;
+  // A parametric canonical scaffold is not an ordinary executable template.
+  // It must first pass host-side role binding and the dedicated attachment
+  // boundary; scheduling its unbound canonical participants would be unsafe.
+  if (entry.status !== "eligible" || !proposedDelta || possibility.canonicalScaffold) return null;
   return {
     proposalId: `poss-${contentHash({ id: possibility.id, at: possibility.evaluatedAtCommit }).slice(0, 24)}`,
     branchId: possibility.branchId,
@@ -295,13 +305,18 @@ function propagateInvalidatedDescendants(evaluated: EvaluatedPossibility[]): voi
   const byId = new Map<string, EvaluatedPossibility>();
   for (const entry of evaluated) {
     byId.set(entry.possibility.id, entry);
-    if (entry.possibility.canonicalEventId) byId.set(entry.possibility.canonicalEventId, entry);
+    // Only the exact canonical-derived possibility represents the raw event
+    // ID. A separate canon-analogue scaffold must not hide an invalid exact
+    // parent merely because both carry the same provenance link.
+    if (entry.possibility.canonicalEventId && entry.possibility.id === `canon-${entry.possibility.canonicalEventId}`) {
+      byId.set(entry.possibility.canonicalEventId, entry);
+    }
   }
   let changed = true;
   while (changed) {
     changed = false;
     for (const entry of evaluated) {
-      if (["realized", "superseded", "expired", "invalidated"].includes(entry.status)) continue;
+      if (["realized", "adapted", "superseded", "expired", "invalidated"].includes(entry.status)) continue;
       const invalidParent = entry.possibility.causalParents
         .map((parent) => byId.get(parent) ?? byId.get(`canon-${parent}`))
         .find((parent) => parent && ["superseded", "expired", "invalidated"].includes(parent.status));

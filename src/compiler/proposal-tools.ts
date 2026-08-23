@@ -38,7 +38,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
   "character-model": { name: "propose_character_model", label: "Propose character model", description: "Submit an evidence-backed baseline plus event/knowledge/state/time-activated development phases for one actor. The model never grants omniscient knowledge." },
   "state-delta": { name: "propose_state_delta", label: "Propose state delta", description: "Submit a deterministic state-delta candidate for later validation. This never moves a branch head." },
-  possibility: { name: "propose_possibility", label: "Propose possibility", description: "Submit an uncommitted future possibility. canon-analogue is reserved for a real canonicalEventId; a choice only the player may make must use player-choice. Do not submit actor-plan templates; actor intent belongs in character goals." },
+  possibility: { name: "propose_possibility", label: "Propose possibility", description: "Submit an uncommitted future possibility. canon-analogue is reserved for a real canonicalEventId; an optional canonicalScaffold may expose only source-grounded functional roles for bounded post-divergence rebinding. A choice only the player may make must use player-choice. Do not submit actor-plan templates; actor intent belongs in character goals." },
 };
 
 /** Exact model-tool authority owned by the compiler embedding. */

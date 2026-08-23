@@ -653,6 +653,7 @@ For a given branch head, every candidate evaluates to one of:
 - `blocked` — a blocking condition currently holds;
 - `expired` — its window/conditions can no longer be satisfied;
 - `superseded` — another committed development replaces it;
+- `adapted` — a committed functional analogue fulfills a canonical development without claiming verbatim realization;
 - `realized` — linked to a committed event.
 
 These statuses are frontier evaluation results, not authoritative world facts.
@@ -674,7 +675,63 @@ CanonicalEvent
 
 At runtime, only the conditions and pressures relevant to the current branch are evaluated. The original event ID is a provenance link, not an imperative.
 
-### 9.4 Frontier refresh
+### 9.4 Bounded canonical scaffold recovery after divergence
+
+An exact canonical-derived possibility keeps the original participants and
+effects. For selected source events, compilation may additionally accept a
+separate `canon-analogue` template with `canonicalScaffold`. This does not make
+canon a scheduler. It declares up to four source-backed **functional roles**
+whose participants may be rebound if the exact event no longer fits the branch.
+An attachment must change at least one declared role; canonical-self execution
+stays on the exact-event path and cannot be relabeled as an adaptation.
+
+The accepted scaffold must preserve the referenced canonical event's
+participants, participant presence, story time, time advance, preconditions,
+typed state effect, knowledge effect, and causal parents exactly. Role gates may
+only make it more restrictive through entity kind, branch availability,
+`active-scene` presence, state predicates, and actor knowledge. Identity-bound
+roles such as a named victim, heir, spouse, prophesied person, or private
+secret-holder are not valid functional substitutions. If an opaque string in a
+locked predicate, effect, or knowledge claim contains the role entity's stable
+ID, canonical name, or alias, compilation fails closed because only typed
+entity references can be substituted safely.
+
+```text
+player event supersedes one currently eligible canonical event
+  ↓ grants one bounded progression slot
+scan accepted scaffolds in comparable story-time/evidence order
+  ├─ hard causal dependency superseded/expired → trace and skip
+  ├─ exact event + canonical-self role binding eligible
+  │                                              → exact event takes precedence
+  ├─ no branch-present role binding satisfies
+  │  state + knowledge + scene gates            → trace and skip
+  └─ one or more bindings survive
+       ↓
+     isolated LLM selects one opaque binding or none
+     and may add only title + participant observation/affect
+       ↓
+     engine reloads the pinned scaffold, rebinds structural entity refs,
+     compares every locked field, rechecks causal/state/knowledge/presence,
+     then commits through the ordinary event boundary
+```
+
+The committed event records `canonicalAdaptation` lineage, including source
+event, scaffold, scene anchor, role bindings, and a core-effect hash. It realizes
+the scaffold, but it does **not** claim `realizesCanonicalEventIds` for the exact
+source event. The frontier instead marks that exact possibility `adapted`: this
+prevents duplicate execution and satisfies downstream causal dependencies while
+preserving the historical fact that canon did not happen verbatim.
+
+The model never receives stable entity IDs, branch/commit IDs, unrestricted
+tools, or effect-writing authority in this lane. Binding enumeration and all
+persistent state/knowledge changes remain deterministic host work. A failed or
+declined attachment leaves the branch unchanged; the private turn audit retains
+the scan traces, exact-candidate exclusions, and offered-decision result. An
+exact event that passes only its weaker base predicates but fails the scaffold's
+functional role gates is excluded from that progression move, so the ordinary
+scheduler cannot bypass the stronger check.
+
+### 9.5 Frontier refresh
 
 After every commit:
 

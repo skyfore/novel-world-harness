@@ -24,6 +24,11 @@ import {
 } from "./npc-reaction.js";
 import type { ReaderEntryContext } from "./entry-context.js";
 import { committedHistory } from "./scene.js";
+import type {
+  CanonicalAttachmentResolution,
+  CanonicalAttachmentResolver,
+} from "./canonical-adaptation.js";
+import type { CanonicalRecoveryTrace } from "./runtime.js";
 
 export type PlayableCharacter = {
   id: string;
@@ -86,6 +91,16 @@ export type PlayTurnOutcome = {
   worldResponseCandidates: PlayerWorldResponseOption[];
   worldResponseResolution?: PlayerWorldResponseResolution;
   worldResponseError?: string;
+  canonicalRecoveryEvents: Array<{
+    eventHash: string;
+    title: string;
+    scaffoldPossibilityId: string;
+    canonicalEventId: string;
+  }>;
+  canonicalRecoveryTraces: CanonicalRecoveryTrace[];
+  excludedCanonicalPossibilityIds: string[];
+  canonicalRecoveryResolution?: CanonicalAttachmentResolution;
+  canonicalRecoveryError?: string;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
   reactionEvents: Array<{
     eventHash: string;
@@ -271,6 +286,7 @@ export async function performPlayTurn(options: {
   translator: PlayerActionTranslator;
   adjudicator?: PlayerWorldAdjudicator;
   worldResponseResolver?: PlayerWorldResponseResolver;
+  canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
   advanceBackground?: number;
   origin?: PlayerTurnOrigin;
@@ -368,14 +384,25 @@ export async function performPlayTurn(options: {
   const worldResponseEvents: PlayTurnOutcome["worldResponseEvents"] = [];
   let worldResponseCandidates: PlayerWorldResponseOption[] = [];
   const backgroundEvents: PlayTurnOutcome["backgroundEvents"] = [];
+  const canonicalRecoveryEvents: PlayTurnOutcome["canonicalRecoveryEvents"] = [];
+  const canonicalRecoveryTraces: CanonicalRecoveryTrace[] = [];
+  const excludedCanonicalPossibilityIds = new Set<string>();
   const reactionEvents: PlayTurnOutcome["reactionEvents"] = [];
   let worldResponseResolution: PlayerWorldResponseResolution | undefined;
+  let canonicalRecoveryResolution: CanonicalAttachmentResolution | undefined;
   let worldResponseError: string | undefined;
+  let canonicalRecoveryError: string | undefined;
   let npcResponseError: string | undefined;
   let backgroundError: string | undefined;
   if (result.accepted) {
     const explicitWait = result.candidate?.intent?.kind === "wait";
-    const effectiveAdvanceBackground = explicitWait ? 1 : advanceBackground;
+    const divergedFromCanonThisTurn = Boolean(result.proposal?.supersedesCanonicalEventIds?.length);
+    // A newly committed contradiction of an eligible canonical event grants
+    // exactly one progression slot. This is the user-authorized trigger for
+    // looking forward; old divergence alone never advances an ordinary turn.
+    const effectiveAdvanceBackground = explicitWait
+      ? 1
+      : Math.max(advanceBackground, divergedFromCanonThisTurn ? 1 : 0);
     let directNpcAttempts = 0;
     if (options.npcResponseReasoner && result.candidate && result.eventHash) {
       const interaction = result.candidate.intent?.controlledAct?.interaction;
@@ -456,11 +483,55 @@ export async function performPlayTurn(options: {
         worldResponseError = error instanceof Error ? error.message : String(error);
       }
     }
+    if (options.canonicalAttachmentResolver || effectiveAdvanceBackground > 0) {
+      try {
+        const recovery = await runtime.recoverCanonicalTrajectory({
+          branchId: options.branchId,
+          actorId: options.actorId,
+          expectedHead: finalHead,
+          // Low-level/custom callers may omit the semantic adapter. The
+          // deterministic scan still runs so stronger scaffold gates can deny
+          // an unsafe exact candidate; it simply declines creative attachment.
+          resolver: options.canonicalAttachmentResolver ?? (() => ({ decision: "none" as const })),
+          temporalMode: divergedFromCanonThisTurn || (effectiveAdvanceBackground > 0 && !explicitWait)
+            ? "advance"
+            : "current-window",
+        });
+        canonicalRecoveryResolution = recovery.resolution;
+        canonicalRecoveryTraces.push(...recovery.traces);
+        recovery.excludedCanonicalPossibilityIds.forEach((id) => excludedCanonicalPossibilityIds.add(id));
+        finalHead = recovery.newHead;
+        if (
+          recovery.eventHash
+          && recovery.title
+          && recovery.scaffoldPossibilityId
+          && recovery.canonicalEventId
+        ) {
+          canonicalRecoveryEvents.push({
+            eventHash: recovery.eventHash,
+            title: recovery.title,
+            scaffoldPossibilityId: recovery.scaffoldPossibilityId,
+            canonicalEventId: recovery.canonicalEventId,
+          });
+        }
+      } catch (error) {
+        finalHead = await engine.branches.readHead(options.branchId);
+        canonicalRecoveryError = error instanceof Error ? error.message : String(error);
+      }
+    }
     try {
       const advanced = await runtime.move({
         branchId: options.branchId,
         maxActorCandidates: Math.max(0, advanceActors - directNpcAttempts),
-        maxBackgroundCandidates: effectiveAdvanceBackground,
+        // A committed attachment already consumed one requested progression
+        // slot; do not silently chain a second world event in the same slot.
+        // A failed recovery stops background scheduling for this turn;
+        // falling through could let the scheduler bypass gates computed before
+        // the failed semantic/commit boundary returned its exclusions.
+        maxBackgroundCandidates: canonicalRecoveryError
+          ? 0
+          : Math.max(0, effectiveAdvanceBackground - canonicalRecoveryEvents.length),
+        excludedBackgroundPossibilityIds: [...excludedCanonicalPossibilityIds],
         temporalMode: explicitWait ? "current-window" : effectiveAdvanceBackground > 0 ? "advance" : "current-window",
         ...(explicitWait ? { backgroundKinds: AUTONOMOUS_BACKGROUND_KINDS } : {}),
       });
@@ -512,6 +583,11 @@ export async function performPlayTurn(options: {
       worldResponseCandidates: structuredClone(worldResponseCandidates),
       worldResponseEvents: structuredClone(worldResponseEvents),
       ...(worldResponseError ? { worldResponseError } : {}),
+      ...(canonicalRecoveryResolution ? { canonicalRecoveryResolution: structuredClone(canonicalRecoveryResolution) } : {}),
+      canonicalRecoveryTraces: structuredClone(canonicalRecoveryTraces),
+      excludedCanonicalPossibilityIds: [...excludedCanonicalPossibilityIds].sort(),
+      canonicalRecoveryEvents: structuredClone(canonicalRecoveryEvents),
+      ...(canonicalRecoveryError ? { canonicalRecoveryError } : {}),
       ...(npcResponseError ? { npcResponseError } : {}),
       reactionEvents: structuredClone(reactionEvents),
       backgroundEvents: structuredClone(backgroundEvents),
@@ -530,6 +606,11 @@ export async function performPlayTurn(options: {
     worldResponseEvents,
     ...(worldResponseResolution ? { worldResponseResolution } : {}),
     ...(worldResponseError ? { worldResponseError } : {}),
+    canonicalRecoveryEvents,
+    canonicalRecoveryTraces,
+    excludedCanonicalPossibilityIds: [...excludedCanonicalPossibilityIds].sort(),
+    ...(canonicalRecoveryResolution ? { canonicalRecoveryResolution } : {}),
+    ...(canonicalRecoveryError ? { canonicalRecoveryError } : {}),
     ...(npcResponseError ? { npcResponseError } : {}),
     backgroundEvents,
     reactionEvents,

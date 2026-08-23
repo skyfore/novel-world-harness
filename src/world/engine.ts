@@ -33,6 +33,12 @@ import { StateSchemaRegistry, advanceTemporalState, applyStateDelta, emptyWorldS
 import { BranchStore, WorldObjectStore } from "./store.js";
 import { assertMonotonicLogicalTime, nextLogicalTime } from "./time.js";
 import { assertEvidenceExclusiveToSource } from "./source-scope.js";
+import {
+  canonicalAdaptationRoleRequirements,
+  validateCanonicalAdaptationContract,
+} from "./canonical-adaptation.js";
+import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { committedHistory, projectActorScene } from "./scene.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -184,6 +190,7 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
     const eventId = proposal.supersedesCanonicalEventIds![index]!;
     if (!context.events?.has(eventId)) errors.push({ code: "UNKNOWN_SUPERSEDED_CANONICAL_EVENT", message: `Unknown superseded canonical event ${eventId}`, path: `supersedesCanonicalEventIds.${index}` });
   }
+  errors.push(...validateCanonicalAdaptationContract(proposal, context));
   for (let index = 0; index < proposal.preconditions.length; index += 1) {
     if (!evaluatePredicate(evaluationState, proposal.preconditions[index]!)) errors.push({ code: "PRECONDITION_FAILED", message: `Precondition ${index} is false`, path: `preconditions.${index}` });
   }
@@ -431,13 +438,96 @@ export class WorldEngine {
       assertEvidenceExclusiveToSource(parsed.evidence, sourceId, `Event proposal ${parsed.proposalId}`);
     }
     const state = await this.projector.project(head);
-    const { report, postState } = validateEventProposal(parsed, head, state, context);
+    const { report: baseReport, postState } = validateEventProposal(parsed, head, state, context);
+    let report = baseReport;
+    if (report.accepted && parsed.canonicalAdaptation) {
+      const runtimeErrors: ValidationIssue[] = [];
+      const sceneActor = context.entities.get(parsed.canonicalAdaptation.sceneActorId);
+      const [knowledge, history, scene] = await Promise.all([
+        new KnowledgeProjector(this).project(head),
+        committedHistory(this, head),
+        sceneActor?.kind === "character"
+          ? projectActorScene(this, sceneActor.id, head).catch(() => undefined)
+          : Promise.resolve(undefined),
+      ]);
+      if (!sceneActor || sceneActor.kind !== "character" || !scene) {
+        runtimeErrors.push({
+          code: "INVALID_CANONICAL_ADAPTATION_SCENE_ACTOR",
+          message: `Canonical adaptation scene anchor ${parsed.canonicalAdaptation.sceneActorId} is not an available character`,
+          path: "canonicalAdaptation.sceneActorId",
+        });
+      }
+      const availableEntityIds = new Set<string>([
+        ...Object.keys(state.values),
+        ...history.flatMap(({ event }) => event.participants),
+      ]);
+      const fulfilledCausalIds = new Set<string>();
+      for (const { event } of history) {
+        fulfilledCausalIds.add(event.eventId);
+        if (event.possibilityId) fulfilledCausalIds.add(event.possibilityId);
+        for (const eventId of event.realizesCanonicalEventIds ?? []) {
+          fulfilledCausalIds.add(eventId);
+          fulfilledCausalIds.add(`canon-${eventId}`);
+        }
+        if (event.canonicalAdaptation) {
+          fulfilledCausalIds.add(event.canonicalAdaptation.adaptedFromCanonicalEventId);
+          fulfilledCausalIds.add(`canon-${event.canonicalAdaptation.adaptedFromCanonicalEventId}`);
+        }
+      }
+      for (const parent of parsed.causalParents) {
+        if (!fulfilledCausalIds.has(parent) && !fulfilledCausalIds.has(`canon-${parent}`)) {
+          runtimeErrors.push({
+            code: "CANONICAL_ADAPTATION_CAUSAL_PARENT_REQUIRED",
+            message: `Canonical scaffold requires unfulfilled causal parent ${parent}`,
+            path: "causalParents",
+          });
+        }
+      }
+      for (const requirement of canonicalAdaptationRoleRequirements(parsed, context)) {
+        const entity = context.entities.get(requirement.boundEntityId);
+        if (!availableEntityIds.has(requirement.boundEntityId)) {
+          runtimeErrors.push({
+            code: "CANONICAL_ADAPTATION_ENTITY_UNAVAILABLE",
+            message: `Canonical scaffold role ${requirement.roleId} binds entity ${requirement.boundEntityId} before it enters branch history`,
+            path: "canonicalAdaptation.roleBindings",
+          });
+        }
+        if (entity?.kind === "character" && state.values[entity.id]?.["character.alive"] === false) {
+          runtimeErrors.push({
+            code: "CANONICAL_ADAPTATION_ENTITY_DEAD",
+            message: `Canonical scaffold role ${requirement.roleId} binds dead character ${requirement.boundEntityId}`,
+            path: "canonicalAdaptation.roleBindings",
+          });
+        }
+        if (requirement.presence === "active-scene" && !scene?.presentEntityIds.includes(requirement.boundEntityId)) {
+          runtimeErrors.push({
+            code: "CANONICAL_ADAPTATION_ENTITY_NOT_PRESENT",
+            message: `Canonical scaffold role ${requirement.roleId} requires ${requirement.boundEntityId} in the active scene`,
+            path: "canonicalAdaptation.roleBindings",
+          });
+        }
+        for (const claimId of requirement.requiresKnowledge) {
+          const fact = knowledge.actors[requirement.boundEntityId]?.[claimId];
+          if (!fact || !isActionableKnowledge(fact)) {
+            runtimeErrors.push({
+              code: "CANONICAL_ADAPTATION_KNOWLEDGE_REQUIRED",
+              message: `Canonical scaffold role binding ${requirement.boundEntityId} lacks required knowledge ${claimId}`,
+              path: "canonicalAdaptation.roleBindings",
+            });
+          }
+        }
+      }
+      if (runtimeErrors.length) {
+        const { derivedDeltaHash: _derivedDeltaHash, ...withoutDerivedHash } = report;
+        report = { ...withoutDerivedHash, accepted: false, errors: [...report.errors, ...runtimeErrors] };
+      }
+    }
     if (!report.accepted) return { report, previousHead: head, newHead: head };
     if (!postState) throw new Error("Accepted event proposal did not produce a projected post-state");
     const deltaHash = await this.objects.putDelta(parsed.proposedDelta);
     const knowledgeDeltaHash = parsed.proposedKnowledge ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge) : undefined;
     const logicalTime = postState.logicalTime;
-    const canonicalPossibilityId = parsed.possibilityId?.startsWith("canon-")
+    const canonicalPossibilityId = !parsed.canonicalAdaptation && parsed.possibilityId?.startsWith("canon-")
       ? parsed.possibilityId.slice("canon-".length)
       : undefined;
     const realizesCanonicalEventIds = canonicalPossibilityId && context.events?.has(canonicalPossibilityId)
@@ -454,6 +544,7 @@ export class WorldEngine {
       knowledgeDeltaHash,
       supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds,
       possibilityId: parsed.possibilityId,
+      canonicalAdaptation: parsed.canonicalAdaptation,
       realizesCanonicalEventIds,
       progress: parsed.progress,
       participantPresence: parsed.participantPresence,
@@ -480,6 +571,7 @@ export class WorldEngine {
       ...(parsed.supersedesCanonicalEventIds ? { supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds } : {}),
       ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
       ...(parsed.possibilityId ? { possibilityId: parsed.possibilityId } : {}),
+      ...(parsed.canonicalAdaptation ? { canonicalAdaptation: structuredClone(parsed.canonicalAdaptation) } : {}),
       ...(parsed.progress ? { progress: parsed.progress } : {}),
     };
     const eventHash = await this.objects.putEvent(event);

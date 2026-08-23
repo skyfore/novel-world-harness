@@ -397,6 +397,23 @@ persisted per instance, with one active pointer that ordinary `nwh` startup
 resumes automatically. `play-world --action` remains the compact script/legacy
 readline path.
 
+There is one bounded exception to ordinary no-auto-advance behavior: when the
+new player event directly conflicts with and supersedes a currently eligible
+canonical event, that turn receives one progression slot. The runtime scans
+explicitly compiled canonical scaffolds in story-time order, skips failed hard
+dependencies, and uses the exact event only when its canonical-self role binding
+also passes the stronger scaffold gates. If only a functional
+participant differs, a fresh isolated capture-only model may select one
+host-enumerated role binding and add bounded observation/affect text. At least
+one role must change—an all-canonical binding remains an exact event rather than
+being relabeled as adapted. The engine
+then reloads the pinned scaffold and rechecks its unmodified causal parents,
+time, state/knowledge effects, branch availability, knowledge, and scene
+presence before commit. The analogue is recorded as adapted lineage, never as a
+claim that the source event happened verbatim; it may satisfy later causal
+dependencies without snapping branch history back to canon. Older prepared
+revisions need reparse to acquire compiler-generated scaffolds.
+
 Branch and integrity workflows:
 
 ```bash

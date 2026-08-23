@@ -3,9 +3,15 @@ import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
-import { possibilitySchema, type Possibility } from "./model.js";
+import {
+  possibilityBaseSchema,
+  validateCanonicalScaffoldPossibility,
+  type Possibility,
+} from "./model.js";
 
-export const possibilityTemplateSchema = possibilitySchema.omit({ branchId: true, evaluatedAtCommit: true });
+export const possibilityTemplateSchema = possibilityBaseSchema
+  .omit({ branchId: true, evaluatedAtCommit: true })
+  .superRefine(validateCanonicalScaffoldPossibility);
 export type PossibilityTemplate = z.infer<typeof possibilityTemplateSchema>;
 type TemplateRef = { version: 1; id: string; hash: string; updatedAt: string };
 export type PossibilityRevisionRef = { id: string; hash: string };

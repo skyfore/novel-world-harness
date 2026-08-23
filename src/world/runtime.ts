@@ -20,6 +20,17 @@ import { committedHistory } from "./scene.js";
 import { immutableClone } from "../util/immutable.js";
 import type { PlayerActionCandidate } from "./player-action.js";
 import type { ModelPlayConversationMessage } from "./play-conversation.js";
+import {
+  canonicalAttachmentResolutionSchema,
+  evaluateCanonicalBindingOptions,
+  type CanonicalAttachmentResolution,
+  type CanonicalAttachmentResolver,
+  type CanonicalBindingOption,
+} from "./canonical-adaptation.js";
+import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { projectActorScene } from "./scene.js";
+import { comparableStoryTime } from "./time.js";
+import { contentHash } from "./canonical.js";
 
 const MAX_CALLBACK_CANDIDATES = 10_000;
 const MAX_PLAYER_WORLD_RESPONSES = 64;
@@ -43,6 +54,8 @@ export type MoveInput = {
   temporalMode?: FrontierTemporalMode;
   /** Optional allowlist for background scheduling; actor proposals are unaffected. */
   backgroundKinds?: readonly PossibilityKind[];
+  /** Host-derived denylist for candidates disproved by a stronger bounded gate. */
+  excludedBackgroundPossibilityIds?: readonly string[];
 };
 
 export type AdjudicationConflict = {
@@ -111,6 +124,34 @@ export type PlayerWorldResponseResult = {
   previousHead: CommitId;
   newHead: CommitId;
   possibilityId?: string;
+  title?: string;
+  eventHash?: string;
+};
+
+export type CanonicalRecoveryTrace = {
+  scaffoldPossibilityId: string;
+  canonicalEventId: string;
+  status:
+    | "directly-superseded"
+    | "already-resolved"
+    | "hard-invalidated"
+    | "temporarily-unavailable"
+    | "exact-event-ready"
+    | "no-valid-binding"
+    | "resolver-declined"
+    | "attached";
+  reasons: string[];
+  bindingOptionCount?: number;
+};
+
+export type CanonicalRecoveryResult = {
+  resolution: CanonicalAttachmentResolution;
+  previousHead: CommitId;
+  newHead: CommitId;
+  traces: CanonicalRecoveryTrace[];
+  excludedCanonicalPossibilityIds: string[];
+  scaffoldPossibilityId?: string;
+  canonicalEventId?: string;
   title?: string;
   eventHash?: string;
 };
@@ -198,6 +239,9 @@ export class WorldRuntime {
     const backgroundKinds = input.backgroundKinds
       ? new Set(possibilityKindSchema.array().max(8).parse(input.backgroundKinds))
       : undefined;
+    const excludedBackgroundPossibilityIds = new Set(
+      idSchema.array().max(MAX_CALLBACK_CANDIDATES).parse(input.excludedBackgroundPossibilityIds ?? []),
+    );
     const temporalMode = backgroundLimit > 0 ? input.temporalMode ?? "advance" : "current-window";
     let latestFrontier = await this.refreshFrontier(input.branchId, currentHead, { temporalMode });
     for (let index = 0; index < backgroundLimit; index += 1) {
@@ -206,11 +250,15 @@ export class WorldRuntime {
           ? {
               ...latestFrontier,
               evaluated: latestFrontier.evaluated.filter((entry) =>
-                backgroundKinds.has(entry.possibility.kind) && Boolean(possibilityToProposal(entry))),
+                !excludedBackgroundPossibilityIds.has(entry.possibility.id)
+                && backgroundKinds.has(entry.possibility.kind)
+                && Boolean(possibilityToProposal(entry))),
             }
           : {
               ...latestFrontier,
-              evaluated: latestFrontier.evaluated.filter((entry) => Boolean(possibilityToProposal(entry))),
+              evaluated: latestFrontier.evaluated.filter((entry) =>
+                !excludedBackgroundPossibilityIds.has(entry.possibility.id)
+                && Boolean(possibilityToProposal(entry))),
             },
         1,
       )[0];
@@ -275,6 +323,7 @@ export class WorldRuntime {
     const history = await this.possibilityHistory(head);
     const frontier = buildFrontier(branchId, head, state, templates, {
       realizedIds: history.realizedIds,
+      adaptedIds: history.adaptedIds,
       supersededIds: history.supersededIds,
       temporalMode: options.temporalMode ?? "current-window",
       ...(temporalAnchor ? { temporalAnchor } : {}),
@@ -297,6 +346,7 @@ export class WorldRuntime {
     const frontier = await this.refreshFrontier(proposal.branchId, proposal.expectedParentCommit);
     const eligible = frontier.evaluated.filter((entry) =>
       entry.status === "eligible"
+      && !entry.possibility.canonicalScaffold
       && (Boolean(entry.possibility.canonicalEventId) || entry.possibility.kind === "player-choice")
       && Boolean(proposal.actorId && entry.possibility.participants.includes(proposal.actorId)),
     );
@@ -359,6 +409,7 @@ export class WorldRuntime {
     const offered = frontier.evaluated
       .filter((entry) =>
         entry.status === "eligible"
+        && !entry.possibility.canonicalScaffold
         && entry.possibility.participants.includes(input.actorId)
         && entry.possibility.kind !== "player-choice"
         && entry.possibility.kind !== "actor-plan"
@@ -430,8 +481,282 @@ export class WorldRuntime {
     };
   }
 
-  private async possibilityHistory(commitId: CommitId): Promise<{ realizedIds: ReadonlySet<string>; supersededIds: ReadonlySet<string> }> {
+  /**
+   * Reuses one explicitly compiled canonical scaffold after branch divergence.
+   * The host scans in story-time order, enumerates only bindings that satisfy
+   * hard state/knowledge/causal constraints, and lets the model select one
+   * opaque binding plus bounded observations/affect. Core effects stay locked.
+   */
+  async recoverCanonicalTrajectory(input: {
+    branchId: BranchId;
+    actorId: string;
+    expectedHead: CommitId;
+    resolver: CanonicalAttachmentResolver;
+    temporalMode?: FrontierTemporalMode;
+    maxResolverCandidates?: number;
+  }): Promise<CanonicalRecoveryResult> {
+    const actualHead = await this.engine.branches.readHead(input.branchId);
+    if (actualHead !== input.expectedHead) {
+      throw new Error(`Cannot recover canonical trajectory at stale commit ${input.expectedHead}; current head is ${actualHead}`);
+    }
+    const maxResolverCandidates = input.maxResolverCandidates ?? 3;
+    if (!Number.isInteger(maxResolverCandidates) || maxResolverCandidates < 0 || maxResolverCandidates > 10) {
+      throw new Error("maxResolverCandidates must be an integer between 0 and 10");
+    }
+    const temporalMode = input.temporalMode ?? "current-window";
+    const [frontier, context, state, history, possibilityHistory, scene, knowledge] = await Promise.all([
+      this.refreshFrontier(input.branchId, input.expectedHead, { temporalMode }),
+      this.engine.contextForCommit(input.expectedHead),
+      this.engine.projector.project(input.expectedHead),
+      committedHistory(this.engine, input.expectedHead),
+      this.possibilityHistory(input.expectedHead),
+      projectActorScene(this.engine, input.actorId, input.expectedHead),
+      new KnowledgeProjector(this.engine).project(input.expectedHead),
+    ]);
+    const traces: CanonicalRecoveryTrace[] = [];
+    const excludedCanonicalPossibilityIds = new Set<string>();
+    if (!possibilityHistory.supersededIds.size || maxResolverCandidates === 0) {
+      return {
+        resolution: { decision: "none" },
+        previousHead: input.expectedHead,
+        newHead: input.expectedHead,
+        traces,
+        excludedCanonicalPossibilityIds: [],
+      };
+    }
+    const activeEntityIds = new Set<string>(scene.presentEntityIds);
+    if (scene.locationId) activeEntityIds.add(scene.locationId);
+    const availableEntityIds = new Set<string>([
+      ...Object.keys(state.values),
+      ...history.flatMap(({ event }) => event.participants),
+    ]);
+    const knownClaimIdsByActor = new Map<string, ReadonlySet<string>>(
+      Object.entries(knowledge.actors).map(([actorId, claims]) => [
+        actorId,
+        new Set(Object.values(claims).filter(isActionableKnowledge).map((fact) => fact.claimId)),
+      ]),
+    );
+    const candidates = frontier.evaluated
+      .filter((entry) => Boolean(entry.possibility.canonicalScaffold && entry.possibility.canonicalEventId))
+      .sort((left, right) => compareCanonicalRecoveryOrder(left.possibility, right.possibility)
+        || left.possibility.id.localeCompare(right.possibility.id));
+    let resolverCalls = 0;
+    for (const entry of candidates) {
+      const scaffold = entry.possibility;
+      const canonicalEventId = scaffold.canonicalEventId!;
+      const directCanonicalId = `canon-${canonicalEventId}`;
+      const traceBase = { scaffoldPossibilityId: scaffold.id, canonicalEventId };
+      if (possibilityHistory.supersededIds.has(directCanonicalId)) {
+        traces.push({ ...traceBase, status: "directly-superseded", reasons: ["the scaffold's own canonical event was directly replaced by branch history"] });
+        continue;
+      }
+      if (["realized", "adapted", "superseded"].includes(entry.status)) {
+        traces.push({ ...traceBase, status: "already-resolved", reasons: [...entry.reasons] });
+        continue;
+      }
+      if (["invalidated", "expired"].includes(entry.status)) {
+        traces.push({ ...traceBase, status: "hard-invalidated", reasons: [...entry.reasons] });
+        continue;
+      }
+      const exact = frontier.evaluated.find((candidate) => candidate.possibility.id === directCanonicalId);
+      if (exact?.status === "realized" || exact?.status === "adapted") {
+        traces.push({
+          ...traceBase,
+          status: "already-resolved",
+          reasons: [exact.status === "adapted"
+            ? "a committed functional analogue already fulfills this canonical development"
+            : "the exact canonical event is already realized"],
+        });
+        continue;
+      }
+      const bindingEvaluation = await evaluateCanonicalBindingOptions({
+        scaffold,
+        context,
+        state,
+        knownClaimIdsByActor,
+        availableEntityIds,
+        activeEntityIds,
+        realizedIds: possibilityHistory.realizedIds,
+        adaptedIds: possibilityHistory.adaptedIds,
+        supersededIds: possibilityHistory.supersededIds,
+        temporalMode,
+      });
+      const canonicalSelfBinding = bindingEvaluation.options.find((option) =>
+        option.bindings.every((binding) => binding.canonicalEntityId === binding.boundEntityId));
+      const adaptationOptions = bindingEvaluation.options.filter((option) =>
+        option.bindings.some((binding) => binding.canonicalEntityId !== binding.boundEntityId));
+      if (exact?.status === "eligible" && canonicalSelfBinding) {
+        traces.push({
+          ...traceBase,
+          status: "exact-event-ready",
+          reasons: ["the exact canonical event and its canonical role bindings remain eligible"],
+          bindingOptionCount: bindingEvaluation.options.length,
+        });
+        break;
+      }
+      if (exact?.status === "eligible" && !canonicalSelfBinding) {
+        // The scaffold carries stronger functional role gates than the base
+        // source event. Do not let the ordinary scheduler immediately bypass
+        // those gates with the exact fixed-participant candidate.
+        excludedCanonicalPossibilityIds.add(directCanonicalId);
+      }
+      if (!adaptationOptions.length) {
+        const exactGateReason = excludedCanonicalPossibilityIds.has(directCanonicalId)
+          ? ["the exact fixed-participant candidate failed the scaffold's stronger role gates and was excluded from this move"]
+          : [];
+        const bindingReasons = bindingEvaluation.options.length
+          ? ["no non-canonical role remapping satisfies the scaffold; canonical-self execution remains on the exact-event path"]
+          : (bindingEvaluation.reasons.length ? bindingEvaluation.reasons : entry.reasons);
+        traces.push({
+          ...traceBase,
+          status: entry.status === "latent" || entry.status === "blocked" ? "temporarily-unavailable" : "no-valid-binding",
+          reasons: [...exactGateReason, ...bindingReasons],
+          bindingOptionCount: adaptationOptions.length,
+        });
+        continue;
+      }
+      if (resolverCalls >= maxResolverCandidates) break;
+      resolverCalls += 1;
+      const canonicalEvent = context.events?.get(canonicalEventId);
+      if (!canonicalEvent) {
+        traces.push({ ...traceBase, status: "hard-invalidated", reasons: ["the pinned canonical source event is unavailable"] });
+        continue;
+      }
+      const rawResolution = await input.resolver(immutableClone({
+        canonicalEvent: {
+          title: modelSafeText(canonicalEvent.title, context),
+          ...(canonicalEvent.readerSummary ? { readerSummary: modelSafeText(canonicalEvent.readerSummary, context) } : {}),
+        },
+        scaffold: {
+          title: modelSafeText(scaffold.title, context),
+        },
+        bindingOptions: adaptationOptions.map((option) => bindingOptionView(option, scaffold, context)),
+        recentCommittedEvents: history.slice(-8).map(({ event }) => ({
+          title: modelSafeText(event.title, context),
+          participantNames: event.participants.map((participant) => context.entities.get(participant)?.canonicalName ?? "unknown entity"),
+        })),
+      }));
+      const resolution = canonicalAttachmentResolutionSchema.parse(structuredClone(rawResolution));
+      if (resolution.decision === "none") {
+        traces.push({
+          ...traceBase,
+          status: "resolver-declined",
+          reasons: [
+            ...(excludedCanonicalPossibilityIds.has(directCanonicalId)
+              ? ["the exact fixed-participant candidate failed the scaffold's stronger role gates and was excluded from this move"]
+              : []),
+            "the bounded semantic adapter found no coherent attachment",
+          ],
+          bindingOptionCount: adaptationOptions.length,
+        });
+        continue;
+      }
+      const selected = adaptationOptions.find((option) => option.bindingOptionId === resolution.bindingOptionId);
+      if (!selected) throw new Error(`Canonical attachment selected an unoffered binding ${resolution.bindingOptionId}`);
+      const boundByRole = new Map(selected.bindings.map((binding) => [binding.roleId, binding.boundEntityId]));
+      const actorObservations = resolution.roleObservations.map((observation) => {
+        const actorId = boundByRole.get(observation.roleId);
+        if (!actorId || context.entities.get(actorId)?.kind !== "character") {
+          throw new Error(`Canonical attachment observation references non-character or unknown role ${observation.roleId}`);
+        }
+        return { actorId, summary: observation.summary };
+      });
+      const actorAffects = resolution.roleAffects.map((affect) => {
+        const actorId = boundByRole.get(affect.roleId);
+        if (!actorId || context.entities.get(actorId)?.kind !== "character") {
+          throw new Error(`Canonical attachment affect references non-character or unknown role ${affect.roleId}`);
+        }
+        return {
+          actorId,
+          label: affect.label,
+          intensity: affect.intensity,
+          ...(affect.expression ? { expression: affect.expression } : {}),
+        };
+      });
+      const possibility = selected.possibility;
+      const proposal = eventProposalSchema.parse({
+        proposalId: `canon-adapt-${contentHash({
+          scaffoldId: scaffold.id,
+          at: input.expectedHead,
+          bindings: selected.bindings,
+          title: resolution.title,
+        }).slice(0, 24)}`,
+        branchId: input.branchId,
+        expectedParentCommit: input.expectedHead,
+        source: "canon-candidate",
+        title: resolution.title,
+        ...(actorObservations.length ? { actorObservations } : {}),
+        ...(actorAffects.length ? { actorAffects } : {}),
+        participants: possibility.participants,
+        ...(possibility.participantPresence ? { participantPresence: possibility.participantPresence } : {}),
+        proposedTime: possibility.candidateWindow ?? { kind: "unknown" },
+        ...(possibility.timeAdvance ? { timeAdvance: possibility.timeAdvance } : {}),
+        preconditions: possibility.preconditions,
+        proposedDelta: possibility.proposedDelta!,
+        ...(possibility.proposedKnowledge ? { proposedKnowledge: possibility.proposedKnowledge } : {}),
+        causalParents: possibility.causalParents,
+        evidence: possibility.evidence,
+        possibilityId: scaffold.id,
+        canonicalAdaptation: {
+          version: 1,
+          scaffoldPossibilityId: scaffold.id,
+          adaptedFromCanonicalEventId: canonicalEventId,
+          sceneActorId: input.actorId,
+          roleBindings: selected.bindings,
+          coreEffectHash: selected.coreEffectHash,
+        },
+        progress: {
+          version: 1,
+          channels: ["thread", "consequence"],
+          threadIds: [scaffold.id, directCanonicalId],
+          noveltyKey: `canonical-adaptation:${scaffold.id}:${contentHash(selected.bindings).slice(0, 16)}`,
+          outcome: "succeeded",
+        },
+      });
+      const committed = await this.engine.commitProposal(proposal);
+      if (!committed.report.accepted) {
+        const details = committed.report.errors.map((issue) => `${issue.code}: ${issue.message}`).join("; ");
+        throw new Error(`Canonical attachment was rejected: ${details || "unknown validation failure"}`);
+      }
+      traces.push({
+        ...traceBase,
+        status: "attached",
+        reasons: [
+          ...(excludedCanonicalPossibilityIds.has(directCanonicalId)
+            ? ["the exact fixed-participant candidate failed the scaffold's stronger role gates"]
+            : []),
+          "a host-validated role binding instantiated the locked canonical scaffold",
+        ],
+        bindingOptionCount: adaptationOptions.length,
+      });
+      return {
+        resolution,
+        previousHead: input.expectedHead,
+        newHead: committed.newHead,
+        traces,
+        excludedCanonicalPossibilityIds: [...excludedCanonicalPossibilityIds].sort(),
+        scaffoldPossibilityId: scaffold.id,
+        canonicalEventId,
+        title: resolution.title,
+        ...(committed.eventHash ? { eventHash: committed.eventHash } : {}),
+      };
+    }
+    return {
+      resolution: { decision: "none" },
+      previousHead: input.expectedHead,
+      newHead: input.expectedHead,
+      traces,
+      excludedCanonicalPossibilityIds: [...excludedCanonicalPossibilityIds].sort(),
+    };
+  }
+
+  private async possibilityHistory(commitId: CommitId): Promise<{
+    realizedIds: ReadonlySet<string>;
+    adaptedIds: ReadonlySet<string>;
+    supersededIds: ReadonlySet<string>;
+  }> {
     const realized = new Set<string>();
+    const adapted = new Set<string>();
     const superseded = new Set<string>();
     const seen = new Set<string>();
     let cursor: CommitId | undefined = commitId;
@@ -443,11 +768,12 @@ export class WorldRuntime {
         const event = await this.engine.objects.getEvent(eventHash);
         if (event.possibilityId) realized.add(event.possibilityId);
         for (const eventId of event.realizesCanonicalEventIds ?? []) realized.add(`canon-${eventId}`);
+        if (event.canonicalAdaptation) adapted.add(`canon-${event.canonicalAdaptation.adaptedFromCanonicalEventId}`);
         for (const eventId of event.supersedesCanonicalEventIds ?? []) superseded.add(`canon-${eventId}`);
       }
       cursor = commit.parentCommitId;
     }
-    return { realizedIds: realized, supersededIds: superseded };
+    return { realizedIds: realized, adaptedIds: adapted, supersededIds: superseded };
   }
 
   private async temporalAnchor(commitId: CommitId): Promise<StoryTime | undefined> {
@@ -498,11 +824,11 @@ function describePlayerWorldResponse(
 ): PlayerWorldResponseOption {
   const entityName = (entityId: string): string => context.entities.get(entityId)?.canonicalName ?? "unknown entity";
   const renderValue = (value: unknown): string => {
-    if (typeof value === "string") return context.entities.get(value)?.canonicalName ?? value;
+    if (typeof value === "string") return context.entities.get(value)?.canonicalName ?? modelSafeText(value, context);
     if (Array.isArray(value)) return `[${value.map((item) => typeof item === "string"
-      ? context.entities.get(item)?.canonicalName ?? item
-      : JSON.stringify(item)).join(", ")}]`;
-    return JSON.stringify(value);
+      ? context.entities.get(item)?.canonicalName ?? modelSafeText(item, context)
+      : JSON.stringify(modelSafeValue(item, context))).join(", ")}]`;
+    return JSON.stringify(modelSafeValue(value, context));
   };
   const stateEffects = (possibility.proposedDelta?.operations ?? []).map((operation) => {
     if (operation.op === "activate-rule") return `activate rule ${context.rules.get(operation.ruleId)?.name ?? "unknown rule"}`;
@@ -532,6 +858,72 @@ function describePlayerWorldResponse(
       ? { timeEffect: `${possibility.timeAdvance.amount} ${possibility.timeAdvance.unit}` }
       : {}),
   };
+}
+
+function bindingOptionView(
+  option: CanonicalBindingOption,
+  scaffold: Possibility,
+  context: Awaited<ReturnType<WorldEngine["contextForCommit"]>>,
+) {
+  const roleById = new Map(scaffold.canonicalScaffold!.roles.map((role) => [role.roleId, role]));
+  const description = describePlayerWorldResponse(option.possibility, context);
+  return {
+    bindingOptionId: option.bindingOptionId,
+    stateEffects: description.stateEffects,
+    knowledgeEffects: description.knowledgeEffects,
+    roles: option.bindings.map((binding) => {
+      const role = roleById.get(binding.roleId)!;
+      return {
+        roleId: role.roleId,
+        description: modelSafeText(role.description, context),
+        canonicalName: context.entities.get(binding.canonicalEntityId)?.canonicalName ?? "unknown canonical participant",
+        boundName: context.entities.get(binding.boundEntityId)?.canonicalName ?? "unknown current participant",
+        boundKind: context.entities.get(binding.boundEntityId)?.kind ?? "unknown",
+      };
+    }),
+  };
+}
+
+function modelSafeValue(
+  value: unknown,
+  context: Awaited<ReturnType<WorldEngine["contextForCommit"]>>,
+): unknown {
+  if (typeof value === "string") return context.entities.get(value)?.canonicalName ?? modelSafeText(value, context);
+  if (Array.isArray(value)) return value.map((item) => modelSafeValue(item, context));
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    modelSafeText(key, context),
+    modelSafeValue(item, context),
+  ]));
+}
+
+function modelSafeText(
+  value: string,
+  context: Awaited<ReturnType<WorldEngine["contextForCommit"]>>,
+): string {
+  let result = value;
+  const entities = [...context.entities.values()].sort((left, right) => right.id.length - left.id.length);
+  for (const entity of entities) {
+    const escaped = entity.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(^|[^A-Za-z0-9._-])${escaped}(?=$|[^A-Za-z0-9._-])`, "gu");
+    result = result.replace(pattern, (_match, prefix: string) => `${prefix}${entity.canonicalName}`);
+  }
+  return result;
+}
+
+function compareCanonicalRecoveryOrder(left: Possibility, right: Possibility): number {
+  const leftTime = comparableStoryTime(left.candidateWindow);
+  const rightTime = comparableStoryTime(right.candidateWindow);
+  if (leftTime && rightTime && leftTime.scale === rightTime.scale && leftTime.min !== rightTime.min) {
+    return leftTime.min - rightTime.min;
+  }
+  if (leftTime && !rightTime) return -1;
+  if (!leftTime && rightTime) return 1;
+  const evidenceOrder = (possibility: Possibility) => possibility.evidence.reduce(
+    (earliest, reference) => Math.min(earliest, reference.span.startLine),
+    Number.POSITIVE_INFINITY,
+  );
+  return evidenceOrder(left) - evidenceOrder(right);
 }
 
 function proposalPossibilityAffinity(proposal: EventProposal, possibility: Possibility): number {

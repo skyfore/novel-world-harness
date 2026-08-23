@@ -5,7 +5,14 @@ import { validateEventProposal } from "../world/engine.js";
 import { diffWorldBranches } from "../world/diff.js";
 import { fsckWorld } from "../world/fsck.js";
 import { KnowledgeProjector } from "../world/knowledge.js";
-import { eventProposalSchema, predicateSchema, stateDeltaSchema, type CommitId } from "../world/model.js";
+import {
+  eventProposalBaseSchema,
+  eventProposalSchema,
+  predicateSchema,
+  stateDeltaSchema,
+  validateCanonicalAdaptationProposalEnvelope,
+  type CommitId,
+} from "../world/model.js";
 import { NarrativeRenderer } from "../world/narrative.js";
 import { runIsolatedCanonReplay } from "../world/replay.js";
 import { WorldSnapshotStore } from "../world/snapshot.js";
@@ -97,7 +104,9 @@ export async function worldRenderCommand(root: string, branchId: string, actorId
   stdout.write(`${await renderer.render(branchId, head, style)}\n`);
 }
 
-const proposalFileSchema = eventProposalSchema.omit({ branchId: true, expectedParentCommit: true });
+const proposalFileSchema = eventProposalBaseSchema
+  .omit({ branchId: true, expectedParentCommit: true })
+  .superRefine(validateCanonicalAdaptationProposalEnvelope);
 
 export async function worldValidateCommand(root: string, branchId: string, proposalPath: string): Promise<void> {
   const { engine } = await openWorld(root);

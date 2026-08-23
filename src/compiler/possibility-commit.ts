@@ -56,6 +56,42 @@ export class PossibilityCommitService {
     for (const participant of template.participants) {
       if (!entityMap.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Possibility ${template.id} references unknown participant ${participant}`, "participants"));
     }
+    const presenceActors = new Set<string>();
+    for (let index = 0; index < (template.participantPresence?.length ?? 0); index += 1) {
+      const presence = template.participantPresence![index]!;
+      if (!template.participants.includes(presence.entityId)) {
+        errors.push(issue(
+          "INVALID_PARTICIPANT_PRESENCE",
+          `Possibility presence ${presence.entityId} is not a possibility participant`,
+          `participantPresence.${index}.entityId`,
+        ));
+      }
+      if (entityMap.get(presence.entityId)?.kind !== "character") {
+        errors.push(issue(
+          "INVALID_PARTICIPANT_PRESENCE",
+          `Possibility presence ${presence.entityId} is not a canonical character`,
+          `participantPresence.${index}.entityId`,
+        ));
+      }
+      if (presenceActors.has(presence.entityId)) {
+        errors.push(issue(
+          "DUPLICATE_PARTICIPANT_PRESENCE",
+          `Possibility presence ${presence.entityId} is duplicated`,
+          `participantPresence.${index}.entityId`,
+        ));
+      }
+      presenceActors.add(presence.entityId);
+    }
+    for (let index = 0; index < template.participants.length; index += 1) {
+      const participantId = template.participants[index]!;
+      if (entityMap.get(participantId)?.kind === "character" && !presenceActors.has(participantId)) {
+        errors.push(issue(
+          "MISSING_PARTICIPANT_PRESENCE",
+          `Character participant ${participantId} has no explicit possibility presence mode`,
+          `participants.${index}`,
+        ));
+      }
+    }
     if (template.canonicalEventId && !eventIds.has(template.canonicalEventId)) {
       errors.push(issue("UNKNOWN_CANONICAL_EVENT", `Possibility ${template.id} references unknown canonical event ${template.canonicalEventId}`, "canonicalEventId"));
     }

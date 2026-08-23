@@ -70,6 +70,7 @@ export type CharacterEntrySeed = {
 export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): CharacterEntryOption[] {
   const characters = bundle.canonical.entities.filter((entity) => entity.kind === "character");
   const orderedEvents = eventsInDiscourseOrder(bundle.canonical.events);
+  const eventRanks = new Map(orderedEvents.map((event, index) => [event.id, index]));
   const soleCharacterId = characters.length === 1 ? characters[0]!.id : undefined;
   const openingOrder = openingDiscourseOrder(bundle, orderedEvents);
   const completeReaderContextBefore = new Set<string>();
@@ -106,7 +107,7 @@ export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): Charac
           actorId: character.id,
           kind: "canonical-scene",
           title: `${character.canonicalName} 的首次亲历场景`,
-          discourseOrder: eventDiscourseOrder(event),
+          discourseOrder: eventRanks.get(event.id)!,
           storyTime: structuredClone(event.storyTime),
           canonicalEventId: event.id,
           readerSetup: checkpoint.readerSetup,
@@ -134,9 +135,9 @@ export function deriveCharacterEntrySeed(
   }
   const orderedEvents = eventsInDiscourseOrder(bundle.canonical.events);
   const baselineOrder = openingDiscourseOrder(bundle, orderedEvents);
-  const priorEvents = orderedEvents.filter((event) => eventDiscourseOrder(event) < option.entry.discourseOrder);
-  const forwardEvents = priorEvents.filter((event) =>
-    eventDiscourseOrder(event) >= baselineOrder && eventAdvancesMainTimeline(event));
+  const priorEvents = orderedEvents.slice(0, option.entry.discourseOrder);
+  const forwardEvents = priorEvents.filter((event, index) =>
+    index >= baselineOrder && eventAdvancesMainTimeline(event));
   const targetEvent = option.entry.canonicalEventId
     ? orderedEvents.find((event) => event.id === option.entry.canonicalEventId)
     : undefined;
@@ -194,7 +195,7 @@ export function readerContextForEntry(
     ...(entry.canonicalEventId ? { entryCanonicalEventId: entry.canonicalEventId } : {}),
     ...(entry.storyTime ? { entryStoryTime: structuredClone(entry.storyTime) } : {}),
     ...(entry.readerSetup ? { entrySetup: entry.readerSetup } : {}),
-    storySoFar: priorEvents.map((event) => ({
+    storySoFar: priorEvents.map((event, index) => ({
       eventId: event.id,
       title: event.title,
       summary: event.readerSummary ?? event.title,
@@ -203,7 +204,7 @@ export function readerContextForEntry(
         const title = eventTitles.get(parentId);
         return title ? [title] : [];
       }),
-      discourseOrder: eventDiscourseOrder(event),
+      discourseOrder: index,
       mode: event.narrativeContext?.mode ?? "unspecified",
       storyTime: structuredClone(event.storyTime),
     })),
@@ -299,13 +300,9 @@ function eventAdvancesMainTimeline(event: CanonicalEvent): boolean {
 
 function eventsInDiscourseOrder(events: readonly CanonicalEvent[]): CanonicalEvent[] {
   return [...events].sort((left, right) =>
-    eventDiscourseOrder(left) - eventDiscourseOrder(right)
-    || earliestEvidenceLine(left) - earliestEvidenceLine(right)
+    earliestEvidenceLine(left) - earliestEvidenceLine(right)
+    || (left.narrativeContext?.discourseOrder ?? 0) - (right.narrativeContext?.discourseOrder ?? 0)
     || left.id.localeCompare(right.id));
-}
-
-function eventDiscourseOrder(event: CanonicalEvent): number {
-  return event.narrativeContext?.discourseOrder ?? earliestEvidenceLine(event);
 }
 
 function earliestEvidenceLine(event: CanonicalEvent): number {
@@ -317,13 +314,15 @@ function openingDiscourseOrder(
   orderedEvents: readonly CanonicalEvent[],
 ): number {
   const beforeId = bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId;
-  const before = beforeId ? orderedEvents.find((event) => event.id === beforeId) : undefined;
-  if (before) return eventDiscourseOrder(before);
+  const beforeIndex = beforeId ? orderedEvents.findIndex((event) => event.id === beforeId) : -1;
+  if (beforeIndex >= 0) return beforeIndex;
   const evidenceLine = Math.min(
     ...bundle.canonical.initialWorld.evidence.map((reference) => reference.span.startLine),
     Number.MAX_SAFE_INTEGER,
   );
-  return Number.isSafeInteger(evidenceLine) ? evidenceLine : 0;
+  if (!Number.isSafeInteger(evidenceLine)) return 0;
+  const firstAtOrAfterOpening = orderedEvents.findIndex((event) => earliestEvidenceLine(event) >= evidenceLine);
+  return firstAtOrAfterOpening < 0 ? orderedEvents.length : firstAtOrAfterOpening;
 }
 
 function uniqueEvidence(evidence: readonly EvidenceRef[]): EvidenceRef[] {

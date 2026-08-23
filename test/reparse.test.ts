@@ -8,7 +8,7 @@ import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { parseOrdinalSelection, reparseCommand } from "../src/commands/reparse.js";
 import { ActorModelStore } from "../src/world/actors.js";
-import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { inspectPreparation } from "../src/workflow/prepare.js";
@@ -181,6 +181,7 @@ describe("explicit prepared-novel reparsing", () => {
         await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
       },
       async finishPreparation(options) {
+        expect(options.reparseBaselineBundleHash).toBe(first.bundleHash);
         await convergeWorldProposals(root, fixture.source.id);
         await proposals.submit("initial-world", {
           proposalId: "opening-all-v2-reparse-test",
@@ -209,11 +210,22 @@ describe("explicit prepared-novel reparsing", () => {
       chapters: "1",
       cacheRoot,
     }, {
-      async compileSource() { throw new Error("simulated compiler failure"); },
+      async compileSource() {
+        await proposals.submit("entity", {
+          proposalId: "hero-dynamic-boundary-reparse-test",
+          payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: ["unfinished"], evidence: batch.evidence },
+          generatedBy: { worker: "test", compilerBatchId: `boundary-${fixture.source.id}-dynamic` },
+        });
+        throw new Error("simulated compiler failure");
+      },
     })).rejects.toThrow(`rolled back to ${result.activeBundleHash}`);
     await expect(cache.lookup(fixture.source)).resolves.toMatchObject({ bundleHash: result.activeBundleHash });
     await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ aliases: ["Hero"] });
     await expect(new InitialWorldStore(root).get()).resolves.not.toBeNull();
+    await expect(new ProposalStore(root).list("pending", fixture.source.id)).resolves.toEqual([]);
+    await expect(new ProposalStore(root).list("rejected", fixture.source.id)).resolves.toContainEqual(
+      expect.objectContaining({ id: "hero-dynamic-boundary-reparse-test" }),
+    );
   });
 
   it("keeps an incompatible active fingerprint intact when a semantic-upgrade reparse fails", async () => {

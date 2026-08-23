@@ -23,6 +23,11 @@ import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { PlaySessionStore } from "../src/world/play-session.js";
 import { COMPILER_TOOL_NAMES } from "../src/compiler/proposal-tools.js";
+import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
+import { InitialWorldStore } from "../src/world/initial.js";
+import { canonicalJson, contentHash } from "../src/world/canonical.js";
+import { WorkspaceOperationLock } from "../src/util/workspace-lock.js";
+import { PossibilityTemplateStore } from "../src/world/possibility-model.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -259,6 +264,35 @@ function preparationContext(notifications: string[], questions: string[]): Exten
       theme: { fg: (_color: string, text: string) => text },
     },
   } as unknown as ExtensionCommandContext;
+}
+
+async function activateLegacyPreparedRevision(
+  cacheRoot: string,
+  published: { cachePath: string; contentMd5: string; bundleHash?: string },
+  source: { id: string; contentSha256: string },
+): Promise<string> {
+  const legacyBundle = JSON.parse(await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8")) as Record<string, unknown>;
+  delete legacyBundle.compilerFingerprint;
+  const legacyHash = contentHash(legacyBundle);
+  const cacheBase = path.join(cacheRoot, published.contentMd5);
+  const legacyRevision = path.join(cacheBase, "revisions", legacyHash);
+  await fs.mkdir(legacyRevision, { recursive: true });
+  await fs.writeFile(path.join(legacyRevision, "bundle.json"), `${canonicalJson(legacyBundle)}\n`);
+  await fs.writeFile(path.join(legacyRevision, "manifest.json"), `${canonicalJson({
+    version: 1,
+    contentMd5: published.contentMd5,
+    contentSha256: source.contentSha256,
+    sourceId: source.id,
+    bundleHash: legacyHash,
+    createdAt: new Date(0).toISOString(),
+  })}\n`);
+  await fs.writeFile(path.join(cacheBase, "active.json"), `${canonicalJson({
+    version: 1,
+    contentMd5: published.contentMd5,
+    bundleHash: legacyHash,
+    updatedAt: new Date(0).toISOString(),
+  })}\n`);
+  return legacyHash;
 }
 
 describe("NWH TUI extension", () => {
@@ -2431,6 +2465,181 @@ describe("NWH TUI extension", () => {
     await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
   });
 
+  it("routes an incompatible prepared revision through rollback-safe reparse before TUI preparation", async () => {
+    let cache!: PreparedNovelCache;
+    let source!: Awaited<ReturnType<typeof createEvidenceFixture>>["source"];
+    let legacyHash = "";
+    let reparseCalls = 0;
+    const runReparse: NonNullable<NwhExtensionOptions["runReparse"]> = async (options) => {
+      reparseCalls += 1;
+      expect(options).toMatchObject({ sourceId: source.id, all: true });
+      const current = await cache.publish(source);
+      return {
+        sourceId: source.id,
+        chapters: [1],
+        previousBundleHash: legacyHash,
+        activeBundleHash: current.bundleHash!,
+      };
+    };
+    const { commands, root, sentHiddenMessages } = await fixture(undefined, undefined, runReparse);
+    const evidence = await createEvidenceFixture(root, "Hero waits in the Hall at the opening.\n", "legacy-novel.txt");
+    source = evidence.source;
+    const batches = await prepareCompilerBatches(root, source);
+    await new CompilerBatchStore(root).replaceCompleted(source.id, batches.map((batch) => batch.id));
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: evidence.evidence("Hero") });
+    await canon.putEntity({ id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: evidence.evidence("Hall") });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      readerSetup: "Hero is waiting in the Hall.",
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      checkpoint: { mode: "chronological", rationale: "The source opens with Hero waiting in the Hall." },
+      delta: {
+        version: 1,
+        operations: [
+          { op: "set", entityId: "hero", field: "character.alive", value: true },
+          { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+        ],
+      },
+      evidence: evidence.evidence("Hero waits in the Hall at the opening."),
+    });
+    const cacheRoot = path.join(root, "prepared-cache");
+    cache = new PreparedNovelCache(root, cacheRoot);
+    const current = await cache.publish(source);
+    legacyHash = await activateLegacyPreparedRevision(cacheRoot, current, source);
+    await expect(cache.lookup(source)).resolves.toMatchObject({ bundleHash: legacyHash, requiresReparse: true });
+    const notifications: string[] = [];
+    const questions: string[] = [];
+
+    await commands.get("prepare-all")?.handler(source.id, preparationContext(notifications, questions));
+
+    expect(reparseCalls).toBe(1);
+    expect(questions).toEqual(["Upgrade prepared world semantics?", "Create playable branch?"]);
+    expect(sentHiddenMessages).toEqual([]);
+    expect(notifications).toContainEqual(expect.stringContaining("rollback-safe whole-novel reparse"));
+    await expect(cache.lookup(source)).resolves.toMatchObject({ status: "already-cached" });
+    expect((await cache.lookup(source)).requiresReparse).toBeUndefined();
+    await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ sourceId: source.id });
+  });
+
+  it("holds the workspace compiler lock across a multi-turn TUI preparation and releases it on shutdown", async () => {
+    const { commands, events, root, sentHiddenMessages } = await fixture();
+    const content = Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n");
+    const evidence = await createEvidenceFixture(root, content, "locked-prepare.txt");
+    const notifications: string[] = [];
+    const ctx = preparationContext(notifications, []);
+
+    await commands.get("prepare-all")?.handler(evidence.source.id, ctx);
+    expect(sentHiddenMessages).toHaveLength(1);
+    await expect(WorkspaceOperationLock.acquire(root, "compiler"))
+      .rejects.toThrow("Another compiler operation is already active");
+
+    await events.get("session_shutdown")?.({ type: "session_shutdown" }, ctx);
+    const recovered = await WorkspaceOperationLock.acquire(root, "compiler");
+    await recovered.release();
+  });
+
+  it("stops after one circuit-broken reconciliation instead of launching the same repair again", async () => {
+    const { commands, events, root, sentHiddenMessages } = await fixture();
+    const evidence = await createEvidenceFixture(root, "The Keeper watches. The Hall opens and closes as the weather changes.\n", "reconciliation-failure.txt");
+    const batches = await prepareCompilerBatches(root, evidence.source);
+    await new CompilerBatchStore(root).replaceCompleted(evidence.source.id, batches.map((batch) => batch.id));
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "hall",
+      kind: "location",
+      canonicalName: "Hall",
+      aliases: [],
+      evidence: evidence.evidence("Hall"),
+    });
+    await canon.putEntity({
+      id: "keeper",
+      kind: "character",
+      canonicalName: "Keeper",
+      aliases: [],
+      evidence: evidence.evidence("Keeper"),
+    });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      readerSetup: "The Keeper watches the Hall as changing weather makes its access uncertain.",
+      participantPresence: [{ entityId: "keeper", mode: "physical" }],
+      checkpoint: { mode: "chronological", rationale: "The Keeper is already watching before the next weather shift." },
+      delta: {
+        version: 1,
+        operations: [
+          { op: "set", entityId: "keeper", field: "character.alive", value: true },
+          { op: "set", entityId: "keeper", field: "character.location", value: "hall" },
+        ],
+      },
+      evidence: evidence.evidence("The Keeper watches"),
+    });
+    for (let index = 1; index <= 20; index += 1) {
+      await canon.putEvent({
+        id: `weather-${String(index).padStart(2, "0")}`,
+        title: `Weather shift ${index}`,
+        ...(index === 20 ? {} : { readerSummary: `The weather causes shift ${index} at the Hall.` }),
+        participants: ["hall"],
+        storyTime: { kind: "ordinal", label: `weather shift ${index}`, orderHint: index },
+        preconditions: [],
+        observedOutcome: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hall", field: "location.open", value: index % 2 === 0 }],
+        },
+        evidence: evidence.evidence("The Hall opens and closes as the weather changes."),
+        causalParents: index === 1 ? [] : [`weather-${String(index - 1).padStart(2, "0")}`],
+        confidence: 1,
+      });
+    }
+    await new PossibilityTemplateStore(root).put({
+      id: "continuing-weather",
+      kind: "environmental",
+      title: "The weather keeps changing access to the Hall",
+      candidateWindow: { kind: "ordinal", label: "next weather shift", orderHint: 21 },
+      preconditions: [],
+      blockers: [],
+      participants: ["hall"],
+      causalParents: ["weather-20"],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hall", field: "location.open", value: false }],
+      },
+      evidence: evidence.evidence("The Hall opens and closes as the weather changes."),
+    });
+    const notifications: string[] = [];
+    const questions: string[] = [];
+    const ctx = preparationContext(notifications, questions);
+
+    await commands.get("prepare-all")?.handler(evidence.source.id, ctx);
+    expect(questions).toEqual(["Reconcile world semantics?"]);
+    expect(sentHiddenMessages).toHaveLength(1);
+    expect(sentHiddenMessages[0]).toContain("<world-semantic-reconciliation");
+
+    await events.get("agent_end")?.({
+      type: "agent_end",
+      messages: [{
+        role: "toolResult",
+        toolCallId: "over-budget",
+        toolName: "read_compiler_artifact",
+        isError: true,
+        content: [],
+        details: {
+          compilerBatchBlocked: true,
+          reason: "compiler tool-call budget exceeded",
+          finishFailureCount: 0,
+          toolCallCount: 41,
+        },
+      }],
+    }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+
+    expect(sentHiddenMessages).toHaveLength(1);
+    expect(notifications).toContainEqual(expect.stringContaining("same deterministic repair pass will not be repeated automatically"));
+    const recovered = await WorkspaceOperationLock.acquire(root, "compiler");
+    await recovered.release();
+  });
+
   it("uses an independent source-owned branch when main is pinned to another novel", async () => {
     const { commands, root } = await fixture();
     const first = await createEvidenceFixture(root, "First Hero waits.\n", "first-novel.txt");
@@ -2652,7 +2861,7 @@ describe("NWH TUI extension", () => {
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
     expect(sentHiddenMessages).toHaveLength(2);
-    expect(sentHiddenMessages[1]).toContain("provider-recovery attempt 1/1");
+    expect(sentHiddenMessages[1]).toContain("batch-recovery attempt 1/1");
     expect(sentHiddenMessages[1]).toContain("batch 1/");
     expect(notifications).toContainEqual(expect.stringContaining("retrying automatically 1/1"));
 
@@ -2661,6 +2870,49 @@ describe("NWH TUI extension", () => {
 
     expect(sentHiddenMessages).toHaveLength(2);
     expect(notifications).toContainEqual(expect.stringContaining("content_filter"));
+    expect(notifications).toContainEqual(expect.stringContaining("Retry /prepare-all to resume"));
+    const progress = await new CompilerBatchStore(root).read(evidence.source.id);
+    expect(progress.completedBatchIds).toEqual([]);
+  });
+
+  it("retries one tool-budget-interrupted /prepare-all batch with its active drafts", async () => {
+    const { commands, events, root, sentHiddenMessages } = await fixture();
+    const content = Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n");
+    const evidence = await createEvidenceFixture(root, content, "tool-budget-retry.txt");
+    const notifications: string[] = [];
+    const ctx = preparationContext(notifications, []);
+
+    await commands.get("prepare-all")?.handler(evidence.source.id, ctx);
+    expect(sentHiddenMessages).toHaveLength(1);
+
+    const budgetFailure = [
+      {
+        role: "toolResult",
+        toolCallId: "over-budget",
+        toolName: "propose_entity",
+        isError: true,
+        content: [],
+        details: {
+          compilerBatchBlocked: true,
+          reason: "compiler tool-call budget exceeded its 40-call limit",
+          finishFailureCount: 1,
+          toolCallCount: 41,
+        },
+      },
+      { role: "assistant", content: [{ type: "text", text: "attempt stopped" }], stopReason: "stop" },
+    ];
+    await events.get("agent_end")?.({ type: "agent_end", messages: budgetFailure }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+
+    expect(sentHiddenMessages).toHaveLength(2);
+    expect(sentHiddenMessages[1]).toContain("batch-recovery attempt 1/1");
+    expect(notifications).toContainEqual(expect.stringContaining("retrying automatically 1/1"));
+
+    await events.get("agent_end")?.({ type: "agent_end", messages: budgetFailure }, ctx);
+    await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+
+    expect(sentHiddenMessages).toHaveLength(2);
+    expect(notifications).toContainEqual(expect.stringContaining("tool-call budget exceeded"));
     expect(notifications).toContainEqual(expect.stringContaining("Retry /prepare-all to resume"));
     const progress = await new CompilerBatchStore(root).read(evidence.source.id);
     expect(progress.completedBatchIds).toEqual([]);

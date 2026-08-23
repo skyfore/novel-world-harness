@@ -17,11 +17,14 @@ async function fixture() {
   const source = await createEvidenceFixture(root, "Hero may refuse the key.\n");
   const service = new PossibilityCommitService(root);
   await service.canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: source.evidence("Hero") });
+  await service.canon.putEntity({ id: "witness", kind: "character", canonicalName: "Witness", aliases: [], evidence: source.evidence("Hero") });
+  await service.canon.putEntity({ id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: source.evidence("Hero") });
   await service.canon.putClaim({ id: "known", subject: "hero", predicate: "knows", object: "key", epistemicType: "explicit-fact", evidence: source.evidence("Hero") });
   await service.canon.putEvent({
     id: "give-key",
     title: "Hero gives the key",
     participants: ["hero"],
+    participantPresence: [{ entityId: "hero", mode: "physical" }],
     storyTime: { kind: "unknown" },
     preconditions: [],
     observedOutcome: { version: 1, operations: [] },
@@ -33,6 +36,36 @@ async function fixture() {
 }
 
 describe("PossibilityCommitService", () => {
+  it("rejects non-character, non-participant, duplicate, and missing possibility presence", async () => {
+    const { service, evidence } = await fixture();
+    const invalid = await service.validate({
+      id: "invalid-presence",
+      kind: "environmental",
+      title: "Invalid presence declarations",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero", "hall"],
+      participantPresence: [
+        { entityId: "hall", mode: "physical" },
+        { entityId: "witness", mode: "remote" },
+        { entityId: "witness", mode: "mentioned" },
+      ],
+      causalParents: [],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence,
+    });
+
+    expect(invalid.accepted).toBe(false);
+    expect(invalid.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INVALID_PARTICIPANT_PRESENCE", path: "participantPresence.0.entityId" }),
+      expect.objectContaining({ code: "INVALID_PARTICIPANT_PRESENCE", path: "participantPresence.1.entityId" }),
+      expect.objectContaining({ code: "DUPLICATE_PARTICIPANT_PRESENCE", path: "participantPresence.2.entityId" }),
+      expect.objectContaining({ code: "MISSING_PARTICIPANT_PRESENCE", path: "participants.0" }),
+    ]));
+  });
+
   it("requires canon analogues to identify canon and validates proposed knowledge", async () => {
     const { service, evidence } = await fixture();
     const invalid = await service.validate({
@@ -42,6 +75,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: [],
       pressure: 1,
       relevance: 1,
@@ -62,6 +96,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: [],
       canonicalEventId: "give-key",
       pressure: 1,
@@ -82,6 +117,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: [],
       pressure: 1,
       relevance: 1,
@@ -101,6 +137,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: ["missing-parent"],
       pressure: 1,
       relevance: 1,
@@ -123,6 +160,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: [],
       pressure: 1,
       relevance: 1,
@@ -143,6 +181,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" as const }],
       causalParents: [],
       canonicalEventId: "give-key",
       pressure: 1,
@@ -193,6 +232,7 @@ describe("PossibilityCommitService", () => {
       id: "named-plan",
       title: "Hero receives a person-specific plan",
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       storyTime: { kind: "unknown" },
       preconditions: [],
       observedOutcome: {
@@ -211,6 +251,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: [],
       canonicalEventId: "named-plan",
       pressure: 1,

@@ -5,7 +5,7 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatch, type CompilerBatch } from "../compiler/batches.js";
 import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
-import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
+import { rejectPendingCompilerBatchProposals, rejectPendingCompilerSourceProposals } from "../compiler/proposals.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore } from "../world/actors.js";
 import { CanonicalModelStore } from "../world/canonical-model.js";
@@ -148,6 +148,8 @@ export async function reparseCommand(
       yes: true,
       createBranch: false,
       restoreCache: false,
+      reparseBaselineBundleHash: previousBundleHash,
+      reparseRunId: runId,
       acquireLock: false,
       signal: options.signal,
       cacheRoot: options.cacheRoot,
@@ -169,13 +171,17 @@ export async function reparseCommand(
     return { sourceId: source.id, chapters: selectedChapters, previousBundleHash, activeBundleHash: active.bundleHash };
   } catch (error) {
     options.onStatus?.(`Reparse failed; restoring revision ${previousBundleHash}`);
-    for (const batchId of [...selectedBatchIds, openingBatchId(batches)]) {
-      await rejectPendingCompilerBatchProposals(root, batchId);
-    }
+    const rejected = await rejectPendingCompilerSourceProposals(root, source.id);
+    if (rejected.length) report(`Rejected ${rejected.length} pending source proposal(s) before rollback.`);
     try {
       await cache.activate(source, previousBundleHash, { allowIncompatibleRollback: true });
     } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], `Reparse failed and rollback to ${previousBundleHash} also failed.`);
+      throw new AggregateError(
+        [error, rollbackError],
+        `Reparse failed and rollback to ${previousBundleHash} also failed. `
+        + `Original error: ${error instanceof Error ? error.message : String(error)} `
+        + `Rollback error: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+      );
     }
     throw new Error(
       `Reparse failed; current preparation was rolled back to ${previousBundleHash}. ${error instanceof Error ? error.message : String(error)}`,
@@ -219,9 +225,8 @@ async function recoverInterruptedReparse(
     `Detected an interrupted reparse affecting ${unfinished.length} selected batch(es); `
     + `restoring active revision ${active.bundleHash} before retrying.`,
   );
-  for (const batchId of [...selectedBatchIds, openingBatchId(batches)]) {
-    await rejectPendingCompilerBatchProposals(root, batchId);
-  }
+  const rejected = await rejectPendingCompilerSourceProposals(root, source.id);
+  if (rejected.length) report(`Rejected ${rejected.length} pending source proposal(s) from the interrupted reparse.`);
   await cache.activate(source, active.bundleHash, { allowIncompatibleRollback: true });
   report("Interrupted reparse baseline restored; restarting the selected scope from a clean prepared revision.");
 }

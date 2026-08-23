@@ -31,6 +31,11 @@ export function startElapsedStatus(options: ElapsedStatusOptions): ElapsedStatus
   return {
     update(nextActivity) {
       if (stopped) return;
+      // Streaming providers can deliver reasoning and text one token at a
+      // time. Re-emitting an unchanged activity for every delta floods a
+      // non-interactive terminal without conveying new progress; the timer
+      // already supplies the elapsed heartbeat.
+      if (nextActivity === activity) return;
       activity = nextActivity;
       emit();
     },

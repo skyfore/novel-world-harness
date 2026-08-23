@@ -33,7 +33,7 @@ export type CompileCommandOptions = {
   onModelEvent?: (event: AgentSessionEvent) => void;
 };
 
-const COMPILER_PROMPT_TIMEOUT_MS = 10 * 60 * 1_000;
+const COMPILER_PROMPT_TIMEOUT_MS = 15 * 60 * 1_000;
 
 const DEFAULT_COMPILER_PROMPT = `Inspect the novel workspace and build a small, evidence-backed compiler batch. Start by searching and reading relevant source spans. Prefer stable entity proposals first, then claims, world rules, and canonical events whose references can be validated. Use propose_state_delta or propose_possibility only when they are useful staging artifacts. Do not attempt to commit anything and do not describe pending proposals as truth.`;
 

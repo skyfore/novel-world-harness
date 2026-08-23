@@ -735,6 +735,65 @@ describe("compiler proposal tools", () => {
     });
   });
 
+  it("rejects non-character or missing event presence before checkpoint and accepts the corrected replacement", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-presence-closure-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "林岐站在钟楼下。\n");
+    const toolset = createCompilerProposalToolset(root);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const event = toolset.tools.find((candidate) => candidate.name === "propose_canonical_event")!;
+    const withdraw = toolset.tools.find((candidate) => candidate.name === "withdraw_compiler_proposal")!;
+    const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    await toolset.beginBatch([fixture.segmentId], "presence-batch", fixture.source.id);
+    for (const [proposalId, id, kind, canonicalName, quote] of [
+      ["presence-character", "lin-qi", "character", "林岐", "林岐"],
+      ["presence-location", "bell-tower", "location", "钟楼", "钟楼"],
+    ] as const) {
+      await entity.execute(proposalId, {
+        proposal_id: proposalId,
+        payload: { id, kind, canonicalName, aliases: [], evidence: fixture.evidence(quote) },
+      } as never, undefined, undefined, {} as ExtensionContext);
+    }
+    const eventPayload = {
+      id: "lin-qi-at-bell-tower",
+      title: "林岐站在钟楼下",
+      readerSummary: "林岐来到钟楼下。",
+      participants: ["lin-qi", "bell-tower"],
+      participantPresence: [{ entityId: "bell-tower", mode: "physical" }],
+      storyTime: { kind: "unknown" as const },
+      preconditions: [],
+      observedOutcome: { version: 1 as const, operations: [] },
+      evidence: fixture.evidence("林岐站在钟楼下。"),
+      causalParents: [],
+      confidence: 1,
+    };
+    await event.execute("bad-presence", {
+      proposal_id: "bad-presence-event",
+      payload: eventPayload,
+    } as never, undefined, undefined, {} as ExtensionContext);
+    const finishInput = {
+      outcome: "complete",
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Recorded the scene." }],
+      summary: "done",
+    };
+    await expect(finish.execute("reject-presence", finishInput as never, undefined, undefined, {} as ExtensionContext))
+      .rejects.toThrow(/participant presence is character-only|missing character participant 'lin-qi'/u);
+
+    await withdraw.execute("withdraw-presence", {
+      proposal_id: "bad-presence-event",
+      reason: "A location cannot have character presence, and the character presence was omitted.",
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await event.execute("correct-presence", {
+      proposal_id: "correct-presence-event",
+      payload: {
+        ...eventPayload,
+        participantPresence: [{ entityId: "lin-qi", mode: "physical" }],
+      },
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await expect(finish.execute("finish-presence", finishInput as never, undefined, undefined, {} as ExtensionContext))
+      .resolves.toMatchObject({ details: { compilerBatchFinished: true } });
+  });
+
   it("withdraws an irreparable current-batch proposal so a corrected graph can finish", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-withdraw-"));
     roots.push(root);

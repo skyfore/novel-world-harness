@@ -19,6 +19,7 @@ import {
   type Claim,
   type EvidenceRef,
   type KnowledgeDelta,
+  type ParticipantPresence,
   type Predicate,
   type StateDelta,
   type StoryTime,
@@ -158,6 +159,49 @@ export async function rejectPendingCompilerBatchProposals(
   return rejected;
 }
 
+/**
+ * Reject every pending compiler draft owned by one source preparation run.
+ *
+ * Reparse can add boundary-calibration batches after its initial batch list is
+ * captured. Cleaning only that initial list leaves those dynamic drafts behind,
+ * and prepared-cache activation correctly refuses to materialize a rollback
+ * while any source proposal is pending. Evidence is the primary ownership
+ * boundary; the host-issued compiler batch id also covers proposal kinds whose
+ * payload does not carry evidence itself.
+ */
+export async function rejectPendingCompilerSourceProposals(
+  workspaceRoot: string,
+  sourceId: string,
+): Promise<string[]> {
+  idSchema.parse(sourceId);
+  const store = new ProposalStore(workspaceRoot);
+  const sourceEvidenceIds = new Set((await store.list("pending", sourceId)).map((summary) => summary.id));
+  const rejected: string[] = [];
+  for (const summary of await store.list("pending")) {
+    const envelope = await store.readEnvelope("pending", summary.id);
+    const generatedBy = envelope.generatedBy;
+    const compilerBatchId = generatedBy && typeof generatedBy === "object" && !Array.isArray(generatedBy)
+      ? (generatedBy as Record<string, unknown>).compilerBatchId
+      : undefined;
+    if (
+      !sourceEvidenceIds.has(summary.id)
+      && !(typeof compilerBatchId === "string" && compilerBatchBelongsToSource(compilerBatchId, sourceId))
+    ) continue;
+    await store.transition(summary.id, "pending", "rejected");
+    rejected.push(summary.id);
+  }
+  return rejected;
+}
+
+function compilerBatchBelongsToSource(compilerBatchId: string, sourceId: string): boolean {
+  return compilerBatchId.startsWith(`batch-${sourceId}-`)
+    || compilerBatchId.startsWith(`boundary-${sourceId}-`)
+    || compilerBatchId.startsWith(`structure-${sourceId}-`)
+    || compilerBatchId.startsWith(`opening-batch-${sourceId}-`)
+    || compilerBatchId.startsWith(`opening-boundary-${sourceId}-`)
+    || compilerBatchId.startsWith(`opening-structure-${sourceId}-`);
+}
+
 type ProposalClosureCatalog = {
   entities: Set<string>;
   entityKinds: Map<string, string>;
@@ -283,6 +327,41 @@ function collectProposalClosureIssues(
   const missing = (kind: Exclude<keyof ProposalClosureCatalog, "entityKinds">, id: string, path: string) => {
     if (!catalog[kind].has(id)) issues.add(`${proposalId}: ${path} references unknown ${singular(kind)} '${id}'`);
   };
+  const character = (entityId: string, path: string) => {
+    missing("entities", entityId, path);
+    const kind = catalog.entityKinds.get(entityId);
+    if (kind && kind !== "character") {
+      issues.add(`${proposalId}: ${path} references '${entityId}' of kind '${kind}', but participant presence is character-only`);
+    }
+  };
+  const presence = (
+    participants: readonly string[] | undefined,
+    entries: readonly ParticipantPresence[] | undefined,
+    path: string,
+    requireEveryCharacterParticipant: boolean,
+  ) => {
+    const participantIds = participants ? new Set(participants) : undefined;
+    const seen = new Set<string>();
+    for (let index = 0; index < (entries?.length ?? 0); index += 1) {
+      const entry = entries![index]!;
+      const entryPath = `${path}.${index}.entityId`;
+      character(entry.entityId, entryPath);
+      if (participantIds && !participantIds.has(entry.entityId)) {
+        issues.add(`${proposalId}: ${entryPath} references '${entry.entityId}', which is not a participant`);
+      }
+      if (seen.has(entry.entityId)) {
+        issues.add(`${proposalId}: ${entryPath} duplicates participant presence for '${entry.entityId}'`);
+      }
+      seen.add(entry.entityId);
+    }
+    if (!participants || !requireEveryCharacterParticipant) return;
+    for (let index = 0; index < participants.length; index += 1) {
+      const participantId = participants[index]!;
+      if (catalog.entityKinds.get(participantId) === "character" && !seen.has(participantId)) {
+        issues.add(`${proposalId}: ${path} is missing character participant '${participantId}' from participants.${index}`);
+      }
+    }
+  };
   const fieldReference = (entityId: string, field: string, path: string) => {
     const kind = catalog.entityKinds.get(entityId);
     const spec = DEFAULT_STATE_FIELDS.find((candidate) => candidate.key === field);
@@ -301,6 +380,7 @@ function collectProposalClosureIssues(
   if (proposal.kind === "canonical-event") {
     const event = payload as CanonicalEvent;
     event.participants.forEach((id, index) => missing("entities", id, `participants.${index}`));
+    presence(event.participants, event.participantPresence, "participantPresence", true);
     event.causalParents.forEach((id, index) => missing("events", id, `causalParents.${index}`));
     collectStoryTimeIssues(event.storyTime, "storyTime", missing);
     event.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `preconditions.${index}`, missing, fieldReference));
@@ -310,8 +390,14 @@ function collectProposalClosureIssues(
       const checkpoint = event.characterEntryCheckpoints![index]!;
       const prefix = `characterEntryCheckpoints.${index}`;
       missing("entities", checkpoint.actorId, `${prefix}.actorId`);
-      checkpoint.participantPresence.forEach((presence, presenceIndex) =>
-        missing("entities", presence.entityId, `${prefix}.participantPresence.${presenceIndex}.entityId`));
+      const actorKind = catalog.entityKinds.get(checkpoint.actorId);
+      if (actorKind && actorKind !== "character") {
+        issues.add(`${proposalId}: ${prefix}.actorId references '${checkpoint.actorId}' of kind '${actorKind}', but an entry actor must be a character`);
+      }
+      if (!event.participants.includes(checkpoint.actorId)) {
+        issues.add(`${proposalId}: ${prefix}.actorId references '${checkpoint.actorId}', which is not an event participant`);
+      }
+      presence(event.participants, checkpoint.participantPresence, `${prefix}.participantPresence`, false);
       collectStateDeltaIssues(checkpoint.delta, `${prefix}.delta`, missing, fieldReference);
       if (checkpoint.knowledge) collectKnowledgeDeltaIssues(checkpoint.knowledge, `${prefix}.knowledge`, missing);
     }
@@ -325,8 +411,7 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "initial-world") {
     const initial = payload as z.infer<typeof initialWorldSchema>;
-    initial.participantPresence?.forEach((presence, index) =>
-      missing("entities", presence.entityId, `participantPresence.${index}.entityId`));
+    presence(undefined, initial.participantPresence, "participantPresence", false);
     collectStateDeltaIssues(initial.delta, "delta", missing, fieldReference);
     if (initial.knowledge) collectKnowledgeDeltaIssues(initial.knowledge, "knowledge", missing);
     if (initial.checkpoint?.beforeCanonicalEventId) missing("events", initial.checkpoint.beforeCanonicalEventId, "checkpoint.beforeCanonicalEventId");
@@ -386,6 +471,7 @@ function collectProposalClosureIssues(
   }
   const possibility = payload as PossibilityTemplate;
   possibility.participants.forEach((id, index) => missing("entities", id, `participants.${index}`));
+  presence(possibility.participants, possibility.participantPresence, "participantPresence", true);
   possibility.causalParents.forEach((id, index) => {
     if (!catalog.events.has(id) && !catalog.possibilities.has(id)) {
       issues.add(`${proposalId}: causalParents.${index} references unknown event or possibility '${id}'`);

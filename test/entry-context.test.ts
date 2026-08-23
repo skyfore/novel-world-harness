@@ -165,4 +165,19 @@ describe("character entry context", () => {
     delete prepared.canonical.events[0]!.readerSummary;
     expect(deriveCharacterEntryOptions(prepared).map((option) => option.actorId)).toEqual(["opening-actor"]);
   });
+
+  it("derives source-wide entry order from evidence when batch-local discourse ordinals restart", () => {
+    const prepared = bundle();
+    for (const event of prepared.canonical.events) {
+      event.narrativeContext = { ...event.narrativeContext!, discourseOrder: 0 };
+    }
+
+    const option = deriveCharacterEntryOptions(prepared)
+      .find((candidate) => candidate.actorId === "later-actor");
+    const seed = deriveCharacterEntrySeed(prepared, "later-actor");
+
+    expect(option?.entry.discourseOrder).toBe(2);
+    expect(seed.readerContext.storySoFar.map((beat) => beat.eventId))
+      .toEqual(["prologue-change", "letter-is-read"]);
+  });
 });

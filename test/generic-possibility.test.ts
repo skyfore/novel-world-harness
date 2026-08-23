@@ -65,6 +65,7 @@ describe("generic possibility templates", () => {
         preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
         blockers: [],
         participants: ["hero", "hall"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
         causalParents: [],
         pressure: 0.9,
         relevance: 0.8,

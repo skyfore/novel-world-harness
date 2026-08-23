@@ -47,7 +47,7 @@ export type CompilerBatch = {
 };
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 9;
+export const COMPILER_PIPELINE_VERSION = 11;
 
 export type BatchProgress = {
   version: 1;
@@ -483,11 +483,13 @@ async function selectEvidenceGroundedOpeningBatch(
   const events = (await new CanonicalModelStore(workspaceRoot).listEvents())
     .filter((event) => event.evidence.some((reference) => reference.span.sourceId === sourceId))
     .sort((left, right) =>
-      (left.narrativeContext?.discourseOrder ?? earliestEventEvidenceLine(left))
-      - (right.narrativeContext?.discourseOrder ?? earliestEventEvidenceLine(right))
-      || earliestEventEvidenceLine(left) - earliestEventEvidenceLine(right)
+      earliestEventEvidenceLine(left) - earliestEventEvidenceLine(right)
+      || (left.narrativeContext?.discourseOrder ?? 0) - (right.narrativeContext?.discourseOrder ?? 0)
       || left.id.localeCompare(right.id));
-  const first = events[0];
+  // Front matter and jacket-style summaries may precede the first lived
+  // narrative scene. Ground the opening pass in that scene's evidence when
+  // the compiled event index can identify one.
+  const first = events.find((event) => event.narrativeContext?.mode === "scene") ?? events[0];
   if (!first) return undefined;
   const lines = first.evidence
     .filter((reference) => reference.span.sourceId === sourceId)
@@ -648,7 +650,7 @@ function buildBatchPrompt(
     `If current-batch-active-proposals is non-empty, this is a recovery attempt. Every exact proposalId listed there is already active and will be included automatically by finish_compiler_batch. Do not recreate any represented artifact under a new proposal ID. Start recovery by calling finish_compiler_batch once to obtain the host's current graph diagnostics, then make only the corrections that diagnostic requires. ` +
     `Pending proposals are immutable. A failed propose_* tool call never enters the active set and must never be withdrawn. Only a tool result that says the pending proposal was recorded is active. If a successfully recorded proposal needs correction, first submit the corrected candidate under a new envelope proposal_id such as -v2, then call withdraw_compiler_proposal for the defective current-batch candidate so it moves to rejected history; never pretend that reusing the old proposal_id overwrote it. Preserve the payload's stable logical id when correcting the same entity, claim, event, goal, rule, or possibility; change that logical id only when the original identity itself was the defect. A new envelope revision must not force causalParents or other logical references to change. ` +
     `Never install later canon in the initial world, leak it into opening character knowledge, or treat it as already committed branch history. Do not infer developments absent from the source. If evidence is insufficient, make fewer proposals rather than inventing facts. ` +
-    `This is the only compiler pass guaranteed to contain these citable evidence segments: ${segmentIds.join(", ")}. Review every supplied section now, but prefer a bounded high-leverage graph over exhaustive mention extraction. The host permits 40 general compiler tool calls, reserves one additional final finish_compiler_batch call, and rejects a 25th active proposal, so stop adding candidates early enough to converge deliberately. ` +
+    `This is the only compiler pass guaranteed to contain these citable evidence segments: ${segmentIds.join(", ")}. Review every supplied section now, but prefer a bounded high-leverage graph over exhaustive mention extraction. The host permits 40 general compiler tool calls and rejects a 25th active proposal. Once the 40 general calls are consumed, the only additional permitted call is the reserved final finish_compiler_batch; any other call stops this attempt, so converge deliberately before the counter reaches zero. ` +
     `After all proposal work and any required withdrawals, call finish_compiler_batch with one reviewed_segments entry for each of those exact segment IDs. The host automatically includes all active proposals created by this batch, including proposals recovered from an earlier failed attempt, so omit proposal_ids. Each reviewed_segments summary must be at most 500 characters and briefly state what was proposed or why it supports no artifact. Use no-artifacts only when every slice supports no active proposal. If finish reports an error, correct that specific issue before retrying and never repeat an identical failing call. Without one successful explicit finish, the batch remains retryable.\n\n` +
     pieces.join("\n\n");
 }

@@ -14,7 +14,7 @@ import {
 import {
   compilerBatchFailure,
   compilerBatchOutcomeFromMessages,
-  isRetryableCompilerBatchInterruption,
+  isRecoverableCompilerBatchInterruption,
 } from "../src/compiler/batch-outcome.js";
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import type { SourceDocument } from "../src/storage/workspace-store.js";
@@ -86,7 +86,7 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure({ assistantStopReason: "length", proposalSucceeded: 2, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("length");
   });
 
-  it("preserves provider error diagnostics and classifies a provider interruption as retryable", () => {
+  it("preserves diagnostics and classifies only bounded interruptions as recoverable", () => {
     const outcome = compilerBatchOutcomeFromMessages([{
       role: "assistant",
       content: [{ type: "text", text: "request stopped" }],
@@ -99,8 +99,12 @@ describe("compiler batches", () => {
       assistantErrorMessage: "Provider finish_reason: content_filter",
     });
     expect(compilerBatchFailure(outcome)).toContain("content_filter");
-    expect(isRetryableCompilerBatchInterruption(outcome)).toBe(true);
-    expect(isRetryableCompilerBatchInterruption({ ...outcome, blockedReason: "tool budget" })).toBe(false);
+    expect(isRecoverableCompilerBatchInterruption(outcome)).toBe(true);
+    expect(isRecoverableCompilerBatchInterruption({
+      ...outcome,
+      blockedReason: "compiler tool-call budget exceeded its 40-call limit",
+    })).toBe(true);
+    expect(isRecoverableCompilerBatchInterruption({ ...outcome, blockedReason: "proposal graph remains incomplete" })).toBe(false);
   });
 
   it("treats a successful retry of the same proposal id as resolving its earlier tool error", () => {
@@ -352,7 +356,24 @@ describe("compiler batches", () => {
       "# Chapter 1",
       "The traveler reaches the road at dawn.",
     ].join("\n"));
-    await new CanonicalModelStore(root).putEvent({
+    const canon = new CanonicalModelStore(root);
+    await canon.putEvent({
+      id: "edition-summary",
+      title: "The edition summarizes the journey",
+      readerSummary: "Publication copy summarizes the journey before the lived narrative begins.",
+      participants: [],
+      storyTime: { kind: "unknown" },
+      narrativeContext: { layerId: "front-matter", discourseOrder: 0, mode: "summary" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: [{
+        span: { sourceId: source.id, startLine: 2, endLine: 2, quoteHash: "edition-summary" },
+        strength: "explicit",
+      }],
+      causalParents: [],
+      confidence: 1,
+    });
+    await canon.putEvent({
       id: "preface-awakening",
       title: "The traveler wakes in the burning village",
       readerSummary: "The traveler wakes in a burning village before reaching the road.",

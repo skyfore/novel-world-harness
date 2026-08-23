@@ -18,6 +18,9 @@ describe("elapsed operation status", () => {
     expect(messages.at(-1)).toContain("elapsed 2s");
     status.update("last tool call propose_entity liubei");
     expect(messages.at(-1)).toContain("last tool call propose_entity liubei");
+    const afterActivityChange = messages.length;
+    status.update("last tool call propose_entity liubei");
+    expect(messages).toHaveLength(afterActivityChange);
     status.stop("model response received; verifying finish handshake");
     const count = messages.length;
     vi.advanceTimersByTime(5_000);

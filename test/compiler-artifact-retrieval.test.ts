@@ -19,6 +19,54 @@ function resultText(result: unknown): string {
 }
 
 describe("compiler artifact retrieval", () => {
+  it("normalizes the event alias and rejects unsupported kinds instead of returning a silent miss", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-artifact-kind-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero enters the Hall.\n");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("Hero"),
+    });
+    await canon.putEvent({
+      id: "hero-enters",
+      title: "Hero enters",
+      participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      storyTime: { kind: "unknown" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: fixture.evidence("Hero enters"),
+      causalParents: [],
+      confidence: 1,
+    });
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([], "batch-kind", fixture.source.id);
+    const find = toolset.tools.find((tool) => tool.name === "find_compiler_artifacts")!;
+
+    const result = JSON.parse(resultText(await find.execute(
+      "event-alias",
+      { query: "*", kind: "event" } as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    ))) as { kind: string; results: Array<{ ref: string; kind: string }> };
+    expect(result.kind).toBe("canonical-event");
+    expect(result.results).toEqual([
+      expect.objectContaining({ ref: "canonical:canonical-event:hero-enters", kind: "canonical-event" }),
+    ]);
+    await expect(find.execute(
+      "bad-kind",
+      { query: "*", kind: "eventuality" } as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    )).rejects.toThrow("Unsupported compiler artifact kind 'eventuality'");
+  });
+
   it("finds and losslessly pages exact artifacts only within the active source", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-artifact-retrieval-"));
     roots.push(root);

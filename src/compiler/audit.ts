@@ -54,6 +54,12 @@ export type CompilerAuditReport = {
     semanticReady: boolean | null;
     semanticIssues: string[];
   };
+  semanticRepairTargets: {
+    eventIds: string[];
+    characterIds: string[];
+    initialWorld: boolean;
+    requiresFullReparse: boolean;
+  };
   coverage: {
     sourceIndexing: number | null;
     evidenceBinding: number | null;
@@ -222,9 +228,12 @@ export async function auditCompiler(
   const openingPhysicalPresence = initialWorld
     ? (physicalOpeningActorIds.size ? 1 : 0)
     : null;
+  // discourseOrder is local to one compiler evidence batch. Source evidence
+  // lines are the cross-batch textual-order authority; the model-proposed
+  // value only breaks ties inside the same evidence slice.
   const eventsByDiscourse = [...events].sort((left, right) =>
-    (left.narrativeContext?.discourseOrder ?? earliestEvidenceLine(left))
-    - (right.narrativeContext?.discourseOrder ?? earliestEvidenceLine(right))
+    earliestEvidenceLine(left) - earliestEvidenceLine(right)
+    || (left.narrativeContext?.discourseOrder ?? 0) - (right.narrativeContext?.discourseOrder ?? 0)
     || left.id.localeCompare(right.id));
   const firstEmbodiedEventByActor = new Map<string, CanonicalEvent>();
   for (const event of eventsByDiscourse) {
@@ -247,6 +256,15 @@ export async function auditCompiler(
             && actionableOpeningFields.has(operation.field))))
       .length / laterEntryActors.length
     : null;
+  const incompleteEntryActors = laterEntryActors.filter((actorId) =>
+    !firstEmbodiedEventByActor.get(actorId)?.characterEntryCheckpoints?.some((checkpoint) =>
+      checkpoint.actorId === actorId
+      && checkpoint.participantPresence.some((presence) =>
+        presence.entityId === actorId && presence.mode === "physical")
+      && checkpoint.delta.operations.some((operation) =>
+        "entityId" in operation
+        && operation.entityId === actorId
+        && actionableOpeningFields.has(operation.field))));
   const autonomousPossibilities = possibilities.filter((possibility) =>
     !["canon-analogue", "player-choice", "actor-plan"].includes(possibility.kind)
     && hasExecutablePossibilityEffect(possibility));
@@ -257,20 +275,70 @@ export async function auditCompiler(
   const autonomousWorldDrivers = autonomousPossibilities.length + executableGoals.length;
   const autonomousDriverCoverage = events.length ? (autonomousWorldDrivers > 0 ? 1 : 0) : null;
   const semanticIssues: string[] = [];
+  const semanticRepairEventIds = new Set<string>();
+  const semanticRepairCharacterIds: string[] = [];
+  let semanticRepairInitialWorld = false;
+  let semanticRepairRequiresFullReparse = false;
   // Small fixtures and short stories may intentionally be sparse. The hard
   // semantic gate targets novel-scale compilations where omissions compound.
   if (events.length >= 20) {
-    if ((eventEffectExplicitness ?? 0) < 0.65) semanticIssues.push(`Only ${formatRatio(eventEffectExplicitness)} of canonical events have a typed state or knowledge effect (minimum 65%).`);
-    if ((timelineAnchoring ?? 0) < 0.75) semanticIssues.push(`Only ${formatRatio(timelineAnchoring)} of canonical events have a story-time anchor (minimum 75%).`);
-    if (recurringCharacters.length && (characterDevelopmentCoverage ?? 0) < 0.5) semanticIssues.push(`Only ${formatRatio(characterDevelopmentCoverage)} of recurring characters have phase-bounded goals or development phases (minimum 50%).`);
-    if (initialWorld && !initialWorld.checkpoint) semanticIssues.push("The initial world does not declare a temporal/narrative checkpoint.");
-    if ((participantPresenceCoverage ?? 0) < 0.8) semanticIssues.push(`Only ${formatRatio(participantPresenceCoverage)} of character participant slots declare physical/remote/mentioned/represented/dream/memory presence (minimum 80%).`);
-    if (readerSummaryCoverage !== 1) semanticIssues.push(`Only ${formatRatio(readerSummaryCoverage)} of canonical events have a source-grounded reader recap (required 100% for complete later-role context).`);
-    if (laterEntryActors.length && characterEntryCheckpointCoverage !== 1) semanticIssues.push(`Only ${formatRatio(characterEntryCheckpointCoverage)} of later embodied characters have a complete pre-event entry checkpoint (required 100%).`);
-    if (initialWorld && openingReaderSetup !== 1) semanticIssues.push("The initial world has no source-grounded spoiler-free readerSetup, so an unread player cannot orient before the opening scene.");
-    if (initialWorld && openingPhysicalPresence !== 1) semanticIssues.push("The initial world does not explicitly identify a physically present opening role; identity or state alone is not bodily presence.");
-    if (initialWorld && openingActionability !== 1) semanticIssues.push("The initial world has no grounded opening character location, plan, or momentum; it is not an actionable lived checkpoint.");
-    if (autonomousWorldDrivers === 0) semanticIssues.push("The compiled world has no executable actor goal or non-canonical autonomous possibility, so divergence can only wait for canon or repeat local dialogue.");
+    if ((eventEffectExplicitness ?? 0) < 0.65) {
+      semanticIssues.push(`Only ${formatRatio(eventEffectExplicitness)} of canonical events have a typed state or knowledge effect (minimum 65%).`);
+      events.filter((event) => event.observedOutcome.operations.length === 0 && (event.observedKnowledge?.operations.length ?? 0) === 0)
+        .forEach((event) => semanticRepairEventIds.add(event.id));
+    }
+    if ((timelineAnchoring ?? 0) < 0.75) {
+      semanticIssues.push(`Only ${formatRatio(timelineAnchoring)} of canonical events have a story-time anchor (minimum 75%).`);
+      events.filter((event) => event.storyTime.kind === "unknown").forEach((event) => semanticRepairEventIds.add(event.id));
+    }
+    if (recurringCharacters.length && (characterDevelopmentCoverage ?? 0) < 0.5) {
+      semanticIssues.push(`Only ${formatRatio(characterDevelopmentCoverage)} of recurring characters have phase-bounded goals or development phases (minimum 50%).`);
+      const requiredDeveloped = Math.ceil(recurringCharacters.length * 0.5);
+      const currentlyDeveloped = recurringCharacters.filter((actorId) => growthActors.has(actorId)).length;
+      semanticRepairCharacterIds.push(...recurringCharacters
+        .filter((actorId) => !growthActors.has(actorId))
+        .sort((left, right) =>
+          (participationCounts.get(right) ?? 0) - (participationCounts.get(left) ?? 0)
+          || left.localeCompare(right))
+        .slice(0, Math.max(0, requiredDeveloped - currentlyDeveloped)));
+    }
+    if (initialWorld && !initialWorld.checkpoint) {
+      semanticIssues.push("The initial world does not declare a temporal/narrative checkpoint.");
+      semanticRepairInitialWorld = true;
+    }
+    if (characterParticipantSlots.length && (participantPresenceCoverage ?? 0) < 0.8) {
+      semanticIssues.push(`Only ${formatRatio(participantPresenceCoverage)} of character participant slots declare physical/remote/mentioned/represented/dream/memory presence (minimum 80%).`);
+      characterParticipantSlots
+        .filter(({ event, participantId }) => !event.participantPresence?.some((presence) => presence.entityId === participantId))
+        .forEach(({ event }) => semanticRepairEventIds.add(event.id));
+    }
+    if (readerSummaryCoverage !== 1) {
+      semanticIssues.push(`Only ${formatRatio(readerSummaryCoverage)} of canonical events have a source-grounded reader recap (required 100% for complete later-role context).`);
+      events.filter((event) => !event.readerSummary?.trim()).forEach((event) => semanticRepairEventIds.add(event.id));
+    }
+    if (laterEntryActors.length && characterEntryCheckpointCoverage !== 1) {
+      semanticIssues.push(`Only ${formatRatio(characterEntryCheckpointCoverage)} of later embodied characters have a complete pre-event entry checkpoint (required 100%).`);
+      incompleteEntryActors.forEach((actorId) => {
+        const event = firstEmbodiedEventByActor.get(actorId);
+        if (event) semanticRepairEventIds.add(event.id);
+      });
+    }
+    if (initialWorld && openingReaderSetup !== 1) {
+      semanticIssues.push("The initial world has no source-grounded spoiler-free readerSetup, so an unread player cannot orient before the opening scene.");
+      semanticRepairInitialWorld = true;
+    }
+    if (initialWorld && openingPhysicalPresence !== 1) {
+      semanticIssues.push("The initial world does not explicitly identify a physically present opening role; identity or state alone is not bodily presence.");
+      semanticRepairInitialWorld = true;
+    }
+    if (initialWorld && openingActionability !== 1) {
+      semanticIssues.push("The initial world has no grounded opening character location, plan, or momentum; it is not an actionable lived checkpoint.");
+      semanticRepairInitialWorld = true;
+    }
+    if (autonomousWorldDrivers === 0) {
+      semanticIssues.push("The compiled world has no executable actor goal or non-canonical autonomous possibility, so divergence can only wait for canon or repeat local dialogue.");
+      semanticRepairRequiresFullReparse = true;
+    }
   }
   const sourceIndexing = sources.length
     ? changedSinceIngest.length
@@ -314,6 +382,12 @@ export async function auditCompiler(
       unconditionalRootEvents: graph.unconditionalRoots,
       semanticReady: events.length >= 20 ? semanticIssues.length === 0 : null,
       semanticIssues,
+    },
+    semanticRepairTargets: {
+      eventIds: [...semanticRepairEventIds],
+      characterIds: semanticRepairCharacterIds,
+      initialWorld: semanticRepairInitialWorld,
+      requiresFullReparse: semanticRepairRequiresFullReparse,
     },
     coverage: {
       sourceIndexing,

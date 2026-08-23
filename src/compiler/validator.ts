@@ -121,6 +121,16 @@ export class CompilerValidator {
       }
       presenceActors.add(presence.entityId);
     }
+    for (let index = 0; index < event.participants.length; index += 1) {
+      const participantId = event.participants[index]!;
+      if (entities.get(participantId)?.kind === "character" && !presenceActors.has(participantId)) {
+        errors.push(issue(
+          "MISSING_PARTICIPANT_PRESENCE",
+          `Character participant ${participantId} has no explicit event presence mode`,
+          `participants.${index}`,
+        ));
+      }
+    }
     for (const parentId of event.causalParents) {
       const parent = events.get(parentId);
       if (!parent) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parentId}`, "causalParents"));

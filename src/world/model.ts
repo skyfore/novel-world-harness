@@ -105,8 +105,9 @@ export type NarrativeContext = z.infer<typeof narrativeContextSchema>;
  * without sharing the actor's scene.
  */
 export const participantPresenceSchema = z.object({
-  entityId: idSchema,
-  mode: z.enum(["physical", "remote", "mentioned", "represented", "dream", "memory"]),
+  entityId: idSchema.describe("Canonical character entity ID only. Locations, artifacts, factions, institutions, and relationships are not presence actors."),
+  mode: z.enum(["physical", "remote", "mentioned", "represented", "dream", "memory"])
+    .describe("How this character participates without conflating mention, representation, memory, or remote contact with bodily presence."),
 }).strict();
 export type ParticipantPresence = z.infer<typeof participantPresenceSchema>;
 
@@ -402,7 +403,8 @@ export const canonicalEventSchema = z.object({
   /** Completed-event recap for a reader who enters at a later source scene. */
   readerSummary: z.string().trim().min(1).max(1_500).optional(),
   participants: z.array(idSchema),
-  participantPresence: z.array(participantPresenceSchema).max(128).optional(),
+  participantPresence: z.array(participantPresenceSchema).max(128).optional()
+    .describe("Exactly one presence entry for every character participant; never include non-character participants."),
   characterEntryCheckpoints: z.array(characterEntryCheckpointSchema).max(128).optional(),
   storyTime: storyTimeSchema,
   timeAdvance: timeAdvanceSchema.optional(),

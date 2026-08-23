@@ -15,7 +15,13 @@ import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { resolveNovelSource } from "../world/play-experience.js";
-import { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "../compiler/reconcile-world.js";
+import {
+  buildWorldReconciliationPrompt,
+  MAX_RECONCILIATION_ITERATIONS,
+  reparseReconciliationIterations,
+  semanticRepairIsIsolated,
+  semanticRepairRequiresReparse,
+} from "../compiler/reconcile-world.js";
 import type { ReparseCommandOptions } from "./reparse.js";
 
 export type PrepareAllCommandOptions = {
@@ -30,6 +36,10 @@ export type PrepareAllCommandOptions = {
   cacheRoot?: string;
   createBranch?: boolean;
   restoreCache?: boolean;
+  /** Active immutable revision that an enclosing reparse is using as its rollback baseline. */
+  reparseBaselineBundleHash?: string;
+  /** Stable identifier for resumable proposal namespaces inside an enclosing reparse. */
+  reparseRunId?: string;
   signal?: AbortSignal;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
@@ -125,7 +135,16 @@ export async function prepareAllCommand(
   }
   const preparedCache = new PreparedNovelCache(root, options.cacheRoot);
   const cachedBeforePreparation = await preparedCache.lookup(inspection.source!);
-  if (cachedBeforePreparation.requiresReparse) {
+  if (
+    options.reparseBaselineBundleHash
+    && cachedBeforePreparation.bundleHash !== options.reparseBaselineBundleHash
+  ) {
+    throw new Error(
+      `Cannot finalize reparse against baseline ${options.reparseBaselineBundleHash}: `
+      + `active prepared revision is ${cachedBeforePreparation.bundleHash ?? "missing"}.`,
+    );
+  }
+  if (!options.reparseBaselineBundleHash && cachedBeforePreparation.requiresReparse) {
     const decision = await ask({
       header: "Pipeline upgrade",
       question: "The active prepared novel uses older world semantics. Reparse the whole novel before continuing?",
@@ -164,7 +183,16 @@ export async function prepareAllCommand(
     }
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
-  if (inspection.stage === "repair") throw preparationFailure(inspection);
+  if (
+    inspection.stage === "repair"
+    && !(
+      inspection.audit
+      && (
+        semanticRepairIsIsolated(inspection.audit)
+        || (Boolean(options.reparseBaselineBundleHash) && semanticRepairRequiresReparse(inspection.audit))
+      )
+    )
+  ) throw preparationFailure(inspection);
 
   if (options.restoreCache !== false) {
     const restored = await preparedCache.restore(inspection.source!);
@@ -222,44 +250,6 @@ export async function prepareAllCommand(
     await convergeForPreparation(root, sourceId, dependencies.converge, report);
     options.signal?.throwIfAborted();
     inspection = await inspectPreparation(root, { sourceId, branchId });
-  }
-
-  if (inspection.audit && semanticRepairIsIsolated(inspection.audit)) {
-    const decision = await ask({
-      header: "World semantics",
-      question: "The novel-scale audit found timeline/effect/character-growth gaps. Run a bounded whole-world reconciliation pass?",
-      options: [
-        { value: "repair", label: "Reconcile world", description: "Propose evidence-backed replacements through the normal validation barrier.", recommended: true },
-        { value: "pause", label: "Pause here", description: "Keep the audit findings for manual repair." },
-      ],
-    });
-    if (decision === "pause") return pausePreparation(inspection, report);
-    for (let iteration = 1; iteration <= 2 && inspection.audit && semanticRepairIsIsolated(inspection.audit); iteration += 1) {
-      report(`Running whole-world semantic reconciliation pass ${iteration}/2.`);
-      await dependencies.compileInitialWorld({
-        root,
-        configPath,
-        allowMissingConfig: true,
-        ...(options.model ? { model: options.model } : {}),
-        saveSession: false,
-        prompt: await buildWorldReconciliationPrompt(root, sourceId, inspection.audit, iteration),
-        compilerBatchId: `reconcile-${sourceId}-v2-${iteration}`,
-        sourceId,
-        includeLocalTools: false,
-        disabledProposalTools: ["propose_state_delta"],
-        acquireLock: false,
-        signal: options.signal,
-        onProgress: report,
-        onStatus: options.onStatus,
-        onModelText: options.onModelText,
-        onModelThinking: options.onModelThinking,
-        onModelToolCall: options.onModelToolCall,
-        onModelToolResult: options.onModelToolResult,
-        onModelEvent: options.onModelEvent,
-      });
-      await convergeForPreparation(root, sourceId, dependencies.converge, report);
-      inspection = await inspectPreparation(root, { sourceId, branchId });
-    }
   }
 
   if (inspection.stage === "needs-initial-world") {
@@ -327,6 +317,70 @@ export async function prepareAllCommand(
     }
   }
 
+  if (inspection.audit && semanticRepairIsIsolated(inspection.audit)) {
+    const decision = await ask({
+      header: "World semantics",
+      question: "The novel-scale audit found timeline/effect/character-growth gaps. Run a bounded whole-world reconciliation pass?",
+      options: [
+        { value: "repair", label: "Reconcile world", description: "Propose evidence-backed replacements through the normal validation barrier.", recommended: true },
+        { value: "pause", label: "Pause here", description: "Keep the audit findings for manual repair." },
+      ],
+    });
+    if (decision === "pause") return pausePreparation(inspection, report);
+    for (
+      let iteration = 1;
+      iteration <= MAX_RECONCILIATION_ITERATIONS && inspection.audit && semanticRepairIsIsolated(inspection.audit);
+      iteration += 1
+    ) {
+      report(`Running whole-world semantic reconciliation pass ${iteration}/${MAX_RECONCILIATION_ITERATIONS}.`);
+      await runWorldReconciliationPass({
+        root,
+        sourceId,
+        branchId,
+        configPath,
+        iteration,
+        mode: "bounded",
+        inspection,
+        options,
+        dependencies,
+        report,
+      });
+      inspection = await inspectPreparation(root, { sourceId, branchId });
+    }
+  } else if (
+    options.reparseBaselineBundleHash
+    && inspection.audit
+    && semanticRepairRequiresReparse(inspection.audit)
+  ) {
+    const plannedIterations = reparseReconciliationIterations(inspection.audit);
+    report(`Whole-novel reparse needs ${plannedIterations} bounded semantic finalization shard(s).`);
+    for (
+      let iteration = 1;
+      iteration <= plannedIterations && inspection.audit?.consistency.semanticReady === false;
+      iteration += 1
+    ) {
+      report(`Running reparse semantic finalization shard ${iteration}/${plannedIterations}.`);
+      await runWorldReconciliationPass({
+        root,
+        sourceId,
+        branchId,
+        configPath,
+        iteration,
+        mode: "reparse-finalization",
+        inspection,
+        options,
+        dependencies,
+        report,
+      });
+      inspection = await inspectPreparation(root, { sourceId, branchId });
+      if (
+        inspection.audit?.consistency.semanticReady === false
+        && !semanticRepairRequiresReparse(inspection.audit)
+        && !semanticRepairIsIsolated(inspection.audit)
+      ) throw preparationFailure(inspection);
+    }
+  }
+
   if (inspection.stage === "create-branch") {
     const cached = await preparedCache.publish(inspection.source!);
     cacheVerified = true;
@@ -357,6 +411,53 @@ export async function prepareAllCommand(
   }
   report(`Preparation complete. Next: ${inspection.next}`);
   return inspection;
+}
+
+async function runWorldReconciliationPass(input: {
+  root: string;
+  sourceId: string;
+  branchId: string;
+  configPath: string;
+  iteration: number;
+  mode: "bounded" | "reparse-finalization";
+  inspection: PreparationInspection;
+  options: PrepareAllCommandOptions;
+  dependencies: PrepareAllDependencies;
+  report: (message: string) => void;
+}): Promise<void> {
+  const audit = input.inspection.audit;
+  if (!audit) throw new Error("Cannot reconcile a world without an audit report.");
+  const namespace = input.options.reparseRunId
+    ? ` Every proposal envelope ID in this pass must end with -${input.options.reparseRunId}.`
+    : "";
+  await input.dependencies.compileInitialWorld({
+    root: input.root,
+    configPath: input.configPath,
+    allowMissingConfig: true,
+    ...(input.options.model ? { model: input.options.model } : {}),
+    saveSession: false,
+    prompt: `${await buildWorldReconciliationPrompt(
+      input.root,
+      input.sourceId,
+      audit,
+      input.iteration,
+      { mode: input.mode },
+    )}${namespace}`,
+    compilerBatchId: `reconcile-${input.sourceId}-${input.mode}-${input.options.reparseRunId ?? "v3"}-${input.iteration}`,
+    sourceId: input.sourceId,
+    includeLocalTools: false,
+    disabledProposalTools: ["propose_state_delta"],
+    acquireLock: false,
+    signal: input.options.signal,
+    onProgress: input.report,
+    onStatus: input.options.onStatus,
+    onModelText: input.options.onModelText,
+    onModelThinking: input.options.onModelThinking,
+    onModelToolCall: input.options.onModelToolCall,
+    onModelToolResult: input.options.onModelToolResult,
+    onModelEvent: input.options.onModelEvent,
+  });
+  await convergeForPreparation(input.root, input.sourceId, input.dependencies.converge, input.report);
 }
 
 async function convergeForPreparation(

@@ -92,6 +92,7 @@ describe("compiler audit", () => {
           id: `event-${index}`,
           title: `Independent story beat ${index}`,
           participants: ["hero"],
+          participantPresence: [{ entityId: "hero", mode: "physical" }],
           storyTime: { kind: "ordinal", label: `beat-${index}`, orderHint: index },
           preconditions: [],
           observedOutcome: { version: 1, operations: [] },

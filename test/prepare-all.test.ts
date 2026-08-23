@@ -81,7 +81,18 @@ describe("prepare-all command", () => {
       reparse: async (options) => {
         reparseCalls += 1;
         expect(options.all).toBe(true);
-        await cache.publish(fixture.source);
+        await prepareAllCommand({
+          root,
+          sourceId: fixture.source.id,
+          yes: true,
+          cacheRoot,
+          createBranch: false,
+          restoreCache: false,
+          acquireLock: false,
+          reparseBaselineBundleHash: legacyHash,
+        }, {
+          reparse: async () => { throw new Error("reparse finalization must not recursively reparse"); },
+        });
       },
     });
 
@@ -363,6 +374,73 @@ describe("prepare-all command", () => {
 
     expect(initialCompilerCalls).toBe(1);
     expect(result.stage).toBe("ready");
+  });
+
+  it("establishes the opening checkpoint before routing novel-scale semantic repair", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-opening-first-"));
+    roots.push(root);
+    vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
+    const fixture = await createEvidenceFixture(root, "Hero waits while a long sequence unfolds.\n");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+    const canon = new CanonicalModelStore(root);
+    const evidence = fixture.evidence("Hero waits while a long sequence unfolds.");
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+    for (let index = 1; index <= 20; index += 1) {
+      await canon.putEvent({
+        id: `opening-first-${index}`,
+        title: `Story beat ${index}`,
+        readerSummary: `Hero experiences story beat ${index}.`,
+        participants: ["hero"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        storyTime: { kind: "ordinal", label: `beat ${index}`, orderHint: index },
+        narrativeContext: { layerId: "main", discourseOrder: index, mode: "scene" },
+        preconditions: [],
+        observedOutcome: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.momentum", value: index }],
+        },
+        evidence,
+        causalParents: index === 1 ? [] : [`opening-first-${index - 1}`],
+        confidence: 1,
+      });
+    }
+    let openingCalls = 0;
+
+    await expect(prepareAllCommand({
+      root,
+      sourceId: fixture.source.id,
+      yes: true,
+      cacheRoot: path.join(root, "prepared-cache"),
+    }, {
+      compileInitialWorld: async (options) => {
+        openingCalls += 1;
+        expect(options.prompt).toContain("one explicit world-time cut");
+        await new CompilerProposalService(root).submit("initial-world", {
+          proposalId: "opening-before-semantic-repair",
+          payload: {
+            version: 1,
+            readerSetup: "Hero waits at the opening while the first unresolved story pressure gathers.",
+            participantPresence: [{ entityId: "hero", mode: "physical" }],
+            checkpoint: { mode: "chronological", rationale: "The source begins with Hero waiting." },
+            delta: {
+              version: 1,
+              operations: [
+                { op: "set", entityId: "hero", field: "character.alive", value: true },
+                { op: "set", entityId: "hero", field: "character.plan", value: "wait and observe" },
+              ],
+            },
+            evidence,
+          },
+          generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
+        });
+      },
+    })).rejects.toThrow("Automatic preparation stopped at 'repair'");
+
+    expect(openingCalls).toBe(1);
+    await expect(new InitialWorldStore(root).get()).resolves.toMatchObject({
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+    });
   });
 
   it("replaces a cached front-matter opening with a narrative-opening revision", async () => {

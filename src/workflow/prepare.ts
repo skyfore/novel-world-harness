@@ -136,7 +136,6 @@ export async function inspectPreparation(
     || audit.evidence.invalidReferences > 0
     || audit.consistency.causalGraphValid === false
     || audit.consistency.narrativeGraphNavigable === false
-    || audit.consistency.semanticReady === false
   ) {
     return {
       ...shared,
@@ -197,6 +196,19 @@ export async function inspectPreparation(
         `The accepted initial world for source ${source.id} does not represent any living opening character in committed state or knowledge; a playable branch cannot be created. Rebuild the opening state before preparing a branch.`,
       ],
       next: `nwh reparse --source ${source.id} --all`,
+    };
+  }
+
+  // Whole-world semantic readiness depends on knowing the actual opening
+  // actors first: only then can later first-embodied entry checkpoints be
+  // classified. Generate/validate the opening before routing semantic repair.
+  if (audit.consistency.semanticReady === false) {
+    return {
+      ...shared,
+      audit,
+      repairReasons: preparationRepairReasons(audit),
+      stage: "repair",
+      next: `nwh audit --source ${source.id}`,
     };
   }
 

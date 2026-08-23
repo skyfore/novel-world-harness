@@ -571,7 +571,7 @@ export function createCompilerProposalToolset(
         successfulProposalIds.add(accepted.proposalId);
         recordProposalProgress();
         return proposalResult(
-          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth. Active proposals: ${successfulProposalIds.size}/${MAX_ACTIVE_COMPILER_PROPOSALS}. General compiler calls remaining: ${Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls)}; one final finish call remains reserved after that budget.`,
+          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth. Active proposals: ${successfulProposalIds.size}/${MAX_ACTIVE_COMPILER_PROPOSALS}. General compiler calls remaining: ${Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls)}. When that reaches zero, the only additional permitted call is finish_compiler_batch; any other call stops this attempt.`,
           {
             ...accepted,
             activeProposalCount: successfulProposalIds.size,

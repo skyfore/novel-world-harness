@@ -162,6 +162,14 @@ export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | un
   return undefined;
 }
 
-export function isRetryableCompilerBatchInterruption(outcome: CompilerBatchOutcome): boolean {
-  return !outcome.blockedReason && outcome.assistantStopReason === "error";
+export function isRecoverableCompilerBatchInterruption(outcome: CompilerBatchOutcome): boolean {
+  if (outcome.blockedReason) {
+    // The tool-call breaker protects one model turn, not the immutable batch.
+    // A fresh turn can hydrate the exact active drafts, reset the per-turn
+    // counter, and continue from deterministic closure diagnostics. Other
+    // circuit-breaker causes (for example repeated identical finish failures)
+    // indicate a semantic loop and must remain terminal.
+    return outcome.blockedReason.startsWith("compiler tool-call budget exceeded");
+  }
+  return outcome.assistantStopReason === "error";
 }

@@ -12,6 +12,20 @@ import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import type { CompilerToolCallGate } from "./tool-call-gate.js";
 
 type ArtifactStatus = "canonical" | "pending";
+export const COMPILER_ARTIFACT_KINDS = [
+  "entity",
+  "claim",
+  "canonical-event",
+  "world-rule",
+  "initial-world",
+  "character-goal",
+  "character-model",
+  "state-delta",
+  "possibility",
+] as const;
+export type CompilerArtifactKind = typeof COMPILER_ARTIFACT_KINDS[number];
+type CompilerArtifactKindInput = CompilerArtifactKind | "event";
+
 type ArtifactRecord = {
   ref: string;
   status: ArtifactStatus;
@@ -21,6 +35,18 @@ type ArtifactRecord = {
   payload: unknown;
   evidence: EvidenceRef[];
 };
+
+const COMPILER_ARTIFACT_KIND_SET = new Set<string>(COMPILER_ARTIFACT_KINDS);
+
+function normalizeCompilerArtifactKind(kind?: string): CompilerArtifactKind | undefined {
+  if (kind === undefined) return undefined;
+  if (kind === "event") return "canonical-event";
+  if (COMPILER_ARTIFACT_KIND_SET.has(kind)) return kind as CompilerArtifactKind;
+  throw new Error(
+    `Unsupported compiler artifact kind '${kind}'. Use one of: ${COMPILER_ARTIFACT_KINDS.join(", ")}. `
+    + "The canonical event kind is 'canonical-event' (the compatibility alias 'event' is also accepted).",
+  );
+}
 
 const MAX_ARTIFACT_RECORDS = 50_000;
 const MAX_ARTIFACT_SERIALIZED_CHARS = 20_000_000;
@@ -185,7 +211,12 @@ export function createCompilerArtifactRetrievalTools(
 ): ToolDefinition[] {
   const findParameters = Type.Object({
     query: Type.String({ minLength: 1, maxLength: 500, description: "Literal case-insensitive text, logical ID, title/name, or * for all." }),
-    kind: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
+    kind: Type.Optional(Type.Union([
+      ...COMPILER_ARTIFACT_KINDS.map((kind) => Type.Literal(kind)),
+      Type.Literal("event"),
+    ], {
+      description: "Exact artifact kind. Use canonical-event for events; event is accepted as a compatibility alias.",
+    })),
     status: Type.Optional(Type.Union([Type.Literal("canonical"), Type.Literal("pending")])),
     offset: Type.Optional(Type.Integer({ minimum: 0, maximum: MAX_ARTIFACT_RECORDS })),
     max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_FIND_RESULTS })),
@@ -200,12 +231,13 @@ export function createCompilerArtifactRetrievalTools(
     parameters: findParameters,
     async execute(_id, input, signal) {
       signal?.throwIfAborted();
+      const kind = normalizeCompilerArtifactKind(input.kind as CompilerArtifactKindInput | undefined);
       const blocked = beforeCall?.();
       if (blocked) return blocked;
       const sourceId = requireSourceId(getSourceId);
       const needle = input.query.normalize("NFKC").toLocaleLowerCase();
       const matches = (await loadCompilerArtifactRecords(workspaceRoot, sourceId))
-        .filter((record) => !input.kind || record.kind === input.kind)
+        .filter((record) => !kind || record.kind === kind)
         .filter((record) => !input.status || record.status === input.status)
         .filter((record) => needle === "*" || `${record.ref}\n${record.logicalId}\n${record.label}\n${canonicalJson(record.payload)}`
           .normalize("NFKC").toLocaleLowerCase().includes(needle));
@@ -231,6 +263,7 @@ export function createCompilerArtifactRetrievalTools(
       return textResult(promptJson({
         sourceId,
         query: input.query,
+        ...(kind ? { kind } : {}),
         offset,
         returned: records.length,
         totalMatches: matches.length,

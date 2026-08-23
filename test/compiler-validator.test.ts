@@ -109,6 +109,44 @@ describe("CompilerCommitService", () => {
     await expect(commits.proposals.read("pending", "bad-event", (await import("../src/world/model.js")).canonicalEventSchema)).resolves.toMatchObject({ id: "bad-event" });
   });
 
+  it("requires exactly character-scoped event presence during canonical validation", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [proposalId, id, kind, name, quote] of [
+      ["presence-cao", "cao-cao", "character", "曹操", "曹操"],
+      ["presence-gate", "north-gate", "location", "北门", "北门"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind, canonicalName: name, aliases: [], evidence: evidence(quote) },
+        generatedBy: { worker: "test" },
+      });
+    }
+    expect((await commits.acceptAllValid()).blocked).toEqual([]);
+    await proposals.submit("canonical-event", {
+      proposalId: "invalid-presence-event",
+      payload: {
+        id: "cao-at-gate",
+        title: "曹操来到北门",
+        participants: ["cao-cao", "north-gate"],
+        participantPresence: [{ entityId: "north-gate", mode: "physical" }],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操，字孟德\n北门"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("canonical-event", "invalid-presence-event");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INVALID_PARTICIPANT_PRESENCE" }),
+      expect.objectContaining({ code: "MISSING_PARTICIPANT_PRESENCE" }),
+    ]));
+  });
+
   it("rejects a later-character checkpoint that has presence but no actionable pre-event state", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {
@@ -294,6 +332,7 @@ describe("CompilerCommitService", () => {
         id: "future-parent-event",
         title: "Later parent",
         participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
         storyTime: { kind: "exact", value: "2050", precision: "year" },
         preconditions: [],
         observedOutcome: { version: 1, operations: [] },
@@ -310,6 +349,7 @@ describe("CompilerCommitService", () => {
         id: "past-child-event",
         title: "Earlier child",
         participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
         storyTime: { kind: "exact", value: "1950", precision: "year" },
         preconditions: [],
         observedOutcome: { version: 1, operations: [] },
@@ -456,6 +496,7 @@ describe("CompilerCommitService", () => {
         id: "event-child",
         title: "Second event",
         participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
         storyTime: { kind: "relative", anchorEventId: "event-parent", relation: "after" },
         preconditions: [],
         observedOutcome: { version: 1, operations: [] },
@@ -471,6 +512,7 @@ describe("CompilerCommitService", () => {
         id: "event-parent",
         title: "First event",
         participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
         storyTime: { kind: "unknown" },
         preconditions: [],
         observedOutcome: { version: 1, operations: [] },

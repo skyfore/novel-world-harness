@@ -13,7 +13,7 @@ import {
 import {
   compilerBatchFailure,
   compilerBatchOutcomeFromMessages,
-  isRetryableCompilerBatchInterruption,
+  isRecoverableCompilerBatchInterruption,
 } from "../compiler/batch-outcome.js";
 import {
   markSourceLoopBatchComplete,
@@ -66,9 +66,14 @@ import { formatCharacters, formatInstances, formatNovels, formatProgress } from 
 import { createTuiUserQuestion } from "../util/tui-user-question.js";
 import type { UserQuestionCustomInput } from "../util/ask-user-question.js";
 import { auditCompiler } from "../compiler/audit.js";
-import { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "../compiler/reconcile-world.js";
+import {
+  buildWorldReconciliationPrompt,
+  MAX_RECONCILIATION_ITERATIONS,
+  semanticRepairIsIsolated,
+  semanticRepairRequiresReparse,
+} from "../compiler/reconcile-world.js";
 import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
-import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { WorkspaceOperationLock, withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
 import { createWorldBranch } from "../world/instance.js";
 import { formatReaderEntryContext } from "../world/entry-context.js";
@@ -220,10 +225,10 @@ type TuiPrepareAllState = {
   reconciliationAttempts: number;
   reconciliationBatchId?: string;
   preparedCacheVerified: boolean;
-  providerRetryCounts: Map<string, number>;
+  recoveryRetryCounts: Map<string, number>;
 };
 
-const MAX_PREPARE_ALL_PROVIDER_RETRIES = 1;
+const MAX_PREPARE_ALL_RECOVERY_RETRIES = 1;
 
 type PresentedPlayerChoice = PlayerSceneChoice & { affordanceId?: string };
 const PLAYER_CHOICE_CONTRACT_VERSION = 2;
@@ -428,6 +433,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     let pendingRunMessages: unknown[] = [];
     let registeredCompilerToolset: CompilerProposalToolset | undefined;
     let prepareAllState: TuiPrepareAllState | undefined;
+    let compilerOperationLock: WorkspaceOperationLock | undefined;
     let compilerCircuitBroken = false;
     let playerMode = false;
     let selectedPlay: SelectedPlayExperience | undefined;
@@ -448,6 +454,16 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     const hostActivities = new Map<string, symbol>();
     const preparedCache = new PreparedNovelCache(workspace.root, options.preparedCacheRoot);
     const runReparse = options.runReparse ?? reparseCommand;
+    const acquireCompilerOperationLock = async (): Promise<WorkspaceOperationLock> => {
+      if (compilerOperationLock) throw new Error("A compiler operation lock is already held by this TUI session.");
+      compilerOperationLock = await WorkspaceOperationLock.acquire(workspace.root, "compiler");
+      return compilerOperationLock;
+    };
+    const releaseCompilerOperationLock = async (lock = compilerOperationLock): Promise<void> => {
+      if (!lock) return;
+      if (compilerOperationLock === lock) compilerOperationLock = undefined;
+      await lock.release();
+    };
     const taskRunning = () => activeTask?.snapshot.status === "running"
       || activeTask?.snapshot.status === "cancelling";
     let managedSessionName: string | undefined;
@@ -568,6 +584,58 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (outcome === "background" && (task.snapshot.status === "running" || task.snapshot.status === "cancelling")) {
         ctx.ui.notify(`${task.snapshot.title} continues in the background; use /tasks to foreground it.`, "info");
       }
+    };
+
+    const startReparseTask = async (
+      ctx: ExtensionContext,
+      request: {
+        sourceId: string;
+        sourceTitle: string;
+        selectedChapters: readonly number[];
+        all: boolean;
+        chapters?: string;
+        model?: string;
+      },
+    ): Promise<NwhTask> => {
+      const chapterLabel = request.selectedChapters.join(",");
+      const task = new NwhTask(
+        `reparse-${request.sourceId}`,
+        `Reparse ${request.sourceTitle} · chapters ${chapterLabel}`,
+        "Preparing compiler request",
+      );
+      activeTask = task;
+      taskHistory.push(task);
+      const unsubscribe = task.subscribe(() => syncTaskChrome(ctx, task));
+      task.start(async (signal) => {
+        const selectedModel = request.model ?? (ctx.model ? modelLabel(ctx.model) : undefined);
+        const result = await runReparse({
+          root: workspace.root,
+          configPath: path.join(workspace.root, "novel-harness.yaml"),
+          sourceId: request.sourceId,
+          ...(request.all ? { all: true } : { chapters: request.chapters }),
+          ...(selectedModel ? { model: selectedModel } : {}),
+          cacheRoot: options.preparedCacheRoot,
+          signal,
+          onProgress: (message) => task.log(message),
+          onStatus: (message) => task.update(message),
+          onModelEvent: (event) => task.appendAgentEvent(event),
+        });
+        task.log(`Active revision: ${result.activeBundleHash}`);
+      });
+      void task.completion.then(() => {
+        unsubscribe();
+        syncTaskChrome(ctx, task);
+        if (task.snapshot.status === "completed") {
+          ctx.ui.notify(`Reparse complete for chapter(s) ${request.selectedChapters.join(", ")}.`, "info");
+        } else if (task.snapshot.status === "cancelled") {
+          ctx.ui.notify("Reparse cancelled safely; the prior prepared revision remains active.", "info");
+        } else {
+          ctx.ui.notify(`Reparse stopped: ${task.snapshot.error ?? "unknown error"}`, "error");
+        }
+      });
+      syncTaskChrome(ctx, task);
+      await foregroundTask(ctx, task);
+      return task;
     };
 
     const setPlayerStatus = (ctx: ExtensionContext, selection: SelectedPlayExperience) => {
@@ -1366,7 +1434,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ? `Begin preliminary chapter-structure discovery ${turn.completedBatches + 1}/${turn.totalBatches} for source path ${promptJson(turn.source.sourcePath)}. Infer only a safe declarative split rule from the supplied structural sample.`
         : `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for source path ${promptJson(turn.source.sourcePath)}. Analyze the supplied evidence now and record typed pending proposals.`,
       ...(retryAttempt > 0 ? [
-        `This is provider-recovery attempt ${retryAttempt}/${MAX_PREPARE_ALL_PROVIDER_RETRIES}. Use neutral, concise literary-analysis language; do not reproduce or embellish narrative passages in prose. Prefer typed tool calls and short clinical summaries. Recover active current-batch proposals instead of duplicating them.`,
+        `This is batch-recovery attempt ${retryAttempt}/${MAX_PREPARE_ALL_RECOVERY_RETRIES}. Use neutral, concise literary-analysis language; do not reproduce or embellish narrative passages in prose. Prefer typed tool calls and short clinical summaries. Recover active current-batch proposals instead of duplicating them.`,
       ] : []),
     ].join("\n\n");
 
@@ -1415,7 +1483,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       });
     };
 
-    const stopPrepareAll = (ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "warning") => {
+    const stopPrepareAll = async (ctx: ExtensionContext, message: string, level: "info" | "warning" | "error" = "warning") => {
       restoreAssistantTools(ctx);
       prepareAllState = undefined;
       pendingTurn = undefined;
@@ -1426,15 +1494,16 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       prepareAllHostActivity = undefined;
       ctx.ui.setStatus("nwh-prepare-all", undefined);
       ctx.ui.setWidget("nwh-prepare-all", undefined, { placement: "belowEditor" });
+      await releaseCompilerOperationLock();
       ctx.ui.notify(message, level);
     };
 
-    const sendHiddenPreparationTurn = (
+    const sendHiddenPreparationTurn = async (
       ctx: ExtensionContext,
       content: string,
       customType: string,
       expectedSegmentIds: readonly string[],
-    ): boolean => {
+    ): Promise<boolean> => {
       const missingSegmentIds = expectedSegmentIds.filter((segmentId) =>
         !content.includes(`<source-segment id="${segmentId}">`));
       if (missingSegmentIds.length) {
@@ -1442,7 +1511,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         pendingTurnInitiatedByUserInput = false;
         pendingRunMessages = [];
         compilerCircuitBroken = false;
-        stopPrepareAll(
+        await stopPrepareAll(
           ctx,
           `Full preparation stopped before the model turn because compiler evidence was missing for: ${missingSegmentIds.join(", ")}.`,
           "error",
@@ -1470,28 +1539,28 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             { value: "pause", label: "Pause", description: "Keep current progress and return to the TUI." },
           ]);
           if (decision !== "continue") {
-            stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
+            await stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
             return;
           }
           state.compileAllApproved = true;
         }
         const preparation = await prepareNextSourceLoopTurn(workspace.root, state.sourceId);
         if (!preparation || preparation.status === "complete") {
-          stopPrepareAll(ctx, "Could not resolve the next compiler batch.", "error");
+          await stopPrepareAll(ctx, "Could not resolve the next compiler batch.", "error");
           return;
         }
         activeSourceId = preparation.source.id;
         activateCompilerTools(ctx, "source", preparation.batch.purpose);
         await beginTurn(preparation);
-        const retryAttempt = state.providerRetryCounts.get(preparation.batch.id) ?? 0;
+        const retryAttempt = state.recoveryRetryCounts.get(preparation.batch.id) ?? 0;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Preparing · batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`));
         ctx.ui.notify(
           retryAttempt > 0
-            ? `Full preparation: retrying compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} after a provider interruption.`
+            ? `Full preparation: retrying compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} after a recoverable interruption.`
             : `Full preparation: starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches}.`,
           "info",
         );
-        sendHiddenPreparationTurn(
+        await sendHiddenPreparationTurn(
           ctx,
           `${compilerPromptForTurn(preparation, retryAttempt)}\n\n${preparation.prompt}`,
           "nwh-prepare-all-batch",
@@ -1506,7 +1575,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           { value: "review", label: "Review first", description: "Stop before accepting anything; use proposal CLI commands." },
         ]);
         if (decision !== "accept") {
-          stopPrepareAll(ctx, `Full preparation paused for proposal review. Next: ${inspection.next}`, "info");
+          await stopPrepareAll(ctx, `Full preparation paused for proposal review. Next: ${inspection.next}`, "info");
           return;
         }
         let lastReported = 0;
@@ -1544,7 +1613,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             branchId: state.branchId,
           });
           if (afterFallback.stage === "needs-initial-world") {
-            stopPrepareAll(ctx, "The deterministic opening-state fallback could not be committed. Run nwh audit for conflicting world data.", "error");
+            await stopPrepareAll(ctx, "The deterministic opening-state fallback could not be committed. Run nwh audit for conflicting world data.", "error");
             return;
           }
           await advancePrepareAll(ctx);
@@ -1555,7 +1624,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           { value: "pause", label: "Pause", description: "Leave the opening world unresolved for manual work." },
         ]);
         if (decision !== "generate") {
-          stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
+          await stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
           return;
         }
         activateCompilerTools(ctx, "opening");
@@ -1565,7 +1634,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         state.initialWorldAttempted = true;
         state.initialWorldBatchId = openingBatch.id;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing · opening world"));
-        sendHiddenPreparationTurn(
+        await sendHiddenPreparationTurn(
           ctx,
           `${INITIAL_WORLD_PROMPT}\n\n${openingBatch.prompt}`,
           "nwh-prepare-all-initial-world",
@@ -1583,21 +1652,29 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           { value: "pause", label: "Pause", description: "Keep canonical preparation complete without creating a branch." },
         ]);
         if (decision !== "create") {
-          stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
+          await stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
           return;
         }
         await createWorldBranch(workspace.root, state.branchId, undefined, state.sourceId, options.preparedCacheRoot);
         await advancePrepareAll(ctx);
         return;
       }
-      if (inspection.stage === "repair" && inspection.audit && semanticRepairIsIsolated(inspection.audit) && state.reconciliationAttempts < 2) {
+      if (inspection.stage === "repair" && inspection.audit && semanticRepairRequiresReparse(inspection.audit)) {
+        await stopPrepareAll(
+          ctx,
+          `Full preparation found systemic semantic debt that exceeds the bounded reconciliation capacity. Run /reparse --source ${state.sourceId} --all; ordinary /prepare-all will not retry the same incomplete migration.`,
+          "error",
+        );
+        return;
+      }
+      if (inspection.stage === "repair" && inspection.audit && semanticRepairIsIsolated(inspection.audit) && state.reconciliationAttempts < MAX_RECONCILIATION_ITERATIONS) {
         if (state.reconciliationAttempts === 0) {
           const decision = await choose(ctx, "Reconcile world semantics?", [
             { value: "repair", label: "Reconcile world", description: "Repair evidence-backed timeline, effects, and character phases through typed proposals.", recommended: true },
             { value: "pause", label: "Pause", description: "Keep the semantic audit findings for manual repair." },
           ]);
           if (decision !== "repair") {
-            stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
+            await stopPrepareAll(ctx, `Full preparation paused. Next: ${inspection.next}`, "info");
             return;
           }
         }
@@ -1608,8 +1685,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         state.reconciliationAttempts = iteration;
         state.reconciliationRequestRunning = true;
         state.reconciliationBatchId = batchId;
-        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Reconciling world · ${iteration}/2`));
-        sendHiddenPreparationTurn(
+        ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Reconciling world · ${iteration}/${MAX_RECONCILIATION_ITERATIONS}`));
+        await sendHiddenPreparationTurn(
           ctx,
           await buildWorldReconciliationPrompt(workspace.root, state.sourceId, inspection.audit, iteration),
           "nwh-prepare-all-reconciliation",
@@ -1623,20 +1700,20 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           const cached = await preparedCache.publish(inspection.source!);
           ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
         }
-        stopPrepareAll(ctx, `Preparation complete. Run /play to choose a character on '${state.branchId}'.`, "info");
+        await stopPrepareAll(ctx, `Preparation complete. Run /play to choose a character on '${state.branchId}'.`, "info");
         return;
       }
       const diagnosis = inspection.repairReasons?.length
         ? ` ${inspection.repairReasons.join(" ")}`
         : "";
-      stopPrepareAll(
+      await stopPrepareAll(
         ctx,
         `Full preparation stopped at '${inspection.stage}'.${diagnosis} Next: ${inspection.next}`,
         inspection.stage === "repair" ? "error" : "warning",
       );
       } catch (error) {
         if (prepareAllState === state) {
-          stopPrepareAll(
+          await stopPrepareAll(
             ctx,
             `Full preparation stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}. Progress already checkpointed remains resumable with /prepare-all.`,
             "error",
@@ -1651,6 +1728,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       stopTerminalInput = undefined;
       prepareAllHostActivity?.close();
       prepareAllHostActivity = undefined;
+      await releaseCompilerOperationLock();
       if (startupRestorePromise) await startupRestorePromise;
       const pendingPlayerTurn = activePlayerTurn;
       if (pendingPlayerTurn?.cancellable) pendingPlayerTurn.controller.abort();
@@ -1774,7 +1852,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
 
       const sourceActivity = sourceLike ? beginHostActivity(ctx, "source-ingest", "Reading and indexing the novel source") : undefined;
+      let inputCompilerLock: WorkspaceOperationLock | undefined;
+      let keepInputCompilerLock = false;
       try {
+        if (sourceLike) inputCompilerLock = await acquireCompilerOperationLock();
         const preparation = await prepareSourceLoopFromInput(workspace.root, event.text, { cacheRoot: options.preparedCacheRoot });
         if (preparation) {
           activeSourceId = preparation.source.id;
@@ -1790,6 +1871,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           sourceActivity?.update("Preparing the foreground compiler turn");
           activateCompilerTools(ctx, "source", preparation.batch.purpose);
           await beginTurn(preparation, true);
+          keepInputCompilerLock = true;
           ctx.ui.notify(
             `Novel indexed: ${preparation.source.sourcePath} · starting batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`,
             "info",
@@ -1800,6 +1882,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         ctx.ui.notify(`Cannot start novel compiler: ${error instanceof Error ? error.message : String(error)}`, "error");
         return { action: "handled" };
       } finally {
+        if (inputCompilerLock && !keepInputCompilerLock) await releaseCompilerOperationLock(inputCompilerLock);
         sourceActivity?.close();
       }
 
@@ -1995,6 +2078,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             : [];
           ctx.ui.notify(`${reconciliationRequest ? "World reconciliation" : "Opening-state compiler"} did not complete (${failure}); incomplete drafts will not enter canonical truth.`, "warning");
           if (rejected.length) ctx.ui.notify(`Rejected ${rejected.length} partial proposal(s).`, "warning");
+          if (reconciliationRequest) {
+            await stopPrepareAll(
+              ctx,
+              `Full preparation stopped after reconciliation failed (${failure}). The same deterministic repair pass will not be repeated automatically; retry only after correcting the reported cause or run /reparse --source ${prepareAllState!.sourceId} --all.`,
+              "error",
+            );
+            return;
+          }
         }
         await advancePrepareAll(ctx);
         return;
@@ -2002,14 +2093,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const failure = compilerBatchFailure(outcome);
       if (failure) {
         const preparation = prepareAllState;
-        if (preparation && isRetryableCompilerBatchInterruption(outcome)) {
-          const retries = preparation.providerRetryCounts.get(completedTurn.batch.id) ?? 0;
-          if (retries < MAX_PREPARE_ALL_PROVIDER_RETRIES) {
-            preparation.providerRetryCounts.set(completedTurn.batch.id, retries + 1);
+        if (preparation && isRecoverableCompilerBatchInterruption(outcome)) {
+          const retries = preparation.recoveryRetryCounts.get(completedTurn.batch.id) ?? 0;
+          if (retries < MAX_PREPARE_ALL_RECOVERY_RETRIES) {
+            preparation.recoveryRetryCounts.set(completedTurn.batch.id, retries + 1);
             pendingTurn = undefined;
             pendingTurnInitiatedByUserInput = false;
             ctx.ui.notify(
-              `Compiler batch ${completedTurn.batch.ordinal + 1} was interrupted by the provider (${failure}); retrying automatically ${retries + 1}/${MAX_PREPARE_ALL_PROVIDER_RETRIES}.`,
+              `Compiler batch ${completedTurn.batch.ordinal + 1} had a recoverable interruption (${failure}); retrying automatically ${retries + 1}/${MAX_PREPARE_ALL_RECOVERY_RETRIES}.`,
               "warning",
             );
             await advancePrepareAll(ctx);
@@ -2024,7 +2115,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           "warning",
         );
         if (wasPreparingAll) {
-          stopPrepareAll(ctx, `Full preparation stopped because the compiler batch did not complete (${failure}). Retry /prepare-all to resume.`);
+          await stopPrepareAll(ctx, `Full preparation stopped because the compiler batch did not complete (${failure}). Retry /prepare-all to resume.`);
+        } else {
+          await releaseCompilerOperationLock();
         }
         return;
       }
@@ -2040,6 +2133,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         "info",
       );
       if (prepareAllState) await advancePrepareAll(ctx);
+      else await releaseCompilerOperationLock();
     });
 
     pi.on("session_start", (event, ctx) => {
@@ -2585,7 +2679,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (!args.trim()) throw new Error("Usage: /prepare-content <novel text>");
         const content = args;
         const activity = beginHostActivity(ctx, "compiler-preflight", "Archiving and indexing pasted novel content");
+        let compilerLock: WorkspaceOperationLock | undefined;
+        let keepCompilerLock = false;
         try {
+          compilerLock = await acquireCompilerOperationLock();
           const preparation = await prepareSourceLoopFromContent(workspace.root, content, {
             title: "pasted-novel.txt",
             cacheRoot: options.preparedCacheRoot,
@@ -2603,6 +2700,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           activity.update("Preparing the foreground compiler turn");
           activateCompilerTools(ctx, "source", preparation.batch.purpose);
           await beginTurn(preparation);
+          keepCompilerLock = true;
           ctx.ui.notify(`Archived pasted content as ${preparation.source.id} · starting batch 1/${preparation.totalBatches}.`, "info");
           pi.sendMessage({
             customType: "nwh-compiler-batch",
@@ -2610,6 +2708,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             display: false,
           }, { triggerTurn: true });
         } finally {
+          if (compilerLock && !keepCompilerLock) await releaseCompilerOperationLock(compilerLock);
           activity.close();
         }
       },
@@ -2620,7 +2719,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       handler: async (_args, ctx) => {
         if (!guardForegroundIdle(ctx, "compile the next evidence batch")) return;
         const activity = beginHostActivity(ctx, "compiler-preflight", "Loading the next evidence batch");
+        let compilerLock: WorkspaceOperationLock | undefined;
+        let keepCompilerLock = false;
         try {
+          compilerLock = await acquireCompilerOperationLock();
           const preparation = await prepareNextSourceLoopTurn(workspace.root, activeSourceId);
           if (!preparation) {
             ctx.ui.notify("No novel source is registered. Paste or drag a novel file path into the TUI first.", "warning");
@@ -2634,6 +2736,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           activity.update("Preparing the foreground compiler turn");
           activateCompilerTools(ctx, "source", preparation.batch.purpose);
           await beginTurn(preparation);
+          keepCompilerLock = true;
           ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");
           // Host-generated compiler context must never be represented as a user
           // message: doing so replaces the visible slash-command transcript.
@@ -2643,6 +2746,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             display: false,
           }, { triggerTurn: true });
         } finally {
+          if (compilerLock && !keepCompilerLock) await releaseCompilerOperationLock(compilerLock);
           activity.close();
         }
       },
@@ -2654,6 +2758,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         if (!guardForegroundIdle(ctx, "prepare the complete novel world")) return;
         const activity = beginHostActivity(ctx, "prepare-all", "Inspecting novel readiness");
         let handedOff = false;
+        let preparationLock: WorkspaceOperationLock | undefined;
         try {
         const [requestedSourceId, requestedBranchId] = splitCommandArguments(args);
         let branchId = requestedBranchId || "main";
@@ -2709,11 +2814,59 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         activeSourceId = sourceId;
         const source = inspection.source ?? await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);
         if (source) setContextSessionName(`${source.title} · full preparation`);
+        const sourceChanged = inspection.audit?.sources.changedSinceIngest.includes(sourceId) ?? false;
         // A changed source cannot be identified as the immutable cached input.
-        // Preserve the audit diagnosis instead of letting cache lookup throw a
-        // less useful hash-mismatch error before the repair stage is reported.
-        if (source && inspection.stage !== "repair") {
+        // Preserve that audit diagnosis instead of replacing it with a hash
+        // mismatch. Every unchanged source, including one already at repair,
+        // must still pass the semantic-pipeline compatibility preflight.
+        if (source && !sourceChanged) {
           activity.update("Checking the prepared revision cache");
+          const cached = await preparedCache.lookup(source);
+          if (cached.requiresReparse) {
+            const decision = await choose(ctx, "Upgrade prepared world semantics?", [
+              {
+                value: "reparse",
+                label: "Reparse all",
+                description: "Preserve the old immutable revision and rebuild every source batch with the current world model.",
+                recommended: true,
+              },
+              {
+                value: "pause",
+                label: "Pause",
+                description: `Keep revision ${cached.bundleHash ?? "legacy"} active and run /reparse later.`,
+              },
+            ]);
+            if (decision !== "reparse") {
+              ctx.ui.notify(`Full preparation paused. Next: /reparse --source ${sourceId} --all`, "info");
+              return;
+            }
+            const batches = await prepareCompilerBatches(workspace.root, source);
+            const selectedChapters = [...new Set(
+              batches.filter((batch) => batch.purpose !== "structure-discovery").map((batch) => batch.chapterOrdinal),
+            )].sort((left, right) => left - right);
+            activity.update("Running rollback-safe semantic pipeline upgrade");
+            ctx.ui.notify(
+              `Prepared revision ${cached.bundleHash ?? "legacy"} is incompatible with the current semantic pipeline; starting a rollback-safe whole-novel reparse.`,
+              "warning",
+            );
+            const task = await startReparseTask(ctx, {
+              sourceId,
+              sourceTitle: source.title,
+              selectedChapters,
+              all: true,
+            });
+            await task.completion;
+            if (task.snapshot.status !== "completed") return;
+            if (!requestedBranchId) {
+              branchId = await resolvePreparationBranchId(workspace.root, source, undefined, { preferNew: true });
+              ctx.ui.notify(`Existing branches remain pinned to their prior revision; the upgraded world will use new branch '${branchId}'.`, "info");
+            }
+            inspection = await inspectPreparation(workspace.root, { sourceId, branchId });
+          }
+        }
+        preparationLock = await acquireCompilerOperationLock();
+        if (source && !sourceChanged) {
+          activity.update("Checking whether the active prepared revision can be restored");
           const restored = await preparedCache.restore(source);
           if (restored.status === "restored") {
             ctx.ui.notify(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; source compilation is skipped.`, "info");
@@ -2730,13 +2883,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           reconciliationRequestRunning: false,
           reconciliationAttempts: 0,
           preparedCacheVerified: false,
-          providerRetryCounts: new Map(),
+          recoveryRetryCounts: new Map(),
         };
         prepareAllHostActivity = activity;
         handedOff = true;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", "Preparing world"));
         await advancePrepareAll(ctx);
         } finally {
+          if (!handedOff && preparationLock) await releaseCompilerOperationLock(preparationLock);
           if (!handedOff) activity.close();
         }
       },
@@ -2859,43 +3013,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         activeSourceId = sourceId;
         setContextSessionName(`${source.title} · reparse chapters ${selectedChapters.join(",")}`);
         ctx.ui.notify(`Starting reparse for ${source.title}: chapter(s) ${selectedChapters.join(", ")}.`, "info");
-        const task = new NwhTask(
-          `reparse-${source.id}`,
-          `Reparse ${source.title} · chapters ${selectedChapters.join(",")}`,
-          "Preparing compiler request",
-        );
-        activeTask = task;
-        taskHistory.push(task);
-        const unsubscribe = task.subscribe(() => syncTaskChrome(ctx, task));
-        task.start(async (signal) => {
-          const selectedModel = parsed.model ?? (ctx.model ? modelLabel(ctx.model) : undefined);
-          const result = await runReparse({
-            root: workspace.root,
-            configPath: path.join(workspace.root, "novel-harness.yaml"),
-            sourceId,
-            ...(all ? { all: true } : { chapters }),
-            ...(selectedModel ? { model: selectedModel } : {}),
-            cacheRoot: options.preparedCacheRoot,
-            signal,
-            onProgress: (message) => task.log(message),
-            onStatus: (message) => task.update(message),
-            onModelEvent: (event) => task.appendAgentEvent(event),
-          });
-          task.log(`Active revision: ${result.activeBundleHash}`);
+        await startReparseTask(ctx, {
+          sourceId,
+          sourceTitle: source.title,
+          selectedChapters,
+          all,
+          ...(chapters ? { chapters } : {}),
+          ...(parsed.model ? { model: parsed.model } : {}),
         });
-        void task.completion.then(() => {
-          unsubscribe();
-          syncTaskChrome(ctx, task);
-          if (task.snapshot.status === "completed") {
-            ctx.ui.notify(`Reparse complete for chapter(s) ${selectedChapters.join(", ")}.`, "info");
-          } else if (task.snapshot.status === "cancelled") {
-            ctx.ui.notify(`Reparse cancelled safely; the prior prepared revision remains active.`, "info");
-          } else {
-            ctx.ui.notify(`Reparse stopped: ${task.snapshot.error ?? "unknown error"}`, "error");
-          }
-        });
-        syncTaskChrome(ctx, task);
-        await foregroundTask(ctx, task);
       },
     });
 

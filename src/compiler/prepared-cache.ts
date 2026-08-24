@@ -20,11 +20,16 @@ import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { auditCompiler } from "./audit.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import { ChapterSplitPlanStore, chapterSplitPlanSchema } from "./chapter-split.js";
+import {
+  inferredTitleOccursInEvidence,
+  sourceTitleInferenceSchema,
+} from "../storage/novel-title.js";
+import { EvidenceVerifier } from "./evidence.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 10;
+export const COMPILER_PROMPT_VERSION = 11;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -34,6 +39,7 @@ const preparedNovelBundleSchema = z.object({
     id: z.string().min(1),
     contentMd5: md5Schema,
     contentSha256: digestSchema,
+    titleInference: sourceTitleInferenceSchema.optional(),
   }).strict(),
   segmenterVersion: z.number().int().positive(),
   compilerFingerprint: z.object({
@@ -60,6 +66,12 @@ export type PreparedNovelBundle = z.infer<typeof preparedNovelBundleSchema>;
 
 function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
   const sourceId = bundle.source.id;
+  if (bundle.source.titleInference && (
+    bundle.source.titleInference.sourceId !== sourceId
+    || bundle.source.titleInference.evidence.span.sourceId !== sourceId
+  )) {
+    throw new Error("Prepared bundle novel-title inference does not match its source identity.");
+  }
   if (bundle.chapterSplitPlan && (
     bundle.chapterSplitPlan.sourceId !== sourceId
     || bundle.chapterSplitPlan.sourceSha256 !== bundle.source.contentSha256
@@ -161,6 +173,7 @@ export class PreparedNovelCache {
     const cached = await this.readCached(identity.contentMd5);
     if (!cached) return null;
     assertSourceIdentity(cached.bundle, identity);
+    await this.assertTitleInferenceEvidence(cached.bundle);
     const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
     if (layoutIssue) throw new Error(layoutIssue);
     return {
@@ -177,6 +190,7 @@ export class PreparedNovelCache {
     const cached = await this.readCached(identity.contentMd5, bundleHash);
     if (!cached) return null;
     assertSourceIdentity(cached.bundle, identity);
+    await this.assertTitleInferenceEvidence(cached.bundle);
     const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
     if (layoutIssue) throw new Error(layoutIssue);
     return {
@@ -348,7 +362,11 @@ export class PreparedNovelCache {
     if (!cached) throw new Error(`Prepared cache revision not found: ${identity.contentMd5}@${bundleHash}`);
     assertSourceIdentity(cached.bundle, identity);
     const pending = await new ProposalStore(this.workspaceRoot).list("pending", source.id);
-    if (pending.length) throw new Error(`Cannot activate a prepared revision while ${pending.length} source proposal(s) are pending.`);
+    const registeredSource = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(source.id);
+    const pendingTitle = registeredSource?.pendingTitleProposal ? 1 : 0;
+    if (pending.length || pendingTitle) {
+      throw new Error(`Cannot activate a prepared revision while ${pending.length + pendingTitle} source proposal(s) are pending.`);
+    }
     const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
     if (layoutIssue && !options.allowIncompatibleRollback) throw new Error(layoutIssue);
     await pinBranchPreparationContexts(this.workspaceRoot);
@@ -375,6 +393,14 @@ export class PreparedNovelCache {
     const proposals = new ProposalStore(this.workspaceRoot);
     const pending = await proposals.list("pending", source.id);
     if (pending.length) throw new Error(`Cannot cache ${source.id}: ${pending.length} source proposal(s) are still pending.`);
+    // Refresh because the successful opening batch can replace the ingest
+    // label with accepted model-derived title metadata while callers retain an
+    // older SourceDocument snapshot.
+    const currentSource = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(source.id);
+    if (!currentSource) throw new Error(`Cannot cache unregistered source ${source.id}.`);
+    if (currentSource.pendingTitleProposal) {
+      throw new Error(`Cannot cache ${source.id}: novel-title proposal ${currentSource.pendingTitleProposal.proposalId} is still pending.`);
+    }
     const batches = await prepareCompilerBatches(this.workspaceRoot, source);
     const progress = await new CompilerBatchStore(this.workspaceRoot).read(source.id);
     const completed = new Set(progress.completedBatchIds);
@@ -410,7 +436,11 @@ export class PreparedNovelCache {
     const chapterSplitPlan = await new ChapterSplitPlanStore(this.workspaceRoot).read(source.id);
     const bundle = preparedNovelBundleSchema.parse({
       version: 1,
-      source: { id: source.id, ...identity },
+      source: {
+        id: source.id,
+        ...identity,
+        ...(currentSource.titleInference ? { titleInference: currentSource.titleInference } : {}),
+      },
       segmenterVersion: SEGMENTER_VERSION,
       compilerFingerprint: currentCompilerFingerprint(),
       ...(chapterSplitPlan ? { chapterSplitPlan } : {}),
@@ -433,6 +463,7 @@ export class PreparedNovelCache {
         possibilities: fromSource(possibilities),
       },
     });
+    await this.assertTitleInferenceEvidence(bundle);
     assertSelfContainedBaseline(bundle, canonical);
     return bundle;
   }
@@ -440,12 +471,18 @@ export class PreparedNovelCache {
   private async assertWorkspaceCanMaterialize(bundle: PreparedNovelBundle): Promise<{ compatible: boolean; empty: boolean; reason?: string }> {
     const proposals = new ProposalStore(this.workspaceRoot);
     const branches = new BranchStore(this.workspaceRoot);
-    const [pending, branchIds] = await Promise.all([proposals.list("pending"), branches.listIds()]);
-    if (pending.length || branchIds.length) {
+    const workspace = await WorkspaceStore.create(this.workspaceRoot);
+    const [pending, branchIds, source] = await Promise.all([
+      proposals.list("pending"),
+      branches.listIds(),
+      workspace.getSource(bundle.source.id),
+    ]);
+    const pendingTitle = source?.pendingTitleProposal ? 1 : 0;
+    if (pending.length || pendingTitle || branchIds.length) {
       return {
         compatible: false,
         empty: false,
-        reason: `Workspace has ${pending.length} pending proposal(s) and ${branchIds.length} branch(es); cached baselines are restored only before local world evolution starts.`,
+        reason: `Workspace has ${pending.length + pendingTitle} pending proposal(s) and ${branchIds.length} branch(es); cached baselines are restored only before local world evolution starts.`,
       };
     }
     const current = await currentCanonical(this.workspaceRoot);
@@ -479,6 +516,11 @@ export class PreparedNovelCache {
   private async freshnessIssue(bundle: PreparedNovelBundle): Promise<string | null> {
     const pending = await new ProposalStore(this.workspaceRoot).list("pending", bundle.source.id);
     if (pending.length) return `${pending.length} source proposal(s) are pending`;
+    const source = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(bundle.source.id);
+    if (source?.pendingTitleProposal) return "a novel-title proposal is pending";
+    if (canonicalJson(source?.titleInference ?? null) !== canonicalJson(bundle.source.titleInference ?? null)) {
+      return "novel-title inference differs";
+    }
     const current = await currentCanonical(this.workspaceRoot);
     const fromSource = <T extends { id?: string; actorId?: string; evidence: readonly EvidenceRef[] }>(items: readonly T[]) =>
       items.filter((item) => {
@@ -524,6 +566,11 @@ export class PreparedNovelCache {
 
   private async materialize(bundle: PreparedNovelBundle, exact: boolean): Promise<void> {
     const sourceId = bundle.source.id;
+    const workspace = await WorkspaceStore.create(this.workspaceRoot);
+    if (bundle.source.titleInference) {
+      await this.assertTitleInferenceEvidence(bundle);
+      await workspace.restoreSourceTitleInference(sourceId, bundle.source.titleInference);
+    }
     const canonical = new CanonicalModelStore(this.workspaceRoot);
     const actors = new ActorModelStore(this.workspaceRoot);
     const possibilities = new PossibilityTemplateStore(this.workspaceRoot);
@@ -559,12 +606,26 @@ export class PreparedNovelCache {
     const chapterSplits = new ChapterSplitPlanStore(this.workspaceRoot);
     if (bundle.chapterSplitPlan) await chapterSplits.write(bundle.chapterSplitPlan);
     else await chapterSplits.remove(sourceId);
-    const source = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(sourceId);
+    const source = await workspace.getSource(sourceId);
     if (!source) throw new Error(`Prepared revision source is not registered: ${sourceId}`);
     await prepareCompilerBatches(this.workspaceRoot, source, {
       chapterSplitPlan: bundle.chapterSplitPlan ?? null,
     });
     await new CompilerBatchStore(this.workspaceRoot).replaceCompleted(sourceId, bundle.batchIds);
+  }
+
+  private async assertTitleInferenceEvidence(bundle: PreparedNovelBundle): Promise<void> {
+    const inference = bundle.source.titleInference;
+    if (!inference) return;
+    const verification = await new EvidenceVerifier(this.workspaceRoot).inspect(inference.evidence);
+    if (!verification.valid || verification.excerpt === undefined) {
+      throw new Error(
+        `Prepared revision novel-title evidence is invalid: ${verification.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`,
+      );
+    }
+    if (!inferredTitleOccursInEvidence(inference.title, verification.excerpt)) {
+      throw new Error("Prepared revision novel title does not occur in its verified source evidence.");
+    }
   }
 
   private async batchLayoutIssue(source: SourceDocument, bundle: PreparedNovelBundle): Promise<string | null> {

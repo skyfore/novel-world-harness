@@ -214,7 +214,8 @@ export async function buildChapterStructureSample(
     sampledRanges,
     lines: sampledLines,
   };
-  const prompt = promptJson(payload);
+  const { sourcePath: _ingestPath, ...modelPayload } = payload;
+  const prompt = promptJson(modelPayload);
   return { ...payload, prompt, promptCharacters: prompt.length };
 }
 

@@ -9,7 +9,7 @@ import {
   type SelectedPlayExperience,
 } from "./play-experience.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
-import path from "node:path";
+import { novelTitleIdStem } from "../storage/novel-title.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prepare.js";
 import { createWorldBranch } from "./instance.js";
@@ -398,11 +398,7 @@ function resolveEntryCharacter(
 }
 
 function nextSourceInstanceId(source: SourceDocument, existingIds: readonly string[]): string {
-  const stem = path.basename(source.sourcePath, path.extname(source.sourcePath))
-    .normalize("NFKD")
-    .toLocaleLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  const stem = novelTitleIdStem(source.titleInference?.title ?? "");
   const base = `${stem || "novel"}-${source.id.slice(0, 8)}`;
   for (let suffix = 1; ; suffix += 1) {
     const candidate = suffix === 1 ? base : `${base}-${suffix}`;

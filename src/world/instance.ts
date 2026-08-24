@@ -94,7 +94,7 @@ export async function createWorldBranch(
   }
   const head = await engine.createBranch(
     branchId,
-    branchId,
+    source?.titleInference?.title ?? branchId,
     seed,
     seedPath ? undefined : entrySeed?.knowledge ?? canonicalInitial?.knowledge,
     effectiveSourceId,

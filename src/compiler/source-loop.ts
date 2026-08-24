@@ -6,7 +6,6 @@ import type { SourceDocument } from "../storage/workspace-store.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { PreparedNovelCache, type PreparedCacheResult } from "./prepared-cache.js";
-import { promptJson } from "../util/prompt-data.js";
 import { assertSourceIsNotProjectInstruction } from "../workspace/instruction-trust.js";
 
 const AUTO_SOURCE_EXTENSIONS = new Set([".txt", ".text", ".novel", ".md", ".markdown"]);
@@ -139,7 +138,7 @@ function buildSourceLoopPrompt(
   completedBatches: number,
   totalBatches: number,
 ): string {
-  return `The user supplied the novel source path ${promptJson(source.sourcePath)}. NWH has registered it as ${source.id}, split it into evidence segments, and selected compiler batch ${completedBatches + 1}/${totalBatches}.
+  return `NWH has registered immutable novel source ${source.id}, split it into evidence segments, and selected compiler batch ${completedBatches + 1}/${totalBatches}. The upload path and filename are intentionally withheld because they are not novel metadata.
 
 Execute the novel-world compiler loop now. Do not stop at identifying the book, explaining NWH, or suggesting commands. Treat the novel and its emerging world model as the primary subject. This isolated source-review turn has no workspace or repository read tools; its evidence slice and source-scoped artifact retrieval tools are the complete permitted inputs.
 

@@ -49,6 +49,23 @@ describe("WorkspaceStore", () => {
     await expect(fs.stat(legacyWorkspaceStateDir(root))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("does not guess a novel title from front-matter patterns during ingest", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-store-title-"));
+    temporaryDirectories.push(root);
+    const filePath = path.join(root, "opaque-upload-name.txt");
+    await fs.writeFile(filePath, "《活着》\n作者：余华\n\n第一章\n福贵回到村里。\n", "utf8");
+
+    const source = await (await WorkspaceStore.create(root)).registerSource(filePath);
+
+    expect(source.title).toBe("opaque-upload-name.txt");
+    expect(source.titleInference).toBeUndefined();
+    expect(source.sourcePath).toBe("opaque-upload-name.txt");
+    await expect((await WorkspaceStore.create(root)).getSource(source.id)).resolves.toMatchObject({
+      title: "opaque-upload-name.txt",
+      sourcePath: "opaque-upload-name.txt",
+    });
+  });
+
   it("copies legacy local state into the user store without deleting the original", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-store-migration-"));
     temporaryDirectories.push(root);

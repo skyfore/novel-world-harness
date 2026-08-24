@@ -50,6 +50,7 @@ describe("novel source compiler loop", () => {
     expect(first.prompt).toContain("Execute the novel-world compiler loop now");
     expect(first.prompt).toContain("EvidenceRef");
     expect(first.prompt).toContain("人物1进入城池");
+    expect(first.prompt).not.toContain("novel world.txt");
     await expect(fs.stat(path.join(workspaceStateDir(root), "sources", `${first.source.id}.json`))).resolves.toBeDefined();
     await expect((await WorkspaceStore.create(root)).readProject()).resolves.toMatchObject({
       name: path.basename(root),

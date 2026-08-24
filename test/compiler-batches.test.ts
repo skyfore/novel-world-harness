@@ -247,6 +247,10 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("peek_adjacent_evidence"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("defer_boundary_artifact"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("context-only"))).toBe(true);
+    expect(batches.every((batch) => !batch.prompt.includes("novel.txt"))).toBe(true);
+    expect(batches[0]!.prompt).toContain("Use your semantic reading");
+    expect(batches[0]!.prompt).toContain("do not use a regular-expression convention");
+    expect(batches.slice(1).every((batch) => batch.prompt.includes("Novel-title inference belongs only to the source-opening review batch"))).toBe(true);
   });
 
   it("keeps continuation segments from one author chapter in one wider batch", async () => {

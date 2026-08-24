@@ -17,6 +17,7 @@ import { InitialWorldStore } from "../src/world/initial.js";
 import { BranchStore } from "../src/world/store.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { WorkspaceStore } from "../src/storage/workspace-store.js";
 
 const roots: string[] = [];
 
@@ -228,7 +229,11 @@ describe("prepare-all command", () => {
     roots.push(root);
     vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
     const first = await createEvidenceFixture(root, "First Hero waits.\n", "first-novel.txt");
-    const second = await createEvidenceFixture(root, "Second Hero waits.\n", "second-novel.txt");
+    const second = await createEvidenceFixture(
+      root,
+      "The Second Chronicle\nAuthor: Example Writer\n\nChapter 1\nSecond Hero waits.\n",
+      "second-novel.txt",
+    );
     const canon = new CanonicalModelStore(root);
     await canon.putEntity({
       id: "first-hero",
@@ -244,7 +249,6 @@ describe("prepare-all command", () => {
     }, undefined, first.source.id);
 
     const batches = await prepareCompilerBatches(root, second.source);
-    for (const batch of batches) await new CompilerBatchStore(root).markComplete(second.source.id, batch.id);
     await canon.putEntity({
       id: "second-hero",
       kind: "character",
@@ -261,6 +265,7 @@ describe("prepare-all command", () => {
       evidence: second.evidence("Second Hero waits."),
     });
 
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(second.source.id, batch.id);
     await expect(prepareAllCommand({
       root,
       sourceId: second.source.id,
@@ -268,18 +273,37 @@ describe("prepare-all command", () => {
       yes: true,
       cacheRoot: path.join(root, "prepared-cache"),
     })).rejects.toThrow("belongs to source");
+    await new CompilerBatchStore(root).reset(second.source.id);
 
     const result = await prepareAllCommand({ root, sourceId: second.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
-      compileSource: async () => { throw new Error("compileSource should not run"); },
+      compileSource: async () => {
+        await (await WorkspaceStore.create(root)).restoreSourceTitleInference(second.source.id, {
+          version: 1,
+          sourceId: second.source.id,
+          title: "The Second Chronicle",
+          evidence: second.evidence("The Second Chronicle")[0]!,
+          generatedBy: {
+            worker: "propose_novel_title",
+            provider: "test",
+            model: "semantic-title-model",
+            compilerBatchId: batches[0]!.id,
+          },
+          inferredAt: new Date().toISOString(),
+        });
+        for (const batch of batches) await new CompilerBatchStore(root).markComplete(second.source.id, batch.id);
+      },
       compileInitialWorld: async () => { throw new Error("compileInitialWorld should not run"); },
       converge: convergeWorldProposals,
       createBranch: worldCreateCommand,
     });
 
-    const expectedBranchId = `second-novel-${second.source.id.slice(0, 8)}`;
+    const expectedBranchId = `the-second-chronicle-${second.source.id.slice(0, 8)}`;
     expect(result).toMatchObject({ stage: "ready", branchId: expectedBranchId });
     await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ sourceId: first.source.id });
-    await expect(new BranchStore(root).read(expectedBranchId)).resolves.toMatchObject({ sourceId: second.source.id });
+    await expect(new BranchStore(root).read(expectedBranchId)).resolves.toMatchObject({
+      name: "The Second Chronicle",
+      sourceId: second.source.id,
+    });
   });
 
   it("quarantines validation-blocked proposals and completes with validated artifacts", async () => {

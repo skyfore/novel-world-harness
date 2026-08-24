@@ -13,6 +13,7 @@ import { InitialWorldStore } from "../src/world/initial.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { ChapterSplitPlanStore, evaluateChapterSplitPlan } from "../src/compiler/chapter-split.js";
+import { WorkspaceStore } from "../src/storage/workspace-store.js";
 
 const roots: string[] = [];
 
@@ -27,6 +28,60 @@ async function temporaryRoot(prefix: string): Promise<string> {
 }
 
 describe("versioned prepared novel cache", () => {
+  it("restores accepted model-inferred title metadata across different upload filenames", async () => {
+    const cacheRoot = await temporaryRoot("nwh-prepared-title-cache-");
+    const sourceRoot = await temporaryRoot("nwh-prepared-title-source-");
+    const content = "The Hidden City\n\nHero waits at the opening.\n";
+    const fixture = await createEvidenceFixture(sourceRoot, content, "publisher-upload.txt");
+    await (await WorkspaceStore.create(sourceRoot)).restoreSourceTitleInference(fixture.source.id, {
+      version: 1,
+      sourceId: fixture.source.id,
+      title: "The Hidden City",
+      evidence: fixture.evidence("The Hidden City")[0]!,
+      generatedBy: {
+        worker: "propose_novel_title",
+        provider: "test",
+        model: "semantic-title-model",
+        compilerBatchId: `batch-${fixture.source.id}-00001-title`,
+      },
+      inferredAt: new Date().toISOString(),
+    });
+    const proposals = new CompilerProposalService(sourceRoot);
+    await proposals.submit("entity", {
+      proposalId: "title-cache-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "title-cache-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        evidence: fixture.evidence("Hero waits at the opening."),
+      },
+      generatedBy: { worker: "test" },
+    });
+    const batches = await prepareCompilerBatches(sourceRoot, fixture.source);
+    await new CompilerBatchStore(sourceRoot).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+    await convergeWorldProposals(sourceRoot, fixture.source.id);
+    const published = await new PreparedNovelCache(sourceRoot, cacheRoot).publish(fixture.source);
+    const bundle = JSON.parse(await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8")) as {
+      source: { titleInference?: { title: string } };
+    };
+    expect(bundle.source.titleInference?.title).toBe("The Hidden City");
+
+    const restoredRoot = await temporaryRoot("nwh-prepared-title-restored-");
+    const restoredFixture = await createEvidenceFixture(restoredRoot, content, "opaque-mirror-name.md");
+    expect(restoredFixture.source.title).toBe("opaque-mirror-name.md");
+    await expect(new PreparedNovelCache(restoredRoot, cacheRoot).restore(restoredFixture.source))
+      .resolves.toMatchObject({ status: "restored", bundleHash: published.bundleHash });
+    await expect((await WorkspaceStore.create(restoredRoot)).getSource(restoredFixture.source.id)).resolves.toMatchObject({
+      title: "The Hidden City",
+      titleInference: { title: "The Hidden City", generatedBy: { model: "semantic-title-model" } },
+      sourcePath: "opaque-mirror-name.md",
+    });
+  });
+
   it("restores the validated chapter split plan with its deterministic batch layout", async () => {
     const cacheRoot = await temporaryRoot("nwh-prepared-chapter-split-cache-");
     const sourceRoot = await temporaryRoot("nwh-prepared-chapter-split-source-");

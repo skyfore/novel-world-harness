@@ -1,4 +1,3 @@
-import path from "node:path";
 import { auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
 import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatch } from "../compiler/batches.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
@@ -7,6 +6,7 @@ import { InitialWorldStore, type InitialWorld } from "../world/initial.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import { BranchStore } from "../world/store.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
+import { novelTitleIdStem } from "../storage/novel-title.js";
 
 export type PreparationStage =
   | "needs-source"
@@ -43,11 +43,9 @@ export async function resolvePreparationBranchId(
   if (!ids.includes("main")) return "main";
   if (!options.preferNew && await preparationBranchMatchesSource(workspaceRoot, branches, "main", source.id)) return "main";
 
-  const sourceStem = path.basename(source.sourcePath, path.extname(source.sourcePath))
-    .normalize("NFKD")
-    .toLocaleLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  // Only accepted model inference may influence a generated instance ID. The
+  // ingest label is often just the upload filename and is not novel metadata.
+  const sourceStem = novelTitleIdStem(source.titleInference?.title ?? "");
   const base = `${sourceStem || "novel"}-${source.id.slice(0, 8)}`;
   for (let suffix = 1; ; suffix += 1) {
     const candidate = suffix === 1 ? base : `${base}-${suffix}`;

@@ -3,6 +3,12 @@ import { isDeepStrictEqual } from "node:util";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import {
+  inferredTitleOccursInEvidence,
+  normalizeModelInferredNovelTitle,
+  sourceTitleProposalSchema,
+  type SourceTitleProposal,
+} from "../storage/novel-title.js";
 import { evidenceRefSchema, idSchema, type EvidenceRef } from "../world/model.js";
 import {
   compilerProposalLogicalIdentity,
@@ -24,6 +30,7 @@ import {
   evaluateChapterSplitPlan,
   type ChapterSplitPlan,
 } from "./chapter-split.js";
+import { EvidenceVerifier } from "./evidence.js";
 
 function proposalResult(text: string, details: CompilerProposalRecordedDetails) {
   return { content: [{ type: "text" as const, text }], details };
@@ -44,6 +51,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
 /** Exact model-tool authority owned by the compiler embedding. */
 export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "configure_chapter_split",
+  "propose_novel_title",
   "find_compiler_artifacts",
   "read_compiler_artifact",
   ...SOURCE_EVIDENCE_TOOL_NAMES,
@@ -173,6 +181,10 @@ type CompilerProposalDetails =
   | CompilerBatchBlockedDetails
   | CompilerProposalRecordedDetails;
 
+type NovelTitleProposalDetails =
+  | CompilerBatchBlockedDetails
+  | { proposalId: string; kind: "novel-title"; activeProposalCount: number; toolCallCount: number; remainingToolCalls: number };
+
 type CompilerWithdrawDetails =
   | CompilerBatchBlockedDetails
   | { compilerProposalWithdrawn: true; proposalId: string; reason: string };
@@ -208,6 +220,7 @@ export function createCompilerProposalToolset(
   generatedBy: { provider?: string; model?: string } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
+  const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
   const boundaryCalibrations = new BoundaryCalibrationStore(workspaceRoot);
   const successfulProposalIds = new Set<string>();
   const peekedDirections = new Set<"previous" | "next">();
@@ -218,6 +231,7 @@ export function createCompilerProposalToolset(
   let activeSourceId: string | undefined;
   let activeBoundaryCalibration: BoundaryCalibrationRequest | undefined;
   let pendingChapterSplitPlan: ChapterSplitPlan | undefined;
+  let pendingNovelTitleProposal: SourceTitleProposal | undefined;
   let finished = false;
   let circuitBreak: { reason: string; failureCount: number } | undefined;
   let totalFinishFailures = 0;
@@ -267,6 +281,7 @@ export function createCompilerProposalToolset(
     if (finished) throw new Error("Compiler batch was already finished; no more proposals may be submitted in this turn.");
     if (circuitBreak) throw new Error("Compiler batch was stopped by its compiler circuit breaker; start a new batch turn to retry.");
   };
+  const activeProposalCount = () => successfulProposalIds.size + (pendingNovelTitleProposal ? 1 : 0);
   const isStructureDiscoveryBatch = () => Boolean(
     activeSourceId
     && compilerBatchId === `structure-${activeSourceId}-v${CHAPTER_SPLIT_DISCOVERY_VERSION}`,
@@ -415,6 +430,100 @@ export function createCompilerProposalToolset(
     },
   });
 
+  const novelTitleInputSchema = z.object({
+    proposal_id: idSchema,
+    title: z.string().min(1).max(200),
+    evidence: evidenceRefSchema,
+    reason: z.string().min(1).max(500),
+  }).strict();
+  const { $schema: _titleDialect, ...novelTitleJsonSchema } = z.toJSONSchema(novelTitleInputSchema);
+  const novelTitleParameters = Type.Unsafe<z.infer<typeof novelTitleInputSchema>>(novelTitleJsonSchema as TSchema);
+  const novelTitleTool = defineTool<typeof novelTitleParameters, NovelTitleProposalDetails>({
+    name: "propose_novel_title",
+    label: "Propose novel title",
+    description: "Infer the work's actual title semantically from the opening source evidence. This stages display metadata only; the filename is not evidence of the title, and the title becomes active only through finish_compiler_batch.",
+    promptSnippet: "Propose the actual novel title only when the opening evidence establishes it",
+    promptGuidelines: [
+      "Use semantic judgment over the opening/title-page evidence; never derive the title from sourcePath or a filename.",
+      "Copy one exact supplied whole-segment EvidenceRef containing the selected title text.",
+      "Omit edition, site, file-extension, author, and chapter-label text unless it is genuinely part of the work title.",
+      "Do not call this tool when the work title is ambiguous or the source already has an accepted model-inferred title.",
+    ],
+    executionMode: "sequential",
+    parameters: novelTitleParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (!activeSourceId || !compilerBatchId?.startsWith(`batch-${activeSourceId}-`)) {
+        throw new Error("Novel-title inference is available only in an ordinary source-review batch.");
+      }
+      if (!boundedSliceSegments.some((segment) => segment.ordinal === 0)) {
+        throw new Error("Novel-title inference is restricted to the source-opening evidence slice.");
+      }
+      const evidence = evidenceRefSchema.parse(input.evidence);
+      const evidenceSegment = boundedSliceSegments.find((segment) => isDeepStrictEqual(evidence, {
+        span: {
+          sourceId: segment.sourceId,
+          startByte: segment.startByte,
+          endByte: segment.endByte,
+          startLine: segment.startLine,
+          endLine: segment.endLine,
+          quoteHash: segment.textSha256,
+        },
+        strength: "explicit",
+      } satisfies EvidenceRef));
+      if (!evidenceSegment) {
+        throw new Error("Novel-title evidence must copy one exact whole EvidenceRef from the supplied source-opening batch.");
+      }
+      await assertEvidenceWithinBoundedSlice({ evidence: [evidence] }, undefined);
+      const inspected = await evidenceVerifier.inspect(evidence);
+      if (!inspected.valid || inspected.excerpt === undefined) {
+        throw new Error(`Novel-title evidence failed verification: ${inspected.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
+      }
+      const title = normalizeModelInferredNovelTitle(input.title);
+      if (!inferredTitleOccursInEvidence(title, inspected.excerpt)) {
+        throw new Error("The model-inferred novel title must occur in its verified opening evidence.");
+      }
+      const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
+      if (!source) throw new Error(`Unknown active compiler source: ${activeSourceId}`);
+      if (source.titleInference) throw new Error(`Source ${activeSourceId} already has an accepted model-inferred title '${source.title}'.`);
+      if (!pendingNovelTitleProposal && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
+        throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals.`);
+      }
+      const proposal = sourceTitleProposalSchema.parse({
+        version: 1,
+        proposalId: input.proposal_id,
+        sourceId: activeSourceId,
+        title,
+        evidence,
+        generatedBy: {
+          worker: "propose_novel_title",
+          ...generatedBy,
+          compilerBatchId,
+        },
+        createdAt: new Date().toISOString(),
+      });
+      pendingNovelTitleProposal = await (await WorkspaceStore.create(workspaceRoot))
+        .stageSourceTitleProposal(activeSourceId, proposal);
+      recordProposalProgress();
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Pending novel-title proposal ${proposal.proposalId} recorded as ${promptJson(title)}. It remains inactive until finish_compiler_batch succeeds.`,
+        }],
+        details: {
+          proposalId: proposal.proposalId,
+          kind: "novel-title",
+          activeProposalCount: activeProposalCount(),
+          toolCallCount: totalToolCalls,
+          remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+        },
+      };
+    },
+  });
+
   const peekAdjacentParameters = Type.Object({
     direction: Type.Union([Type.Literal("previous"), Type.Literal("next")]),
     max_chars: Type.Optional(Type.Integer({ minimum: 500, maximum: 4_000 })),
@@ -555,7 +664,7 @@ export function createCompilerProposalToolset(
         }
         await assertEvidenceWithinBoundedSlice(input.payload, input.evidence);
         await assertStableLogicalRevision(service, kind, input.payload, compilerBatchId);
-        if (!successfulProposalIds.has(input.proposal_id) && successfulProposalIds.size >= MAX_ACTIVE_COMPILER_PROPOSALS) {
+        if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
           throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
         }
         const accepted = await service.submit(kind, {
@@ -571,10 +680,10 @@ export function createCompilerProposalToolset(
         successfulProposalIds.add(accepted.proposalId);
         recordProposalProgress();
         return proposalResult(
-          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth. Active proposals: ${successfulProposalIds.size}/${MAX_ACTIVE_COMPILER_PROPOSALS}. General compiler calls remaining: ${Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls)}. When that reaches zero, the only additional permitted call is finish_compiler_batch; any other call stops this attempt.`,
+          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth. Active proposals: ${activeProposalCount()}/${MAX_ACTIVE_COMPILER_PROPOSALS}. General compiler calls remaining: ${Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls)}. When that reaches zero, the only additional permitted call is finish_compiler_batch; any other call stops this attempt.`,
           {
             ...accepted,
-            activeProposalCount: successfulProposalIds.size,
+            activeProposalCount: activeProposalCount(),
             toolCallCount: totalToolCalls,
             remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
           },
@@ -589,11 +698,12 @@ export function createCompilerProposalToolset(
   const withdrawTool = defineTool<typeof withdrawParameters, CompilerWithdrawDetails>({
     name: "withdraw_compiler_proposal",
     label: "Withdraw compiler proposal",
-    description: "Withdraw an invalid proposal successfully submitted in the current compiler batch. The immutable candidate moves to rejected history and is removed from the finish handshake; submit any corrected replacement under a new proposal ID first.",
+    description: "Withdraw an invalid proposal successfully submitted in the current compiler batch and remove it from the finish handshake. For ordinary world artifacts, submit a corrected replacement under a new proposal ID first; novel-title metadata is a singleton and must be withdrawn before its corrected replacement can be staged.",
     promptSnippet: "Withdraw an invalid current-batch proposal before finishing",
     promptGuidelines: [
       "Use this only for a proposal successfully submitted in the current compiler batch.",
       "Explain the concrete defect, and submit an evidence-backed corrected replacement under a new proposal ID when the evidence still supports the artifact.",
+      "For a defective novel-title proposal, withdraw it first and then call propose_novel_title with a new proposal ID; only one title candidate may be staged at a time.",
     ],
     executionMode: "sequential",
     parameters: withdrawParameters,
@@ -602,6 +712,16 @@ export function createCompilerProposalToolset(
       const blocked = beginToolCall("mutation");
       if (blocked) return blocked;
       assertBatchWritable();
+      if (pendingNovelTitleProposal?.proposalId === input.proposal_id) {
+        if (!activeSourceId) throw new Error("Novel-title proposal lost its active source identity.");
+        await (await WorkspaceStore.create(workspaceRoot)).withdrawSourceTitleProposal(activeSourceId, input.proposal_id);
+        pendingNovelTitleProposal = undefined;
+        recordProposalProgress();
+        return {
+          content: [{ type: "text" as const, text: `Novel-title proposal ${input.proposal_id} withdrawn: ${input.reason}` }],
+          details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
+        };
+      }
       if (!successfulProposalIds.has(input.proposal_id)) {
         throw new Error(`Cannot withdraw ${input.proposal_id}: it is not an active successful submission in this compiler batch.`);
       }
@@ -719,8 +839,8 @@ export function createCompilerProposalToolset(
       if (finished) throw new Error("Compiler batch was already finished.");
       const blocked = beginToolCall("finish");
       if (blocked) return blocked;
-      const expected = [...successfulProposalIds].sort();
-      const listed = expected;
+      const listed = [...successfulProposalIds].sort();
+      const expected = [...listed, ...(pendingNovelTitleProposal ? [pendingNovelTitleProposal.proposalId] : [])].sort();
       if (isStructureDiscoveryBatch() && !pendingChapterSplitPlan) {
         return failFinish("Structure discovery requires one successful configure_chapter_split call before finish.");
       }
@@ -754,16 +874,22 @@ export function createCompilerProposalToolset(
         await new SegmentStore(workspaceRoot).write(manifest);
         await new ChapterSplitPlanStore(workspaceRoot).write(pendingChapterSplitPlan);
       }
+      if (pendingNovelTitleProposal) {
+        if (!activeSourceId) return failFinish("Novel-title proposal lost its active source identity.");
+        await (await WorkspaceStore.create(workspaceRoot))
+          .commitSourceTitleProposal(activeSourceId, pendingNovelTitleProposal.proposalId);
+      }
       finished = true;
       return {
         content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}).` }],
-        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: listed, reviewedSegmentIds: reviewedIds },
+        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: expected, reviewedSegmentIds: reviewedIds },
       };
     },
   });
   return {
     tools: [
       configureChapterSplitTool,
+      novelTitleTool,
       ...retrievalTools,
       peekAdjacentTool,
       deferBoundaryTool,
@@ -782,6 +908,7 @@ export function createCompilerProposalToolset(
       activeSourceId = sourceId;
       activeBoundaryCalibration = undefined;
       pendingChapterSplitPlan = undefined;
+      pendingNovelTitleProposal = undefined;
       finished = false;
       circuitBreak = undefined;
       totalFinishFailures = 0;
@@ -815,6 +942,11 @@ export function createCompilerProposalToolset(
         boundedSliceSegments = expectedSegmentIds.map((id) => structuredClone(byId.get(id)!));
       }
       if (compilerBatchId && activeSourceId) {
+        const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
+        const pendingTitle = sourceTitleProposalSchema.safeParse(source?.pendingTitleProposal);
+        if (pendingTitle.success && pendingTitle.data.generatedBy.compilerBatchId === compilerBatchId) {
+          pendingNovelTitleProposal = pendingTitle.data;
+        }
         activeBoundaryCalibration = await boundaryCalibrations.get(activeSourceId, compilerBatchId);
         if (activeBoundaryCalibration) {
           const calibrationSegmentIds = [

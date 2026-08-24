@@ -30,6 +30,7 @@ import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
 import { hasExecutablePossibilityEffect, isMetaKnowledgePredicate } from "./semantics.js";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
 
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
@@ -156,6 +157,13 @@ export async function rejectPendingCompilerBatchProposals(
     await store.transition(summary.id, "pending", "rejected");
     rejected.push(summary.id);
   }
+  const workspace = await WorkspaceStore.create(workspaceRoot);
+  for (const source of await workspace.listSources()) {
+    const titleProposal = source.pendingTitleProposal;
+    if (titleProposal?.generatedBy.compilerBatchId !== compilerBatchId) continue;
+    await workspace.withdrawSourceTitleProposal(source.id, titleProposal.proposalId);
+    rejected.push(titleProposal.proposalId);
+  }
   return rejected;
 }
 
@@ -189,6 +197,12 @@ export async function rejectPendingCompilerSourceProposals(
     ) continue;
     await store.transition(summary.id, "pending", "rejected");
     rejected.push(summary.id);
+  }
+  const workspace = await WorkspaceStore.create(workspaceRoot);
+  const source = await workspace.getSource(sourceId);
+  if (source?.pendingTitleProposal) {
+    await workspace.withdrawSourceTitleProposal(sourceId, source.pendingTitleProposal.proposalId);
+    rejected.push(source.pendingTitleProposal.proposalId);
   }
   return rejected;
 }

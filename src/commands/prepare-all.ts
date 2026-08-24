@@ -129,10 +129,21 @@ export async function prepareAllCommand(
     inspection = await inspectPreparation(root, { sourceId, branchId });
   }
   sourceId = inspection.source!.id;
-  if (!options.branchId) {
-    branchId = await resolvePreparationBranchId(root, inspection.source!);
-    if (branchId !== inspection.branchId) inspection = await inspectPreparation(root, { sourceId, branchId });
-  }
+  let preferNewBranch = false;
+  const refreshDerivedBranchId = async (): Promise<boolean> => {
+    if (options.branchId || !inspection.source) return false;
+    const resolved = await resolvePreparationBranchId(
+      root,
+      inspection.source,
+      undefined,
+      { preferNew: preferNewBranch },
+    );
+    if (resolved === branchId && inspection.branchId === branchId) return false;
+    branchId = resolved;
+    inspection = await inspectPreparation(root, { sourceId, branchId });
+    return true;
+  };
+  await refreshDerivedBranchId();
   const preparedCache = new PreparedNovelCache(root, options.cacheRoot);
   const cachedBeforePreparation = await preparedCache.lookup(inspection.source!);
   if (
@@ -177,11 +188,12 @@ export async function prepareAllCommand(
       onModelToolResult: options.onModelToolResult,
       onModelEvent: options.onModelEvent,
     });
+    inspection = await inspectPreparation(root, { sourceId, branchId });
     if (!options.branchId) {
-      branchId = await resolvePreparationBranchId(root, inspection.source!, undefined, { preferNew: true });
+      preferNewBranch = true;
+      await refreshDerivedBranchId();
       report(`Existing branches remain pinned to their prior revision; the upgraded world will use new branch '${branchId}'.`);
     }
-    inspection = await inspectPreparation(root, { sourceId, branchId });
   }
   if (
     inspection.stage === "repair"
@@ -199,6 +211,7 @@ export async function prepareAllCommand(
     if (restored.status === "restored") {
       report(`Restored active prepared revision ${restored.bundleHash} for ${restored.contentMd5}; model compilation is not required.`);
       inspection = await inspectPreparation(root, { sourceId, branchId });
+      await refreshDerivedBranchId();
     } else if (restored.status === "workspace-not-empty" && restored.reason) {
       report(`Prepared cache was not restored: ${restored.reason}`);
     }
@@ -236,6 +249,7 @@ export async function prepareAllCommand(
   }
 
   inspection = await inspectPreparation(root, { sourceId, branchId });
+  await refreshDerivedBranchId();
   options.signal?.throwIfAborted();
   if (inspection.pending.length) {
     const decision = await ask({

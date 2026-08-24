@@ -8,7 +8,8 @@ import { createCompilerProposalTools, createCompilerProposalToolset } from "../s
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { SegmentStore } from "../src/compiler/segments.js";
 import { ProposalStore } from "../src/world/canonical-model.js";
-import { entitySchema } from "../src/world/model.js";
+import { entitySchema, type EvidenceRef } from "../src/world/model.js";
+import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -35,13 +36,115 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(19);
+    expect(tools).toHaveLength(20);
     for (const tool of tools.filter((candidate) => candidate.name.startsWith("propose_"))) {
       const validator = Compile(tool.parameters);
       expect(tool.executionMode).toBe("sequential");
       expect(validator.Check({ proposal_id: "valid-id", payload: "{}" }), tool.name).toBe(false);
       expect(JSON.stringify(tool.parameters), tool.name).not.toContain('"payload":{}');
     }
+  });
+
+  it("accepts a model-selected title from opening evidence only at the successful finish handshake", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-title-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "《活着》\n作者：余华\n\n第一章\n福贵回到村里。\n",
+      "opaque-upload-name.txt",
+    );
+    const manifest = await new SegmentStore(root).readManifest(fixture.source.id);
+    const opening = manifest!.segments.find((segment) => segment.ordinal === 0)!;
+    const evidence: EvidenceRef = {
+      span: {
+        sourceId: opening.sourceId,
+        startByte: opening.startByte,
+        endByte: opening.endByte,
+        startLine: opening.startLine,
+        endLine: opening.endLine,
+        quoteHash: opening.textSha256,
+      },
+      strength: "explicit",
+    };
+    const batchId = `batch-${fixture.source.id}-00001-title`;
+    const toolset = createCompilerProposalToolset(root, { provider: "test", model: "semantic-title-model" });
+    await toolset.beginBatch([opening.id], batchId, fixture.source.id);
+    const inferTitle = toolset.tools.find((candidate) => candidate.name === "propose_novel_title")!;
+
+    await expect(inferTitle.execute("title", {
+      proposal_id: "novel-title-huozhe",
+      title: "活着",
+      evidence,
+      reason: "The model identifies the bracketed work title and excludes the author line.",
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { proposalId: "novel-title-huozhe", kind: "novel-title" },
+    });
+    await expect(inferTitle.execute("title-idempotent-retry", {
+      proposal_id: "novel-title-huozhe",
+      title: "活着",
+      evidence,
+      reason: "Provider retried the same semantic title candidate.",
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { proposalId: "novel-title-huozhe", activeProposalCount: 1 },
+    });
+    await expect(WorkspaceStore.create(root)
+      .then((store) => store.getSource(fixture.source.id))).resolves.toMatchObject({
+      title: "opaque-upload-name.txt",
+      pendingTitleProposal: { proposalId: "novel-title-huozhe", title: "活着" },
+    });
+
+    // A new toolset simulates provider/session recovery: the pending metadata
+    // candidate is rehydrated and still requires a successful finish.
+    const retry = createCompilerProposalToolset(root, { provider: "test", model: "semantic-title-model" });
+    await retry.beginBatch([opening.id], batchId, fixture.source.id);
+    const finish = retry.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    await expect(finish.execute("finish-title", {
+      outcome: "complete",
+      reviewed_segments: [{
+        segment_id: opening.id,
+        disposition: "proposed",
+        summary: "Inferred the evidence-backed novel title.",
+      }],
+      summary: "Accepted the title metadata after reviewing the opening evidence.",
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true, proposalIds: ["novel-title-huozhe"] },
+    });
+    await expect(WorkspaceStore.create(root)
+      .then((store) => store.getSource(fixture.source.id))).resolves.toMatchObject({
+      title: "活着",
+      titleInference: {
+        title: "活着",
+        generatedBy: { provider: "test", model: "semantic-title-model", compilerBatchId: batchId },
+      },
+    });
+  });
+
+  it("rejects a model-inferred title that is absent from its verified opening evidence", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-title-absent-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "《活着》\n作者：余华\n", "opaque.txt");
+    const manifest = await new SegmentStore(root).readManifest(fixture.source.id);
+    const opening = manifest!.segments[0]!;
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([opening.id], `batch-${fixture.source.id}-00001-title`, fixture.source.id);
+    const inferTitle = toolset.tools.find((candidate) => candidate.name === "propose_novel_title")!;
+
+    await expect(inferTitle.execute("title-absent", {
+      proposal_id: "novel-title-absent",
+      title: "许三观卖血记",
+      evidence: {
+        span: {
+          sourceId: opening.sourceId,
+          startByte: opening.startByte,
+          endByte: opening.endByte,
+          startLine: opening.startLine,
+          endLine: opening.endLine,
+          quoteHash: opening.textSha256,
+        },
+        strength: "explicit",
+      },
+      reason: "Unsupported guess.",
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("must occur");
   });
 
   it("normalizes provider-stringified JSON before strict proposal validation", async () => {

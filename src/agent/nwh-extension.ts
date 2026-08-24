@@ -31,7 +31,7 @@ import { rejectPendingCompilerBatchProposals } from "../compiler/proposals.js";
 import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
 import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prepare.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
-import { WorkspaceStore } from "../storage/workspace-store.js";
+import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { PlaySessionStore } from "../world/play-session.js";
 import { modelPlayConversation, PlayConversationStore } from "../world/play-conversation.js";
 import { workspaceStateDir } from "./runtime-paths.js";
@@ -132,6 +132,8 @@ export function compilerToolNamesForScope(
       : name !== "configure_chapter_split")
     .filter((name) => scope === "reconciliation" || !SOURCE_EVIDENCE_TOOL_NAMES.includes(name as typeof SOURCE_EVIDENCE_TOOL_NAMES[number]))
     .filter((name) => scope === "source" || !BOUNDARY_CALIBRATION_TOOL_NAMES.includes(name as typeof BOUNDARY_CALIBRATION_TOOL_NAMES[number]))
+    .filter((name) => name !== "propose_novel_title"
+      || (scope === "source" && sourcePurpose === "source-review"))
     .filter((name) => {
       if (scope !== "source") return true;
       return sourcePurpose === "boundary-calibration"
@@ -217,6 +219,9 @@ const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence an
 type TuiPrepareAllState = {
   sourceId: string;
   branchId: string;
+  branchIdExplicit: boolean;
+  preferNewBranch: boolean;
+  branchTitleKey: string | null;
   compileAllApproved: boolean;
   initialWorldRequestRunning: boolean;
   initialWorldAttempted: boolean;
@@ -229,6 +234,10 @@ type TuiPrepareAllState = {
 };
 
 const MAX_PREPARE_ALL_RECOVERY_RETRIES = 1;
+
+function generatedNovelLabel(source: SourceDocument): string {
+  return source.titleInference?.title ?? `Novel ${source.id.slice(0, 8)}`;
+}
 
 type PresentedPlayerChoice = PlayerSceneChoice & { affordanceId?: string };
 const PLAYER_CHOICE_CONTRACT_VERSION = 2;
@@ -1392,7 +1401,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       await resetCompilerBatch(turn.batch.segmentIds, turn.batch.id, turn.source.id);
       pendingTurn = turn;
       pendingTurnInitiatedByUserInput = initiatedByUserInput;
-      setContextSessionName(`${turn.source.title} · world compilation`);
+      setContextSessionName(`${generatedNovelLabel(turn.source)} · world compilation`);
     };
 
     const activateCompilerTools = (
@@ -1431,8 +1440,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
 
     const compilerPromptForTurn = (turn: SourceLoopTurn, retryAttempt = 0) => [
       turn.batch.purpose === "structure-discovery"
-        ? `Begin preliminary chapter-structure discovery ${turn.completedBatches + 1}/${turn.totalBatches} for source path ${promptJson(turn.source.sourcePath)}. Infer only a safe declarative split rule from the supplied structural sample.`
-        : `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for source path ${promptJson(turn.source.sourcePath)}. Analyze the supplied evidence now and record typed pending proposals.`,
+        ? `Begin preliminary chapter-structure discovery ${turn.completedBatches + 1}/${turn.totalBatches} for immutable source ${turn.source.id}. The upload filename is intentionally withheld because it is not novel metadata. Infer only a safe declarative split rule from the supplied structural sample.`
+        : `Begin novel-world compiler batch ${turn.completedBatches + 1}/${turn.totalBatches} for immutable source ${turn.source.id}. The upload filename is intentionally withheld because it is not novel metadata. Analyze the supplied evidence now and record typed pending proposals.`,
       ...(retryAttempt > 0 ? [
         `This is batch-recovery attempt ${retryAttempt}/${MAX_PREPARE_ALL_RECOVERY_RETRIES}. Use neutral, concise literary-analysis language; do not reproduce or embellish narrative passages in prose. Prefer typed tool calls and short clinical summaries. Recover active current-batch proposals instead of duplicating them.`,
       ] : []),
@@ -1527,10 +1536,29 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (!state) return;
       try {
       prepareAllHostActivity?.update("Checking deterministic preparation state");
-      const inspection = await inspectPreparation(workspace.root, {
+      let inspection = await inspectPreparation(workspace.root, {
         sourceId: state.sourceId,
         branchId: state.branchId,
       });
+      const branchTitleKey = inspection.source?.titleInference?.title ?? null;
+      if (!state.branchIdExplicit && inspection.source
+        && (state.preferNewBranch || state.branchTitleKey !== branchTitleKey)) {
+        const resolvedBranchId = await resolvePreparationBranchId(
+          workspace.root,
+          inspection.source,
+          undefined,
+          { preferNew: state.preferNewBranch },
+        );
+        state.preferNewBranch = false;
+        state.branchTitleKey = branchTitleKey;
+        if (resolvedBranchId !== state.branchId) {
+          state.branchId = resolvedBranchId;
+          inspection = await inspectPreparation(workspace.root, {
+            sourceId: state.sourceId,
+            branchId: state.branchId,
+          });
+        }
+      }
       if (inspection.stage === "compile") {
         prepareAllHostActivity?.update(`Preparing evidence batch ${inspection.completedBatches + 1}/${inspection.totalBatches}`);
         if (!state.compileAllApproved) {
@@ -2124,6 +2152,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       pendingTurn = undefined;
       pendingTurnInitiatedByUserInput = false;
       await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id);
+      const refreshedSource = await (await WorkspaceStore.create(workspace.root)).getSource(completedTurn.source.id);
+      if (refreshedSource?.titleInference) {
+        setContextSessionName(
+          `${generatedNovelLabel(refreshedSource)} · ${prepareAllState ? "full preparation" : "world compilation"}`,
+        );
+      }
       ctx.ui.notify(
         completedTurn.batch.purpose === "structure-discovery"
           ? `Chapter split plan checkpointed for ${completedTurn.source.title}; evidence batches will be regenerated on the next compiler turn.`
@@ -2762,6 +2796,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         try {
         const [requestedSourceId, requestedBranchId] = splitCommandArguments(args);
         let branchId = requestedBranchId || "main";
+        let preferNewBranch = false;
         let inspection = await inspectPreparation(workspace.root, {
           sourceId: requestedSourceId || activeSourceId,
           branchId,
@@ -2813,7 +2848,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }
         activeSourceId = sourceId;
         const source = inspection.source ?? await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);
-        if (source) setContextSessionName(`${source.title} · full preparation`);
+        if (source) setContextSessionName(`${generatedNovelLabel(source)} · full preparation`);
         const sourceChanged = inspection.audit?.sources.changedSinceIngest.includes(sourceId) ?? false;
         // A changed source cannot be identified as the immutable cached input.
         // Preserve that audit diagnosis instead of replacing it with a hash
@@ -2858,7 +2893,10 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             await task.completion;
             if (task.snapshot.status !== "completed") return;
             if (!requestedBranchId) {
-              branchId = await resolvePreparationBranchId(workspace.root, source, undefined, { preferNew: true });
+              preferNewBranch = true;
+              const reparsedSource = await (await WorkspaceStore.create(workspace.root)).getSource(sourceId);
+              if (!reparsedSource) throw new Error(`Unknown source '${sourceId}' after reparse.`);
+              branchId = await resolvePreparationBranchId(workspace.root, reparsedSource, undefined, { preferNew: true });
               ctx.ui.notify(`Existing branches remain pinned to their prior revision; the upgraded world will use new branch '${branchId}'.`, "info");
             }
             inspection = await inspectPreparation(workspace.root, { sourceId, branchId });
@@ -2877,6 +2915,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         prepareAllState = {
           sourceId,
           branchId,
+          branchIdExplicit: Boolean(requestedBranchId),
+          preferNewBranch,
+          branchTitleKey: inspection.source?.titleInference?.title ?? null,
           compileAllApproved: false,
           initialWorldRequestRunning: false,
           initialWorldAttempted: false,
@@ -3011,7 +3052,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activeSourceId = sourceId;
-        setContextSessionName(`${source.title} · reparse chapters ${selectedChapters.join(",")}`);
+        setContextSessionName(`${generatedNovelLabel(source)} · reparse chapters ${selectedChapters.join(",")}`);
         ctx.ui.notify(`Starting reparse for ${source.title}: chapter(s) ${selectedChapters.join(", ")}.`, "info");
         await startReparseTask(ctx, {
           sourceId,

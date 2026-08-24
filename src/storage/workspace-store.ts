@@ -1,8 +1,15 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { ensureWorkspaceState, workspaceStateDir } from "../agent/runtime-paths.js";
 import type { HarnessConfig } from "../config/schema.js";
+import {
+  sourceTitleInferenceSchema,
+  sourceTitleProposalSchema,
+  type SourceTitleInference,
+  type SourceTitleProposal,
+} from "./novel-title.js";
 import { SourceMaterialStore, sourceMaterialIdentity } from "./source-material-store.js";
 
 const STATE_VERSION = 1;
@@ -25,6 +32,10 @@ export type SourceDocument = {
   contentMd5?: string;
   contentSha256: string;
   bytes: number;
+  /** Accepted compiler-model inference; absent means title is only an ingest label. */
+  titleInference?: SourceTitleInference;
+  /** Retry-safe candidate that becomes active only through finish_compiler_batch. */
+  pendingTitleProposal?: SourceTitleProposal;
   registeredAt: string;
   updatedAt: string;
 };
@@ -177,20 +188,101 @@ export class WorkspaceStore {
     }
   }
 
-  private async registerSourceBytes(title: string, content: Uint8Array, sourcePath: string): Promise<SourceDocument> {
-    const identity = await new SourceMaterialStore().put(content, title);
+  async stageSourceTitleProposal(sourceId: string, proposal: SourceTitleProposal): Promise<SourceTitleProposal> {
+    const parsed = sourceTitleProposalSchema.parse(proposal);
+    if (parsed.sourceId !== sourceId || parsed.evidence.span.sourceId !== sourceId) {
+      throw new Error("A novel-title proposal and its evidence must belong to the active source.");
+    }
+    const source = await this.getSource(sourceId);
+    if (!source) throw new Error(`Unknown source id: ${sourceId}`);
+    if (source.titleInference) throw new Error(`Source ${sourceId} already has an accepted model-inferred title.`);
+    if (source.pendingTitleProposal) {
+      const { createdAt: _existingCreatedAt, ...existingIdentity } = source.pendingTitleProposal;
+      const { createdAt: _candidateCreatedAt, ...candidateIdentity } = parsed;
+      if (isDeepStrictEqual(existingIdentity, candidateIdentity)) return source.pendingTitleProposal;
+      throw new Error(`Source ${sourceId} already has pending novel-title proposal ${source.pendingTitleProposal.proposalId}.`);
+    }
+    await atomicJson(path.join(this.sourcesDir, stateFileName(sourceId)), {
+      ...source,
+      pendingTitleProposal: parsed,
+      updatedAt: new Date().toISOString(),
+    });
+    return parsed;
+  }
+
+  async withdrawSourceTitleProposal(sourceId: string, proposalId: string): Promise<void> {
+    const source = await this.getSource(sourceId);
+    if (!source?.pendingTitleProposal || source.pendingTitleProposal.proposalId !== proposalId) {
+      throw new Error(`Novel-title proposal ${proposalId} is not pending for source ${sourceId}.`);
+    }
+    const { pendingTitleProposal: _pending, ...retained } = source;
+    await atomicJson(path.join(this.sourcesDir, stateFileName(sourceId)), {
+      ...retained,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  async commitSourceTitleProposal(sourceId: string, proposalId: string): Promise<SourceDocument> {
+    const source = await this.getSource(sourceId);
+    if (!source?.pendingTitleProposal || source.pendingTitleProposal.proposalId !== proposalId) {
+      throw new Error(`Novel-title proposal ${proposalId} is not pending for source ${sourceId}.`);
+    }
+    const proposal = sourceTitleProposalSchema.parse(source.pendingTitleProposal);
+    const inference = sourceTitleInferenceSchema.parse({
+      version: 1,
+      sourceId,
+      title: proposal.title,
+      evidence: proposal.evidence,
+      generatedBy: proposal.generatedBy,
+      inferredAt: new Date().toISOString(),
+    });
+    const { pendingTitleProposal: _pending, ...retained } = source;
+    const next: SourceDocument = {
+      ...retained,
+      title: inference.title,
+      titleInference: inference,
+      updatedAt: inference.inferredAt,
+    };
+    await atomicJson(path.join(this.sourcesDir, stateFileName(sourceId)), next);
+    return next;
+  }
+
+  async restoreSourceTitleInference(sourceId: string, value: SourceTitleInference): Promise<SourceDocument> {
+    const inference = sourceTitleInferenceSchema.parse(value);
+    if (inference.sourceId !== sourceId || inference.evidence.span.sourceId !== sourceId) {
+      throw new Error("Restored novel-title inference does not belong to its source.");
+    }
+    const source = await this.getSource(sourceId);
+    if (!source) throw new Error(`Unknown source id: ${sourceId}`);
+    const { pendingTitleProposal: _pending, ...retained } = source;
+    const next: SourceDocument = {
+      ...retained,
+      title: inference.title,
+      titleInference: inference,
+      updatedAt: new Date().toISOString(),
+    };
+    await atomicJson(path.join(this.sourcesDir, stateFileName(sourceId)), next);
+    return next;
+  }
+
+  private async registerSourceBytes(fallbackTitle: string, content: Uint8Array, sourcePath: string): Promise<SourceDocument> {
+    const identity = await new SourceMaterialStore().put(content, fallbackTitle);
     const id = identity.contentSha256.slice(0, 20);
     const filePath = path.join(this.sourcesDir, stateFileName(id));
     const existing = await readJson<SourceDocument>(filePath);
+    const titleInference = sourceTitleInferenceSchema.safeParse(existing?.titleInference);
+    const pendingTitleProposal = sourceTitleProposalSchema.safeParse(existing?.pendingTitleProposal);
     const now = new Date().toISOString();
     const source: SourceDocument = {
       version: STATE_VERSION,
       id,
-      title,
+      title: titleInference.success ? titleInference.data.title : fallbackTitle,
       sourcePath,
       contentMd5: identity.contentMd5,
       contentSha256: identity.contentSha256,
       bytes: identity.bytes,
+      ...(titleInference.success ? { titleInference: titleInference.data } : {}),
+      ...(pendingTitleProposal.success ? { pendingTitleProposal: pendingTitleProposal.data } : {}),
       registeredAt: existing?.registeredAt ?? now,
       updatedAt: now,
     };

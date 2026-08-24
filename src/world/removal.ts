@@ -150,7 +150,12 @@ export async function removeNovelAnalysis(
   await batchStore.reset(sourceId);
   await boundaryStore.reset(sourceId);
 
-  const proposals = await new ProposalStore(root).removeForSource(sourceId);
+  let proposals = await new ProposalStore(root).removeForSource(sourceId);
+  const currentSource = await workspace.getSource(sourceId);
+  if (currentSource?.pendingTitleProposal) {
+    await workspace.withdrawSourceTitleProposal(sourceId, currentSource.pendingTitleProposal.proposalId);
+    proposals += 1;
+  }
   const preparedCache = await new PreparedNovelCache(root, options.cacheRoot).remove(source);
 
   return {

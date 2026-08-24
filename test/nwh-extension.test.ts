@@ -302,6 +302,7 @@ describe("NWH TUI extension", () => {
     expect(source).not.toContain("find_source_evidence");
     expect(source).not.toContain("read_source_evidence");
     expect(source).not.toContain("propose_initial_world");
+    expect(source).toContain("propose_novel_title");
     expect(source).toContain("peek_adjacent_evidence");
     expect(source).toContain("defer_boundary_artifact");
     expect(source).not.toContain("replace_boundary_proposal");
@@ -310,6 +311,7 @@ describe("NWH TUI extension", () => {
     expect(boundary).not.toContain("peek_adjacent_evidence");
     expect(boundary).not.toContain("defer_boundary_artifact");
     expect(boundary).toContain("replace_boundary_proposal");
+    expect(boundary).not.toContain("propose_novel_title");
 
     const structure = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "source", "structure-discovery");
     expect(structure).toEqual(["configure_chapter_split", "finish_compiler_batch"]);
@@ -319,12 +321,14 @@ describe("NWH TUI extension", () => {
     expect(opening).not.toContain("find_source_evidence");
     expect(opening).not.toContain("propose_canonical_event");
     expect(opening).not.toContain("peek_adjacent_evidence");
+    expect(opening).not.toContain("propose_novel_title");
 
     const reconciliation = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "reconciliation");
     expect(reconciliation).toContain("find_source_evidence");
     expect(reconciliation).toContain("read_source_evidence");
     expect(reconciliation).not.toContain("propose_state_delta");
     expect(reconciliation).not.toContain("peek_adjacent_evidence");
+    expect(reconciliation).not.toContain("propose_novel_title");
   });
   it("registers local commands and leaves assistant/thinking rendering to Pi", async () => {
     const { commands, sentUserMessages, markdownTransformers, messageRenderers } = await fixture();
@@ -2689,7 +2693,7 @@ describe("NWH TUI extension", () => {
 
     await commands.get("prepare-all")?.handler(second.source.id, preparationContext(notifications, questions));
 
-    const expectedBranchId = `second-novel-${second.source.id.slice(0, 8)}`;
+    const expectedBranchId = `novel-${second.source.id.slice(0, 8)}`;
     expect(questions).toEqual(["Accept validated proposals?", "Create playable branch?"]);
     expect(notifications).toContainEqual(expect.stringContaining(`using independent branch '${expectedBranchId}'`));
     await expect(new BranchStore(root).read(expectedBranchId)).resolves.toMatchObject({

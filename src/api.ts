@@ -13,6 +13,7 @@ export { evaluateCompilerAgainstGold, compilerGoldSchema, type CompilerEvaluatio
 export { inspectPreparation, type PreparationInspection, type PreparationStage } from "./workflow/prepare.js";
 export { ingestWorkspaceContent, ingestWorkspaceSource } from "./commands/ingest.js";
 export { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore, type SourceMaterialIdentity } from "./storage/source-material-store.js";
+export { sourceTitleInferenceSchema, sourceTitleProposalSchema, type SourceTitleInference, type SourceTitleProposal } from "./storage/novel-title.js";
 export { WorkspaceStore, type SourceDocument, type StoredProject } from "./storage/workspace-store.js";
 
 export { ActorModelStore, characterDevelopmentPhaseSchema, deterministicActorProposalSource, evaluateCharacterGoal, resolveCharacterModel, type CharacterDevelopmentPhase, type CharacterGoal, type CharacterModel, type EffectiveCharacterModel } from "./world/actors.js";

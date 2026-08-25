@@ -17,6 +17,7 @@ import { createEvidenceFixture } from "./helpers/evidence.js";
 import { SourceStructureStore } from "../src/compiler/structure.js";
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 import { characterModelSchema } from "../src/world/actors.js";
+import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
 
 const roots: string[] = [];
 
@@ -185,12 +186,13 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(38);
+    expect(tools).toHaveLength(39);
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "propose_proposition",
       "propose_attribution",
       "propose_event_participation",
       "propose_event_relation",
+      "propose_spatial_relation",
     ]));
     for (const tool of tools.filter((candidate) => candidate.name.startsWith("propose_"))) {
       const validator = Compile(tool.parameters);
@@ -472,6 +474,71 @@ describe("compiler proposal tools", () => {
       counterEvidence: [expect.objectContaining({ strength: "strong-inference" })],
     });
     expect(pending.evidenceAssertions).toHaveLength(2);
+  });
+
+  it("binds a spatial route to exact host-resolved support instead of a coarse segment", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-spatial-evidence-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "A narrow road led from the village to the harbor, two hours on foot.\n",
+    );
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-spatial`, fixture.source.id);
+    const spatial = toolset.tools.find((candidate) => candidate.name === "propose_spatial_relation")!;
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "village",
+      kind: "location",
+      canonicalName: "village",
+      aliases: [],
+      evidence: fixture.evidence("village"),
+    });
+    await canon.putEntity({
+      id: "harbor",
+      kind: "location",
+      canonicalName: "harbor",
+      aliases: [],
+      evidence: fixture.evidence("harbor"),
+    });
+
+    await spatial.execute("spatial-evidence", {
+      proposal_id: "spatial-village-harbor",
+      payload: {
+        ontologyVersion: "spatial-v1",
+        id: "village-harbor-road",
+        kind: "route",
+        fromLocationId: "village",
+        toLocationId: "harbor",
+        direction: "two-way",
+        modes: ["foot"],
+        duration: { minimum: 2, typical: 2, maximum: 2, unit: "hour" },
+        basis: "explicit",
+        visibility: "public",
+        status: "supported",
+        confidence: 1,
+      },
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "road led from the village to the harbor, two hours on foot",
+        target_path: "/kind",
+        relation: "supports",
+        strength: "explicit",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const pending = await new ProposalStore(root).read("pending", "spatial-village-harbor", spatialRelationSchema);
+    expect(pending.payload.evidence).toHaveLength(1);
+    expect(pending.payload.evidence[0]?.span.startByte).toBeGreaterThan(0);
+    expect(pending.evidenceAssertions).toHaveLength(1);
+    expect(pending.payload.evidence[0]?.span.quoteHash).toBe(pending.evidenceAssertions[0]?.anchors[0]?.exactHash);
+    expect((await new CompilerCommitService(root).accept("spatial-relation", "spatial-village-harbor")).accepted).toBe(true);
+    await expect(canon.getSpatialRelation("village-harbor-road")).resolves.toMatchObject({
+      kind: "route",
+      fromLocationId: "village",
+      toLocationId: "harbor",
+    });
   });
 
   it("accepts a model-selected title from opening evidence only at the successful finish handshake", async () => {

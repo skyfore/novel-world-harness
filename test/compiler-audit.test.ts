@@ -8,9 +8,12 @@ import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import { resolveTextAnchor } from "../src/compiler/text-anchors.js";
 import { ensureSourceStructure } from "../src/compiler/structure.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
+import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { ActorModelStore } from "../src/world/actors.js";
+import { contentHash } from "../src/world/canonical.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -107,6 +110,81 @@ describe("compiler audit", () => {
       exactBindingRatio: 1,
     });
     expect(report.readiness.evidence).toBe("ready");
+  });
+
+  it("audits exact-evidence-backed spatial topology and location coverage", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-spatial-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "A narrow road led from the village to the harbor, two hours on foot.\n",
+    );
+    const segment = (await new SegmentStore(root).list(fixture.source.id))[0]!;
+    const anchor = await resolveTextAnchor(root, segment, {
+      segment_id: segment.id,
+      exact: "road led from the village to the harbor, two hours on foot",
+      target_path: "/kind",
+      relation: "supports",
+      strength: "explicit",
+    });
+    const evidence = [{
+      span: {
+        sourceId: anchor.sourceId,
+        startByte: anchor.startByte,
+        endByte: anchor.endByte,
+        startLine: anchor.startLine,
+        endLine: anchor.endLine,
+        quoteHash: anchor.exactHash,
+      },
+      strength: "explicit" as const,
+    }];
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "village", kind: "location", canonicalName: "village", aliases: [], evidence: fixture.evidence("village") });
+    await canon.putEntity({ id: "harbor", kind: "location", canonicalName: "harbor", aliases: [], evidence: fixture.evidence("harbor") });
+    const relation = spatialRelationSchema.parse({
+      ontologyVersion: "spatial-v1",
+      id: "village-harbor-road",
+      kind: "route",
+      fromLocationId: "village",
+      toLocationId: "harbor",
+      direction: "two-way",
+      modes: ["foot"],
+      duration: { minimum: 2, unit: "hour" },
+      basis: "explicit",
+      visibility: "public",
+      status: "supported",
+      confidence: 1,
+      evidence,
+    });
+    await canon.putSpatialRelation(relation);
+    await new EvidenceAssertionStore(root).replaceForArtifact(
+      "spatial-relation",
+      relation.id,
+      contentHash(relation),
+      [{
+        version: 1,
+        id: "spatial-road-support",
+        target: { artifactKind: "spatial-relation", artifactId: relation.id, jsonPointer: "/kind" },
+        anchors: [anchor],
+        relation: "supports",
+        strength: "explicit",
+        derivation: { runId: "audit-spatial", worker: "test", ontologyVersion: "evidence-v1" },
+      }],
+    );
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.spatialSemantics).toMatchObject({
+      ontologyVersion: "spatial-v1",
+      relations: 1,
+      routes: 1,
+      timedRoutes: 1,
+      locationsInTopology: 2,
+      referenceValidationIssues: 0,
+      errors: [],
+    });
+    expect(report.canonical.spatialRelations).toBe(1);
+    expect(report.coverage.locationsWithSpatialTopology).toBe(1);
+    expect(report.evidence.errors).not.toContainEqual(expect.objectContaining({ artifact: "spatial-relation:village-harbor-road" }));
   });
 
   it("accounts for proposition attribution and semantic knowledge provenance", async () => {

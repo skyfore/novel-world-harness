@@ -12,6 +12,7 @@ import { CanonicalModelStore } from "../world/canonical-model.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
+import { spatialRelationEvidence } from "../world/spatial-ontology.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { promptJson } from "../util/prompt-data.js";
 import { compileSourceCommand } from "./compile-source.js";
@@ -288,14 +289,15 @@ async function invalidatePreparationArtifacts(
   const actors = new ActorModelStore(root);
   const possibilities = new PossibilityTemplateStore(root);
   const initial = new InitialWorldStore(root);
-  const [entities, claims, events, rules, goals, models, templates, opening] = await Promise.all([
-    canon.listEntities(), canon.listClaims(), canon.listEvents(), canon.listRules(),
+  const [entities, claims, events, spatialRelations, rules, goals, models, templates, opening] = await Promise.all([
+    canon.listEntities(), canon.listClaims(), canon.listEvents(), canon.listSpatialRelations(), canon.listRules(),
     actors.listGoals(), actors.listModels(), possibilities.list(), initial.get(),
   ]);
   let count = 0;
   for (const item of entities) if (shouldInvalidate(item)) { await canon.removeCurrent("entities", item.id); count += 1; }
   for (const item of claims) if (shouldInvalidate(item)) { await canon.removeCurrent("claims", item.id); count += 1; }
   for (const item of events) if (shouldInvalidate(item)) { await canon.removeCurrent("events", item.id); count += 1; }
+  for (const item of spatialRelations) if (shouldInvalidate({ evidence: spatialRelationEvidence(item) })) { await canon.removeCurrent("spatial-relations", item.id); count += 1; }
   for (const item of rules) if (shouldInvalidate(item)) { await canon.removeCurrent("rules", item.id); count += 1; }
   for (const item of goals) if (shouldInvalidate(item)) { await actors.removeGoal(item.id); count += 1; }
   for (const item of models) if (shouldInvalidate(item)) { await actors.removeModel(item.actorId); count += 1; }

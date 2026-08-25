@@ -37,6 +37,12 @@ import {
   validateRelationshipOntologyEvidenceAssertions,
   validateRelationshipOntologyReferences,
 } from "../world/relationship-ontology.js";
+import {
+  spatialRelationSchema,
+  validateSpatialEvidenceAssertions,
+  validateSpatialRelationCatalog,
+  type SpatialRelation,
+} from "../world/spatial-ontology.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { isMetaKnowledgePredicate } from "./semantics.js";
@@ -55,7 +61,7 @@ import {
   validateCommittedKnowledgeAcquisitionTrace,
 } from "./attribution-trace.js";
 
-export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
+export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type CompilerValidationCatalog = {
   entities: Map<string, Entity>;
@@ -65,6 +71,7 @@ export type CompilerValidationCatalog = {
   events: Map<string, CanonicalEvent>;
   eventParticipations: Map<string, EventParticipation>;
   eventRelations: Map<string, EventRelation>;
+  spatialRelations: Map<string, SpatialRelation>;
   rules: Map<string, WorldRule>;
   goals: Map<string, CharacterGoal>;
 };
@@ -94,7 +101,7 @@ export class CompilerValidator {
   }
 
   async loadCatalog(): Promise<CompilerValidationCatalog> {
-    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, eventRelationList, ruleList, goalList] = await Promise.all([
+    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, eventRelationList, spatialRelationList, ruleList, goalList] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listPropositions(),
       this.canon.listAttributions(),
@@ -102,6 +109,7 @@ export class CompilerValidator {
       this.canon.listEvents(),
       this.canon.listEventParticipations(),
       this.canon.listEventRelations(),
+      this.canon.listSpatialRelations(),
       this.canon.listRules(),
       this.actors?.listGoals() ?? [],
     ]);
@@ -113,13 +121,14 @@ export class CompilerValidator {
       events: new Map(eventList.map((event) => [event.id, event])),
       eventParticipations: new Map(eventParticipationList.map((item) => [item.id, item])),
       eventRelations: new Map(eventRelationList.map((item) => [item.id, item])),
+      spatialRelations: new Map(spatialRelationList.map((item) => [item.id, item])),
       rules: new Map(ruleList.map((rule) => [rule.id, rule])),
       goals: new Map(goalList.map((goal) => [goal.id, goal])),
     };
   }
 
   validateWithCatalog(kind: CanonicalProposalKind, payload: unknown, catalog: CompilerValidationCatalog): CompilerValidation {
-    const { entities, propositions, attributions, claims, events, eventParticipations, eventRelations, rules, goals } = catalog;
+    const { entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, rules, goals } = catalog;
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
@@ -137,6 +146,19 @@ export class CompilerValidator {
       errors.push(...validateEventRelationCatalog({
         events,
         relations: prospectiveRelations.values(),
+      }));
+    }
+    if (kind === "spatial-relation") {
+      const relation = spatialRelationSchema.parse(payload);
+      relation.requires.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      relation.blockedWhen.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      const prospectiveRelations = new Map(spatialRelations);
+      prospectiveRelations.set(relation.id, relation);
+      errors.push(...validateSpatialRelationCatalog(prospectiveRelations.values(), {
+        entities,
+        events,
+        claims: new Set(claims.keys()),
+        rules: new Set(rules.keys()),
       }));
     }
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
@@ -834,6 +856,9 @@ export class CompilerCommitService {
     const relationCandidates = eligible.filter((item) => item.kind === "event-relation");
     for (const candidate of relationCandidates) addToCatalog(catalog, candidate.kind, candidate.payload);
     for (const candidate of relationCandidates) await processCandidate(candidate);
+    const spatialCandidates = eligible.filter((item) => item.kind === "spatial-relation");
+    for (const candidate of spatialCandidates) addToCatalog(catalog, candidate.kind, candidate.payload);
+    for (const candidate of spatialCandidates) await processCandidate(candidate);
     for (const kind of ["initial-world", "character-goal", "character-model"] as const) {
       for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
     }
@@ -864,6 +889,9 @@ export class CompilerCommitService {
           ...validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
           ...validateRelationshipOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
         ]
+      : [];
+    const spatialEvidenceIssues = kind === "spatial-relation"
+      ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)
       : [];
     const exactInspection = await this.evidence.inspectAssertions(evidenceAssertions);
     const legacySourceIds = evidenceSourceIds([...payloadEvidence, ...envelopeEvidence]);
@@ -911,6 +939,7 @@ export class CompilerCommitService {
       ...groundingIssues,
       ...targetIssues,
       ...characterEvidenceIssues,
+      ...spatialEvidenceIssues,
       ...exactInspection.issues,
       ...mixedSourceIssues,
       ...resolutionTraceIssues,
@@ -930,6 +959,7 @@ export class CompilerCommitService {
     else if (kind === "canonical-event") await this.canon.putEvent(canonicalEventSchema.parse(payload));
     else if (kind === "event-participation") await this.canon.putEventParticipation(eventParticipationSchema.parse(payload));
     else if (kind === "event-relation") await this.canon.putEventRelation(eventRelationSchema.parse(payload));
+    else if (kind === "spatial-relation") await this.canon.putSpatialRelation(spatialRelationSchema.parse(payload));
     else if (kind === "world-rule") await this.canon.putRule(worldRuleSchema.parse(payload));
     else if (kind === "initial-world") await this.initialWorld.put(initialWorldSchema.parse(payload));
     else if (kind === "character-goal") await this.actorModels.putGoal(characterGoalSchema.parse(payload));
@@ -1052,12 +1082,13 @@ function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposa
   if (kind === "canonical-event") { const value = canonicalEventSchema.parse(payload); catalog.events.set(value.id, value); }
   if (kind === "event-participation") { const value = eventParticipationSchema.parse(payload); catalog.eventParticipations.set(value.id, value); }
   if (kind === "event-relation") { const value = eventRelationSchema.parse(payload); catalog.eventRelations.set(value.id, value); }
+  if (kind === "spatial-relation") { const value = spatialRelationSchema.parse(payload); catalog.spatialRelations.set(value.id, value); }
   if (kind === "world-rule") { const value = worldRuleSchema.parse(payload); catalog.rules.set(value.id, value); }
   if (kind === "character-goal") { const value = characterGoalSchema.parse(payload); catalog.goals.set(value.id, value); }
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
-  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
 }
 function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "entity") return entitySchema;
@@ -1067,6 +1098,7 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "canonical-event") return canonicalEventSchema;
   if (kind === "event-participation") return eventParticipationSchema;
   if (kind === "event-relation") return eventRelationSchema;
+  if (kind === "spatial-relation") return spatialRelationSchema;
   if (kind === "initial-world") return initialWorldSchema;
   if (kind === "character-goal") return characterGoalSchema;
   if (kind === "character-model") return characterModelSchema;

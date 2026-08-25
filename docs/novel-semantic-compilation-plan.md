@@ -1,6 +1,6 @@
 # Technical Plan: Evidence-Grounded Full-Novel Semantic Compilation
 
-- **Status:** In progress — M0 through M4, M5a, and M5b-1 implemented; M5b-2, M5c through M7 remain
+- **Status:** In progress — M0 through M4, M5a, M5b-1, and M5b-2a implemented; M5b-2b and M5c through M7 remain
 - **Date:** 2026-08-25
 - **Scope:** Novel ingest, structural segmentation, semantic annotation, identity resolution, canonical compilation, audit, reconciliation, and reparse
 - **Preserves:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0002](adr/0002-user-level-content-addressed-storage.md), and [ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
@@ -371,9 +371,103 @@ actor-safe redaction, exact selector injection, and audit coverage
 [proposal-tools.test.ts](../test/proposal-tools.test.ts#L420),
 [compiler-audit.test.ts](../test/compiler-audit.test.ts#L263)).
 
-Remaining M5 work is M5b-2 spatial/world-rule domains and M5c deterministic
-salience. Goal hierarchy/conflict/commitment should be expanded only from
-measured failures.
+#### 3.7.2 M5b-2a finding: place identity, topological proximity, and passage are different facts
+
+Before M5b-2a, places already had stable `Entity` identity and dynamic
+location/open/controller facts already lived in `WorldState`. The execution
+layer, however, compared exact `character.location` IDs: it had no containment
+hierarchy, could not distinguish adjacency from a traversable route, and could
+not validate direction, travel mode, or minimum elapsed time. That produced two
+opposite errors: a model could promote map adjacency into passage, while the
+host could treat “at the castle” and “inside a room of the castle” as proven
+remote locations. Typed state remains authoritative for current position and
+control; topology is now a separate versioned canonical artifact
+([state.ts](../src/world/state.ts#L127),
+[spatial-ontology.ts](../src/world/spatial-ontology.ts#L58)).
+
+External standards support this separation, while the implementation remains a
+small executable subset. OGC [GeoSPARQL 1.1](https://docs.ogc.org/is/22-047r1/22-047r1.html)
+represents topology as independently queryable binary spatial relations and
+distinguishes relation families. W3C [Spatial Data on the Web Best Practices](https://www.w3.org/TR/sdw-bp/)
+emphasizes stable reusable identifiers for spatial things and application-fit,
+machine-readable links. W3C [OWL-Time](https://www.w3.org/TR/owl-time/)
+separates numeric duration from temporal unit. The repository therefore does
+not add RDF, coordinates, or geometry inference: it retains stable location
+entities and compiles explicit `contains`, `adjacent`, and `route` records.
+
+`spatial-v1` now provides:
+
+- direct-container `contains`, normalized symmetric `adjacent`, and directional
+  `route` records with controlled modes and optional minimum/typical/maximum
+  duration. Every relation also carries basis, public/observable/knowledge/
+  engine visibility, story-time validity, establishing/retiring events,
+  state/rule gates, support/contest status, confidence, and item evidence
+  ([spatial-ontology.ts](../src/world/spatial-ontology.ts#L19),
+  [spatial-ontology.ts](../src/world/spatial-ontology.ts#L39),
+  [spatial-ontology.ts](../src/world/spatial-ontology.ts#L58));
+- prospective, commit, prepared-publication, and snapshot closure for location
+  endpoint kinds and event/claim/rule/predicate references. Static containment
+  rejects multiple parents and cycles; containment is checked again after
+  temporal/state activation so independently valid historical alternatives
+  cannot co-activate into an invalid branch topology
+  ([spatial-ontology.ts](../src/world/spatial-ontology.ts#L145),
+  [spatial-ontology.ts](../src/world/spatial-ontology.ts#L264),
+  [context.ts](../src/world/context.ts#L138));
+- host-owned exact citations: `propose_spatial_relation` accepts selectors, not
+  invented byte offsets/hashes, the host resolves anchors, and embedded
+  support/counter evidence must equal the assertion sets at commit and prepared
+  publication boundaries
+  ([proposal-tools.ts](../src/compiler/proposal-tools.ts#L115),
+  [spatial-ontology.ts](../src/world/spatial-ontology.ts#L205),
+  [prepared-cache.ts](../src/compiler/prepared-cache.ts#L942));
+- route-only traversal. Adjacency never proves passage; deterministic path
+  search respects direction and explicit `travelMode`, adds every known minimum
+  duration, and rejects an unproved, mode-incompatible, or too-fast compiled
+  arrival ([spatial-ontology.ts](../src/world/spatial-ontology.ts#L317),
+  [player-action.ts](../src/world/player-action.ts#L1148));
+- containment-aware physical scope. Equal locations or active ancestor/
+  descendant locations may overlap and are no longer rejected merely because
+  their IDs differ; this still does not invent room-to-room passage
+  ([spatial-ontology.ts](../src/world/spatial-ontology.ts#L290),
+  [player-action.ts](../src/world/player-action.ts#L1230));
+- actor-safe projection only when both endpoints are referenceable and the
+  visibility/knowledge gate passes. Evidence, confidence, and relation/event/
+  claim/rule IDs are removed before location IDs become turn-local opaque
+  handles. The engine may use hidden topology for deterministic validation
+  without leaking it to the actor
+  ([spatial-ontology.ts](../src/world/spatial-ontology.ts#L405),
+  [player-action.ts](../src/world/player-action.ts#L773));
+- canonical snapshot v7 pinning for spatial revisions. V1-v6 snapshots load
+  without a `spatial-v1` contract, so new movement rules do not retroactively
+  constrain historical branches. Audit now reports containment, adjacency,
+  route/direction/duration, gates, visibility, contests, closure issues, and
+  location-topology coverage
+  ([context.ts](../src/world/context.ts#L45),
+  [context.ts](../src/world/context.ts#L201),
+  [audit.ts](../src/compiler/audit.ts#L685),
+  [audit.ts](../src/compiler/audit.ts#L1184)).
+
+Tests cover schema constraints, dangling/non-location endpoints, multiple
+parents/cycles, dynamic gates, direction/mode/duration, non-traversable
+adjacency, containment scope, actor knowledge isolation, exact assertions,
+proposal-to-commit flow, prepared/context regression, and immutable snapshot
+revision pinning
+([spatial-ontology.test.ts](../test/spatial-ontology.test.ts#L1),
+[spatial-runtime.test.ts](../test/spatial-runtime.test.ts#L1),
+[proposal-tools.test.ts](../test/proposal-tools.test.ts#L475),
+[canonical-revisions.test.ts](../test/canonical-revisions.test.ts#L80)).
+
+The boundary is deliberate: the compiler does not infer passage from “nearby,”
+regional co-membership, or narrative order; it does not fill unknown duration
+from common sense; and it performs no coordinate geometry. Dynamic
+`location.controller` remains branch state derived from committed events.
+Route choice is deterministic shortest-hop with known minimum duration and
+logical IDs as tie-breakers, not a claim of real-world optimality. Jurisdiction,
+rule conflict, exceptions, and priorities belong to M5b-2b.
+
+Remaining M5 work is the M5b-2b versioned world-rule domain and M5c
+deterministic salience. Goal hierarchy/conflict/commitment should be expanded
+only from measured failures.
 
 ### 3.8 Current audit cannot measure full-book semantic recall
 
@@ -416,7 +510,7 @@ state deltas, goals, and runtime checkpoints.
 Finding: repair and reparse need explicit source-accounting gaps and artifact
 dependencies.
 
-## 4. Current end-to-end flow after M0-M4, M5a, and M5b-1
+## 4. Current end-to-end flow after M0-M4, M5a, M5b-1, and M5b-2a
 
 ```text
 nwh ingest
@@ -435,6 +529,7 @@ nwh compile-source / prepare-all
   -> host resolves trusted anchors, EvidenceRefs, and derivation provenance
   -> character-v1 separates disposition, appraisal, and development proposals
   -> relationship-v1 separates directed stance, typed obligation, and relationship change
+  -> spatial-v1 separates contains, adjacent, and directional/mode/duration route records
   -> finish validates source accounting and the prospective semantic graph
   -> pending proposal store
 
@@ -442,14 +537,15 @@ accept / prepare
   -> cryptographic evidence validation
   -> mention-resolution and exact-target trace validation
   -> reference, state-schema, participation, epistemic, event/character/
-     relationship-ontology validation
+     relationship/spatial-ontology validation
   -> dependency ordering / semantic cycle checks
   -> immutable canonical revision + current ref
   -> prepared publication repeats whole-catalog projection/readiness gates
 
 audit / reconcile
   -> source-accounting denominators and observation/resolution coverage
-  -> exact-evidence, participation, epistemic, typed-causality, character, and relationship metrics
+  -> exact-evidence, participation, epistemic, typed-causality, character,
+     relationship, and spatial metrics
   -> bounded repair queues; dependency-aware invalidation remains M6
 
 reparse
@@ -459,9 +555,10 @@ reparse
 
 runtime
   -> committed events are branch truth
-  -> snapshot V6 pins proposition/attribution/participation/relation revisions
+  -> snapshot V7 pins proposition/attribution/participation/event-relation/spatial-relation revisions
   -> typed semantic records derive compatibility event views, never branch truth
   -> character/relationship policy activates only from committed/experienced/known triggers and actor-safe visibility
+  -> active spatial routes deterministically constrain compiled-arrival direction, mode, and known minimum time
   -> deterministic state, knowledge, scenes, and character development
 ```
 
@@ -470,10 +567,10 @@ validation -> explicit acceptance -> replay sequence
 ([technical-design.md](technical-design.md#L933)). Source annotations and
 resolution records are now non-canonical predecessors of world proposals;
 finish-time closure prevents an incomplete prospective graph from being
-checkpointed ([proposals.ts](../src/compiler/proposals.ts#L316)). M5a character
-and M5b-1 directed-relationship semantics are now compiled, source-scoped,
-audited, and projected; M5b-2/M5c still need spatial/rule ontology and salience
-selection. M6 needs explicit
+checkpointed ([proposals.ts](../src/compiler/proposals.ts#L316)). M5a character,
+M5b-1 directed-relationship, and M5b-2a spatial semantics are now compiled,
+source-scoped, audited, and projected; M5b-2b still needs the world-rule
+ontology and M5c still needs salience selection. M6 needs explicit
 dependency-driven invalidation and publication policy, and M7 needs a labeled
 multi-novel semantic benchmark.
 
@@ -485,7 +582,7 @@ multi-novel semantic benchmark.
 | Structure | chapter, paragraph, scene candidates, discourse spans | Derived/proposed; never world truth |
 | Annotation | mentions, quotations, proposition/event mentions | Source observations; non-canonical |
 | Resolution | identity clusters, event coreference, typed relations | Versioned compiler decisions; still proposals |
-| Canonical model | entities, propositions, events, rules, character models | Accepted compilation reference |
+| Canonical model | entities, propositions, events, event/spatial relations, rules, character models | Accepted compilation reference |
 | Branch truth | committed event history | Runtime truth |
 | Projection | world state, actor knowledge, development, frontier | Deterministically derived |
 | Narrative | rendered prose and summaries | Non-authoritative |
@@ -907,11 +1004,13 @@ The current typed state registry remains the execution boundary. Unsupported
 semantics continue to live as propositions rather than being coerced into an
 incorrect field.
 
-Add versioned domain modules:
+Add versioned domain modules (spatial-v1 is implemented; the remainder is
+milestone-scoped):
 
 - character physical/status/resource fields;
 - artifact identity, custody, quantity, and condition;
-- spatial containment, adjacency, route, control, and travel duration;
+- [implemented M5b-2a] spatial containment, adjacency, route, travel mode, and
+  duration;
 - institution membership, authority, and procedure;
 - faction alignment and control;
 - directed relationship stance and obligations.
@@ -1588,10 +1687,10 @@ Exit criteria:
 Objective: make agent behavior depend on evidence-backed, contextual
 development rather than arbitrary trait names.
 
-Status: **M5a and M5b-1 complete and verified; M5b-2/M5c pending.** Character
-and directed-relationship controlled registries, nested host-owned evidence,
-prospective/commit/prepared validation, audit metrics, and actor-safe runtime
-projection are implemented
+Status: **M5a, M5b-1, and M5b-2a complete and verified; M5b-2b/M5c pending.**
+Character and directed-relationship controlled registries, nested host-owned
+evidence, prospective/commit/prepared validation, audit metrics, actor-safe
+runtime projection, and spatial topology/route gates are implemented
 ([character-ontology.ts](../src/world/character-ontology.ts#L14),
 [relationship-ontology.ts](../src/world/relationship-ontology.ts#L16),
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L312),
@@ -1604,7 +1703,9 @@ Work:
 - enrich goal hierarchy/conflict/commitment;
 - [implemented M5b-1] add directed target-specific identity/type, stance,
   typed obligation, and before/after relationship change;
-- add spatial and world-rule domain modules;
+- [implemented M5b-2a] add spatial contains/adjacent/route, visibility,
+  event/state gates, travel mode/minimum duration, and snapshot pinning;
+- [M5b-2b] add world-rule kind/jurisdiction/authority/exception/priority;
 - replace fixed recent-event slicing with deterministic salience selection.
 
 Primary files:
@@ -1627,6 +1728,9 @@ Exit criteria:
   cannot activate early;
 - every relationship semantic record has exact support/counter-evidence;
 - actor projection remains deterministic and knowledge-safe.
+- adjacency cannot substitute for a route; compiled arrival must match active
+  direction, travel mode, and known minimum duration, while legacy snapshots
+  are not retroactively constrained.
 
 ### M6: Dependency-aware audit, reconciliation, and reparse
 

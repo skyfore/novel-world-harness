@@ -20,6 +20,7 @@ import { PlayConversationStore } from "./play-conversation.js";
 import { inspectPlayExperience, resolveNovelSource } from "./play-experience.js";
 import { PossibilityTemplateStore } from "./possibility-model.js";
 import { BranchStore } from "./store.js";
+import { spatialRelationEvidence } from "./spatial-ontology.js";
 
 export type InstanceRemovalResult = {
   branchId: string;
@@ -128,6 +129,21 @@ export async function removeNovelAnalysis(
       await canonical.putEventRelation(revised);
     } else {
       await canonical.removeCurrent("event-relations", relation.id);
+    }
+    canonicalArtifacts += 1;
+  }
+  for (const relation of await canonical.listSpatialRelations()) {
+    const allEvidence = spatialRelationEvidence(relation);
+    if (!allEvidence.some((reference) => reference.span.sourceId === sourceId)) continue;
+    const evidence = relation.evidence.filter((reference) => reference.span.sourceId !== sourceId);
+    const counterEvidence = (relation.counterEvidence ?? []).filter((reference) => reference.span.sourceId !== sourceId);
+    if (evidence.length) {
+      const revised = { ...relation, evidence };
+      if (counterEvidence.length) revised.counterEvidence = counterEvidence;
+      else delete revised.counterEvidence;
+      await canonical.putSpatialRelation(revised);
+    } else {
+      await canonical.removeCurrent("spatial-relations", relation.id);
     }
     canonicalArtifacts += 1;
   }

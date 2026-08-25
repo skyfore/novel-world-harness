@@ -25,9 +25,10 @@ import {
   type WorldRule,
 } from "./model.js";
 import { characterOntologyEvidence } from "./character-ontology.js";
+import { spatialRelationSchema, type SpatialRelation } from "./spatial-ontology.js";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "event-participations" | "event-relations" | "rules";
+export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "event-participations" | "event-relations" | "spatial-relations" | "rules";
 export type CanonicalRevisionRef = { id: string; hash: string };
 type StoredCanonicalRef = { version: 1; id: string; hash: string };
 export type ProposalStatus = "pending" | "accepted" | "rejected";
@@ -65,6 +66,7 @@ export class CanonicalModelStore {
   putEvent(event: CanonicalEvent): Promise<void> { const value = canonicalEventSchema.parse(event); return this.put("events", value.id, value); }
   putEventParticipation(participation: EventParticipation): Promise<void> { const value = eventParticipationSchema.parse(participation); return this.put("event-participations", value.id, value); }
   putEventRelation(relation: EventRelation): Promise<void> { const value = eventRelationSchema.parse(relation); return this.put("event-relations", value.id, value); }
+  putSpatialRelation(relation: SpatialRelation): Promise<void> { const value = spatialRelationSchema.parse(relation); return this.put("spatial-relations", value.id, value); }
   putRule(rule: WorldRule): Promise<void> { const value = worldRuleSchema.parse(rule); return this.put("rules", value.id, value); }
   ensureEntityRevision(entity: Entity): Promise<void> { const value = entitySchema.parse(entity); return this.ensureRevision("entities", value.id, value); }
   ensurePropositionRevision(proposition: Proposition): Promise<void> { const value = propositionSchema.parse(proposition); return this.ensureRevision("propositions", value.id, value); }
@@ -73,6 +75,7 @@ export class CanonicalModelStore {
   ensureEventRevision(event: CanonicalEvent): Promise<void> { const value = canonicalEventSchema.parse(event); return this.ensureRevision("events", value.id, value); }
   ensureEventParticipationRevision(participation: EventParticipation): Promise<void> { const value = eventParticipationSchema.parse(participation); return this.ensureRevision("event-participations", value.id, value); }
   ensureEventRelationRevision(relation: EventRelation): Promise<void> { const value = eventRelationSchema.parse(relation); return this.ensureRevision("event-relations", value.id, value); }
+  ensureSpatialRelationRevision(relation: SpatialRelation): Promise<void> { const value = spatialRelationSchema.parse(relation); return this.ensureRevision("spatial-relations", value.id, value); }
   ensureRuleRevision(rule: WorldRule): Promise<void> { const value = worldRuleSchema.parse(rule); return this.ensureRevision("rules", value.id, value); }
   getEntity(id: string): Promise<Entity> { return this.get("entities", id, entitySchema); }
   getProposition(id: string): Promise<Proposition> { return this.get("propositions", id, propositionSchema); }
@@ -81,6 +84,7 @@ export class CanonicalModelStore {
   getEvent(id: string): Promise<CanonicalEvent> { return this.get("events", id, canonicalEventSchema); }
   getEventParticipation(id: string): Promise<EventParticipation> { return this.get("event-participations", id, eventParticipationSchema); }
   getEventRelation(id: string): Promise<EventRelation> { return this.get("event-relations", id, eventRelationSchema); }
+  getSpatialRelation(id: string): Promise<SpatialRelation> { return this.get("spatial-relations", id, spatialRelationSchema); }
   getRule(id: string): Promise<WorldRule> { return this.get("rules", id, worldRuleSchema); }
   getEntityRevision(id: string, hash: string): Promise<Entity> { return this.getRevision("entities", id, hash, entitySchema); }
   getPropositionRevision(id: string, hash: string): Promise<Proposition> { return this.getRevision("propositions", id, hash, propositionSchema); }
@@ -89,6 +93,7 @@ export class CanonicalModelStore {
   getEventRevision(id: string, hash: string): Promise<CanonicalEvent> { return this.getRevision("events", id, hash, canonicalEventSchema); }
   getEventParticipationRevision(id: string, hash: string): Promise<EventParticipation> { return this.getRevision("event-participations", id, hash, eventParticipationSchema); }
   getEventRelationRevision(id: string, hash: string): Promise<EventRelation> { return this.getRevision("event-relations", id, hash, eventRelationSchema); }
+  getSpatialRelationRevision(id: string, hash: string): Promise<SpatialRelation> { return this.getRevision("spatial-relations", id, hash, spatialRelationSchema); }
   getRuleRevision(id: string, hash: string): Promise<WorldRule> { return this.getRevision("rules", id, hash, worldRuleSchema); }
   listEntities(): Promise<Entity[]> { return this.list("entities", entitySchema); }
   listPropositions(): Promise<Proposition[]> { return this.list("propositions", propositionSchema); }
@@ -97,6 +102,7 @@ export class CanonicalModelStore {
   listEvents(): Promise<CanonicalEvent[]> { return this.list("events", canonicalEventSchema); }
   listEventParticipations(): Promise<EventParticipation[]> { return this.list("event-participations", eventParticipationSchema); }
   listEventRelations(): Promise<EventRelation[]> { return this.list("event-relations", eventRelationSchema); }
+  listSpatialRelations(): Promise<SpatialRelation[]> { return this.list("spatial-relations", spatialRelationSchema); }
   listRules(): Promise<WorldRule[]> { return this.list("rules", worldRuleSchema); }
   async currentRevision(kind: CanonicalKind, idInput: string): Promise<CanonicalRevisionRef | null> {
     const id = safeId(idInput);

@@ -75,6 +75,7 @@ export type ModelActorWorldView = {
   knowledge: ActorScopedActionContext["knowledge"];
   presentEntities: ActorScopedActionContext["presentEntities"];
   referenceableEntities: ActorScopedActionContext["referenceableEntities"];
+  spatialRelations: ActorScopedActionContext["spatialRelations"];
   writableEntityIds: ActorScopedActionContext["writableEntityIds"];
   writableStateFields: ActorScopedActionContext["writableStateFields"];
   scene: Omit<ActorScopedActionContext["scene"], "beat">;
@@ -188,6 +189,7 @@ export function modelActorProposalSource(
         knowledge: structuredClone(modelScoped.knowledge),
         presentEntities: structuredClone(modelScoped.presentEntities),
         referenceableEntities: structuredClone(modelScoped.referenceableEntities),
+        spatialRelations: structuredClone(modelScoped.spatialRelations),
         writableEntityIds: [...modelScoped.writableEntityIds],
         writableStateFields: structuredClone(modelScoped.writableStateFields),
         scene: {

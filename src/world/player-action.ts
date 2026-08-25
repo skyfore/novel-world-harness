@@ -34,8 +34,8 @@ import {
 } from "./model.js";
 import { NarrativeRenderer } from "./narrative.js";
 import type { CanonicalChoiceResolution } from "./runtime.js";
-import { projectActorScene } from "./scene.js";
-import { advanceStoryTime } from "./time.js";
+import { committedHistory, projectActorScene } from "./scene.js";
+import { advanceStoryTime, timeAdvanceInDays } from "./time.js";
 import { projectActorVisibleState } from "./actor-visible.js";
 import { evaluatePredicate } from "./state.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
@@ -46,6 +46,14 @@ import {
   recentPlayConversation,
   type ModelPlayConversationMessage,
 } from "./play-conversation.js";
+import {
+  modelVisibleSpatialRelationSchema,
+  modelVisibleSpatialRelations,
+  findSpatialRoute,
+  resolveActiveSpatialRelations,
+  spatialLocationsMayOverlap,
+  spatialTravelModeSchema,
+} from "./spatial-ontology.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -62,6 +70,7 @@ export const playerIntentSceneTransitionSchema = z
   .object({
     kind: z.enum(["stay", "depart", "arrive", "explore"]),
     destination: playerIntentTargetSchema.optional(),
+    travelMode: spatialTravelModeSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -70,6 +79,9 @@ export const playerIntentSceneTransitionSchema = z
     }
     if (value.kind === "stay" && value.destination) {
       ctx.addIssue({ code: "custom", message: "A stay transition cannot name a destination", path: ["destination"] });
+    }
+    if (value.kind === "stay" && value.travelMode) {
+      ctx.addIssue({ code: "custom", message: "A stay transition cannot name a travel mode", path: ["travelMode"] });
     }
   });
 export type PlayerIntentSceneTransition = z.infer<typeof playerIntentSceneTransitionSchema>;
@@ -281,6 +293,7 @@ export const actorScopedActionContextSchema = z
     referenceableEntities: z.array(actorScopedEntitySchema),
     writableEntityIds: z.array(idSchema),
     writableStateFields: z.array(stateFieldSpecSchema),
+    spatialRelations: z.array(modelVisibleSpatialRelationSchema).default([]),
     scene: z.object({
       beat: z.number().int().nonnegative(),
       label: z.string().optional(),
@@ -385,6 +398,7 @@ export function playerActionTranslationContext(
     knowledge: structuredClone(context.knowledge),
     presentEntities: structuredClone(context.presentEntities),
     referenceableEntities: structuredClone(context.referenceableEntities),
+    spatialRelations: structuredClone(context.spatialRelations),
     writableEntityIds: [...context.writableEntityIds],
     writableStateFields: structuredClone(context.writableStateFields),
     scene: {
@@ -507,6 +521,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
         candidate.intent.sceneTransition = {
           kind: candidate.intent.sceneTransition!.kind,
           destination: { ...destination, entityId: scopedEntityHandle(destination.entityId) },
+          ...(candidate.intent.sceneTransition!.travelMode
+            ? { travelMode: candidate.intent.sceneTransition!.travelMode }
+            : {}),
         };
       }
       const interaction = candidate.intent.controlledAct?.interaction;
@@ -538,6 +555,22 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
     })),
     presentEntities: context.presentEntities.map((entity) => ({ ...entity, id: entityHandle(entity.id) })),
     referenceableEntities: context.referenceableEntities.map((entity) => ({ ...entity, id: entityHandle(entity.id) })),
+    spatialRelations: (context.spatialRelations ?? []).map((relation) => {
+      if (relation.kind === "contains") return {
+        ...relation,
+        containerLocationId: entityHandle(relation.containerLocationId),
+        containedLocationId: entityHandle(relation.containedLocationId),
+      };
+      if (relation.kind === "adjacent") return {
+        ...relation,
+        locationIds: relation.locationIds.map(entityHandle),
+      };
+      return {
+        ...relation,
+        fromLocationId: entityHandle(relation.fromLocationId),
+        toLocationId: entityHandle(relation.toLocationId),
+      };
+    }),
     writableEntityIds: context.writableEntityIds.map(entityHandle),
     writableStateFields: structuredClone(context.writableStateFields),
     scene: {
@@ -630,6 +663,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
           candidate.intent.sceneTransition = {
             kind: candidate.intent.sceneTransition!.kind,
             destination: { ...destination, entityId: decodeEntity(destination.entityId) },
+            ...(candidate.intent.sceneTransition!.travelMode
+              ? { travelMode: candidate.intent.sceneTransition!.travelMode }
+              : {}),
           };
         }
         const interaction = candidate.intent.controlledAct?.interaction;
@@ -737,10 +773,11 @@ export async function buildActorScopedActionContext(
     || !evidenceBelongsExclusivelyToSource(actorEntity.evidence, effectiveSourceId)) {
     throw new Error(`Actor ${actorId} is not a source-owned character in ${effectiveSourceId ?? "the committed world context"}.`);
   }
-  const [view, worldState, scene] = await Promise.all([
+  const [view, worldState, scene, history] = await Promise.all([
     new KnowledgeProjector(engine).view(actorId, commitId),
     engine.projector.project(commitId),
     projectActorScene(engine, actorId, commitId, effectiveSourceId),
+    committedHistory(engine, commitId),
   ]);
   const referenceable = new Set<EntityId>([actorId]);
   const knownIdentities = new Set<EntityId>([actorId]);
@@ -827,6 +864,21 @@ export async function buildActorScopedActionContext(
       return { id: entity.id, kind: entity.kind, name: `Unidentified ${entity.kind} ${ordinal}` };
     });
   const presentEntities = referenceableEntities.filter((entity) => present.has(entity.id));
+  const knownClaimIds = new Set(visibleKnowledge
+    .filter((entry) => isActionableKnowledge(entry.fact))
+    .map((entry) => entry.fact.claimId));
+  const realizedCanonicalEventIds = new Set(history.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? []));
+  const spatialRelations = modelVisibleSpatialRelations(
+    resolveActiveSpatialRelations(context.spatialRelations ?? [], {
+      state: worldState,
+      realizedCanonicalEventIds,
+    }),
+    {
+      visibleEntityIds: new Set(referenceableEntities.map((entity) => entity.id)),
+      knownClaimIds,
+      ...(scene.locationId ? { currentLocationId: scene.locationId } : {}),
+    },
+  );
   const writableKinds = new Set(
     [...writable]
       .map((id) => context.entities.get(id)?.kind)
@@ -881,6 +933,7 @@ export async function buildActorScopedActionContext(
     referenceableEntities,
     writableEntityIds: [actorId, ...[...writable].filter((id) => id !== actorId).sort()],
     writableStateFields,
+    spatialRelations,
     scene: {
       beat: scene.beat,
       ...(scene.label ? { label: scene.label } : {}),
@@ -1125,11 +1178,59 @@ export async function validatePlayerActionSpatialScope(
     }
   }
   const actorLocation = state.values[actorId]?.["character.location"];
-  const present = new Set((await projectActorScene(engine, actorId, commitId, sourceId)).presentEntityIds);
+  const [scene, history] = await Promise.all([
+    projectActorScene(engine, actorId, commitId, sourceId),
+    committedHistory(engine, commitId),
+  ]);
+  const present = new Set(scene.presentEntityIds);
   const issues: ValidationIssue[] = [];
+  const activeRelations = context.spatialOntologyVersion === "spatial-v1"
+    ? resolveActiveSpatialRelations(context.spatialRelations ?? [], {
+        state,
+        realizedCanonicalEventIds: new Set(history.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? [])),
+      })
+    : [];
+  const destination = candidate.intent?.sceneTransition?.kind === "arrive"
+    && candidate.intent.sceneTransition.destination?.kind === "entity"
+    ? candidate.intent.sceneTransition.destination.entityId
+    : undefined;
+  if (destination && context.spatialOntologyVersion === "spatial-v1" && destination !== actorLocation) {
+    if (typeof actorLocation !== "string") {
+      issues.push(issue(
+        "PLAYER_SPATIAL_ORIGIN_UNKNOWN",
+        "Compiled-location travel requires a committed current location in a spatial-v1 world.",
+        "intent.sceneTransition.destination.entityId",
+      ));
+    } else {
+      const travelMode = candidate.intent?.sceneTransition?.travelMode;
+      if (!travelMode) {
+        issues.push(issue(
+          "PLAYER_SPATIAL_MODE_REQUIRED",
+          "Compiled-location travel in a spatial-v1 world requires an explicit travel mode.",
+          "intent.sceneTransition.travelMode",
+        ));
+      }
+      const path = travelMode ? findSpatialRoute(activeRelations, actorLocation, destination, travelMode) : undefined;
+      if (travelMode && !path) {
+        issues.push(issue(
+          "PLAYER_SPATIAL_ROUTE_UNPROVEN",
+          `No active spatial-v1 ${travelMode} route proves travel from ${actorLocation} to ${destination}; adjacency alone is insufficient.`,
+          "intent.sceneTransition.destination.entityId",
+        ));
+      } else if (path && path.minimumDurationDays !== undefined && path.minimumDurationDays > 0
+        && timeAdvanceInDays(candidate.intent?.requestedTimeAdvance) + Number.EPSILON < path.minimumDurationDays) {
+        issues.push(issue(
+          "PLAYER_SPATIAL_TRAVEL_TOO_FAST",
+          `The proposed travel advances less time than the active route's ${path.minimumDurationDays}-day deterministic minimum.`,
+          "intent.requestedTimeAdvance",
+        ));
+      }
+    }
+  }
   for (const characterId of [...interactionCharacters].sort()) {
     const characterLocation = state.values[characterId]?.["character.location"];
-    if (typeof actorLocation === "string" && typeof characterLocation === "string" && actorLocation !== characterLocation) {
+    if (typeof actorLocation === "string" && typeof characterLocation === "string"
+      && !spatialLocationsMayOverlap(activeRelations, actorLocation, characterLocation)) {
       issues.push(issue(
         "PLAYER_REMOTE_INTERACTION_FORBIDDEN",
         `Player action cannot physically interact with ${characterId} because committed locations prove that character is elsewhere`,

@@ -112,6 +112,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Later canon remains a candidate until runtime commitment." },
   "event-participation": { name: "propose_event_participation", label: "Propose event participation", description: "Submit one evidence-backed semantic role for an entity in a canonical event as part of a complete same-finish inventory. Role and character scene-presence are independent; accepting this record does not create or execute the event." },
   "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Only non-contested causes/enables can project to legacy causalParents; narrative sequence never implies causation." },
+  "spatial-relation": { name: "propose_spatial_relation", label: "Propose spatial relation", description: "Submit one exact-evidence-backed contains, adjacency, or traversable-route relation. Adjacency never implies passage; route activation, visibility, direction, and duration remain explicit." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed StateDelta used to create a runtime genesis branch." },
   "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
@@ -967,10 +968,10 @@ export function createCompilerProposalToolset(
           },
           strength: selector.strength,
         });
-      if (kind === "character-model" && selector.relation === "supports") {
+      if ((kind === "character-model" || kind === "spatial-relation") && selector.relation === "supports") {
         supportingSemanticEvidence.push({ targetPath: selector.target_path, reference: exactReference });
       }
-      if ((kind === "event-relation" || kind === "character-model") && selector.relation === "contradicts") {
+      if ((kind === "event-relation" || kind === "character-model" || kind === "spatial-relation") && selector.relation === "contradicts") {
         if (kind === "character-model" && !characterSemanticTarget(selector.target_path)) {
           throw new Error(
             `Character counter-evidence selector '${selector.target_path}' must target one disposition, appraisal, development, relationship stance, obligation, or relationship change item.`,
@@ -1012,6 +1013,15 @@ export function createCompilerProposalToolset(
       payload = {
         ...(payload as Record<string, unknown>),
         counterEvidence: counterEvidence.map((item) => structuredClone(item.reference)),
+      };
+    }
+    if (kind === "spatial-relation") {
+      payload = {
+        ...(payload as Record<string, unknown>),
+        evidence: supportingSemanticEvidence.map((item) => structuredClone(item.reference)),
+        ...(counterEvidence.length
+          ? { counterEvidence: counterEvidence.map((item) => structuredClone(item.reference)) }
+          : {}),
       };
     }
     if (kind === "character-model") {

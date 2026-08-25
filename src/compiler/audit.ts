@@ -44,6 +44,13 @@ import {
   validateRelationshipOntologyEvidenceAssertions,
   validateRelationshipOntologyReferences,
 } from "../world/relationship-ontology.js";
+import {
+  SPATIAL_ONTOLOGY_VERSION,
+  spatialEndpoints,
+  spatialRelationEvidence,
+  validateSpatialEvidenceAssertions,
+  validateSpatialRelationCatalog,
+} from "../world/spatial-ontology.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -165,6 +172,25 @@ export type CompilerAuditReport = {
     referenceValidationIssues: number;
     errors: Array<{ actorId: string; code: string; message: string; path?: string }>;
   };
+  spatialSemantics: {
+    ontologyVersion: typeof SPATIAL_ONTOLOGY_VERSION;
+    relations: number;
+    containment: number;
+    adjacency: number;
+    routes: number;
+    oneWayRoutes: number;
+    timedRoutes: number;
+    eventGated: number;
+    stateGated: number;
+    contested: number;
+    publicRelations: number;
+    observableRelations: number;
+    knowledgeRelations: number;
+    engineRelations: number;
+    locationsInTopology: number;
+    referenceValidationIssues: number;
+    errors: Array<{ code: string; message: string; path?: string }>;
+  };
   canonical: {
     entities: number;
     propositions: number;
@@ -173,6 +199,7 @@ export type CompilerAuditReport = {
     events: number;
     eventParticipations: number;
     eventRelations: number;
+    spatialRelations: number;
     rules: number;
     initialWorld: boolean;
     characterGoals: number;
@@ -226,6 +253,7 @@ export type CompilerAuditReport = {
     controlledCharacterModels: number | null;
     directedRelationshipEntities: number | null;
     typedRelationshipEntities: number | null;
+    locationsWithSpatialTopology: number | null;
     characterDevelopmentCoverage: number | null;
     openingCheckpointDeclared: number | null;
     participantPresenceCoverage: number | null;
@@ -428,7 +456,7 @@ export async function auditCompiler(
 
   const canon = new CanonicalModelStore(workspaceRoot);
   const actorStore = new ActorModelStore(workspaceRoot);
-  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allEventParticipations, allEventRelations, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
+  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allEventParticipations, allEventRelations, allSpatialRelations, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -436,6 +464,7 @@ export async function auditCompiler(
     canon.listEvents(),
     canon.listEventParticipations(),
     canon.listEventRelations(),
+    canon.listSpatialRelations(),
     canon.listRules(),
     new InitialWorldStore(workspaceRoot).get(),
     actorStore.listGoals(),
@@ -458,6 +487,10 @@ export async function auditCompiler(
   const events = allEvents.filter(belongsToSelectedSource);
   const eventParticipations = allEventParticipations.filter(belongsToSelectedSource);
   const eventRelations = allEventRelations.filter(belongsToSelectedSource);
+  const spatialRelations = allSpatialRelations.filter((item) => belongsToSelectedSource({
+    evidence: item.evidence,
+    counterEvidence: item.counterEvidence,
+  }));
   const rules = allRules.filter(belongsToSelectedSource);
   const initialWorld = storedInitialWorld && belongsToSelectedSource(storedInitialWorld) ? storedInitialWorld : null;
   const goals = allGoals.filter(belongsToSelectedSource);
@@ -474,6 +507,7 @@ export async function auditCompiler(
     ...events.map((item) => ({ name: `event:${item.id}`, kind: "canonical-event", id: item.id, payload: item, evidence: item.evidence })),
     ...eventParticipations.map((item) => ({ name: `event-participation:${item.id}`, kind: "event-participation", id: item.id, payload: item, evidence: item.evidence })),
     ...eventRelations.map((item) => ({ name: `event-relation:${item.id}`, kind: "event-relation", id: item.id, payload: item, evidence: artifactEvidence(item) })),
+    ...spatialRelations.map((item) => ({ name: `spatial-relation:${item.id}`, kind: "spatial-relation", id: item.id, payload: item, evidence: spatialRelationEvidence(item) })),
     ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: item.evidence })),
     ...(initialWorld ? [{ name: "initial-world", kind: "initial-world", id: "initial-world", payload: initialWorld, evidence: initialWorld.evidence }] : []),
     ...goals.map((item) => ({ name: `goal:${item.id}`, kind: "character-goal", id: item.id, payload: item, evidence: item.evidence })),
@@ -505,6 +539,14 @@ export async function auditCompiler(
           message: `Controlled character/relationship model ${artifact.id} has no exact evidence binding.`,
         });
       }
+      if (artifact.kind === "spatial-relation") {
+        invalidAssertions += 1;
+        evidenceErrors.push({
+          artifact: artifact.name,
+          code: "MISSING_EXACT_SPATIAL_BINDING",
+          message: `Spatial relation ${artifact.id} has no exact evidence binding.`,
+        });
+      }
       continue;
     }
     artifactsWithExactEvidence += 1;
@@ -514,6 +556,12 @@ export async function auditCompiler(
       ...(artifact.kind === "character-model"
         ? validateCharacterOntologyEvidenceAssertions(
             characterModelSchema.parse(artifact.payload),
+            binding.assertions,
+          )
+        : []),
+      ...(artifact.kind === "spatial-relation"
+        ? validateSpatialEvidenceAssertions(
+            spatialRelations.find((relation) => relation.id === artifact.id)!,
             binding.assertions,
           )
         : []),
@@ -633,6 +681,20 @@ export async function auditCompiler(
     .filter((key) => legacyCausalKeys.has(key)));
   const typedCausalRelations = legacyCausalKeys.size
     ? typedCausalKeys.size / legacyCausalKeys.size
+    : null;
+  const spatialValidation = validateSpatialRelationCatalog(spatialRelations, {
+    entities: new Map(entities.map((entity) => [entity.id, entity])),
+    events: new Map(events.map((event) => [event.id, event])),
+    claims: new Set(claims.map((claim) => claim.id)),
+    rules: new Set(rules.map((rule) => rule.id)),
+  });
+  const locationEntities = entities.filter((entity) => entity.kind === "location");
+  const locationIds = new Set(locationEntities.map((entity) => entity.id));
+  const locationsInTopology = new Set(spatialRelations
+    .flatMap(spatialEndpoints)
+    .filter((entityId) => locationIds.has(entityId))).size;
+  const locationsWithSpatialTopology = locationEntities.length
+    ? locationsInTopology / locationEntities.length
     : null;
   const characterOntologyCatalog = {
     entities: new Map(entities.map((entity) => [entity.id, { kind: entity.kind }])),
@@ -933,6 +995,7 @@ export async function auditCompiler(
   const semanticReadiness: CompilerReadinessState = epistemicErrors.length
     || participationValidation.length
     || relationValidation.length
+    || spatialValidation.length
     || characterOntologyValidation.length
     || relationshipOntologyValidation.length
     ? "not-ready"
@@ -1118,6 +1181,25 @@ export async function auditCompiler(
       referenceValidationIssues: relationshipOntologyValidation.length,
       errors: relationshipOntologyValidation,
     },
+    spatialSemantics: {
+      ontologyVersion: SPATIAL_ONTOLOGY_VERSION,
+      relations: spatialRelations.length,
+      containment: spatialRelations.filter((item) => item.kind === "contains").length,
+      adjacency: spatialRelations.filter((item) => item.kind === "adjacent").length,
+      routes: spatialRelations.filter((item) => item.kind === "route").length,
+      oneWayRoutes: spatialRelations.filter((item) => item.kind === "route" && item.direction === "one-way").length,
+      timedRoutes: spatialRelations.filter((item) => item.kind === "route" && item.duration !== undefined).length,
+      eventGated: spatialRelations.filter((item) => item.establishedByEventIds.length > 0 || item.retiredByEventIds.length > 0).length,
+      stateGated: spatialRelations.filter((item) => item.requires.length > 0 || item.blockedWhen.length > 0).length,
+      contested: spatialRelations.filter((item) => item.status === "contested").length,
+      publicRelations: spatialRelations.filter((item) => item.visibility === "public").length,
+      observableRelations: spatialRelations.filter((item) => item.visibility === "observable").length,
+      knowledgeRelations: spatialRelations.filter((item) => item.visibility === "knowledge").length,
+      engineRelations: spatialRelations.filter((item) => item.visibility === "engine").length,
+      locationsInTopology,
+      referenceValidationIssues: spatialValidation.length,
+      errors: spatialValidation,
+    },
     canonical: {
       entities: entities.length,
       propositions: propositions.length,
@@ -1126,6 +1208,7 @@ export async function auditCompiler(
       events: events.length,
       eventParticipations: eventParticipations.length,
       eventRelations: eventRelations.length,
+      spatialRelations: spatialRelations.length,
       rules: rules.length,
       initialWorld: Boolean(initialWorld),
       characterGoals: goals.length,
@@ -1157,6 +1240,7 @@ export async function auditCompiler(
         ? semanticIssues.length === 0
           && participationValidation.length === 0
           && relationValidation.length === 0
+          && spatialValidation.length === 0
           && characterOntologyValidation.length === 0
           && relationshipOntologyValidation.length === 0
         : null,
@@ -1191,6 +1275,7 @@ export async function auditCompiler(
       controlledCharacterModels: controlledCharacterModelCoverage,
       directedRelationshipEntities: directedRelationshipCoverage,
       typedRelationshipEntities: typedRelationshipCoverage,
+      locationsWithSpatialTopology,
       characterDevelopmentCoverage,
       openingCheckpointDeclared: initialWorld ? (initialWorld.checkpoint ? 1 : 0) : null,
       participantPresenceCoverage,

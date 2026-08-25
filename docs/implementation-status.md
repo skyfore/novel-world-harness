@@ -20,6 +20,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Event participation semantics | M4b-1 implemented | Versioned event/entity/semantic-role records keep character presence independent from agency, require a complete lossless projection to legacy `participants`/`participantPresence`, participate in compiler closure and prepared-publication gates, and are pinned in runtime snapshot V5 |
 | Event relation semantics | M4b-2 implemented | Independently evidenced temporal, causal, explanatory, identity/subevent, and narrative-continuation records have deterministic closure, contradiction, cycle, and legacy-projection validation; only non-contested `causes`/`enables` relations project to `causalParents`, and runtime snapshot V6 pins their revisions |
 | Character semantics | M5a implemented | Versioned behavioral dimensions separate contextual dispositions, event appraisals, and event-gated development episodes; stable inference and counter-evidence rules fail closed, legacy free-form keys are explicitly namespaced, and actor-facing projections remain future-canon and visibility safe |
+| Spatial semantics | M5b-2a implemented | Exact-evidence-backed containment, adjacency, and route artifacts are source-scoped, graph-validated, revision-pinned in snapshot V7, and actor-safe; compiled travel requires an active direction/mode-compatible route and respects known minimum duration, while adjacency never proves passage |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
@@ -124,8 +125,20 @@ The branch now implements a constrained end-to-end path from a local novel throu
   invisible targets. Audit reports directed/type state coverage, legacy
   kind/strength/obligation operations, relationship-policy inventory, and
   reference failures; prepared publication repeats exact-evidence validation.
+- Canonical space may use the `spatial-v1` ontology. `contains`, normalized
+  symmetric `adjacent`, and directional `route` records keep topology separate
+  from dynamic `character.location` and `location.controller` state. Endpoint,
+  event/claim/rule/predicate closure, static and active containment graph
+  invariants, and exact support/counter-evidence are checked at compiler and
+  prepared-publication boundaries. Runtime traversal uses routes only, matches
+  explicit travel mode and known minimum duration, and treats containment as a
+  possibly shared physical scope without inventing passage. Actor projections
+  apply public/observable/knowledge/engine visibility and strip compiler
+  evidence/identities before opaque-handle transport. Audit reports topology
+  inventory, gates, visibility, conflicts, reference errors, and location
+  coverage.
 - Canonical entities, propositions, attributions, claims, events, event
-  participations, event relations, and rules use
+  participations, event relations, spatial relations, and rules use
   logical refs over immutable revisions.
 - `proposals accept-all` accepts dependency-valid canonical artifacts and valid generic possibility templates; unsupported `state-delta` proposals remain staging artifacts.
 - Automated source preparation does not expose the staging-only raw `state-delta` tool. Its catalogs, review barrier, and convergence are scoped to the selected source.
@@ -143,7 +156,7 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 ### Runtime authority
 
 - Branch truth is an immutable commit chain.
-- Every new branch pins the exact canonical entity, claim, event, rule, state-schema, actor-policy, and possibility-template revisions used by its commits; later preparation edits do not change historical replay, actor behavior, or frontier inputs. Reparse pins a supplemental policy snapshot for legacy branch snapshots before changing current refs.
+- Every new branch pins the exact canonical entity, claim, event, spatial-relation, rule, state-schema, actor-policy, and possibility-template revisions used by its commits; later preparation edits do not change historical replay, actor behavior, movement validation, or frontier inputs. Snapshot V7 carries spatial revisions; V1-V6 contexts load without retroactive spatial-v1 enforcement. Reparse pins a supplemental policy snapshot for legacy branch snapshots before changing current refs.
 - State is deterministically projected from committed deltas.
 - Branch heads use expected-parent checks and a local exclusive mutation lock; dead same-host lock owners are recovered and `world fsck` reports stale or active locks.
 - Temporal world rules are evaluated against pre-state and proposed post-state.

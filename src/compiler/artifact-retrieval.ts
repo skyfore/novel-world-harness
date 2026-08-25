@@ -11,6 +11,7 @@ import { assertSafeTextOffset, safeTextPageEnd } from "../util/text-pages.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import type { CompilerToolCallGate } from "./tool-call-gate.js";
 import { EvidenceAssertionStore, evidenceAssertionSourceIds } from "./evidence-assertions.js";
+import { spatialRelationEvidence } from "../world/spatial-ontology.js";
 
 type ArtifactStatus = "canonical" | "pending";
 export const COMPILER_ARTIFACT_KINDS = [
@@ -21,6 +22,7 @@ export const COMPILER_ARTIFACT_KINDS = [
   "canonical-event",
   "event-participation",
   "event-relation",
+  "spatial-relation",
   "world-rule",
   "initial-world",
   "character-goal",
@@ -127,7 +129,7 @@ export async function loadCompilerArtifactRecords(
   const initial = new InitialWorldStore(workspaceRoot);
   const proposals = new ProposalStore(workspaceRoot);
   const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
-  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
+  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -135,6 +137,7 @@ export async function loadCompilerArtifactRecords(
     canon.listEvents(),
     canon.listEventParticipations(),
     canon.listEventRelations(),
+    canon.listSpatialRelations(),
     canon.listRules(),
     actors.listGoals(),
     actors.listModels(),
@@ -163,6 +166,18 @@ export async function loadCompilerArtifactRecords(
   addCanonical(events, "canonical-event", (value) => ({ id: value.id, label: value.title }));
   addCanonical(eventParticipations, "event-participation", (value) => ({ id: value.id, label: `${value.eventId} ${value.role} ${value.entityId}` }));
   addCanonical(eventRelations, "event-relation", (value) => ({ id: value.id, label: `${value.fromEventId} ${value.type} ${value.toEventId}` }));
+  for (const relation of spatialRelations) {
+    const evidence = spatialRelationEvidence(relation);
+    if (!evidence.some((reference) => reference.span.sourceId === sourceId)) continue;
+    assertEvidenceExclusiveToSource(evidence, sourceId, `Canonical spatial-relation ${relation.id}`);
+    records.push(canonicalRecord(
+      "spatial-relation",
+      relation.id,
+      `${relation.kind}: ${relation.id}`,
+      structuredClone(relation),
+      evidence,
+    ));
+  }
   addCanonical(rules, "world-rule", (value) => ({ id: value.id, label: value.name }));
   addCanonical(goals, "character-goal", (value) => ({ id: value.id, label: value.description }));
   addCanonical(models, "character-model", (value) => ({ id: value.actorId, label: `Character model: ${value.actorId}` }));

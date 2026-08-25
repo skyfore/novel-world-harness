@@ -1,6 +1,6 @@
 # 技术计划：可溯源的全书小说语义编译
 
-- **状态：** 进行中——M0 至 M4、M5a、M5b-1 已实现；M5b-2、M5c 至 M7 待完成
+- **状态：** 进行中——M0 至 M4、M5a、M5b-1、M5b-2a 已实现；M5b-2b、M5c 至 M7 待完成
 - **日期：** 2026-08-25
 - **范围：** 小说导入、结构拆分、语义标注、身份消歧、canonical 编译、审计、修复与重解析
 - **必须遵守：** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md)、[ADR 0002](adr/0002-user-level-content-addressed-storage.md)、[ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
@@ -368,7 +368,88 @@ reference closure、未来信息隔离、wrong-direction fail-closed、reversal�
 [proposal-tools.test.ts](../test/proposal-tools.test.ts#L420)、
 [compiler-audit.test.ts](../test/compiler-audit.test.ts#L263)）。
 
-M5 剩余工作是 M5b-2 spatial/world-rule domain 与 M5c deterministic salience；
+#### 2.7.2 M5b-2a：地点身份、拓扑邻近与可通行路径不是同一事实
+
+M5b-2a 前，地点已经是稳定 `Entity`，动态位置、开放状态与控制者也已经是
+`WorldState` 字段；但执行层只有 `character.location` 的精确 ID 比较，既没有地点
+包含层级，也不能区分“相邻”与“存在可走路径”，更无法验证方向、交通方式或最短
+时间。这样会产生两类相反错误：模型可能把地图上的邻接直接当作通路；也可能把
+“人在城堡”与“人在城堡内房间”误判为确定异地。现有 typed state registry 仍是
+动态位置/控制权的权威边界，拓扑则必须成为独立、可版本化、可引用的 canonical
+artifact（[state.ts](../src/world/state.ts#L127)、
+[spatial-ontology.ts](../src/world/spatial-ontology.ts#L58)）。
+
+外部标准支持这种拆分，但本项目只实现执行所需的小型子集。OGC
+[GeoSPARQL 1.1](https://docs.ogc.org/is/22-047r1/22-047r1.html) 把拓扑关系作为
+可独立查询的二元空间关系，并区分多组关系词表；W3C
+[Spatial Data on the Web Best Practices](https://www.w3.org/TR/sdw-bp/) 强调空间
+对象应有稳定、可复用的标识，并用适合应用的机器可读关系表达连接；W3C
+[OWL-Time](https://www.w3.org/TR/owl-time/) 则把数值时长和时间单位显式分开。
+因此这里不引入 RDF、坐标或几何推理，而是保留稳定 location entity，再编译
+`contains`、`adjacent`、`route` 三类显式关系。
+
+已实现的 `spatial-v1` 包含：
+
+- `contains` 表示直接容器，`adjacent` 是规范化的无向邻接，`route` 独立记录
+  from/to、单/双向、受控交通方式和可选 minimum/typical/maximum duration；
+  所有关系还带 basis、public/observable/knowledge/engine visibility、有效故事时间、
+  建立/废止事件、state/rule gate、supported/contested、置信度与逐条证据
+  （[spatial-ontology.ts](../src/world/spatial-ontology.ts#L19)、
+  [spatial-ontology.ts](../src/world/spatial-ontology.ts#L39)、
+  [spatial-ontology.ts](../src/world/spatial-ontology.ts#L58)）；
+- prospective closure、commit、prepared publication 和 snapshot hydration 都会检查
+  endpoint 必须是本 source 的 location，event/claim/rule/predicate 引用必须闭合，
+  静态 containment 不得多父或成环；时间/state gate 解算后还会对当前激活的
+  containment 重跑单父与无环检查，避免两个各自合法的历史候选在同一分支同时
+  激活后破坏拓扑
+  （[spatial-ontology.ts](../src/world/spatial-ontology.ts#L145)、
+  [spatial-ontology.ts](../src/world/spatial-ontology.ts#L264)、
+  [context.ts](../src/world/context.ts#L138)）；
+- 模型不能提交自造 byte offset/hash。`propose_spatial_relation` 只接受 exact selector，
+  host 解出可信 anchor 后回填 EvidenceRef；support/counter assertion 集合必须与
+  artifact 内嵌 evidence 完全相等，并在提交与 prepared cache 再验证
+  （[proposal-tools.ts](../src/compiler/proposal-tools.ts#L115)、
+  [spatial-ontology.ts](../src/world/spatial-ontology.ts#L205)、
+  [prepared-cache.ts](../src/compiler/prepared-cache.ts#L942)）；
+- runtime 的通行证明只遍历 active `route`，绝不把 `adjacent` 当 passage；路径解析
+  确定性遵守方向和显式 `travelMode`，累加所有已知 minimum duration，并拒绝无路径、
+  交通方式不匹配或时间推进过短的 compiled-location arrival
+  （[spatial-ontology.ts](../src/world/spatial-ontology.ts#L317)、
+  [player-action.ts](../src/world/player-action.ts#L1148)）；
+- 精确相同地点或 active containment 的祖先/后代地点只说明“可能处于同一物理
+  scope”，不会被旧的字符串不等规则直接判成远程互动；它仍不自动证明房间间可通行
+  （[spatial-ontology.ts](../src/world/spatial-ontology.ts#L290)、
+  [player-action.ts](../src/world/player-action.ts#L1230)）；
+- actor/model 只能看到 endpoint 已可引用且 visibility/knowledge gate 满足的 active
+  关系；投影删除 evidence、confidence、内部 relation/event/claim/rule ID，随后再把
+  location ID 换成 turn-local opaque handle。engine 可使用完整 topology 做确定性校验，
+  但隐藏路线不会因此泄漏给角色
+  （[spatial-ontology.ts](../src/world/spatial-ontology.ts#L405)、
+  [player-action.ts](../src/world/player-action.ts#L773)）；
+- canonical snapshot 升至 v7 并固定 spatial relation revision；旧 v1-v6 snapshot
+  以“无 spatial-v1 契约”加载，避免新路径约束倒灌历史分支。Audit 新增 containment、
+  adjacency、route、direction、duration、gate、visibility、contest、reference issue 与
+  location topology coverage 指标
+  （[context.ts](../src/world/context.ts#L45)、
+  [context.ts](../src/world/context.ts#L201)、
+  [audit.ts](../src/compiler/audit.ts#L685)、
+  [audit.ts](../src/compiler/audit.ts#L1184)）。
+
+测试覆盖 schema、悬空/非地点 endpoint、多父/环、动态 gate、方向/方式/时长、
+adjacency 不可通行、层级 scope、actor 知识隔离、exact assertion、proposal→commit、
+prepared/context 回归和 snapshot revision pinning
+（[spatial-ontology.test.ts](../test/spatial-ontology.test.ts#L1)、
+[spatial-runtime.test.ts](../test/spatial-runtime.test.ts#L1)、
+[proposal-tools.test.ts](../test/proposal-tools.test.ts#L475)、
+[canonical-revisions.test.ts](../test/canonical-revisions.test.ts#L80)）。
+
+边界也必须明确：本阶段不从“距离近”“同一地区”或叙述顺序推断通路，不把未知
+duration 补成常识值，不做经纬度/几何计算；`location.controller` 仍由 committed
+event history 派生的 WorldState 决定。当前路径选择以最少 hop、已知 minimum duration
+和 logical ID 确定性打破平局，不承诺现实世界最优路线。更复杂的 jurisdiction、规则
+冲突、exception/priority 属于 M5b-2b。
+
+M5 剩余工作是 M5b-2b versioned world-rule domain 与 M5c deterministic salience；
 goal hierarchy/conflict/commitment 仍需在后续基于实测失败决定是否扩展。
 
 ### 2.8 当前审计没有全书 recall 分母
@@ -406,7 +487,7 @@ resolution → event/relation → state/knowledge → character/possibility 的�
 **结论：** missing semantic unit 和 stale downstream artifact 必须成为
 显式对象。
 
-## 3. M0-M4、M5a 与 M5b-1 完成后的当前流程
+## 3. M0-M4、M5a、M5b-1 与 M5b-2a 完成后的当前流程
 
 ```text
 nwh ingest
@@ -426,20 +507,21 @@ compile-source / prepare-all
   -> 宿主解析可信 anchor、EvidenceRef 与 derivation provenance
   -> character-v1 分离 disposition、appraisal 与 development proposal
   -> relationship-v1 分离 directed stance、typed obligation 与 relationship change
+  -> spatial-v1 分离 contains、adjacent 与 direction/mode/duration route
   -> finish 校验 source accounting 与 prospective semantic graph
   -> pending proposal store
 
 accept / prepare
   -> 验证 source hash 与 span
   -> 验证 mention-resolution 与 exact target trace
-  -> 验证引用、state schema、participation、epistemic、event/character/relationship ontology
+  -> 验证引用、state schema、participation、epistemic、event/character/relationship/spatial ontology
   -> dependency order 与 semantic cycle check
   -> 接受为 immutable canonical revision
   -> prepared publication 重复 whole-catalog projection/readiness gate
 
 audit / reconcile
   -> source-accounting denominator 与 observation/resolution coverage
-  -> exact evidence、participation、epistemic、typed causality、character 与 relationship metric
+  -> exact evidence、participation、epistemic、typed causality、character、relationship 与 spatial metric
   -> bounded repair queue；dependency-driven invalidation 留待 M6
 
 reparse
@@ -449,9 +531,10 @@ reparse
 
 runtime
   -> committed event history 为 branch truth
-  -> Snapshot V6 固定 proposition/attribution/participation/relation revision
+  -> Snapshot V7 固定 proposition/attribution/participation/event-relation/spatial-relation revision
   -> typed semantic record 只派生 compatibility event view，不成为 branch truth
   -> character/relationship policy 仅由 committed/experienced/known trigger 激活并保持 actor-safe visibility
+  -> active spatial route 确定性约束 compiled arrival 的方向、方式与已知最短时间
   -> 确定性投影 state、knowledge、scene、development 和 frontier
 ```
 
@@ -459,9 +542,9 @@ runtime
 -> replay 的权威顺序（[technical-design.md](technical-design.md#L933)）。Source
 annotation 与 resolution 已成为 world proposal 之前的非 canonical 层；finish
 closure 会拒绝不完整的 prospective graph
-（[proposals.ts](../src/compiler/proposals.ts#L316)）。M5a 角色语义与 M5b-1 directed
-relationship 语义现已完成编译、source scope、审计与投影；后续仍需 M5b-2/M5c
-的 spatial/rule ontology 与 salience selection，M6 的 dependency-driven invalidation 与 publication policy，
+（[proposals.ts](../src/compiler/proposals.ts#L316)）。M5a 角色语义、M5b-1 directed
+relationship 与 M5b-2a spatial 语义现已完成编译、source scope、审计与投影；
+后续仍需 M5b-2b world-rule ontology 与 M5c salience selection，M6 的 dependency-driven invalidation 与 publication policy，
 以及 M7 的多小说人工标注 semantic benchmark。
 
 ### 3.1 研究基线的主要失真点
@@ -475,6 +558,7 @@ relationship 语义现已完成编译、source scope、审计与投影；后续�
 | causalParents[] | 多种 event relation 合一 | 拓扑有效但语义可能错误 |
 | claim | proposition、holder、certainty 合一 | narrator/rumor/belief 容易污染 truth |
 | trait map | disposition、affect、stance 合一 | 角色模型不稳定、不可比较 |
+| location ID equality | 包含、邻接与通路合一或缺失 | 远程互动误判，移动方式/耗时无法验证 |
 | extracted count | inventory 与 coverage 合一 | 漏抽对象不会进入分母 |
 
 ## 4. 目标权威架构
@@ -485,7 +569,7 @@ relationship 语义现已完成编译、source scope、审计与投影；后续�
 | Structure | chapter、paragraph、scene candidate、discourse span | 派生/候选，不是世界真值 |
 | Annotation | mention、quotation、proposition mention、event mention | 原文观察，非 canonical |
 | Resolution | identity cluster、event coreference、time/relation hypothesis | 版本化编译判断，仍需接受 |
-| Canonical | entity、proposition、event、relation、rule、character model | 接受后的编译参考 |
+| Canonical | entity、proposition、event、event/spatial relation、rule、character model | 接受后的编译参考 |
 | Branch | committed event history | runtime 真值 |
 | Projection | WorldState、knowledge、development、frontier | 确定性派生 |
 | Narrative | prose、summary、analysis | 无写 truth 权限 |
@@ -899,11 +983,11 @@ before、after、during、contains、overlaps、starts、finishes，不引入 RD
 保留当前 typed state registry。无法正确映射的语义继续成为 proposition，
 不能强行写入相近字段。
 
-新增版本化 domain modules：
+版本化 domain modules（其中 spatial-v1 已实现，其余按 milestone 推进）：
 
 - character physical/status/resource；
 - artifact identity/custody/quantity/condition；
-- spatial containment/adjacency/route/control/travel duration；
+- [M5b-2a 已实现] spatial containment/adjacency/route/travel mode/duration；
 - institution membership/authority/procedure；
 - faction alignment/control；
 - directed relationship stance/obligation。
@@ -1480,10 +1564,10 @@ snapshot/audit 生命周期，以及排除 contested 与 narrative-only 关系�
 
 目标：actor behavior 来自上下文化、有证据的角色发展。
 
-状态：**M5a 与 M5b-1 已完成并验证，M5b-2/M5c 待完成。** Character 与
+状态：**M5a、M5b-1 与 M5b-2a 已完成并验证，M5b-2b/M5c 待完成。** Character、
 directed relationship controlled registry、nested host-owned evidence、
 prospective/commit/prepared validation、audit metric 与 actor-safe runtime
-projection 均已实现
+projection，以及 spatial topology/route runtime gate 均已实现
 （[character-ontology.ts](../src/world/character-ontology.ts#L14)、
 [relationship-ontology.ts](../src/world/relationship-ontology.ts#L16)、
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L312)、
@@ -1496,7 +1580,9 @@ projection 均已实现
 - goal hierarchy/conflict/commitment；
 - [M5b-1 已实现] directed target-specific relationship identity/type、stance、
   typed obligation 与 before/after change；
-- spatial/world-rule modules；
+- [M5b-2a 已实现] spatial contains/adjacent/route、visibility、event/state gate、
+  travel mode/minimum duration 与 snapshot pinning；
+- [M5b-2b] world-rule kind/jurisdiction/authority/exception/priority modules；
 - deterministic salience memory。
 
 主要文件：
@@ -1516,6 +1602,8 @@ projection 均已实现
 - reverse direction 不能复用 forward stance，future relationship policy 不会提前激活；
 - 每条 relationship semantic record 有逐项 exact support/counter-evidence；
 - actor projection 保持 deterministic 和 knowledge-safe。
+- adjacency 不会被当作 route；compiled arrival 必须匹配 active route 的方向、
+  travel mode 与已知 minimum duration；旧 snapshot 不被追溯施加新约束。
 
 ### M6：Dependency-aware Audit、Reconcile 与 Reparse
 

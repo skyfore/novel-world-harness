@@ -80,6 +80,9 @@ export function createPiPlayerWorldResponseResolver(
                 ...(intent.sceneTransition.destination
                   ? { destination: describeTarget(intent.sceneTransition.destination) }
                   : {}),
+                ...(intent.sceneTransition.travelMode
+                  ? { travelMode: intent.sceneTransition.travelMode }
+                  : {}),
               },
             } : {}),
             ...(intent.requestedTimeAdvance ? { requestedTimeAdvance: intent.requestedTimeAdvance } : {}),

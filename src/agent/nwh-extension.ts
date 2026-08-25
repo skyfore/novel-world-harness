@@ -916,6 +916,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         knowledge: [],
         presentEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
         referenceableEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
+        spatialRelations: [],
         visibleEntities: [{ id: selection.actor.id, kind: "character", name: selection.actor.canonicalName }],
         recentVisibleEvents: [],
         scene: { key: "scene:unavailable", beat: 0, locationState: {}, signature: "unavailable" },

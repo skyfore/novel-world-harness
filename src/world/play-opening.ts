@@ -25,6 +25,7 @@ import {
 } from "./play-conversation.js";
 import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
 import { modelVisibleRelationshipOntology, type ModelVisibleRelationshipOntology } from "./relationship-ontology.js";
+import type { SpatialDuration } from "./spatial-ontology.js";
 
 export type PlayerChoiceBehavioralContext = {
   /** Effective at this committed head; policy guidance, never world truth. */
@@ -83,6 +84,7 @@ export type PlayOpeningFrame = {
   presentEntities: Awaited<ReturnType<typeof buildActorScopedActionContext>>["presentEntities"];
   /** Identities the actor may name, without implying physical presence. */
   referenceableEntities: Awaited<ReturnType<typeof buildActorScopedActionContext>>["referenceableEntities"];
+  spatialRelations: Awaited<ReturnType<typeof buildActorScopedActionContext>>["spatialRelations"];
   /** @deprecated Kept in persisted frames; now aliases presentEntities. */
   visibleEntities: Awaited<ReturnType<typeof buildActorScopedActionContext>>["referenceableEntities"];
   recentVisibleEvents: Array<{
@@ -147,6 +149,11 @@ export type PlayerSceneNarratorFrame = {
   }>;
   presentEntities: Array<{ kind: string; name: string }>;
   referenceableEntities: Array<{ kind: string; name: string }>;
+  spatialRelations: Array<
+    | { kind: "contains"; container: string; contained: string }
+    | { kind: "adjacent"; locations: [string, string] }
+    | { kind: "route"; from: string; to: string; direction: "one-way" | "two-way"; modes: string[]; duration?: SpatialDuration }
+  >;
   recentVisibleEvents: Array<{ title: string }>;
   scene: { label?: string; locationState: unknown };
   activeThreads: ActorVisibleNarrativeThread[];
@@ -309,6 +316,7 @@ export async function buildPlayOpeningFrame(
     knowledge: structuredClone(scoped.knowledge),
     presentEntities: structuredClone(scoped.presentEntities),
     referenceableEntities: structuredClone(scoped.referenceableEntities),
+    spatialRelations: structuredClone(scoped.spatialRelations),
     visibleEntities: structuredClone(scoped.presentEntities),
     recentVisibleEvents: direction.scene.recentEvents
       .slice(-5)
@@ -406,6 +414,25 @@ export function playerSceneModelFrame(frame: PlayOpeningFrame): PlayerSceneNarra
     knowledge,
     presentEntities: frame.presentEntities.map(({ kind, name }) => ({ kind, name })),
     referenceableEntities: frame.referenceableEntities.map(({ kind, name }) => ({ kind, name })),
+    spatialRelations: (frame.spatialRelations ?? []).map((relation) => {
+      if (relation.kind === "contains") return {
+        kind: relation.kind,
+        container: namedEntities.get(relation.containerLocationId) ?? "known place",
+        contained: namedEntities.get(relation.containedLocationId) ?? "known place",
+      };
+      if (relation.kind === "adjacent") return {
+        kind: relation.kind,
+        locations: relation.locationIds.map((id) => namedEntities.get(id) ?? "known place") as [string, string],
+      };
+      return {
+        kind: relation.kind,
+        from: namedEntities.get(relation.fromLocationId) ?? "known place",
+        to: namedEntities.get(relation.toLocationId) ?? "known place",
+        direction: relation.direction,
+        modes: [...relation.modes],
+        ...(relation.duration ? { duration: structuredClone(relation.duration) } : {}),
+      };
+    }),
     recentVisibleEvents: frame.recentVisibleEvents.map((event) => ({ title: event.title })),
     scene: {
       ...(frame.scene.label ? { label: frame.scene.label } : {}),
@@ -544,7 +571,7 @@ Rules:
 - Produce only the finished literary scene. Choice generation and analysis happened in separate private sessions; do not call an analysis or choice tool, discuss a plan, or expose specialist reasoning.
 - Do not compress the beat into a status report, event summary, or utilitarian bridge. Develop image, rhythm, embodied response, dialogue, and dramatic pressure as the material warrants. A normal beat may take several fully shaped paragraphs; there is no fixed short target. Remain inside one immediate playable beat rather than rushing across subsequent events.
 - Open directly inside the scene in second person. Do not start with identity metadata such as "You are ...", a command tutorial, a recap heading, or a greeting.
-- Render the character's immediate sensory moment, embodied response, emotional pressure, and unresolved in-world tension using committed state, knowledge, present entities, visible events, activeThreads, and the admitted continuity channels.
+- Render the character's immediate sensory moment, embodied response, emotional pressure, and unresolved in-world tension using committed state, knowledge, present entities, actor-visible spatialRelations, visible events, activeThreads, and the admitted continuity channels.
 - presentEntities proves current scene presence. referenceableEntities proves only that an identity may be named; never describe a referenceable-only character as physically present.
 - Establish persistent or actionable facts only when present in the frame. Do not import remembered source-novel canon, hidden state, or future events.
 - Host story time, elapsed duration, commit steps, and event dates are withheld unless they appear in selfState or acquired knowledge. Never infer or announce a calendar date from genre or remembered canon.

@@ -45,6 +45,12 @@ import {
   validateRelationshipOntologyEvidenceAssertions,
   validateRelationshipOntologyReferences,
 } from "../world/relationship-ontology.js";
+import {
+  spatialRelationSchema,
+  validateSpatialEvidenceAssertions,
+  validateSpatialRelationCatalog,
+  type SpatialRelation,
+} from "../world/spatial-ontology.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
@@ -118,7 +124,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -134,6 +140,7 @@ export const compilerProposalSchemas = {
     .superRefine(validateParticipantPresence),
   "event-participation": compilerEventParticipationSchema,
   "event-relation": compilerEventRelationSchema,
+  "spatial-relation": spatialRelationSchema,
   "world-rule": compilerWorldRuleSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "initial-world": initialWorldSchema,
   "character-goal": characterGoalSchema,
@@ -213,8 +220,11 @@ export class CompilerProposalService {
     const characterEvidenceIssues = kind === "character-model"
       ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
       : [];
-    if (targetIssues.length || characterEvidenceIssues.length) {
-      throw new Error([...targetIssues, ...characterEvidenceIssues]
+    const spatialEvidenceIssues = kind === "spatial-relation"
+      ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)
+      : [];
+    if (targetIssues.length || characterEvidenceIssues.length || spatialEvidenceIssues.length) {
+      throw new Error([...targetIssues, ...characterEvidenceIssues, ...spatialEvidenceIssues]
         .map((item) => `${item.code}${item.path ? ` at ${item.path}` : ""}: ${item.message}`).join("; "));
     }
     const proposal: ArtifactProposal<unknown> = {
@@ -354,7 +364,7 @@ export async function validateCompilerProposalClosure(
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
   const actors = new ActorModelStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalRules, canonicalGoals, canonicalPossibilities, pending] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalSpatialRelations, canonicalRules, canonicalGoals, canonicalPossibilities, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -362,6 +372,7 @@ export async function validateCompilerProposalClosure(
     canon.listEvents(),
     canon.listEventParticipations(),
     canon.listEventRelations(),
+    canon.listSpatialRelations(),
     canon.listRules(),
     actors.listGoals(),
     possibilities.list(),
@@ -432,6 +443,13 @@ export async function validateCompilerProposalClosure(
     relations: new Map(canonicalEventRelations.filter(fromActiveSource).map((item) => [item.id, item])),
     requireCompleteCausalProjectionForEventIds: new Set<string>(),
   };
+  const spatialCatalog = {
+    entities: new Map(canonicalEntities.filter(fromActiveSource).map((entity) => [entity.id, { kind: entity.kind }])),
+    events: new Map(canonicalEvents.filter(fromActiveSource).map((event) => [event.id, event])),
+    claims: new Set(canonicalClaims.filter(fromActiveSource).map((claim) => claim.id)),
+    rules: new Set(canonicalRules.filter(fromActiveSource).map((rule) => rule.id)),
+    relations: new Map(canonicalSpatialRelations.filter(fromActiveSource).map((relation) => [relation.id, relation])),
+  };
   const characterOntologyCatalog = {
     entities: new Map(canonicalEntities.filter(fromActiveSource).map((entity) => [entity.id, { kind: entity.kind }])),
     propositions: new Set(canonicalPropositions.filter(fromActiveSource).map((proposition) => proposition.id)),
@@ -447,6 +465,7 @@ export async function validateCompilerProposalClosure(
       const value = entitySchema.parse(proposal.payload);
       participationCatalog.entities.set(value.id, value);
       characterOntologyCatalog.entities.set(value.id, { kind: value.kind });
+      spatialCatalog.entities.set(value.id, { kind: value.kind });
     } else if (proposal.kind === "canonical-event") {
       const value = canonicalEventSchema.parse(proposal.payload);
       participationCatalog.events.set(value.id, value);
@@ -454,16 +473,21 @@ export async function validateCompilerProposalClosure(
         participants: value.participants,
         participantPresence: value.participantPresence,
       });
+      spatialCatalog.events.set(value.id, value);
     } else if (proposal.kind === "event-participation") {
       const value = eventParticipationSchema.parse(proposal.payload);
       participationCatalog.participations.set(value.id, value);
     } else if (proposal.kind === "event-relation") {
       const value = eventRelationSchema.parse(proposal.payload);
       relationCatalog.relations.set(value.id, value);
+    } else if (proposal.kind === "spatial-relation") {
+      const value = spatialRelationSchema.parse(proposal.payload);
+      spatialCatalog.relations.set(value.id, value);
     } else if (proposal.kind === "claim") {
       const value = claimSchema.parse(proposal.payload);
       semanticCatalog.claims.set(value.id, value);
       characterOntologyCatalog.claims.add(value.id);
+      spatialCatalog.claims.add(value.id);
     } else if (proposal.kind === "proposition") {
       const value = propositionSchema.parse(proposal.payload);
       semanticCatalog.propositions.set(value.id, value);
@@ -474,6 +498,8 @@ export async function validateCompilerProposalClosure(
     } else if (proposal.kind === "character-goal") {
       const value = characterGoalSchema.parse(proposal.payload);
       characterOntologyCatalog.goals.set(value.id, { actorId: value.actorId });
+    } else if (proposal.kind === "world-rule") {
+      spatialCatalog.rules.add((proposal.payload as WorldRule).id);
     }
     if (proposal.kind === "canonical-event") {
       const event = canonicalEventSchema.parse(proposal.payload);
@@ -525,6 +551,12 @@ export async function validateCompilerProposalClosure(
         issues.add(`${proposalId}: ${formatGroundingIssue(nameIssue)}`);
       }
     }
+    if (proposal.kind === "spatial-relation") {
+      for (const spatialEvidenceIssue of validateSpatialEvidenceAssertions(
+        spatialRelationSchema.parse(proposal.payload),
+        proposal.evidenceAssertions,
+      )) issues.add(`${proposalId}: ${formatGroundingIssue(spatialEvidenceIssue)}`);
+    }
     collectProposalClosureIssues(proposalId, proposal, catalog, issues);
     for (const located of findKnowledgeDeltas(proposal.payload)) {
       for (let index = 0; index < located.delta.operations.length; index += 1) {
@@ -555,6 +587,9 @@ export async function validateCompilerProposalClosure(
     requireCompleteCausalProjectionForEventIds: relationCatalog.requireCompleteCausalProjectionForEventIds,
   })) {
     issues.add(`event-relation: ${relationIssue.code} at ${relationIssue.path ?? "payload"}: ${relationIssue.message}`);
+  }
+  for (const spatialIssue of validateSpatialRelationCatalog(spatialCatalog.relations.values(), spatialCatalog)) {
+    issues.add(`spatial-relation: ${spatialIssue.code} at ${spatialIssue.path ?? "payload"}: ${spatialIssue.message}`);
   }
   for (const [proposalId, proposal] of staged) {
     if (proposal.kind !== "character-model") continue;
@@ -687,6 +722,22 @@ function collectProposalClosureIssues(
     missing("events", relation.toEventId, "toEventId");
     relation.requiredConditions?.forEach((predicate, index) =>
       collectPredicateIssues(predicate, `requiredConditions.${index}`, missing, fieldReference));
+    return;
+  }
+  if (proposal.kind === "spatial-relation") {
+    const relation = payload as SpatialRelation;
+    const endpoints = relation.kind === "contains"
+      ? [relation.containerLocationId, relation.containedLocationId]
+      : relation.kind === "adjacent"
+        ? relation.locationIds
+        : [relation.fromLocationId, relation.toLocationId];
+    endpoints.forEach((id, index) => missing("entities", id, `endpoints.${index}`));
+    relation.establishedByEventIds.forEach((id, index) => missing("events", id, `establishedByEventIds.${index}`));
+    relation.retiredByEventIds.forEach((id, index) => missing("events", id, `retiredByEventIds.${index}`));
+    relation.knownByClaimIds.forEach((id, index) => missing("claims", id, `knownByClaimIds.${index}`));
+    if (relation.validStoryTime) collectStoryTimeIssues(relation.validStoryTime, "validStoryTime", missing);
+    [...relation.requires, ...relation.blockedWhen].forEach((predicate, index) =>
+      collectPredicateIssues(predicate, `predicates.${index}`, missing, fieldReference));
     return;
   }
   if (proposal.kind === "world-rule") {

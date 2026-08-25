@@ -44,6 +44,7 @@ import {
 import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import { validateKnowledgeSemanticReferences } from "./knowledge-semantics.js";
 import { committedHistory, projectActorScene } from "./scene.js";
+import type { SpatialRelation } from "./spatial-ontology.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -58,6 +59,8 @@ export type WorldModelContext = {
   events?: ReadonlyMap<string, CanonicalEvent>;
   eventParticipations?: readonly EventParticipation[];
   eventRelations?: readonly EventRelation[];
+  spatialOntologyVersion?: "spatial-v1";
+  spatialRelations?: readonly SpatialRelation[];
   actorGoals?: readonly CharacterGoal[];
   actorModels?: ReadonlyMap<string, CharacterModel>;
   possibilityTemplates?: readonly PossibilityTemplate[];
@@ -685,6 +688,8 @@ function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
     entities: [...context.entities.entries()].sort(([left], [right]) => left.localeCompare(right)),
     claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    spatialOntologyVersion: context.spatialOntologyVersion,
+    spatialRelations: [...(context.spatialRelations ?? [])].sort((left, right) => left.id.localeCompare(right.id)),
     rules: [...context.rules.entries()].sort(([left], [right]) => left.localeCompare(right)),
     stateFields: context.stateSchema.list(),
   });

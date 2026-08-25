@@ -21,6 +21,12 @@ import {
   RELATIONSHIP_ONTOLOGY_VERSION,
   validateRelationshipOntologyEvidenceAssertions,
 } from "../world/relationship-ontology.js";
+import {
+  spatialRelationEvidence,
+  spatialRelationSchema,
+  validateSpatialEvidenceAssertions,
+  validateSpatialRelationCatalog,
+} from "../world/spatial-ontology.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
@@ -41,7 +47,7 @@ import { EvidenceAssertionStore } from "./evidence-assertions.js";
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 21;
+export const COMPILER_PROMPT_VERSION = 22;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -70,6 +76,7 @@ const preparedNovelBundleSchema = z.object({
     events: z.array(canonicalEventSchema),
     eventParticipations: z.array(eventParticipationSchema).default([]),
     eventRelations: z.array(eventRelationSchema).default([]),
+    spatialRelations: z.array(spatialRelationSchema).default([]),
     rules: z.array(worldRuleSchema),
     initialWorld: initialWorldSchema,
     goals: z.array(characterGoalSchema),
@@ -102,6 +109,7 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     bundle.canonical.events,
     bundle.canonical.eventParticipations,
     bundle.canonical.eventRelations,
+    bundle.canonical.spatialRelations,
     bundle.canonical.rules,
     bundle.canonical.goals,
     bundle.canonical.models,
@@ -117,6 +125,13 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
       [...relation.evidence, ...(relation.counterEvidence ?? [])],
       sourceId,
       `Prepared event relation ${relation.id}`,
+    );
+  }
+  for (const relation of bundle.canonical.spatialRelations) {
+    assertEvidenceExclusiveToSource(
+      spatialRelationEvidence(relation),
+      sourceId,
+      `Prepared spatial relation ${relation.id}`,
     );
   }
   for (const model of bundle.canonical.models) {
@@ -458,7 +473,7 @@ export class PreparedNovelCache {
         if (matches) assertEvidenceExclusiveToSource(item.evidence, source.id, `Prepared artifact ${item.id ?? item.actorId ?? "unknown"}`);
         return matches;
       });
-    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, rules, goals, models, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, rules, goals, models, possibilities] = await Promise.all([
       canonical.listEntities(),
       canonical.listPropositions(),
       canonical.listAttributions(),
@@ -466,6 +481,7 @@ export class PreparedNovelCache {
       canonical.listEvents(),
       canonical.listEventParticipations(),
       canonical.listEventRelations(),
+      canonical.listSpatialRelations(),
       canonical.listRules(),
       actors.listGoals(),
       actors.listModels(),
@@ -498,6 +514,7 @@ export class PreparedNovelCache {
         events: fromSource(events),
         eventParticipations: fromSource(eventParticipations),
         eventRelations: fromSource(eventRelations),
+        spatialRelations: fromSource(spatialRelations),
         rules: fromSource(rules),
         initialWorld,
         goals: fromSource(goals),
@@ -508,6 +525,7 @@ export class PreparedNovelCache {
     await this.assertTitleInferenceEvidence(bundle);
     assertPreparedBundleSourceScope(bundle);
     await assertPreparedCharacterEvidence(this.workspaceRoot, bundle);
+    await assertPreparedSpatialEvidence(this.workspaceRoot, bundle);
     assertSelfContainedBaseline(bundle, canonical);
     return bundle;
   }
@@ -539,6 +557,7 @@ export class PreparedNovelCache {
       ["event", current.events, expected.events, (item: { id: string }) => item.id],
       ["event participation", current.eventParticipations, expected.eventParticipations, (item: { id: string }) => item.id],
       ["event relation", current.eventRelations, expected.eventRelations, (item: { id: string }) => item.id],
+      ["spatial relation", current.spatialRelations, expected.spatialRelations, (item: { id: string }) => item.id],
       ["rule", current.rules, expected.rules, (item: { id: string }) => item.id],
       ["goal", current.goals, expected.goals, (item: { id: string }) => item.id],
       ["model", current.models, expected.models, (item: { actorId: string }) => item.actorId],
@@ -584,6 +603,7 @@ export class PreparedNovelCache {
       ["events", fromSource(current.events), bundle.canonical.events, (item: { id: string }) => item.id],
       ["event participations", fromSource(current.eventParticipations), bundle.canonical.eventParticipations, (item: { id: string }) => item.id],
       ["event relations", fromSource(current.eventRelations), bundle.canonical.eventRelations, (item: { id: string }) => item.id],
+      ["spatial relations", fromSource(current.spatialRelations), bundle.canonical.spatialRelations, (item: { id: string }) => item.id],
       ["rules", fromSource(current.rules), bundle.canonical.rules, (item: { id: string }) => item.id],
       ["goals", fromSource(current.goals), bundle.canonical.goals, (item: { id: string }) => item.id],
       ["models", fromSource(current.models), bundle.canonical.models, (item: { actorId: string }) => item.actorId],
@@ -646,6 +666,7 @@ export class PreparedNovelCache {
       await removeMissing(current.events, new Set(bundle.canonical.events.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("events", id));
       await removeMissing(current.eventParticipations, new Set(bundle.canonical.eventParticipations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-participations", id));
       await removeMissing(current.eventRelations, new Set(bundle.canonical.eventRelations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-relations", id));
+      await removeMissing(current.spatialRelations, new Set(bundle.canonical.spatialRelations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("spatial-relations", id));
       await removeMissing(current.rules, new Set(bundle.canonical.rules.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("rules", id));
       await removeMissing(current.goals, new Set(bundle.canonical.goals.map((item) => item.id)), (item) => item.id, (id) => actors.removeGoal(id));
       await removeMissing(current.models, new Set(bundle.canonical.models.map((item) => item.actorId)), (item) => item.actorId, (id) => actors.removeModel(id));
@@ -659,6 +680,7 @@ export class PreparedNovelCache {
     for (const event of bundle.canonical.events) await canonical.putEvent(event);
     for (const participation of bundle.canonical.eventParticipations) await canonical.putEventParticipation(participation);
     for (const relation of bundle.canonical.eventRelations) await canonical.putEventRelation(relation);
+    for (const relation of bundle.canonical.spatialRelations) await canonical.putSpatialRelation(relation);
     await new InitialWorldStore(this.workspaceRoot).put(bundle.canonical.initialWorld);
     for (const goal of bundle.canonical.goals) await actors.putGoal(goal);
     for (const model of bundle.canonical.models) await actors.putModel(model);
@@ -857,6 +879,7 @@ async function currentCanonical(workspaceRoot: string) {
     events: await canonical.listEvents(),
     eventParticipations: await canonical.listEventParticipations(),
     eventRelations: await canonical.listEventRelations(),
+    spatialRelations: await canonical.listSpatialRelations(),
     rules: await canonical.listRules(),
     initialWorld: await new InitialWorldStore(workspaceRoot).get(),
     goals: await actors.listGoals(),
@@ -916,6 +939,32 @@ async function assertPreparedCharacterEvidence(
   }
 }
 
+async function assertPreparedSpatialEvidence(
+  workspaceRoot: string,
+  bundle: PreparedNovelBundle,
+): Promise<void> {
+  const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
+  const verifier = new EvidenceVerifier(workspaceRoot);
+  for (const relation of bundle.canonical.spatialRelations) {
+    const binding = await exactEvidence.bindingForArtifact("spatial-relation", relation.id);
+    if (!binding?.assertions.length) {
+      throw new Error(`Prepared spatial relation ${relation.id} has no exact evidence binding.`);
+    }
+    if (binding.artifactHash !== contentHash(relation)) {
+      throw new Error(`Prepared spatial relation ${relation.id} has a stale exact evidence binding.`);
+    }
+    const issues = [
+      ...validateSpatialEvidenceAssertions(relation, binding.assertions),
+      ...(await verifier.verifyAssertions(binding.assertions)).issues,
+    ];
+    if (issues.length) {
+      throw new Error(`Prepared spatial relation ${relation.id} has invalid exact evidence: ${issues
+        .map((issue) => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)
+        .join("; ")}`);
+    }
+  }
+}
+
 function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore: CanonicalModelStore): void {
   const catalog: CompilerValidationCatalog = {
     entities: new Map(bundle.canonical.entities.map((item) => [item.id, item])),
@@ -925,6 +974,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     events: new Map(bundle.canonical.events.map((item) => [item.id, item])),
     eventParticipations: new Map(bundle.canonical.eventParticipations.map((item) => [item.id, item])),
     eventRelations: new Map(bundle.canonical.eventRelations.map((item) => [item.id, item])),
+    spatialRelations: new Map(bundle.canonical.spatialRelations.map((item) => [item.id, item])),
     rules: new Map(bundle.canonical.rules.map((item) => [item.id, item])),
     goals: new Map(bundle.canonical.goals.map((item) => [item.id, item])),
   };
@@ -938,6 +988,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     ...bundle.canonical.events.map((payload) => ({ kind: "canonical-event" as const, label: payload.id, payload })),
     ...bundle.canonical.eventParticipations.map((payload) => ({ kind: "event-participation" as const, label: payload.id, payload })),
     ...bundle.canonical.eventRelations.map((payload) => ({ kind: "event-relation" as const, label: payload.id, payload })),
+    ...bundle.canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation" as const, label: payload.id, payload })),
     { kind: "initial-world", label: "initial-world", payload: bundle.canonical.initialWorld },
     ...bundle.canonical.models.map((payload) => ({ kind: "character-model" as const, label: payload.actorId, payload })),
     ...bundle.canonical.goals.map((payload) => ({ kind: "character-goal" as const, label: payload.id, payload })),
@@ -963,6 +1014,15 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
   });
   if (relationIssues.length) {
     throw new Error(`Cannot cache source-isolated baseline: typed event relation projection is invalid (${relationIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}).`);
+  }
+  const spatialIssues = validateSpatialRelationCatalog(bundle.canonical.spatialRelations, {
+    entities: catalog.entities,
+    events: catalog.events,
+    claims: new Set(catalog.claims.keys()),
+    rules: new Set(catalog.rules.keys()),
+  });
+  if (spatialIssues.length) {
+    throw new Error(`Cannot cache source-isolated baseline: spatial relation projection is invalid (${spatialIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}).`);
   }
   const possibilityIds = new Set(bundle.canonical.possibilities.map((item) => item.id));
   for (const possibility of bundle.canonical.possibilities) {

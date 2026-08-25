@@ -36,6 +36,12 @@ import {
   RELATIONSHIP_STANCE_DIMENSION_IDS,
   RELATIONSHIP_TYPE_IDS,
 } from "../world/relationship-ontology.js";
+import {
+  SPATIAL_ONTOLOGY_VERSION,
+  SPATIAL_TRAVEL_MODE_IDS,
+  spatialEndpoints,
+  type SpatialRelation,
+} from "../world/spatial-ontology.js";
 
 export type CompilerBatch = {
   id: string;
@@ -55,7 +61,7 @@ export type CompilerBatch = {
 };
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 22;
+export const COMPILER_PIPELINE_VERSION = 23;
 
 export type BatchProgress = {
   version: 1;
@@ -101,6 +107,12 @@ type CompilerEventParticipationIdentity = Pick<EventParticipation, "id" | "event
   status: "canonical" | "pending";
 };
 type CompilerEventRelationIdentity = Pick<EventRelation, "id" | "fromEventId" | "toEventId" | "type" | "status" | "confidence"> & {
+  artifactStatus: "canonical" | "pending";
+};
+type CompilerSpatialRelationIdentity = Pick<SpatialRelation, "id" | "kind" | "visibility" | "status" | "confidence"> & {
+  endpoints: [string, string];
+  direction?: "one-way" | "two-way";
+  modes?: string[];
   artifactStatus: "canonical" | "pending";
 };
 type CompilerPossibilityIdentity = {
@@ -153,6 +165,7 @@ type CompilerArtifactCatalog = {
   events: CompilerEventIdentity[];
   eventParticipations: CompilerEventParticipationIdentity[];
   eventRelations: CompilerEventRelationIdentity[];
+  spatialRelations: CompilerSpatialRelationIdentity[];
   rules: CompilerRuleIdentity[];
   initialWorlds: CompilerInitialWorldIdentity[];
   characterGoals: CompilerGoalIdentity[];
@@ -683,6 +696,7 @@ function buildBatchPrompt(
     `Prefer entity and claim proposals before events that reference them. Make physical items whose possession, location, condition, quantity, or delivery changes into artifact entities, including letters and documents. Canonical events must describe one causally atomic narrated occurrence at a time: use one explicitly narrated transition at a time as the causal boundary. Put every simultaneous typed consequence of that occurrence in the same observedOutcome (up to 16 operations); the former at most one state operation limitation no longer applies. Include participant movement, death/injury, resources, relationships, institutions, and location changes; do not hide consequences only in the title, and do not split one death into unrelated pseudo-events merely to store multiple fields. Separate genuinely sequential occurrences. Every explicitly narrated character movement between known locations must update character.location. For every canonical event, write readerSummary as a self-contained 1-3 sentence recap of what has happened and why it matters, using only facts established through that event and no later spoilers. For every character in participants, set participantPresence explicitly: physical means bodily co-presence in the event's lived scene; remote means real-time participation from elsewhere; mentioned means only referred to; represented covers a letter, recording, image, signature, or other proxy; dream and memory are non-present narrative appearances. A letter's author, addressee, signer, or named person is never physical merely because the artifact connects them. When an event is a character's first bodily source appearance after the opening checkpoint, add a characterEntryCheckpoint for that actor. Its readerSetup must establish where, when, who, and the immediate unresolved situation without revealing the event outcome; actorObservation contains only what that actor directly perceives; participantPresence describes the checkpoint itself; delta and knowledge contain only source-backed facts already true immediately before the event and should establish a lived actionable state such as location, plan, or momentum. Never copy observedOutcome or later knowledge into the checkpoint. Compile explicitly narrated later canonical events too: storing later canon as a candidate does not make it active branch truth. Put an observed character knowledge transition in observedKnowledge even when observedOutcome has no state operations. Use timeAdvance for an explicit duration or scene-to-scene passage of time; storyTime is the historical anchor, while narrativeContext records flashback/frame/discourse order and must never reorder world truth. ` +
     `Use Proposition for reusable semantic content and Attribution for who asserts, knows, believes, suspects, reports, denies, or questions it. Accepting either records a source-grounded interpretation; it never makes the proposition world truth. Keep polarity and modality on the proposition, and epistemic/speech attitude on the attribution. When an attribution comes from recorded discourse, list its quotationIds; the host requires quotation speaker mentions on character-held attributions to resolve to that character, treats a document holder as the containing information source rather than an inner speaker, and prevents narrator/unknown holders from silently overriding a resolved speaker. Claims remain the legacy world-level projection consumed by current runtime knowledge operations. A semantic KnowledgeDelta learn operation therefore retains claimId and additionally supplies a content-compatible propositionId plus acquisitionMode; supply attributionId when the acquisition depends on attributed discourse. told requires a matching character sourceActorId, quotation, and resolved addressee; read requires a document attribution and quotation; observed, inferred, remembered, and deceived-misattributed remain distinct acquisition modes. Never create a claim or proposition whose predicate/relation is knows, does-not-know, believes, suspects, heard, or disbelieves. Record who knows a base claim only with KnowledgeDelta learn/forget operations; a character's ignorance is represented by the absence of that learned claim, never by teaching them a does-not-know claim. ` +
     `Character goals/models are policy inputs and must be evidence-backed. A goal must be phase-bounded: use activation preconditions, afterCanonicalEventIds, or storyWindow when the goal is not active at the opening. Supply completion or expiry conditions when the evidence makes them expressible, targetIds for stable people/places/items, and one or more candidateAction/actionPatterns for concrete locally executable next steps. New structured character models use ontologyVersion=${CHARACTER_ONTOLOGY_VERSION}, registered disposition dimensions only (${CHARACTER_DIMENSION_IDS.join(", ")}), controlled context IDs only (${CHARACTER_CONTEXT_IDS.join(", ")}), and empty traits/decisionBiases unless retaining an explicitly legacy:-namespaced key. A disposition must distinguish global/context/target scope, stable/situational applicability, behavioral basis, confidence, and supported/contested status. One action cannot establish a stable disposition unless the narrator explicitly characterizes it; a behavioral stable inference needs at least two distinct source spans. Keep a transient event appraisal separate from stable disposition, and link its interpretation proposition and affected goals. A DevelopmentEpisode explains a before/after disposition change but enters actor context only after its world/experienced trigger events are committed; it never installs the complete future arc. Legacy developmentPhases remain readable, but activate a phase only through world predicates, a realized/experienced canonical event, acquired knowledge, or story time. Trait modifiers are cumulative changes caused by lived history, never a summary of the entire future character arc. Do not let a later goal, appraisal, or personality phase become active merely because its actor identity exists. For directed social policy use relationshipOntologyVersion=${RELATIONSHIP_ONTOLOGY_VERSION}. Reuse one relationship entity whose committed relationship.from is the model actor, relationship.to is its target, relationship.active is true, and relationship.type is one of ${RELATIONSHIP_TYPE_IDS.join(", ")}; the reverse direction requires its own relationship entity and policy. Decompose attitude into stance dimensions (${RELATIONSHIP_STANCE_DIMENSION_IDS.join(", ")}) rather than one generic strength. Typed obligations use only ${RELATIONSHIP_OBLIGATION_TYPE_IDS.join(", ")}, link exact content to a proposition, and remain actor policy rather than objective world truth. Event/knowledge gates must prevent future stance, obligation, or relationship change from entering actor context before the branch commits or the actor experiences/learns its trigger. A RelationshipChange links same-pair before/after records and a mechanism proposition; it never activates merely because the compiler knows the future arc. ` +
+    `Compile consequential place structure with ontologyVersion=${SPATIAL_ONTOLOGY_VERSION} spatial-relation records, each backed by exact field-level evidence. Use contains only for one immediate container-to-contained place edge; do not emit redundant transitive containment. Store symmetric adjacency once with ascending location IDs, but never treat adjacency as permission to pass. Use route for actual traversability, with explicit one-way/two-way direction, controlled travel modes (${SPATIAL_TRAVEL_MODE_IDS.join(", ")}), and source-supported minimum/typical/maximum duration only when stated or safely bounded. A route that opens, closes, appears, or disappears later must be gated by establishedByEventIds, retiredByEventIds, validStoryTime, requires, or blockedWhen; complete future topology is not automatically current branch truth. Set visibility deliberately: public for genuinely common geography, observable only at an endpoint, knowledge with one or more grounding claim IDs, and engine for hidden constraints. Contested spatial interpretations remain auditable but never prove runtime reachability. ` +
     `<initial-world-policy>Ordinary source-review batches must not propose an initial-world; the host runs a separate opening-world pass after source compilation and validation.</initial-world-policy> ` +
     `State operations may use only these registered fields: ${COMPILER_STATE_FIELDS.join(", ")}. Match effects to field meaning exactly: illness changes character.health, closure changes location.open, employment changes character.title or institution membership, ownership changes artifact.owner, and movement changes character.location. Never force an unsupported fact into the nearest-looking field; preserve it as a claim until a typed state representation exists. character.plan is a current actionable intention and character.momentum is finite narrative pressure. character.relationships stores relationship entity IDs, never counterpart character IDs; every new directed relationship must pair that reference with grounded relationship.from/to/type/active state. relationship.type accepts only ${RELATIONSHIP_TYPE_IDS.join(", ")}. relationship.kind, relationship.strength, and relationship.obligations are legacy compatibility fields: do not write them for new semantics, because stance dimensions and typed policy obligations live in the evidence-validated relationship ontology. Every entity-reference value, including set members, must be an ASCII logical entity ID rather than a display name. World-rule predicates are conditions, not outcomes, and a rule with no requires or forbids is invalid. Use elapsed-days-* and story-time-* predicates for temporal laws; after-step/before-step are engine commit counts: never use a chapter number, bell count, date, age, or story ordinal as an engine step. ` +
     `Propose evidence-backed temporal or institutional world rules when their trigger and constraint are expressible with registered state and story-clock predicates. Keep one-off happenings as canonical events, and preserve non-executable social interpretation as claims rather than inventing an always-on law. ` +
@@ -711,6 +725,7 @@ async function loadCompilerArtifactCatalog(
   const events = new Map<string, CompilerEventIdentity>();
   const eventParticipations = new Map<string, CompilerEventParticipationIdentity>();
   const eventRelations = new Map<string, CompilerEventRelationIdentity>();
+  const spatialRelations = new Map<string, CompilerSpatialRelationIdentity>();
   const rules = new Map<string, CompilerRuleIdentity>();
   const initialWorlds: CompilerInitialWorldIdentity[] = [];
   const goals = new Map<string, CompilerGoalIdentity>();
@@ -725,7 +740,7 @@ async function loadCompilerArtifactCatalog(
   const actors = new ActorModelStore(workspaceRoot);
   const initialWorld = new InitialWorldStore(workspaceRoot);
   const possibilityStore = new PossibilityTemplateStore(workspaceRoot);
-  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalRules, canonicalInitial, canonicalGoals, canonicalModels, canonicalPossibilities] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalSpatialRelations, canonicalRules, canonicalInitial, canonicalGoals, canonicalModels, canonicalPossibilities] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -733,6 +748,7 @@ async function loadCompilerArtifactCatalog(
     canon.listEvents(),
     canon.listEventParticipations(),
     canon.listEventRelations(),
+    canon.listSpatialRelations(),
     canon.listRules(),
     initialWorld.get(),
     actors.listGoals(),
@@ -746,6 +762,7 @@ async function loadCompilerArtifactCatalog(
   for (const event of canonicalEvents.filter((item) => hasSourceEvidence(item, sourceId))) events.set(event.id, prioritize(eventIdentity(event, "canonical"), event));
   for (const participation of canonicalEventParticipations.filter((item) => hasSourceEvidence(item, sourceId))) eventParticipations.set(participation.id, prioritize(eventParticipationIdentity(participation, "canonical"), participation));
   for (const relation of canonicalEventRelations.filter((item) => hasSourceEvidence(item, sourceId))) eventRelations.set(relation.id, prioritize(eventRelationIdentity(relation, "canonical"), relation));
+  for (const relation of canonicalSpatialRelations.filter((item) => hasSourceEvidence(item, sourceId))) spatialRelations.set(relation.id, prioritize(spatialRelationIdentity(relation, "canonical"), relation));
   for (const rule of canonicalRules.filter((item) => hasSourceEvidence(item, sourceId))) rules.set(rule.id, prioritize(ruleIdentity(rule, "canonical"), rule));
   if (canonicalInitial && hasSourceEvidence(canonicalInitial, sourceId)) initialWorlds.push(prioritize(initialWorldIdentity(canonicalInitial, "canonical"), canonicalInitial));
   for (const goal of canonicalGoals.filter((item) => hasSourceEvidence(item, sourceId))) goals.set(goal.id, prioritize(goalIdentity(goal, "canonical"), goal));
@@ -777,6 +794,9 @@ async function loadCompilerArtifactCatalog(
     } else if (summary.kind === "event-relation") {
       const proposal = await proposals.read("pending", summary.id, compilerProposalSchemas["event-relation"]);
       if (!eventRelations.has(proposal.payload.id)) eventRelations.set(proposal.payload.id, prioritize(eventRelationIdentity(proposal.payload, "pending"), proposal.payload));
+    } else if (summary.kind === "spatial-relation") {
+      const proposal = await proposals.read("pending", summary.id, compilerProposalSchemas["spatial-relation"]);
+      if (!spatialRelations.has(proposal.payload.id)) spatialRelations.set(proposal.payload.id, prioritize(spatialRelationIdentity(proposal.payload, "pending"), proposal.payload));
     } else if (summary.kind === "world-rule") {
       const proposal = await proposals.read("pending", summary.id, worldRuleSchema);
       if (!rules.has(proposal.payload.id)) rules.set(proposal.payload.id, prioritize(ruleIdentity(proposal.payload, "pending"), proposal.payload));
@@ -806,6 +826,7 @@ async function loadCompilerArtifactCatalog(
     events: byId(events.values()),
     eventParticipations: byId(eventParticipations.values()),
     eventRelations: byId(eventRelations.values()),
+    spatialRelations: byId(spatialRelations.values()),
     rules: byId(rules.values()),
     initialWorlds: initialWorlds.sort((left, right) => `${left.status}:${left.proposalId ?? ""}`.localeCompare(`${right.status}:${right.proposalId ?? ""}`)),
     characterGoals: byId(goals.values()),
@@ -937,6 +958,22 @@ function eventRelationIdentity(
   };
 }
 
+function spatialRelationIdentity(
+  relation: SpatialRelation,
+  artifactStatus: CompilerSpatialRelationIdentity["artifactStatus"],
+): CompilerSpatialRelationIdentity {
+  return {
+    id: relation.id,
+    kind: relation.kind,
+    endpoints: spatialEndpoints(relation),
+    visibility: relation.visibility,
+    status: relation.status,
+    confidence: relation.confidence,
+    ...(relation.kind === "route" ? { direction: relation.direction, modes: [...relation.modes] } : {}),
+    artifactStatus,
+  };
+}
+
 function ruleIdentity(rule: WorldRule, status: CompilerRuleIdentity["status"]): CompilerRuleIdentity {
   return { id: rule.id, name: catalogText(rule.name), scope: rule.scope, status };
 }
@@ -1031,6 +1068,7 @@ function emptyCompilerArtifactCatalog(): CompilerArtifactCatalog {
     events: [],
     eventParticipations: [],
     eventRelations: [],
+    spatialRelations: [],
     rules: [],
     initialWorlds: [],
     characterGoals: [],
@@ -1048,6 +1086,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     events: 120,
     eventParticipations: 240,
     eventRelations: 240,
+    spatialRelations: 160,
     rules: 80,
     initialWorlds: 4,
     characterGoals: 120,
@@ -1062,6 +1101,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     events: sampleCatalog(catalog.events, limits.events),
     eventParticipations: sampleCatalog(catalog.eventParticipations, limits.eventParticipations),
     eventRelations: sampleCatalog(catalog.eventRelations, limits.eventRelations),
+    spatialRelations: sampleCatalog(catalog.spatialRelations, limits.spatialRelations),
     rules: sampleCatalog(catalog.rules, limits.rules),
     initialWorlds: sampleCatalog(catalog.initialWorlds, limits.initialWorlds),
     characterGoals: sampleCatalog(catalog.characterGoals, limits.characterGoals),
@@ -1073,7 +1113,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     const omitted = catalog[key].length - compact[key].length;
     if (omitted > 0) compact.omitted[key] = omitted;
   }
-  const removable = ["possibilities", "eventRelations", "eventParticipations", "events", "claims", "characterGoals", "characterModels", "rules", "entities"] as const;
+  const removable = ["possibilities", "eventRelations", "eventParticipations", "spatialRelations", "events", "claims", "characterGoals", "characterModels", "rules", "entities"] as const;
   while (promptJson(compact).length > MAX_CATALOG_JSON_CHARS) {
     const key = removable.find((candidate) => compact[candidate].length > 1);
     if (!key) break;

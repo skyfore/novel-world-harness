@@ -28,6 +28,7 @@ import {
   chapterHeadingMatches,
   type ChapterSplitPlan,
 } from "./chapter-split.js";
+import { ensureSourceStructure } from "./structure.js";
 
 export type CompilerBatch = {
   id: string;
@@ -47,7 +48,7 @@ export type CompilerBatch = {
 };
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 12;
+export const COMPILER_PIPELINE_VERSION = 13;
 
 export type BatchProgress = {
   version: 1;
@@ -218,6 +219,7 @@ export async function prepareCompilerBatches(
   if (!persistedManifest || !isDeepStrictEqual(persistedManifest, manifest)) {
     await segmentStore.write(manifest);
   }
+  await ensureSourceStructure(workspaceRoot, source);
 
   const chapterMetadata = chapterMetadataForSegments(manifest.segments);
   const groups: SourceSegment[][] = [];

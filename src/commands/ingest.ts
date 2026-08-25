@@ -5,6 +5,7 @@ import type { HarnessConfig } from "../config/schema.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { assertSourceIsNotProjectInstruction } from "../workspace/instruction-trust.js";
+import { ensureSourceStructure } from "../compiler/structure.js";
 
 export async function ingestWorkspaceSource(
   root: string,
@@ -17,7 +18,8 @@ export async function ingestWorkspaceSource(
   const document = await store.registerSource(filePath);
   const manifest = await segmentSource(store.root, document);
   await new SegmentStore(store.root).write(manifest);
-  return { project: storedProject, document, manifest };
+  const structure = await ensureSourceStructure(store.root, document);
+  return { project: storedProject, document, manifest, structure };
 }
 
 export async function ingestWorkspaceContent(
@@ -31,7 +33,8 @@ export async function ingestWorkspaceContent(
   const document = await store.registerSourceContent(title, content);
   const manifest = await segmentSource(store.root, document);
   await new SegmentStore(store.root).write(manifest);
-  return { project: storedProject, document, manifest };
+  const structure = await ensureSourceStructure(store.root, document);
+  return { project: storedProject, document, manifest, structure };
 }
 
 export async function ingestCommand(filePath: string, configPath: string, cacheRoot?: string): Promise<void> {

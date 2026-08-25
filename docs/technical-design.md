@@ -185,6 +185,34 @@ hash to its current assertion revisions. This lets provenance change without
 manufacturing a new world-model revision, while audit and retrieval can reject
 stale bindings.
 
+#### 5.2.1 Source-observation structure and accounting
+
+Canonical artifacts are not a valid denominator for source coverage. Before
+canonicalization, the host materializes a source-observation tree with one
+`work` root, deterministic `paragraph` containers, and `sentence` / `non-scene`
+leaf units. The leaf anchors are a gap-free, non-overlapping byte partition of
+the immutable source. Their IDs are derived from source identity, structure
+version, kind, and byte range, so prompt batching never becomes semantic
+identity.
+
+Scene and discourse annotations are a separate overlapping layer. A memory,
+frame, embedded document, or narrator comment may overlap structural units or
+another discourse span; it never changes textual order or the base partition.
+
+At the successful batch finish handshake, reviewed segment ranges are projected
+onto base units:
+
+- a unit overlapping an exact semantic assertion or committed observation is
+  `represented`;
+- an explicitly reviewed no-artifact unit is `background-only`;
+- whitespace/non-scene bytes are classified deterministically;
+- a unit in a proposal-bearing segment without exact coverage is `unresolved`,
+  not silently counted as extracted.
+
+Audit reports both unit and byte denominators. Missing reviews remain
+`unknown`; fully reviewed unresolved/deferred units are `not-ready`; only full
+accounting without blockers is `ready`.
+
 ### 5.3 Entity
 
 An entity contains stable identity and classification only.

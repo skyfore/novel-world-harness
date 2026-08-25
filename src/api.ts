@@ -5,7 +5,30 @@ export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleS
 export { convergeWorldProposals, type WorldConvergenceProgress, type WorldProposalConvergence } from "./compiler/converge.js";
 export { EvidenceVerifier, type EvidenceInspection, type EvidenceVerification } from "./compiler/evidence.js";
 export { EvidenceAssertionStore, evidenceAssertionSourceIds, validateEvidenceAssertionTargets } from "./compiler/evidence-assertions.js";
-export { jsonPointerExists, modelEvidenceSelectorSchema, modelEvidenceSelectorsSchema, resolveTextAnchor, type ModelEvidenceSelector } from "./compiler/text-anchors.js";
+export { jsonPointerExists, modelEvidenceSelectorSchema, modelEvidenceSelectorsSchema, resolveTextAnchor, textAnchorForByteRange, type ModelEvidenceSelector } from "./compiler/text-anchors.js";
+export {
+  STRUCTURE_VERSION,
+  SourceStructureStore,
+  baseStructuralUnits,
+  discourseSegmentSchema,
+  ensureSourceStructure,
+  materializeSourceStructure,
+  structuralUnitKindSchema,
+  structuralUnitSchema,
+  type DiscourseSegment,
+  type SourceStructureManifest,
+  type StructuralUnit,
+  type StructuralUnitKind,
+} from "./compiler/structure.js";
+export {
+  SourceAccountingStore,
+  sourceAccountingRecordSchema,
+  sourceAccountingStatusSchema,
+  type SourceAccountingManifest,
+  type SourceAccountingRecord,
+  type SourceAccountingStatus,
+  type SourceAccountingSummary,
+} from "./compiler/source-accounting.js";
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
 export { PreparedNovelCache, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
 export { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "./compiler/reconcile-world.js";

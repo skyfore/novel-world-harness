@@ -16,6 +16,8 @@ import {
   validateEvidenceAssertionTargets,
 } from "./evidence-assertions.js";
 import { evidenceSourceIds } from "../world/source-scope.js";
+import { SourceStructureStore, baseStructuralUnits, type SourceStructureManifest } from "./structure.js";
+import { SourceAccountingStore, type SourceAccountingStatus } from "./source-accounting.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -32,6 +34,19 @@ export type CompilerAuditReport = {
     accepted: number;
     rejected: number;
     pendingByKind: Record<string, number>;
+  };
+  observations: {
+    structuredSources: number;
+    structuralUnits: number;
+    baseUnits: number;
+    accountedUnits: number;
+    unaccountedUnits: number;
+    blockingUnits: number;
+    invalidAnchors: number;
+    unitCoverage: number | null;
+    byteCoverage: number | null;
+    statusCounts: Record<SourceAccountingStatus, number>;
+    errors: Array<{ observation: string; code: string; message: string }>;
   };
   canonical: {
     entities: number;
@@ -76,6 +91,7 @@ export type CompilerAuditReport = {
   coverage: {
     sourceIndexing: number | null;
     evidenceBinding: number | null;
+    sourceAccounting: number | null;
     temporalConsistency: number | null;
     stateDeltaExplicitness: number | null;
     causalityConsistency: number | null;
@@ -139,6 +155,59 @@ export async function auditCompiler(
       changedSinceIngest.push(source.id);
     }
   }
+  const structureStore = new SourceStructureStore(workspaceRoot);
+  const accountingStore = new SourceAccountingStore(workspaceRoot);
+  const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
+  const structures: SourceStructureManifest[] = [];
+  let structuralUnits = 0;
+  let baseUnits = 0;
+  let accountedUnits = 0;
+  let unaccountedUnits = 0;
+  let blockingUnits = 0;
+  let accountedObservationBytes = 0;
+  let observationBytes = 0;
+  let invalidObservationAnchors = 0;
+  const observationErrors: CompilerAuditReport["observations"]["errors"] = [];
+  const accountingStatusCounts: Record<SourceAccountingStatus, number> = {
+    represented: 0,
+    "background-only": 0,
+    paratext: 0,
+    "duplicate-description": 0,
+    unresolved: 0,
+    "intentionally-deferred": 0,
+  };
+  for (const source of sources) {
+    const structure = await structureStore.read(source.id);
+    if (!structure || structure.sourceSha256 !== source.contentSha256) continue;
+    structures.push(structure);
+    structuralUnits += structure.units.length;
+    baseUnits += baseStructuralUnits(structure).length;
+    for (const unit of structure.units) {
+      const inspection = await evidenceVerifier.inspectAnchor(unit.anchor);
+      invalidObservationAnchors += inspection.issues.length;
+      for (const issue of inspection.issues) {
+        observationErrors.push({ observation: `structural-unit:${unit.id}`, code: issue.code, message: issue.message });
+      }
+    }
+    for (const discourse of structure.discourseSegments) {
+      for (const anchor of discourse.anchors) {
+        const inspection = await evidenceVerifier.inspectAnchor(anchor);
+        invalidObservationAnchors += inspection.issues.length;
+        for (const issue of inspection.issues) {
+          observationErrors.push({ observation: `discourse-segment:${discourse.id}`, code: issue.code, message: issue.message });
+        }
+      }
+    }
+    const summary = await accountingStore.summarize(structure);
+    accountedUnits += summary.accountedUnits;
+    unaccountedUnits += summary.unaccountedUnits;
+    blockingUnits += summary.blockingUnits;
+    accountedObservationBytes += summary.accountedBytes;
+    observationBytes += summary.totalBytes;
+    for (const status of Object.keys(accountingStatusCounts) as SourceAccountingStatus[]) {
+      accountingStatusCounts[status] += summary.statusCounts[status];
+    }
+  }
 
   const proposalStore = new ProposalStore(workspaceRoot);
   const [pending, accepted, rejected] = await Promise.all([
@@ -176,7 +245,6 @@ export async function auditCompiler(
   const models = allModels.filter(belongsToSelectedSource);
   const possibilities = allPossibilities.filter(belongsToSelectedSource);
 
-  const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
   const evidenceArtifacts: Array<{ name: string; kind: string; id: string; payload: unknown; evidence: EvidenceRef[] }> = [
     ...entities.map((item) => ({ name: `entity:${item.id}`, kind: "entity", id: item.id, payload: item, evidence: item.evidence })),
     ...claims.map((item) => ({ name: `claim:${item.id}`, kind: "claim", id: item.id, payload: item, evidence: item.evidence })),
@@ -410,7 +478,7 @@ export async function auditCompiler(
   const exactBindingRatio = evidenceArtifacts.length ? validExactBindings / evidenceArtifacts.length : null;
   const structuralReadiness: CompilerReadinessState = !sources.length
     ? "not-ready"
-    : changedSinceIngest.length || segmented !== sources.length
+    : changedSinceIngest.length || segmented !== sources.length || structures.length !== sources.length || invalidObservationAnchors
       ? "not-ready"
       : "ready";
   const evidenceReadiness: CompilerReadinessState = evidenceArtifacts.length === 0
@@ -440,13 +508,20 @@ export async function auditCompiler(
         : runtimeRatios.every((value) => value === 1)
           ? "ready"
           : "unknown";
-  // Source accounting and mention-resolution stores are introduced by later
-  // compiler milestones. Keep them explicitly unknown rather than deriving a
-  // false denominator from already-extracted canonical artifacts.
+  const accountingReadiness: CompilerReadinessState = !sources.length || structures.length !== sources.length
+    ? "unknown"
+    : unaccountedUnits > 0
+      ? "unknown"
+      : blockingUnits > 0
+        ? "not-ready"
+        : "ready";
+  // Mention-resolution stores are introduced by the next compiler milestone.
+  // Keep resolution explicitly unknown rather than deriving a false
+  // denominator from already-extracted canonical artifacts.
   const readinessStates = {
     structural: structuralReadiness,
     evidence: evidenceReadiness,
-    accounting: "unknown" as const,
+    accounting: accountingReadiness,
     resolution: "unknown" as const,
     semantic: semanticReadiness,
     runtime: runtimeReadiness,
@@ -461,6 +536,7 @@ export async function auditCompiler(
   const readinessBlockingIssues = [
     ...changedSinceIngest.map((sourceId) => `Source ${sourceId} changed or failed immutable-source verification.`),
     ...evidenceErrors.map((error) => `${error.artifact}: ${error.code}: ${error.message}`),
+    ...observationErrors.map((error) => `${error.observation}: ${error.code}: ${error.message}`),
     ...graph.cycles.map((cycle) => `Causal cycle: ${cycle.join(" -> ")}`),
     ...graph.missing.map(({ eventId, parentId }) => `Event ${eventId} has missing causal parent ${parentId}.`),
     ...graph.temporalRegressions.map(({ eventId, parentId }) => `Event ${eventId} is earlier than causal parent ${parentId}.`),
@@ -472,6 +548,19 @@ export async function auditCompiler(
     version: 1,
     sources: { registered: sources.length, segmented, segments: segmentCount, changedSinceIngest },
     proposals: { pending: pending.length, accepted: accepted.length, rejected: rejected.length, pendingByKind },
+    observations: {
+      structuredSources: structures.length,
+      structuralUnits,
+      baseUnits,
+      accountedUnits,
+      unaccountedUnits,
+      blockingUnits,
+      invalidAnchors: invalidObservationAnchors,
+      unitCoverage: baseUnits ? accountedUnits / baseUnits : null,
+      byteCoverage: observationBytes ? accountedObservationBytes / observationBytes : null,
+      statusCounts: accountingStatusCounts,
+      errors: observationErrors,
+    },
     canonical: {
       entities: entities.length,
       claims: claims.length,
@@ -515,6 +604,7 @@ export async function auditCompiler(
     coverage: {
       sourceIndexing,
       evidenceBinding: validBindingRatio,
+      sourceAccounting: baseUnits ? accountedUnits / baseUnits : null,
       temporalConsistency: events.length ? (graph.cycles.length || graph.temporalRegressions.length ? 0 : 1) : null,
       stateDeltaExplicitness: events.length ? eventsWithExplicitDelta / events.length : null,
       causalityConsistency: events.length ? (graph.cycles.length || graph.missing.length || narrativeGraphNavigable === false ? 0 : 1) : null,

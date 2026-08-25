@@ -45,6 +45,8 @@ import {
   resolveTextAnchor,
   type ModelEvidenceSelector,
 } from "./text-anchors.js";
+import { ensureSourceStructure } from "./structure.js";
+import { SourceAccountingStore } from "./source-accounting.js";
 
 function proposalResult(text: string, details: CompilerProposalRecordedDetails) {
   return { content: [{ type: "text" as const, text }], details };
@@ -1078,6 +1080,28 @@ export function createCompilerProposalToolset(
         if (!activeSourceId) return failFinish("Novel-title proposal lost its active source identity.");
         await (await WorkspaceStore.create(workspaceRoot))
           .commitSourceTitleProposal(activeSourceId, pendingNovelTitleProposal.proposalId);
+      }
+      if (activeSourceId && compilerBatchId && input.reviewed_segments.length) {
+        const workspace = await WorkspaceStore.create(workspaceRoot);
+        const source = await workspace.getSource(activeSourceId);
+        if (!source) return failFinish(`Unknown active compiler source: ${activeSourceId}`);
+        const segmentsById = new Map(validatedSourceSegments.map((segment) => [segment.id, segment]));
+        const assertions: EvidenceAssertion[] = [];
+        for (const proposalId of listed) {
+          const envelope = await service.store.readEnvelope("pending", proposalId);
+          assertions.push(...evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []));
+        }
+        await new SourceAccountingStore(workspaceRoot).recordBatchReview({
+          source,
+          structure: await ensureSourceStructure(workspaceRoot, source),
+          batchId: compilerBatchId,
+          reviews: input.reviewed_segments.map((review) => {
+            const segment = segmentsById.get(review.segment_id);
+            if (!segment) throw new Error(`Reviewed segment ${review.segment_id} is not in the validated source manifest.`);
+            return { segment, disposition: review.disposition, summary: review.summary };
+          }),
+          evidenceAssertions: assertions,
+        });
       }
       finished = true;
       return {

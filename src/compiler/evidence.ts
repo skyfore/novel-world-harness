@@ -23,6 +23,7 @@ export type EvidenceInspection = EvidenceVerification & {
 type CachedSource = {
   source: SourceDocument;
   buffer: Buffer;
+  sha256: string;
   lines: Array<{ startByte: number; endByte: number }>;
 };
 
@@ -140,11 +141,10 @@ export class EvidenceVerifier {
         )],
       };
     }
-    const currentHash = sha256(cached.buffer);
-    if (currentHash !== cached.source.contentSha256) {
+    if (cached.sha256 !== cached.source.contentSha256) {
       return {
         valid: false,
-        issues: [issue("EVIDENCE_SOURCE_CHANGED", `Source ${cached.source.sourcePath} changed after ingest; expected ${cached.source.contentSha256}, found ${currentHash}`)],
+        issues: [issue("EVIDENCE_SOURCE_CHANGED", `Source ${cached.source.sourcePath} changed after ingest; expected ${cached.source.contentSha256}, found ${cached.sha256}`)],
       };
     }
     if (span.startLine > cached.lines.length || span.endLine > cached.lines.length) {
@@ -194,7 +194,7 @@ export class EvidenceVerifier {
     for (const source of sources) {
       try {
         const buffer = await readSourceMaterial(this.workspaceRoot, source);
-        this.cache.set(source.id, { source, buffer, lines: lineRanges(buffer.toString("utf8")) });
+        this.cache.set(source.id, { source, buffer, sha256: sha256(buffer), lines: lineRanges(buffer.toString("utf8")) });
       } catch (error) {
         this.sourceErrors.set(source.id, error instanceof Error ? error.message : String(error));
       }

@@ -15,6 +15,8 @@ import { inspectPlayExperience, listPlayableCharacters } from "../src/world/play
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../src/world/removal.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { SourceStructureStore } from "../src/compiler/structure.js";
+import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 
 const roots: string[] = [];
 
@@ -104,6 +106,7 @@ describe("novel-world removal", () => {
       proposals: 1,
       initialWorld: true,
       evidenceIndex: true,
+      sourceObservations: true,
       compilerProgress: true,
       preparedCache: true,
     });
@@ -116,6 +119,8 @@ describe("novel-world removal", () => {
       characters: [expect.objectContaining({ id: "first-hero" })],
     });
     await expect(fs.stat(cachePath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(new SourceStructureStore(root).read(first.source.id)).resolves.toBeNull();
+    await expect(new SourceAccountingStore(root).read(first.source.id)).resolves.toBeNull();
   });
 
   it("removes a novel, all of its instances, and active parsed state without deleting archived evidence", async () => {

@@ -91,11 +91,39 @@ export async function resolveTextAnchor(
   const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(segment.sourceId);
   if (!source) throw new Error(`Unknown evidence source ${segment.sourceId}.`);
   const sourceBytes = await readSourceMaterial(workspaceRoot, source);
-  const startLine = segment.startLine + newlineCount(before);
-  const endLine = startLine + newlineCount(exact);
+  return textAnchorForByteRange(segment.sourceId, sourceBytes, startByte, endByte);
+}
+
+/** Build a trusted anchor for a host-selected, non-empty UTF-8 source range. */
+export function textAnchorForByteRange(
+  sourceId: string,
+  sourceBytesInput: Uint8Array,
+  startByte: number,
+  endByte: number,
+): TextAnchor {
+  idSchema.parse(sourceId);
+  const sourceBytes = Buffer.from(sourceBytesInput);
+  if (!Number.isInteger(startByte) || !Number.isInteger(endByte)
+    || startByte < 0 || endByte <= startByte || endByte > sourceBytes.byteLength) {
+    throw new Error(`Invalid text-anchor byte range ${startByte}-${endByte} for ${sourceBytes.byteLength} source bytes.`);
+  }
+  const exactBytes = sourceBytes.subarray(startByte, endByte);
+  const exact = exactBytes.toString("utf8");
+  if (!Buffer.from(exact, "utf8").equals(exactBytes)) {
+    throw new Error(`Text-anchor byte range ${startByte}-${endByte} splits an invalid UTF-8 boundary.`);
+  }
+  const before = sourceBytes.subarray(0, startByte).toString("utf8");
+  if (Buffer.byteLength(before, "utf8") !== startByte) {
+    throw new Error(`Text-anchor start byte ${startByte} splits an invalid UTF-8 boundary.`);
+  }
+  const startLine = 1 + newlineCount(before);
+  // endByte is exclusive. The final anchored byte belongs to the line reached
+  // immediately before that byte, including when the byte itself is an EOL.
+  const beforeFinalByte = sourceBytes.subarray(0, endByte - 1).toString("utf8");
+  const endLine = 1 + newlineCount(beforeFinalByte);
   return textAnchorSchema.parse({
     version: 1,
-    sourceId: segment.sourceId,
+    sourceId,
     startByte,
     endByte,
     startLine,

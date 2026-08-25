@@ -14,6 +14,8 @@ import { ProposalStore } from "../src/world/canonical-model.js";
 import { entitySchema } from "../src/world/model.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { SourceStructureStore } from "../src/compiler/structure.js";
+import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 
 const roots: string[] = [];
 
@@ -94,6 +96,27 @@ describe("compiler proposal tools", () => {
     });
     await expect(new EvidenceVerifier(root).verifyAssertions(pending.evidenceAssertions ?? []))
       .resolves.toMatchObject({ valid: true, issues: [] });
+
+    const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    await expect(finish.execute("finish-exact-entity", {
+      outcome: "complete",
+      reviewed_segments: [{
+        segment_id: fixture.segmentId,
+        disposition: "proposed",
+        summary: "Recorded the source-backed character mention and classification.",
+      }],
+      summary: "Exact evidence resolves the represented source unit.",
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true },
+    });
+    const structure = await new SourceStructureStore(root).read(fixture.source.id);
+    expect(structure).not.toBeNull();
+    await expect(new SourceAccountingStore(root).summarize(structure!)).resolves.toMatchObject({
+      unitCoverage: 1,
+      byteCoverage: 1,
+      blockingUnits: 0,
+      statusCounts: { represented: 1 },
+    });
 
     expect((await new CompilerCommitService(root).accept("entity", "entity-hero-exact")).accepted).toBe(true);
     const binding = await new EvidenceAssertionStore(root).bindingForArtifact("entity", "hero");

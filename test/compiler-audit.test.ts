@@ -6,6 +6,7 @@ import { auditCompiler } from "../src/compiler/audit.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
 import { resolveTextAnchor } from "../src/compiler/text-anchors.js";
+import { ensureSourceStructure } from "../src/compiler/structure.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
@@ -23,6 +24,7 @@ describe("compiler audit", () => {
     const source = await workspace.getSource(fixture.source.id);
     const manifest = await segmentSource(root, source!);
     await new SegmentStore(root).write(manifest);
+    await ensureSourceStructure(root, source!);
 
     const proposals = new CompilerProposalService(root);
     const commits = new CompilerCommitService(root);

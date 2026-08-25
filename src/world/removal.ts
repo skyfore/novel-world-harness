@@ -6,6 +6,8 @@ import { BoundaryCalibrationStore } from "../compiler/boundary-calibration.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { SegmentStore } from "../compiler/segments.js";
 import { ChapterSplitPlanStore } from "../compiler/chapter-split.js";
+import { SourceStructureStore } from "../compiler/structure.js";
+import { SourceAccountingStore } from "../compiler/source-accounting.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore } from "./actors.js";
 import { CanonicalModelStore, ProposalStore } from "./canonical-model.js";
@@ -30,6 +32,7 @@ export type NovelAnalysisRemovalResult = {
   proposals: number;
   initialWorld: boolean;
   evidenceIndex: boolean;
+  sourceObservations: boolean;
   compilerProgress: boolean;
   preparedCache: boolean;
 };
@@ -142,6 +145,14 @@ export async function removeNovelAnalysis(
   const evidenceIndex = Boolean(await segments.readManifest(sourceId));
   await segments.remove(sourceId);
   await new ChapterSplitPlanStore(root).remove(sourceId);
+  const structureStore = new SourceStructureStore(root);
+  const accountingStore = new SourceAccountingStore(root);
+  const sourceObservations = Boolean(
+    await structureStore.read(sourceId)
+    || await accountingStore.read(sourceId),
+  );
+  await structureStore.remove(sourceId);
+  await accountingStore.remove(sourceId);
 
   const batchStore = new CompilerBatchStore(root);
   const boundaryStore = new BoundaryCalibrationStore(root);
@@ -166,6 +177,7 @@ export async function removeNovelAnalysis(
     proposals,
     initialWorld: removedInitialWorld,
     evidenceIndex,
+    sourceObservations,
     compilerProgress,
     preparedCache,
   };

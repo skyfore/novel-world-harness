@@ -1285,7 +1285,12 @@ superseding revisions, source-scoped paging, audit denominators, and canonical
 name/alias trace gates. M3b-1 event mentions are also implemented in the
 non-canonical observation layer with exact trigger/extent anchors, participant
 mention references, discourse context, salience, closure, paging, and audit
-counts. M3b-2 event identity/resolution remains next.
+counts. M3b-2 is now implemented in `src/compiler/event-resolution.ts` and
+`src/compiler/event-resolution-retrieval.ts`: deterministic evidence/title/
+participant candidates, explicit coreference/subevent clusters,
+resolved/new-event/ambiguous/unresolved decisions, immutable merge/split
+revisions, participant and canonical-event trace gates, paging, recovery, and
+major-event audit coverage complete M3.
 
 Work:
 

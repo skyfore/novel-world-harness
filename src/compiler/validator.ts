@@ -29,6 +29,7 @@ import {
 } from "./evidence-assertions.js";
 import { evidenceSourceIds } from "../world/source-scope.js";
 import { validateCommittedEntityResolutionTrace } from "./entity-resolution.js";
+import { validateCommittedEventResolutionTrace } from "./event-resolution.js";
 
 export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
@@ -652,6 +653,13 @@ export class CompilerCommitService {
         entitySchema.parse(payload),
       )).map((message) => issue("MISSING_ENTITY_RESOLUTION_TRACE", message, "id"))
       : [];
+    const eventResolutionTraceIssues = kind === "canonical-event" && sourceIds.length === 1
+      ? (await validateCommittedEventResolutionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        canonicalEventSchema.parse(payload),
+      )).map((message) => issue("MISSING_EVENT_RESOLUTION_TRACE", message, "id"))
+      : [];
     const errors = [
       ...validation.errors,
       ...inspected.issues,
@@ -660,6 +668,7 @@ export class CompilerCommitService {
       ...exactInspection.issues,
       ...mixedSourceIssues,
       ...resolutionTraceIssues,
+      ...eventResolutionTraceIssues,
     ];
     return { accepted: errors.length === 0, errors, warnings: validation.warnings };
   }

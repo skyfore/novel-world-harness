@@ -1193,8 +1193,13 @@ candidate、显式 resolved/new-entity/ambiguous/unresolved 决策、immutable
 superseding revision、source-scoped 分页、audit denominator，以及 canonical
 name/alias trace gate。M3b-1 event mention 也已进入 non-canonical observation
 层：保留 exact trigger/extent anchor、participant mention reference、discourse
-context、salience、closure、分页与 audit count。M3b-2 event identity/resolution
-是下一步。
+context、salience、closure、分页与 audit count。M3b-2 也已在
+`src/compiler/event-resolution.ts` 与
+`src/compiler/event-resolution-retrieval.ts` 实现：deterministic
+evidence/title/participant candidate、显式 coreference/subevent cluster、
+resolved/new-event/ambiguous/unresolved 决策、immutable merge/split revision、
+participant/canonical-event trace gate、分页、恢复与 major-event audit
+coverage；M3 至此完成。
 
 改造：
 

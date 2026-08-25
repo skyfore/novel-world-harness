@@ -39,6 +39,7 @@ import {
 } from "./evidence-assertions.js";
 import { SourceAnnotationStore } from "./annotations.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
+import { EventResolutionStore } from "./event-resolution.js";
 
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
@@ -207,6 +208,7 @@ export async function rejectPendingCompilerBatchProposals(
   }
   rejected.push(...await new SourceAnnotationStore(workspaceRoot).rejectBatch(compilerBatchId));
   rejected.push(...await new EntityResolutionStore(workspaceRoot).rejectBatch(compilerBatchId));
+  rejected.push(...await new EventResolutionStore(workspaceRoot).rejectBatch(compilerBatchId));
   return rejected;
 }
 
@@ -249,6 +251,7 @@ export async function rejectPendingCompilerSourceProposals(
   }
   rejected.push(...await new SourceAnnotationStore(workspaceRoot).rejectSource(sourceId));
   rejected.push(...await new EntityResolutionStore(workspaceRoot).rejectSource(sourceId));
+  rejected.push(...await new EventResolutionStore(workspaceRoot).rejectSource(sourceId));
   return rejected;
 }
 

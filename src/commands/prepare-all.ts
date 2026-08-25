@@ -25,6 +25,7 @@ import {
 import type { ReparseCommandOptions } from "./reparse.js";
 import {
   ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
+  EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
   SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
 } from "../compiler/proposal-tools.js";
 
@@ -298,6 +299,7 @@ export async function prepareAllCommand(
           "propose_state_delta",
           ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
           ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
+          ...EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
         ],
         acquireLock: false,
         signal: options.signal,
@@ -472,6 +474,7 @@ async function runWorldReconciliationPass(input: {
       "propose_state_delta",
       ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
       ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
+      ...EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
     ],
     acquireLock: false,
     signal: input.options.signal,

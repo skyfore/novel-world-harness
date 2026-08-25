@@ -53,6 +53,27 @@ export {
   type LexicalEntityResolutionCandidate,
 } from "./compiler/entity-resolution.js";
 export {
+  EVENT_RESOLUTION_ONTOLOGY_VERSION,
+  EventResolutionStore,
+  eventResolutionCandidateSchema,
+  eventResolutionProposalSchema,
+  eventResolutionRelationSchema,
+  eventResolutionSchema,
+  generateEventResolutionCandidates,
+  inspectEventResolutionCoverage,
+  validateCommittedEventResolutionTrace,
+  validateEventProposalResolutionTrace,
+  validateEventResolutionClosure,
+  type DeterministicEventResolutionCandidate,
+  type EventResolution,
+  type EventResolutionCandidate,
+  type EventResolutionCoverage,
+  type EventResolutionProposal,
+  type EventResolutionProposalStatus,
+  type EventResolutionProposalSummary,
+  type EventResolutionRelation,
+} from "./compiler/event-resolution.js";
+export {
   STRUCTURE_VERSION,
   SourceStructureStore,
   baseStructuralUnits,

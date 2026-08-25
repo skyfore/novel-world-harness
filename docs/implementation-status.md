@@ -14,7 +14,8 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Source ingest | Implemented | Exact file/stdin/inline bytes archived globally by SHA-256, source manifest, widened deterministic evidence segments, plus finish-gated declarative chapter discovery when built-in headings are insufficient |
 | Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce source-exclusive typed pending proposals, recover drafts across retries, allow narrow withdrawal, and use host-owned finish and total-tool-call circuit breakers |
 | Source observations | M2 + M3b-1 implemented | Immutable-source paragraph/sentence partition, exact entity/event mention, quotation, and discourse annotations, source-local closure, accounting, audit, batch recovery, and paged retrieval; event mentions carry no truth or canonical-event authority |
-| Entity resolution | M3a implemented | Deterministic source-scoped lexical candidates, explicit resolved/new/ambiguous/unresolved decisions, immutable superseding revisions, unresolved audit queues, and canonical name/alias trace gates; event resolution remains M3b |
+| Entity resolution | M3a implemented | Deterministic source-scoped lexical candidates, explicit resolved/new/ambiguous/unresolved decisions, immutable superseding revisions, unresolved audit queues, and canonical name/alias trace gates |
+| Event resolution | M3b implemented | Source-scoped evidence/title/participant candidates, explicit coreference vs subevent clusters, resolved/new/ambiguous/unresolved decisions, merge/split revisions, major-event coverage, participant trace, and canonical-event commit gates |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
@@ -51,6 +52,11 @@ The branch now implements a constrained end-to-end path from a local novel throu
   not auto-merge. Canonical names and aliases from sources with mention
   inventory must pass both finish-time and commit-time resolution trace gates;
   ambiguity remains stored and blocks resolution readiness.
+- Event identity is a separate versioned cluster decision. Evidence overlap,
+  title/trigger similarity, and participant overlap only rank candidates;
+  coreference versus subevent remains explicit. Cluster merge/split revisions
+  preserve prior partitions, while canonical events and every participant must
+  trace through accepted event/entity mention resolutions.
 - Built-in author headings are preferred. A longer heading-free source first gets a bounded, non-citable structure sample; the model may choose a literal prefix/number-style/suffix rule through `configure_chapter_split`, but cannot submit executable code or regex. The host requires exact sampled examples, validates all source-line matches, and persists the plan only inside a successful finish handshake. Prepared revisions retain that plan.
 - Evidence segments are bounded at 96 KiB / 1,000 lines. Up to eight continuation segments from the same detected chapter may share a compiler batch, subject to 128 KiB serialized-source and byte limits; batches never merge different chapters.
 - The full segment manifest is rederived from immutable source bytes and deep-compared before model context is built; a scoped compiler turn captures its selected slice before inference, so stale or mid-turn metadata cannot widen the evidence boundary.

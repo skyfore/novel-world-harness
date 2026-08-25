@@ -77,10 +77,25 @@ import {
   ENTITY_RESOLUTION_RETRIEVAL_TOOL_NAMES,
   createEntityResolutionRetrievalTools,
 } from "./entity-resolution-retrieval.js";
+import {
+  EVENT_RESOLUTION_ONTOLOGY_VERSION,
+  EventResolutionStore,
+  eventResolutionSchema,
+  validateEventProposalResolutionTrace,
+  validateEventResolutionClosure,
+  type EventResolution,
+} from "./event-resolution.js";
+import {
+  EVENT_RESOLUTION_RETRIEVAL_TOOL_NAMES,
+  createEventResolutionRetrievalTools,
+} from "./event-resolution-retrieval.js";
 
 function proposalResult(
   text: string,
-  details: CompilerProposalRecordedDetails | SourceAnnotationProposalRecordedDetails | IdentityResolutionProposalRecordedDetails,
+  details: CompilerProposalRecordedDetails
+    | SourceAnnotationProposalRecordedDetails
+    | IdentityResolutionProposalRecordedDetails
+    | EventResolutionProposalRecordedDetails,
 ) {
   return { content: [{ type: "text" as const, text }], details };
 }
@@ -105,6 +120,7 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "read_compiler_artifact",
   ...SOURCE_ANNOTATION_TOOL_NAMES,
   ...ENTITY_RESOLUTION_RETRIEVAL_TOOL_NAMES,
+  ...EVENT_RESOLUTION_RETRIEVAL_TOOL_NAMES,
   ...SOURCE_EVIDENCE_TOOL_NAMES,
   "peek_adjacent_evidence",
   "defer_boundary_artifact",
@@ -114,6 +130,7 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "propose_quotation",
   "propose_discourse_segment",
   "propose_entity_resolution",
+  "propose_event_resolution",
   "withdraw_compiler_proposal",
   "replace_boundary_proposal",
   "finish_compiler_batch",
@@ -133,6 +150,7 @@ export const SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES = [
 ] as const;
 
 export const ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES = ["propose_entity_resolution"] as const;
+export const EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES = ["propose_event_resolution"] as const;
 
 type ProposalToolInput = {
   proposal_id: string;
@@ -347,11 +365,23 @@ type IdentityResolutionProposalRecordedDetails = {
   remainingToolCalls: number;
 };
 
+type EventResolutionProposalRecordedDetails = {
+  proposalId: string;
+  kind: "event-resolution";
+  resolutionId: string;
+  eventMentionIds: string[];
+  status: EventResolution["status"];
+  activeProposalCount: number;
+  toolCallCount: number;
+  remainingToolCalls: number;
+};
+
 type CompilerProposalDetails =
   | CompilerBatchBlockedDetails
   | CompilerProposalRecordedDetails
   | SourceAnnotationProposalRecordedDetails
-  | IdentityResolutionProposalRecordedDetails;
+  | IdentityResolutionProposalRecordedDetails
+  | EventResolutionProposalRecordedDetails;
 
 type NovelTitleProposalDetails =
   | CompilerBatchBlockedDetails
@@ -550,6 +580,51 @@ const identityResolutionParameters = Type.Object({
   rationale: Type.String({ minLength: 1, maxLength: 2_000 }),
 }, { additionalProperties: false });
 
+const eventResolutionRelationParameters = Type.Union([
+  Type.Literal("coreference"),
+  Type.Literal("subevent"),
+]);
+
+const eventResolutionCandidateParameters = Type.Object({
+  canonical_event_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  relation: eventResolutionRelationParameters,
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  basis_event_mention_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), {
+    minItems: 1,
+    maxItems: 64,
+    uniqueItems: true,
+  }),
+  evidence_assertion_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), {
+    maxItems: 64,
+    uniqueItems: true,
+  }),
+  rationale: Type.String({ minLength: 1, maxLength: 1_000 }),
+}, { additionalProperties: false });
+
+const eventResolutionParameters = Type.Object({
+  proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  resolution_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  event_mention_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), {
+    minItems: 1,
+    maxItems: 64,
+    uniqueItems: true,
+  }),
+  status: Type.Union([
+    Type.Literal("resolved"),
+    Type.Literal("new-event"),
+    Type.Literal("ambiguous"),
+    Type.Literal("unresolved"),
+  ]),
+  canonical_event_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  relation: Type.Optional(eventResolutionRelationParameters),
+  candidates: Type.Array(eventResolutionCandidateParameters, { maxItems: 64 }),
+  supersedes_resolution_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), {
+    maxItems: 64,
+    uniqueItems: true,
+  }),
+  rationale: Type.String({ minLength: 1, maxLength: 2_000 }),
+}, { additionalProperties: false });
+
 function safeTextSuffix(text: string, maxChars: number): string {
   let start = Math.max(0, text.length - maxChars);
   if (start > 0 && start < text.length
@@ -567,11 +642,13 @@ export function createCompilerProposalToolset(
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
   const entityResolutionStore = new EntityResolutionStore(workspaceRoot);
+  const eventResolutionStore = new EventResolutionStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
   const boundaryCalibrations = new BoundaryCalibrationStore(workspaceRoot);
   const successfulProposalIds = new Set<string>();
   const successfulAnnotationProposalIds = new Set<string>();
   const successfulEntityResolutionProposalIds = new Set<string>();
+  const successfulEventResolutionProposalIds = new Set<string>();
   const peekedDirections = new Set<"previous" | "next">();
   let expectedSegmentIds: string[] = [];
   let boundedSliceSegments: SourceSegment[] = [];
@@ -633,6 +710,7 @@ export function createCompilerProposalToolset(
   const activeProposalCount = () => successfulProposalIds.size
     + successfulAnnotationProposalIds.size
     + successfulEntityResolutionProposalIds.size
+    + successfulEventResolutionProposalIds.size
     + (pendingNovelTitleProposal ? 1 : 0);
   const isStructureDiscoveryBatch = () => Boolean(
     activeSourceId
@@ -726,6 +804,9 @@ export function createCompilerProposalToolset(
     }
     if (successfulEntityResolutionProposalIds.has(proposalId)) {
       throw new Error(`Proposal ID ${proposalId} is already used by an entity-resolution proposal in this batch.`);
+    }
+    if (successfulEventResolutionProposalIds.has(proposalId)) {
+      throw new Error(`Proposal ID ${proposalId} is already used by an event-resolution proposal in this batch.`);
     }
     if (!successfulAnnotationProposalIds.has(proposalId) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
       throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
@@ -1150,6 +1231,12 @@ export function createCompilerProposalToolset(
       () => compilerBatchId,
       () => beginToolCall("retrieval"),
     ),
+    ...createEventResolutionRetrievalTools(
+      workspaceRoot,
+      () => activeSourceId,
+      () => compilerBatchId,
+      () => beginToolCall("retrieval"),
+    ),
     ...createCompilerSourceEvidenceTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
   ];
 
@@ -1181,6 +1268,9 @@ export function createCompilerProposalToolset(
         }
         if (successfulEntityResolutionProposalIds.has(input.proposal_id)) {
           throw new Error(`Proposal ID ${input.proposal_id} is already used by an entity-resolution proposal in this batch.`);
+        }
+        if (successfulEventResolutionProposalIds.has(input.proposal_id)) {
+          throw new Error(`Proposal ID ${input.proposal_id} is already used by an event-resolution proposal in this batch.`);
         }
         if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
           throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
@@ -1411,7 +1501,9 @@ export function createCompilerProposalToolset(
       assertBatchWritable();
       if (isStructureDiscoveryBatch()) throw new Error("Identity resolution is unavailable during chapter structure discovery.");
       if (!activeSourceId) throw new Error("Identity resolution requires an active source-scoped compiler batch.");
-      if (successfulProposalIds.has(input.proposal_id) || successfulAnnotationProposalIds.has(input.proposal_id)) {
+      if (successfulProposalIds.has(input.proposal_id)
+        || successfulAnnotationProposalIds.has(input.proposal_id)
+        || successfulEventResolutionProposalIds.has(input.proposal_id)) {
         throw new Error(`Proposal ID ${input.proposal_id} is already used by another compiler proposal in this batch.`);
       }
       if (!successfulEntityResolutionProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
@@ -1471,6 +1563,91 @@ export function createCompilerProposalToolset(
       );
     },
   });
+  const eventResolutionTool = defineTool<typeof eventResolutionParameters, CompilerProposalDetails>({
+    name: "propose_event_resolution",
+    label: "Propose event resolution",
+    description: "Stage an explicit event-mention cluster as resolved, new-event, ambiguous, or unresolved, with coreference/subevent semantics. This never commits occurrence or world effects by itself.",
+    promptSnippet: "Resolve, cluster, or deliberately leave open source event mentions after deterministic candidate lookup",
+    promptGuidelines: [
+      "Call find_event_resolution_candidates for each cluster member before selecting an event.",
+      "Use resolved only for an existing canonical event and new-event only for a same-finish propose_canonical_event candidate.",
+      "Coreference means the mention describes the canonical event itself; subevent means it describes a proper component and cannot alone ground that canonical event.",
+      "Ambiguous and unresolved are valid outcomes. Narrative adjacency, evidence overlap, or a shared participant never proves coreference.",
+      "Every candidate basis must include every event_mention_id in the proposed cluster.",
+      "A merge or split uses a new resolution_id and supersedes_resolution_ids naming the exact current cluster revisions it replaces.",
+    ],
+    executionMode: "sequential",
+    parameters: eventResolutionParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (isStructureDiscoveryBatch()) throw new Error("Event resolution is unavailable during chapter structure discovery.");
+      if (!activeSourceId) throw new Error("Event resolution requires an active source-scoped compiler batch.");
+      if (successfulProposalIds.has(input.proposal_id)
+        || successfulAnnotationProposalIds.has(input.proposal_id)
+        || successfulEntityResolutionProposalIds.has(input.proposal_id)) {
+        throw new Error(`Proposal ID ${input.proposal_id} is already used by another compiler proposal in this batch.`);
+      }
+      if (!successfulEventResolutionProposalIds.has(input.proposal_id)
+        && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
+        throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+      }
+      const resolution = eventResolutionSchema.parse({
+        version: 1,
+        id: input.resolution_id,
+        sourceId: activeSourceId,
+        eventMentionIds: [...input.event_mention_ids].sort(),
+        status: input.status,
+        ...(input.canonical_event_id ? { canonicalEventId: input.canonical_event_id } : {}),
+        ...(input.relation ? { relation: input.relation } : {}),
+        candidates: input.candidates.map((candidate) => ({
+          canonicalEventId: candidate.canonical_event_id,
+          relation: candidate.relation,
+          confidence: candidate.confidence,
+          basisEventMentionIds: [...candidate.basis_event_mention_ids].sort(),
+          evidenceAssertionIds: candidate.evidence_assertion_ids,
+          rationale: candidate.rationale,
+        })),
+        supersedesResolutionIds: [...input.supersedes_resolution_ids].sort(),
+        rationale: input.rationale,
+        derivation: {
+          runId: compilerBatchId ?? input.proposal_id,
+          worker: "propose_event_resolution",
+          ...(compilerBatchId ? { compilerBatchId } : {}),
+          ...generatedBy,
+          ontologyVersion: EVENT_RESOLUTION_ONTOLOGY_VERSION,
+        },
+      });
+      await eventResolutionStore.stage(activeSourceId, {
+        version: 1,
+        id: input.proposal_id,
+        payload: resolution,
+        generatedBy: {
+          worker: "propose_event_resolution",
+          ...(compilerBatchId ? { compilerBatchId } : {}),
+          ...generatedBy,
+        },
+        createdAt: new Date().toISOString(),
+      });
+      successfulEventResolutionProposalIds.add(input.proposal_id);
+      recordProposalProgress();
+      return proposalResult(
+        `Pending event-resolution proposal ${input.proposal_id} recorded for ${resolution.eventMentionIds.length} event mention(s) with status ${resolution.status}. It is an identity decision, not committed occurrence or world truth. Active proposals: ${activeProposalCount()}/${MAX_ACTIVE_COMPILER_PROPOSALS}.`,
+        {
+          proposalId: input.proposal_id,
+          kind: "event-resolution",
+          resolutionId: resolution.id,
+          eventMentionIds: resolution.eventMentionIds,
+          status: resolution.status,
+          activeProposalCount: activeProposalCount(),
+          toolCallCount: totalToolCalls,
+          remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+        },
+      );
+    },
+  });
   const withdrawParameters = Type.Object({
     proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
     reason: Type.String({ minLength: 1, maxLength: 500 }),
@@ -1499,6 +1676,28 @@ export function createCompilerProposalToolset(
         recordProposalProgress();
         return {
           content: [{ type: "text" as const, text: `Novel-title proposal ${input.proposal_id} withdrawn: ${input.reason}` }],
+          details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
+        };
+      }
+      if (successfulEventResolutionProposalIds.has(input.proposal_id)) {
+        if (!activeSourceId) throw new Error("Event-resolution proposal lost its active source identity.");
+        let alreadyCommitted = false;
+        try {
+          await eventResolutionStore.withdraw(activeSourceId, input.proposal_id);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          await eventResolutionStore.readProposal(activeSourceId, "accepted", input.proposal_id);
+          alreadyCommitted = true;
+        }
+        successfulEventResolutionProposalIds.delete(input.proposal_id);
+        recordProposalProgress();
+        return {
+          content: [{
+            type: "text" as const,
+            text: alreadyCommitted
+              ? `Previously committed recovery event resolution ${input.proposal_id} released from this finish handshake; immutable history remains available for a merge/split revision: ${input.reason}`
+              : `Event-resolution proposal ${input.proposal_id} withdrawn to rejected history: ${input.reason}`,
+          }],
           details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
         };
       }
@@ -1666,10 +1865,12 @@ export function createCompilerProposalToolset(
       const listed = [...successfulProposalIds].sort();
       const listedAnnotations = [...successfulAnnotationProposalIds].sort();
       const listedEntityResolutions = [...successfulEntityResolutionProposalIds].sort();
+      const listedEventResolutions = [...successfulEventResolutionProposalIds].sort();
       const expected = [
         ...listed,
         ...listedAnnotations,
         ...listedEntityResolutions,
+        ...listedEventResolutions,
         ...(pendingNovelTitleProposal ? [pendingNovelTitleProposal.proposalId] : []),
       ].sort();
       if (new Set(expected).size !== expected.length) {
@@ -1730,6 +1931,32 @@ export function createCompilerProposalToolset(
       if (entityTraceIssues.length) {
         return failFinish(`Canonical entity proposal trace is incomplete:\n- ${entityTraceIssues.join("\n- ")}`);
       }
+      const eventResolutionClosureIssues = activeSourceId
+        ? await validateEventResolutionClosure(
+          workspaceRoot,
+          activeSourceId,
+          listedEventResolutions,
+          listedAnnotations,
+          listedEntityResolutions,
+          listed,
+        )
+        : [];
+      if (eventResolutionClosureIssues.length) {
+        return failFinish(`Event-resolution graph is incomplete:\n- ${eventResolutionClosureIssues.join("\n- ")}`);
+      }
+      const eventTraceIssues = activeSourceId
+        ? await validateEventProposalResolutionTrace(
+          workspaceRoot,
+          activeSourceId,
+          listed,
+          listedAnnotations,
+          listedEntityResolutions,
+          listedEventResolutions,
+        )
+        : [];
+      if (eventTraceIssues.length) {
+        return failFinish(`Canonical event proposal trace is incomplete:\n- ${eventTraceIssues.join("\n- ")}`);
+      }
       if (pendingChapterSplitPlan) {
         if (!activeSourceId) return failFinish("Structure discovery lost its active source identity.");
         const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
@@ -1751,6 +1978,9 @@ export function createCompilerProposalToolset(
         : [];
       if (activeSourceId && listedEntityResolutions.length) {
         await entityResolutionStore.commitProposals(activeSourceId, listedEntityResolutions);
+      }
+      if (activeSourceId && listedEventResolutions.length) {
+        await eventResolutionStore.commitProposals(activeSourceId, listedEventResolutions);
       }
       if (activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const workspace = await WorkspaceStore.create(workspaceRoot);
@@ -1795,6 +2025,7 @@ export function createCompilerProposalToolset(
       ...proposalTools,
       ...annotationProposalTools,
       identityResolutionTool,
+      eventResolutionTool,
       withdrawTool,
       replaceBoundaryTool,
       finishTool,
@@ -1803,6 +2034,7 @@ export function createCompilerProposalToolset(
       successfulProposalIds.clear();
       successfulAnnotationProposalIds.clear();
       successfulEntityResolutionProposalIds.clear();
+      successfulEventResolutionProposalIds.clear();
       peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];
@@ -1893,6 +2125,14 @@ export function createCompilerProposalToolset(
             throw new Error(`Compiler batch ${compilerBatchId} reuses proposal ID ${summary.id} across proposal stores.`);
           }
           successfulEntityResolutionProposalIds.add(summary.id);
+        }
+        for (const summary of await eventResolutionStore.listBatchProposals(activeSourceId, compilerBatchId)) {
+          if (successfulProposalIds.has(summary.id)
+            || successfulAnnotationProposalIds.has(summary.id)
+            || successfulEntityResolutionProposalIds.has(summary.id)) {
+            throw new Error(`Compiler batch ${compilerBatchId} reuses proposal ID ${summary.id} across proposal stores.`);
+          }
+          successfulEventResolutionProposalIds.add(summary.id);
         }
       }
     },

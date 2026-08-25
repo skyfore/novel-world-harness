@@ -294,6 +294,48 @@ ambiguous, unresolved, or invalid decisions are `not-ready`; all observed
 entity mentions selected through valid resolutions are `ready`; sources with no
 mention inventory remain `unknown` rather than receiving synthetic coverage.
 
+#### 5.2.4 Event identity and cluster resolution
+
+`src/compiler/event-resolution.ts` keeps textual event presentation separate
+from canonical occurrence. An `EventResolution` owns one or more event mention
+IDs and records one of four explicit outcomes:
+
+- `resolved` links the cluster to an existing canonical event;
+- `new-event` links it to a canonical-event proposal in the same finish
+  handshake;
+- `ambiguous` retains at least two event/relation candidates;
+- `unresolved` records that no safe event identity is available.
+
+A selected candidate also declares `coreference` or `subevent`.
+Coreference says the cluster describes the canonical event itself; subevent
+says it describes only a proper component and therefore cannot, by itself,
+ground the canonical event. Candidate generation is deterministic and
+source-scoped. It ranks exact-evidence overlap, normalized title/trigger
+similarity, and already-resolved participant overlap, but these signals never
+auto-merge events or assert that an event occurred.
+
+Current refs are keyed by event mention while immutable payloads may cover a
+cluster. A merge names all current `supersedesResolutionIds`; a split emits
+multiple non-overlapping new clusters that collectively cover every mention in
+the superseded cluster. Finish validation rejects dropped members, overlapping
+new clusters, in-place revision IDs, unknown candidates, unresolved
+participants, and cross-source evidence. Failed-batch cleanup restores the
+prior partition without deleting revision history.
+
+When a source has event mentions, every new canonical-event proposal must have
+a same-finish coreferential `new-event` trace. Every canonical participant must
+also trace through a participant entity mention whose identity resolution
+selects that entity. `CompilerCommitService` repeats the event trace check, so
+direct acceptance cannot bypass the finish gate. Sources compiled before event
+mention inventory remain readable until explicit reparse.
+
+`find_event_resolution_candidates`, `find_event_resolutions`, and
+`read_event_resolution` provide bounded source-local candidate, unresolved,
+merge/split, and exact-payload retrieval. Audit reports all event-resolution
+states and computes `majorEventResolution` from event mentions explicitly
+marked `major`; ambiguous, unresolved, pending, invalid, or absent decisions
+block resolution readiness.
+
 ### 5.3 Entity
 
 An entity contains stable identity and classification only.

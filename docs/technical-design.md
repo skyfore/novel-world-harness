@@ -4,6 +4,7 @@
 - **Date:** 2026-08-11
 - **Applies to:** Phase 1–3 world compiler/runtime work
 - **Architecture decisions:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0003](adr/0003-world-time-character-development-and-divergence.md), [ADR 0004](adr/0004-model-first-player-intent-and-world-adjudication.md)
+- **Semantic compiler follow-up:** [中文技术计划](novel-semantic-compilation-plan.zh-CN.md) / [English technical plan](novel-semantic-compilation-plan.md)
 
 ## 1. Purpose
 

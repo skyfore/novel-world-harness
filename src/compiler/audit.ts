@@ -10,6 +10,8 @@ import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { hasExecutablePossibilityEffect } from "./semantics.js";
 
+export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
+
 export type CompilerAuditReport = {
   version: 1;
   sources: {
@@ -80,6 +82,18 @@ export type CompilerAuditReport = {
     openingPhysicalPresence: number | null;
     openingActionability: number | null;
     autonomousDriverCoverage: number | null;
+  };
+  readiness: {
+    policyVersion: "baseline-v1";
+    structural: CompilerReadinessState;
+    evidence: CompilerReadinessState;
+    accounting: CompilerReadinessState;
+    resolution: CompilerReadinessState;
+    semantic: CompilerReadinessState;
+    runtime: CompilerReadinessState;
+    publication: CompilerReadinessState;
+    unknownDimensions: string[];
+    blockingIssues: string[];
   };
   notes: string[];
 };
@@ -348,6 +362,63 @@ export async function auditCompiler(
         : Math.min(1, indexedBytes / sourceBytes)
     : null;
   const validBindingRatio = referencesChecked ? Math.max(0, 1 - evidenceErrors.length / referencesChecked) : null;
+  const structuralReadiness: CompilerReadinessState = !sources.length
+    ? "not-ready"
+    : changedSinceIngest.length || segmented !== sources.length
+      ? "not-ready"
+      : "ready";
+  const evidenceReadiness: CompilerReadinessState = evidenceArtifacts.length === 0
+    ? "unknown"
+    : evidenceErrors.length
+      ? "not-ready"
+      : "ready";
+  const semanticReadiness: CompilerReadinessState = events.length < 20
+    ? "unknown"
+    : semanticIssues.length
+      ? "not-ready"
+      : "ready";
+  const runtimeRatios = [
+    openingReaderSetup,
+    openingPhysicalPresence,
+    openingActionability,
+    autonomousDriverCoverage,
+  ];
+  const runtimeReadiness: CompilerReadinessState = !initialWorld
+    ? "not-ready"
+    : narrativeGraphNavigable === false || graph.cycles.length > 0 || graph.missing.length > 0
+      ? "not-ready"
+      : runtimeRatios.some((value) => value === 0)
+        ? "not-ready"
+        : runtimeRatios.every((value) => value === 1)
+          ? "ready"
+          : "unknown";
+  // Source accounting and mention-resolution stores are introduced by later
+  // compiler milestones. Keep them explicitly unknown rather than deriving a
+  // false denominator from already-extracted canonical artifacts.
+  const readinessStates = {
+    structural: structuralReadiness,
+    evidence: evidenceReadiness,
+    accounting: "unknown" as const,
+    resolution: "unknown" as const,
+    semantic: semanticReadiness,
+    runtime: runtimeReadiness,
+  };
+  const unknownDimensions = Object.entries(readinessStates)
+    .filter(([, state]) => state === "unknown")
+    .map(([name]) => name);
+  const publicationReadiness: CompilerReadinessState = Object.values(readinessStates)
+    .every((state) => state === "ready")
+    ? "ready"
+    : "not-ready";
+  const readinessBlockingIssues = [
+    ...changedSinceIngest.map((sourceId) => `Source ${sourceId} changed or failed immutable-source verification.`),
+    ...evidenceErrors.map((error) => `${error.artifact}: ${error.code}: ${error.message}`),
+    ...graph.cycles.map((cycle) => `Causal cycle: ${cycle.join(" -> ")}`),
+    ...graph.missing.map(({ eventId, parentId }) => `Event ${eventId} has missing causal parent ${parentId}.`),
+    ...graph.temporalRegressions.map(({ eventId, parentId }) => `Event ${eventId} is earlier than causal parent ${parentId}.`),
+    ...(narrativeGraphNavigable === false ? ["The canonical event graph is not narratively navigable."] : []),
+    ...semanticIssues,
+  ];
 
   return {
     version: 1,
@@ -410,9 +481,17 @@ export async function auditCompiler(
       openingActionability,
       autonomousDriverCoverage,
     },
+    readiness: {
+      policyVersion: "baseline-v1",
+      ...readinessStates,
+      publication: publicationReadiness,
+      unknownDimensions,
+      blockingIssues: readinessBlockingIssues,
+    },
     notes: [
       ...(options.sourceId ? [`Audit is scoped to source ${options.sourceId}; unrelated registered sources and artifacts are excluded.`] : []),
       "Null coverage values are intentional: the compiler does not have a trustworthy denominator for those dimensions yet.",
+      "Readiness states distinguish ready, not-ready, and unknown; unknown required dimensions prevent publication readiness.",
       "Canonical artifact counts are inventory, not full-book semantic coverage.",
       ...(narrativeGraphNavigable === false
         ? ["The canonical event graph is dominated by unconditional disconnected roots; recurring characters alone are not enough to make later canon active at the opening."]

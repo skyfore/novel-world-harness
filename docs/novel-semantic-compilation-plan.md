@@ -1069,37 +1069,39 @@ records must use:
 
 ## 10. Audit and publication gates
 
-Replace the overloaded `semanticReady` with:
+Replace the overloaded `semanticReady` with an explicit three-state report:
 
 ```ts
+type ReadinessState = "ready" | "not-ready" | "unknown";
+
 type CompilerReadiness = {
-  structuralReady: boolean;
-  evidenceReady: boolean;
-  accountingReady: boolean;
-  resolutionReady: boolean;
-  semanticReady: boolean;
-  runtimeReady: boolean;
-  publicationReady: boolean;
+  structural: ReadinessState;
+  evidence: ReadinessState;
+  accounting: ReadinessState;
+  resolution: ReadinessState;
+  semantic: ReadinessState;
+  runtime: ReadinessState;
+  publication: ReadinessState;
   unknownDimensions: string[];
-  blockingIssues: ValidationIssue[];
+  blockingIssues: string[];
 };
 ```
 
 Definitions:
 
-- `structuralReady`: source identity, segmentation, hierarchy, and coverage are
+- `structural`: source identity, segmentation, hierarchy, and coverage are
   valid.
-- `evidenceReady`: every required field/relation has valid exact anchors or an
+- `evidence`: every required field/relation has valid exact anchors or an
   explicit derivation.
-- `accountingReady`: every required base unit has an accounting record.
-- `resolutionReady`: unresolved and ambiguous mention rates are below a
+- `accounting`: every required base unit has an accounting record.
+- `resolution`: unresolved and ambiguous mention rates are below a
   declared, genre-specific threshold; all canonical references resolve.
-- `semanticReady`: events, relations, time, state/knowledge effects, character
+- `semantic`: events, relations, time, state/knowledge effects, character
   goals/models, and rules satisfy schema and consistency gates.
-- `runtimeReady`: initial checkpoint, physical presence, actionability,
+- `runtime`: initial checkpoint, physical presence, actionability,
   autonomous drivers, replay, and actor isolation pass.
-- `publicationReady`: all required readiness dimensions are true. Unknown is
-  blocking, not equivalent to true.
+- `publication`: all required readiness dimensions are ready. Unknown is
+  blocking, not equivalent to ready.
 
 Audit denominators:
 

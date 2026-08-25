@@ -41,6 +41,21 @@ describe("compiler audit", () => {
     expect(report.coverage.entityResolution).toBeNull();
     expect(report.coverage.majorEventResolution).toBeNull();
     expect(report.coverage.epistemicCoverage).toBeNull();
+    expect(report.readiness).toMatchObject({
+      policyVersion: "baseline-v1",
+      structural: "ready",
+      evidence: "ready",
+      accounting: "unknown",
+      resolution: "unknown",
+      semantic: "unknown",
+      runtime: "not-ready",
+      publication: "not-ready",
+    });
+    expect(report.readiness.unknownDimensions).toEqual(expect.arrayContaining([
+      "accounting",
+      "resolution",
+      "semantic",
+    ]));
   });
 
   it("can audit one source without inheriting another source's changed file or artifacts", async () => {
@@ -151,6 +166,11 @@ describe("compiler audit", () => {
       expect.stringContaining("participant slots declare"),
       expect.stringContaining("source-grounded reader recap"),
       expect.stringContaining("no executable actor goal or non-canonical autonomous possibility"),
+    ]));
+    expect(report.readiness.semantic).toBe("not-ready");
+    expect(report.readiness.publication).toBe("not-ready");
+    expect(report.readiness.blockingIssues).toEqual(expect.arrayContaining([
+      expect.stringContaining("typed state or knowledge effect"),
     ]));
   });
 });

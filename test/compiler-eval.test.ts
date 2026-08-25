@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { evaluateCompilerAgainstGold } from "../src/eval/compiler-eval.js";
+import { compilerGoldSchema, evaluateCompilerAgainstGold } from "../src/eval/compiler-eval.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 
 const roots: string[] = [];
@@ -51,6 +51,59 @@ describe("compiler gold evaluation", () => {
     expect(report.entities.unexpected).toEqual(["extra"]);
     expect(report.events.f1).toBe(1);
     expect(report.causalEdges.f1).toBe(1);
+    expect(report.goldVersion).toBe(1);
+    expect(report.semanticLayers.mentions.status).toBe("not-annotated");
+    expect(report.unavailableDimensions).toEqual([]);
+  });
+
+  it("accepts a layered semantic gold denominator without treating unimplemented layers as zero recall", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-eval-layered-"));
+    roots.push(root);
+    const report = await evaluateCompilerAgainstGold(root, {
+      version: 2,
+      name: "layered-gold",
+      canonical: { expectedEntityIds: ["hero"], expectedEventIds: ["arrival"] },
+      semantic: {
+        mentions: [
+          { id: "mention-hero", kind: "entity", span: { sourceId: "source-a", startByte: 0, endByte: 4 } },
+          { id: "mention-arrival", kind: "event", span: { sourceId: "source-a", startByte: 5, endByte: 12 } },
+        ],
+        entityClusters: [{ id: "entity-hero", mentionIds: ["mention-hero"], canonicalEntityId: "hero" }],
+        eventClusters: [{ id: "event-arrival", mentionIds: ["mention-arrival"], canonicalEventId: "arrival" }],
+        eventParticipants: [{
+          id: "participant-arrival-hero",
+          eventClusterId: "event-arrival",
+          entityClusterId: "entity-hero",
+          role: "agent",
+        }],
+      },
+    });
+
+    expect(report.goldVersion).toBe(2);
+    expect(report.entities.recall).toBe(0);
+    expect(report.semanticLayers.mentions).toMatchObject({
+      status: "not-implemented",
+      expected: 2,
+      actual: null,
+      recall: null,
+    });
+    expect(report.semanticLayers.entityResolution.status).toBe("not-implemented");
+    expect(report.semanticLayers.eventRelations.status).toBe("not-annotated");
+    expect(report.unavailableDimensions).toEqual(expect.arrayContaining([
+      "mentions",
+      "entityResolution",
+      "eventResolution",
+      "eventParticipants",
+    ]));
+  });
+
+  it("rejects layered gold with dangling semantic references", () => {
+    expect(() => compilerGoldSchema.parse({
+      version: 2,
+      name: "invalid-layered-gold",
+      semantic: {
+        entityClusters: [{ id: "hero", mentionIds: ["missing-mention"] }],
+      },
+    })).toThrow(/Unknown mention 'missing-mention'/);
   });
 });
-

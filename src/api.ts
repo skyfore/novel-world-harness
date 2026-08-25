@@ -1,4 +1,4 @@
-export { auditCompiler, type CompilerAuditReport } from "./compiler/audit.js";
+export { auditCompiler, type CompilerAuditReport, type CompilerReadinessState } from "./compiler/audit.js";
 export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
 export { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./compiler/boundary-calibration.js";
 export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleSchema, chapterSplitPlanSchema, type ChapterHeadingRule, type ChapterSplitPlan, type ChapterStructureSample } from "./compiler/chapter-split.js";
@@ -9,7 +9,18 @@ export { PreparedNovelCache, type PreparedCacheResult, type PreparedCacheRevisio
 export { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "./compiler/reconcile-world.js";
 export { CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
 export { CompilerCommitService, CompilerValidator, type CompilerConvergenceProgress, type CompilerValidation } from "./compiler/validator.js";
-export { evaluateCompilerAgainstGold, compilerGoldSchema, type CompilerEvaluationReport, type CompilerGold, type SetMetric } from "./eval/compiler-eval.js";
+export {
+  evaluateCompilerAgainstGold,
+  compilerGoldSchema,
+  compilerSemanticGoldSchema,
+  type CompilerEvaluationReport,
+  type CompilerGold,
+  type CompilerSemanticGold,
+  type SemanticEvaluationStatus,
+  type SemanticLayerMetric,
+  type SemanticLayerName,
+  type SetMetric,
+} from "./eval/compiler-eval.js";
 export { inspectPreparation, type PreparationInspection, type PreparationStage } from "./workflow/prepare.js";
 export { ingestWorkspaceContent, ingestWorkspaceSource } from "./commands/ingest.js";
 export { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore, type SourceMaterialIdentity } from "./storage/source-material-store.js";

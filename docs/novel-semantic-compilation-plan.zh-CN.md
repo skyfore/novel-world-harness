@@ -1001,34 +1001,36 @@ $NWH_HOME/workspaces/v1/<workspace-id>/
 
 ## 9. Audit 与 publication gate
 
-将单个 `semanticReady` 拆成：
+将单个 `semanticReady` 拆成显式三态：
 
 ```ts
+type ReadinessState = "ready" | "not-ready" | "unknown";
+
 type CompilerReadiness = {
-  structuralReady: boolean;
-  evidenceReady: boolean;
-  accountingReady: boolean;
-  resolutionReady: boolean;
-  semanticReady: boolean;
-  runtimeReady: boolean;
-  publicationReady: boolean;
+  structural: ReadinessState;
+  evidence: ReadinessState;
+  accounting: ReadinessState;
+  resolution: ReadinessState;
+  semantic: ReadinessState;
+  runtime: ReadinessState;
+  publication: ReadinessState;
   unknownDimensions: string[];
-  blockingIssues: ValidationIssue[];
+  blockingIssues: string[];
 };
 ```
 
 定义：
 
-- `structuralReady`：source、segment、hierarchy、byte coverage 有效。
-- `evidenceReady`：每个 required field/relation 有 exact anchor 或显式推理链。
-- `accountingReady`：所有基础单元有 accounting record。
-- `resolutionReady`：所有 canonical reference 已解析；ambiguous/unresolved
+- `structural`：source、segment、hierarchy、byte coverage 有效。
+- `evidence`：每个 required field/relation 有 exact anchor 或显式推理链。
+- `accounting`：所有基础单元有 accounting record。
+- `resolution`：所有 canonical reference 已解析；ambiguous/unresolved
   在声明阈值内。
-- `semanticReady`：event、relation、time、state/knowledge effect、
+- `semantic`：event、relation、time、state/knowledge effect、
   character、rule 通过一致性验证。
-- `runtimeReady`：opening checkpoint、presence、actionability、
+- `runtime`：opening checkpoint、presence、actionability、
   autonomous driver、replay 和 knowledge isolation 通过。
-- `publicationReady`：所有必需维度都为 true；unknown 是 blocking。
+- `publication`：所有必需维度都为 ready；unknown 是 blocking。
 
 新的 denominator：
 

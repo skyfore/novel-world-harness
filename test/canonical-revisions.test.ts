@@ -77,6 +77,67 @@ describe("CanonicalModelStore revisions", () => {
     expect(pinned.claims?.size).toBe(0);
   });
 
+  it("pins typed event participation revisions and refuses an incomplete runtime projection", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-participation-context-"));
+    roots.push(root);
+    const canon = new CanonicalModelStore(root);
+    const contexts = new WorldContextStore(root, canon);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] });
+    await canon.putEntity({ id: "gate", kind: "location", canonicalName: "Gate", aliases: [], evidence: [] });
+    await canon.putEvent({
+      id: "hero-enters-gate",
+      title: "Hero enters the gate",
+      participants: ["hero", "gate"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      storyTime: { kind: "unknown" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: [],
+      causalParents: [],
+      confidence: 1,
+    });
+    await canon.putEventParticipation({
+      id: "hero-enters-gate-hero",
+      eventId: "hero-enters-gate",
+      entityId: "hero",
+      role: "agent",
+      presence: "physical",
+      confidence: 1,
+      evidence: [],
+    });
+    await canon.putEventParticipation({
+      id: "hero-enters-gate-gate",
+      eventId: "hero-enters-gate",
+      entityId: "gate",
+      role: "destination",
+      confidence: 1,
+      evidence: [],
+    });
+
+    const first = await contexts.captureCurrent();
+    const stored = JSON.parse(await fs.readFile(path.join(contexts.root, `${first.canonicalSnapshotHash}.json`), "utf8")) as { version: number };
+    expect(stored.version).toBe(5);
+    expect(first.events?.get("hero-enters-gate")?.participants).toEqual(["hero", "gate"]);
+    expect(first.eventParticipations).toContainEqual(expect.objectContaining({ id: "hero-enters-gate-hero", role: "agent" }));
+
+    await canon.putEventParticipation({
+      id: "hero-enters-gate-hero",
+      eventId: "hero-enters-gate",
+      entityId: "hero",
+      role: "experiencer",
+      presence: "physical",
+      confidence: 0.8,
+      evidence: [],
+    });
+    const latest = await contexts.captureCurrent();
+    const pinned = await contexts.load(first.canonicalSnapshotHash!);
+    expect(latest.eventParticipations).toContainEqual(expect.objectContaining({ role: "experiencer" }));
+    expect(pinned.eventParticipations).toContainEqual(expect.objectContaining({ role: "agent" }));
+
+    await canon.removeCurrent("event-participations", "hero-enters-gate-gate");
+    await expect(contexts.captureCurrent()).rejects.toThrow("INCOMPLETE_EVENT_PARTICIPATION");
+  });
+
   it("pins branch projection to the canonical snapshot captured at genesis", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-context-snapshot-"));
     roots.push(root);

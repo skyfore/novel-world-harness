@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { CompilerProposalService, validateCompilerProposalClosure } from "../src/compiler/proposals.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
@@ -16,7 +16,7 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-compiler-"));
   roots.push(root);
   const source = await createEvidenceFixture(root, "曹操，字孟德\n北门\nUnknown person appears\n");
-  return { proposals: new CompilerProposalService(root), commits: new CompilerCommitService(root), evidence: source.evidence };
+  return { root, proposals: new CompilerProposalService(root), commits: new CompilerCommitService(root), evidence: source.evidence };
 }
 
 describe("CompilerCommitService", () => {
@@ -706,6 +706,116 @@ describe("CompilerCommitService", () => {
         })],
       },
     });
+  });
+
+  it("commits a same-pass event before its typed participation records", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await commits.canon.putEntity({ id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") });
+    await commits.canon.putEntity({ id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("北门") });
+    await proposals.submit("canonical-event", {
+      proposalId: "arrival-event",
+      payload: {
+        id: "cao-arrives-at-gate",
+        title: "曹操来到北门",
+        participants: ["cao-cao", "north-gate"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操，字孟德\n北门"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    for (const [proposalId, payload] of [
+      ["arrival-cao-role", {
+        id: "cao-arrives-at-gate-cao",
+        eventId: "cao-arrives-at-gate",
+        entityId: "cao-cao",
+        role: "agent",
+        presence: "physical",
+        confidence: 1,
+        evidence: evidence("曹操"),
+      }],
+      ["arrival-gate-role", {
+        id: "cao-arrives-at-gate-gate",
+        eventId: "cao-arrives-at-gate",
+        entityId: "north-gate",
+        role: "destination",
+        confidence: 1,
+        evidence: evidence("北门"),
+      }],
+    ] as const) {
+      await proposals.submit("event-participation", {
+        proposalId,
+        payload,
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.kind)).toEqual([
+      "canonical-event",
+      "event-participation",
+      "event-participation",
+    ]);
+    await expect(commits.canon.listEventParticipations()).resolves.toHaveLength(2);
+  });
+
+  it("blocks batch closure until typed roles project every legacy participant", async () => {
+    const { root, proposals, commits, evidence } = await fixture();
+    await commits.canon.putEntity({ id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") });
+    await commits.canon.putEntity({ id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("北门") });
+    await commits.canon.putEvent({
+      id: "cao-at-gate",
+      title: "曹操在北门",
+      participants: ["cao-cao", "north-gate"],
+      participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+      storyTime: { kind: "unknown" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: evidence("曹操，字孟德\n北门"),
+      causalParents: [],
+      confidence: 1,
+    });
+    await proposals.submit("event-participation", {
+      proposalId: "cao-at-gate-cao-role",
+      payload: {
+        id: "cao-at-gate-cao",
+        eventId: "cao-at-gate",
+        entityId: "cao-cao",
+        role: "agent",
+        presence: "physical",
+        confidence: 1,
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const partial = await validateCompilerProposalClosure(
+      root,
+      ["cao-at-gate-cao-role"],
+    );
+    expect(partial.some((message) => message.includes("INCOMPLETE_EVENT_PARTICIPATION"))).toBe(true);
+
+    await proposals.submit("event-participation", {
+      proposalId: "cao-at-gate-gate-role",
+      payload: {
+        id: "cao-at-gate-gate",
+        eventId: "cao-at-gate",
+        entityId: "north-gate",
+        role: "location",
+        confidence: 1,
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await expect(validateCompilerProposalClosure(
+      root,
+      ["cao-at-gate-cao-role", "cao-at-gate-gate-role"],
+    )).resolves.toEqual([]);
   });
 
   it("rejects invalid proposition references and epistemic relations", async () => {

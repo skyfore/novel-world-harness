@@ -168,6 +168,15 @@ describe("compiler audit", () => {
       causalParents: [],
       confidence: 1,
     });
+    await canon.putEventParticipation({
+      id: "hero-infers-gate-open-hero",
+      eventId: "hero-infers-gate-open",
+      entityId: "hero",
+      role: "experiencer",
+      presence: "physical",
+      confidence: 1,
+      evidence,
+    });
 
     const report = await auditCompiler(root, { sourceId: fixture.source.id });
     expect(report.epistemic).toMatchObject({
@@ -181,6 +190,16 @@ describe("compiler audit", () => {
       errors: [],
     });
     expect(report.coverage.epistemicCoverage).toBe(1);
+    expect(report.eventSemantics).toMatchObject({
+      participations: 1,
+      eventsWithTypedParticipation: 1,
+      legacyParticipantSlots: 1,
+      typedParticipantSlots: 1,
+      validationIssues: 0,
+      errors: [],
+    });
+    expect(report.canonical.eventParticipations).toBe(1);
+    expect(report.coverage.typedEventParticipation).toBe(1);
   });
 
   it("can audit one source without inheriting another source's changed file or artifacts", async () => {

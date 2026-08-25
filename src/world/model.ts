@@ -244,12 +244,45 @@ export type NarrativeContext = z.infer<typeof narrativeContextSchema>;
  * cause or receive an event through a letter, memory, report, or remote channel
  * without sharing the actor's scene.
  */
+export const participantPresenceModeSchema = z.enum(["physical", "remote", "mentioned", "represented", "dream", "memory"]);
+export type ParticipantPresenceMode = z.infer<typeof participantPresenceModeSchema>;
+
 export const participantPresenceSchema = z.object({
   entityId: idSchema.describe("Canonical character entity ID only. Locations, artifacts, factions, institutions, and relationships are not presence actors."),
-  mode: z.enum(["physical", "remote", "mentioned", "represented", "dream", "memory"])
+  mode: participantPresenceModeSchema
     .describe("How this character participates without conflating mention, representation, memory, or remote contact with bodily presence."),
 }).strict();
 export type ParticipantPresence = z.infer<typeof participantPresenceSchema>;
+
+/**
+ * Typed semantic participation is independent from the legacy participant
+ * inventory. It records the entity's role in an occurrence; presence remains
+ * character-only and describes access to the lived scene, not causal agency.
+ */
+export const eventParticipationRoleSchema = z.enum([
+  "agent",
+  "patient",
+  "theme",
+  "experiencer",
+  "beneficiary",
+  "instrument",
+  "location",
+  "source",
+  "destination",
+  "other",
+]);
+export type EventParticipationRole = z.infer<typeof eventParticipationRoleSchema>;
+
+export const eventParticipationSchema = z.object({
+  id: idSchema,
+  eventId: idSchema,
+  entityId: idSchema,
+  role: eventParticipationRoleSchema,
+  presence: participantPresenceModeSchema.optional(),
+  confidence: z.number().finite().min(0).max(1),
+  evidence: z.array(evidenceRefSchema),
+}).strict();
+export type EventParticipation = z.infer<typeof eventParticipationSchema>;
 
 export const valueTypeSchema = z.enum(["boolean", "number", "string", "entity-ref", "entity-ref-set", "json-scalar"]);
 export type ValueType = z.infer<typeof valueTypeSchema>;

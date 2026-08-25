@@ -6,7 +6,8 @@ import { ActorModelStore, type ActorArtifactKind } from "./actors.js";
 import { canonicalJson, contentHash } from "./canonical.js";
 import { CanonicalModelStore, type CanonicalKind, type CanonicalRevisionRef } from "./canonical-model.js";
 import type { WorldModelContext } from "./engine.js";
-import { idSchema, stateFieldSpecSchema, type Attribution, type CanonicalEvent, type Claim, type Entity, type EvidenceRef, type Proposition, type WorldRule } from "./model.js";
+import { idSchema, stateFieldSpecSchema, type Attribution, type CanonicalEvent, type Claim, type Entity, type EventParticipation, type EvidenceRef, type Proposition, type WorldRule } from "./model.js";
+import { eventParticipationsByEvent, projectEventParticipations, validateEventParticipationCatalog } from "./event-semantics.js";
 import { PossibilityTemplateStore, type PossibilityTemplate } from "./possibility-model.js";
 import type { CharacterGoal, CharacterModel } from "./actors.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "./state.js";
@@ -38,18 +39,27 @@ const canonicalSnapshotV3Schema = canonicalSnapshotV2Schema.omit({ version: true
   sourceId: idSchema,
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 }).strict();
-const canonicalSnapshotV4Schema = canonicalSnapshotV2Schema.omit({ version: true }).extend({
+const canonicalSnapshotV4BaseSchema = canonicalSnapshotV2Schema.omit({ version: true }).extend({
   version: z.literal(4),
   propositions: z.array(revisionRefSchema),
   attributions: z.array(revisionRefSchema),
   sourceId: idSchema.optional(),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-}).strict().superRefine((value, ctx) => {
+}).strict();
+const validatePreparedSnapshotScope = (
+  value: { sourceId?: string; preparedRevisionHash?: string },
+  ctx: z.RefinementCtx,
+) => {
   if (value.preparedRevisionHash && !value.sourceId) {
     ctx.addIssue({ code: "custom", path: ["preparedRevisionHash"], message: "A prepared revision hash requires sourceId" });
   }
-});
-const canonicalSnapshotSchema = z.union([canonicalSnapshotV1Schema, canonicalSnapshotV2Schema, canonicalSnapshotV3Schema, canonicalSnapshotV4Schema]);
+};
+const canonicalSnapshotV4Schema = canonicalSnapshotV4BaseSchema.superRefine(validatePreparedSnapshotScope);
+const canonicalSnapshotV5Schema = canonicalSnapshotV4BaseSchema.omit({ version: true }).extend({
+  version: z.literal(5),
+  eventParticipations: z.array(revisionRefSchema),
+}).strict().superRefine(validatePreparedSnapshotScope);
+const canonicalSnapshotSchema = z.union([canonicalSnapshotV1Schema, canonicalSnapshotV2Schema, canonicalSnapshotV3Schema, canonicalSnapshotV4Schema, canonicalSnapshotV5Schema]);
 const legacyPolicySupplementSchema = policySnapshotSchema.extend({ version: z.literal(1) }).strict();
 export type CanonicalSnapshot = z.infer<typeof canonicalSnapshotSchema>;
 
@@ -59,6 +69,7 @@ export type ScopedWorldArtifacts = {
   attributions: readonly Attribution[];
   claims: readonly Claim[];
   events: readonly CanonicalEvent[];
+  eventParticipations: readonly EventParticipation[];
   rules: readonly WorldRule[];
   goals: readonly CharacterGoal[];
   models: readonly CharacterModel[];
@@ -76,12 +87,13 @@ export class WorldContextStore {
   }
 
   async captureCurrent(sourceId?: string): Promise<WorldModelContext> {
-    const [entities, propositions, attributions, claims, events, rules, goals, models, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, eventParticipations, rules, goals, models, possibilities] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listPropositions(),
       this.canon.listAttributions(),
       this.canon.listClaims(),
       this.canon.listEvents(),
+      this.canon.listEventParticipations(),
       this.canon.listRules(),
       this.actors.listGoals(),
       this.actors.listModels(),
@@ -95,6 +107,7 @@ export class WorldContextStore {
       attributions: attributions.filter(belongsToSource),
       claims: claims.filter(belongsToSource),
       events: events.filter(belongsToSource),
+      eventParticipations: eventParticipations.filter(belongsToSource),
       rules: rules.filter(belongsToSource),
       goals: goals.filter(belongsToSource),
       models: models.filter(belongsToSource),
@@ -109,12 +122,14 @@ export class WorldContextStore {
     artifacts: ScopedWorldArtifacts,
   ): Promise<WorldModelContext> {
     if (!/^[a-f0-9]{64}$/.test(preparedRevisionHash)) throw new Error(`Invalid prepared revision hash: ${preparedRevisionHash}`);
+    assertEventParticipationProjection(artifacts);
     await Promise.all([
       ...artifacts.entities.map((item) => this.canon.ensureEntityRevision(item)),
       ...artifacts.propositions.map((item) => this.canon.ensurePropositionRevision(item)),
       ...artifacts.attributions.map((item) => this.canon.ensureAttributionRevision(item)),
       ...artifacts.claims.map((item) => this.canon.ensureClaimRevision(item)),
       ...artifacts.events.map((item) => this.canon.ensureEventRevision(item)),
+      ...artifacts.eventParticipations.map((item) => this.canon.ensureEventParticipationRevision(item)),
       ...artifacts.rules.map((item) => this.canon.ensureRuleRevision(item)),
       ...artifacts.goals.map((item) => this.actors.ensureGoalRevision(item)),
       ...artifacts.models.map((item) => this.actors.ensureModelRevision(item)),
@@ -129,6 +144,7 @@ export class WorldContextStore {
     preparedRevisionHash?: string,
     refsFromContent = false,
   ): Promise<WorldModelContext> {
+    assertEventParticipationProjection(artifacts);
     if (sourceId) {
       assertArtifactCollectionsExclusiveToSource(sourceId, [
         artifacts.entities,
@@ -136,6 +152,7 @@ export class WorldContextStore {
         artifacts.attributions,
         artifacts.claims,
         artifacts.events,
+        artifacts.eventParticipations,
         artifacts.rules,
         artifacts.goals,
         artifacts.models,
@@ -155,7 +172,7 @@ export class WorldContextStore {
         ? items.map((item) => ({ id: item.id, hash: contentHash(item) })).sort((left, right) => left.id.localeCompare(right.id))
         : this.possibilityRefs(items.map((item) => item.id));
     const snapshot = canonicalSnapshotSchema.parse({
-      version: 4,
+      version: 5,
       ...(sourceId ? { sourceId } : {}),
       ...(preparedRevisionHash ? { preparedRevisionHash } : {}),
       entities: await canonicalRefs("entities", artifacts.entities),
@@ -163,6 +180,7 @@ export class WorldContextStore {
       attributions: await canonicalRefs("attributions", artifacts.attributions),
       claims: await canonicalRefs("claims", artifacts.claims),
       events: await canonicalRefs("events", artifacts.events),
+      eventParticipations: await canonicalRefs("event-participations", artifacts.eventParticipations),
       rules: await canonicalRefs("rules", artifacts.rules),
       actorGoals: await actorRefs("goals", artifacts.goals, (item) => item.id),
       actorModels: await actorRefs("models", artifacts.models, (item) => item.actorId),
@@ -251,39 +269,45 @@ export class WorldContextStore {
 
   private async hydrate(snapshotHash: string, snapshot: CanonicalSnapshot): Promise<WorldModelContext> {
     const policies = snapshot.version === 1 ? await this.readLegacySupplement(snapshotHash) : snapshot;
-    const [entities, propositions, attributions, claims, events, rules, actorGoals, actorModels, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, eventParticipations, rules, actorGoals, actorModels, possibilities] = await Promise.all([
       Promise.all(snapshot.entities.map((ref) => this.canon.getEntityRevision(ref.id, ref.hash))),
-      snapshot.version === 4 ? Promise.all(snapshot.propositions.map((ref) => this.canon.getPropositionRevision(ref.id, ref.hash))) : [],
-      snapshot.version === 4 ? Promise.all(snapshot.attributions.map((ref) => this.canon.getAttributionRevision(ref.id, ref.hash))) : [],
+      snapshot.version === 4 || snapshot.version === 5 ? Promise.all(snapshot.propositions.map((ref) => this.canon.getPropositionRevision(ref.id, ref.hash))) : [],
+      snapshot.version === 4 || snapshot.version === 5 ? Promise.all(snapshot.attributions.map((ref) => this.canon.getAttributionRevision(ref.id, ref.hash))) : [],
       Promise.all(snapshot.claims.map((ref) => this.canon.getClaimRevision(ref.id, ref.hash))),
       Promise.all(snapshot.events.map((ref) => this.canon.getEventRevision(ref.id, ref.hash))),
+      snapshot.version === 5 ? Promise.all(snapshot.eventParticipations.map((ref) => this.canon.getEventParticipationRevision(ref.id, ref.hash))) : [],
       Promise.all(snapshot.rules.map((ref) => this.canon.getRuleRevision(ref.id, ref.hash))),
       policies ? Promise.all(policies.actorGoals.map((ref) => this.actors.getGoalRevision(ref.id, ref.hash))) : [],
       policies ? Promise.all(policies.actorModels.map((ref) => this.actors.getModelRevision(ref.id, ref.hash))) : [],
       policies ? Promise.all(policies.possibilities.map((ref) => this.possibilities.getRevision(ref.id, ref.hash))) : [],
     ]);
-    if ((snapshot.version === 3 || snapshot.version === 4) && snapshot.sourceId) {
+    if ((snapshot.version === 3 || snapshot.version === 4 || snapshot.version === 5) && snapshot.sourceId) {
       assertArtifactCollectionsExclusiveToSource(snapshot.sourceId, [
         entities,
         propositions,
         attributions,
         claims,
         events,
+        eventParticipations,
         rules,
         actorGoals,
         actorModels,
         possibilities,
       ]);
     }
+    assertEventParticipationProjection({ entities, events, eventParticipations });
+    const participationIndex = eventParticipationsByEvent(eventParticipations);
+    const projectedEvents = events.map((event) => projectEventParticipations(event, participationIndex.get(event.id) ?? []));
     return {
       canonicalSnapshotHash: snapshotHash,
-      ...((snapshot.version === 3 || snapshot.version === 4) && snapshot.sourceId ? { sourceId: snapshot.sourceId } : {}),
-      ...((snapshot.version === 3 || snapshot.version === 4) && snapshot.preparedRevisionHash ? { preparedRevisionHash: snapshot.preparedRevisionHash } : {}),
+      ...((snapshot.version === 3 || snapshot.version === 4 || snapshot.version === 5) && snapshot.sourceId ? { sourceId: snapshot.sourceId } : {}),
+      ...((snapshot.version === 3 || snapshot.version === 4 || snapshot.version === 5) && snapshot.preparedRevisionHash ? { preparedRevisionHash: snapshot.preparedRevisionHash } : {}),
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       propositions: new Map(propositions.map((proposition) => [proposition.id, proposition])),
       attributions: new Map(attributions.map((attribution) => [attribution.id, attribution])),
       claims: new Map(claims.map((claim) => [claim.id, claim])),
-      events: new Map(events.map((event) => [event.id, event])),
+      events: new Map(projectedEvents.map((event) => [event.id, event])),
+      eventParticipations,
       rules: new Map(rules.map((rule) => [rule.id, rule])),
       actorGoals,
       actorModels: new Map(actorModels.map((model) => [model.actorId, model])),
@@ -322,6 +346,19 @@ export class WorldContextStore {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       if ((await fs.readFile(filePath, "utf8")) !== serialized) throw new Error(`Canonical snapshot already exists with different content: ${snapshotHash}`);
     }
+  }
+}
+
+function assertEventParticipationProjection(
+  artifacts: Pick<ScopedWorldArtifacts, "entities" | "events" | "eventParticipations">,
+): void {
+  const issues = validateEventParticipationCatalog({
+    entities: new Map(artifacts.entities.map((item) => [item.id, item])),
+    events: new Map(artifacts.events.map((item) => [item.id, item])),
+    participations: artifacts.eventParticipations,
+  });
+  if (issues.length) {
+    throw new Error(`Invalid typed event participation projection: ${issues.map((item) => `${item.code} at ${item.path ?? "payload"}: ${item.message}`).join("; ")}`);
   }
 }
 

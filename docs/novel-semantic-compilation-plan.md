@@ -620,6 +620,24 @@ that can be projected losslessly into the legacy claim representation; richer
 polarity/modality remains semantic-only until M4b replaces that projection.
 Neither proposition nor attribution is promoted to world truth.
 
+M4b-1 is also implemented. `EventParticipation` is now an independently
+versioned event/entity/semantic-role assertion; character scene presence is a
+separate optional dimension rather than a synonym for agency
+([model.ts](../src/world/model.ts#L247)). The catalog validator rejects unknown
+references, invalid role/entity combinations, duplicate roles, conflicting
+presence, and any typed inventory that cannot project exactly to the legacy
+event fields ([event-semantics.ts](../src/world/event-semantics.ts#L18),
+[event-semantics.ts](../src/world/event-semantics.ts#L90)). Compiler finish
+checks the prospective canonical-plus-pending catalog before checkpointing
+([proposals.ts](../src/compiler/proposals.ts#L471)); prepared publication and
+runtime snapshot hydration apply the same gate. Snapshot V5 pins participation
+revisions and then derives the compatibility event view without mutating world
+truth ([context.ts](../src/world/context.ts#L174),
+[context.ts](../src/world/context.ts#L298)). Audit coverage counts only real
+legacy event/entity slots, so orphan or extra records cannot inflate the metric
+([audit.ts](../src/compiler/audit.ts#L514)). M4b-2 temporal/causal relations
+remain outstanding.
+
 ### 6.5 Events, participation, time, and event relations
 
 ```ts
@@ -657,7 +675,8 @@ type EventParticipation = {
     | "destination"
     | "other";
   presence?: ParticipantPresence["mode"];
-  evidenceAssertionIds: string[];
+  confidence: number;
+  evidence: EvidenceRef[];
 };
 
 type EventRelation = {
@@ -1339,11 +1358,13 @@ Exit criteria:
 Objective: distinguish narrative order, factuality, temporal relations, and
 causality.
 
-Implementation status (2026-08-25): M4a is complete. Proposition/attribution
+Implementation status (2026-08-25): M4a and M4b-1 are complete. Proposition/attribution
 identity and quotation-backed knowledge acquisition are implemented with
-source, identity-resolution, closure, commit, replay, and audit gates. M4b
-remains: typed event participation and independently evidenced temporal/causal
-relations plus legacy projections.
+source, identity-resolution, closure, commit, replay, and audit gates. Typed
+event participation now has the same revision, retrieval, closure, prepared,
+snapshot, removal, and audit lifecycle, with exact legacy participant/presence
+projection. M4b-2 remains: independently evidenced temporal/causal relations
+and the legacy `causalParents` projection.
 
 Work:
 
@@ -1357,10 +1378,14 @@ Work:
 Primary files:
 
 - `src/world/model.ts`;
+- `src/world/event-semantics.ts`;
+- `src/world/context.ts`;
 - `src/world/knowledge.ts`;
 - `src/compiler/proposals.ts`;
 - `src/compiler/validator.ts`;
 - `src/compiler/batches.ts`;
+- `src/compiler/audit.ts`;
+- `src/compiler/prepared-cache.ts`;
 - `src/world/frontier.ts`;
 - `src/world/canon-runtime.ts`.
 

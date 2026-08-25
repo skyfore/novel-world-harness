@@ -30,6 +30,7 @@ import {
   validateCommittedKnowledgeAcquisitionTrace,
 } from "./attribution-trace.js";
 import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
+import { validateEventParticipationCatalog } from "../world/event-semantics.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -102,12 +103,21 @@ export type CompilerAuditReport = {
     invalidTraces: number;
     errors: Array<{ sourceId: string; artifact: string; message: string }>;
   };
+  eventSemantics: {
+    participations: number;
+    eventsWithTypedParticipation: number;
+    legacyParticipantSlots: number;
+    typedParticipantSlots: number;
+    validationIssues: number;
+    errors: Array<{ code: string; message: string; path?: string }>;
+  };
   canonical: {
     entities: number;
     propositions: number;
     attributions: number;
     claims: number;
     events: number;
+    eventParticipations: number;
     rules: number;
     initialWorld: boolean;
     characterGoals: number;
@@ -154,6 +164,7 @@ export type CompilerAuditReport = {
     entityResolution: number | null;
     majorEventResolution: number | null;
     epistemicCoverage: number | null;
+    typedEventParticipation: number | null;
     timelineAnchoring: number | null;
     eventEffectExplicitness: number | null;
     characterDevelopmentCoverage: number | null;
@@ -358,12 +369,13 @@ export async function auditCompiler(
 
   const canon = new CanonicalModelStore(workspaceRoot);
   const actorStore = new ActorModelStore(workspaceRoot);
-  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
+  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allEventParticipations, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
     canon.listClaims(),
     canon.listEvents(),
+    canon.listEventParticipations(),
     canon.listRules(),
     new InitialWorldStore(workspaceRoot).get(),
     actorStore.listGoals(),
@@ -381,6 +393,7 @@ export async function auditCompiler(
   const attributions = allAttributions.filter(belongsToSelectedSource);
   const claims = allClaims.filter(belongsToSelectedSource);
   const events = allEvents.filter(belongsToSelectedSource);
+  const eventParticipations = allEventParticipations.filter(belongsToSelectedSource);
   const rules = allRules.filter(belongsToSelectedSource);
   const initialWorld = storedInitialWorld && belongsToSelectedSource(storedInitialWorld) ? storedInitialWorld : null;
   const goals = allGoals.filter(belongsToSelectedSource);
@@ -393,6 +406,7 @@ export async function auditCompiler(
     ...attributions.map((item) => ({ name: `attribution:${item.id}`, kind: "attribution", id: item.id, payload: item, evidence: item.evidence })),
     ...claims.map((item) => ({ name: `claim:${item.id}`, kind: "claim", id: item.id, payload: item, evidence: item.evidence })),
     ...events.map((item) => ({ name: `event:${item.id}`, kind: "canonical-event", id: item.id, payload: item, evidence: item.evidence })),
+    ...eventParticipations.map((item) => ({ name: `event-participation:${item.id}`, kind: "event-participation", id: item.id, payload: item, evidence: item.evidence })),
     ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: item.evidence })),
     ...(initialWorld ? [{ name: "initial-world", kind: "initial-world", id: "initial-world", payload: initialWorld, evidence: initialWorld.evidence }] : []),
     ...goals.map((item) => ({ name: `goal:${item.id}`, kind: "character-goal", id: item.id, payload: item, evidence: item.evidence })),
@@ -496,6 +510,26 @@ export async function auditCompiler(
       epistemicErrors.push({ sourceId: source.id, artifact: "knowledge", message });
     }
   }
+
+  const participationValidation = validateEventParticipationCatalog({
+    entities: new Map(entities.map((entity) => [entity.id, entity])),
+    events: new Map(events.map((event) => [event.id, event])),
+    participations: eventParticipations,
+  });
+  const eventIds = new Set(events.map((event) => event.id));
+  const eventsWithTypedParticipation = new Set(eventParticipations
+    .filter((item) => eventIds.has(item.eventId))
+    .map((item) => item.eventId));
+  const legacyParticipantKeys = new Set(events.flatMap((event) =>
+    [...new Set(event.participants)].map((entityId) => `${event.id}:${entityId}`)));
+  const typedParticipantKeys = new Set(eventParticipations
+    .map((item) => `${item.eventId}:${item.entityId}`)
+    .filter((key) => legacyParticipantKeys.has(key)));
+  const legacyParticipantSlots = legacyParticipantKeys.size;
+  const typedParticipantSlots = typedParticipantKeys.size;
+  const typedEventParticipation = legacyParticipantSlots
+    ? Math.min(1, typedParticipantSlots / legacyParticipantSlots)
+    : null;
 
   const graph = auditCausalGraph(events);
   const narrativeGraphNavigable = events.length ? graphNavigable(events, graph) : null;
@@ -639,6 +673,11 @@ export async function auditCompiler(
         .filter(({ event, participantId }) => !event.participantPresence?.some((presence) => presence.entityId === participantId))
         .forEach(({ event }) => semanticRepairEventIds.add(event.id));
     }
+    if (legacyParticipantSlots && (typedEventParticipation ?? 0) < 0.8) {
+      semanticIssues.push(`Only ${formatRatio(typedEventParticipation)} of canonical event participant slots have typed semantic roles (minimum 80%).`);
+      events.filter((event) => !eventsWithTypedParticipation.has(event.id))
+        .forEach((event) => semanticRepairEventIds.add(event.id));
+    }
     if (readerSummaryCoverage !== 1) {
       semanticIssues.push(`Only ${formatRatio(readerSummaryCoverage)} of canonical events have a source-grounded reader recap (required 100% for complete later-role context).`);
       events.filter((event) => !event.readerSummary?.trim()).forEach((event) => semanticRepairEventIds.add(event.id));
@@ -688,7 +727,7 @@ export async function auditCompiler(
       : validExactBindings === evidenceArtifacts.length
         ? "ready"
         : "unknown";
-  const semanticReadiness: CompilerReadinessState = epistemicErrors.length
+  const semanticReadiness: CompilerReadinessState = epistemicErrors.length || participationValidation.length
     ? "not-ready"
     : events.length < 20
     ? "unknown"
@@ -751,6 +790,7 @@ export async function auditCompiler(
     ...eventResolutionErrors.map((error) => `Event resolution ${error.sourceId}: ${error.message}`),
     ...missingEventResolutionMentionIds.map((mentionId) => `Event mention ${mentionId} has no current event-resolution record.`),
     ...epistemicErrors.map((error) => `${error.artifact}: ${error.message}`),
+    ...participationValidation.map((error) => `Event participation ${error.code}: ${error.message}`),
     ...graph.cycles.map((cycle) => `Causal cycle: ${cycle.join(" -> ")}`),
     ...graph.missing.map(({ eventId, parentId }) => `Event ${eventId} has missing causal parent ${parentId}.`),
     ...graph.temporalRegressions.map(({ eventId, parentId }) => `Event ${eventId} is earlier than causal parent ${parentId}.`),
@@ -817,12 +857,21 @@ export async function auditCompiler(
       invalidTraces: epistemicErrors.length,
       errors: epistemicErrors,
     },
+    eventSemantics: {
+      participations: eventParticipations.length,
+      eventsWithTypedParticipation: eventsWithTypedParticipation.size,
+      legacyParticipantSlots,
+      typedParticipantSlots,
+      validationIssues: participationValidation.length,
+      errors: participationValidation,
+    },
     canonical: {
       entities: entities.length,
       propositions: propositions.length,
       attributions: attributions.length,
       claims: claims.length,
       events: events.length,
+      eventParticipations: eventParticipations.length,
       rules: rules.length,
       initialWorld: Boolean(initialWorld),
       characterGoals: goals.length,
@@ -850,7 +899,7 @@ export async function auditCompiler(
       causalComponents: graph.components.length,
       largestCausalComponent: Math.max(0, ...graph.components.map((component) => component.length)),
       unconditionalRootEvents: graph.unconditionalRoots,
-      semanticReady: events.length >= 20 ? semanticIssues.length === 0 : null,
+      semanticReady: events.length >= 20 ? semanticIssues.length === 0 && participationValidation.length === 0 : null,
       semanticIssues,
     },
     semanticRepairTargets: {
@@ -875,6 +924,7 @@ export async function auditCompiler(
       epistemicCoverage: propositions.length
         ? new Set(attributions.map((attribution) => attribution.propositionId)).size / propositions.length
         : null,
+      typedEventParticipation,
       timelineAnchoring,
       eventEffectExplicitness,
       characterDevelopmentCoverage,

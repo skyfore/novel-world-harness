@@ -15,7 +15,7 @@ import {
 } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
-import { attributionSchema, canonicalEventSchema, claimSchema, entitySchema, propositionSchema, worldRuleSchema, type Attribution, type CanonicalEvent, type Claim, type Entity, type EvidenceRef, type Proposition, type WorldRule } from "../world/model.js";
+import { attributionSchema, canonicalEventSchema, claimSchema, entitySchema, propositionSchema, worldRuleSchema, type Attribution, type CanonicalEvent, type Claim, type Entity, type EventParticipation, type EvidenceRef, type Proposition, type WorldRule } from "../world/model.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { COMPILER_STATE_FIELDS, CompilerProposalService, compilerProposalSchemas } from "./proposals.js";
 import { promptJson } from "../util/prompt-data.js";
@@ -48,7 +48,7 @@ export type CompilerBatch = {
 };
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 19;
+export const COMPILER_PIPELINE_VERSION = 20;
 
 export type BatchProgress = {
   version: 1;
@@ -87,6 +87,10 @@ type CompilerEventIdentity = Pick<CanonicalEvent, "id"> & {
   participants: string[];
   causalParents: string[];
   storyTimePreview: string;
+  status: "canonical" | "pending";
+};
+type CompilerEventParticipationIdentity = Pick<EventParticipation, "id" | "eventId" | "entityId" | "role" | "confidence"> & {
+  presence?: NonNullable<EventParticipation["presence"]>;
   status: "canonical" | "pending";
 };
 type CompilerPossibilityIdentity = {
@@ -129,6 +133,7 @@ type CompilerArtifactCatalog = {
   attributions: CompilerAttributionIdentity[];
   claims: CompilerClaimIdentity[];
   events: CompilerEventIdentity[];
+  eventParticipations: CompilerEventParticipationIdentity[];
   rules: CompilerRuleIdentity[];
   initialWorlds: CompilerInitialWorldIdentity[];
   characterGoals: CompilerGoalIdentity[];
@@ -652,7 +657,7 @@ function buildBatchPrompt(
   return `You are processing compiler batch ${batchId} for immutable source ${source.id}. The ingest filename is intentionally withheld because it is not novel metadata.\n\n` +
     `Analyze only the supplied citable evidence slices: do not call list_files, search_files, or read_file. <boundary-review-policy>${boundaryPolicy}</boundary-review-policy> Produce small typed pending proposals with the available propose_* tools. Target at most 20 high-leverage active proposals and never exceed the hard limit of 24; reserve compiler calls and active slots for repair and the final finish handshake. Prioritize stable identities and executable state/knowledge transitions over exhaustive mention extraction. ` +
     `<novel-title-policy>${titlePolicy} A novel-title proposal is workflow/display metadata, not world truth, and becomes active only after the batch finish handshake succeeds.</novel-title-policy> ` +
-    `Do not commit truth. Reuse stable entity IDs when the evidence clearly refers to the same identity. Use propose_entity_mention for identity-bearing proper names, descriptions, pronouns, titles, kinship terms, collectives, and high-impact omitted arguments when retaining the occurrence matters to later resolution. A mention records source wording plus kind candidates only: it never creates a canonical entity, alias, or identity link. For each recorded entity mention, call find_entity_resolution_candidates, then propose_entity_resolution as resolved, new-entity, ambiguous, or unresolved. Lexical equality proposes candidates but does not prove identity. Use resolved only for an existing canonical entity and new-entity only with a same-finish propose_entity candidate. Preserve uncertainty explicitly rather than selecting a low-confidence candidate. A canonical entity proposal's canonicalName must match a resolved/new-entity mention surface; each proposed alias must have its own alias-classified resolved mention. Use propose_event_mention to retain a source event trigger, its possibly discontinuous extent, participant mention IDs, discourse context, type candidates, and salience before proposing a canonical event. An event mention is textual presentation only: a recalled, dreamed, hypothetical, denied, summarized, or narrated event is not thereby committed as having occurred. For each retained event mention or deliberate coreference cluster, call find_event_resolution_candidates and propose_event_resolution as resolved, new-event, ambiguous, or unresolved. Distinguish coreference from subevent; evidence overlap, narrative adjacency, title similarity, and shared participants are candidate signals, never proof. A new canonical event requires a same-finish coreferential new-event resolution, and every canonical participant must trace through a resolved participant mention in that event cluster. Use mention IDs—not canonical character IDs—for event participants, quotation speaker/addressee attribution, and discourse viewpoint. Record direct/indirect/free-indirect speech with propose_quotation when attribution or knowledge transmission matters, and record scenes, summaries, temporal displacement, frames, recollections, hypotheticals, dreams, embedded documents, and narrator commentary with propose_discourse_segment when narrative order must remain separate from world chronology. Overlapping discourse spans are valid. Search prior source annotations, identity resolutions, and event resolutions before duplicating them. Prefer resolution-relevant observations over exhaustive low-value mention enumeration. ` +
+    `Do not commit truth. Reuse stable entity IDs when the evidence clearly refers to the same identity. Use propose_entity_mention for identity-bearing proper names, descriptions, pronouns, titles, kinship terms, collectives, and high-impact omitted arguments when retaining the occurrence matters to later resolution. A mention records source wording plus kind candidates only: it never creates a canonical entity, alias, or identity link. For each recorded entity mention, call find_entity_resolution_candidates, then propose_entity_resolution as resolved, new-entity, ambiguous, or unresolved. Lexical equality proposes candidates but does not prove identity. Use resolved only for an existing canonical entity and new-entity only with a same-finish propose_entity candidate. Preserve uncertainty explicitly rather than selecting a low-confidence candidate. A canonical entity proposal's canonicalName must match a resolved/new-entity mention surface; each proposed alias must have its own alias-classified resolved mention. Use propose_event_mention to retain a source event trigger, its possibly discontinuous extent, participant mention IDs, discourse context, type candidates, and salience before proposing a canonical event. An event mention is textual presentation only: a recalled, dreamed, hypothetical, denied, summarized, or narrated event is not thereby committed as having occurred. For each retained event mention or deliberate coreference cluster, call find_event_resolution_candidates and propose_event_resolution as resolved, new-event, ambiguous, or unresolved. Distinguish coreference from subevent; evidence overlap, narrative adjacency, title similarity, and shared participants are candidate signals, never proof. A new canonical event requires a same-finish coreferential new-event resolution, and every canonical participant must trace through a resolved participant mention in that event cluster. For every proposed canonical event, propose a complete event-participation inventory in the same finish: assign each legacy participant at least one explicit semantic role, keep presence separate from role, and make the typed entity/presence projection exactly equal the event's participants and participantPresence compatibility fields. Never infer agency merely from physical presence. Use mention IDs—not canonical character IDs—for event mention participants, quotation speaker/addressee attribution, and discourse viewpoint. Record direct/indirect/free-indirect speech with propose_quotation when attribution or knowledge transmission matters, and record scenes, summaries, temporal displacement, frames, recollections, hypotheticals, dreams, embedded documents, and narrator commentary with propose_discourse_segment when narrative order must remain separate from world chronology. Overlapping discourse spans are valid. Search prior source annotations, identity resolutions, event resolutions, and event-participation records before duplicating them. Prefer resolution-relevant observations over exhaustive low-value mention enumeration. ` +
     `Every logical ID must use only ASCII letters, digits, dot, underscore, and hyphen, and must start with a letter or digit. ` +
     `Every entity canonicalName and alias must occur in that entity's supplied evidence; empty aliases are valid, and you must not expand censored, abbreviated, translated, or externally remembered names beyond the evidence. ` +
     `Every canonical proposal must cite at least one host-issued source segment ID through the top-level evidence_segment_ids array. Omit payload.evidence, nested evidence fields, and top-level evidence: the host deterministically injects immutable compatibility EvidenceRefs. Never invent or edit an evidence handle. For every material source-backed field or relation, also add an evidence_selectors entry containing the exact copied source wording, the cited segment_id, the field's RFC 6901 target_path, supports/contradicts/contextualizes relation, and an independently judged strength. Use prefix/suffix or one-based occurrence only to disambiguate repeated wording. Inferences require a concise interpretation. The host alone resolves trusted byte/line ranges and hashes; never invent or submit offsets or hashes. ` +
@@ -685,6 +690,7 @@ async function loadCompilerArtifactCatalog(
   const attributions = new Map<string, CompilerAttributionIdentity>();
   const claims = new Map<string, CompilerClaimIdentity>();
   const events = new Map<string, CompilerEventIdentity>();
+  const eventParticipations = new Map<string, CompilerEventParticipationIdentity>();
   const rules = new Map<string, CompilerRuleIdentity>();
   const initialWorlds: CompilerInitialWorldIdentity[] = [];
   const goals = new Map<string, CompilerGoalIdentity>();
@@ -699,12 +705,13 @@ async function loadCompilerArtifactCatalog(
   const actors = new ActorModelStore(workspaceRoot);
   const initialWorld = new InitialWorldStore(workspaceRoot);
   const possibilityStore = new PossibilityTemplateStore(workspaceRoot);
-  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalRules, canonicalInitial, canonicalGoals, canonicalModels, canonicalPossibilities] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalRules, canonicalInitial, canonicalGoals, canonicalModels, canonicalPossibilities] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
     canon.listClaims(),
     canon.listEvents(),
+    canon.listEventParticipations(),
     canon.listRules(),
     initialWorld.get(),
     actors.listGoals(),
@@ -716,6 +723,7 @@ async function loadCompilerArtifactCatalog(
   for (const attribution of canonicalAttributions.filter((item) => hasSourceEvidence(item, sourceId))) attributions.set(attribution.id, prioritize(attributionIdentity(attribution, "canonical"), attribution));
   for (const claim of canonicalClaims.filter((item) => hasSourceEvidence(item, sourceId))) claims.set(claim.id, prioritize(claimIdentity(claim, "canonical"), claim));
   for (const event of canonicalEvents.filter((item) => hasSourceEvidence(item, sourceId))) events.set(event.id, prioritize(eventIdentity(event, "canonical"), event));
+  for (const participation of canonicalEventParticipations.filter((item) => hasSourceEvidence(item, sourceId))) eventParticipations.set(participation.id, prioritize(eventParticipationIdentity(participation, "canonical"), participation));
   for (const rule of canonicalRules.filter((item) => hasSourceEvidence(item, sourceId))) rules.set(rule.id, prioritize(ruleIdentity(rule, "canonical"), rule));
   if (canonicalInitial && hasSourceEvidence(canonicalInitial, sourceId)) initialWorlds.push(prioritize(initialWorldIdentity(canonicalInitial, "canonical"), canonicalInitial));
   for (const goal of canonicalGoals.filter((item) => hasSourceEvidence(item, sourceId))) goals.set(goal.id, prioritize(goalIdentity(goal, "canonical"), goal));
@@ -741,6 +749,9 @@ async function loadCompilerArtifactCatalog(
     } else if (summary.kind === "canonical-event") {
       const proposal = await proposals.read("pending", summary.id, canonicalEventSchema);
       if (!events.has(proposal.payload.id)) events.set(proposal.payload.id, prioritize(eventIdentity(proposal.payload, "pending"), proposal.payload));
+    } else if (summary.kind === "event-participation") {
+      const proposal = await proposals.read("pending", summary.id, compilerProposalSchemas["event-participation"]);
+      if (!eventParticipations.has(proposal.payload.id)) eventParticipations.set(proposal.payload.id, prioritize(eventParticipationIdentity(proposal.payload, "pending"), proposal.payload));
     } else if (summary.kind === "world-rule") {
       const proposal = await proposals.read("pending", summary.id, worldRuleSchema);
       if (!rules.has(proposal.payload.id)) rules.set(proposal.payload.id, prioritize(ruleIdentity(proposal.payload, "pending"), proposal.payload));
@@ -768,6 +779,7 @@ async function loadCompilerArtifactCatalog(
     attributions: byId(attributions.values()),
     claims: byId(claims.values()),
     events: byId(events.values()),
+    eventParticipations: byId(eventParticipations.values()),
     rules: byId(rules.values()),
     initialWorlds: initialWorlds.sort((left, right) => `${left.status}:${left.proposalId ?? ""}`.localeCompare(`${right.status}:${right.proposalId ?? ""}`)),
     characterGoals: byId(goals.values()),
@@ -869,6 +881,21 @@ function eventIdentity(event: CanonicalEvent, status: CompilerEventIdentity["sta
   };
 }
 
+function eventParticipationIdentity(
+  participation: EventParticipation,
+  status: CompilerEventParticipationIdentity["status"],
+): CompilerEventParticipationIdentity {
+  return {
+    id: participation.id,
+    eventId: participation.eventId,
+    entityId: participation.entityId,
+    role: participation.role,
+    ...(participation.presence ? { presence: participation.presence } : {}),
+    confidence: participation.confidence,
+    status,
+  };
+}
+
 function ruleIdentity(rule: WorldRule, status: CompilerRuleIdentity["status"]): CompilerRuleIdentity {
   return { id: rule.id, name: catalogText(rule.name), scope: rule.scope, status };
 }
@@ -953,6 +980,7 @@ function emptyCompilerArtifactCatalog(): CompilerArtifactCatalog {
     attributions: [],
     claims: [],
     events: [],
+    eventParticipations: [],
     rules: [],
     initialWorlds: [],
     characterGoals: [],
@@ -968,6 +996,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     attributions: 120,
     claims: 120,
     events: 120,
+    eventParticipations: 240,
     rules: 80,
     initialWorlds: 4,
     characterGoals: 120,
@@ -980,6 +1009,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     attributions: sampleCatalog(catalog.attributions, limits.attributions),
     claims: sampleCatalog(catalog.claims, limits.claims),
     events: sampleCatalog(catalog.events, limits.events),
+    eventParticipations: sampleCatalog(catalog.eventParticipations, limits.eventParticipations),
     rules: sampleCatalog(catalog.rules, limits.rules),
     initialWorlds: sampleCatalog(catalog.initialWorlds, limits.initialWorlds),
     characterGoals: sampleCatalog(catalog.characterGoals, limits.characterGoals),
@@ -991,7 +1021,7 @@ function compactArtifactCatalog(catalog: CompilerArtifactCatalog): CompilerArtif
     const omitted = catalog[key].length - compact[key].length;
     if (omitted > 0) compact.omitted[key] = omitted;
   }
-  const removable = ["possibilities", "events", "claims", "characterGoals", "characterModels", "rules", "entities"] as const;
+  const removable = ["possibilities", "eventParticipations", "events", "claims", "characterGoals", "characterModels", "rules", "entities"] as const;
   while (promptJson(compact).length > MAX_CATALOG_JSON_CHARS) {
     const key = removable.find((candidate) => compact[candidate].length > 1);
     if (!key) break;

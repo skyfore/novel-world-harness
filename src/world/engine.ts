@@ -19,6 +19,7 @@ import {
   type EntityId,
   type EvidenceRef,
   type EventProposal,
+  type EventParticipation,
   type KnowledgeDelta,
   type LogicalTime,
   type ObjectHash,
@@ -54,6 +55,7 @@ export type WorldModelContext = {
   stateSchema: StateSchemaRegistry;
   claims?: ReadonlyMap<string, Claim>;
   events?: ReadonlyMap<string, CanonicalEvent>;
+  eventParticipations?: readonly EventParticipation[];
   actorGoals?: readonly CharacterGoal[];
   actorModels?: ReadonlyMap<string, CharacterModel>;
   possibilityTemplates?: readonly PossibilityTemplate[];

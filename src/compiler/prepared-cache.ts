@@ -9,7 +9,8 @@ import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../w
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema } from "../world/initial.js";
-import { WORLD_ENGINE_VERSION, attributionSchema, canonicalEventSchema, claimSchema, entitySchema, propositionSchema, worldRuleSchema, type EvidenceRef } from "../world/model.js";
+import { WORLD_ENGINE_VERSION, attributionSchema, canonicalEventSchema, claimSchema, entitySchema, eventParticipationSchema, propositionSchema, worldRuleSchema, type EvidenceRef } from "../world/model.js";
+import { validateEventParticipationCatalog } from "../world/event-semantics.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
@@ -29,7 +30,7 @@ import { EvidenceVerifier } from "./evidence.js";
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 18;
+export const COMPILER_PROMPT_VERSION = 19;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -56,6 +57,7 @@ const preparedNovelBundleSchema = z.object({
     attributions: z.array(attributionSchema).default([]),
     claims: z.array(claimSchema),
     events: z.array(canonicalEventSchema),
+    eventParticipations: z.array(eventParticipationSchema).default([]),
     rules: z.array(worldRuleSchema),
     initialWorld: initialWorldSchema,
     goals: z.array(characterGoalSchema),
@@ -86,6 +88,7 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     bundle.canonical.attributions,
     bundle.canonical.claims,
     bundle.canonical.events,
+    bundle.canonical.eventParticipations,
     bundle.canonical.rules,
     bundle.canonical.goals,
     bundle.canonical.models,
@@ -428,12 +431,13 @@ export class PreparedNovelCache {
         if (matches) assertEvidenceExclusiveToSource(item.evidence, source.id, `Prepared artifact ${item.id ?? item.actorId ?? "unknown"}`);
         return matches;
       });
-    const [entities, propositions, attributions, claims, events, rules, goals, models, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, eventParticipations, rules, goals, models, possibilities] = await Promise.all([
       canonical.listEntities(),
       canonical.listPropositions(),
       canonical.listAttributions(),
       canonical.listClaims(),
       canonical.listEvents(),
+      canonical.listEventParticipations(),
       canonical.listRules(),
       actors.listGoals(),
       actors.listModels(),
@@ -464,6 +468,7 @@ export class PreparedNovelCache {
         attributions: fromSource(attributions),
         claims: fromSource(claims),
         events: fromSource(events),
+        eventParticipations: fromSource(eventParticipations),
         rules: fromSource(rules),
         initialWorld,
         goals: fromSource(goals),
@@ -501,6 +506,7 @@ export class PreparedNovelCache {
       ["attribution", current.attributions, expected.attributions, (item: { id: string }) => item.id],
       ["claim", current.claims, expected.claims, (item: { id: string }) => item.id],
       ["event", current.events, expected.events, (item: { id: string }) => item.id],
+      ["event participation", current.eventParticipations, expected.eventParticipations, (item: { id: string }) => item.id],
       ["rule", current.rules, expected.rules, (item: { id: string }) => item.id],
       ["goal", current.goals, expected.goals, (item: { id: string }) => item.id],
       ["model", current.models, expected.models, (item: { actorId: string }) => item.actorId],
@@ -544,6 +550,7 @@ export class PreparedNovelCache {
       ["attributions", fromSource(current.attributions), bundle.canonical.attributions, (item: { id: string }) => item.id],
       ["claims", fromSource(current.claims), bundle.canonical.claims, (item: { id: string }) => item.id],
       ["events", fromSource(current.events), bundle.canonical.events, (item: { id: string }) => item.id],
+      ["event participations", fromSource(current.eventParticipations), bundle.canonical.eventParticipations, (item: { id: string }) => item.id],
       ["rules", fromSource(current.rules), bundle.canonical.rules, (item: { id: string }) => item.id],
       ["goals", fromSource(current.goals), bundle.canonical.goals, (item: { id: string }) => item.id],
       ["models", fromSource(current.models), bundle.canonical.models, (item: { actorId: string }) => item.actorId],
@@ -604,6 +611,7 @@ export class PreparedNovelCache {
       await removeMissing(current.attributions, new Set(bundle.canonical.attributions.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("attributions", id));
       await removeMissing(current.claims, new Set(bundle.canonical.claims.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("claims", id));
       await removeMissing(current.events, new Set(bundle.canonical.events.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("events", id));
+      await removeMissing(current.eventParticipations, new Set(bundle.canonical.eventParticipations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-participations", id));
       await removeMissing(current.rules, new Set(bundle.canonical.rules.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("rules", id));
       await removeMissing(current.goals, new Set(bundle.canonical.goals.map((item) => item.id)), (item) => item.id, (id) => actors.removeGoal(id));
       await removeMissing(current.models, new Set(bundle.canonical.models.map((item) => item.actorId)), (item) => item.actorId, (id) => actors.removeModel(id));
@@ -615,6 +623,7 @@ export class PreparedNovelCache {
     for (const claim of bundle.canonical.claims) await canonical.putClaim(claim);
     for (const rule of bundle.canonical.rules) await canonical.putRule(rule);
     for (const event of bundle.canonical.events) await canonical.putEvent(event);
+    for (const participation of bundle.canonical.eventParticipations) await canonical.putEventParticipation(participation);
     await new InitialWorldStore(this.workspaceRoot).put(bundle.canonical.initialWorld);
     for (const goal of bundle.canonical.goals) await actors.putGoal(goal);
     for (const model of bundle.canonical.models) await actors.putModel(model);
@@ -811,6 +820,7 @@ async function currentCanonical(workspaceRoot: string) {
     attributions: await canonical.listAttributions(),
     claims: await canonical.listClaims(),
     events: await canonical.listEvents(),
+    eventParticipations: await canonical.listEventParticipations(),
     rules: await canonical.listRules(),
     initialWorld: await new InitialWorldStore(workspaceRoot).get(),
     goals: await actors.listGoals(),
@@ -848,6 +858,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     attributions: new Map(bundle.canonical.attributions.map((item) => [item.id, item])),
     claims: new Map(bundle.canonical.claims.map((item) => [item.id, item])),
     events: new Map(bundle.canonical.events.map((item) => [item.id, item])),
+    eventParticipations: new Map(bundle.canonical.eventParticipations.map((item) => [item.id, item])),
     rules: new Map(bundle.canonical.rules.map((item) => [item.id, item])),
   };
   const validator = new CompilerValidator(canonicalStore);
@@ -858,6 +869,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     ...bundle.canonical.claims.map((payload) => ({ kind: "claim" as const, label: payload.id, payload })),
     ...bundle.canonical.rules.map((payload) => ({ kind: "world-rule" as const, label: payload.id, payload })),
     ...bundle.canonical.events.map((payload) => ({ kind: "canonical-event" as const, label: payload.id, payload })),
+    ...bundle.canonical.eventParticipations.map((payload) => ({ kind: "event-participation" as const, label: payload.id, payload })),
     { kind: "initial-world", label: "initial-world", payload: bundle.canonical.initialWorld },
     ...bundle.canonical.models.map((payload) => ({ kind: "character-model" as const, label: payload.actorId, payload })),
     ...bundle.canonical.goals.map((payload) => ({ kind: "character-goal" as const, label: payload.id, payload })),
@@ -868,6 +880,14 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     throw new Error(
       `Cannot cache source-isolated baseline: ${artifact.kind} '${artifact.label}' depends on omitted or invalid data (${validation.errors.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}).`,
     );
+  }
+  const participationIssues = validateEventParticipationCatalog({
+    entities: catalog.entities,
+    events: catalog.events,
+    participations: catalog.eventParticipations.values(),
+  });
+  if (participationIssues.length) {
+    throw new Error(`Cannot cache source-isolated baseline: typed event participation projection is invalid (${participationIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}).`);
   }
   const possibilityIds = new Set(bundle.canonical.possibilities.map((item) => item.id));
   for (const possibility of bundle.canonical.possibilities) {

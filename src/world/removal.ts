@@ -109,6 +109,13 @@ export async function removeNovelAnalysis(
     else await canonical.removeCurrent("claims", claim.id);
     canonicalArtifacts += 1;
   }
+  for (const participation of await canonical.listEventParticipations()) {
+    if (!containsSourceEvidence(participation, sourceId)) continue;
+    const evidence = withoutSourceEvidence(participation, sourceId);
+    if (evidence.length) await canonical.putEventParticipation({ ...participation, evidence });
+    else await canonical.removeCurrent("event-participations", participation.id);
+    canonicalArtifacts += 1;
+  }
   for (const event of await canonical.listEvents()) {
     if (!containsSourceEvidence(event, sourceId)) continue;
     const evidence = withoutSourceEvidence(event, sourceId);

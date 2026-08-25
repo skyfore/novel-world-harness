@@ -356,6 +356,7 @@ describe("versioned prepared novel cache", () => {
     const legacyCanonical = currentBundle.canonical as Record<string, unknown>;
     delete legacyCanonical.propositions;
     delete legacyCanonical.attributions;
+    delete legacyCanonical.eventParticipations;
     const legacyHash = contentHash(currentBundle);
     const semanticLegacyRevision = path.join(semanticLegacyBase, "revisions", legacyHash);
     await fs.mkdir(semanticLegacyRevision, { recursive: true });

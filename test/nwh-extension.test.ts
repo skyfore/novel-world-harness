@@ -2593,6 +2593,14 @@ describe("NWH TUI extension", () => {
         causalParents: index === 1 ? [] : [`weather-${String(index - 1).padStart(2, "0")}`],
         confidence: 1,
       });
+      await canon.putEventParticipation({
+        id: `weather-${String(index).padStart(2, "0")}-hall`,
+        eventId: `weather-${String(index).padStart(2, "0")}`,
+        entityId: "hall",
+        role: "location",
+        confidence: 1,
+        evidence: evidence.evidence("The Hall opens and closes as the weather changes."),
+      });
     }
     await new PossibilityTemplateStore(root).put({
       id: "continuing-weather",

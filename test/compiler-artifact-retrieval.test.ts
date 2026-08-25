@@ -43,6 +43,15 @@ describe("compiler artifact retrieval", () => {
       causalParents: [],
       confidence: 1,
     });
+    await canon.putEventParticipation({
+      id: "hero-enters-hero-agent",
+      eventId: "hero-enters",
+      entityId: "hero",
+      role: "agent",
+      presence: "physical",
+      confidence: 1,
+      evidence: fixture.evidence("Hero enters"),
+    });
     const toolset = createCompilerProposalToolset(root);
     await toolset.beginBatch([], "batch-kind", fixture.source.id);
     const find = toolset.tools.find((tool) => tool.name === "find_compiler_artifacts")!;
@@ -57,6 +66,19 @@ describe("compiler artifact retrieval", () => {
     expect(result.kind).toBe("canonical-event");
     expect(result.results).toEqual([
       expect.objectContaining({ ref: "canonical:canonical-event:hero-enters", kind: "canonical-event" }),
+    ]);
+    const participationResult = JSON.parse(resultText(await find.execute(
+      "participation-kind",
+      { query: "*", kind: "event-participation" } as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    ))) as { results: Array<{ ref: string; kind: string }> };
+    expect(participationResult.results).toEqual([
+      expect.objectContaining({
+        ref: "canonical:event-participation:hero-enters-hero-agent",
+        kind: "event-participation",
+      }),
     ]);
     await expect(find.execute(
       "bad-kind",

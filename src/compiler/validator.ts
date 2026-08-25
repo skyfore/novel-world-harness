@@ -7,6 +7,7 @@ import {
   canonicalEventSchema,
   claimSchema,
   entitySchema,
+  eventParticipationSchema,
   attributionSchema,
   propositionSchema,
   worldRuleSchema,
@@ -16,6 +17,7 @@ import {
   type Entity,
   type EvidenceAssertion,
   type EvidenceRef,
+  type EventParticipation,
   type KnowledgeDelta,
   type Predicate,
   type Proposition,
@@ -23,6 +25,7 @@ import {
   type ValidationIssue,
   type WorldRule,
 } from "../world/model.js";
+import { validateEventParticipationRecord } from "../world/event-semantics.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { isMetaKnowledgePredicate } from "./semantics.js";
@@ -41,7 +44,7 @@ import {
   validateCommittedKnowledgeAcquisitionTrace,
 } from "./attribution-trace.js";
 
-export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
+export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type CompilerValidationCatalog = {
   entities: Map<string, Entity>;
@@ -49,6 +52,7 @@ export type CompilerValidationCatalog = {
   attributions: Map<string, Attribution>;
   claims: Map<string, Claim>;
   events: Map<string, CanonicalEvent>;
+  eventParticipations: Map<string, EventParticipation>;
   rules: Map<string, WorldRule>;
 };
 export type CompilerConvergenceProgress = {
@@ -73,12 +77,13 @@ export class CompilerValidator {
   }
 
   async loadCatalog(): Promise<CompilerValidationCatalog> {
-    const [entityList, propositionList, attributionList, claimList, eventList, ruleList] = await Promise.all([
+    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, ruleList] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listPropositions(),
       this.canon.listAttributions(),
       this.canon.listClaims(),
       this.canon.listEvents(),
+      this.canon.listEventParticipations(),
       this.canon.listRules(),
     ]);
     return {
@@ -87,12 +92,13 @@ export class CompilerValidator {
       attributions: new Map(attributionList.map((attribution) => [attribution.id, attribution])),
       claims: new Map(claimList.map((claim) => [claim.id, claim])),
       events: new Map(eventList.map((event) => [event.id, event])),
+      eventParticipations: new Map(eventParticipationList.map((item) => [item.id, item])),
       rules: new Map(ruleList.map((rule) => [rule.id, rule])),
     };
   }
 
   validateWithCatalog(kind: CanonicalProposalKind, payload: unknown, catalog: CompilerValidationCatalog): CompilerValidation {
-    const { entities, propositions, attributions, claims, events, rules } = catalog;
+    const { entities, propositions, attributions, claims, events, eventParticipations, rules } = catalog;
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
@@ -101,6 +107,7 @@ export class CompilerValidator {
     if (kind === "attribution") this.validateAttribution(attributionSchema.parse(payload), entities, propositions, attributions, errors);
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
     if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
+    if (kind === "event-participation") this.validateEventParticipation(eventParticipationSchema.parse(payload), entities, events, eventParticipations, errors);
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
     if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
@@ -193,7 +200,13 @@ export class CompilerValidator {
     if (event.observedOutcome.operations.length > 16) {
       errors.push(issue("OVERSIZED_CANONICAL_EVENT", `Event ${event.id} contains more than 16 typed state effects and must be split at a genuine causal boundary`, "observedOutcome.operations"));
     }
-    for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
+    const participantIds = new Set<string>();
+    for (let index = 0; index < event.participants.length; index += 1) {
+      const participant = event.participants[index]!;
+      if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, `participants.${index}`));
+      if (participantIds.has(participant)) errors.push(issue("DUPLICATE_PARTICIPANT", `Event ${event.id} contains duplicate participant ${participant}`, `participants.${index}`));
+      participantIds.add(participant);
+    }
     const presenceActors = new Set<string>();
     for (let index = 0; index < (event.participantPresence?.length ?? 0); index += 1) {
       const presence = event.participantPresence![index]!;
@@ -311,6 +324,31 @@ export class CompilerValidator {
     const visibleRules = new Map(rules);
     visibleRules.set(rule.id, rule);
     for (const predicate of [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]) this.validatePredicate(predicate, entities, visibleRules, errors);
+  }
+
+  private validateEventParticipation(
+    participation: EventParticipation,
+    entities: ReadonlyMap<string, Entity>,
+    events: ReadonlyMap<string, CanonicalEvent>,
+    participations: ReadonlyMap<string, EventParticipation>,
+    errors: ValidationIssue[],
+  ): void {
+    if (!participation.evidence.length) {
+      errors.push(issue("MISSING_EVIDENCE", `Event participation ${participation.id} has no source evidence`, "evidence"));
+    }
+    errors.push(...validateEventParticipationRecord(participation, entities, events));
+    const duplicate = [...participations.values()].find((candidate) =>
+      candidate.id !== participation.id
+      && candidate.eventId === participation.eventId
+      && candidate.entityId === participation.entityId
+      && candidate.role === participation.role);
+    if (duplicate) {
+      errors.push(issue(
+        "DUPLICATE_EVENT_PARTICIPATION",
+        `Event ${participation.eventId} already has ${participation.role} participation ${duplicate.id} for ${participation.entityId}`,
+        "role",
+      ));
+    }
   }
 
   private validateInitialWorld(
@@ -735,6 +773,7 @@ export class CompilerCommitService {
       },
       "CAUSAL_CYCLE",
     );
+    for (const candidate of eligible.filter((item) => item.kind === "event-participation")) await processCandidate(candidate);
     for (const kind of ["initial-world", "character-model", "character-goal"] as const) {
       for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
     }
@@ -822,6 +861,7 @@ export class CompilerCommitService {
     else if (kind === "attribution") await this.canon.putAttribution(attributionSchema.parse(payload));
     else if (kind === "claim") await this.canon.putClaim(claimSchema.parse(payload));
     else if (kind === "canonical-event") await this.canon.putEvent(canonicalEventSchema.parse(payload));
+    else if (kind === "event-participation") await this.canon.putEventParticipation(eventParticipationSchema.parse(payload));
     else if (kind === "world-rule") await this.canon.putRule(worldRuleSchema.parse(payload));
     else if (kind === "initial-world") await this.initialWorld.put(initialWorldSchema.parse(payload));
     else if (kind === "character-goal") await this.actorModels.putGoal(characterGoalSchema.parse(payload));
@@ -942,11 +982,12 @@ function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposa
   if (kind === "attribution") { const value = attributionSchema.parse(payload); catalog.attributions.set(value.id, value); }
   if (kind === "claim") { const value = claimSchema.parse(payload); catalog.claims.set(value.id, value); }
   if (kind === "canonical-event") { const value = canonicalEventSchema.parse(payload); catalog.events.set(value.id, value); }
+  if (kind === "event-participation") { const value = eventParticipationSchema.parse(payload); catalog.eventParticipations.set(value.id, value); }
   if (kind === "world-rule") { const value = worldRuleSchema.parse(payload); catalog.rules.set(value.id, value); }
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
-  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
 }
 function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "entity") return entitySchema;
@@ -954,6 +995,7 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "attribution") return attributionSchema;
   if (kind === "claim") return claimSchema;
   if (kind === "canonical-event") return canonicalEventSchema;
+  if (kind === "event-participation") return eventParticipationSchema;
   if (kind === "initial-world") return initialWorldSchema;
   if (kind === "character-goal") return characterGoalSchema;
   if (kind === "character-model") return characterModelSchema;

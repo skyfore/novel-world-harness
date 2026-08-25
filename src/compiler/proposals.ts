@@ -6,6 +6,7 @@ import {
   canonicalEventSchema,
   claimSchema,
   entitySchema,
+  eventParticipationSchema,
   attributionSchema,
   evidenceAssertionSchema,
   evidenceRefSchema,
@@ -23,6 +24,7 @@ import {
   type Claim,
   type EvidenceRef,
   type EvidenceAssertion,
+  type EventParticipation,
   type KnowledgeDelta,
   type ParticipantPresence,
   type Predicate,
@@ -31,6 +33,7 @@ import {
   type StoryTime,
   type WorldRule,
 } from "../world/model.js";
+import { validateEventParticipationCatalog } from "../world/event-semantics.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
@@ -92,6 +95,7 @@ const compilerPropositionSchema = propositionSchema.safeExtend({ evidence: evide
   }
 });
 const compilerAttributionSchema = attributionSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
+const compilerEventParticipationSchema = eventParticipationSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
   validateParticipantPresence(possibility, ctx);
   if (possibility.kind === "player-choice" && !hasExecutablePossibilityEffect(possibility)) {
@@ -102,7 +106,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -116,6 +120,7 @@ export const compilerProposalSchemas = {
   "canonical-event": compilerCanonicalEventSchema
     .extend({ evidence: evidenceRefSchema.array().min(1) })
     .superRefine(validateParticipantPresence),
+  "event-participation": compilerEventParticipationSchema,
   "world-rule": compilerWorldRuleSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "initial-world": initialWorldSchema,
   "character-goal": characterGoalSchema,
@@ -315,12 +320,13 @@ export async function validateCompilerProposalClosure(
   const canon = new CanonicalModelStore(workspaceRoot);
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalRules, canonicalPossibilities, pending] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalRules, canonicalPossibilities, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
     canon.listClaims(),
     canon.listEvents(),
+    canon.listEventParticipations(),
     canon.listRules(),
     possibilities.list(),
     proposals.list("pending"),
@@ -378,8 +384,22 @@ export async function validateCompilerProposalClosure(
     propositions: new Map(canonicalPropositions.filter(fromActiveSource).map((proposition) => [proposition.id, proposition])),
     attributions: new Map(canonicalAttributions.filter(fromActiveSource).map((attribution) => [attribution.id, attribution])),
   };
+  const participationCatalog = {
+    entities: new Map(canonicalEntities.filter(fromActiveSource).map((entity) => [entity.id, entity])),
+    events: new Map(canonicalEvents.filter(fromActiveSource).map((event) => [event.id, event])),
+    participations: new Map(canonicalEventParticipations.filter(fromActiveSource).map((item) => [item.id, item])),
+  };
   for (const proposal of staged.values()) {
-    if (proposal.kind === "claim") {
+    if (proposal.kind === "entity") {
+      const value = entitySchema.parse(proposal.payload);
+      participationCatalog.entities.set(value.id, value);
+    } else if (proposal.kind === "canonical-event") {
+      const value = canonicalEventSchema.parse(proposal.payload);
+      participationCatalog.events.set(value.id, value);
+    } else if (proposal.kind === "event-participation") {
+      const value = eventParticipationSchema.parse(proposal.payload);
+      participationCatalog.participations.set(value.id, value);
+    } else if (proposal.kind === "claim") {
       const value = claimSchema.parse(proposal.payload);
       semanticCatalog.claims.set(value.id, value);
     } else if (proposal.kind === "proposition") {
@@ -451,6 +471,13 @@ export async function validateCompilerProposalClosure(
   collectSemanticDependencyCycles(staged, new Set(proposalIds), "proposition", issues);
   collectSemanticDependencyCycles(staged, new Set(proposalIds), "attribution", issues);
   collectEventDependencyCycles(staged, new Set(proposalIds), issues);
+  for (const participationIssue of validateEventParticipationCatalog({
+    entities: participationCatalog.entities,
+    events: participationCatalog.events,
+    participations: participationCatalog.participations.values(),
+  })) {
+    issues.add(`event-participation: ${participationIssue.code} at ${participationIssue.path ?? "payload"}: ${participationIssue.message}`);
+  }
   return [...issues].sort();
 }
 
@@ -556,6 +583,12 @@ function collectProposalClosureIssues(
       collectStateDeltaIssues(checkpoint.delta, `${prefix}.delta`, missing, fieldReference);
       if (checkpoint.knowledge) collectKnowledgeDeltaIssues(checkpoint.knowledge, `${prefix}.knowledge`, missing);
     }
+    return;
+  }
+  if (proposal.kind === "event-participation") {
+    const participation = payload as EventParticipation;
+    missing("events", participation.eventId, "eventId");
+    missing("entities", participation.entityId, "entityId");
     return;
   }
   if (proposal.kind === "world-rule") {

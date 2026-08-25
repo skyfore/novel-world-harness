@@ -155,6 +155,14 @@ export {
 } from "./world/entry-context.js";
 export { KnowledgeProjector, type ActorWorldView } from "./world/knowledge.js";
 export {
+  EVENT_PARTICIPATION_PROJECTION_VERSION,
+  eventParticipationsByEvent,
+  projectEventParticipations,
+  validateEventParticipationCatalog,
+  validateEventParticipationRecord,
+  type EventParticipationCatalog,
+} from "./world/event-semantics.js";
+export {
   claimProjectionMismatches,
   findKnowledgeDeltas,
   projectPropositionObject,

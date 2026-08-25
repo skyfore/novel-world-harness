@@ -627,6 +627,24 @@ revision 和事件历史仍可读取，新语义字段保持 additive。bridge �
 polarity/modality 在 M4b 替换该 projection 前保持 semantic-only。proposition
 与 attribution 均不会自动升级为 world truth。
 
+M4b-1 也已实现。`EventParticipation` 现在是独立 versioned 的
+event/entity/semantic-role assertion；character scene presence 是与 role
+分离的可选维度，不能再把“在场”误写成“施事”
+（[model.ts](../src/world/model.ts#L247)）。catalog validator 会拒绝未知引用、
+role/entity kind 不相容、重复 role、冲突 presence，以及任何不能无损投影回
+legacy event 字段的 typed inventory
+（[event-semantics.ts](../src/world/event-semantics.ts#L18)、
+[event-semantics.ts](../src/world/event-semantics.ts#L90)）。compiler finish 会在
+checkpoint 前验证 canonical + pending 的 prospective catalog
+（[proposals.ts](../src/compiler/proposals.ts#L471)）；prepared publication 与
+runtime snapshot hydration 复用同一闸门。Snapshot V5 固定 participation
+revision，再派生兼容 event view，不直接改写 world truth
+（[context.ts](../src/world/context.ts#L174)、
+[context.ts](../src/world/context.ts#L298)）。audit coverage 只统计真实存在的
+legacy event/entity slot，孤儿或多余记录不能虚高覆盖率
+（[audit.ts](../src/compiler/audit.ts#L514)）。M4b-2 的 temporal/causal
+relation 仍待完成。
+
 ### 5.5 EventMention、Participation 与 EventRelation
 
 ```ts
@@ -664,7 +682,8 @@ type EventParticipation = {
     | "destination"
     | "other";
   presence?: ParticipantPresence["mode"];
-  evidenceAssertionIds: string[];
+  confidence: number;
+  evidence: EvidenceRef[];
 };
 
 type EventRelation = {
@@ -1242,10 +1261,12 @@ coverage；M3 至此完成。
 
 目标：拆开时间、因果、归因和知识路径。
 
-实现状态（2026-08-25）：M4a 已完成。proposition/attribution identity 与
+实现状态（2026-08-25）：M4a 与 M4b-1 已完成。proposition/attribution identity 与
 quotation-backed knowledge acquisition 已接通 source、identity resolution、
-closure、commit、replay 和 audit gate。M4b 尚待完成：typed event
-participation、独立证据化的 temporal/causal relation，以及 legacy projection。
+closure、commit、replay 和 audit gate。typed event participation 也已接通
+revision、retrieval、closure、prepared、snapshot、removal 与 audit 生命周期，
+并强制与 legacy participant/presence 无损等价。M4b-2 尚待完成：独立证据化的
+temporal/causal relation 及 legacy `causalParents` projection。
 
 改造：
 
@@ -1259,10 +1280,14 @@ participation、独立证据化的 temporal/causal relation，以及 legacy proj
 主要文件：
 
 - `src/world/model.ts`；
+- `src/world/event-semantics.ts`；
+- `src/world/context.ts`；
 - `src/world/knowledge.ts`；
 - `src/compiler/proposals.ts`；
 - `src/compiler/validator.ts`；
 - `src/compiler/batches.ts`；
+- `src/compiler/audit.ts`；
+- `src/compiler/prepared-cache.ts`；
 - `src/world/frontier.ts`；
 - `src/world/canon-runtime.ts`。
 

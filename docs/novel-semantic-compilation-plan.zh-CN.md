@@ -1,7 +1,8 @@
 # 技术计划：可溯源的全书小说语义编译
 
-- **状态：** 进行中——M0 至 M4、M5a、M5b-1、M5b-2a 已实现；M5b-2b、M5c 至 M7 待完成
+- **状态：** 进行中——M0 gold schema/baseline scaffold、M1 至 M4、M5a、M5b-1、M5b-2a、M5b-2b 与 M6 的直接证据失效修复已实现；M0 semantic scorer、M5c、M6 portability/传递依赖闭包与 M7 多小说 benchmark 待完成
 - **日期：** 2026-08-25
+- **本次代码基线验证：** `pnpm build`；`pnpm test`（109 个测试文件、618 项测试通过）
 - **范围：** 小说导入、结构拆分、语义标注、身份消歧、canonical 编译、审计、修复与重解析
 - **必须遵守：** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md)、[ADR 0002](adr/0002-user-level-content-addressed-storage.md)、[ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
 - **上位设计：** [Technical Design](technical-design.md)
@@ -18,8 +19,8 @@
 - WorldState、角色知识和角色发展都是派生投影；
 - future canon 不会因为编译器知道结局就进入活跃分支。
 
-当前主要问题不是模型能力不足，也不是 prompt 长度不够，而是从
-“source segment”到“canonical artifact”的跨度太大：
+本计划最初发现的问题不是模型能力不足，也不是 prompt 长度不够，而是从
+“source segment”到“canonical artifact”的跨度过大：
 
 ```text
 原文字节
@@ -28,8 +29,16 @@
   -> entity / claim / event / character model
 ```
 
-中间的实体提及、引语、事件提及、命题归因、时间关系、因果边及其证据没有
-被保留下来。最终结果虽然能通过结构校验，却难以回答：
+M0 至 M5b-2b 已经把实体/事件 mention、引语、discourse、身份/事件 resolution、
+命题/归因、参与角色、typed event relation、角色/关系/空间/world-rule ontology
+作为可版本化对象接入 proposal、验证、prepared snapshot、audit 和 actor-safe runtime。
+宿主现在解析 exact selector，模型不能伪造可信 offset/hash；章节 reparse 也已按
+区间包含清理章节内直接语义依赖
+（[proposal-tools.ts](../src/compiler/proposal-tools.ts#L114)、
+[evidence-assertions.ts](../src/compiler/evidence-assertions.ts#L29)、
+[reparse.ts](../src/commands/reparse.ts#L278)）。
+
+因此下图是**研究基线**，不再是完整的当前流程：
 
 - 这个字段由原文哪一句支持？
 - 这是原文明说，还是模型推断？
@@ -38,7 +47,7 @@
 - 角色性格变化来自哪次经历，是否只在某个对象或情境下成立？
 - 还有多少原文没有被纳入世界模型？
 
-本计划在 segment 和 canonical proposal 之间增加一个非权威的
+当前实现已经在 segment 和 canonical proposal 之间增加了非权威的
 annotation/resolution plane：
 
 ```text
@@ -63,9 +72,26 @@ validate -> accept -> immutable canonical revision
 committed history -> WorldState -> runtime
 ```
 
-该改造不引入数据库、向量检索或第二套世界真值。Annotation 和 resolution
-仍然是编译记录或候选解释；只有现有 canonical 接受边界和 runtime commit
-边界能够建立真值。
+该改造没有引入数据库、向量检索或第二套世界真值。Annotation 和 resolution
+仍然只是编译观察/决策；canonical artifact 也是接受后的编译参考而非活跃分支
+事实，只有 runtime commit 能建立 branch truth。
+
+本次深审确认，当前主要风险已经转移到五个更窄但更关键的闭环缺口：
+
+1. scene/discourse 能被观察，但 deterministic structure 实际只物化
+   work/paragraph/sentence/non-scene；尚无被接受的 scene membership 把事件、地点、
+   时间和参与者连成可执行世界切片；
+2. exact evidence binding 在当前 workspace 可审计，但 prepared bundle 没有携带
+   assertion/binding，恢复到另一 workspace 后会丢失字段级 provenance；
+3. semantic gold schema 已定义，但评分函数仍把所有已标注 semantic layer 标成
+   `not-implemented`，不能证明长篇 extraction precision/recall；
+4. typed causality 已可验证和审计，但 runtime frontier 仍消费兼容
+   `causalParents`；relation 的 mechanism/requiredConditions 尚未成为执行条件；
+5. 章节内直接失效已修复，mention → resolution → canonical → runtime 派生物的
+   传递 impact closure 仍未实现。
+
+所以当前系统可以宣称“机制可追溯、约束可执行”，不能宣称“任意长篇小说已被
+完整且正确理解”。后续路线图以消除这五个证据链断点为目标。
 
 ## 2. 研究结论
 
@@ -96,77 +122,89 @@ committed history -> WorldState -> runtime
 
 本计划只能在这些边界内增强语义层，不能绕过或替换它们。
 
-### 2.2 章节和 block 是传输结构，不是小说世界结构
+### 2.2 章节和 block 是传输结构；scene 观察尚未成为世界分解
 
-当前 segment 只有 `section | block`
-（[segments.ts](../src/compiler/segments.ts#L16)）。章节识别依赖内置标题模式
-或一个前缀/数字/后缀规则
-（[chapter-split.ts](../src/compiler/chapter-split.ts#L15)）；过大的 section
-按字节、行数和空行继续切开
-（[segments.ts](../src/compiler/segments.ts#L323)）。
+当前 segment 仍只有 `section | block`
+（[segments.ts](../src/compiler/segments.ts#L16)）。章节识别依赖内置标题模式或
+受限的前缀/数字/后缀规则，过大的 section 再按字节、行数和空行切开
+（[chapter-split.ts](../src/compiler/chapter-split.ts#L15)、
+[segments.ts](../src/compiler/segments.ts#L323)）。这是一套安全的 prompt 传输结构。
 
-这种设计能安全地建立 prompt batch，但不能表达：
+M2 已增加 `StructuralUnit` vocabulary 和独立 discourse observation；但代码审查
+发现 `materializeSourceStructure` 当前实际只生成 work、paragraph、sentence 与
+blank `non-scene`，并把 `discourseSegments` 初始化为空
+（[structure.ts](../src/compiler/structure.ts#L87-L167)）。模型可另行记录 scene、
+summary、flashback、flashforward、dream、embedded-document 等可重叠 observation，
+并验证 viewpoint/mention/quotation/event mention 的引用闭包
+（[annotations.ts](../src/compiler/annotations.ts#L124-L181)、
+[annotations.ts](../src/compiler/annotations.ts#L550-L634)）。
 
-- 卷、部、回、章、场景、beat 的层级；
-- 章节开头延续上一章同一场景；
-- 一章内多次切换时间、地点和人物集合；
-- flashback、梦境、嵌套故事或信件与当前场景重叠；
-- 叙述概括与现场行动之间的边界。
+这已经把 prompt batch、基础结构、话语观察和证据 span 分开，却还缺一个接受后的
+`SceneOccurrence/SceneMembership`：当前 canonical event 有 story time 与
+narrative context，但没有稳定引用 source scene observation，也没有统一表达 scene
+的地点、时间窗口、参与者集合、viewpoint 和跨章 continuation。因此“识别出一段
+flashback”并不等于“已经把它编进可执行世界”。
 
-叙事计算研究通常用时间、地点、人物集合和持续行动共同定义 scene，而不是
-依赖章节版式
-（[Detecting Scenes in Fiction](https://aclanthology.org/2021.eacl-main.276/)）。
-后续研究也明确指出章节属于编辑结构，cliffhanger 可能把同一 scene 分在两章
+叙事计算研究通常用时间、地点、人物集合和持续行动共同定义 scene，而不是依赖
+章节版式
+（[Detecting Scenes in Fiction](https://aclanthology.org/2021.eacl-main.276/)）；
+后续研究也指出章节属于编辑结构，cliffhanger 可能把同一 scene 分在两章
 （[Rethinking Scene Segmentation](https://aclanthology.org/2025.latechclfl-1.8/)）。
 
-**结论：** 保留现有 chapter/block segment；在其上增加可重叠的结构和话语
-标注。Prompt batch、结构单元、scene 和证据 span 必须是四个不同概念。
+**结论：** 现有 transport 与 observation 层方向正确；下一步不是继续细切 chunk，
+而是显式 resolve scene occurrence，并把 event/location/time/participant membership
+作为有证据、可 revision、非 branch-truth 的编译对象。
 
-### 2.3 当前引用能证明字节未变，不能证明断言被原文支持
+### 2.3 精确引用已实现，但 portable provenance 与语义蕴含仍未闭环
 
-`SourceSpan` 有行号、字节范围和 `quoteHash`
-（[model.ts](../src/world/model.ts#L19)），`EvidenceVerifier` 会验证原文
-身份、范围和哈希
-（[evidence.ts](../src/compiler/evidence.ts#L21)）。
+基础 `SourceSpan` 记录行号、字节范围和 `quoteHash`，`EvidenceVerifier` 会验证
+不可变 source identity、范围与哈希
+（[model.ts](../src/world/model.ts#L19)、
+[evidence.ts](../src/compiler/evidence.ts#L21)）。M1 又加入宿主解析的 exact selector、
+JSON Pointer target、supports/contradicts relation 与 derivation。Assertion revision
+和 artifact-hash binding 独立保存，避免仅因 compiler provenance 改变就制造新的
+世界 revision
+（[evidence-assertions.ts](../src/compiler/evidence-assertions.ts#L15-L130)）；本地
+artifact retrieval 也能返回字段路径、强度和精确 anchor
+（[artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts#L198-L213)、
+[artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts#L323-L334)）。
 
-但模型工具只提交 segment ID；宿主将整个 segment 转成 evidence
-（[proposal-tools.ts](../src/compiler/proposal-tools.ts#L114)、
-[segments.ts](../src/compiler/segments.ts#L243)）。单个 segment 可达到约
-1000 行或 96 KiB
-（[segments.ts](../src/compiler/segments.ts#L52)）。
+深审发现两个剩余断点：
 
-这会混淆三个完全不同的事实：
-
-1. 模型读过这个 segment；
-2. 某句话明确支持一个字段；
-3. 模型综合整段后做出了人物或因果推断。
-
-编译路径还会把宿主生成的 whole-segment reference 标成 `explicit`。
-实体有额外的名称/别名出现检查，但事件效果、因果边和人物 trait 没有通用的
-文本蕴含验证
-（[evidence.ts](../src/compiler/evidence.ts#L132)）。
+1. 通用 target validator 只证明 JSON Pointer 存在、target ID 匹配，并不定义
+   “每种 artifact 哪些字段必须有 assertion”；目前只有 character、relationship、
+   spatial 和 controlled world-rule 等选定 ontology 具有逐项 support/counter 集合
+   完全相等的专用 gate
+   （[evidence-assertions.ts](../src/compiler/evidence-assertions.ts#L132-L163)、
+   [world-rule-ontology.ts](../src/world/world-rule-ontology.ts#L199-L227)）。
+2. `PreparedNovelBundle` 只序列化 canonical arrays，没有 assertion revision/binding
+   table；publish 能在原 workspace 重跑部分 exact-evidence gate，但 materialize
+   只恢复 canonical artifacts。因此跨 workspace cache restore 后，artifact 仍有
+   portable `EvidenceRef`，字段级 assertion/provenance 却不可检索
+   （[prepared-cache.ts](../src/compiler/prepared-cache.ts#L60-L92)、
+   [prepared-cache.ts](../src/compiler/prepared-cache.ts#L676-L700)）。
 
 [W3C Web Annotation Data Model](https://www.w3.org/TR/annotation-model/)
-将文本位置和 exact/prefix/suffix quote selector 分开；
-[W3C PROV-O](https://www.w3.org/TR/prov-o/) 区分被生成的 Entity、生成过程
-Activity 和 Agent。这两项标准适合用于本项目的精确 anchor 和编译 provenance，
-但不要求采用 RDF。
+明确区分 TextPosition 与包含 exact/prefix/suffix 的 TextQuote selector；
+[W3C PROV-O](https://www.w3.org/TR/prov-o/) 区分被生成的 Entity、生成 Activity
+与负责的 Agent。本项目借用这两个建模原则，不需要采用 RDF。
 
-**结论：** “字节绑定是否有效”与“原文是否支持这个解释”必须成为两个字段。
-证据必须落到 artifact 字段或关系边，而不是只落到整个 artifact。
+**结论：** 当前系统可以证明“这条引用精确落在未变化的原文字节上”，并能对选定
+ontology 强制字段级支持；它仍不能由结构校验自动证明“这句话语义上蕴含该断言”。
+下一步必须补 portable assertion bundle、artifact required-evidence profile 和人工
+entailment gold，三者不能相互冒充。
 
-### 2.4 缺少 mention/resolution 层是全书身份错误的根源
+### 2.4 Mention/resolution 已补齐机制，长篇消歧质量仍未被测量
 
-当前 Entity 只有稳定 ID、kind、canonical name、aliases 和 artifact 级
-evidence
-（[model.ts](../src/world/model.ts#L40)）。没有：
-
-- 原文 mention；
-- 专名、称谓、官职、亲属称谓、代词、集合称呼；
-- 候选 entity；
-- resolved/ambiguous/unresolved 状态；
-- alias 的类型和有效时间；
-- merge/split 历史。
+M3 已将 source observation 与 stable identity 分开：entity mention 保存 exact
+surface/form/scene，deterministic lexical candidate 只负责召回候选，模型必须提交
+resolved/new/ambiguous/unresolved 决策；event mention 与 event resolution 也把
+trigger/extent、participant mention、coreference/subevent、merge/split revision
+保留下来。Canonical name、alias、event 和 participant 的接受 gate 会反查这些
+resolution，而不会因为字符串相似就自动合并
+（[annotations.ts](../src/compiler/annotations.ts#L46-L122)、
+[entity-resolution.ts](../src/compiler/entity-resolution.ts#L1)、
+[event-resolution.ts](../src/compiler/event-resolution.ts#L1)）。
 
 长篇 coreference 明显比短文档困难。BookCoref 的书级样本平均超过
 20 万 token，并报告模型在书级长度上的性能退化
@@ -176,28 +214,30 @@ evidence
 官方 [BookNLP](https://github.com/booknlp/booknlp) 也把 mention、coreference、
 quotation、entity 和 event 保持为不同输出层。
 
-**结论：** mention 是原文观察，entity 是消歧后的稳定身份；二者不能继续
-合并成一次模型提交。
+**结论：** mention/resolution 的 ontology 与 revision 生命周期已经存在，最危险的
+“直接用一次模型输出创建身份”问题已被消除。剩余风险是 recall 与跨章 clustering
+是否正确：当前没有多小说人工 gold，因而 unresolved queue 和内部 closure 只能证明
+过程可审计，不能证明人物没有漏抽、误合并或错误拆分。
 
-### 2.5 当前因果图只验证拓扑，不验证因果
+### 2.5 Typed 因果关系已可审计，但执行层仍是兼容投影
 
-`CanonicalEvent` 只有一个 `causalParents: string[]`，confidence 和
-evidence 也只存在于整个事件
-（[model.ts](../src/world/model.ts#L400)）。验证器会检查父事件存在、
-时间不发生明确回退
-（[validator.ts](../src/compiler/validator.ts#L97)），闭包会检查循环
-（[proposals.ts](../src/compiler/proposals.ts#L583)）。
+M4b-2 已增加一等 `EventRelation`：关系独立记录 before/after/during/contains/
+overlaps/starts/finishes、causes/enables/prevents/motivates/explains、coreference/
+subevent/narrative-continuation，以及 status、confidence、mechanism、
+requiredConditions、support/counter evidence
+（[model.ts](../src/world/model.ts#L388-L425)）。Catalog validator 检查 endpoint、
+时间矛盾、重复/相反关系、causal/subevent/temporal cycle，并只把非 contested 的
+`causes`/`enables` 无损投影到 legacy `causalParents`
+（[event-relations.ts](../src/world/event-relations.ts#L22-L152)）。
 
-但一条关系没有自己的：
+这解决了“图无环就等于因果正确”的表示问题，却还没有完成执行迁移：
 
-- cause/enable/prevent/motivate/explain/subevent 类型；
-- source span；
-- explicit/inferred/contested 状态；
-- confidence；
-- mechanism/precondition；
-- counter-evidence。
-
-因此叙事相邻、时间先后、前提条件、人物动机和直接因果可能被压缩进同一数组。
+- `causes` 与 `enables` 在 compatibility projection 中仍折叠为同一种 parent；
+- `requiredConditions` 目前只做 predicate/reference 验证，没有进入 frontier eligibility；
+- possibility frontier 仍只消费 `possibility.causalParents` 与自身 preconditions，
+  不读取 relation type、status、mechanism 或 condition
+  （[frontier.ts](../src/world/frontier.ts#L33-L106)）；
+- evaluator 仍按无类型 parent pair 评分，不测 type、status、evidence 或 mechanism。
 
 带有强度、证据和其他属性的关系应成为一等对象，这属于
 [W3C N-ary Relations Note](https://www.w3.org/TR/swbp-n-aryRelations/)
@@ -206,22 +246,23 @@ evidence 也只存在于整个事件
 [EventRelBench](https://aclanthology.org/2025.findings-emnlp.482/) 也显示通用
 LLM 在这些关系任务上仍不可靠。
 
-**结论：** 图无环不等于因果正确。每条 event relation 必须独立建模、引用
-和验证。
+**结论：** typed relation 已完成“表示与审计”，下一步要完成“condition-aware
+执行与反事实评测”。Mechanism 仍是解释性 provenance，不能直接写 world truth；
+只有其 required condition 在当前 branch state 被确定性满足时，关系才可支撑对应
+runtime dependency。
 
-### 2.6 Claim/Knowledge 方向正确，但 attribution 不足
+### 2.6 Proposition/Attribution/Knowledge 路径已分层，但仍缺语义 gold
 
-`Claim` 使用自由 predicate 和 `unknown` object，只能附带较粗的
-epistemic type 与可选 speaker
-（[model.ts](../src/world/model.ts#L46)）。`KnowledgeDelta` 正确地区分
-knows/believes/suspects/heard/disbelieves 与世界状态
-（[model.ts](../src/world/model.ts#L200)），但还不能完整表达：
-
-- narrator、人物、文书、传闻的嵌套归因；
-- 否认、质疑、撤回、欺骗；
-- 直接观察、听说、阅读、推断、回忆；
-- 命题成立的 story-time；
-- 同一命题在不同人物视角下的不同置信度。
+M4a 已把 reusable `Proposition` 与 narrator/character/document/unknown holder 的
+`Attribution` 分开；polarity/modality/valid story time 属于命题，asserts/knows/
+believes/suspects/reports/denies/questions、certainty、nested source attribution 与
+quotation IDs 属于归因。`KnowledgeDelta learn` 仍保留 legacy claim ID，同时增加
+content-compatible proposition、attribution 与 observed/told/read/inferred/
+remembered/deceived-misattributed acquisition mode
+（[model.ts](../src/world/model.ts#L146-L206)、
+[attribution-trace.ts](../src/compiler/attribution-trace.ts#L34-L176)）。接受一个
+proposition/attribution 只确认它是 source-grounded interpretation，不把命题提升为
+WorldState 或任何角色知识；角色知识仍只由 committed KnowledgeDelta 派生。
 
 引语语料通常分别标注 quote span、speaker、addressee 和 cue
 （[RiQuA](https://aclanthology.org/2020.lrec-1.104/)）；事件 factuality
@@ -230,8 +271,10 @@ knows/believes/suspects/heard/disbelieves 与世界状态
 [ISO-TimeML](https://aclanthology.org/L10-1027/) 也强调文本表达和它所指
 事件之间的区别。
 
-**结论：** Claim 应拆成 Proposition、Attribution/Factuality 和
-actor-specific acquisition，断言不能自动成为世界真值。
+**结论：** authority 分层已经落地。剩余问题不是再增加一个自由字段，而是建立
+quotation/attribution/acquisition 的人工 gold 与矛盾案例：当前 closure 能拒绝悬空
+speaker/addressee 和不合法获取路径，却不能证明模型把自由间接引语、讽刺、撒谎或
+不可靠叙述解释正确。
 
 ### 2.7 角色发展 authority 正确，性格 ontology 不可比较
 
@@ -446,48 +489,138 @@ prepared/context 回归和 snapshot revision pinning
 边界也必须明确：本阶段不从“距离近”“同一地区”或叙述顺序推断通路，不把未知
 duration 补成常识值，不做经纬度/几何计算；`location.controller` 仍由 committed
 event history 派生的 WorldState 决定。当前路径选择以最少 hop、已知 minimum duration
-和 logical ID 确定性打破平局，不承诺现实世界最优路线。更复杂的 jurisdiction、规则
-冲突、exception/priority 属于 M5b-2b。
+和 logical ID 确定性打破平局，不承诺现实世界最优路线。
 
-M5 剩余工作是 M5b-2b versioned world-rule domain 与 M5c deterministic salience；
-goal hierarchy/conflict/commitment 仍需在后续基于实测失败决定是否扩展。
+#### 2.7.3 M5b-2b：世界规则必须区分适用、义务、禁止、例外与优先关系
 
-### 2.8 当前审计没有全书 recall 分母
+旧 `WorldRule` 只有 scope、`appliesWhen`、`requires`、`forbids` 和 artifact 级
+evidence，无法表示规则来源、管辖范围、可废止性、例外、冲突优先关系和角色是否
+知道该规则。更危险的是，如果把一个整数 `priority` 当成隐式冲突解决器，两个模型
+提案可能在没有原文根据时改变世界法则。
 
-编译 prompt 明确优先构造 bounded high-leverage graph，而不是穷举 mention
-（[batches.ts](../src/compiler/batches.ts#L638)、
-[batches.ts](../src/compiler/batches.ts#L659)）。Audit 中
-`entityResolution`、`majorEventResolution`、`epistemicCoverage`
-被直接设为 `null`
-（[audit.ts](../src/compiler/audit.ts#L392)）。
+已实现的 `world-rule-v2` 将这类语义编成受控 canonical artifact：
 
-语义 gate 只有在已经抽到至少 20 个事件时才运行
-（[audit.ts](../src/compiler/audit.ts#L277)）。现有 evaluator 只比较 logical
-ID 集合和无类型 causal edge
-（[compiler-eval.ts](../src/eval/compiler-eval.ts#L7)）。
-`三国演义` fixture 只验证字节和 120 回章节形态，不验证语义
+- rule 记录 physical/social/legal/magical/institutional kind，global/entity/location/
+  faction/institution scope，authority、jurisdiction、applicability、具体 story-time、
+  visibility、knowledge claim、priority、defeasible 与显式 `overridesRuleIds`；
+- 每条 require/forbid clause 和每个 exception 都有独立 ID、basis、supported/
+  contested、confidence、support/counter evidence；contested item 永不执行；
+- legal/institutional rule 必须有有效 authority，bounded jurisdiction 的 entity kind
+  和 applicability binding 必须闭合；unknown reference、同一 rule 自相矛盾、
+  override 不可废止规则、priority 非严格上升与 override cycle 都 fail closed；
+- priority **只排序和校验**，不会自行压过另一规则。只有证据支持的显式 override
+  edge 才能停用较低、defeasible rule
+  （[model.ts](../src/world/model.ts#L710-L835)、
+  [world-rule-ontology.ts](../src/world/world-rule-ontology.ts#L90-L197)）。
+
+这一取舍与一手标准的建模原则一致：
+[OASIS LegalRuleML 1.0](https://docs.oasis-open.org/legalruleml/legalruleml-core-spec/v1.0/os/legalruleml-core-spec-v1.0-os.html)
+用显式 `Override` 表示规则 superiority，并把 defeasibility 与 rule strength 分开；
+[W3C ODRL 2.2](https://www.w3.org/TR/odrl-model/) 分开 permission、prohibition、duty
+及其 constraints，并要求显式 conflict strategy，未声明时默认 conflict invalid。
+本项目没有照搬法律 ontology，而是实现小说 runtime 所需的最小确定性子集。
+
+Runtime 先从 committed `activeRuleIds` 中解析 time/applicability/exception/override，
+在 pre-state 检查 require，在拟议 delta 后的 post-state 检查 forbid；隐藏或角色未知
+的规则仍由 engine 执行，但不会进入 actor/NPC prompt
+（[world-rule-ontology.ts](../src/world/world-rule-ontology.ts#L230-L328)、
+[engine.ts](../src/world/engine.ts#L255-L283)）。这保持了“执行”和“披露”分离。
+Audit 统计 controlled/legacy、kind/scope、clause/exception、defeasibility、override、
+visibility、exact evidence 与 reference issue；跨 rule 的潜在 require/forbid 冲突只做
+诊断，只有有效显式 override 才标为已解决
+（[audit.ts](../src/compiler/audit.ts#L1299-L1328)、
+[audit.ts](../src/compiler/audit.ts#L1489-L1506)）。
+
+M5 现在只剩 M5c deterministic salience；goal hierarchy/conflict/commitment 以及更深的
+institution/faction/artifact/economy domain module 应由 benchmark 暴露的真实失败驱动，
+不应先凭想象扩大 ontology。
+
+### 2.8 Source accounting 已有内部 denominator，仍没有独立语义 recall 分母
+
+编译 prompt 明确优先构造 bounded high-leverage graph，而不是穷举 mention；单 batch
+最多 24 个 active proposal、40 次一般工具调用
+（[batches.ts](../src/compiler/batches.ts#L705-L727)、
+[proposal-tools.ts](../src/compiler/proposal-tools.ts#L442-L447)）。M2/M3 后，Audit 已能
+用基础 structural unit 与已产生 observation 计算 source accounting、entity/event
+resolution 和 proposition-attribution coverage
+（[audit.ts](../src/compiler/audit.ts#L1384-L1409)）。这些 denominator 对发现“已观察
+但未处理”的缺口有价值。
+
+语义 gate 仍只有在已经抽到至少 20 个事件时才运行
+（[audit.ts](../src/compiler/audit.ts#L1366-L1374)）。更关键的是，
+`compilerGoldSchema` 虽然已经定义 mention、cluster、quotation、participation、
+event relation、proposition、knowledge、state effect 与 character assertion，实际
+`evaluateCompilerAgainstGold` 仍只读取 entity/claim/event/rule/goal/model 和 legacy
+causal parent ID；每个被标注的 semantic layer 都返回 `not-implemented`
+（[compiler-eval.ts](../src/eval/compiler-eval.ts#L397-L511)）。`三国演义` fixture 只
+验证字节和 120 回章节形态，不验证语义
 （[corpus README](../fixtures/corpus/README.md#L19)、
 [corpus-fixture.test.ts](../test/corpus-fixture.test.ts#L8)）。
 
-**结论：** 已抽取 artifact 的内部比例不能代表全书覆盖率。必须引入
-source accounting 和独立人工 gold denominator。
+**结论：** source accounting 已实现，但“模型自己先找出的 mention 数量”不能作为
+模型是否漏找 mention 的独立分母。必须实现 semantic evaluator 并加入人工 gold；
+在此之前，内部 coverage 只能叫 pipeline accounting，不能叫全书 semantic recall。
 
-### 2.9 Reconcile/reparse 只能修已知对象
+### 2.9 Reparse 已修直接证据失效，仍缺传递 dependency closure
 
 Bounded reconciliation 只有两轮，并限制每轮修复的 event/character 数量
-（[reconcile-world.ts](../src/compiler/reconcile-world.ts#L15)）。当前目标主要是
-已知事件缺少 summary、presence、checkpoint、time、effect 或粗粒度角色发展
-（[reconcile-world.ts](../src/compiler/reconcile-world.ts#L183)）。
+（[reconcile-world.ts](../src/compiler/reconcile-world.ts#L15-L25)）。当前目标主要是
+已知事件、角色或规则问题，而不是发现模型从未抽取的语义单元
+（[reconcile-world.ts](../src/compiler/reconcile-world.ts#L417-L476)）。
 
-章节 reparse 仅当 artifact 的全部 evidence 都落在选中 span 时才失效该
-artifact
-（[reparse.ts](../src/commands/reparse.ts#L275)），没有计算 mention →
-resolution → event/relation → state/knowledge → character/possibility 的依赖闭包。
+本次深审修复了一个直接正确性缺陷：旧实现用 evidence span hash 完全相等匹配章节
+batch，因而字段级 exact quote 子区间不会命中；同时遗漏 proposition、attribution、
+event participation 和 event relation。当前实现改用 byte/line containment，并覆盖
+所有 canonical collection、rule/spatial 的嵌套 evidence 及 character ontology
+内部 evidence；只有“全部证据均在选中范围”的 artifact 被移除，跨章 artifact 保留，
+immutable revision 与 branch pin 不受影响
+（[reparse.ts](../src/commands/reparse.ts#L278-L365)、
+[reparse.test.ts](../test/reparse.test.ts#L146)）。
 
-**结论：** missing semantic unit 和 stale downstream artifact 必须成为
-显式对象。
+仍未解决的是传递依赖：系统没有计算 mention → resolution → event/relation →
+state/knowledge → character/possibility/prepared projection 的 impact closure。聚合型
+CharacterModel 若同时含选中章和其他章的 evidence，也只能整体保留，无法只标记其中
+一个 disposition/appraisal stale。
 
-## 3. M0-M4、M5a、M5b-1 与 M5b-2a 完成后的当前流程
+**结论：** 直接章节失效已安全修复；M6 仍需显式 `ArtifactDependency`、stale/review
+状态和 impact plan。Missing semantic unit 与 stale downstream artifact 必须成为
+可查询对象，而不是依靠模型在下一次整章 prompt 中猜测。
+
+### 2.10 深审后的风险排序
+
+| 优先级 | 证据链断点 | 当前后果 | 改造判据 |
+|---|---|---|---|
+| P0 | Prepared bundle 不携带 exact assertion/binding | cache restore 后字段 provenance 丢失 | 任意 workspace restore 后 assertion 数量、hash、target 与发布前完全相同 |
+| P0 | Semantic gold scorer 未实现 | 无法知道 mention、因果、角色和知识抽取是否正确 | 每个已标注 layer 输出 alignment、precision、recall、F1，不再显示假 `not-implemented` 原因 |
+| P0 | 无传递 artifact dependency graph | 局部 reparse 可留下 stale downstream semantic | dry-run 能列出直接/传递 impact，commit 后无 dangling current ref，旧 branch 仍 replay |
+| P1 | Scene 只是 observation | 世界拆分无法稳定连接地点、时间、人物与事件 | 跨章 scene occurrence 可 resolve/revision，event membership 与 discourse order 分离 |
+| P1 | Typed causal condition 未进入 frontier | `causes`/`enables` 执行上仍近似相同 | required condition 在当前 branch 不满足时关系不能解锁 possibility；反事实测试通过 |
+| P1 | 近期经历固定 `slice(-12)` | 重要但较早的目标、关系或创伤事件被挤出 actor context | deterministic salience 按目标/关系/未解决义务/新近度组合，actor-safe 且 replay 稳定 |
+| P2 | institution/faction/artifact/economy 仍是粗粒度 state fields | 程序、资源流、物品能力难表达 | 只有 benchmark 中重复失败的领域才增加受控 module 与 migration |
+
+P0 是“证据是否可携带、结果是否可测、修复是否完整”的发布可信度问题；P1 是
+“世界是否能执行得更像原作”的语义能力问题；P2 必须后置，避免 ontology 在没有
+语料证据时膨胀。
+
+### 2.11 外部资料的采用边界
+
+| 一手资料 | 本计划采用的原则 | 明确不推出的结论 |
+|---|---|---|
+| [W3C Web Annotation](https://www.w3.org/TR/annotation-model/) | position 与 exact/prefix/suffix quote selector 分离 | 不要求 RDF，也不证明引用对断言的语义蕴含 |
+| [W3C PROV-O](https://www.w3.org/TR/prov-o/) | source entity、compiler activity、agent/provenance 分离 | provenance 完整不等于模型解释正确 |
+| [Detecting Scenes in Fiction](https://aclanthology.org/2021.eacl-main.276/) 与 [Rethinking Scene Segmentation](https://aclanthology.org/2025.latechclfl-1.8/) | scene 依赖时间、地点、人物与行动连续性，可能跨 chapter | 不直接采用论文模型或其 label 作为 runtime truth |
+| [BookCoref](https://aclanthology.org/2025.acl-long.1197/)、[GOLEMcoref](https://aclanthology.org/2026.acl-short.39/) 与 [BookNLP](https://github.com/booknlp/booknlp) | 长篇/多语文学共指困难；mention、cluster、quote、entity/event 应分层 | 不把任一外部 pipeline 输出自动接受为 canonical identity |
+| [W3C N-ary Relations](https://www.w3.org/TR/swbp-n-aryRelations/)、[MAVEN-ERE](https://aclanthology.org/2022.emnlp-main.60/) 与 [EventRelBench](https://aclanthology.org/2025.findings-emnlp.482/) | 带 type/status/evidence/mechanism 的关系应为一等对象；event relation 任务仍困难 | 关系 schema 合法不代表因果判断正确 |
+| [RiQuA](https://aclanthology.org/2020.lrec-1.104/)、[Event Factuality and Modal Dependency](https://aclanthology.org/2021.acl-long.122/) 与 [ISO-TimeML](https://aclanthology.org/L10-1027/) | quotation、speaker/addressee/cue、conceiver/certainty、文本 mention 与所指事件分开 | narrator/character assertion 不自动成为 world truth |
+| [PersonaBank](https://aclanthology.org/L16-1163/) 与 [Story Commonsense](https://aclanthology.org/P18-1213/) | 目标、动机、affect、事件前后变化应连接时间线 | 不采用诊断性人格标签，也不从常识补写原作心理 |
+| [GeoSPARQL 1.1](https://docs.ogc.org/is/22-047r1/22-047r1.html)、[Spatial Data on the Web BP](https://www.w3.org/TR/sdw-bp/) 与 [OWL-Time](https://www.w3.org/TR/owl-time/) | 空间 identity/topology/route 与 duration/unit 分离 | 邻接不等于可通行，不从现实地图推断小说世界 |
+| [OASIS LegalRuleML 1.0](https://docs.oasis-open.org/legalruleml/legalruleml-core-spec/v1.0/os/legalruleml-core-spec-v1.0-os.html) 与 [W3C ODRL 2.2](https://www.w3.org/TR/odrl-model/) | 规则类型、约束、例外/冲突策略与显式 superiority 分开 | priority 数字本身没有推翻另一规则的权威 |
+| [W3C SHACL](https://www.w3.org/TR/shacl/) | data 与 constraints 分离，输出逐约束 result，验证不改输入 | 不引入 RDF store；Zod/TypeScript validator 仍是本项目执行边界 |
+
+所有外部资料只支撑 ontology 设计原则和评测必要性；仓库是否实现某项能力，以前述
+本地代码与测试引用为准。
+
+## 3. M0-M4、M5a、M5b-1、M5b-2a 与 M5b-2b 完成后的当前流程
 
 ```text
 nwh ingest
@@ -508,24 +641,25 @@ compile-source / prepare-all
   -> character-v1 分离 disposition、appraisal 与 development proposal
   -> relationship-v1 分离 directed stance、typed obligation 与 relationship change
   -> spatial-v1 分离 contains、adjacent 与 direction/mode/duration route
+  -> world-rule-v2 分离 applicability、require/forbid clause、exception 与 explicit override
   -> finish 校验 source accounting 与 prospective semantic graph
   -> pending proposal store
 
 accept / prepare
   -> 验证 source hash 与 span
   -> 验证 mention-resolution 与 exact target trace
-  -> 验证引用、state schema、participation、epistemic、event/character/relationship/spatial ontology
+  -> 验证引用、state schema、participation、epistemic、event/character/relationship/spatial/world-rule ontology
   -> dependency order 与 semantic cycle check
   -> 接受为 immutable canonical revision
   -> prepared publication 重复 whole-catalog projection/readiness gate
 
 audit / reconcile
   -> source-accounting denominator 与 observation/resolution coverage
-  -> exact evidence、participation、epistemic、typed causality、character、relationship 与 spatial metric
-  -> bounded repair queue；dependency-driven invalidation 留待 M6
+  -> exact evidence、participation、epistemic、typed causality、character、relationship、spatial 与 rule metric
+  -> bounded repair queue；完整 dependency impact closure 留待 M6
 
 reparse
-  -> 失效 selected span 内 source-backed current artifact
+  -> 以 byte/line containment 失效 selected span 内直接 source-backed current artifact
   -> 重新生成 revision
   -> 既有 branch 继续 pin 旧 prepared revision
 
@@ -535,6 +669,7 @@ runtime
   -> typed semantic record 只派生 compatibility event view，不成为 branch truth
   -> character/relationship policy 仅由 committed/experienced/known trigger 激活并保持 actor-safe visibility
   -> active spatial route 确定性约束 compiled arrival 的方向、方式与已知最短时间
+  -> active world rule 在 pre/post state 执行 require/forbid，exception/explicit override fail closed
   -> 确定性投影 state、knowledge、scene、development 和 frontier
 ```
 
@@ -543,9 +678,10 @@ runtime
 annotation 与 resolution 已成为 world proposal 之前的非 canonical 层；finish
 closure 会拒绝不完整的 prospective graph
 （[proposals.ts](../src/compiler/proposals.ts#L316)）。M5a 角色语义、M5b-1 directed
-relationship 与 M5b-2a spatial 语义现已完成编译、source scope、审计与投影；
-后续仍需 M5b-2b world-rule ontology 与 M5c salience selection，M6 的 dependency-driven invalidation 与 publication policy，
-以及 M7 的多小说人工标注 semantic benchmark。
+relationship、M5b-2a spatial 与 M5b-2b world-rule 语义现已完成编译、source scope、
+审计与 runtime gate。后续仍需 M5c salience selection，M6 的 portable evidence、
+semantic evaluator 与 dependency-driven impact closure，以及 M7 的多小说人工标注
+semantic benchmark。
 
 ### 3.1 研究基线的主要失真点
 
@@ -559,6 +695,7 @@ relationship 与 M5b-2a spatial 语义现已完成编译、source scope、审计
 | claim | proposition、holder、certainty 合一 | narrator/rumor/belief 容易污染 truth |
 | trait map | disposition、affect、stance 合一 | 角色模型不稳定、不可比较 |
 | location ID equality | 包含、邻接与通路合一或缺失 | 远程互动误判，移动方式/耗时无法验证 |
+| flat world rule | 适用、条款、例外与优先关系合一 | 规则冲突可能靠任意 priority 被静默解决 |
 | extracted count | inventory 与 coverage 合一 | 漏抽对象不会进入分母 |
 
 ## 4. 目标权威架构
@@ -983,37 +1120,63 @@ before、after、during、contains、overlaps、starts、finishes，不引入 RD
 保留当前 typed state registry。无法正确映射的语义继续成为 proposition，
 不能强行写入相近字段。
 
-版本化 domain modules（其中 spatial-v1 已实现，其余按 milestone 推进）：
+版本化 domain modules（character/relationship/spatial/world-rule 已实现受控子集，
+其余只按 benchmark 失败推进）：
 
 - character physical/status/resource；
 - artifact identity/custody/quantity/condition；
 - [M5b-2a 已实现] spatial containment/adjacency/route/travel mode/duration；
 - institution membership/authority/procedure；
 - faction alignment/control；
-- directed relationship stance/obligation。
+- [M5b-1 已实现] directed relationship stance/obligation；
+- [M5b-2b 已实现] world-rule applicability/clause/exception/explicit override。
 
 ```ts
-type WorldRuleV2 = {
+type ControlledWorldRule = {
+  ontologyVersion: "world-rule-v2";
   id: string;
   name: string;
   kind: "physical" | "social" | "legal" | "magical" | "institutional";
+  scope: "global" | "entity" | "location" | "faction" | "institution";
   authorityEntityId?: string;
   jurisdictionEntityIds: string[];
   appliesWhen: Predicate[];
-  requires?: Predicate[];
-  forbids?: Predicate[];
-  effectTemplate?: StateDelta;
-  exceptions?: Predicate[];
+  validStoryTime?: StoryTime;
+  visibility: "public" | "observable" | "knowledge" | "engine";
+  knownByClaimIds: string[];
   priority: number;
   defeasible: boolean;
-  validStoryTime?: StoryTime;
-  knownByClaimIds?: string[];
-  evidenceAssertionIds: string[];
+  overridesRuleIds: string[];
+  clauses: Array<{
+    id: string;
+    modality: "require" | "forbid";
+    predicate: Predicate;
+    basis: "explicit" | "inferred";
+    status: "supported" | "contested";
+    confidence: number;
+    evidence: EvidenceRef[];
+    counterEvidence?: EvidenceRef[];
+  }>;
+  exceptions: Array<{
+    id: string;
+    appliesWhen: Predicate[];
+    basis: "explicit" | "inferred";
+    status: "supported" | "contested";
+    confidence: number;
+    evidence: EvidenceRef[];
+    counterEvidence?: EvidenceRef[];
+  }>;
+  basis: "explicit" | "inferred";
+  status: "supported" | "contested";
+  confidence: number;
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 ```
 
-验证策略借鉴 [W3C SHACL](https://www.w3.org/TR/shacl/) 的数据与约束分离，
-但仍用 TypeScript/Zod 和本地 JSON 文件。
+验证策略借鉴 [W3C SHACL](https://www.w3.org/TR/shacl/) 将 data graph 与 shape/
+constraint 分开、输出逐约束 validation result 且验证期间保持输入不变的原则；实现仍是
+TypeScript/Zod、本地 JSON、proposal validation 和 immutable revision，不引入 RDF。
 
 ### 5.7 Character ontology
 
@@ -1564,12 +1727,14 @@ snapshot/audit 生命周期，以及排除 contested 与 narrative-only 关系�
 
 目标：actor behavior 来自上下文化、有证据的角色发展。
 
-状态：**M5a、M5b-1 与 M5b-2a 已完成并验证，M5b-2b/M5c 待完成。** Character、
+状态：**M5a、M5b-1、M5b-2a 与 M5b-2b 已完成并验证，M5c 待完成。** Character、
 directed relationship controlled registry、nested host-owned evidence、
 prospective/commit/prepared validation、audit metric 与 actor-safe runtime
-projection，以及 spatial topology/route runtime gate 均已实现
+projection、spatial topology/route runtime gate，以及 controlled world-rule 的
+authority/jurisdiction/clause/exception/override 与 pre/post-state enforcement 均已实现
 （[character-ontology.ts](../src/world/character-ontology.ts#L14)、
 [relationship-ontology.ts](../src/world/relationship-ontology.ts#L16)、
+[world-rule-ontology.ts](../src/world/world-rule-ontology.ts#L15)、
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L312)、
 [audit.ts](../src/compiler/audit.ts#L636)）。
 
@@ -1582,7 +1747,8 @@ projection，以及 spatial topology/route runtime gate 均已实现
   typed obligation 与 before/after change；
 - [M5b-2a 已实现] spatial contains/adjacent/route、visibility、event/state gate、
   travel mode/minimum duration 与 snapshot pinning；
-- [M5b-2b] world-rule kind/jurisdiction/authority/exception/priority modules；
+- [M5b-2b 已实现] world-rule kind/scope/jurisdiction/authority、逐条 clause/exception、
+  visibility、defeasibility 与 explicit override；
 - deterministic salience memory。
 
 主要文件：
@@ -1591,8 +1757,11 @@ projection，以及 spatial topology/route runtime gate 均已实现
 - `src/world/development.ts`；
 - `src/world/state.ts`；
 - `src/world/relationship-ontology.ts`；
+- `src/world/spatial-ontology.ts`；
+- `src/world/world-rule-ontology.ts`；
 - `src/world/model-actor-policy.ts`；
-- `src/compiler/semantics.ts`。
+- `src/compiler/proposals.ts`；
+- `src/compiler/audit.ts`。
 
 完成标准：
 
@@ -1604,13 +1773,24 @@ projection，以及 spatial topology/route runtime gate 均已实现
 - actor projection 保持 deterministic 和 knowledge-safe。
 - adjacency 不会被当作 route；compiled arrival 必须匹配 active route 的方向、
   travel mode 与已知 minimum duration；旧 snapshot 不被追溯施加新约束。
+- contested rule/clause/exception 不执行；priority 不会在缺少显式 override 时静默解决
+  冲突；engine-hidden/unknown rule 仍执行但不会泄漏到 actor prompt。
 
 ### M6：Dependency-aware Audit、Reconcile 与 Reparse
 
 目标：缺失和过期语义能够被发现并安全修复。
 
+状态：**直接证据失效修复已完成；portable evidence、semantic evaluator 与传递
+impact closure 待完成。** 章节 reparse 现已覆盖全部 canonical semantic collection、
+嵌套 ontology evidence 与 exact subspan containment，并保持跨章 artifact 和旧分支。
+
 改造：
 
+- prepared bundle 增加 versioned evidence assertion revision/binding manifest，
+  publish/activate/materialize 校验 artifact hash 与 target closure；
+- 为 entity/event/proposition/attribution/participation/relation/character/spatial/rule
+  定义 required-evidence profile，区分 blocking、review 与 optional target；
+- 实现 semantic gold alignment 和每层 precision/recall/F1；
 - 从 typed records 重建 dependency graph；
 - source anchor 变化后计算 impact closure；
 - downstream artifact 标记 stale/review-required；
@@ -1621,6 +1801,8 @@ projection，以及 spatial topology/route runtime gate 均已实现
 主要文件：
 
 - `src/compiler/audit.ts`；
+- `src/compiler/evidence-assertions.ts`；
+- `src/eval/compiler-eval.ts`；
 - `src/compiler/reconcile-world.ts`；
 - `src/commands/reparse.ts`；
 - `src/compiler/prepared-cache.ts`；
@@ -1628,6 +1810,9 @@ projection，以及 spatial topology/route runtime gate 均已实现
 
 完成标准：
 
+- prepared revision 在另一 workspace materialize 后仍能逐字段检索相同 exact
+  assertion，旧 bundle 明确进入 legacy evidence mode；
+- gold 中每个已标注 semantic layer 都被真实评分，未实现维度不能进入 macro F1；
 - source change 能列出所有直接和传递受影响 artifact；
 - missing semantic unit 成为 repair target；
 - required coverage 为 unknown 时 publication 不通过；
@@ -1654,6 +1839,46 @@ projection，以及 spatial topology/route runtime gate 均已实现
 - semantic variance 被报告；
 - V1 始终可读且明确标记 legacy。
 
+### 分批实施、迁移与逐步验收
+
+每个 package 必须独立完成“schema/实现 → unit/integration → full suite → commit”，
+不得把多个 authority 变化压进一个不可回滚提交：
+
+1. **P0-A Portable evidence。** Bundle format 增加可选 `evidenceAssertions` 与 bindings；
+   publish 复制 immutable assertion revisions，materialize 先恢复 assertions 再恢复
+   canonical current refs，activate 对 artifact hash、assertion hash、source scope 和
+   JSON Pointer 做全量校验。旧 v1 bundle dual-read，但 audit 标记
+   `portableExactEvidence=unknown`，不能伪装为满足新 gate。
+2. **P0-B Semantic evaluator。** 先实现 exact/overlap anchor matching，再实现 entity/
+   event cluster alignment，随后评 participation role、typed relation、proposition/
+   acquisition、state effect 与 character assertion。Macro F1 只聚合真正 evaluated
+   layer；每个 false positive/negative 输出 gold ID、actual ID 和 alignment reason。
+3. **P0-C Dependency graph。** 引入 versioned typed edge（evidence-target、mention-
+   resolution、canonical-reference、projection-input）；`reparse --dry-run` 输出直接与
+   transitive impact、preserve reason 和 branch pins，确认后只移动 current refs，永不
+   删除 immutable revision。跨章聚合 artifact 标为 `review-required`，不静默保留为新鲜。
+4. **P1-A Scene occurrence。** 在 discourse observation 之上增加 scene resolution；
+   显式记录 source anchors、story interval、location、participant membership、viewpoint、
+   continuation/coreference，并允许一个章节多个 scene、一个 scene 跨章节、flashback
+   与 frame overlap。CanonicalEvent 通过 membership 引用 occurrence，但 occurrence 不
+   自身建立 branch truth。
+5. **P1-B Conditional causality。** 将非 contested causes/enables 的
+   `requiredConditions` 编译进 possibility dependency；commit/frontier 在当前 state
+   确定性求值。新增“删去原因/条件后结果不可解锁”的 counterfactual tests，
+   `narrative-continuation` 永远不能替代 causal support。
+6. **P1-C Deterministic salience。** 替换固定 `slice(-12)`：候选来自 actor 亲历的
+   committed history，按 unresolved goal、active obligation、relationship target、
+   appraisal/development trigger、progress channel 与 recency 的版本化权重排序；相同
+   branch/context 必须产生相同结果，且 actor-invisible event 永不入选。
+7. **P2 Domain growth。** 只有当多小说 gold/e2e failure 重复证明现有 typed state
+   不足时，才分别引入 institution procedure、faction command、artifact capability/
+   custody flow 或 economy/resource ledger；每个 module 单独 ADR、ontology version、
+   legacy migration 和 actor-visibility test。
+
+完成 P0 后，项目才能可靠回答“编译结果是否可携带、可测量、可局部修复”；完成 P1
+后，才能更可靠地回答“某个世界场景为何发生、谁能经历、何种条件使后续可能”；P2
+只提升已被数据证明的领域表达能力。
+
 依赖关系：
 
 ```text
@@ -1667,8 +1892,8 @@ M0 baseline/gold
                       -> M7 rollout
 ```
 
-M0/M1 必须最先完成。没有精确 evidence 和 denominator 时扩大 ontology，
-只会扩大不可验证输出。
+M1 的本地 exact evidence 已完成，但 P0-A 的 portability 与 P0-B 的独立 denominator
+仍是扩大 ontology 前的硬前置；否则只会扩大不可验证输出。
 
 ## 12. 测试策略
 
@@ -1753,21 +1978,21 @@ CLI 必须区分：
 
 ## 15. 最终实现效果
 
-| 当前 | 完成后 |
-|---|---|
-| Artifact 引用整个 prompt segment | 关键字段和关系精确链接原文 |
-| 宿主把 segment evidence 标为 explicit | 字节有效性与解释强度分离 |
-| 模型直接创建 entity | 先 inventory mention，再 resolve 或保留 ambiguous |
-| chapter/block 代表叙事结构 | hierarchy 与 overlapping scene/discourse 并存 |
-| participant 是无角色 ID | participation role/presence 独立有 evidence |
-| causalParents 混合多类关系 | cause/enable/prevent/motivate/time/subevent/continuation 分开 |
-| Claim 高度自由 | proposition、attribution、factuality、acquisition 分开 |
-| trait 是任意 scalar key | dimension 版本化、上下文化、时间化、有正反 evidence |
-| audit 统计已抽取 inventory | source accounting + gold 提供 denominator |
-| reconcile 只修已知事件 | 可发现 missing/unresolved semantic unit |
-| reparse 只看 evidence containment | 计算完整 downstream impact，保持 branch pinning |
+| 研究基线 | 当前已实现 | P0/P1 完成后 |
+|---|---|---|
+| Artifact 引用整个 prompt segment | 选定 ontology 的字段/关系使用 host-owned exact assertion | assertion 随 prepared revision 可携带，所有 required target 有显式 profile |
+| 字节有效性与解释强度混合 | anchor hash、support/contradict、basis/status 已分开 | 独立 entailment gold 测量语义支持是否正确 |
+| 模型直接创建 entity/event identity | mention inventory 与 entity/event resolution 有独立 revision | gold 测得跨章 cluster precision/recall，变更可算 impact closure |
+| chapter/block 代表叙事结构 | 基础 structure 与 overlapping discourse observation 分开 | scene occurrence 跨章连接 location/time/participant/event membership |
+| participant 是无角色 ID | typed participation role/presence 独立有 evidence | scene membership 与 actor experience 一致性可评测 |
+| causalParents 混合多类关系 | typed relation 分开 cause/enable/prevent/motivate/time/subevent/continuation | required condition 驱动 frontier，并用反事实测试验证 |
+| Claim 混合内容与来源 | proposition、attribution、quotation、acquisition 分开 | gold 覆盖不可靠叙述、自由间接引语、欺骗与知识路径 |
+| trait 是任意 scalar key | character-v1、relationship-v1 有 context/time/target/正反 evidence | salience 由 goal/obligation/relationship/experience 确定性选择 |
+| 空间与规则是粗粒度字段 | spatial-v1 与 world-rule-v2 已进入 engine/actor-safe projection | benchmark 驱动更窄的 institution/artifact/economy module |
+| audit 只统计已抽取 inventory | source accounting 与内部 closure 已可报告 | 人工 gold 提供独立 semantic denominator 与 CI gate |
+| reconcile/reparse 只修少量旧 artifact | selected chapter 直接 evidence dependency 已完整失效 | dry-run/commit 计算全部 downstream impact 并标记聚合 semantic stale |
 
-完成后系统能够回答：
+P0/P1 完成后系统能够在明确置信边界内回答：
 
 - 每项 world fact、relationship、state delta 由哪段精确原文支持；
 - 哪些结论是原文明说，哪些是模型推断或有争议解释；

@@ -1,7 +1,8 @@
 # Technical Plan: Evidence-Grounded Full-Novel Semantic Compilation
 
-- **Status:** In progress — M0 through M4, M5a, M5b-1, and M5b-2a implemented; M5b-2b and M5c through M7 remain
+- **Status:** In progress — the M0 gold-schema/baseline scaffold, M1-M4, M5a, M5b-1, M5b-2a, M5b-2b, and direct-evidence reparse invalidation are implemented; the semantic scorer, M5c, evidence portability/transitive M6 closure, and the M7 multi-novel benchmark remain
 - **Date:** 2026-08-25
+- **Verified code baseline:** `pnpm build`; `pnpm test` (109 test files, 618 tests passing)
 - **Scope:** Novel ingest, structural segmentation, semantic annotation, identity resolution, canonical compilation, audit, reconciliation, and reparse
 - **Preserves:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0002](adr/0002-user-level-content-addressed-storage.md), and [ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
 - **Builds on:** [Technical Design](technical-design.md) and [Implementation Status](implementation-status.md)
@@ -19,14 +20,17 @@ world:
 - world state and character development are deterministic projections;
 - actor knowledge is isolated from compiler omniscience and future canon.
 
-The principal weakness is the semantic distance between a source segment and a
-canonical artifact. The current compiler asks one model pass to discover a
-mention, resolve identity, decide event boundaries, infer relationships, assign
-causes, map effects into state, and summarize character development. Only the
-final artifact and a whole-segment evidence reference survive. The intermediate
-decisions are neither inspectable nor independently repairable.
+The original research baseline found excessive semantic distance between a
+source segment and a canonical artifact. M1-M5b-2b have since made exact
+assertions, entity/event mentions and resolutions, propositions and
+attributions, participation and event relations, and controlled character,
+relationship, spatial, and world-rule semantics inspectable and versioned.
+The host resolves trusted selectors, and chapter reparse now recognizes exact
+quote subspans rather than requiring whole-segment hash equality
+([evidence-assertions.ts](../src/compiler/evidence-assertions.ts#L29),
+[reparse.ts](../src/commands/reparse.ts#L278)).
 
-This plan adds a non-authoritative semantic annotation and resolution plane
+The implemented pipeline adds a non-authoritative semantic annotation and resolution plane
 between source segmentation and canonical proposals:
 
 ```text
@@ -55,6 +59,26 @@ The change is additive. It does not introduce a database, embeddings, a vector
 store, or a second source of world truth. Annotation artifacts remain proposals
 or derived compiler records. Only the existing canonical and branch commit
 boundaries can establish truth.
+
+The deep code review therefore narrows the remaining work to five closure
+failures rather than another broad extraction rewrite:
+
+1. deterministic structure materializes work/paragraph/sentence/non-scene, but
+   accepted scene membership does not yet connect events, locations, time, and
+   participants across chapter boundaries;
+2. exact-assertion bindings are available in the compiling workspace but are
+   absent from the prepared bundle, so restored revisions lose field-level
+   provenance;
+3. a rich semantic gold schema exists, but the evaluator marks every annotated
+   semantic layer `not-implemented`;
+4. typed causal relations are validated, yet the frontier still consumes the
+   legacy `causalParents` projection and ignores relation conditions;
+5. direct chapter evidence invalidation is fixed, but there is no transitive
+   mention-to-runtime impact closure.
+
+Accordingly, the repository can claim an auditable mechanism and executable
+constraints. It cannot yet claim complete or correct understanding of an
+arbitrary full-length novel.
 
 ## 2. Scope and non-goals
 
@@ -102,7 +126,7 @@ These mechanisms should remain unchanged in authority. The new annotation store
 should copy the same immutable revision/ref pattern rather than inventing a
 different persistence model.
 
-### 3.2 Current segmentation is safe for batching but too flat for narrative semantics
+### 3.2 Transport segmentation is safe; scene observations are not yet executable world decomposition
 
 The segment ontology contains only `section` and `block`
 ([segments.ts](../src/compiler/segments.ts#L16)). Chapter detection supports
@@ -111,8 +135,21 @@ built-in heading patterns or one declarative prefix/number/suffix rule
 are split by byte/line limits and blank-line opportunities
 ([segments.ts](../src/compiler/segments.ts#L323)).
 
-This is a good transport representation, but chapter and block boundaries are
-not reliable event or scene boundaries. Research on fiction scene segmentation
+This remains a good transport representation, but chapter and block boundaries
+are not reliable event or scene boundaries. M2 added a structural vocabulary
+and separate discourse observations. The actual deterministic materializer,
+however, currently emits only work, paragraph, sentence, and blank non-scene
+units and initializes `discourseSegments` empty
+([structure.ts](../src/compiler/structure.ts#L87-L167)). A model may separately
+record scene, summary, flashback, flashforward, dream, embedded-document, and
+other overlapping observations with closed mention/quotation/event references
+([annotations.ts](../src/compiler/annotations.ts#L124-L181),
+[annotations.ts](../src/compiler/annotations.ts#L550-L634)).
+
+There is still no accepted `SceneOccurrence`/membership artifact joining a
+source scene to canonical events, locations, a story interval, participants,
+and viewpoint. Detecting a flashback therefore does not by itself compile that
+passage into an executable world slice. Research on fiction scene segmentation
 defines scene coherence through time, location, character constellation, and
 ongoing action rather than chapter typography
 ([Detecting Scenes in Fiction](https://aclanthology.org/2021.eacl-main.276/)).
@@ -120,31 +157,38 @@ Later work explicitly notes that editorial chapter divisions can split one
 scene, including at cliffhangers
 ([Rethinking Scene Segmentation](https://aclanthology.org/2025.latechclfl-1.8/)).
 
-Finding: retain deterministic chapter/block segmentation, but add semantic
-structure above it. Do not make prompt chunks the ontology of the novel.
+Finding: retain transport segments and overlapping observations; next resolve
+cross-chapter scene occurrences and evidenced event/location/time/participant
+membership. Prompt chunks, structural units, discourse, scenes, and source
+anchors must remain distinct.
 
-### 3.3 Evidence integrity is strong, but evidence entailment is weak
+### 3.3 Exact citation exists; portable provenance and semantic entailment remain incomplete
 
 `SourceSpan` records line/byte bounds and a quote hash
 ([model.ts](../src/world/model.ts#L19)). `EvidenceVerifier` verifies immutable
 source identity, boundaries, and hashes
 ([evidence.ts](../src/compiler/evidence.ts#L21)).
 
-However, compiler tools accept only segment IDs. The host converts every cited
-segment into a whole-segment evidence reference
-([proposal-tools.ts](../src/compiler/proposal-tools.ts#L114),
-[segments.ts](../src/compiler/segments.ts#L243)). A segment may contain up to
-approximately 1,000 lines or 96 KiB
-([segments.ts](../src/compiler/segments.ts#L52)). The compiler path also stamps
-the host-created reference as `explicit`, even when the artifact field is a
-model interpretation.
+M1 added host-resolved exact selectors, JSON Pointer targets,
+support/contradiction relations, and derivation. Immutable assertion revisions
+are bound independently to an artifact hash so provenance changes do not
+manufacture a world revision
+([evidence-assertions.ts](../src/compiler/evidence-assertions.ts#L15-L130)).
+Local artifact retrieval exposes target paths, strengths, and exact anchors
+([artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts#L198-L213),
+[artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts#L323-L334)).
 
-The result proves that an artifact was associated with unchanged source bytes,
-but not which sentence supports a field, whether the source states it
-explicitly, or whether a relation is inferred. Entity grounding additionally
-checks name/alias occurrence, but there is no general textual entailment check
-for event effects, causal edges, or character traits
-([evidence.ts](../src/compiler/evidence.ts#L132)).
+Two gaps remain. The generic target validator proves only that a pointer exists
+and targets the right artifact; it does not define required evidence fields for
+each artifact kind. Dedicated exact support/counter-evidence gates currently
+exist only for selected controlled ontologies
+([evidence-assertions.ts](../src/compiler/evidence-assertions.ts#L132-L163),
+[world-rule-ontology.ts](../src/world/world-rule-ontology.ts#L199-L227)). Also,
+`PreparedNovelBundle` serializes canonical arrays but no assertion revisions or
+bindings, while materialization restores only canonical artifacts
+([prepared-cache.ts](../src/compiler/prepared-cache.ts#L60-L92),
+[prepared-cache.ts](../src/compiler/prepared-cache.ts#L676-L700)). A restored
+bundle retains portable `EvidenceRef`s but loses field-level provenance.
 
 The target design follows the selector distinction in the
 [W3C Web Annotation Data Model](https://www.w3.org/TR/annotation-model/):
@@ -153,22 +197,23 @@ make the intended text recoverable and robustly reviewable. Compilation
 derivation should use the Entity/Activity/Agent distinction from
 [W3C PROV-O](https://www.w3.org/TR/prov-o/).
 
-Finding: cryptographic binding and semantic support must become separate
-concepts.
+Finding: cryptographic binding and semantic support are now separate for the
+implemented layers. The next gate must make assertions portable, declare
+required evidence profiles, and measure textual entailment against human gold;
+structural validation cannot substitute for semantic correctness.
 
-### 3.4 A mention and resolution plane is missing
+### 3.4 Mention and resolution are implemented, but long-book accuracy is unmeasured
 
-The canonical entity schema contains stable ID, kind, name, aliases, and
-artifact-level evidence, but no source mention or resolution object
-([model.ts](../src/world/model.ts#L40)). Cross-batch catalogs are intentionally
-bounded, and the model must request omitted artifacts when necessary
-([batches.ts](../src/compiler/batches.ts#L902),
-[artifact-retrieval.ts](../src/compiler/artifact-retrieval.ts#L207)).
-
-This makes a long-book model call responsible for deciding whether a title,
-pronoun, nickname, kinship term, or changed office denotes an existing entity.
-When that decision is wrong, the system can only revise the final entity/event;
-it cannot inspect or relink the underlying mentions.
+M3 separates source observations from stable identity. Entity mentions preserve
+exact surface/form/scene data; deterministic lexical matching only recalls
+candidates; and the model must record a resolved, new, ambiguous, or unresolved
+decision. Event mentions and resolutions likewise preserve trigger/extent,
+participant mentions, coreference versus subevent decisions, and immutable
+merge/split revisions. Canonical name, alias, event, and participant acceptance
+traces back through these decisions rather than auto-merging on similarity
+([annotations.ts](../src/compiler/annotations.ts#L46-L122),
+[entity-resolution.ts](../src/compiler/entity-resolution.ts#L1),
+[event-resolution.ts](../src/compiler/event-resolution.ts#L1)).
 
 Long-book coreference remains materially harder than short-document
 coreference. BookCoref evaluates book-scale documents averaging more than
@@ -181,24 +226,31 @@ The official [BookNLP](https://github.com/booknlp/booknlp) pipeline likewise
 keeps proper/common/pronominal mentions, coreference, quotations, entities, and
 events as distinguishable outputs.
 
-Finding: canonical identity must be downstream of source mentions and explicit
-resolution hypotheses.
+Finding: the ontology and revision lifecycle now put canonical identity
+downstream of source mentions and explicit resolution. The remaining risk is
+quality, not inspectability: without multi-novel gold, closed references and an
+unresolved queue cannot prove that mentions were neither missed, incorrectly
+merged, nor incorrectly split.
 
-### 3.5 Event semantics are compressed too early
+### 3.5 Typed event relations are auditable, but execution still uses a compatibility projection
 
-A canonical event currently stores participants, time, preconditions, state and
-knowledge effects, artifact-level evidence, a confidence value, and
-`causalParents`
-([model.ts](../src/world/model.ts#L400)). The validator checks that causal
-parents exist and do not create definite temporal regression
-([validator.ts](../src/compiler/validator.ts#L97)); proposal closure checks
-cycles
-([proposals.ts](../src/compiler/proposals.ts#L583)).
+M4b-2 adds first-class `EventRelation` records for temporal, causal,
+explanatory, coreference/subevent, and narrative-continuation semantics, with
+status, confidence, mechanism, required conditions, support, and
+counter-evidence
+([model.ts](../src/world/model.ts#L388-L425)). Catalog validation checks
+endpoints, temporal contradictions, duplicates/opposites, cycles, and a
+lossless compatibility projection: only non-contested `causes` and `enables`
+become legacy `causalParents`
+([event-relations.ts](../src/world/event-relations.ts#L22-L152)).
 
-The relation itself has no type, span, confidence, mechanism, polarity, or
-counter-evidence. Consequently temporal continuation, enabling conditions,
-motivation, explanation, direct causation, prevention, and subevent structure
-can be compressed into the same parent array.
+The execution migration is incomplete. `causes` and `enables` collapse to the
+same parent in the compatibility view; relation `requiredConditions` are
+validated but do not enter frontier eligibility; and the frontier still reads
+only possibility parents and preconditions
+([frontier.ts](../src/world/frontier.ts#L33-L106)). The evaluator likewise
+scores untyped parent pairs rather than relation type, status, evidence, or
+mechanism.
 
 Relations that carry their own attributes should be represented as first-class
 objects; this is the n-ary relation case described in the
@@ -209,18 +261,24 @@ jointly annotated in
 [EventRelBench](https://aclanthology.org/2025.findings-emnlp.482/) further
 shows that general LLMs remain unreliable across these event-relation tasks.
 
-Finding: graph validity is not causal validity. Each event relation requires its
-own type and evidence.
+Finding: representation and audit are complete enough for a vertical slice;
+condition-aware execution and counterfactual evaluation are not. Mechanism text
+must remain explanatory provenance, while deterministically satisfied required
+conditions may gate runtime dependency.
 
-### 3.6 Claims and knowledge need structured attribution
+### 3.6 Proposition, attribution, and acquisition are separated; semantic gold is still missing
 
-`Claim` has a free-form predicate, an untyped object, an epistemic category,
-and an optional speaker
-([model.ts](../src/world/model.ts#L46)). `KnowledgeDelta` correctly separates
-what a character knows or believes from world state
-([model.ts](../src/world/model.ts#L200)), but cannot fully represent nested
-attribution, denial, retraction, deception, observation versus hearsay, or the
-time during which a proposition is valid.
+M4a separates reusable proposition content from narrator, character, document,
+or unknown-holder attribution. Polarity, modality, and optional valid story time
+belong to the proposition; assertion, knowledge, belief, suspicion, reporting,
+denial, questioning, certainty, nested source attribution, and quotation IDs
+belong to attribution. `KnowledgeDelta learn` retains its legacy claim key while
+adding a compatible proposition, attribution, and observed/told/read/inferred/
+remembered/deceived-misattributed acquisition mode
+([model.ts](../src/world/model.ts#L146-L206),
+[attribution-trace.ts](../src/compiler/attribution-trace.ts#L34-L176)).
+Accepting either semantic record never promotes the proposition to WorldState
+or actor knowledge; only committed knowledge deltas do that.
 
 Quotation research treats quote span, speaker, addressee, and cue as separate
 annotations
@@ -231,10 +289,13 @@ The distinction between a textual event expression and its denoted event is a
 core design principle in
 [ISO-TimeML](https://aclanthology.org/L10-1027/).
 
-Finding: a claim should be decomposed into proposition, attribution/factuality,
-and actor-specific acquisition.
+Finding: the authority decomposition is implemented. The remaining task is a
+gold suite for free-indirect discourse, unreliable narration, irony, lies, and
+acquisition paths. Reference closure can reject dangling speakers/addressees
+and invalid transfer mechanics; it cannot prove that a probabilistic
+interpretation is correct.
 
-### 3.7 Character development has the right authority but an underspecified ontology
+### 3.7 Character ontology is controlled; salience and goal hierarchy remain
 
 Character goals support knowledge gates, event/time activation, completion,
 expiry, milestones, and candidate actions
@@ -462,55 +523,111 @@ regional co-membership, or narrative order; it does not fill unknown duration
 from common sense; and it performs no coordinate geometry. Dynamic
 `location.controller` remains branch state derived from committed events.
 Route choice is deterministic shortest-hop with known minimum duration and
-logical IDs as tie-breakers, not a claim of real-world optimality. Jurisdiction,
-rule conflict, exceptions, and priorities belong to M5b-2b.
+logical IDs as tie-breakers, not a claim of real-world optimality.
 
-Remaining M5 work is the M5b-2b versioned world-rule domain and M5c
-deterministic salience. Goal hierarchy/conflict/commitment should be expanded
-only from measured failures.
+#### 3.7.3 M5b-2b finding: rule applicability, clauses, exceptions, and superiority are distinct
 
-### 3.8 Current audit cannot measure full-book semantic recall
+`world-rule-v2` now records controlled kind and scope, authority,
+jurisdiction, applicability, concrete story time, disclosure, grounding claims,
+priority, defeasibility, explicit override edges, and independently evidenced
+require/forbid clauses and exceptions. Contested semantics never execute.
+Catalog validation fails closed on invalid authority/jurisdiction, unbound
+applicability, dangling knowledge/rule references, internal contradiction,
+indefeasible targets, non-increasing override priority, and override cycles.
+Priority alone never resolves conflict; an explicit valid `overridesRuleIds`
+edge is required
+([model.ts](../src/world/model.ts#L710-L835),
+[world-rule-ontology.ts](../src/world/world-rule-ontology.ts#L90-L197)).
 
-The compiler prompt explicitly prioritizes a bounded high-leverage graph over
-exhaustive mention extraction
-([batches.ts](../src/compiler/batches.ts#L638),
-[batches.ts](../src/compiler/batches.ts#L659)). Audit ratios are mostly
-calculated over artifacts that were already extracted. Entity resolution,
-major-event resolution, and epistemic coverage are explicitly `null`
-([audit.ts](../src/compiler/audit.ts#L392)).
+This follows modeling principles, not the full vocabularies, of
+[OASIS LegalRuleML 1.0](https://docs.oasis-open.org/legalruleml/legalruleml-core-spec/v1.0/os/legalruleml-core-spec-v1.0-os.html),
+which represents superiority with an explicit Override relation and separates
+defeasibility from rule strength, and [W3C ODRL 2.2](https://www.w3.org/TR/odrl-model/),
+which separates permissions, prohibitions, duties, constraints, and explicit
+conflict strategy.
 
-The semantic publication gate only runs when at least 20 canonical events
-already exist
-([audit.ts](../src/compiler/audit.ts#L277)). Existing gold evaluation compares
-logical ID sets and untyped causal edge pairs
-([compiler-eval.ts](../src/eval/compiler-eval.ts#L7)). The long
-`三国演义` fixture protects bytes and chapter shape, not semantic accuracy
+The runtime resolves only committed active rule IDs, applicability, temporal
+scope, supported exceptions, and explicit overrides. It checks requirements on
+pre-state and prohibitions on proposed post-state. Hidden or actor-unknown rules
+still constrain the engine but are omitted from model prompts
+([world-rule-ontology.ts](../src/world/world-rule-ontology.ts#L230-L328),
+[engine.ts](../src/world/engine.ts#L255-L283)). Audit reports the controlled and
+legacy inventory, clauses/exceptions, visibility, exact evidence, references,
+and potential cross-rule conflicts; only a valid explicit override marks a
+potential conflict resolved
+([audit.ts](../src/compiler/audit.ts#L1299-L1328),
+[audit.ts](../src/compiler/audit.ts#L1489-L1506)).
+
+Remaining M5 work is deterministic salience. Goal hierarchy and deeper
+institution/faction/artifact/economy modules should be driven by measured
+failures rather than speculative ontology growth.
+
+### 3.8 Source accounting has internal denominators, not independent semantic recall
+
+The compiler deliberately prefers a bounded high-leverage graph and permits at
+most 24 active proposals and 40 general tool calls per batch
+([batches.ts](../src/compiler/batches.ts#L705-L727),
+[proposal-tools.ts](../src/compiler/proposal-tools.ts#L442-L447)). Audit now
+computes source accounting, entity/event resolution, and proposition-
+attribution coverage over deterministic units and produced observations
+([audit.ts](../src/compiler/audit.ts#L1384-L1409)). These metrics reveal
+observed-but-unhandled work, not observations the model never found.
+
+The semantic gate still runs only after at least 20 events. More importantly,
+the gold schema defines mentions, clusters, quotations, participation, event
+relations, propositions, knowledge, state effects, and character assertions,
+but `evaluateCompilerAgainstGold` reads only entity/claim/event/rule/goal/model
+IDs and legacy causal parents. Every annotated semantic layer is returned as
+`not-implemented`
+([compiler-eval.ts](../src/eval/compiler-eval.ts#L397-L511)). The checked-in
+`三国演义` fixture protects bytes and 120-chapter shape, not semantic accuracy
 ([corpus README](../fixtures/corpus/README.md#L19),
 [corpus-fixture.test.ts](../test/corpus-fixture.test.ts#L8)).
 
-Finding: internal consistency ratios cannot stand in for source-level recall.
-The compiler needs a source accounting denominator and an independently
-annotated benchmark.
+Finding: pipeline accounting exists; independent semantic recall does not. The
+semantic evaluators and a human-annotated multi-novel denominator are P0.
 
-### 3.9 Reconciliation repairs known artifacts, not missing semantics
+### 3.9 Direct chapter invalidation is fixed; transitive dependency closure is missing
 
-Bounded reconciliation has two iterations and targets a limited number of known
-events and characters
-([reconcile-world.ts](../src/compiler/reconcile-world.ts#L15)). Its current
-targets are missing summaries, presence, opening checkpoints, time anchors,
-typed effects, and coarse character development
-([reconcile-world.ts](../src/compiler/reconcile-world.ts#L183)).
+Bounded reconciliation still targets a limited set of known events,
+characters, and rules rather than semantics never extracted
+([reconcile-world.ts](../src/compiler/reconcile-world.ts#L15-L25),
+[reconcile-world.ts](../src/compiler/reconcile-world.ts#L417-L476)).
 
-Chapter reparse invalidates an artifact only when all its evidence is contained
-in the selected spans
-([reparse.ts](../src/commands/reparse.ts#L275)). It does not compute a semantic
-dependency closure from changed mentions through identity, event relations,
-state deltas, goals, and runtime checkpoints.
+This review fixed direct invalidation: exact quote subranges now match selected
+batch ranges by byte/line containment, and reparse covers propositions,
+attributions, event participations, event relations, nested spatial/rule
+evidence, and character-ontology evidence. Only artifacts wholly supported by
+the selected scope are removed; cross-chapter artifacts and immutable branch
+pins are preserved
+([reparse.ts](../src/commands/reparse.ts#L278-L365),
+[reparse.test.ts](../test/reparse.test.ts#L146)).
 
-Finding: repair and reparse need explicit source-accounting gaps and artifact
-dependencies.
+There is still no transitive impact path from mention through resolution,
+canonical relations, state/knowledge, character policy, possibilities, and
+prepared projections. A cross-chapter aggregate CharacterModel cannot mark one
+nested disposition stale without replacing the whole model.
 
-## 4. Current end-to-end flow after M0-M4, M5a, M5b-1, and M5b-2a
+Finding: direct invalidation is safe, while M6 still needs typed dependencies,
+dry-run impact plans, and stale/review-required state for aggregate artifacts.
+
+### 3.10 Prioritized review findings
+
+| Priority | Broken evidence-chain link | Required acceptance result |
+|---|---|---|
+| P0 | Prepared bundles omit exact assertion revisions/bindings | Restoring in another workspace preserves assertion count, hash, target, and source scope |
+| P0 | Semantic gold scorers are placeholders | Every annotated layer emits alignment, precision, recall, and F1 |
+| P0 | No transitive artifact dependency graph | Dry-run reports direct/transitive impact; replacement leaves no dangling current refs and old branches replay |
+| P1 | Scene remains an observation | Cross-chapter occurrences resolve and version event/location/time/participant membership |
+| P1 | Causal conditions do not enter the frontier | An unmet required condition cannot unlock a possibility; counterfactual tests pass |
+| P1 | Actor experience uses fixed `.slice(-12)` recency | Versioned, deterministic, actor-safe goal/obligation/relationship/experience salience |
+| P2 | Institution/faction/artifact/economy state is coarse | Add a domain module only after repeated benchmark failures justify it |
+
+P0 establishes portability, measurement, and safe repair. P1 improves
+executable literary semantics. P2 is deliberately benchmark-driven to prevent
+unbounded ontology growth.
+
+## 4. Current end-to-end flow after M0-M4, M5a, M5b-1, M5b-2a, and M5b-2b
 
 ```text
 nwh ingest
@@ -530,6 +647,7 @@ nwh compile-source / prepare-all
   -> character-v1 separates disposition, appraisal, and development proposals
   -> relationship-v1 separates directed stance, typed obligation, and relationship change
   -> spatial-v1 separates contains, adjacent, and directional/mode/duration route records
+  -> world-rule-v2 separates applicability, require/forbid clauses, exceptions, and explicit overrides
   -> finish validates source accounting and the prospective semantic graph
   -> pending proposal store
 
@@ -537,7 +655,7 @@ accept / prepare
   -> cryptographic evidence validation
   -> mention-resolution and exact-target trace validation
   -> reference, state-schema, participation, epistemic, event/character/
-     relationship/spatial-ontology validation
+     relationship/spatial/world-rule-ontology validation
   -> dependency ordering / semantic cycle checks
   -> immutable canonical revision + current ref
   -> prepared publication repeats whole-catalog projection/readiness gates
@@ -545,11 +663,11 @@ accept / prepare
 audit / reconcile
   -> source-accounting denominators and observation/resolution coverage
   -> exact-evidence, participation, epistemic, typed-causality, character,
-     relationship, and spatial metrics
-  -> bounded repair queues; dependency-aware invalidation remains M6
+     relationship, spatial, and world-rule metrics
+  -> bounded repair queues; full transitive impact closure remains M6
 
 reparse
-  -> invalidate source-backed current artifacts in selected spans
+  -> invalidate direct source-backed current artifacts by byte/line containment
   -> create new immutable revisions
   -> preserve branches pinned to prior prepared revisions
 
@@ -559,6 +677,7 @@ runtime
   -> typed semantic records derive compatibility event views, never branch truth
   -> character/relationship policy activates only from committed/experienced/known triggers and actor-safe visibility
   -> active spatial routes deterministically constrain compiled-arrival direction, mode, and known minimum time
+  -> active world rules enforce pre-state requirements and post-state prohibitions with fail-closed exceptions/overrides
   -> deterministic state, knowledge, scenes, and character development
 ```
 
@@ -568,10 +687,10 @@ validation -> explicit acceptance -> replay sequence
 resolution records are now non-canonical predecessors of world proposals;
 finish-time closure prevents an incomplete prospective graph from being
 checkpointed ([proposals.ts](../src/compiler/proposals.ts#L316)). M5a character,
-M5b-1 directed-relationship, and M5b-2a spatial semantics are now compiled,
-source-scoped, audited, and projected; M5b-2b still needs the world-rule
-ontology and M5c still needs salience selection. M6 needs explicit
-dependency-driven invalidation and publication policy, and M7 needs a labeled
+M5b-1 directed-relationship, M5b-2a spatial, and M5b-2b world-rule semantics
+are now compiled, source-scoped, audited, and enforced/projected. M5c still
+needs salience selection. M6 needs portable exact assertions, implemented
+semantic evaluation, and transitive dependency impact; M7 needs a labeled
 multi-novel semantic benchmark.
 
 ## 5. Target authority model
@@ -1004,8 +1123,8 @@ The current typed state registry remains the execution boundary. Unsupported
 semantics continue to live as propositions rather than being coerced into an
 incorrect field.
 
-Add versioned domain modules (spatial-v1 is implemented; the remainder is
-milestone-scoped):
+Add versioned domain modules. Controlled character, relationship, spatial, and
+world-rule subsets are implemented; remaining domains are benchmark-scoped:
 
 - character physical/status/resource fields;
 - artifact identity, custody, quantity, and condition;
@@ -1013,33 +1132,60 @@ milestone-scoped):
   duration;
 - institution membership, authority, and procedure;
 - faction alignment and control;
-- directed relationship stance and obligations.
+- [implemented M5b-1] directed relationship stance and obligations;
+- [implemented M5b-2b] rule applicability, clauses, exceptions, and explicit
+  override.
 
-World rules gain:
+The implemented controlled world-rule subset is:
 
 ```ts
-type WorldRuleV2 = {
+type ControlledWorldRule = {
+  ontologyVersion: "world-rule-v2";
   id: string;
   name: string;
   kind: "physical" | "social" | "legal" | "magical" | "institutional";
+  scope: "global" | "entity" | "location" | "faction" | "institution";
   authorityEntityId?: string;
   jurisdictionEntityIds: string[];
   appliesWhen: Predicate[];
-  requires?: Predicate[];
-  forbids?: Predicate[];
-  effectTemplate?: StateDelta;
-  exceptions?: Predicate[];
+  validStoryTime?: StoryTime;
+  visibility: "public" | "observable" | "knowledge" | "engine";
+  knownByClaimIds: string[];
   priority: number;
   defeasible: boolean;
-  validStoryTime?: StoryTime;
-  knownByClaimIds?: string[];
-  evidenceAssertionIds: string[];
+  overridesRuleIds: string[];
+  clauses: Array<{
+    id: string;
+    modality: "require" | "forbid";
+    predicate: Predicate;
+    basis: "explicit" | "inferred";
+    status: "supported" | "contested";
+    confidence: number;
+    evidence: EvidenceRef[];
+    counterEvidence?: EvidenceRef[];
+  }>;
+  exceptions: Array<{
+    id: string;
+    appliesWhen: Predicate[];
+    basis: "explicit" | "inferred";
+    status: "supported" | "contested";
+    confidence: number;
+    evidence: EvidenceRef[];
+    counterEvidence?: EvidenceRef[];
+  }>;
+  basis: "explicit" | "inferred";
+  status: "supported" | "contested";
+  confidence: number;
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 ```
 
-Use shape-like deterministic validators, inspired by the separation of data and
-constraints in [W3C SHACL](https://www.w3.org/TR/shacl/), without adopting an
-RDF store.
+Use shape-like deterministic validators inspired by
+[W3C SHACL](https://www.w3.org/TR/shacl/): separate data from constraints,
+emit per-constraint results, and do not mutate validated input. The
+implementation remains TypeScript/Zod over local JSON, proposals, and
+immutable revisions rather than RDF.
 
 ### 6.7 Character ontology
 
@@ -1687,12 +1833,15 @@ Exit criteria:
 Objective: make agent behavior depend on evidence-backed, contextual
 development rather than arbitrary trait names.
 
-Status: **M5a, M5b-1, and M5b-2a complete and verified; M5b-2b/M5c pending.**
+Status: **M5a, M5b-1, M5b-2a, and M5b-2b complete and verified; M5c pending.**
 Character and directed-relationship controlled registries, nested host-owned
 evidence, prospective/commit/prepared validation, audit metrics, actor-safe
-runtime projection, and spatial topology/route gates are implemented
+runtime projection, spatial topology/route gates, and controlled rule
+authority/jurisdiction/clause/exception/override with pre/post-state
+enforcement are implemented
 ([character-ontology.ts](../src/world/character-ontology.ts#L14),
 [relationship-ontology.ts](../src/world/relationship-ontology.ts#L16),
+[world-rule-ontology.ts](../src/world/world-rule-ontology.ts#L15),
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L312),
 [audit.ts](../src/compiler/audit.ts#L636)).
 
@@ -1705,7 +1854,9 @@ Work:
   typed obligation, and before/after relationship change;
 - [implemented M5b-2a] add spatial contains/adjacent/route, visibility,
   event/state gates, travel mode/minimum duration, and snapshot pinning;
-- [M5b-2b] add world-rule kind/jurisdiction/authority/exception/priority;
+- [implemented M5b-2b] add controlled world-rule kind/scope, authority,
+  jurisdiction, per-item clauses/exceptions, visibility, defeasibility, and
+  explicit override;
 - replace fixed recent-event slicing with deterministic salience selection.
 
 Primary files:
@@ -1714,8 +1865,11 @@ Primary files:
 - `src/world/development.ts`;
 - `src/world/state.ts`;
 - `src/world/relationship-ontology.ts`;
+- `src/world/spatial-ontology.ts`;
+- `src/world/world-rule-ontology.ts`;
 - `src/world/model-actor-policy.ts`;
-- `src/compiler/semantics.ts`;
+- `src/compiler/proposals.ts`;
+- `src/compiler/audit.ts`;
 - related runtime and actor tests.
 
 Exit criteria:
@@ -1731,13 +1885,25 @@ Exit criteria:
 - adjacency cannot substitute for a route; compiled arrival must match active
   direction, travel mode, and known minimum duration, while legacy snapshots
   are not retroactively constrained.
+- contested rules/clauses/exceptions never execute; priority cannot silently
+  resolve a conflict without explicit override; hidden or unknown rules enforce
+  without leaking to actor prompts.
 
 ### M6: Dependency-aware audit, reconciliation, and reparse
 
 Objective: make missing and stale semantics discoverable and repairable.
 
+Status: **direct evidence invalidation is implemented; portable assertions,
+semantic evaluators, and transitive impact closure remain.** Chapter reparse
+now covers all canonical semantic collections, nested ontology evidence, and
+exact subspan containment while preserving cross-chapter artifacts and old
+branches.
+
 Work:
 
+- carry versioned exact-assertion revisions and bindings in prepared bundles;
+- define required-evidence profiles per artifact kind;
+- implement semantic gold alignment and per-layer precision/recall/F1;
 - materialize rebuildable artifact dependency graph;
 - calculate impact closure from changed anchors;
 - mark downstream artifacts stale rather than silently retaining them;
@@ -1748,6 +1914,8 @@ Work:
 Primary files:
 
 - `src/compiler/audit.ts`;
+- `src/compiler/evidence-assertions.ts`;
+- `src/eval/compiler-eval.ts`;
 - `src/compiler/reconcile-world.ts`;
 - `src/commands/reparse.ts`;
 - `src/compiler/prepared-cache.ts`;
@@ -1755,6 +1923,10 @@ Primary files:
 
 Exit criteria:
 
+- materializing a prepared revision in another workspace preserves every exact
+  assertion hash/target, while old bundles enter explicit legacy-evidence mode;
+- every annotated gold layer is genuinely evaluated and unevaluated layers are
+  excluded from macro F1;
 - a source edit identifies all directly and transitively affected artifacts;
 - missing major semantic units are repair targets;
 - publication cannot pass with unknown required coverage;
@@ -1783,6 +1955,36 @@ Exit criteria:
 
 ## 13. Delivery order and dependencies
 
+Each package must independently complete schema/implementation, targeted tests,
+the full suite, and one reversible commit:
+
+1. **P0-A portable evidence:** add optional assertion revisions/bindings to the
+   bundle; restore assertions before canonical refs; validate artifact,
+   assertion, source, and pointer hashes; dual-read old bundles as explicit
+   legacy-evidence mode.
+2. **P0-B semantic evaluation:** implement anchor matching, entity/event cluster
+   alignment, then participation, typed relation, proposition/acquisition,
+   state-effect, and character metrics. Emit false-positive/negative alignment
+   reasons and aggregate only evaluated layers.
+3. **P0-C dependency graph:** version evidence-target, mention-resolution,
+   canonical-reference, and projection-input edges. `reparse --dry-run` reports
+   direct/transitive impact, preservation reasons, and branch pins; confirmation
+   changes current refs but never deletes immutable revisions.
+4. **P1-A scene occurrence:** resolve anchors, story interval, location,
+   participants, viewpoint, continuation, and coreference across chapters.
+   Canonical events reference membership, while scene compilation never creates
+   branch truth by itself.
+5. **P1-B conditional causality:** compile non-contested cause/enable required
+   conditions into deterministic frontier dependency and add counterfactual
+   tests. Narrative continuation can never satisfy causal support.
+6. **P1-C deterministic salience:** replace `.slice(-12)` with versioned scoring
+   over unresolved goals, active obligations, relationship targets,
+   appraisal/development triggers, progress channels, and recency. Identical
+   branch context must produce identical actor-safe selection.
+7. **P2 domain growth:** add institution procedure, faction command, artifact
+   capability/custody, or economy ledgers only after repeated benchmark failures,
+   with a separate ADR, ontology version, migration, and visibility tests.
+
 ```text
 M0 baseline/gold
   |
@@ -1806,8 +2008,8 @@ M4 event/proposition/knowledge
                M7 rollout
 ```
 
-M0 and M1 are mandatory first. Adding a richer ontology without exact evidence
-and a denominator would increase the amount of unverifiable model output.
+Local M1 exact evidence is implemented, but P0-A portability and P0-B's
+independent denominator remain mandatory before broader ontology growth.
 
 ## 14. Test strategy
 
@@ -1892,23 +2094,23 @@ CLI output should distinguish:
 
 ## 17. Final system effect
 
-After this plan is complete, the system changes in observable ways:
+The baseline, implemented state, and P0/P1 outcome are materially different:
 
-| Current behavior | Target behavior |
-|---|---|
-| Artifact cites a whole prompt segment | Every important field and relation links to exact source text |
-| Host marks segment evidence as explicit | Byte validity and semantic inference strength are independent |
-| Model creates entity identity directly | Mentions are inventoried, then explicitly resolved or left ambiguous |
-| Chapters/blocks stand in for narrative units | Structural hierarchy and overlapping scene/discourse spans coexist |
-| Event participants are untyped IDs | Participation roles and presence have independent evidence |
-| `causalParents` conflates several relations | Cause, enablement, prevention, motivation, time, subevent, and continuation are distinct |
-| Claim predicate/object is largely free-form | Proposition, attribution, factuality, and actor acquisition are separable |
-| Trait names are arbitrary scalar keys | Character dimensions are versioned, contextual, temporal, and evidenced |
-| Audit measures extracted inventory | Source accounting and gold annotations provide denominators |
-| Reconcile repairs known weak events | Reconcile can discover missing/unresolved semantic units |
-| Chapter reparse uses evidence containment only | Reparse computes downstream semantic impact while preserving pinned branches |
+| Research baseline | Implemented now | After P0/P1 |
+|---|---|---|
+| Artifact cites a whole prompt segment | Selected ontologies use host-owned field/relation assertions | Assertions travel with prepared revisions and required targets have profiles |
+| Byte validity and inference strength are mixed | Anchor hash, support/contradiction, basis, and status are separate | Human entailment gold measures semantic support |
+| Model creates entity/event identity directly | Mention inventory and entity/event resolution have revisions | Gold measures cross-chapter clusters; changes compute impact closure |
+| Chapters/blocks stand in for narrative units | Base structure and overlapping discourse observations are separate | Cross-chapter scenes join location/time/participants/events |
+| Participants are untyped IDs | Participation role and presence have independent evidence | Scene membership and actor experience are jointly evaluated |
+| `causalParents` conflates relations | Typed causal/temporal/explanatory/identity/continuation records exist | Required conditions gate frontier dependency and pass counterfactual tests |
+| Claim mixes content and source | Proposition, attribution, quotation, and acquisition are separate | Gold covers unreliable discourse, deception, and knowledge paths |
+| Traits are arbitrary scalar keys | Controlled character/relationship semantics include context/time/target/evidence | Deterministic salience selects goals, obligations, relationships, and experience |
+| Space and rules are coarse | spatial-v1 and world-rule-v2 constrain engine and actor-safe views | Benchmarks drive narrower institution/artifact/economy modules |
+| Audit measures extracted inventory | Source accounting and internal closure are reported | Human gold supplies independent semantic denominators and CI gates |
+| Reparse handles only coarse evidence | Selected chapters invalidate all direct semantic evidence dependencies | Dry-run/commit computes downstream impact and marks aggregate semantics stale |
 
-The final product can answer not only “what world was compiled?” but also:
+After P0/P1, the product can answer within explicit confidence boundaries:
 
 - which exact source words support each fact, relationship, and state change;
 - whether the source states a conclusion or the compiler inferred it;

@@ -11,7 +11,7 @@ import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
 import { EvidenceVerifier } from "../src/compiler/evidence.js";
 import { segmentEvidenceRef, SegmentStore } from "../src/compiler/segments.js";
 import { ProposalStore } from "../src/world/canonical-model.js";
-import { entitySchema } from "../src/world/model.js";
+import { entitySchema, eventRelationSchema } from "../src/world/model.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { SourceStructureStore } from "../src/compiler/structure.js";
@@ -184,11 +184,12 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(37);
+    expect(tools).toHaveLength(38);
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "propose_proposition",
       "propose_attribution",
       "propose_event_participation",
+      "propose_event_relation",
     ]));
     for (const tool of tools.filter((candidate) => candidate.name.startsWith("propose_"))) {
       const validator = Compile(tool.parameters);
@@ -205,6 +206,64 @@ describe("compiler proposal tools", () => {
       expect(schema, name).not.toContain("exactHash");
       expect(schema, name).not.toContain("entityId");
     }
+  });
+
+  it("resolves contested event-relation counter-evidence without exposing trusted spans to the model", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-relation-counter-evidence-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "The door opened. Yet the witness denied that the opening happened.\n",
+    );
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-relation-counter`, fixture.source.id);
+    const relation = toolset.tools.find((candidate) => candidate.name === "propose_event_relation")!;
+    const validator = Compile(relation.parameters);
+    const payload = {
+      id: "door-opening-contested",
+      fromEventId: "door-opens",
+      toEventId: "witness-reacts",
+      type: "before",
+      status: "contested",
+      confidence: 0.55,
+    };
+
+    expect(validator.Check({
+      proposal_id: "relation-contested-raw-ref",
+      payload: { ...payload, counterEvidence: [{ span: { quoteHash: "forged" }, strength: "explicit" }] },
+      evidence_segment_ids: [fixture.segmentId],
+    })).toBe(false);
+
+    await relation.execute("relation-contested", {
+      proposal_id: "relation-contested",
+      payload,
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "The door opened",
+        target_path: "/type",
+        relation: "supports",
+        strength: "explicit",
+      }, {
+        segment_id: fixture.segmentId,
+        exact: "the witness denied that the opening happened",
+        target_path: "/type",
+        relation: "contradicts",
+        strength: "explicit",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const pending = await new ProposalStore(root).read("pending", "relation-contested", eventRelationSchema);
+    expect(pending.payload.counterEvidence).toHaveLength(1);
+    expect(pending.payload.counterEvidence?.[0]).toMatchObject({
+      span: {
+        sourceId: fixture.source.id,
+        startByte: expect.any(Number),
+        endByte: expect.any(Number),
+        quoteHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+      strength: "explicit",
+    });
   });
 
   it("accepts a model-selected title from opening evidence only at the successful finish handshake", async () => {

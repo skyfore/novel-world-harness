@@ -1,6 +1,6 @@
 # Technical Plan: Evidence-Grounded Full-Novel Semantic Compilation
 
-- **Status:** Proposed
+- **Status:** In progress — M0 through M4 implemented; M5 through M7 remain
 - **Date:** 2026-08-25
 - **Scope:** Novel ingest, structural segmentation, semantic annotation, identity resolution, canonical compilation, audit, reconciliation, and reparse
 - **Preserves:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0002](adr/0002-user-level-content-addressed-storage.md), and [ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
@@ -303,47 +303,60 @@ state deltas, goals, and runtime checkpoints.
 Finding: repair and reparse need explicit source-accounting gaps and artifact
 dependencies.
 
-## 4. Current end-to-end flow
+## 4. Current end-to-end flow after M0-M4
 
 ```text
 nwh ingest
   -> register source metadata
   -> immutable source archive
   -> chapter/block segment manifest
+  -> deterministic work/paragraph/sentence/non-scene structure
 
 nwh compile-source / prepare-all
   -> build chapter-bounded batches
   -> create fresh Pi compiler session per batch
-  -> provide bounded catalogs and lexical read/search tools
-  -> model submits typed proposals with segment handles
-  -> host injects whole-segment EvidenceRefs
+  -> provide bounded, paged catalogs and source-scoped lexical read/search
+  -> stage exact entity/event mentions, quotations, and discourse observations
+  -> stage explicit entity/event resolution decisions
+  -> model submits typed proposals plus exact supporting/contradicting selectors
+  -> host resolves trusted anchors, EvidenceRefs, and derivation provenance
+  -> finish validates source accounting and the prospective semantic graph
   -> pending proposal store
 
 accept / prepare
   -> cryptographic evidence validation
-  -> reference and state-schema validation
-  -> dependency ordering / cycle checks
+  -> mention-resolution and exact-target trace validation
+  -> reference, state-schema, participation, epistemic, and event-relation validation
+  -> dependency ordering / semantic cycle checks
   -> immutable canonical revision + current ref
+  -> prepared publication repeats whole-catalog projection/readiness gates
 
 audit / reconcile
-  -> inventory and structural ratios
-  -> bounded repair of selected known artifacts
+  -> source-accounting denominators and observation/resolution coverage
+  -> exact-evidence, participation, epistemic, and typed-causality metrics
+  -> bounded repair queues; dependency-aware invalidation remains M6
 
 reparse
-  -> invalidate artifacts whose evidence is wholly inside selected spans
+  -> invalidate source-backed current artifacts in selected spans
   -> create new immutable revisions
   -> preserve branches pinned to prior prepared revisions
 
 runtime
   -> committed events are branch truth
+  -> snapshot V6 pins proposition/attribution/participation/relation revisions
+  -> typed semantic records derive compatibility event views, never branch truth
   -> deterministic state, knowledge, scenes, and character development
 ```
 
-The governing sequence is already documented as segment -> batch -> typed
-proposal -> validation -> explicit acceptance -> replay
-([technical-design.md](technical-design.md#L933)). This plan inserts annotation
-and resolution stages before canonical proposals; it does not weaken that
-sequence.
+The implementation preserves the governing segment -> batch -> proposal ->
+validation -> explicit acceptance -> replay sequence
+([technical-design.md](technical-design.md#L933)). Source annotations and
+resolution records are now non-canonical predecessors of world proposals;
+finish-time closure prevents an incomplete prospective graph from being
+checkpointed ([proposals.ts](../src/compiler/proposals.ts#L316)). M5 still needs
+the richer character/relationship/spatial/rule ontology, M6 needs explicit
+dependency-driven invalidation and publication policy, and M7 needs a labeled
+multi-novel semantic benchmark.
 
 ## 5. Target authority model
 
@@ -635,8 +648,39 @@ revisions and then derives the compatibility event view without mutating world
 truth ([context.ts](../src/world/context.ts#L174),
 [context.ts](../src/world/context.ts#L298)). Audit coverage counts only real
 legacy event/entity slots, so orphan or extra records cannot inflate the metric
-([audit.ts](../src/compiler/audit.ts#L514)). M4b-2 temporal/causal relations
-remain outstanding.
+([audit.ts](../src/compiler/audit.ts#L514)).
+
+M4b-2 is now implemented. `EventRelation` is a first-class immutable artifact
+whose type, evidential status, confidence, mechanism, conditions, supporting
+evidence, and counter-evidence are independently reviewable
+([model.ts](../src/world/model.ts#L360)). The model-facing compiler schema strips
+both supporting and counter-evidence references; models provide exact quote
+selectors and the host alone resolves trusted ranges and hashes, including
+`contradicts` selectors used as relation counter-evidence
+([proposal-tools.ts](../src/compiler/proposal-tools.ts#L215),
+[proposal-tools.ts](../src/compiler/proposal-tools.ts#L850)). The deterministic
+catalog validator checks endpoint closure, story-time compatibility, inverse
+normalization, duplicate/opposite/overlap contradictions, causal/temporal/
+subevent cycles, and exact compatibility with legacy causal parents
+([event-relations.ts](../src/world/event-relations.ts#L26),
+[event-relations.ts](../src/world/event-relations.ts#L71)). Only non-contested
+`causes` and `enables` records participate in that compatibility projection;
+`narrative-continuation` and contested interpretations remain reviewable but
+cannot become runtime causal ancestry
+([event-relations.ts](../src/world/event-relations.ts#L22),
+[event-relations.ts](../src/world/event-relations.ts#L56)). Same-finish compiler
+closure validates the prospective canonical-plus-pending relation graph before
+checkpointing ([proposals.ts](../src/compiler/proposals.ts#L392),
+[proposals.ts](../src/compiler/proposals.ts#L504)); both single and batch
+acceptance also validate the prospective canonical relation catalog before
+commit ([validator.ts](../src/compiler/validator.ts#L114)). Prepared publication
+repeats the catalog gate, while snapshot V6 pins relation revisions and hydrates
+a derived legacy event view without mutating canonical artifacts
+([context.ts](../src/world/context.ts#L64),
+[context.ts](../src/world/context.ts#L284)). Audit reports relation counts,
+validation issues, and coverage against actual legacy causal edges, so extra
+relations cannot inflate the denominator
+([audit.ts](../src/compiler/audit.ts#L550)).
 
 ### 6.5 Events, participation, time, and event relations
 
@@ -689,7 +733,10 @@ type EventRelation = {
     | "before"
     | "after"
     | "during"
+    | "contains"
     | "overlaps"
+    | "starts"
+    | "finishes"
     | "causes"
     | "enables"
     | "prevents"
@@ -700,10 +747,15 @@ type EventRelation = {
   confidence: number;
   mechanism?: string;
   requiredConditions?: Predicate[];
-  evidenceAssertionIds: string[];
-  counterEvidenceAssertionIds?: string[];
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 ```
+
+As with other migrated semantic artifacts, exact field/relation bindings live
+in the host-owned `EvidenceAssertionStore`, keyed by immutable artifact
+revision; the payload retains verified `EvidenceRef[]` for compatibility and
+source-scope enforcement.
 
 Event relation validation:
 
@@ -1358,13 +1410,15 @@ Exit criteria:
 Objective: distinguish narrative order, factuality, temporal relations, and
 causality.
 
-Implementation status (2026-08-25): M4a and M4b-1 are complete. Proposition/attribution
+Implementation status (2026-08-25): M4a, M4b-1, and M4b-2 are complete. Proposition/attribution
 identity and quotation-backed knowledge acquisition are implemented with
 source, identity-resolution, closure, commit, replay, and audit gates. Typed
 event participation now has the same revision, retrieval, closure, prepared,
 snapshot, removal, and audit lifecycle, with exact legacy participant/presence
-projection. M4b-2 remains: independently evidenced temporal/causal relations
-and the legacy `causalParents` projection.
+projection. Typed event relations now have independent evidence, status,
+confidence, temporal/causal/subevent graph validation, prepared/snapshot/audit
+lifecycle support, and a versioned lossless `causalParents` compatibility
+projection that excludes contested and narrative-only relations.
 
 Work:
 

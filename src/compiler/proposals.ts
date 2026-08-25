@@ -7,6 +7,7 @@ import {
   claimSchema,
   entitySchema,
   eventParticipationSchema,
+  eventRelationSchema,
   attributionSchema,
   evidenceAssertionSchema,
   evidenceRefSchema,
@@ -25,6 +26,7 @@ import {
   type EvidenceRef,
   type EvidenceAssertion,
   type EventParticipation,
+  type EventRelation,
   type KnowledgeDelta,
   type ParticipantPresence,
   type Predicate,
@@ -34,6 +36,7 @@ import {
   type WorldRule,
 } from "../world/model.js";
 import { validateEventParticipationCatalog } from "../world/event-semantics.js";
+import { validateEventRelationCatalog } from "../world/event-relations.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
@@ -96,6 +99,7 @@ const compilerPropositionSchema = propositionSchema.safeExtend({ evidence: evide
 });
 const compilerAttributionSchema = attributionSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerEventParticipationSchema = eventParticipationSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
+const compilerEventRelationSchema = eventRelationSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
   validateParticipantPresence(possibility, ctx);
   if (possibility.kind === "player-choice" && !hasExecutablePossibilityEffect(possibility)) {
@@ -106,7 +110,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -121,6 +125,7 @@ export const compilerProposalSchemas = {
     .extend({ evidence: evidenceRefSchema.array().min(1) })
     .superRefine(validateParticipantPresence),
   "event-participation": compilerEventParticipationSchema,
+  "event-relation": compilerEventRelationSchema,
   "world-rule": compilerWorldRuleSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
   "initial-world": initialWorldSchema,
   "character-goal": characterGoalSchema,
@@ -152,6 +157,13 @@ export function compilerProposalArtifactId(
   return idSchema.parse(kind === "character-model" ? record.actorId : record.id);
 }
 
+export function compilerPayloadEvidence(payload: unknown): EvidenceRef[] {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const record = payload as { evidence?: unknown; counterEvidence?: unknown };
+  return [record.evidence, record.counterEvidence].flatMap((candidate) =>
+    candidate === undefined ? [] : evidenceRefSchema.array().parse(candidate));
+}
+
 export class CompilerProposalService {
   readonly store: ProposalStore;
   constructor(workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
@@ -163,10 +175,7 @@ export class CompilerProposalService {
     const evidenceAssertions = input.evidenceAssertions === undefined
       ? []
       : evidenceAssertionSchema.array().parse(input.evidenceAssertions);
-    const payloadEvidence = payload && typeof payload === "object" && !Array.isArray(payload)
-      && Array.isArray((payload as { evidence?: unknown }).evidence)
-      ? evidenceRefSchema.array().parse((payload as { evidence: unknown[] }).evidence)
-      : [];
+    const payloadEvidence = compilerPayloadEvidence(payload);
     const legacySourceId = assertSingleEvidenceSource(
       [...payloadEvidence, ...evidence],
       `Compiler proposal ${input.proposalId}`,
@@ -320,13 +329,14 @@ export async function validateCompilerProposalClosure(
   const canon = new CanonicalModelStore(workspaceRoot);
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalRules, canonicalPossibilities, pending] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalRules, canonicalPossibilities, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
     canon.listClaims(),
     canon.listEvents(),
     canon.listEventParticipations(),
+    canon.listEventRelations(),
     canon.listRules(),
     possibilities.list(),
     proposals.list("pending"),
@@ -389,6 +399,11 @@ export async function validateCompilerProposalClosure(
     events: new Map(canonicalEvents.filter(fromActiveSource).map((event) => [event.id, event])),
     participations: new Map(canonicalEventParticipations.filter(fromActiveSource).map((item) => [item.id, item])),
   };
+  const relationCatalog = {
+    events: new Map(canonicalEvents.filter(fromActiveSource).map((event) => [event.id, event])),
+    relations: new Map(canonicalEventRelations.filter(fromActiveSource).map((item) => [item.id, item])),
+    requireCompleteCausalProjectionForEventIds: new Set<string>(),
+  };
   for (const proposal of staged.values()) {
     if (proposal.kind === "entity") {
       const value = entitySchema.parse(proposal.payload);
@@ -399,6 +414,9 @@ export async function validateCompilerProposalClosure(
     } else if (proposal.kind === "event-participation") {
       const value = eventParticipationSchema.parse(proposal.payload);
       participationCatalog.participations.set(value.id, value);
+    } else if (proposal.kind === "event-relation") {
+      const value = eventRelationSchema.parse(proposal.payload);
+      relationCatalog.relations.set(value.id, value);
     } else if (proposal.kind === "claim") {
       const value = claimSchema.parse(proposal.payload);
       semanticCatalog.claims.set(value.id, value);
@@ -408,6 +426,11 @@ export async function validateCompilerProposalClosure(
     } else if (proposal.kind === "attribution") {
       const value = attributionSchema.parse(proposal.payload);
       semanticCatalog.attributions.set(value.id, value);
+    }
+    if (proposal.kind === "canonical-event") {
+      const event = canonicalEventSchema.parse(proposal.payload);
+      relationCatalog.events.set(event.id, event);
+      relationCatalog.requireCompleteCausalProjectionForEventIds.add(event.id);
     }
   }
 
@@ -423,7 +446,7 @@ export async function validateCompilerProposalClosure(
     if (duplicates.length > 1) {
       issues.add(`${proposalId}: logical artifact '${logicalIdentity}' also has active proposal(s) ${duplicates.filter((id) => id !== proposalId).join(", ")}`);
     }
-    const payloadEvidence = (proposal.payload as { evidence?: EvidenceRef[] }).evidence ?? [];
+    const payloadEvidence = compilerPayloadEvidence(proposal.payload);
     if (sourceId) {
       const proposalSourceIds = evidenceSourceIds([...payloadEvidence, ...proposal.evidence]);
       const exactSourceIds = evidenceAssertionSourceIds(proposal.evidenceAssertions);
@@ -477,6 +500,13 @@ export async function validateCompilerProposalClosure(
     participations: participationCatalog.participations.values(),
   })) {
     issues.add(`event-participation: ${participationIssue.code} at ${participationIssue.path ?? "payload"}: ${participationIssue.message}`);
+  }
+  for (const relationIssue of validateEventRelationCatalog({
+    events: relationCatalog.events,
+    relations: relationCatalog.relations.values(),
+    requireCompleteCausalProjectionForEventIds: relationCatalog.requireCompleteCausalProjectionForEventIds,
+  })) {
+    issues.add(`event-relation: ${relationIssue.code} at ${relationIssue.path ?? "payload"}: ${relationIssue.message}`);
   }
   return [...issues].sort();
 }
@@ -589,6 +619,14 @@ function collectProposalClosureIssues(
     const participation = payload as EventParticipation;
     missing("events", participation.eventId, "eventId");
     missing("entities", participation.entityId, "entityId");
+    return;
+  }
+  if (proposal.kind === "event-relation") {
+    const relation = payload as EventRelation;
+    missing("events", relation.fromEventId, "fromEventId");
+    missing("events", relation.toEventId, "toEventId");
+    relation.requiredConditions?.forEach((predicate, index) =>
+      collectPredicateIssues(predicate, `requiredConditions.${index}`, missing, fieldReference));
     return;
   }
   if (proposal.kind === "world-rule") {

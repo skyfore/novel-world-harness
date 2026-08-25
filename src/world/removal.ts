@@ -116,6 +116,21 @@ export async function removeNovelAnalysis(
     else await canonical.removeCurrent("event-participations", participation.id);
     canonicalArtifacts += 1;
   }
+  for (const relation of await canonical.listEventRelations()) {
+    const allEvidence = [...relation.evidence, ...(relation.counterEvidence ?? [])];
+    if (!allEvidence.some((reference) => reference.span.sourceId === sourceId)) continue;
+    const evidence = withoutSourceEvidence(relation, sourceId);
+    const counterEvidence = (relation.counterEvidence ?? []).filter((reference) => reference.span.sourceId !== sourceId);
+    if (evidence.length) {
+      const revised = { ...relation, evidence };
+      if (counterEvidence.length) revised.counterEvidence = counterEvidence;
+      else delete revised.counterEvidence;
+      await canonical.putEventRelation(revised);
+    } else {
+      await canonical.removeCurrent("event-relations", relation.id);
+    }
+    canonicalArtifacts += 1;
+  }
   for (const event of await canonical.listEvents()) {
     if (!containsSourceEvidence(event, sourceId)) continue;
     const evidence = withoutSourceEvidence(event, sourceId);

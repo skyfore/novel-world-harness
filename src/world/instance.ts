@@ -42,6 +42,7 @@ export async function createWorldBranch(
     claims: prepared.bundle.canonical.claims,
     events: prepared.bundle.canonical.events,
     eventParticipations: prepared.bundle.canonical.eventParticipations,
+    eventRelations: prepared.bundle.canonical.eventRelations,
     rules: prepared.bundle.canonical.rules,
     goals: prepared.bundle.canonical.goals,
     models: prepared.bundle.canonical.models,

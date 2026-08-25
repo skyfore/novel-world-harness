@@ -22,7 +22,7 @@ describe("compiler artifact retrieval", () => {
   it("normalizes the event alias and rejects unsupported kinds instead of returning a silent miss", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-artifact-kind-"));
     roots.push(root);
-    const fixture = await createEvidenceFixture(root, "Hero enters the Hall.\n");
+    const fixture = await createEvidenceFixture(root, "The Hall opens. Hero enters the Hall.\n");
     const canon = new CanonicalModelStore(root);
     await canon.putEntity({
       id: "hero",
@@ -32,15 +32,26 @@ describe("compiler artifact retrieval", () => {
       evidence: fixture.evidence("Hero"),
     });
     await canon.putEvent({
+      id: "hall-opens",
+      title: "The Hall opens",
+      participants: [],
+      storyTime: { kind: "ordinal", label: "opening", orderHint: 1 },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: fixture.evidence("The Hall opens"),
+      causalParents: [],
+      confidence: 1,
+    });
+    await canon.putEvent({
       id: "hero-enters",
       title: "Hero enters",
       participants: ["hero"],
       participantPresence: [{ entityId: "hero", mode: "physical" }],
-      storyTime: { kind: "unknown" },
+      storyTime: { kind: "ordinal", label: "entry", orderHint: 2 },
       preconditions: [],
       observedOutcome: { version: 1, operations: [] },
       evidence: fixture.evidence("Hero enters"),
-      causalParents: [],
+      causalParents: ["hall-opens"],
       confidence: 1,
     });
     await canon.putEventParticipation({
@@ -52,13 +63,23 @@ describe("compiler artifact retrieval", () => {
       confidence: 1,
       evidence: fixture.evidence("Hero enters"),
     });
+    await canon.putEventRelation({
+      id: "hall-opens-enables-entry",
+      fromEventId: "hall-opens",
+      toEventId: "hero-enters",
+      type: "enables",
+      status: "explicit",
+      confidence: 1,
+      mechanism: "The opened Hall permits the Hero to enter.",
+      evidence: fixture.evidence("The Hall opens. Hero enters the Hall."),
+    });
     const toolset = createCompilerProposalToolset(root);
     await toolset.beginBatch([], "batch-kind", fixture.source.id);
     const find = toolset.tools.find((tool) => tool.name === "find_compiler_artifacts")!;
 
     const result = JSON.parse(resultText(await find.execute(
       "event-alias",
-      { query: "*", kind: "event" } as never,
+      { query: "Hero enters", kind: "event" } as never,
       undefined,
       undefined,
       {} as ExtensionContext,
@@ -78,6 +99,19 @@ describe("compiler artifact retrieval", () => {
       expect.objectContaining({
         ref: "canonical:event-participation:hero-enters-hero-agent",
         kind: "event-participation",
+      }),
+    ]);
+    const relationResult = JSON.parse(resultText(await find.execute(
+      "relation-kind",
+      { query: "*", kind: "event-relation" } as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    ))) as { results: Array<{ ref: string; kind: string }> };
+    expect(relationResult.results).toEqual([
+      expect.objectContaining({
+        ref: "canonical:event-relation:hall-opens-enables-entry",
+        kind: "event-relation",
       }),
     ]);
     await expect(find.execute(

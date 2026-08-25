@@ -31,6 +31,7 @@ import {
 } from "./attribution-trace.js";
 import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
 import { validateEventParticipationCatalog } from "../world/event-semantics.js";
+import { eventRelationProjectsLegacyCausalParent, validateEventRelationCatalog } from "../world/event-relations.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -110,6 +111,14 @@ export type CompilerAuditReport = {
     typedParticipantSlots: number;
     validationIssues: number;
     errors: Array<{ code: string; message: string; path?: string }>;
+    relations: number;
+    temporalRelations: number;
+    causalRelations: number;
+    narrativeContinuations: number;
+    legacyCausalEdges: number;
+    typedCausalEdges: number;
+    relationValidationIssues: number;
+    relationErrors: Array<{ code: string; message: string; path?: string }>;
   };
   canonical: {
     entities: number;
@@ -118,6 +127,7 @@ export type CompilerAuditReport = {
     claims: number;
     events: number;
     eventParticipations: number;
+    eventRelations: number;
     rules: number;
     initialWorld: boolean;
     characterGoals: number;
@@ -165,6 +175,7 @@ export type CompilerAuditReport = {
     majorEventResolution: number | null;
     epistemicCoverage: number | null;
     typedEventParticipation: number | null;
+    typedCausalRelations: number | null;
     timelineAnchoring: number | null;
     eventEffectExplicitness: number | null;
     characterDevelopmentCoverage: number | null;
@@ -369,23 +380,27 @@ export async function auditCompiler(
 
   const canon = new CanonicalModelStore(workspaceRoot);
   const actorStore = new ActorModelStore(workspaceRoot);
-  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allEventParticipations, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
+  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allEventParticipations, allEventRelations, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
     canon.listClaims(),
     canon.listEvents(),
     canon.listEventParticipations(),
+    canon.listEventRelations(),
     canon.listRules(),
     new InitialWorldStore(workspaceRoot).get(),
     actorStore.listGoals(),
     actorStore.listModels(),
     new PossibilityTemplateStore(workspaceRoot).list(),
   ]);
-  const belongsToSelectedSource = (item: { evidence: readonly EvidenceRef[] }) => {
+  const artifactEvidence = (item: { evidence: readonly EvidenceRef[]; counterEvidence?: readonly EvidenceRef[] }) =>
+    [...item.evidence, ...(item.counterEvidence ?? [])];
+  const belongsToSelectedSource = (item: { evidence: readonly EvidenceRef[]; counterEvidence?: readonly EvidenceRef[] }) => {
     if (!options.sourceId) return true;
-    const matches = item.evidence.some((reference) => reference.span.sourceId === options.sourceId);
-    if (matches) assertEvidenceExclusiveToSource(item.evidence, options.sourceId, "Audited compiler artifact");
+    const evidence = artifactEvidence(item);
+    const matches = evidence.some((reference) => reference.span.sourceId === options.sourceId);
+    if (matches) assertEvidenceExclusiveToSource(evidence, options.sourceId, "Audited compiler artifact");
     return matches;
   };
   const entities = allEntities.filter(belongsToSelectedSource);
@@ -394,6 +409,7 @@ export async function auditCompiler(
   const claims = allClaims.filter(belongsToSelectedSource);
   const events = allEvents.filter(belongsToSelectedSource);
   const eventParticipations = allEventParticipations.filter(belongsToSelectedSource);
+  const eventRelations = allEventRelations.filter(belongsToSelectedSource);
   const rules = allRules.filter(belongsToSelectedSource);
   const initialWorld = storedInitialWorld && belongsToSelectedSource(storedInitialWorld) ? storedInitialWorld : null;
   const goals = allGoals.filter(belongsToSelectedSource);
@@ -407,6 +423,7 @@ export async function auditCompiler(
     ...claims.map((item) => ({ name: `claim:${item.id}`, kind: "claim", id: item.id, payload: item, evidence: item.evidence })),
     ...events.map((item) => ({ name: `event:${item.id}`, kind: "canonical-event", id: item.id, payload: item, evidence: item.evidence })),
     ...eventParticipations.map((item) => ({ name: `event-participation:${item.id}`, kind: "event-participation", id: item.id, payload: item, evidence: item.evidence })),
+    ...eventRelations.map((item) => ({ name: `event-relation:${item.id}`, kind: "event-relation", id: item.id, payload: item, evidence: artifactEvidence(item) })),
     ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: item.evidence })),
     ...(initialWorld ? [{ name: "initial-world", kind: "initial-world", id: "initial-world", payload: initialWorld, evidence: initialWorld.evidence }] : []),
     ...goals.map((item) => ({ name: `goal:${item.id}`, kind: "character-goal", id: item.id, payload: item, evidence: item.evidence })),
@@ -529,6 +546,19 @@ export async function auditCompiler(
   const typedParticipantSlots = typedParticipantKeys.size;
   const typedEventParticipation = legacyParticipantSlots
     ? Math.min(1, typedParticipantSlots / legacyParticipantSlots)
+    : null;
+  const relationValidation = validateEventRelationCatalog({
+    events: new Map(events.map((event) => [event.id, event])),
+    relations: eventRelations,
+  });
+  const legacyCausalKeys = new Set(events.flatMap((event) =>
+    [...new Set(event.causalParents)].map((parentId) => `${parentId}:${event.id}`)));
+  const typedCausalKeys = new Set(eventRelations
+    .filter(eventRelationProjectsLegacyCausalParent)
+    .map((relation) => `${relation.fromEventId}:${relation.toEventId}`)
+    .filter((key) => legacyCausalKeys.has(key)));
+  const typedCausalRelations = legacyCausalKeys.size
+    ? typedCausalKeys.size / legacyCausalKeys.size
     : null;
 
   const graph = auditCausalGraph(events);
@@ -678,6 +708,11 @@ export async function auditCompiler(
       events.filter((event) => !eventsWithTypedParticipation.has(event.id))
         .forEach((event) => semanticRepairEventIds.add(event.id));
     }
+    if (legacyCausalKeys.size && typedCausalRelations !== 1) {
+      semanticIssues.push(`Only ${formatRatio(typedCausalRelations)} of legacy causal-parent edges have independently evidenced causes/enables relations (required 100%).`);
+      events.filter((event) => event.causalParents.some((parentId) => !typedCausalKeys.has(`${parentId}:${event.id}`)))
+        .forEach((event) => semanticRepairEventIds.add(event.id));
+    }
     if (readerSummaryCoverage !== 1) {
       semanticIssues.push(`Only ${formatRatio(readerSummaryCoverage)} of canonical events have a source-grounded reader recap (required 100% for complete later-role context).`);
       events.filter((event) => !event.readerSummary?.trim()).forEach((event) => semanticRepairEventIds.add(event.id));
@@ -727,7 +762,7 @@ export async function auditCompiler(
       : validExactBindings === evidenceArtifacts.length
         ? "ready"
         : "unknown";
-  const semanticReadiness: CompilerReadinessState = epistemicErrors.length || participationValidation.length
+  const semanticReadiness: CompilerReadinessState = epistemicErrors.length || participationValidation.length || relationValidation.length
     ? "not-ready"
     : events.length < 20
     ? "unknown"
@@ -791,6 +826,7 @@ export async function auditCompiler(
     ...missingEventResolutionMentionIds.map((mentionId) => `Event mention ${mentionId} has no current event-resolution record.`),
     ...epistemicErrors.map((error) => `${error.artifact}: ${error.message}`),
     ...participationValidation.map((error) => `Event participation ${error.code}: ${error.message}`),
+    ...relationValidation.map((error) => `Event relation ${error.code}: ${error.message}`),
     ...graph.cycles.map((cycle) => `Causal cycle: ${cycle.join(" -> ")}`),
     ...graph.missing.map(({ eventId, parentId }) => `Event ${eventId} has missing causal parent ${parentId}.`),
     ...graph.temporalRegressions.map(({ eventId, parentId }) => `Event ${eventId} is earlier than causal parent ${parentId}.`),
@@ -864,6 +900,14 @@ export async function auditCompiler(
       typedParticipantSlots,
       validationIssues: participationValidation.length,
       errors: participationValidation,
+      relations: eventRelations.length,
+      temporalRelations: eventRelations.filter((item) => ["before", "after", "during", "contains", "overlaps", "starts", "finishes"].includes(item.type)).length,
+      causalRelations: eventRelations.filter((item) => ["causes", "enables", "prevents", "motivates", "explains"].includes(item.type)).length,
+      narrativeContinuations: eventRelations.filter((item) => item.type === "narrative-continuation").length,
+      legacyCausalEdges: legacyCausalKeys.size,
+      typedCausalEdges: typedCausalKeys.size,
+      relationValidationIssues: relationValidation.length,
+      relationErrors: relationValidation,
     },
     canonical: {
       entities: entities.length,
@@ -872,6 +916,7 @@ export async function auditCompiler(
       claims: claims.length,
       events: events.length,
       eventParticipations: eventParticipations.length,
+      eventRelations: eventRelations.length,
       rules: rules.length,
       initialWorld: Boolean(initialWorld),
       characterGoals: goals.length,
@@ -899,7 +944,7 @@ export async function auditCompiler(
       causalComponents: graph.components.length,
       largestCausalComponent: Math.max(0, ...graph.components.map((component) => component.length)),
       unconditionalRootEvents: graph.unconditionalRoots,
-      semanticReady: events.length >= 20 ? semanticIssues.length === 0 && participationValidation.length === 0 : null,
+      semanticReady: events.length >= 20 ? semanticIssues.length === 0 && participationValidation.length === 0 && relationValidation.length === 0 : null,
       semanticIssues,
     },
     semanticRepairTargets: {
@@ -925,6 +970,7 @@ export async function auditCompiler(
         ? new Set(attributions.map((attribution) => attribution.propositionId)).size / propositions.length
         : null,
       typedEventParticipation,
+      typedCausalRelations,
       timelineAnchoring,
       eventEffectExplicitness,
       characterDevelopmentCoverage,

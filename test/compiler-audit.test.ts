@@ -144,11 +144,22 @@ describe("compiler audit", () => {
       evidence,
     });
     await canon.putEvent({
+      id: "hero-reports-gate-open",
+      title: "Hero reports that the gate is open",
+      participants: [],
+      storyTime: { kind: "ordinal", label: "report", orderHint: 1 },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence,
+      causalParents: [],
+      confidence: 1,
+    });
+    await canon.putEvent({
       id: "hero-infers-gate-open",
       title: "Hero forms a belief about the gate",
       participants: ["hero"],
       participantPresence: [{ entityId: "hero", mode: "physical" }],
-      storyTime: { kind: "unknown" },
+      storyTime: { kind: "ordinal", label: "inference", orderHint: 2 },
       preconditions: [],
       observedOutcome: { version: 1, operations: [] },
       observedKnowledge: {
@@ -165,7 +176,7 @@ describe("compiler audit", () => {
         }],
       },
       evidence,
-      causalParents: [],
+      causalParents: ["hero-reports-gate-open"],
       confidence: 1,
     });
     await canon.putEventParticipation({
@@ -175,6 +186,16 @@ describe("compiler audit", () => {
       role: "experiencer",
       presence: "physical",
       confidence: 1,
+      evidence,
+    });
+    await canon.putEventRelation({
+      id: "report-causes-inference",
+      fromEventId: "hero-reports-gate-open",
+      toEventId: "hero-infers-gate-open",
+      type: "causes",
+      status: "explicit",
+      confidence: 1,
+      mechanism: "The report supplies the content from which the belief is formed.",
       evidence,
     });
 
@@ -197,9 +218,17 @@ describe("compiler audit", () => {
       typedParticipantSlots: 1,
       validationIssues: 0,
       errors: [],
+      relations: 1,
+      causalRelations: 1,
+      legacyCausalEdges: 1,
+      typedCausalEdges: 1,
+      relationValidationIssues: 0,
+      relationErrors: [],
     });
     expect(report.canonical.eventParticipations).toBe(1);
+    expect(report.canonical.eventRelations).toBe(1);
     expect(report.coverage.typedEventParticipation).toBe(1);
+    expect(report.coverage.typedCausalRelations).toBe(1);
   });
 
   it("can audit one source without inheriting another source's changed file or artifacts", async () => {

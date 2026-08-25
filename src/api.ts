@@ -163,6 +163,15 @@ export {
   type EventParticipationCatalog,
 } from "./world/event-semantics.js";
 export {
+  EVENT_RELATION_PROJECTION_VERSION,
+  eventRelationProjectsLegacyCausalParent,
+  eventRelationsByTarget,
+  projectEventRelations,
+  validateEventRelationCatalog,
+  validateEventRelationRecord,
+  type EventRelationCatalog,
+} from "./world/event-relations.js";
+export {
   claimProjectionMismatches,
   findKnowledgeDeltas,
   projectPropositionObject,

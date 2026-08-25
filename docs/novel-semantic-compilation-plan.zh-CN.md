@@ -1,6 +1,6 @@
 # 技术计划：可溯源的全书小说语义编译
 
-- **状态：** Proposed
+- **状态：** 进行中——M0 至 M4 已实现，M5 至 M7 待完成
 - **日期：** 2026-08-25
 - **范围：** 小说导入、结构拆分、语义标注、身份消歧、canonical 编译、审计、修复与重解析
 - **必须遵守：** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md)、[ADR 0002](adr/0002-user-level-content-addressed-storage.md)、[ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
@@ -299,43 +299,61 @@ resolution → event/relation → state/knowledge → character/possibility 的�
 **结论：** missing semantic unit 和 stale downstream artifact 必须成为
 显式对象。
 
-## 3. 当前流程
+## 3. M0-M4 完成后的当前流程
 
 ```text
 nwh ingest
   -> 注册 source metadata
   -> 不可变 source archive
   -> chapter/block segment manifest
+  -> 确定性 work/paragraph/sentence/non-scene structure
 
 compile-source / prepare-all
   -> 构造不跨章节的 bounded batch
   -> 每 batch 新建 Pi compiler session
-  -> 注入有限 artifact catalog
+  -> 注入 bounded、可分页 artifact catalog
   -> 提供 source-scoped lexical find/read
-  -> 模型通过 typed tools 提交 proposal
-  -> 模型只给 segment handle，宿主注入 whole-segment EvidenceRef
+  -> 记录精确 entity/event mention、quotation、discourse observation
+  -> 记录显式 entity/event resolution decision
+  -> 模型提交 typed proposal 与 supporting/contradicting exact selector
+  -> 宿主解析可信 anchor、EvidenceRef 与 derivation provenance
+  -> finish 校验 source accounting 与 prospective semantic graph
   -> pending proposal store
 
 accept / prepare
   -> 验证 source hash 与 span
-  -> 验证实体引用、state schema、时间与因果循环
+  -> 验证 mention-resolution 与 exact target trace
+  -> 验证引用、state schema、participation、epistemic 与 event relation
+  -> dependency order 与 semantic cycle check
   -> 接受为 immutable canonical revision
+  -> prepared publication 重复 whole-catalog projection/readiness gate
 
 audit / reconcile
-  -> 统计 inventory、内部 coverage ratio、图结构
-  -> 修复少量已知薄弱 artifact
+  -> source-accounting denominator 与 observation/resolution coverage
+  -> exact evidence、participation、epistemic、typed causality metric
+  -> bounded repair queue；dependency-driven invalidation 留待 M6
 
 reparse
-  -> 按 evidence containment 失效 current artifact
+  -> 失效 selected span 内 source-backed current artifact
   -> 重新生成 revision
   -> 既有 branch 继续 pin 旧 prepared revision
 
 runtime
   -> committed event history 为 branch truth
+  -> Snapshot V6 固定 proposition/attribution/participation/relation revision
+  -> typed semantic record 只派生 compatibility event view，不成为 branch truth
   -> 确定性投影 state、knowledge、scene、development 和 frontier
 ```
 
-### 3.1 当前主要失真点
+实现仍保持 segment -> batch -> proposal -> validation -> explicit acceptance
+-> replay 的权威顺序（[technical-design.md](technical-design.md#L933)）。Source
+annotation 与 resolution 已成为 world proposal 之前的非 canonical 层；finish
+closure 会拒绝不完整的 prospective graph
+（[proposals.ts](../src/compiler/proposals.ts#L316)）。后续仍需：M5 的角色/关系/
+空间/rule ontology，M6 的 dependency-driven invalidation 与 publication policy，
+以及 M7 的多小说人工标注 semantic benchmark。
+
+### 3.1 研究基线的主要失真点
 
 | 位置 | 当前压缩 | 后果 |
 |---|---|---|
@@ -642,8 +660,35 @@ revision，再派生兼容 event view，不直接改写 world truth
 （[context.ts](../src/world/context.ts#L174)、
 [context.ts](../src/world/context.ts#L298)）。audit coverage 只统计真实存在的
 legacy event/entity slot，孤儿或多余记录不能虚高覆盖率
-（[audit.ts](../src/compiler/audit.ts#L514)）。M4b-2 的 temporal/causal
-relation 仍待完成。
+（[audit.ts](../src/compiler/audit.ts#L514)）。
+
+M4b-2 现已实现。`EventRelation` 已成为独立、不可变 revision artifact；type、
+证据状态、confidence、mechanism、条件、支持证据与反证均可单独审阅
+（[model.ts](../src/world/model.ts#L360)）。模型侧工具 schema 会剥离支持证据和
+反证的可信引用；模型只提交 exact quote selector，宿主独占 byte range/hash
+解析权，并把 `contradicts` selector 转成关系反证
+（[proposal-tools.ts](../src/compiler/proposal-tools.ts#L215)、
+[proposal-tools.ts](../src/compiler/proposal-tools.ts#L850)）。确定性 catalog
+validator 校验 endpoint closure、story-time 相容性、inverse normalization、
+重复/反向/overlap 矛盾、causal/temporal/subevent cycle，以及与 legacy
+`causalParents` 的精确等价
+（[event-relations.ts](../src/world/event-relations.ts#L26)、
+[event-relations.ts](../src/world/event-relations.ts#L71)）。只有非 contested 的
+`causes`/`enables` 能进入兼容投影；`narrative-continuation` 与 contested
+解释可以保留审阅，但不能成为 runtime causal ancestry
+（[event-relations.ts](../src/world/event-relations.ts#L22)、
+[event-relations.ts](../src/world/event-relations.ts#L56)）。compiler 在 finish
+前验证 canonical + pending 的 prospective relation graph
+（[proposals.ts](../src/compiler/proposals.ts#L392)、
+[proposals.ts](../src/compiler/proposals.ts#L504)）；单条与批量 accept 也会在
+commit 前验证 prospective canonical relation catalog
+（[validator.ts](../src/compiler/validator.ts#L114)）。prepared publication 复用
+同一 catalog gate，Snapshot V6 固定 relation revision，并仅在 hydration 时
+派生 legacy event view，不改写 canonical artifact
+（[context.ts](../src/world/context.ts#L64)、
+[context.ts](../src/world/context.ts#L284)）。Audit 按真实 legacy causal edge
+计算 typed coverage，并报告 relation 数量与 validation issue，额外关系不能虚高
+分母（[audit.ts](../src/compiler/audit.ts#L550)）。
 
 ### 5.5 EventMention、Participation 与 EventRelation
 
@@ -696,7 +741,10 @@ type EventRelation = {
     | "before"
     | "after"
     | "during"
+    | "contains"
     | "overlaps"
+    | "starts"
+    | "finishes"
     | "causes"
     | "enables"
     | "prevents"
@@ -707,10 +755,14 @@ type EventRelation = {
   confidence: number;
   mechanism?: string;
   requiredConditions?: Predicate[];
-  evidenceAssertionIds: string[];
-  counterEvidenceAssertionIds?: string[];
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 ```
+
+与其他迁移后的 semantic artifact 一样，字段/关系级 exact binding 存放在
+宿主管理的 `EvidenceAssertionStore` 中，并按不可变 artifact revision 绑定；
+payload 保留经过校验的 `EvidenceRef[]`，用于兼容和 source-scope enforcement。
 
 Validator 必须检查：
 
@@ -1261,12 +1313,14 @@ coverage；M3 至此完成。
 
 目标：拆开时间、因果、归因和知识路径。
 
-实现状态（2026-08-25）：M4a 与 M4b-1 已完成。proposition/attribution identity 与
+实现状态（2026-08-25）：M4a、M4b-1 与 M4b-2 已完成。proposition/attribution identity 与
 quotation-backed knowledge acquisition 已接通 source、identity resolution、
 closure、commit、replay 和 audit gate。typed event participation 也已接通
 revision、retrieval、closure、prepared、snapshot、removal 与 audit 生命周期，
-并强制与 legacy participant/presence 无损等价。M4b-2 尚待完成：独立证据化的
-temporal/causal relation 及 legacy `causalParents` projection。
+并强制与 legacy participant/presence 无损等价。typed event relation 现已具备
+独立 evidence/status/confidence、temporal/causal/subevent 图校验、prepared/
+snapshot/audit 生命周期，以及排除 contested 与 narrative-only 关系的 versioned
+无损 `causalParents` 兼容投影。
 
 改造：
 

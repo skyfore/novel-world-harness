@@ -85,15 +85,26 @@ describe("CanonicalModelStore revisions", () => {
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] });
     await canon.putEntity({ id: "gate", kind: "location", canonicalName: "Gate", aliases: [], evidence: [] });
     await canon.putEvent({
-      id: "hero-enters-gate",
-      title: "Hero enters the gate",
-      participants: ["hero", "gate"],
-      participantPresence: [{ entityId: "hero", mode: "physical" }],
-      storyTime: { kind: "unknown" },
+      id: "gate-opens",
+      title: "The gate opens",
+      participants: [],
+      storyTime: { kind: "ordinal", label: "opening", orderHint: 1 },
       preconditions: [],
       observedOutcome: { version: 1, operations: [] },
       evidence: [],
       causalParents: [],
+      confidence: 1,
+    });
+    await canon.putEvent({
+      id: "hero-enters-gate",
+      title: "Hero enters the gate",
+      participants: ["hero", "gate"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      storyTime: { kind: "ordinal", label: "entry", orderHint: 2 },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: [],
+      causalParents: ["gate-opens"],
       confidence: 1,
     });
     await canon.putEventParticipation({
@@ -103,6 +114,16 @@ describe("CanonicalModelStore revisions", () => {
       role: "agent",
       presence: "physical",
       confidence: 1,
+      evidence: [],
+    });
+    await canon.putEventRelation({
+      id: "gate-opens-enables-entry",
+      fromEventId: "gate-opens",
+      toEventId: "hero-enters-gate",
+      type: "enables",
+      status: "inferred",
+      confidence: 0.9,
+      mechanism: "Opening the gate makes entry possible.",
       evidence: [],
     });
     await canon.putEventParticipation({
@@ -116,9 +137,10 @@ describe("CanonicalModelStore revisions", () => {
 
     const first = await contexts.captureCurrent();
     const stored = JSON.parse(await fs.readFile(path.join(contexts.root, `${first.canonicalSnapshotHash}.json`), "utf8")) as { version: number };
-    expect(stored.version).toBe(5);
+    expect(stored.version).toBe(6);
     expect(first.events?.get("hero-enters-gate")?.participants).toEqual(["hero", "gate"]);
     expect(first.eventParticipations).toContainEqual(expect.objectContaining({ id: "hero-enters-gate-hero", role: "agent" }));
+    expect(first.eventRelations).toContainEqual(expect.objectContaining({ id: "gate-opens-enables-entry", type: "enables" }));
 
     await canon.putEventParticipation({
       id: "hero-enters-gate-hero",
@@ -129,10 +151,22 @@ describe("CanonicalModelStore revisions", () => {
       confidence: 0.8,
       evidence: [],
     });
+    await canon.putEventRelation({
+      id: "gate-opens-enables-entry",
+      fromEventId: "gate-opens",
+      toEventId: "hero-enters-gate",
+      type: "causes",
+      status: "inferred",
+      confidence: 0.7,
+      mechanism: "The opened gate directly causes the entry opportunity.",
+      evidence: [],
+    });
     const latest = await contexts.captureCurrent();
     const pinned = await contexts.load(first.canonicalSnapshotHash!);
     expect(latest.eventParticipations).toContainEqual(expect.objectContaining({ role: "experiencer" }));
     expect(pinned.eventParticipations).toContainEqual(expect.objectContaining({ role: "agent" }));
+    expect(latest.eventRelations).toContainEqual(expect.objectContaining({ type: "causes" }));
+    expect(pinned.eventRelations).toContainEqual(expect.objectContaining({ type: "enables" }));
 
     await canon.removeCurrent("event-participations", "hero-enters-gate-gate");
     await expect(contexts.captureCurrent()).rejects.toThrow("INCOMPLETE_EVENT_PARTICIPATION");

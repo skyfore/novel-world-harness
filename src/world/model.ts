@@ -357,6 +357,56 @@ export const predicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   ]),
 );
 
+export const eventRelationTypeSchema = z.enum([
+  "coreference",
+  "subevent",
+  "before",
+  "after",
+  "during",
+  "contains",
+  "overlaps",
+  "starts",
+  "finishes",
+  "causes",
+  "enables",
+  "prevents",
+  "motivates",
+  "explains",
+  "narrative-continuation",
+]);
+export type EventRelationType = z.infer<typeof eventRelationTypeSchema>;
+
+export const eventRelationStatusSchema = z.enum(["explicit", "inferred", "contested"]);
+export type EventRelationStatus = z.infer<typeof eventRelationStatusSchema>;
+
+export const eventRelationSchema = z.object({
+  id: idSchema,
+  fromEventId: idSchema,
+  toEventId: idSchema,
+  type: eventRelationTypeSchema,
+  status: eventRelationStatusSchema,
+  confidence: z.number().finite().min(0).max(1),
+  mechanism: z.string().trim().min(1).max(1_000).optional(),
+  requiredConditions: z.array(predicateSchema).max(32).optional(),
+  evidence: z.array(evidenceRefSchema),
+  counterEvidence: z.array(evidenceRefSchema).optional(),
+}).strict().superRefine((relation, ctx) => {
+  if (relation.fromEventId === relation.toEventId) {
+    ctx.addIssue({ code: "custom", path: ["toEventId"], message: "An event relation must connect two distinct canonical events" });
+  }
+  if (relation.status === "explicit" && !relation.evidence.some((item) => item.strength === "explicit")) {
+    ctx.addIssue({ code: "custom", path: ["status"], message: "An explicit event relation requires at least one explicit evidence reference" });
+  }
+  if (relation.status === "contested" && !(relation.counterEvidence?.length)) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "A contested event relation requires counter-evidence" });
+  }
+  if (["causes", "enables", "prevents", "motivates", "explains"].includes(relation.type)
+    && relation.status === "inferred" && !relation.mechanism) {
+    ctx.addIssue({ code: "custom", path: ["mechanism"], message: "An inferred causal or explanatory relation requires a mechanism" });
+  }
+}).describe("An evidence-backed relation between canonical events. Narrative continuation and temporal order never imply causation.");
+export type EventRelation = z.infer<typeof eventRelationSchema>;
+
 export const stateOperationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("set"), entityId: idSchema, field: z.string().min(1), value: stateValueSchema }).strict(),
   z.object({ op: z.literal("unset"), entityId: idSchema, field: z.string().min(1) }).strict(),

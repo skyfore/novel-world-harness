@@ -20,6 +20,7 @@ import {
   type EvidenceRef,
   type EventProposal,
   type EventParticipation,
+  type EventRelation,
   type KnowledgeDelta,
   type LogicalTime,
   type ObjectHash,
@@ -56,6 +57,7 @@ export type WorldModelContext = {
   claims?: ReadonlyMap<string, Claim>;
   events?: ReadonlyMap<string, CanonicalEvent>;
   eventParticipations?: readonly EventParticipation[];
+  eventRelations?: readonly EventRelation[];
   actorGoals?: readonly CharacterGoal[];
   actorModels?: ReadonlyMap<string, CharacterModel>;
   possibilityTemplates?: readonly PossibilityTemplate[];

@@ -111,6 +111,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   claim: { name: "propose_claim", label: "Propose claim", description: "Submit an evidence-backed base-world claim candidate. Character knowledge or ignorance is never a claim predicate; represent learning only in a KnowledgeDelta. This does not commit canonical truth." },
   "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Later canon remains a candidate until runtime commitment." },
   "event-participation": { name: "propose_event_participation", label: "Propose event participation", description: "Submit one evidence-backed semantic role for an entity in a canonical event as part of a complete same-finish inventory. Role and character scene-presence are independent; accepting this record does not create or execute the event." },
+  "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Only non-contested causes/enables can project to legacy causalParents; narrative sequence never implies causation." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed StateDelta used to create a runtime genesis branch." },
   "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
@@ -244,10 +245,11 @@ function removeModelWritableEvidence(value: unknown): void {
   const properties = record.properties;
   if (properties && typeof properties === "object" && !Array.isArray(properties)) {
     delete (properties as Record<string, unknown>).evidence;
+    delete (properties as Record<string, unknown>).counterEvidence;
     delete (properties as Record<string, unknown>).evidenceAssertions;
   }
   if (Array.isArray(record.required)) {
-    record.required = record.required.filter((name) => name !== "evidence" && name !== "evidenceAssertions");
+    record.required = record.required.filter((name) => name !== "evidence" && name !== "counterEvidence" && name !== "evidenceAssertions");
   }
   for (const nested of Object.values(record)) removeModelWritableEvidence(nested);
 }
@@ -262,6 +264,7 @@ function containsEvidenceField(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return Object.hasOwn(record, "evidence")
+    || Object.hasOwn(record, "counterEvidence")
     || Object.hasOwn(record, "evidenceAssertions")
     || Object.values(record).some(containsEvidenceField);
 }
@@ -269,7 +272,7 @@ function containsEvidenceField(value: unknown): boolean {
 function evidencePointerTargetsEvidence(pointer: string): boolean {
   return pointer.slice(1).split("/")
     .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"))
-    .some((token) => token === "evidence" || token === "evidenceAssertions");
+    .some((token) => token === "evidence" || token === "counterEvidence" || token === "evidenceAssertions");
 }
 
 function injectHostEvidence(
@@ -862,11 +865,11 @@ export function createCompilerProposalToolset(
     }
     if (input.evidence !== undefined || containsEvidenceField(input.payload)) {
       throw new Error(
-        "Model proposals using evidence_segment_ids must omit payload.evidence, nested evidence fields, and top-level evidence; the host owns EvidenceRef construction.",
+        "Model proposals using evidence_segment_ids must omit payload.evidence, payload.counterEvidence, nested evidence fields, and top-level evidence; the host owns EvidenceRef construction.",
       );
     }
     const { segments, evidence } = resolveEvidenceSegmentIds(input.evidence_segment_ids);
-    const payload = kind === "state-delta"
+    let payload = kind === "state-delta"
       ? input.payload
       : injectHostEvidence(kind, input.payload, evidence);
     const selectors = input.evidence_selectors === undefined
@@ -875,6 +878,7 @@ export function createCompilerProposalToolset(
     const segmentById = new Map(segments.map((segment) => [segment.id, segment]));
     const artifactId = compilerProposalArtifactId(kind, payload, input.proposal_id);
     const evidenceAssertions: EvidenceAssertion[] = [];
+    const counterEvidence: EvidenceRef[] = [];
     for (let index = 0; index < selectors.length; index += 1) {
       const selector = selectors[index]!;
       const segment = segmentById.get(selector.segment_id);
@@ -890,6 +894,19 @@ export function createCompilerProposalToolset(
         throw new Error(`Evidence selector target_path '${selector.target_path}' does not exist in the proposal payload.`);
       }
       const anchor = await resolveTextAnchor(workspaceRoot, segment, selector);
+      if (kind === "event-relation" && selector.relation === "contradicts") {
+        counterEvidence.push(evidenceRefSchema.parse({
+          span: {
+            sourceId: anchor.sourceId,
+            startByte: anchor.startByte,
+            endByte: anchor.endByte,
+            startLine: anchor.startLine,
+            endLine: anchor.endLine,
+            quoteHash: anchor.exactHash,
+          },
+          strength: selector.strength,
+        }));
+      }
       const assertionId = `evidence-${crypto.createHash("sha256").update([
         input.proposal_id,
         String(index),
@@ -919,6 +936,9 @@ export function createCompilerProposalToolset(
           ontologyVersion: "evidence-v1",
         },
       }));
+    }
+    if (kind === "event-relation" && counterEvidence.length) {
+      payload = { ...(payload as Record<string, unknown>), counterEvidence };
     }
     return kind === "state-delta"
       ? { payload, evidence, evidenceAssertions }

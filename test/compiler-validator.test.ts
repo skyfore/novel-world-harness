@@ -818,6 +818,137 @@ describe("CompilerCommitService", () => {
     )).resolves.toEqual([]);
   });
 
+  it("commits a same-pass event before its independently evidenced causal relation", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await commits.canon.putEvent({
+      id: "first-event",
+      title: "曹操出现",
+      participants: [],
+      storyTime: { kind: "ordinal", label: "first", orderHint: 1 },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: evidence("曹操"),
+      causalParents: [],
+      confidence: 1,
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "second-event-proposal",
+      payload: {
+        id: "second-event",
+        title: "北门随后出现",
+        participants: [],
+        storyTime: { kind: "ordinal", label: "second", orderHint: 2 },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("北门"),
+        causalParents: ["first-event"],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("event-relation", {
+      proposalId: "first-enables-second-proposal",
+      payload: {
+        id: "first-enables-second",
+        fromEventId: "first-event",
+        toEventId: "second-event",
+        type: "enables",
+        status: "explicit",
+        confidence: 1,
+        mechanism: "The first event establishes the condition for the second.",
+        evidence: evidence("曹操，字孟德\n北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await commits.acceptAllValid();
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.kind)).toEqual(["canonical-event", "event-relation"]);
+    await expect(commits.canon.getEventRelation("first-enables-second")).resolves.toMatchObject({
+      type: "enables",
+      fromEventId: "first-event",
+      toEventId: "second-event",
+    });
+  });
+
+  it("rejects event relations with unknown endpoints", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("event-relation", {
+      proposalId: "orphan-relation",
+      payload: {
+        id: "orphan-relation",
+        fromEventId: "missing-first",
+        toEventId: "missing-second",
+        type: "before",
+        status: "explicit",
+        confidence: 1,
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await commits.accept("event-relation", "orphan-relation");
+    expect(result.accepted).toBe(false);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "UNKNOWN_RELATION_SOURCE_EVENT" }),
+      expect.objectContaining({ code: "UNKNOWN_RELATION_TARGET_EVENT" }),
+    ]));
+  });
+
+  it("rejects a single accepted event relation that would make the canonical temporal graph cyclic", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const id of ["event-a", "event-b", "event-c"]) {
+      await commits.canon.putEvent({
+        id,
+        title: id,
+        participants: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      });
+    }
+    for (const [proposalId, relationId, fromEventId, toEventId] of [
+      ["a-before-b-proposal", "a-before-b", "event-a", "event-b"],
+      ["b-before-c-proposal", "b-before-c", "event-b", "event-c"],
+    ] as const) {
+      await proposals.submit("event-relation", {
+        proposalId,
+        payload: {
+          id: relationId,
+          fromEventId,
+          toEventId,
+          type: "before",
+          status: "explicit",
+          confidence: 1,
+          evidence: evidence("曹操"),
+        },
+        generatedBy: { worker: "test" },
+      });
+      expect((await commits.accept("event-relation", proposalId)).accepted).toBe(true);
+    }
+    await proposals.submit("event-relation", {
+      proposalId: "c-before-a-proposal",
+      payload: {
+        id: "c-before-a",
+        fromEventId: "event-c",
+        toEventId: "event-a",
+        type: "before",
+        status: "explicit",
+        confidence: 1,
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await commits.accept("event-relation", "c-before-a-proposal");
+    expect(result.accepted).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ code: "TEMPORAL_RELATION_CYCLE" }));
+    await expect(commits.canon.getEventRelation("c-before-a")).rejects.toThrow("not found");
+  });
+
   it("rejects invalid proposition references and epistemic relations", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {

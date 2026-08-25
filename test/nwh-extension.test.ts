@@ -2601,6 +2601,18 @@ describe("NWH TUI extension", () => {
         confidence: 1,
         evidence: evidence.evidence("The Hall opens and closes as the weather changes."),
       });
+      if (index > 1) {
+        await canon.putEventRelation({
+          id: `weather-${String(index - 1).padStart(2, "0")}-causes-${String(index).padStart(2, "0")}`,
+          fromEventId: `weather-${String(index - 1).padStart(2, "0")}`,
+          toEventId: `weather-${String(index).padStart(2, "0")}`,
+          type: "causes",
+          status: "explicit",
+          confidence: 1,
+          mechanism: "The continuing weather change produces the next access-state shift.",
+          evidence: evidence.evidence("The Hall opens and closes as the weather changes."),
+        });
+      }
     }
     await new PossibilityTemplateStore(root).put({
       id: "continuing-weather",

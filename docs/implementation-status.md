@@ -18,6 +18,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Event resolution | M3b implemented | Source-scoped evidence/title/participant candidates, explicit coreference vs subevent clusters, resolved/new/ambiguous/unresolved decisions, merge/split revisions, major-event coverage, participant trace, and canonical-event commit gates |
 | Proposition, attribution, and knowledge acquisition | M4a implemented | Reusable proposition content is separated from narrator/character/document attitudes; quotation IDs trace holders to resolved speakers, and additive knowledge provenance records proposition, attribution, and acquisition mode without breaking legacy claim-keyed replay |
 | Event participation semantics | M4b-1 implemented | Versioned event/entity/semantic-role records keep character presence independent from agency, require a complete lossless projection to legacy `participants`/`participantPresence`, participate in compiler closure and prepared-publication gates, and are pinned in runtime snapshot V5 |
+| Event relation semantics | M4b-2 implemented | Independently evidenced temporal, causal, explanatory, identity/subevent, and narrative-continuation records have deterministic closure, contradiction, cycle, and legacy-projection validation; only non-contested `causes`/`enables` relations project to `causalParents`, and runtime snapshot V6 pins their revisions |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
@@ -92,7 +93,15 @@ The branch now implements a constrained end-to-end path from a local novel throu
   preserves this provenance without exposing global state or compiler
   omniscience. Audit reports semantic-operation coverage, modes, and broken
   quotation/acquisition traces.
-- Canonical entities, propositions, attributions, claims, events, and rules use
+- Event relations are immutable semantic artifacts, separate from both event
+  records and discourse order. Models submit exact supporting/contradicting
+  text selectors; trusted evidence ranges and hashes are host-generated.
+  Deterministic catalog validation rejects dangling endpoints, incompatible
+  story-time order, duplicate/inverse contradictions, and relevant graph
+  cycles. Only non-contested `causes` and `enables` relations can reproduce the
+  legacy causal-parent projection; narrative continuation never does.
+- Canonical entities, propositions, attributions, claims, events, event
+  participations, event relations, and rules use
   logical refs over immutable revisions.
 - `proposals accept-all` accepts dependency-valid canonical artifacts and valid generic possibility templates; unsupported `state-delta` proposals remain staging artifacts.
 - Automated source preparation does not expose the staging-only raw `state-delta` tool. Its catalogs, review barrier, and convergence are scoped to the selected source.

@@ -427,6 +427,20 @@ export const actorEventObservationSchema = z.object({
 }).strict();
 export type ActorEventObservation = z.infer<typeof actorEventObservationSchema>;
 
+/**
+ * Exact words that were spoken as part of a committed event. The semantic
+ * knowledge transfer still lives in KnowledgeDelta; this record exists so a
+ * literary renderer can preserve wording without reverse-engineering dialogue
+ * from an actor-observation summary.
+ */
+export const spokenUtteranceSchema = z.object({
+  speakerId: idSchema,
+  addresseeIds: z.array(idSchema).min(1).max(16),
+  content: z.string().trim().min(1).max(2_000),
+  channel: z.literal("audible").default("audible"),
+}).strict();
+export type SpokenUtterance = z.infer<typeof spokenUtteranceSchema>;
+
 /** Event-scoped affect. Continuity is derived from history; this is not a second mutable character state. */
 export const actorAffectSchema = z.object({
   actorId: idSchema,
@@ -446,6 +460,7 @@ export const eventProposalBaseSchema = z
     title: z.string().min(1),
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
     actorAffects: z.array(actorAffectSchema).max(128).optional(),
+    spokenUtterances: z.array(spokenUtteranceSchema).max(32).optional(),
     participants: z.array(idSchema),
     participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     proposedTime: storyTimeSchema,
@@ -476,7 +491,10 @@ export function validateCanonicalAdaptationProposalEnvelope(
   }
 }
 
-export const eventProposalSchema = eventProposalBaseSchema.superRefine(validateCanonicalAdaptationProposalEnvelope);
+export const eventProposalSchema = eventProposalBaseSchema.superRefine((value, ctx) => {
+  validateSpokenUtteranceParticipants(value, ctx);
+  validateCanonicalAdaptationProposalEnvelope(value, ctx);
+});
 export type EventProposal = z.infer<typeof eventProposalSchema>;
 
 export const committedEventSchema = z
@@ -490,6 +508,7 @@ export const committedEventSchema = z
     title: z.string().min(1),
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
     actorAffects: z.array(actorAffectSchema).max(128).optional(),
+    spokenUtterances: z.array(spokenUtteranceSchema).max(32).optional(),
     participants: z.array(idSchema),
     participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     deltaHash: idSchema,
@@ -504,6 +523,7 @@ export const committedEventSchema = z
     progress: narrativeProgressSchema.optional(),
   })
   .strict()
+  .superRefine(validateSpokenUtteranceParticipants)
   .superRefine(validateParticipantPresence)
   .superRefine((value, ctx) => {
     if (value.canonicalAdaptation && value.possibilityId !== value.canonicalAdaptation.scaffoldPossibilityId) {
@@ -522,6 +542,30 @@ export const committedEventSchema = z
     }
   });
 export type CommittedEvent = z.infer<typeof committedEventSchema>;
+
+function validateSpokenUtteranceParticipants(
+  value: { participants: string[]; spokenUtterances?: SpokenUtterance[] },
+  ctx: z.RefinementCtx,
+): void {
+  value.spokenUtterances?.forEach((utterance, index) => {
+    if (!value.participants.includes(utterance.speakerId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A spoken utterance speaker must be an event participant",
+        path: ["spokenUtterances", index, "speakerId"],
+      });
+    }
+    utterance.addresseeIds.forEach((addresseeId, addresseeIndex) => {
+      if (!value.participants.includes(addresseeId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "A spoken utterance addressee must be an event participant",
+          path: ["spokenUtterances", index, "addresseeIds", addresseeIndex],
+        });
+      }
+    });
+  });
+}
 
 export const branchSchema = z.object({
   id: idSchema,

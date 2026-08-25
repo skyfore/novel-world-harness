@@ -48,7 +48,8 @@ describe("novel source compiler loop", () => {
     expect(first.source.sourcePath).toBe("novel world.txt");
     expect(first.totalBatches).toBeGreaterThan(1);
     expect(first.prompt).toContain("Execute the novel-world compiler loop now");
-    expect(first.prompt).toContain("EvidenceRef");
+    expect(first.prompt).toContain("evidence_segment_ids");
+    expect(first.prompt).not.toContain("quoteHash");
     expect(first.prompt).toContain("人物1进入城池");
     expect(first.prompt).not.toContain("novel world.txt");
     await expect(fs.stat(path.join(workspaceStateDir(root), "sources", `${first.source.id}.json`))).resolves.toBeDefined();

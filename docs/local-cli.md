@@ -184,14 +184,16 @@ one orientation because no prior screen context exists; a plain `--new-session`,
 `/new`, or `/clear` stays unbound and renders no scene.
 
 Startup never waits for an optional narrator before letting Pi render the
-transcript. The isolated narrator is mounted as one assistant stream in Pi's
-scrollable transcript, while provider/model, retry, and choice-tool phases use
-compact footer status. The accepted text must match the observed stream before
+transcript. Private choice, style, and dramaturgy specialists run without
+streaming; the fresh final literary narrator is mounted as one assistant stream
+in Pi's scrollable transcript, while its provider/model, read-only retrieval,
+and retry phases use compact footer status. The accepted text must match the observed stream before
 that same native component is committed as the durable scene; no duplicate
 narrator message is mounted. Thinking and current-head choice metadata are
 stored with it outside parent-model context and restore with the transcript. A
-rejected underspecified attempt is removed before one automatic retry streams.
-The action dialog merges narrator suggestions with bounded, current-head
+rejected underspecified, repetitive, or locked-dialogue-dropping attempt is
+removed before one fresh final-narrator retry streams; private specialists are
+not repeated. The action dialog merges choice-specialist suggestions with bounded, current-head
 host-preflighted exits and free-form input. It therefore retains an executable
 route even when choice capture is empty or malformed. Current-contract choices
 restore only when branch, actor, commit, and choice contract still match. Older
@@ -215,17 +217,20 @@ file tools, project instructions, compiler extension, source text, future canon,
 or mutation tool. A single capture-only candidate is passed to deterministic
 scope, knowledge, world-rule, invariant, and optimistic-head validation before the
 host may commit it. Missing sparse-state fields are treated as unknown and cannot
-be fabricated into positive preconditions. The scene model proposes 2-4 concrete
+be fabricated into positive preconditions. The private choice specialist proposes 2-4 concrete
 actor actions or exact spoken lines from the committed scene, lived development,
 and effective disposition. The selector displays only those action/line texts,
 without host rationale or a recommendation badge. They remain unvalidated
 suggestions until selected; selection then enters the ordinary typed
 interpretation, current-world adjudication, and deterministic gates. The choice
 model supplies action text only and cannot choose a privileged host intent or
-bypass interpretation. Choice capture is the tool-only first phase and scene
-prose starts only after its result. If that call is absent or malformed, the host
-does not retry it; accepted prose is kept and the dialog still includes bounded
-current-head host-preflighted actions. The same animated working indicator is used while
+bypass interpretation. Choice capture is a separate tool-only session running
+concurrently with private literary-style and dramaturgy analysis. A fresh final
+narrator then composes only prose from the committed frame, exact resolved act
+and locked speech, narrator-safe style-only source excerpts, exact prior play
+prose, and whichever bounded analyses succeeded. If the choice call is absent
+or malformed, the host does not retry it; accepted prose is kept and the dialog
+still includes bounded current-head host-preflighted actions. The same animated working indicator is used while
 interpreting, adjudicating, validating, and rendering.
 
 The interpreter explicitly separates what the selected character can do from
@@ -238,9 +243,12 @@ remain at the prior head and use an explicitly out-of-character recovery notice
 instead of being dramatized as resistance. A protocol failure never creates a
 world rule.
 
-Narration and choices are separate channels: the model is instructed to keep
-prose inside the current actor-visible scene and end on a concrete fact or
-in-world signal. The host validates structural shape and repetition but does not
+Narration and choices are separate sessions and channels. The final narrator is
+instructed to render rather than summarize, preserve every committed locked
+utterance verbatim, keep prose inside one current actor-visible beat, and end on
+a concrete fact or in-world signal. It has no compact 120-350-character target.
+The host validates broad structural limits, repetition, and exact locked
+dialogue but does not otherwise
 match language-specific “what next” or handoff phrases. Possible actions normally
 appear in the choice selector; missing/malformed auxiliary choices leave valid
 prose intact and retain at least one preflighted host action, with no choice

@@ -113,9 +113,37 @@ describe("play experience NPC integration", () => {
     expect(first.reactionEvents).toEqual([
       expect.objectContaining({ actorId: "witness", responseKind: "speak", title: "Witness answers Hero" }),
     ]);
+    const playerEvent = await engine.objects.getEvent(first.result.eventHash!);
+    const npcEvent = await engine.objects.getEvent(first.reactionEvents[0]!.eventHash);
+    expect(playerEvent.spokenUtterances).toEqual([{
+      speakerId: "hero",
+      addresseeIds: ["witness"],
+      content: "Where did the courier go?",
+      channel: "audible",
+    }]);
+    expect(npcEvent.spokenUtterances).toEqual([{
+      speakerId: "witness",
+      addresseeIds: ["hero"],
+      content: "I saw the courier leave through the east door.",
+      channel: "audible",
+    }]);
     expect(first.logicalStep).toBe(2);
     const frame = await buildPlayOpeningFrame(root, "main", "hero", fixture.source.id);
     expect(frame.recentVisibleEvents.at(-1)?.title).toContain("I saw the courier leave through the east door");
+    expect(frame.resolvedAct?.lockedUtterances).toEqual([
+      {
+        speaker: "Hero",
+        addressees: ["Witness"],
+        text: "Where did the courier go?",
+        mode: "verbatim",
+      },
+      {
+        speaker: "Witness",
+        addressees: ["Hero"],
+        text: "I saw the courier leave through the east door.",
+        mode: "verbatim",
+      },
+    ]);
 
     let nextRecent: unknown;
     const second = await performPlayTurn({

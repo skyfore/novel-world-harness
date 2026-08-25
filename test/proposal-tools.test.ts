@@ -6,9 +6,9 @@ import { Compile } from "typebox/compile";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCompilerProposalTools, createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
-import { SegmentStore } from "../src/compiler/segments.js";
+import { segmentEvidenceRef, SegmentStore } from "../src/compiler/segments.js";
 import { ProposalStore } from "../src/world/canonical-model.js";
-import { entitySchema, type EvidenceRef } from "../src/world/model.js";
+import { entitySchema } from "../src/world/model.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 describe("compiler proposal tools", () => {
-  it("exposes the actual payload shape to the model", async () => {
+  it("exposes payload semantics but only host-issued evidence handles to the model", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-schema-"));
     roots.push(root);
     const tool = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_entity");
@@ -27,8 +27,9 @@ describe("compiler proposal tools", () => {
 
     const schema = JSON.stringify(tool?.parameters);
     expect(schema).toContain("canonicalName");
-    expect(schema).toContain("sourceId");
-    expect(schema).toContain("quoteHash");
+    expect(schema).toContain("evidence_segment_ids");
+    expect(schema).not.toContain("quoteHash");
+    expect(schema).not.toContain('"evidence":');
     expect(schema).not.toContain('"payload":{}');
   });
 
@@ -42,6 +43,8 @@ describe("compiler proposal tools", () => {
       expect(tool.executionMode).toBe("sequential");
       expect(validator.Check({ proposal_id: "valid-id", payload: "{}" }), tool.name).toBe(false);
       expect(JSON.stringify(tool.parameters), tool.name).not.toContain('"payload":{}');
+      expect(JSON.stringify(tool.parameters), tool.name).not.toContain("quoteHash");
+      expect(JSON.stringify(tool.parameters), tool.name).not.toContain('"evidence":');
     }
   });
 
@@ -55,17 +58,6 @@ describe("compiler proposal tools", () => {
     );
     const manifest = await new SegmentStore(root).readManifest(fixture.source.id);
     const opening = manifest!.segments.find((segment) => segment.ordinal === 0)!;
-    const evidence: EvidenceRef = {
-      span: {
-        sourceId: opening.sourceId,
-        startByte: opening.startByte,
-        endByte: opening.endByte,
-        startLine: opening.startLine,
-        endLine: opening.endLine,
-        quoteHash: opening.textSha256,
-      },
-      strength: "explicit",
-    };
     const batchId = `batch-${fixture.source.id}-00001-title`;
     const toolset = createCompilerProposalToolset(root, { provider: "test", model: "semantic-title-model" });
     await toolset.beginBatch([opening.id], batchId, fixture.source.id);
@@ -74,7 +66,7 @@ describe("compiler proposal tools", () => {
     await expect(inferTitle.execute("title", {
       proposal_id: "novel-title-huozhe",
       title: "活着",
-      evidence,
+      evidence_segment_id: opening.id,
       reason: "The model identifies the bracketed work title and excludes the author line.",
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { proposalId: "novel-title-huozhe", kind: "novel-title" },
@@ -82,7 +74,7 @@ describe("compiler proposal tools", () => {
     await expect(inferTitle.execute("title-idempotent-retry", {
       proposal_id: "novel-title-huozhe",
       title: "活着",
-      evidence,
+      evidence_segment_id: opening.id,
       reason: "Provider retried the same semantic title candidate.",
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { proposalId: "novel-title-huozhe", activeProposalCount: 1 },
@@ -132,17 +124,7 @@ describe("compiler proposal tools", () => {
     await expect(inferTitle.execute("title-absent", {
       proposal_id: "novel-title-absent",
       title: "许三观卖血记",
-      evidence: {
-        span: {
-          sourceId: opening.sourceId,
-          startByte: opening.startByte,
-          endByte: opening.endByte,
-          startLine: opening.startLine,
-          endLine: opening.endLine,
-          quoteHash: opening.textSha256,
-        },
-        strength: "explicit",
-      },
+      evidence_segment_id: opening.id,
       reason: "Unsupported guess.",
     } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("must occur");
   });
@@ -156,17 +138,23 @@ describe("compiler proposal tools", () => {
       kind: "character",
       canonicalName: "刘备",
       aliases: ["玄德"],
-      evidence: fixture.evidence("刘备"),
     };
-    const tool = createCompilerProposalTools(root, { provider: "test", model: "stringifying-provider" })
+    const toolset = createCompilerProposalToolset(root, { provider: "test", model: "stringifying-provider" });
+    await toolset.beginBatch([fixture.segmentId], "stringified-json", fixture.source.id);
+    const tool = toolset.tools
       .find((candidate) => candidate.name === "propose_entity");
     expect(tool?.prepareArguments).toBeDefined();
 
     const prepared = tool?.prepareArguments?.({
       proposal_id: "entity-liu-bei",
       payload: JSON.stringify(payload),
+      evidence_segment_ids: JSON.stringify([fixture.segmentId]),
     });
-    expect(prepared).toMatchObject({ proposal_id: "entity-liu-bei", payload });
+    expect(prepared).toMatchObject({
+      proposal_id: "entity-liu-bei",
+      payload,
+      evidence_segment_ids: [fixture.segmentId],
+    });
     expect(Compile(tool!.parameters).Check(prepared), "prepared arguments satisfy the provider-facing schema").toBe(true);
     await tool?.execute(
       "call-1",
@@ -177,7 +165,9 @@ describe("compiler proposal tools", () => {
     );
 
     const stored = await new CompilerProposalService(root).store.read("pending", "entity-liu-bei", entitySchema);
-    expect(stored.payload).toEqual(payload);
+    const segment = (await new SegmentStore(root).list(fixture.source.id))[0]!;
+    expect(stored.payload).toEqual({ ...payload, evidence: [segmentEvidenceRef(segment)] });
+    expect(stored.evidence).toEqual([]);
     expect(stored.generatedBy).toMatchObject({ provider: "test", model: "stringifying-provider" });
   });
 
@@ -189,6 +179,94 @@ describe("compiler proposal tools", () => {
       .toThrow("payload must be a JSON value");
   });
 
+  it("rejects unknown handles and any attempt to mix handles with model-written evidence", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-host-evidence-boundary-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero enters the village.\n");
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], "host-evidence-boundary", fixture.source.id);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const payload = {
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+    };
+
+    await expect(entity.execute("unknown-handle", {
+      proposal_id: "entity-hero-unknown",
+      payload,
+      evidence_segment_ids: ["unknown-segment"],
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("Unknown evidence_segment_ids");
+
+    await expect(entity.execute("missing-handle", {
+      proposal_id: "entity-hero-raw",
+      payload: { ...payload, evidence: fixture.evidence("Hero") },
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("require evidence_segment_ids");
+
+    await expect(entity.execute("mixed-evidence", {
+      proposal_id: "entity-hero-mixed",
+      payload: { ...payload, evidence: fixture.evidence("Hero") },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("must omit payload.evidence");
+
+    await expect(new ProposalStore(root).list("pending")).resolves.toEqual([]);
+  });
+
+  it("injects handles into envelope-only and nested evidence shapes without duplication", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-host-evidence-shapes-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "After the oath, Hero becomes resolute.\n");
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], "host-evidence-shapes", fixture.source.id);
+    const expectedEvidence = [segmentEvidenceRef((await new SegmentStore(root).list(fixture.source.id))[0]!)];
+
+    const stateDelta = toolset.tools.find((candidate) => candidate.name === "propose_state_delta")!;
+    await stateDelta.execute("state-delta", {
+      proposal_id: "delta-host-evidence",
+      payload: { version: 1, operations: [] },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await expect(new ProposalStore(root).readEnvelope("pending", "delta-host-evidence")).resolves.toMatchObject({
+      payload: { version: 1, operations: [] },
+      evidence: expectedEvidence,
+    });
+
+    const characterModel = toolset.tools.find((candidate) => candidate.name === "propose_character_model")!;
+    const modelPayload = {
+      actorId: "hero",
+      traits: { resolve: 0.5 },
+      decisionBiases: {},
+      developmentPhases: [{
+        id: "after-oath",
+        label: "After the oath",
+        activation: {
+          preconditions: [],
+          afterCanonicalEventIds: ["hero-oath"],
+          afterExperiencedCanonicalEventIds: [],
+          requiresKnowledge: [],
+        },
+        traitModifiers: { resolve: 0.3 },
+        decisionBiasModifiers: {},
+      }],
+    };
+    const prepared = characterModel.prepareArguments?.({
+      proposal_id: "model-hero",
+      payload: modelPayload,
+      evidence_segment_ids: [fixture.segmentId],
+    });
+    expect(Compile(characterModel.parameters).Check(prepared)).toBe(true);
+    await characterModel.execute("character-model", prepared as never, undefined, undefined, {} as ExtensionContext);
+    await expect(new ProposalStore(root).readEnvelope("pending", "model-hero")).resolves.toMatchObject({
+      payload: {
+        ...modelPayload,
+        evidence: expectedEvidence,
+        developmentPhases: [{ ...modelPayload.developmentPhases[0], evidence: expectedEvidence }],
+      },
+      evidence: [],
+    });
+  });
+
   it("rejects unsafe ids and evidence-free compiler entities", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-invalid-payload-"));
     roots.push(root);
@@ -198,10 +276,14 @@ describe("compiler proposal tools", () => {
       kind: "character",
       canonicalName: "刘备",
       aliases: ["玄德"],
-      evidence: [],
     };
     expect(validator.Check({ proposal_id: "entity-liu-bei", payload: { id: "liu-bei", ...base } })).toBe(false);
-    expect(validator.Check({ proposal_id: "中文 id", payload: { id: "中文 id", ...base } })).toBe(false);
+    expect(validator.Check({ proposal_id: "中文 id", payload: { id: "中文 id", ...base }, evidence_segment_ids: ["segment-1"] })).toBe(false);
+    expect(validator.Check({
+      proposal_id: "entity-liu-bei",
+      payload: { id: "liu-bei", ...base, evidence: [] },
+      evidence_segment_ids: ["segment-1"],
+    })).toBe(false);
   });
 
   it("rejects one compiler artifact that mixes evidence from different novels", async () => {
@@ -234,6 +316,8 @@ describe("compiler proposal tools", () => {
     const toolset = createCompilerProposalToolset(root);
     await toolset.beginBatch([fixture.segmentId], "opening-slice", fixture.source.id);
     const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const segments = await new SegmentStore(root).list(fixture.source.id);
+    const futureSegment = segments.find((segment) => segment.id !== fixture.segmentId)!;
 
     await expect(entity.execute("future-entity", {
       proposal_id: "future-villain",
@@ -242,8 +326,8 @@ describe("compiler proposal tools", () => {
         kind: "character",
         canonicalName: "Villain",
         aliases: [],
-        evidence: fixture.evidence("Villain reveals the future."),
       },
+      evidence_segment_ids: [futureSegment.id],
     } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("outside the host-supplied compiler segment slice");
     await expect(new ProposalStore(root).list("pending")).resolves.toEqual([]);
   });
@@ -277,8 +361,8 @@ describe("compiler proposal tools", () => {
         kind: "character",
         canonicalName: "Bob",
         aliases: [],
-        evidence: fixture.evidence("Bob"),
       },
+      evidence_segment_ids: [second!.id],
     } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("outside the host-supplied compiler segment slice");
   });
 
@@ -286,7 +370,9 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-state-field-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "林岐把银钥交给墨砚。\n");
-    const tool = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_canonical_event")!;
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], "state-field", fixture.source.id);
+    const tool = toolset.tools.find((candidate) => candidate.name === "propose_canonical_event")!;
     const payload = {
       id: "lin-qi-gives-key",
       title: "林岐交出银钥",
@@ -297,11 +383,14 @@ describe("compiler proposal tools", () => {
         version: 1,
         operations: [{ op: "set", entityId: "silver-key", field: "owner", value: "mo-yan" }],
       },
-      evidence: fixture.evidence("林岐把银钥交给墨砚"),
       causalParents: [],
       confidence: 1,
     };
-    const prepared = tool.prepareArguments?.({ proposal_id: "event-key", payload });
+    const prepared = tool.prepareArguments?.({
+      proposal_id: "event-key",
+      payload,
+      evidence_segment_ids: [fixture.segmentId],
+    });
     expect(Compile(tool.parameters).Check(prepared)).toBe(false);
     await expect(tool.execute("call-invalid-field", prepared as never, undefined, undefined, {} as ExtensionContext))
       .rejects.toThrow("Unsupported compiler state field 'owner'");
@@ -315,6 +404,7 @@ describe("compiler proposal tools", () => {
           operations: [{ op: "set", entityId: "silver-key", field: "artifact.owner", value: "mo-yan" }],
         },
       },
+      evidence_segment_ids: [fixture.segmentId],
     });
     expect(Compile(tool.parameters).Check(valid)).toBe(true);
   });
@@ -383,8 +473,8 @@ describe("compiler proposal tools", () => {
         appliesWhen: [],
         requires: [{ op: "after-step", step: 7 }],
         forbids: [{ op: "fact-equals", entityId: "gate", field: "location.open", value: true }],
-        evidence: fixture.evidence("第七声钟响后，北门必须关闭。"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     });
     expect(Compile(tool.parameters).Check(prepared)).toBe(false);
     await expect(tool.execute("rule-time", prepared as never, undefined, undefined, {} as ExtensionContext))
@@ -502,7 +592,9 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-event-atomic-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "墨砚开门并送出停战信。\n");
-    const tool = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_canonical_event")!;
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], "atomic-event", fixture.source.id);
+    const tool = toolset.tools.find((candidate) => candidate.name === "propose_canonical_event")!;
     const prepared = tool.prepareArguments?.({
       proposal_id: "combined-event",
       payload: {
@@ -518,10 +610,10 @@ describe("compiler proposal tools", () => {
             { op: "set", entityId: "ceasefire-letter", field: "artifact.delivered", value: true },
           ],
         },
-        evidence: fixture.evidence("墨砚开门并送出停战信。"),
         causalParents: [],
         confidence: 1,
       },
+      evidence_segment_ids: [fixture.segmentId],
     });
     expect(Compile(tool.parameters).Check(prepared)).toBe(true);
     await expect(tool.execute("combined-event", prepared as never, undefined, undefined, {} as ExtensionContext))
@@ -578,8 +670,8 @@ describe("compiler proposal tools", () => {
         kind: "character",
         canonicalName: "刘备",
         aliases: ["刘玄德", "刘皇叔"],
-        evidence: fixture.evidence("刘备来到涿县。"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
 
     await expect(finish.execute("finish", {
@@ -733,8 +825,8 @@ describe("compiler proposal tools", () => {
         kind: "character",
         canonicalName: "人物",
         aliases: [],
-        evidence: fixture.evidence("人物"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     };
 
     for (let index = 1; index <= 40; index += 1) {
@@ -797,8 +889,8 @@ describe("compiler proposal tools", () => {
         kind: "character",
         canonicalName: "林岐",
         aliases: [],
-        evidence: fixture.evidence("林岐"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
     await initial.execute("opening", {
       proposal_id: "opening-world",
@@ -808,8 +900,8 @@ describe("compiler proposal tools", () => {
           version: 1,
           operations: [{ op: "set", entityId: "lin-qi", field: "character.location", value: "bell-tower" }],
         },
-        evidence: fixture.evidence("林岐站在钟楼下。"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
     const finishInput = {
       outcome: "complete",
@@ -827,8 +919,8 @@ describe("compiler proposal tools", () => {
         kind: "location",
         canonicalName: "钟楼",
         aliases: [],
-        evidence: fixture.evidence("钟楼"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
     await expect(finish.execute("closed", {
       ...finishInput,
@@ -848,13 +940,14 @@ describe("compiler proposal tools", () => {
     const withdraw = toolset.tools.find((candidate) => candidate.name === "withdraw_compiler_proposal")!;
     const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
     await toolset.beginBatch([fixture.segmentId], "presence-batch", fixture.source.id);
-    for (const [proposalId, id, kind, canonicalName, quote] of [
-      ["presence-character", "lin-qi", "character", "林岐", "林岐"],
-      ["presence-location", "bell-tower", "location", "钟楼", "钟楼"],
+    for (const [proposalId, id, kind, canonicalName] of [
+      ["presence-character", "lin-qi", "character", "林岐"],
+      ["presence-location", "bell-tower", "location", "钟楼"],
     ] as const) {
       await entity.execute(proposalId, {
         proposal_id: proposalId,
-        payload: { id, kind, canonicalName, aliases: [], evidence: fixture.evidence(quote) },
+        payload: { id, kind, canonicalName, aliases: [] },
+        evidence_segment_ids: [fixture.segmentId],
       } as never, undefined, undefined, {} as ExtensionContext);
     }
     const eventPayload = {
@@ -866,13 +959,13 @@ describe("compiler proposal tools", () => {
       storyTime: { kind: "unknown" as const },
       preconditions: [],
       observedOutcome: { version: 1 as const, operations: [] },
-      evidence: fixture.evidence("林岐站在钟楼下。"),
       causalParents: [],
       confidence: 1,
     };
     await event.execute("bad-presence", {
       proposal_id: "bad-presence-event",
       payload: eventPayload,
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
     const finishInput = {
       outcome: "complete",
@@ -892,6 +985,7 @@ describe("compiler proposal tools", () => {
         ...eventPayload,
         participantPresence: [{ entityId: "lin-qi", mode: "physical" }],
       },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
     await expect(finish.execute("finish-presence", finishInput as never, undefined, undefined, {} as ExtensionContext))
       .resolves.toMatchObject({ details: { compilerBatchFinished: true } });
@@ -914,8 +1008,8 @@ describe("compiler proposal tools", () => {
         kind: "character",
         canonicalName: "林岐",
         aliases: [],
-        evidence: fixture.evidence("林岐"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
     await initial.execute("broken-opening", {
       proposal_id: "opening-world-broken",
@@ -925,8 +1019,8 @@ describe("compiler proposal tools", () => {
           version: 1,
           operations: [{ op: "set", entityId: "linqi", field: "character.location", value: "missing-location" }],
         },
-        evidence: fixture.evidence("林岐站在钟楼下。"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
     const review = [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Recorded Lin Qi." }];
     await expect(finish.execute("broken-graph", {
@@ -970,8 +1064,8 @@ describe("compiler proposal tools", () => {
         kind: "character",
         canonicalName: "林岐",
         aliases: [],
-        evidence: fixture.evidence("林岐"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
     await firstInitial.execute("bad-opening", {
       proposal_id: "recovered-bad-opening",
@@ -981,8 +1075,8 @@ describe("compiler proposal tools", () => {
           version: 1,
           operations: [{ op: "set", entityId: "linqi", field: "character.location", value: "unsupported-place" }],
         },
-        evidence: fixture.evidence("林岐站在钟楼下。"),
       },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
 
     const retry = createCompilerProposalToolset(root);
@@ -999,6 +1093,55 @@ describe("compiler proposal tools", () => {
       summary: "Recovered and finished.",
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { compilerBatchFinished: true, proposalIds: ["recovered-linqi"] },
+    });
+  });
+
+  it("rehydrates legacy full-EvidenceRef drafts while new recovery work uses handles", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-legacy-recovery-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero waits in the Village.\n");
+    const batchId = `batch-${fixture.source.id}-00001-legacy`;
+    const service = new CompilerProposalService(root);
+    await service.submit("entity", {
+      proposalId: "legacy-hero",
+      payload: {
+        id: "hero",
+        kind: "character",
+        canonicalName: "Hero",
+        aliases: [],
+        evidence: fixture.evidence("Hero"),
+      },
+      generatedBy: { worker: "legacy-model", compilerBatchId: batchId },
+    });
+
+    const retry = createCompilerProposalToolset(root);
+    await retry.beginBatch([fixture.segmentId], batchId, fixture.source.id);
+    const entity = retry.tools.find((candidate) => candidate.name === "propose_entity")!;
+    await entity.execute("new-location", {
+      proposal_id: "handle-village",
+      payload: {
+        id: "village",
+        kind: "location",
+        canonicalName: "Village",
+        aliases: [],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const finish = retry.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    await expect(finish.execute("finish-legacy-recovery", {
+      outcome: "complete",
+      reviewed_segments: [{
+        segment_id: fixture.segmentId,
+        disposition: "proposed",
+        summary: "Recovered the legacy character and added its location through a host handle.",
+      }],
+      summary: "Legacy and handle-backed drafts converge in one recovery batch.",
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: {
+        compilerBatchFinished: true,
+        proposalIds: ["handle-village", "legacy-hero"],
+      },
     });
   });
 
@@ -1019,8 +1162,8 @@ describe("compiler proposal tools", () => {
         kind: "character",
         canonicalName: "林岐",
         aliases: [],
-        evidence: fixture.evidence("林岐来到前厅。"),
       },
+      evidence_segment_ids: [firstSegment!.id],
     };
 
     await toolset.beginBatch([firstSegment!.id], undefined, fixture.source.id);
@@ -1048,8 +1191,8 @@ describe("compiler proposal tools", () => {
         kind: "character",
         canonicalName: "王安",
         aliases: [],
-        evidence: fixture.evidence("王安随后到达。"),
       },
+      evidence_segment_ids: [secondSegment!.id],
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { proposalId: "entity-wangan", kind: "entity" },
     });
@@ -1124,10 +1267,13 @@ describe("compiler proposal tools", () => {
       kind: "character",
       canonicalName: "林岐",
       aliases: [],
-      evidence: fixture.evidence("林岐"),
     };
 
-    await entity.execute("base", { proposal_id: "entity-linqi", payload } as never, undefined, undefined, {} as ExtensionContext);
+    await entity.execute("base", {
+      proposal_id: "entity-linqi",
+      payload,
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
     await withdraw.execute("withdraw-base", {
       proposal_id: "entity-linqi",
       reason: "The candidate needs a corrected envelope revision.",
@@ -1136,11 +1282,13 @@ describe("compiler proposal tools", () => {
     await expect(entity.execute("bad-revision", {
       proposal_id: "entity-linqi-v2",
       payload: { ...payload, id: "linqi-v2" },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("Keep payload.id='linqi'");
 
     await expect(entity.execute("good-revision", {
       proposal_id: "entity-linqi-v2",
       payload,
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { proposalId: "entity-linqi-v2" },
     });
@@ -1149,6 +1297,7 @@ describe("compiler proposal tools", () => {
     await entity.execute("first-chained-revision", {
       proposal_id: "entity-linqi-alternate-v2",
       payload: chainedPayload,
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext);
     await withdraw.execute("withdraw-chained-revision", {
       proposal_id: "entity-linqi-alternate-v2",
@@ -1158,6 +1307,7 @@ describe("compiler proposal tools", () => {
     await expect(entity.execute("bad-chained-revision", {
       proposal_id: "entity-linqi-alternate-v3",
       payload: { ...chainedPayload, id: "linqi-alternate-v3" },
+      evidence_segment_ids: [fixture.segmentId],
     } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("Keep payload.id='linqi-alternate-v2'");
   });
 });

@@ -50,9 +50,10 @@ describe("compiler source evidence retrieval", () => {
       undefined,
       undefined,
       {} as ExtensionContext,
-    ))) as { sourceId: string; evidence: { span: { sourceId: string } }; chunk: string };
+    ))) as { sourceId: string; evidence_segment_id: string; chunk: string };
     expect(exact.sourceId).toBe(first.source.id);
-    expect(exact.evidence.span.sourceId).toBe(first.source.id);
+    expect(exact.evidence_segment_id).toBe((await new SegmentStore(root).list(first.source.id))[0]!.id);
+    expect(JSON.stringify(exact)).not.toContain("quoteHash");
     expect(exact.chunk).toContain("Hero enters the Hall");
     expect(exact.chunk).not.toContain("Villain");
 
@@ -107,15 +108,7 @@ describe("compiler source evidence retrieval", () => {
         : segment),
     });
     const toolset = createCompilerProposalToolset(root);
-    await toolset.beginBatch([], "reconcile-tampered-index", fixture.source.id);
-    const find = toolset.tools.find((tool) => tool.name === "find_source_evidence")!;
-
-    await expect(find.execute(
-      "find",
-      { query: "Hero" } as never,
-      undefined,
-      undefined,
-      {} as ExtensionContext,
-    )).rejects.toThrow("missing or stale");
+    await expect(toolset.beginBatch([], "reconcile-tampered-index", fixture.source.id))
+      .rejects.toThrow("missing or stale");
   });
 });

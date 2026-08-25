@@ -7,6 +7,7 @@ import {
   assertPlaySceneNarration,
   buildPlayOpeningFrame,
   playSceneRequestForEntry,
+  playSceneChoicePrompt,
   playScenePrompt,
   playerSceneModelFrame,
   renderPlaySceneFailure,
@@ -15,6 +16,7 @@ import {
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { ActorModelStore } from "../src/world/actors.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { PlayConversationStore } from "../src/world/play-conversation.js";
 
 const roots: string[] = [];
 
@@ -132,12 +134,16 @@ describe("player opening narration", () => {
     expect(renderPlaySceneFailure(frame)).toContain("没有推进世界");
     expect(renderPlaySceneFailure(frame, "turn")).toContain("行动已经提交");
     expect(renderPlaySceneFailure(frame, "turn")).toContain("不必重复");
-    expect(playScenePrompt(frame, "opening")).toContain("information visible to the character");
-    expect(playScenePrompt(frame, "opening")).toContain("not global world truth");
-    expect(playScenePrompt(frame, "opening")).toContain("prompt-size boundary rather than proof of ignorance");
-    expect(playScenePrompt(frame, "opening")).toContain("all possible actions belong only in propose_player_choices");
-    expect(playScenePrompt(frame, "opening")).toContain("current scene, not an agency handoff");
-    expect(playScenePrompt(frame, "opening")).toContain("Open the playable story");
+    const literaryPrompt = playScenePrompt(frame, "opening");
+    expect(literaryPrompt).toContain("information visible to the character");
+    expect(literaryPrompt).toContain("not global world truth");
+    expect(literaryPrompt).toContain("prompt-size boundary rather than proof of ignorance");
+    expect(literaryPrompt).toContain("sourceReferences contains exact source-novel prose");
+    expect(literaryPrompt).toContain("playContinuity contains exact prior player and rendered-scene prose");
+    expect(literaryPrompt).toContain("there is no fixed short target");
+    expect(literaryPrompt).toContain("current scene, not an agency handoff");
+    expect(literaryPrompt).toContain("Open the playable story");
+    expect(literaryPrompt).not.toContain("propose_player_choices");
     expect(playScenePrompt(frame, "orientation")).toContain("not necessarily the beginning");
     expect(playScenePrompt(frame, "turn")).toContain("action was accepted and committed");
     const adversarialPrompt = playScenePrompt({
@@ -222,9 +228,141 @@ describe("player opening narration", () => {
     });
     expect(modelFrame).not.toHaveProperty("affordances");
     expect(modelFrame).not.toHaveProperty("actionAnchors");
-    const prompt = playScenePrompt(modelFrame, "opening");
+    const prompt = playSceneChoicePrompt(modelFrame, "opening");
     expect(prompt).toContain("exact concrete thing the actor could do now");
     expect(prompt).toContain("exact words the actor could say now");
-    expect(prompt).toContain("contains only action");
+    expect(prompt).toContain("call propose_player_choices exactly once");
+    expect(prompt).not.toContain("sourceReferences");
+  });
+
+  it("injects exact act, source prose, play prose, and committed outcomes with explicit authority", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-play-literary-packet-"));
+    roots.push(root);
+    const sourceLine = "雨丝斜斜地擦过檐角，福贵看着见证人，话到嘴边反而放得很轻。";
+    const evidence = await createEvidenceFixture(root, `${sourceLine}\n`, "literary-context.txt");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "福贵",
+      aliases: [],
+      evidence: evidence.evidence("福贵"),
+    });
+    await canon.putEntity({
+      id: "witness",
+      kind: "character",
+      canonicalName: "见证人",
+      aliases: [],
+      evidence: evidence.evidence("见证人"),
+    });
+    const { engine } = await openWorkspaceWorld(root);
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "witness", field: "character.alive", value: true },
+      ],
+    }, undefined, evidence.source.id);
+    await new PlayConversationStore(root).append({
+      branchId: "main",
+      actorId: "hero",
+      atCommit: genesis,
+      role: "scene",
+      status: "rendered",
+      text: "雨还没有落稳，檐角先暗了下来。",
+    });
+    const committed = await engine.commitProposal({
+      proposalId: "hero-asks",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "player",
+      actorId: "hero",
+      title: "福贵询问见证人",
+      actorObservations: [
+        { actorId: "hero", summary: "你问见证人门外是谁。" },
+        { actorId: "witness", summary: "福贵问你门外是谁。" },
+      ],
+      spokenUtterances: [{
+        speakerId: "hero",
+        addresseeIds: ["witness"],
+        content: "门外是谁？",
+        channel: "audible",
+      }],
+      participants: ["hero", "witness"],
+      participantPresence: [
+        { entityId: "hero", mode: "physical" },
+        { entityId: "witness", mode: "physical" },
+      ],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      progress: {
+        version: 1,
+        channels: ["relationship", "consequence"],
+        threadIds: [],
+        noveltyKey: "hero-asks-witness",
+        outcome: "succeeded",
+      },
+      causalParents: [],
+      evidence: evidence.evidence(sourceLine),
+    });
+    const event = await engine.objects.getEvent(committed.eventHash!);
+    await new PlayConversationStore(root).append({
+      branchId: "main",
+      actorId: "hero",
+      atCommit: committed.newHead,
+      eventId: event.eventId,
+      role: "player",
+      status: "accepted",
+      text: "我抬头对见证人说：“门外是谁？”",
+    });
+
+    const frame = await buildPlayOpeningFrame(root, "main", "hero", evidence.source.id);
+    expect(frame.resolvedAct).toEqual({
+      rawUtterance: "我抬头对见证人说：“门外是谁？”",
+      worldStatus: "accepted",
+      actualOutcomes: ["你问见证人门外是谁。"],
+      lockedUtterances: [{
+        speaker: "福贵",
+        addressees: ["见证人"],
+        text: "门外是谁？",
+        mode: "verbatim",
+      }],
+    });
+    expect(frame.sourceReferences).toEqual([
+      expect.objectContaining({
+        text: sourceLine,
+        authority: "style-only",
+        safety: "actor-visible-committed-evidence",
+      }),
+    ]);
+    expect(frame.playContinuity?.map(({ role, text, authority }) => ({ role, text, authority }))).toEqual([
+      { role: "scene", text: "雨还没有落稳，檐角先暗了下来。", authority: "presentation-only" },
+      { role: "player", text: "我抬头对见证人说：“门外是谁？”", authority: "untrusted-player-text" },
+    ]);
+    const modelFrame = playerSceneModelFrame(frame);
+    expect(modelFrame.sourceReferences?.[0]).not.toHaveProperty("sourceId");
+    expect(modelFrame.sourceReferences?.[0]).not.toHaveProperty("startByte");
+    const prompt = playScenePrompt(modelFrame, "turn", {
+      style: {
+        proseMode: "贴近人物感受",
+        syntax: ["长短句相间"],
+        diction: ["克制"],
+        cadence: "先缓后紧",
+        dialogueHandling: "台词单独落下",
+        continuityCues: ["延续檐角意象"],
+        avoid: ["事件摘要"],
+      },
+    });
+    expect(prompt).toContain(sourceLine);
+    expect(prompt).toContain("雨还没有落稳，檐角先暗了下来。");
+    expect(prompt).toContain("我抬头对见证人说");
+    expect(prompt).toContain("你问见证人门外是谁。");
+    expect(prompt).toContain("authority=\"non-authoritative\"");
+    const withoutDialogue = "雨声贴着檐角落下来，你看着见证人，方才的问题还横在两人之间。空气微微一紧，门外的动静被衬得越发清晰；他没有立刻移开目光，昏暗里只剩雨丝接连擦过屋檐的细响。你喉间残留着开口后的干涩，门闩上凝着的一线水光却在这时轻轻颤了一下，随即又停住。";
+    expect(() => assertPlaySceneNarration(withoutDialogue, { frame: modelFrame, purpose: "turn" }))
+      .toThrow("changed or omitted exact dialogue");
+    const withDialogue = `${withoutDialogue}\n\n“门外是谁？”你问。檐下的雨声忽然显得更密，见证人的目光仍停在你脸上。`;
+    expect(assertPlaySceneNarration(withDialogue, { frame: modelFrame, purpose: "turn" })).toBe(withDialogue);
   });
 });

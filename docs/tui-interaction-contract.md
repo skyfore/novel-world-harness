@@ -40,13 +40,14 @@ prints a result.
 ## Surfaces
 
 - Main Pi turns use Pi's native assistant, thinking, and tool components.
-- Isolated scene sessions bridge Pi assistant events into one message in Pi's
-  native scrollable transcript. Provider/model, retry, and capture-tool phases
-  use compact footer status. The accepted text is checked against the live
+- The final isolated scene session bridges Pi assistant events into one message
+  in Pi's native scrollable transcript. The private choice, style, and
+  dramaturgy specialists do not stream. Final-provider/model, retry, and
+  read-only retrieval phases use compact footer status. The accepted text is checked against the live
   stream before that same native component is committed as a durable,
   model-context-excluded scene. Thinking and player choices persist with it; no
   duplicate narrator copy is mounted. A structurally rejected attempt is removed
-  before its one automatic retry streams. Scene prose is model-directed to contain
+  before its one automatic final-narrator retry streams. Scene prose is model-directed to contain
   only the current in-world moment and end on a concrete fact/signal; host code
   does not classify prose semantics through language-specific phrase matching.
 - Thinking defaults to `auto`: an active block is visible, `thinking_end`
@@ -58,9 +59,11 @@ prints a result.
   unvalidated suggestions. Choice capture is mutation-free; selection still
   enters the normal typed interpretation, current-world adjudication,
   deterministic player-action validation, and commit boundary. Choice capture
-  is the first, tool-only narrator phase. A missing or malformed call receives no
-  repair and no host-generated substitute; the dialog then contains only its
-  free-form path.
+  runs in its own private tool-only specialist session, concurrently with
+  private style and dramaturgy analysis. A missing or malformed call receives
+  no repair and no model-authored substitute; the final literary narrator still
+  runs, and the dialog retains free-form input plus any current-head
+  host-preflighted exits.
 - Natural-language input in player mode is always treated as in-world. The only
   meta route is the explicit `/ooc [question]` UI protocol, so host code never
   guesses from Chinese or English wording that a sentence is “system-level.”

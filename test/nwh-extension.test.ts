@@ -2734,8 +2734,8 @@ describe("NWH TUI extension", () => {
       payload: {
         version: 1,
         delta: { version: 1, operations: [] },
-        evidence: evidence.evidence("Hero waits at the opening."),
       },
+      evidence_segment_ids: [segmentId!],
     };
     const proposalResult = await initial.execute("opening-proposal", proposalInput as never, undefined, undefined, ctx);
     const finishInput = {
@@ -2766,6 +2766,7 @@ describe("NWH TUI extension", () => {
     const evidence = await createEvidenceFixture(root, "Hero waits at the opening.\n", "unfinished-opening.txt");
     const batches = await prepareCompilerBatches(root, evidence.source);
     for (const batch of batches) await new CompilerBatchStore(root).markComplete(evidence.source.id, batch.id);
+    const segmentId = batches.find((batch) => batch.purpose === "source-review")!.segmentIds[0]!;
     await new CanonicalModelStore(root).putEntity({
       id: "hero",
       kind: "character",
@@ -2782,8 +2783,8 @@ describe("NWH TUI extension", () => {
       payload: {
         version: 1,
         delta: { version: 1, operations: [] },
-        evidence: evidence.evidence("Hero waits at the opening."),
       },
+      evidence_segment_ids: [segmentId],
     };
     const proposalResult = await registeredToolDefinitions.get("propose_initial_world")!
       .execute("partial-opening-call", proposalInput as never, undefined, undefined, ctx);
@@ -2820,7 +2821,8 @@ describe("NWH TUI extension", () => {
     expect(sentHiddenMessages).toHaveLength(1);
 
     const hiddenContext = sentHiddenMessages[0]!;
-    expect(hiddenContext).toContain("EvidenceRef");
+    expect(hiddenContext).toContain("evidence_segment_ids");
+    expect(hiddenContext).not.toContain("quoteHash");
     expect(hiddenContext).toContain("人物1进入城池");
     const segmentIds = [...hiddenContext.matchAll(/<source-segment id="([^"]+)">/g)].map((match) => match[1]!);
     expect(segmentIds.length).toBeGreaterThan(0);
@@ -2841,7 +2843,8 @@ describe("NWH TUI extension", () => {
 
     expect(sentHiddenMessages).toHaveLength(2);
     expect(sentHiddenMessages[1]).toContain("<source-segment");
-    expect(sentHiddenMessages[1]).toContain("EvidenceRef");
+    expect(sentHiddenMessages[1]).toContain("evidence_segment_ids");
+    expect(sentHiddenMessages[1]).not.toContain("quoteHash");
     expect(notifications.some((message) => message.includes("starting compiler batch 2/"))).toBe(true);
   });
 

@@ -20,7 +20,7 @@ import {
 } from "./proposals.js";
 import { createCompilerArtifactRetrievalTools } from "./artifact-retrieval.js";
 import { createCompilerSourceEvidenceTools, SOURCE_EVIDENCE_TOOL_NAMES } from "./source-evidence-retrieval.js";
-import { readSegmentText, segmentSource, SegmentStore, type SourceSegment } from "./segments.js";
+import { readSegmentText, segmentEvidenceRef, segmentSource, SegmentStore, type SourceSegment } from "./segments.js";
 import { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./boundary-calibration.js";
 import { promptJson } from "../util/prompt-data.js";
 import { safeTextPrefix } from "../util/text-pages.js";
@@ -72,6 +72,8 @@ export const BOUNDARY_CALIBRATION_TOOL_NAMES = [
 type ProposalToolInput = {
   proposal_id: string;
   payload: unknown;
+  evidence_segment_ids?: string[];
+  /** Internal compatibility only; absent from the model-facing schema. */
   evidence?: unknown[];
 };
 
@@ -92,6 +94,9 @@ export function prepareProposalToolArguments(
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return parsed as ProposalToolInput;
   const normalized = { ...(parsed as Record<string, unknown>) };
   if ("payload" in normalized) normalized.payload = parseJsonArgument(normalized.payload, "payload");
+  if ("evidence_segment_ids" in normalized) {
+    normalized.evidence_segment_ids = parseJsonArgument(normalized.evidence_segment_ids, "evidence_segment_ids");
+  }
   if ("evidence" in normalized) normalized.evidence = parseJsonArgument(normalized.evidence, "evidence");
   if (
     kind !== "state-delta"
@@ -110,11 +115,73 @@ function proposalToolParameters(kind: CompilerProposalKind) {
   const inputSchema = z.object({
     proposal_id: idSchema,
     payload: compilerProposalSchemas[kind],
-    evidence: z.array(evidenceRefSchema).optional(),
   }).strict();
   const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(inputSchema);
+  removeModelWritableEvidence(jsonSchema);
+  const properties = jsonSchema.properties as Record<string, unknown>;
+  properties.evidence_segment_ids = {
+    type: "array",
+    items: {
+      type: "string",
+      pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    },
+    minItems: 1,
+    maxItems: 16,
+    uniqueItems: true,
+    description: "Host-issued immutable source segment IDs. The host injects exact EvidenceRefs; never include payload.evidence or raw hashes.",
+  };
+  jsonSchema.required = [...new Set([...(jsonSchema.required ?? []), "evidence_segment_ids"])];
   constrainCompilerStateFields(jsonSchema);
   return Type.Unsafe<ProposalToolInput>(jsonSchema as TSchema);
+}
+
+function removeModelWritableEvidence(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) removeModelWritableEvidence(item);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  const properties = record.properties;
+  if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+    delete (properties as Record<string, unknown>).evidence;
+  }
+  if (Array.isArray(record.required)) {
+    record.required = record.required.filter((name) => name !== "evidence");
+  }
+  for (const nested of Object.values(record)) removeModelWritableEvidence(nested);
+}
+
+const evidenceSegmentIdsSchema = z.array(idSchema)
+  .min(1)
+  .max(16)
+  .refine((ids) => new Set(ids).size === ids.length, "evidence_segment_ids must be unique");
+
+function containsEvidenceField(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsEvidenceField);
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return Object.hasOwn(record, "evidence") || Object.values(record).some(containsEvidenceField);
+}
+
+function injectHostEvidence(
+  kind: CompilerProposalKind,
+  payload: unknown,
+  evidence: readonly EvidenceRef[],
+): unknown {
+  if (kind === "state-delta") return payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const enriched: Record<string, unknown> = {
+    ...(payload as Record<string, unknown>),
+    evidence: structuredClone(evidence),
+  };
+  if (kind === "character-model" && Array.isArray(enriched.developmentPhases)) {
+    enriched.developmentPhases = enriched.developmentPhases.map((phase) =>
+      phase && typeof phase === "object" && !Array.isArray(phase)
+        ? { ...(phase as Record<string, unknown>), evidence: structuredClone(evidence) }
+        : phase);
+  }
+  return enriched;
 }
 
 function constrainCompilerStateFields(value: unknown): void {
@@ -321,6 +388,55 @@ export function createCompilerProposalToolset(
       }
     }
   };
+  const resolveEvidenceSegmentIds = (value: unknown): { segments: SourceSegment[]; evidence: EvidenceRef[] } => {
+    const segmentIds = evidenceSegmentIdsSchema.parse(value);
+    if (!activeSourceId || validatedSourceSegments.length === 0) {
+      throw new Error("evidence_segment_ids require an active source-scoped compiler batch with a validated evidence manifest.");
+    }
+    const byId = new Map(validatedSourceSegments.map((segment) => [segment.id, segment]));
+    const unknown = segmentIds.filter((id) => !byId.has(id));
+    if (unknown.length) {
+      throw new Error(`Unknown evidence_segment_ids for active source '${activeSourceId}': ${unknown.join(", ")}.`);
+    }
+    if (expectedSegmentIds.length) {
+      const allowed = new Set(expectedSegmentIds);
+      const outside = segmentIds.filter((id) => !allowed.has(id));
+      if (outside.length) {
+        throw new Error(
+          `Evidence segment handle(s) ${outside.join(", ")} are outside the host-supplied compiler segment slice (${expectedSegmentIds.join(", ")}).`,
+        );
+      }
+    }
+    const segments = segmentIds
+      .map((id) => byId.get(id)!)
+      .sort((left, right) => left.ordinal - right.ordinal);
+    return {
+      segments: structuredClone(segments),
+      evidence: segments.map(segmentEvidenceRef),
+    };
+  };
+  const normalizeProposalEvidence = (
+    kind: CompilerProposalKind,
+    input: ProposalToolInput,
+  ): { payload: unknown; evidence?: unknown[] } => {
+    if (input.evidence_segment_ids === undefined) {
+      if (activeSourceId || compilerBatchId) {
+        throw new Error(
+          "Source-scoped compiler proposals require evidence_segment_ids; raw EvidenceRef input is available only to the unscoped internal compatibility API.",
+        );
+      }
+      return { payload: input.payload, ...(input.evidence === undefined ? {} : { evidence: input.evidence }) };
+    }
+    if (input.evidence !== undefined || containsEvidenceField(input.payload)) {
+      throw new Error(
+        "Model proposals using evidence_segment_ids must omit payload.evidence, nested evidence fields, and top-level evidence; the host owns EvidenceRef construction.",
+      );
+    }
+    const { evidence } = resolveEvidenceSegmentIds(input.evidence_segment_ids);
+    return kind === "state-delta"
+      ? { payload: input.payload, evidence }
+      : { payload: injectHostEvidence(kind, input.payload, evidence) };
+  };
   const adjacentSegment = (direction: "previous" | "next") => {
     if (!activeSourceId || expectedSegmentIds.length === 0 || boundedSliceSegments.length !== expectedSegmentIds.length) {
       throw new Error("Adjacent evidence requires a non-empty, source-scoped compiler batch.");
@@ -433,7 +549,7 @@ export function createCompilerProposalToolset(
   const novelTitleInputSchema = z.object({
     proposal_id: idSchema,
     title: z.string().min(1).max(200),
-    evidence: evidenceRefSchema,
+    evidence_segment_id: idSchema,
     reason: z.string().min(1).max(500),
   }).strict();
   const { $schema: _titleDialect, ...novelTitleJsonSchema } = z.toJSONSchema(novelTitleInputSchema);
@@ -445,7 +561,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Propose the actual novel title only when the opening evidence establishes it",
     promptGuidelines: [
       "Use semantic judgment over the opening/title-page evidence; never derive the title from sourcePath or a filename.",
-      "Copy one exact supplied whole-segment EvidenceRef containing the selected title text.",
+      "Cite one exact supplied opening evidence_segment_id containing the selected title text; the host constructs its EvidenceRef.",
       "Omit edition, site, file-extension, author, and chapter-label text unless it is genuinely part of the work title.",
       "Do not call this tool when the work title is ambiguous or the source already has an accepted model-inferred title.",
     ],
@@ -462,20 +578,9 @@ export function createCompilerProposalToolset(
       if (!boundedSliceSegments.some((segment) => segment.ordinal === 0)) {
         throw new Error("Novel-title inference is restricted to the source-opening evidence slice.");
       }
-      const evidence = evidenceRefSchema.parse(input.evidence);
-      const evidenceSegment = boundedSliceSegments.find((segment) => isDeepStrictEqual(evidence, {
-        span: {
-          sourceId: segment.sourceId,
-          startByte: segment.startByte,
-          endByte: segment.endByte,
-          startLine: segment.startLine,
-          endLine: segment.endLine,
-          quoteHash: segment.textSha256,
-        },
-        strength: "explicit",
-      } satisfies EvidenceRef));
-      if (!evidenceSegment) {
-        throw new Error("Novel-title evidence must copy one exact whole EvidenceRef from the supplied source-opening batch.");
+      const { segments: [evidenceSegment], evidence: [evidence] } = resolveEvidenceSegmentIds([input.evidence_segment_id]);
+      if (!evidenceSegment || evidenceSegment.ordinal !== 0 || !evidence) {
+        throw new Error("Novel-title evidence_segment_id must identify the exact source-opening segment supplied by the host.");
       }
       await assertEvidenceWithinBoundedSlice({ evidence: [evidence] }, undefined);
       const inspected = await evidenceVerifier.inspect(evidence);
@@ -532,7 +637,7 @@ export function createCompilerProposalToolset(
   const peekAdjacentTool = defineTool<typeof peekAdjacentParameters, AdjacentEvidencePeekDetails>({
     name: "peek_adjacent_evidence",
     label: "Peek adjacent evidence",
-    description: "Read one bounded context-only preview from the immediate previous or next source segment when the current slice appears to cut through a semantic unit. The preview has no EvidenceRef and cannot ground a proposal.",
+    description: "Read one bounded context-only preview from the immediate previous or next source segment when the current slice appears to cut through a semantic unit. The preview has no citable evidence segment ID and cannot ground a proposal.",
     promptSnippet: "Peek at one immediate neighboring boundary when continuity is genuinely uncertain",
     promptGuidelines: [
       "Analyze the supplied segment first and call this only for a concrete unresolved opening or closing boundary.",
@@ -571,7 +676,7 @@ export function createCompilerProposalToolset(
             totalCharacters: text.length,
             truncated: chunk.length < text.length,
             chunk,
-            citationPolicy: "context-only; this preview supplies no EvidenceRef and cannot ground a proposal",
+            citationPolicy: "context-only; this preview supplies no evidence segment ID and cannot ground a proposal",
           }),
         }],
         details: {
@@ -650,7 +755,7 @@ export function createCompilerProposalToolset(
       label: metadata.label,
       description: metadata.description,
       promptSnippet: metadata.description,
-      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and include precise evidence in the payload where the schema requires it.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
+      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
       executionMode: "sequential",
       parameters,
       prepareArguments: (args) => prepareProposalToolArguments(args, kind),
@@ -662,15 +767,16 @@ export function createCompilerProposalToolset(
         if (isStructureDiscoveryBatch()) {
           throw new Error("World-artifact proposals are unavailable during chapter structure discovery.");
         }
-        await assertEvidenceWithinBoundedSlice(input.payload, input.evidence);
-        await assertStableLogicalRevision(service, kind, input.payload, compilerBatchId);
+        const normalized = normalizeProposalEvidence(kind, input);
+        await assertEvidenceWithinBoundedSlice(normalized.payload, normalized.evidence);
+        await assertStableLogicalRevision(service, kind, normalized.payload, compilerBatchId);
         if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
           throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
         }
         const accepted = await service.submit(kind, {
           proposalId: input.proposal_id,
-          payload: input.payload,
-          evidence: input.evidence,
+          payload: normalized.payload,
+          evidence: normalized.evidence,
           generatedBy: {
             worker: metadata.name,
             ...generatedBy,
@@ -925,11 +1031,11 @@ export function createCompilerProposalToolset(
       if (expectedSegmentIds.length && !activeSourceId) {
         throw new Error("A bounded compiler batch requires an active sourceId.");
       }
-      if (expectedSegmentIds.length) {
-        const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId!);
+      if (activeSourceId) {
+        const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
         if (!source) throw new Error(`Unknown active compiler source: ${activeSourceId}`);
         const [persistedManifest, derivedManifest] = await Promise.all([
-          new SegmentStore(workspaceRoot).readManifest(activeSourceId!),
+          new SegmentStore(workspaceRoot).readManifest(activeSourceId),
           segmentSource(workspaceRoot, source),
         ]);
         if (!persistedManifest || !isDeepStrictEqual(persistedManifest, derivedManifest)) {

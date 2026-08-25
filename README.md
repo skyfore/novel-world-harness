@@ -334,29 +334,36 @@ first for the chosen character, `create` opens a new story, and an actual
 ordinary process restart add no duplicate narration. A fresh transcript opened
 through an explicit player-entry command gets one orientation; an unbound
 `--new-session` or `/clear` remains at the Harness welcome, and `/scene`
-explicitly re-renders a selected current moment. The narrator runs in a fresh
-isolated session with a bounded committed actor frame, exact read-only retrieval
-over that same actor-safe corpus, effective current-head character disposition
-and motivation, and one capture-only next-choice tool. It streams its actual Pi
-events into the current TUI, automatically retries a structurally invalid short
-or repetitive first draft once, and reports final model failure
+explicitly re-renders a selected current moment. The scene path first runs three
+private isolated specialists in parallel: concrete next-action choice, literary
+style, and immediate-beat dramaturgy. A fresh final narrator receives their
+bounded advisories plus an authority-ranked packet containing the committed
+actor frame, the exact resolved player act and locked dialogue, narrator-safe
+style-only source excerpts, and exact presentation-only play prose. It has only
+read access over actor-safe context and branch-safe conversation memory; no
+choice, analysis, file, or mutation tool. Only this final session streams its Pi
+events into the current TUI. It automatically retries a structurally invalid,
+repetitive, or dialogue-dropping first draft once without rerunning the private
+specialists, and reports final model failure
 with direct recovery commands instead of displaying canned pseudo-prose. Scene
-prose contains only the current actor-visible moment and ends on a concrete
+prose is no longer forced into a compact 120-350-character target: it develops
+one current actor-visible beat as literature and ends on a concrete
 in-world fact or signal; the narrator never receives private host affordances.
 
 The choice tool generates 2-4 concrete things the inhabited actor could do or
 exact words they could say. After narration, the TUI merges those suggestions
 with bounded current-head host-preflighted exits and a free-form alternative,
 showing only action/line text—no system rationale or recommendation badge.
-Choice capture is the first, tool-only phase of the isolated narrator turn; scene
-prose begins only after that tool succeeds. This avoids asking one optional-tool
-response to finish prose and remember a trailing call.
+Choice capture runs in its own private tool-only specialist session, concurrently
+with style and dramaturgy analysis. The final prose session is separate and
+tool-free apart from actor-safe retrieval, so literary composition is not the
+compressed residue of an option-generation transcript.
 Model suggestions do not claim capability or outcome: selecting one enters the
 same restricted player-action translation and deterministic validation boundary
 as free-form input. A host route retains an opaque current-head affordance ID,
 bypasses only probabilistic translation, and is re-resolved through deterministic
-scope/knowledge/engine gates. If the narrator omits or malforms the auxiliary
-choice call, the host does not retry it; valid scene prose remains accepted and
+scope/knowledge/engine gates. If the choice specialist omits or malforms its
+capture call, the host does not retry it; valid scene prose remains accepted and
 at least one preflighted exit remains beside free-form input. Rendering and
 choice capture never advance the branch or act for the player.
 

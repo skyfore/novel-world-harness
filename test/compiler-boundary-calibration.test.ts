@@ -154,8 +154,8 @@ describe("compiler boundary calibration", () => {
         kind: "character",
         canonicalName: "Alice",
         aliases: [],
-        evidence: evidence.evidence("Alice"),
       },
+      evidence_segment_ids: [segments[0]!.id],
     } as never, undefined, undefined, {} as ExtensionContext);
     const peek = sourceTools.tools.find((tool) => tool.name === "peek_adjacent_evidence")!;
     const defer = sourceTools.tools.find((tool) => tool.name === "defer_boundary_artifact")!;
@@ -182,8 +182,8 @@ describe("compiler boundary calibration", () => {
         kind: "character",
         canonicalName: "Alice",
         aliases: [],
-        evidence: evidence.evidence("Alice"),
       },
+      evidence_segment_ids: [segments[0]!.id],
     } as never, undefined, undefined, {} as ExtensionContext);
     await expect(replace.execute("replace", {
       proposal_id: "alice-partial",

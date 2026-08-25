@@ -1197,6 +1197,16 @@ export function playerActionToKnowledgeAwareAction(input: {
     actorId: input.actorId,
     title: input.eventTitle ?? playerIntentTitle(input.utterance),
     actorObservations,
+    ...(interaction?.kind === "speech"
+      ? {
+          spokenUtterances: [{
+            speakerId: input.actorId,
+            addresseeIds: [...new Set(interaction.addresseeIds)].sort(),
+            content: interaction.content,
+            channel: "audible" as const,
+          }],
+        }
+      : {}),
     participants: [...new Set([input.actorId, ...candidate.participants])],
     participantPresence: physicalParticipantIds.map((entityId) => ({ entityId, mode: "physical" as const })),
     proposedTime: input.proposedTime ?? { kind: "unknown" },

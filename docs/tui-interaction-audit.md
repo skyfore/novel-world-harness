@@ -127,35 +127,38 @@ without a tool call; this is what the inspected harness session did. The TUI the
 mistook deterministic director affordances for narrator choices, which is why
 strategic plan copy appeared in the menu.
 
-**Repair.** The isolated narrator has two exact read-only tools over its bounded
-actor-safe corpus and one mutation-free capture tool,
-`propose_player_choices`. It returns 2-4 immediate actor-visible actions or
-exact spoken lines shaped by the actor's current effective disposition and
-committed development. The structural choice contract enforces only action-only
-object shape, bounded count/length, and duplicate removal; behavioral semantics
-remain the isolated model's responsibility rather than a Chinese/English phrase
-list in host code. The TUI presents only the action/line itself (no internal
-rationale or unvalidated recommendation) plus free-form input. Narration and choice capture settle independently: valid
-scene prose is committed to the transcript even when the provider omits or
-malforms the choice call. The normal narrator protocol now makes choice capture
-the first, tool-only phase; after its successful tool result, the same isolated
-agent streams scene prose. If the model still omits or malforms the call, the
-host performs no repair turn; valid prose remains accepted, while bounded
-current-head host-preflighted exits remain available beside free-form input.
-These exits are not narrator-authored outcome promises and selecting one bypasses
-only probabilistic translation before the usual deterministic gates. Choosing a model suggestion
-schedules its utterance through the same restricted typed interpreter,
-current-world adjudicator, scope/knowledge checks, engine validation, and commit
-path as typed player input.
+**Repair.** Choice generation and literary rendering now use different isolated
+sessions. A private choice specialist owns the mutation-free
+`propose_player_choices` capture tool and returns 2-4 immediate actor-visible
+actions or exact spoken lines shaped by current disposition and committed
+development. It cannot stream prose. In parallel, private style and dramaturgy
+specialists produce bounded advisory records. A fresh final narrator then sees
+the actor-safe committed frame, exact resolved act/locked dialogue, admitted
+style-only source prose, exact presentation-only play continuity, and successful
+advisories; it receives read-only retrieval but no choice or analysis capture
+tool. Only this final session streams into the TUI.
+
+The structural choice contract enforces only action-only object shape, bounded
+count/length, and duplicate removal; behavioral semantics remain the isolated
+model's responsibility rather than a Chinese/English phrase list in host code.
+The TUI presents only the action/line itself plus free-form input. Any private
+specialist may fail or omit its call without discarding valid final prose. A
+locked-dialogue or structural prose failure retries only a fresh final narrator,
+not the private fan-out. Bounded current-head host-preflighted exits remain
+available when model suggestions are absent. These exits are not outcome
+promises, and choosing any model suggestion schedules its utterance through the
+same restricted typed interpreter, current-world adjudicator, scope/knowledge
+checks, engine validation, and commit path as typed player input.
 
 The prose and choice channels are also separate. The narrator may end on a
 concrete current fact, sensation, motion, spoken cue, or unresolved signal, but
 may not append “你可以……”, “是……还是……”, “下一步由你决定”, or equivalent
 player-facing action scaffolding. This is a model-layer semantic constraint;
-host validation remains language-neutral and checks only structural narration
-properties. Narrator-authored possible actions may appear only in
-`propose_player_choices`; private host exits are merged later and never enter the
-narrator prompt.
+host validation remains language-neutral except for exact preservation of
+committed locked utterances, and otherwise checks structural narration
+properties. Model-authored possible actions may appear only in the private
+choice specialist's `propose_player_choices`; private host exits are merged
+later and never enter the final narrator prompt.
 
 ### 4. Player action translation looked hung and could run forever
 

@@ -6,7 +6,7 @@ import { readSourceMaterial, SourceMaterialStore } from "../storage/source-mater
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { promptJson } from "../util/prompt-data.js";
 import { z } from "zod";
-import { idSchema } from "../world/model.js";
+import { idSchema, type EvidenceRef } from "../world/model.js";
 import {
   ChapterSplitPlanStore,
   customChapterBoundaries,
@@ -238,6 +238,25 @@ export async function readSegmentText(workspaceRoot: string, segment: SourceSegm
   } catch {
     throw new Error(`Segment ${segment.id} does not align to valid UTF-8 source boundaries.`);
   }
+}
+
+/**
+ * Materialize the immutable evidence identity owned by a validated source
+ * segment. Model tools cite only the segment id; the host is the sole writer
+ * of byte ranges, line ranges, and content hashes.
+ */
+export function segmentEvidenceRef(segment: SourceSegment): EvidenceRef {
+  return {
+    span: {
+      sourceId: segment.sourceId,
+      startByte: segment.startByte,
+      endByte: segment.endByte,
+      startLine: segment.startLine,
+      endLine: segment.endLine,
+      quoteHash: segment.textSha256,
+    },
+    strength: "explicit",
+  };
 }
 
 function parseLines(text: string): LineRecord[] {

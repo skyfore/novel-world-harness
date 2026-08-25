@@ -342,6 +342,16 @@ async function respondOneNpc(input: {
       { actorId: input.npcId, summary: boundedText(reaction.npcObservation) },
       { actorId: input.playerId, summary: playerVisibleReaction(reaction) },
     ],
+    ...(reaction.interaction?.kind === "speech"
+      ? {
+          spokenUtterances: [{
+            speakerId: input.npcId,
+            addresseeIds: [input.playerId],
+            content: reaction.interaction.content,
+            channel: "audible" as const,
+          }],
+        }
+      : {}),
     actorAffects: [{ actorId: input.npcId, ...reaction.emotion }],
     participants: [input.npcId, input.playerId],
     participantPresence: [input.npcId, input.playerId].map((entityId) => ({ entityId, mode: "physical" as const })),

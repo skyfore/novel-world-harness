@@ -97,7 +97,7 @@ export class EvidenceVerifier {
     if (actualHash !== span.quoteHash) {
       return {
         valid: false,
-        issues: [issue("EVIDENCE_HASH_MISMATCH", `Evidence hash mismatch; expected ${span.quoteHash}, found ${actualHash}`)],
+        issues: [issue("EVIDENCE_HASH_MISMATCH", `Evidence hash mismatch; provided ${span.quoteHash}, computed ${actualHash}`)],
       };
     }
     return { valid: true, issues: [], excerpt: cached.buffer.subarray(startByte, endByte).toString("utf8") };

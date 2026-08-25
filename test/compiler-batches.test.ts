@@ -207,13 +207,14 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure(outcome)).toContain("compiler circuit breaker");
   });
 
-  it("builds bounded prompts with explicit evidence refs", async () => {
+  it("builds bounded prompts with host-issued evidence handles", async () => {
     const { root, source } = await fixture();
     const batches = await prepareCompilerBatches(root, source);
     expect(batches.length).toBeGreaterThan(1);
     expect(batches).toHaveLength(12);
     expect(batches.every((batch) => batch.segmentIds.length === 1)).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("EvidenceRef"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("evidence_segment_ids"))).toBe(true);
+    expect(batches.every((batch) => !batch.prompt.includes("quoteHash"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Target at most 20 high-leverage active proposals"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("rejects a 25th active proposal"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Ordinary source-review batches must not propose an initial-world"))).toBe(true);
@@ -236,9 +237,9 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("withdraw_compiler_proposal"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("kind=canon-analogue"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Use player-choice"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("Copy only a supplied whole-segment EvidenceRef JSON object exactly"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("host deterministically injects exact immutable EvidenceRefs"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("do not call list_files, search_files, or read_file"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("never invent a narrower range"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Never invent or edit an evidence handle"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("at most one state operation"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("summary must be at most 500 characters"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("finish_compiler_batch"))).toBe(true);

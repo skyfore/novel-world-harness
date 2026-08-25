@@ -121,6 +121,26 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   if (state.atCommit !== head) errors.push({ code: "STATE_HEAD_MISMATCH", message: `Projected state ${state.atCommit} does not match ${head}` });
   for (const entityId of proposal.participants) if (!context.entities.has(entityId)) errors.push({ code: "UNKNOWN_PARTICIPANT", message: `Unknown participant ${entityId}` });
   if (proposal.actorId && !context.entities.has(proposal.actorId)) errors.push({ code: "UNKNOWN_ACTOR", message: `Unknown actor ${proposal.actorId}` });
+  proposal.spokenUtterances?.forEach((utterance, index) => {
+    const speaker = context.entities.get(utterance.speakerId);
+    if (!speaker || speaker.kind !== "character") {
+      errors.push({
+        code: "INVALID_SPOKEN_UTTERANCE",
+        message: `Spoken utterance speaker ${utterance.speakerId} must be a character`,
+        path: `spokenUtterances.${index}.speakerId`,
+      });
+    }
+    utterance.addresseeIds.forEach((addresseeId, addresseeIndex) => {
+      const addressee = context.entities.get(addresseeId);
+      if (!addressee || addressee.kind !== "character") {
+        errors.push({
+          code: "INVALID_SPOKEN_UTTERANCE",
+          message: `Spoken utterance addressee ${addresseeId} must be a character`,
+          path: `spokenUtterances.${index}.addresseeIds.${addresseeIndex}`,
+        });
+      }
+    });
+  });
   const presenceIds = new Set<string>();
   for (let index = 0; index < (proposal.participantPresence?.length ?? 0); index += 1) {
     const presence = proposal.participantPresence![index]!;
@@ -550,6 +570,7 @@ export class WorldEngine {
       participantPresence: parsed.participantPresence,
       actorObservations: parsed.actorObservations,
       actorAffects: parsed.actorAffects,
+      spokenUtterances: parsed.spokenUtterances,
     });
     const event: CommittedEvent = {
       version: 1,
@@ -562,6 +583,7 @@ export class WorldEngine {
       title: parsed.title,
       ...(parsed.actorObservations ? { actorObservations: structuredClone(parsed.actorObservations) } : {}),
       ...(parsed.actorAffects ? { actorAffects: structuredClone(parsed.actorAffects) } : {}),
+      ...(parsed.spokenUtterances ? { spokenUtterances: structuredClone(parsed.spokenUtterances) } : {}),
       participants: parsed.participants,
       ...(parsed.participantPresence ? { participantPresence: structuredClone(parsed.participantPresence) } : {}),
       deltaHash,

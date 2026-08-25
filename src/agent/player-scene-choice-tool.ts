@@ -76,7 +76,7 @@ export function createPlayerSceneChoiceCaptureTool(): PlayerSceneChoiceCaptureTo
       return {
         content: [{
           type: "text" as const,
-          text: "Concrete player choices captured. Now stream only the requested scene narration. Do not mention or enumerate these choices, and do not call this tool again.",
+          text: "Concrete player choices captured. End this private choice-analysis call now; do not write scene narration and do not call this tool again.",
         }],
         details: { captured: choices.length },
       };

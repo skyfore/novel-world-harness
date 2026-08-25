@@ -184,7 +184,11 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(34);
+    expect(tools).toHaveLength(36);
+    expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+      "propose_proposition",
+      "propose_attribution",
+    ]));
     for (const tool of tools.filter((candidate) => candidate.name.startsWith("propose_"))) {
       const validator = Compile(tool.parameters);
       expect(tool.executionMode).toBe("sequential");
@@ -1082,6 +1086,63 @@ describe("compiler proposal tools", () => {
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { compilerBatchFinished: true },
     });
+  });
+
+  it("requires proposition and attribution references to close before batch checkpoint", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposition-attribution-closure-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero reports that the Gate is open.\n");
+    const toolset = createCompilerProposalToolset(root);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const proposition = toolset.tools.find((candidate) => candidate.name === "propose_proposition")!;
+    const attribution = toolset.tools.find((candidate) => candidate.name === "propose_attribution")!;
+    const finish = toolset.tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
+    await toolset.beginBatch([fixture.segmentId], "semantic-closure", fixture.source.id);
+    await attribution.execute("attribution-first", {
+      proposal_id: "hero-reports-gate-open",
+      payload: {
+        id: "hero-reports-gate-open",
+        propositionId: "gate-open",
+        holderKind: "character",
+        holderEntityId: "hero",
+        attitude: "reports",
+        certainty: 1,
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+    const finishInput = {
+      outcome: "complete",
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Recorded a report." }],
+      summary: "done",
+    };
+    await expect(finish.execute("open-attribution", finishInput as never, undefined, undefined, {} as ExtensionContext))
+      .rejects.toThrow("unknown proposition 'gate-open'");
+
+    for (const [proposalId, id, kind, canonicalName] of [
+      ["hero-entity", "hero", "character", "Hero"],
+      ["gate-entity", "gate", "location", "Gate"],
+    ] as const) {
+      await entity.execute(proposalId, {
+        proposal_id: proposalId,
+        payload: { id, kind, canonicalName, aliases: [] },
+        evidence_segment_ids: [fixture.segmentId],
+      } as never, undefined, undefined, {} as ExtensionContext);
+    }
+    await proposition.execute("gate-open", {
+      proposal_id: "gate-open-proposal",
+      payload: {
+        id: "gate-open",
+        subjectEntityId: "gate",
+        relationId: "open",
+        object: { kind: "literal", value: true },
+        polarity: "positive",
+        modality: "asserted",
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    await expect(finish.execute("closed-attribution", finishInput as never, undefined, undefined, {} as ExtensionContext))
+      .resolves.toMatchObject({ details: { compilerBatchFinished: true } });
   });
 
   it("rejects non-character or missing event presence before checkpoint and accepts the corrected replacement", async () => {

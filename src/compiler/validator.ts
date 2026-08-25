@@ -7,13 +7,17 @@ import {
   canonicalEventSchema,
   claimSchema,
   entitySchema,
+  attributionSchema,
+  propositionSchema,
   worldRuleSchema,
+  type Attribution,
   type CanonicalEvent,
   type Claim,
   type Entity,
   type EvidenceAssertion,
   type EvidenceRef,
   type Predicate,
+  type Proposition,
   type StoryTime,
   type ValidationIssue,
   type WorldRule,
@@ -31,10 +35,12 @@ import { evidenceSourceIds } from "../world/source-scope.js";
 import { validateCommittedEntityResolutionTrace } from "./entity-resolution.js";
 import { validateCommittedEventResolutionTrace } from "./event-resolution.js";
 
-export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
+export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type CompilerValidationCatalog = {
   entities: Map<string, Entity>;
+  propositions: Map<string, Proposition>;
+  attributions: Map<string, Attribution>;
   claims: Map<string, Claim>;
   events: Map<string, CanonicalEvent>;
   rules: Map<string, WorldRule>;
@@ -61,14 +67,18 @@ export class CompilerValidator {
   }
 
   async loadCatalog(): Promise<CompilerValidationCatalog> {
-    const [entityList, claimList, eventList, ruleList] = await Promise.all([
+    const [entityList, propositionList, attributionList, claimList, eventList, ruleList] = await Promise.all([
       this.canon.listEntities(),
+      this.canon.listPropositions(),
+      this.canon.listAttributions(),
       this.canon.listClaims(),
       this.canon.listEvents(),
       this.canon.listRules(),
     ]);
     return {
       entities: new Map(entityList.map((entity) => [entity.id, entity])),
+      propositions: new Map(propositionList.map((proposition) => [proposition.id, proposition])),
+      attributions: new Map(attributionList.map((attribution) => [attribution.id, attribution])),
       claims: new Map(claimList.map((claim) => [claim.id, claim])),
       events: new Map(eventList.map((event) => [event.id, event])),
       rules: new Map(ruleList.map((rule) => [rule.id, rule])),
@@ -76,11 +86,13 @@ export class CompilerValidator {
   }
 
   validateWithCatalog(kind: CanonicalProposalKind, payload: unknown, catalog: CompilerValidationCatalog): CompilerValidation {
-    const { entities, claims, events, rules } = catalog;
+    const { entities, propositions, attributions, claims, events, rules } = catalog;
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
     if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors);
+    if (kind === "proposition") this.validateProposition(propositionSchema.parse(payload), entities, propositions, events, errors);
+    if (kind === "attribution") this.validateAttribution(attributionSchema.parse(payload), entities, propositions, attributions, errors);
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
     if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, claims, events, rules, errors);
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
@@ -92,6 +104,64 @@ export class CompilerValidator {
 
   private validateEntity(entity: Entity, errors: ValidationIssue[]): void {
     if (!entity.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Entity ${entity.id} has no source evidence`, "evidence"));
+  }
+
+  private validateProposition(
+    proposition: Proposition,
+    entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    events: ReadonlyMap<string, CanonicalEvent>,
+    errors: ValidationIssue[],
+  ): void {
+    if (!proposition.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Proposition ${proposition.id} has no source evidence`, "evidence"));
+    if (!entities.has(proposition.subjectEntityId)) {
+      errors.push(issue("UNKNOWN_PROPOSITION_SUBJECT", `Proposition subject ${proposition.subjectEntityId} is not canonical`, "subjectEntityId"));
+    }
+    if (proposition.object.kind === "entity" && !entities.has(proposition.object.entityId)) {
+      errors.push(issue("UNKNOWN_PROPOSITION_OBJECT", `Proposition object ${proposition.object.entityId} is not canonical`, "object.entityId"));
+    }
+    if (proposition.object.kind === "proposition" && !propositions.has(proposition.object.propositionId)) {
+      errors.push(issue("UNKNOWN_NESTED_PROPOSITION", `Nested proposition ${proposition.object.propositionId} is not canonical`, "object.propositionId"));
+    }
+    if (proposition.validStoryTime?.kind === "relative" && !events.has(proposition.validStoryTime.anchorEventId)) {
+      errors.push(issue("UNKNOWN_PROPOSITION_TIME_ANCHOR", `Proposition story time references unknown canonical event ${proposition.validStoryTime.anchorEventId}`, "validStoryTime.anchorEventId"));
+    }
+    if (isMetaKnowledgePredicate(proposition.relationId)) {
+      errors.push(issue("META_KNOWLEDGE_PROPOSITION", `Proposition ${proposition.id} embeds epistemic attitude '${proposition.relationId}'; use Attribution around base semantic content`, "relationId"));
+    }
+  }
+
+  private validateAttribution(
+    attribution: Attribution,
+    entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
+    errors: ValidationIssue[],
+  ): void {
+    if (!attribution.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Attribution ${attribution.id} has no source evidence`, "evidence"));
+    if (!propositions.has(attribution.propositionId)) {
+      errors.push(issue("UNKNOWN_ATTRIBUTED_PROPOSITION", `Attribution references unknown proposition ${attribution.propositionId}`, "propositionId"));
+    }
+    if (attribution.holderKind === "character") {
+      const holder = attribution.holderEntityId ? entities.get(attribution.holderEntityId) : undefined;
+      if (!holder || holder.kind !== "character") {
+        errors.push(issue("INVALID_ATTRIBUTION_HOLDER", `Character attribution holder ${attribution.holderEntityId ?? "missing"} is not a canonical character`, "holderEntityId"));
+      }
+    }
+    if (attribution.holderKind === "document") {
+      const holder = attribution.holderEntityId ? entities.get(attribution.holderEntityId) : undefined;
+      if (!holder || holder.kind !== "artifact") {
+        errors.push(issue("INVALID_ATTRIBUTION_HOLDER", `Document attribution holder ${attribution.holderEntityId ?? "missing"} is not a canonical artifact`, "holderEntityId"));
+      }
+    }
+    if (attribution.sourceAttributionId) {
+      const source = attributions.get(attribution.sourceAttributionId);
+      if (!source) {
+        errors.push(issue("UNKNOWN_SOURCE_ATTRIBUTION", `Attribution source ${attribution.sourceAttributionId} is not canonical`, "sourceAttributionId"));
+      } else if (source.propositionId !== attribution.propositionId) {
+        errors.push(issue("ATTRIBUTION_CHAIN_MISMATCH", `Attribution source ${source.id} concerns proposition ${source.propositionId}, not ${attribution.propositionId}`, "sourceAttributionId"));
+      }
+    }
   }
 
   private validateClaim(claim: Claim, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
@@ -582,9 +652,8 @@ export class CompilerCommitService {
       onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length, proposalId: candidate.id });
     };
 
-    for (const kind of ["entity", "claim"] as const) {
-      for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
-    }
+    for (const candidate of eligible.filter((item) => item.kind === "entity")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "claim")) await processCandidate(candidate);
     await processDependencyKind(
       eligible.filter((item) => item.kind === "world-rule"),
       catalog.rules,
@@ -597,9 +666,6 @@ export class CompilerCommitService {
       },
       "RULE_DEPENDENCY_CYCLE",
     );
-    for (const kind of ["initial-world", "character-model", "character-goal"] as const) {
-      for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
-    }
     await processDependencyKind(
       eligible.filter((item) => item.kind === "canonical-event"),
       catalog.events,
@@ -612,6 +678,33 @@ export class CompilerCommitService {
       },
       "CAUSAL_CYCLE",
     );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "proposition"),
+      catalog.propositions,
+      propositionDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "PROPOSITION_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "attribution"),
+      catalog.attributions,
+      attributionDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "ATTRIBUTION_DEPENDENCY_CYCLE",
+    );
+    for (const kind of ["initial-world", "character-model", "character-goal"] as const) {
+      for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
+    }
     onProgress?.({ phase: "complete", processed, total, accepted: accepted.length, blocked: blocked.length });
     return { accepted, blocked, staging };
   }
@@ -676,6 +769,8 @@ export class CompilerCommitService {
   private async commitParsed(candidate: PendingCanonicalProposal): Promise<void> {
     const { kind, id, payload } = candidate;
     if (kind === "entity") await this.canon.putEntity(entitySchema.parse(payload));
+    else if (kind === "proposition") await this.canon.putProposition(propositionSchema.parse(payload));
+    else if (kind === "attribution") await this.canon.putAttribution(attributionSchema.parse(payload));
     else if (kind === "claim") await this.canon.putClaim(claimSchema.parse(payload));
     else if (kind === "canonical-event") await this.canon.putEvent(canonicalEventSchema.parse(payload));
     else if (kind === "world-rule") await this.canon.putRule(worldRuleSchema.parse(payload));
@@ -729,7 +824,7 @@ function selectLogicalCandidates(candidates: readonly PendingCanonicalProposal[]
   };
 }
 
-async function processDependencyKind<T extends CanonicalEvent | WorldRule>(
+async function processDependencyKind<T extends { id: string }>(
   candidates: readonly PendingCanonicalProposal[],
   canonical: ReadonlyMap<string, T>,
   dependencies: (payload: T) => string[],
@@ -784,18 +879,30 @@ function eventDependencies(event: CanonicalEvent): string[] {
   return [...event.causalParents, ...(event.storyTime.kind === "relative" ? [event.storyTime.anchorEventId] : [])];
 }
 
+function propositionDependencies(proposition: Proposition): string[] {
+  return proposition.object.kind === "proposition" ? [proposition.object.propositionId] : [];
+}
+
+function attributionDependencies(attribution: Attribution): string[] {
+  return attribution.sourceAttributionId ? [attribution.sourceAttributionId] : [];
+}
+
 function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposalKind, payload: unknown): void {
   if (kind === "entity") { const value = entitySchema.parse(payload); catalog.entities.set(value.id, value); }
+  if (kind === "proposition") { const value = propositionSchema.parse(payload); catalog.propositions.set(value.id, value); }
+  if (kind === "attribution") { const value = attributionSchema.parse(payload); catalog.attributions.set(value.id, value); }
   if (kind === "claim") { const value = claimSchema.parse(payload); catalog.claims.set(value.id, value); }
   if (kind === "canonical-event") { const value = canonicalEventSchema.parse(payload); catalog.events.set(value.id, value); }
   if (kind === "world-rule") { const value = worldRuleSchema.parse(payload); catalog.rules.set(value.id, value); }
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
-  return kind === "entity" || kind === "claim" || kind === "canonical-event" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
 }
 function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "entity") return entitySchema;
+  if (kind === "proposition") return propositionSchema;
+  if (kind === "attribution") return attributionSchema;
   if (kind === "claim") return claimSchema;
   if (kind === "canonical-event") return canonicalEventSchema;
   if (kind === "initial-world") return initialWorldSchema;

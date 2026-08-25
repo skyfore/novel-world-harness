@@ -37,6 +37,8 @@ export async function createWorldBranch(
   const prepared = source ? await new PreparedNovelCache(root, cacheRoot).loadFreshActive(source) : null;
   const artifacts = prepared ? {
     entities: prepared.bundle.canonical.entities,
+    propositions: prepared.bundle.canonical.propositions,
+    attributions: prepared.bundle.canonical.attributions,
     claims: prepared.bundle.canonical.claims,
     events: prepared.bundle.canonical.events,
     rules: prepared.bundle.canonical.rules,

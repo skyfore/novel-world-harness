@@ -6,9 +6,11 @@ import {
   canonicalEventSchema,
   claimSchema,
   entitySchema,
+  attributionSchema,
   evidenceAssertionSchema,
   evidenceRefSchema,
   idSchema,
+  propositionSchema,
   validateParticipantPresence,
   stateDeltaSchema,
   stateOperationSchema,
@@ -16,6 +18,7 @@ import {
   storyTimeSchema,
   worldRuleSchema,
   type ArtifactProposal,
+  type Attribution,
   type CanonicalEvent,
   type Claim,
   type EvidenceRef,
@@ -23,6 +26,7 @@ import {
   type KnowledgeDelta,
   type ParticipantPresence,
   type Predicate,
+  type Proposition,
   type StateDelta,
   type StoryTime,
   type WorldRule,
@@ -77,6 +81,16 @@ const compilerClaimSchema = claimSchema.extend({ evidence: evidenceRefSchema.arr
     });
   }
 });
+const compilerPropositionSchema = propositionSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((proposition, ctx) => {
+  if (isMetaKnowledgePredicate(proposition.relationId)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["relationId"],
+      message: "Epistemic attitudes belong in Attribution; a Proposition must describe only the attributed content.",
+    });
+  }
+});
+const compilerAttributionSchema = attributionSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
   validateParticipantPresence(possibility, ctx);
   if (possibility.kind === "player-choice" && !hasExecutablePossibilityEffect(possibility)) {
@@ -87,7 +101,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -95,6 +109,8 @@ const stateFieldOperations = new Set(["set", "unset", "add-member", "remove-memb
 
 export const compilerProposalSchemas = {
   entity: entitySchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
+  proposition: compilerPropositionSchema,
+  attribution: compilerAttributionSchema,
   claim: compilerClaimSchema,
   "canonical-event": compilerCanonicalEventSchema
     .extend({ evidence: evidenceRefSchema.array().min(1) })
@@ -267,6 +283,8 @@ function compilerBatchBelongsToSource(compilerBatchId: string, sourceId: string)
 type ProposalClosureCatalog = {
   entities: Set<string>;
   entityKinds: Map<string, string>;
+  propositions: Set<string>;
+  attributions: Set<string>;
   claims: Set<string>;
   events: Set<string>;
   rules: Set<string>;
@@ -296,8 +314,10 @@ export async function validateCompilerProposalClosure(
   const canon = new CanonicalModelStore(workspaceRoot);
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const [canonicalEntities, canonicalClaims, canonicalEvents, canonicalRules, canonicalPossibilities, pending] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalRules, canonicalPossibilities, pending] = await Promise.all([
     canon.listEntities(),
+    canon.listPropositions(),
+    canon.listAttributions(),
     canon.listClaims(),
     canon.listEvents(),
     canon.listRules(),
@@ -314,6 +334,8 @@ export async function validateCompilerProposalClosure(
   const catalog: ProposalClosureCatalog = {
     entities: new Set(canonicalEntities.filter(fromActiveSource).map((item) => item.id)),
     entityKinds: new Map(canonicalEntities.filter(fromActiveSource).map((item) => [item.id, item.kind])),
+    propositions: new Set(canonicalPropositions.filter(fromActiveSource).map((item) => item.id)),
+    attributions: new Set(canonicalAttributions.filter(fromActiveSource).map((item) => item.id)),
     claims: new Set(canonicalClaims.filter(fromActiveSource).map((item) => item.id)),
     events: new Set(canonicalEvents.filter(fromActiveSource).map((item) => item.id)),
     rules: new Set(canonicalRules.filter(fromActiveSource).map((item) => item.id)),
@@ -342,6 +364,8 @@ export async function validateCompilerProposalClosure(
       catalog.entities.add(entity.id);
       catalog.entityKinds.set(entity.id, entity.kind);
     }
+    if (summary.kind === "proposition") catalog.propositions.add((payload as { id: string }).id);
+    if (summary.kind === "attribution") catalog.attributions.add((payload as { id: string }).id);
     if (summary.kind === "claim") catalog.claims.add((payload as { id: string }).id);
     if (summary.kind === "canonical-event") catalog.events.add((payload as { id: string }).id);
     if (summary.kind === "world-rule") catalog.rules.add((payload as { id: string }).id);
@@ -393,6 +417,8 @@ export async function validateCompilerProposalClosure(
     }
     collectProposalClosureIssues(proposalId, proposal, catalog, issues);
   }
+  collectSemanticDependencyCycles(staged, new Set(proposalIds), "proposition", issues);
+  collectSemanticDependencyCycles(staged, new Set(proposalIds), "attribution", issues);
   collectEventDependencyCycles(staged, new Set(proposalIds), issues);
   return [...issues].sort();
 }
@@ -454,6 +480,21 @@ function collectProposalClosureIssues(
   };
   const payload = proposal.payload;
   if (proposal.kind === "entity") return;
+  if (proposal.kind === "proposition") {
+    const proposition = payload as Proposition;
+    missing("entities", proposition.subjectEntityId, "subjectEntityId");
+    if (proposition.object.kind === "entity") missing("entities", proposition.object.entityId, "object.entityId");
+    if (proposition.object.kind === "proposition") missing("propositions", proposition.object.propositionId, "object.propositionId");
+    if (proposition.validStoryTime) collectStoryTimeIssues(proposition.validStoryTime, "validStoryTime", missing);
+    return;
+  }
+  if (proposal.kind === "attribution") {
+    const attribution = payload as Attribution;
+    missing("propositions", attribution.propositionId, "propositionId");
+    if (attribution.holderEntityId) missing("entities", attribution.holderEntityId, "holderEntityId");
+    if (attribution.sourceAttributionId) missing("attributions", attribution.sourceAttributionId, "sourceAttributionId");
+    return;
+  }
   if (proposal.kind === "claim") {
     const claim = payload as Claim;
     missing("entities", claim.subject, "subject");
@@ -685,6 +726,52 @@ function collectEventDependencyCycles(
     state.set(eventId, "visited");
   };
   [...events.keys()].sort().forEach(visit);
+}
+
+function collectSemanticDependencyCycles(
+  staged: ReadonlyMap<string, StagedProposal>,
+  activeProposalIds: ReadonlySet<string>,
+  kind: "proposition" | "attribution",
+  issues: Set<string>,
+): void {
+  const artifacts = new Map<string, { proposalId: string; dependencies: string[] }>();
+  for (const [proposalId, proposal] of staged) {
+    if (!activeProposalIds.has(proposalId) || proposal.kind !== kind) continue;
+    if (kind === "proposition") {
+      const value = proposal.payload as Proposition;
+      artifacts.set(value.id, {
+        proposalId,
+        dependencies: value.object.kind === "proposition" ? [value.object.propositionId] : [],
+      });
+    } else {
+      const value = proposal.payload as Attribution;
+      artifacts.set(value.id, {
+        proposalId,
+        dependencies: value.sourceAttributionId ? [value.sourceAttributionId] : [],
+      });
+    }
+  }
+  const state = new Map<string, "visiting" | "visited">();
+  const stack: string[] = [];
+  const visit = (id: string) => {
+    if (state.get(id) === "visited") return;
+    if (state.get(id) === "visiting") {
+      const cycleStart = stack.indexOf(id);
+      for (const member of stack.slice(Math.max(0, cycleStart))) {
+        const proposalId = artifacts.get(member)?.proposalId;
+        if (proposalId) issues.add(`${proposalId}: ${kind} dependency cycle includes '${member}'`);
+      }
+      return;
+    }
+    const artifact = artifacts.get(id);
+    if (!artifact) return;
+    state.set(id, "visiting");
+    stack.push(id);
+    artifact.dependencies.filter((dependency) => artifacts.has(dependency)).forEach(visit);
+    stack.pop();
+    state.set(id, "visited");
+  };
+  [...artifacts.keys()].sort().forEach(visit);
 }
 
 function isCompilerProposalKind(kind: string): kind is CompilerProposalKind {

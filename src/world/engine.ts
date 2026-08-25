@@ -9,6 +9,7 @@ import {
   participantPresenceSchema,
   stateDeltaSchema,
   type ActorEventObservation,
+  type Attribution,
   type BranchId,
   type CanonicalEvent,
   type Claim,
@@ -22,6 +23,7 @@ import {
   type LogicalTime,
   type ObjectHash,
   type ParticipantPresence,
+  type Proposition,
   type StateDelta,
   type ValidationIssue,
   type ValidationReport,
@@ -45,6 +47,8 @@ export type WorldModelContext = {
   sourceId?: string;
   preparedRevisionHash?: string;
   entities: ReadonlyMap<EntityId, Entity>;
+  propositions?: ReadonlyMap<string, Proposition>;
+  attributions?: ReadonlyMap<string, Attribution>;
   rules: ReadonlyMap<string, WorldRule>;
   stateSchema: StateSchemaRegistry;
   claims?: ReadonlyMap<string, Claim>;

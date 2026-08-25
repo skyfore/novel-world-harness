@@ -95,6 +95,23 @@ describe("compiler artifact retrieval", () => {
       epistemicType: "explicit-fact",
       evidence: first.evidence("Hero"),
     });
+    await canon.putProposition({
+      id: "hero-present",
+      subjectEntityId: "hero",
+      relationId: "present-at",
+      object: { kind: "literal", value: "Hall" },
+      polarity: "positive",
+      modality: "asserted",
+      evidence: first.evidence("Hero enters the Hall"),
+    });
+    await canon.putAttribution({
+      id: "narrator-hero-present",
+      propositionId: "hero-present",
+      holderKind: "narrator",
+      attitude: "asserts",
+      certainty: 1,
+      evidence: first.evidence("Hero enters the Hall"),
+    });
 
     const toolset = createCompilerProposalToolset(root);
     await toolset.beginBatch([], "batch-first", first.source.id);
@@ -108,6 +125,8 @@ describe("compiler artifact retrieval", () => {
       {} as ExtensionContext,
     ));
     expect(found).toContain("canonical:entity:hero");
+    expect(found).toContain("canonical:proposition:hero-present");
+    expect(found).toContain("canonical:attribution:narrator-hero-present");
     expect(found).not.toContain("villain");
 
     const firstIndexPage = JSON.parse(resultText(await find.execute(
@@ -117,7 +136,7 @@ describe("compiler artifact retrieval", () => {
       undefined,
       {} as ExtensionContext,
     ))) as { returned: number; totalMatches: number; nextOffset?: number };
-    expect(firstIndexPage).toMatchObject({ returned: 1, totalMatches: 2, nextOffset: 1 });
+    expect(firstIndexPage).toMatchObject({ returned: 1, totalMatches: 4, nextOffset: 1 });
 
     const firstChunk = resultText(await read.execute(
       "read",

@@ -16,6 +16,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Source observations | M2 + M3b-1 implemented | Immutable-source paragraph/sentence partition, exact entity/event mention, quotation, and discourse annotations, source-local closure, accounting, audit, batch recovery, and paged retrieval; event mentions carry no truth or canonical-event authority |
 | Entity resolution | M3a implemented | Deterministic source-scoped lexical candidates, explicit resolved/new/ambiguous/unresolved decisions, immutable superseding revisions, unresolved audit queues, and canonical name/alias trace gates |
 | Event resolution | M3b implemented | Source-scoped evidence/title/participant candidates, explicit coreference vs subevent clusters, resolved/new/ambiguous/unresolved decisions, merge/split revisions, major-event coverage, participant trace, and canonical-event commit gates |
+| Proposition and attribution | M4a-1 implemented | Reusable proposition content is separated from narrator/character/document attitudes; both are evidence-backed, dependency-validated semantic records and neither writes world state or actor knowledge |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
@@ -71,7 +72,16 @@ The branch now implements a constrained end-to-end path from a local novel throu
   compiler conversation remains persistable as compiler model context.
 - Proposals remain pending until explicit acceptance.
 - Acceptance verifies the immutable archived source hash, evidence byte/line ranges and quote hashes, and that every canonical entity name and alias occurs in its verified evidence excerpt. Empty alias lists are valid.
-- Canonical entities, claims, events, and rules use logical refs over immutable revisions.
+- Proposition content and epistemic/speech attribution are accepted as separate
+  immutable semantic artifacts. Proposition polarity/modality never implies
+  world truth; attribution records who asserts, knows, believes, suspects,
+  reports, denies, or questions that content. Subject/object, holder kind,
+  nested proposition, source-attribution, and dependency-cycle validation all
+  fail closed. These artifacts are retained in prepared bundles and branch
+  snapshots but do not enter state projection or legacy claim-based actor
+  knowledge automatically.
+- Canonical entities, propositions, attributions, claims, events, and rules use
+  logical refs over immutable revisions.
 - `proposals accept-all` accepts dependency-valid canonical artifacts and valid generic possibility templates; unsupported `state-delta` proposals remain staging artifacts.
 - Automated source preparation does not expose the staging-only raw `state-delta` tool. Its catalogs, review barrier, and convergence are scoped to the selected source.
 - Only the active batch is hydrated with a size-bounded artifact index. Exact

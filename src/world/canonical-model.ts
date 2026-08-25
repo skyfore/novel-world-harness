@@ -6,19 +6,23 @@ import type { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
 import {
   artifactProposalSchema,
+  attributionSchema,
   canonicalEventSchema,
   claimSchema,
   entitySchema,
+  propositionSchema,
   worldRuleSchema,
   type ArtifactProposal,
+  type Attribution,
   type CanonicalEvent,
   type Claim,
   type Entity,
+  type Proposition,
   type WorldRule,
 } from "./model.js";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-export type CanonicalKind = "entities" | "claims" | "events" | "rules";
+export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "rules";
 export type CanonicalRevisionRef = { id: string; hash: string };
 type StoredCanonicalRef = { version: 1; id: string; hash: string };
 export type ProposalStatus = "pending" | "accepted" | "rejected";
@@ -50,22 +54,32 @@ export class CanonicalModelStore {
   readonly root: string;
   constructor(workspaceRoot: string) { this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "canon"); }
   putEntity(entity: Entity): Promise<void> { const value = entitySchema.parse(entity); return this.put("entities", value.id, value); }
+  putProposition(proposition: Proposition): Promise<void> { const value = propositionSchema.parse(proposition); return this.put("propositions", value.id, value); }
+  putAttribution(attribution: Attribution): Promise<void> { const value = attributionSchema.parse(attribution); return this.put("attributions", value.id, value); }
   putClaim(claim: Claim): Promise<void> { const value = claimSchema.parse(claim); return this.put("claims", value.id, value); }
   putEvent(event: CanonicalEvent): Promise<void> { const value = canonicalEventSchema.parse(event); return this.put("events", value.id, value); }
   putRule(rule: WorldRule): Promise<void> { const value = worldRuleSchema.parse(rule); return this.put("rules", value.id, value); }
   ensureEntityRevision(entity: Entity): Promise<void> { const value = entitySchema.parse(entity); return this.ensureRevision("entities", value.id, value); }
+  ensurePropositionRevision(proposition: Proposition): Promise<void> { const value = propositionSchema.parse(proposition); return this.ensureRevision("propositions", value.id, value); }
+  ensureAttributionRevision(attribution: Attribution): Promise<void> { const value = attributionSchema.parse(attribution); return this.ensureRevision("attributions", value.id, value); }
   ensureClaimRevision(claim: Claim): Promise<void> { const value = claimSchema.parse(claim); return this.ensureRevision("claims", value.id, value); }
   ensureEventRevision(event: CanonicalEvent): Promise<void> { const value = canonicalEventSchema.parse(event); return this.ensureRevision("events", value.id, value); }
   ensureRuleRevision(rule: WorldRule): Promise<void> { const value = worldRuleSchema.parse(rule); return this.ensureRevision("rules", value.id, value); }
   getEntity(id: string): Promise<Entity> { return this.get("entities", id, entitySchema); }
+  getProposition(id: string): Promise<Proposition> { return this.get("propositions", id, propositionSchema); }
+  getAttribution(id: string): Promise<Attribution> { return this.get("attributions", id, attributionSchema); }
   getClaim(id: string): Promise<Claim> { return this.get("claims", id, claimSchema); }
   getEvent(id: string): Promise<CanonicalEvent> { return this.get("events", id, canonicalEventSchema); }
   getRule(id: string): Promise<WorldRule> { return this.get("rules", id, worldRuleSchema); }
   getEntityRevision(id: string, hash: string): Promise<Entity> { return this.getRevision("entities", id, hash, entitySchema); }
+  getPropositionRevision(id: string, hash: string): Promise<Proposition> { return this.getRevision("propositions", id, hash, propositionSchema); }
+  getAttributionRevision(id: string, hash: string): Promise<Attribution> { return this.getRevision("attributions", id, hash, attributionSchema); }
   getClaimRevision(id: string, hash: string): Promise<Claim> { return this.getRevision("claims", id, hash, claimSchema); }
   getEventRevision(id: string, hash: string): Promise<CanonicalEvent> { return this.getRevision("events", id, hash, canonicalEventSchema); }
   getRuleRevision(id: string, hash: string): Promise<WorldRule> { return this.getRevision("rules", id, hash, worldRuleSchema); }
   listEntities(): Promise<Entity[]> { return this.list("entities", entitySchema); }
+  listPropositions(): Promise<Proposition[]> { return this.list("propositions", propositionSchema); }
+  listAttributions(): Promise<Attribution[]> { return this.list("attributions", attributionSchema); }
   listClaims(): Promise<Claim[]> { return this.list("claims", claimSchema); }
   listEvents(): Promise<CanonicalEvent[]> { return this.list("events", canonicalEventSchema); }
   listRules(): Promise<WorldRule[]> { return this.list("rules", worldRuleSchema); }
@@ -303,6 +317,8 @@ function proposalIdentity<T>(proposal: ArtifactProposal<T>): Omit<ArtifactPropos
 export class CanonicalCompiler {
   constructor(private readonly proposals: ProposalStore, private readonly canon: CanonicalModelStore) {}
   async acceptEntity(id: string): Promise<Entity> { const proposal = await this.proposals.read("pending", id, entitySchema); await this.canon.putEntity(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
+  async acceptProposition(id: string): Promise<Proposition> { const proposal = await this.proposals.read("pending", id, propositionSchema); await this.canon.putProposition(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
+  async acceptAttribution(id: string): Promise<Attribution> { const proposal = await this.proposals.read("pending", id, attributionSchema); await this.canon.putAttribution(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptClaim(id: string): Promise<Claim> { const proposal = await this.proposals.read("pending", id, claimSchema); await this.canon.putClaim(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptEvent(id: string): Promise<CanonicalEvent> { const proposal = await this.proposals.read("pending", id, canonicalEventSchema); await this.canon.putEvent(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptRule(id: string): Promise<WorldRule> { const proposal = await this.proposals.read("pending", id, worldRuleSchema); await this.canon.putRule(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }

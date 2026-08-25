@@ -15,6 +15,8 @@ import { EvidenceAssertionStore, evidenceAssertionSourceIds } from "./evidence-a
 type ArtifactStatus = "canonical" | "pending";
 export const COMPILER_ARTIFACT_KINDS = [
   "entity",
+  "proposition",
+  "attribution",
   "claim",
   "canonical-event",
   "world-rule",
@@ -123,8 +125,10 @@ export async function loadCompilerArtifactRecords(
   const initial = new InitialWorldStore(workspaceRoot);
   const proposals = new ProposalStore(workspaceRoot);
   const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
-  const [entities, claims, events, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
+  const [entities, propositions, attributions, claims, events, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
     canon.listEntities(),
+    canon.listPropositions(),
+    canon.listAttributions(),
     canon.listClaims(),
     canon.listEvents(),
     canon.listRules(),
@@ -149,6 +153,8 @@ export async function loadCompilerArtifactRecords(
     }
   };
   addCanonical(entities, "entity", (value) => ({ id: value.id, label: value.canonicalName }));
+  addCanonical(propositions, "proposition", (value) => ({ id: value.id, label: `${value.subjectEntityId} ${value.relationId}` }));
+  addCanonical(attributions, "attribution", (value) => ({ id: value.id, label: `${value.holderKind} ${value.attitude} ${value.propositionId}` }));
   addCanonical(claims, "claim", (value) => ({ id: value.id, label: `${value.subject} ${value.predicate}` }));
   addCanonical(events, "canonical-event", (value) => ({ id: value.id, label: value.title }));
   addCanonical(rules, "world-rule", (value) => ({ id: value.id, label: value.name }));

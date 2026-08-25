@@ -3,6 +3,8 @@ import { z } from "zod";
 export type ProjectId = string;
 export type EntityId = string;
 export type ClaimId = string;
+export type PropositionId = string;
+export type AttributionId = string;
 export type CanonicalEventId = string;
 export type RuleId = string;
 export type BranchId = string;
@@ -135,6 +137,70 @@ export const storyTimeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("unknown") }).strict(),
 ]);
 export type StoryTime = z.infer<typeof storyTimeSchema>;
+
+/**
+ * A proposition is semantic content, not an assertion that the content is
+ * world truth. Truth commitment remains the responsibility of validated
+ * events, state deltas, rules, and their branch history.
+ */
+export const propositionObjectSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("entity"), entityId: idSchema }).strict(),
+  z.object({
+    kind: z.literal("literal"),
+    value: z.union([z.string(), z.number().finite(), z.boolean(), z.null()]),
+  }).strict(),
+  z.object({ kind: z.literal("proposition"), propositionId: idSchema }).strict(),
+]);
+export type PropositionObject = z.infer<typeof propositionObjectSchema>;
+
+export const propositionSchema = z
+  .object({
+    id: idSchema,
+    subjectEntityId: idSchema,
+    relationId: idSchema,
+    object: propositionObjectSchema,
+    polarity: z.enum(["positive", "negative"]),
+    modality: z.enum(["asserted", "possible", "necessary", "counterfactual"]),
+    validStoryTime: storyTimeSchema.optional(),
+    evidence: z.array(evidenceRefSchema),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.object.kind === "proposition" && value.object.propositionId === value.id) {
+      ctx.addIssue({ code: "custom", path: ["object", "propositionId"], message: "A proposition cannot contain itself" });
+    }
+  });
+export type Proposition = z.infer<typeof propositionSchema>;
+
+/**
+ * Attribution records an epistemic or speech attitude toward a proposition.
+ * Accepting this record validates that the attribution is source-grounded; it
+ * does not promote the referenced proposition to world truth.
+ */
+export const attributionSchema = z
+  .object({
+    id: idSchema,
+    propositionId: idSchema,
+    holderKind: z.enum(["narrator", "character", "document", "unknown"]),
+    holderEntityId: idSchema.optional(),
+    attitude: z.enum(["asserts", "knows", "believes", "suspects", "reports", "denies", "questions"]),
+    certainty: z.number().finite().min(0).max(1),
+    sourceAttributionId: idSchema.optional(),
+    evidence: z.array(evidenceRefSchema),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.holderKind === "character" || value.holderKind === "document") && !value.holderEntityId) {
+      ctx.addIssue({ code: "custom", path: ["holderEntityId"], message: `${value.holderKind} attribution requires holderEntityId` });
+    }
+    if ((value.holderKind === "narrator" || value.holderKind === "unknown") && value.holderEntityId) {
+      ctx.addIssue({ code: "custom", path: ["holderEntityId"], message: `${value.holderKind} attribution cannot name a holder entity` });
+    }
+    if (value.sourceAttributionId === value.id) {
+      ctx.addIssue({ code: "custom", path: ["sourceAttributionId"], message: "An attribution cannot source itself" });
+    }
+  });
+export type Attribution = z.infer<typeof attributionSchema>;
 
 /**
  * Human/calendar time and replay order deliberately stay separate. `step` is

@@ -602,6 +602,15 @@ an acquisition mode:
 The world-truth decision remains separate. An asserted proposition is not
 automatically a state fact.
 
+Implementation note (2026-08-25): M4a-1 now persists `Proposition` and
+`Attribution` as immutable, source-scoped semantic artifacts with proposal,
+closure, dependency-order, validator, retrieval, audit, prepared-cache, branch
+snapshot, and removal support. Payloads retain compatibility `EvidenceRef[]`;
+field-level `EvidenceAssertion` bindings remain in the host-owned assertion
+store keyed by artifact revision rather than duplicating assertion IDs inside
+the payload. Quotation/mention trace and `KnowledgeDelta` acquisition linkage
+remain M4a-2 work.
+
 ### 6.5 Events, participation, time, and event relations
 
 ```ts

@@ -353,6 +353,9 @@ describe("versioned prepared novel cache", () => {
     const semanticLegacyBase = path.join(semanticLegacyRoot, published.contentMd5);
     const currentBundle = JSON.parse(await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8")) as Record<string, unknown>;
     delete currentBundle.compilerFingerprint;
+    const legacyCanonical = currentBundle.canonical as Record<string, unknown>;
+    delete legacyCanonical.propositions;
+    delete legacyCanonical.attributions;
     const legacyHash = contentHash(currentBundle);
     const semanticLegacyRevision = path.join(semanticLegacyBase, "revisions", legacyHash);
     await fs.mkdir(semanticLegacyRevision, { recursive: true });

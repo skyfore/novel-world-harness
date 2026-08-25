@@ -611,6 +611,14 @@ type Attribution = {
 
 World truth、narrator assertion 和 actor belief 始终是三个不同投影。
 
+实现进度说明（2026-08-25）：M4a-1 已将 `Proposition` 与
+`Attribution` 落为 source-scoped、不可变 revision 语义 artifact，并接通
+proposal、closure、依赖排序、validator、检索、audit、prepared cache、
+branch snapshot 与删除生命周期。payload 暂时保留兼容用
+`EvidenceRef[]`；字段级 `EvidenceAssertion` 继续由 host 以 artifact revision
+为键独立存储，避免在 payload 内复制 assertion ID。quotation/mention trace
+以及 `KnowledgeDelta` acquisition 串联留在 M4a-2。
+
 ### 5.5 EventMention、Participation 与 EventRelation
 
 ```ts

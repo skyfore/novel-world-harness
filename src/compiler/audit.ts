@@ -89,6 +89,8 @@ export type CompilerAuditReport = {
   };
   canonical: {
     entities: number;
+    propositions: number;
+    attributions: number;
     claims: number;
     events: number;
     rules: number;
@@ -136,7 +138,7 @@ export type CompilerAuditReport = {
     causalityConsistency: number | null;
     entityResolution: number | null;
     majorEventResolution: number | null;
-    epistemicCoverage: null;
+    epistemicCoverage: number | null;
     timelineAnchoring: number | null;
     eventEffectExplicitness: number | null;
     characterDevelopmentCoverage: number | null;
@@ -341,8 +343,10 @@ export async function auditCompiler(
 
   const canon = new CanonicalModelStore(workspaceRoot);
   const actorStore = new ActorModelStore(workspaceRoot);
-  const [allEntities, allClaims, allEvents, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
+  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
     canon.listEntities(),
+    canon.listPropositions(),
+    canon.listAttributions(),
     canon.listClaims(),
     canon.listEvents(),
     canon.listRules(),
@@ -358,6 +362,8 @@ export async function auditCompiler(
     return matches;
   };
   const entities = allEntities.filter(belongsToSelectedSource);
+  const propositions = allPropositions.filter(belongsToSelectedSource);
+  const attributions = allAttributions.filter(belongsToSelectedSource);
   const claims = allClaims.filter(belongsToSelectedSource);
   const events = allEvents.filter(belongsToSelectedSource);
   const rules = allRules.filter(belongsToSelectedSource);
@@ -368,6 +374,8 @@ export async function auditCompiler(
 
   const evidenceArtifacts: Array<{ name: string; kind: string; id: string; payload: unknown; evidence: EvidenceRef[] }> = [
     ...entities.map((item) => ({ name: `entity:${item.id}`, kind: "entity", id: item.id, payload: item, evidence: item.evidence })),
+    ...propositions.map((item) => ({ name: `proposition:${item.id}`, kind: "proposition", id: item.id, payload: item, evidence: item.evidence })),
+    ...attributions.map((item) => ({ name: `attribution:${item.id}`, kind: "attribution", id: item.id, payload: item, evidence: item.evidence })),
     ...claims.map((item) => ({ name: `claim:${item.id}`, kind: "claim", id: item.id, payload: item, evidence: item.evidence })),
     ...events.map((item) => ({ name: `event:${item.id}`, kind: "canonical-event", id: item.id, payload: item, evidence: item.evidence })),
     ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: item.evidence })),
@@ -727,6 +735,8 @@ export async function auditCompiler(
     },
     canonical: {
       entities: entities.length,
+      propositions: propositions.length,
+      attributions: attributions.length,
       claims: claims.length,
       events: events.length,
       rules: rules.length,
@@ -778,7 +788,9 @@ export async function auditCompiler(
       majorEventResolution: majorEventMentions
         ? Math.min(1, majorResolvedEventMentions / majorEventMentions)
         : null,
-      epistemicCoverage: null,
+      epistemicCoverage: propositions.length
+        ? new Set(attributions.map((attribution) => attribution.propositionId)).size / propositions.length
+        : null,
       timelineAnchoring,
       eventEffectExplicitness,
       characterDevelopmentCoverage,

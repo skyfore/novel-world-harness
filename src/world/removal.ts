@@ -88,6 +88,20 @@ export async function removeNovelAnalysis(
     else await canonical.removeCurrent("entities", entity.id);
     canonicalArtifacts += 1;
   }
+  for (const proposition of await canonical.listPropositions()) {
+    if (!containsSourceEvidence(proposition, sourceId)) continue;
+    const evidence = withoutSourceEvidence(proposition, sourceId);
+    if (evidence.length) await canonical.putProposition({ ...proposition, evidence });
+    else await canonical.removeCurrent("propositions", proposition.id);
+    canonicalArtifacts += 1;
+  }
+  for (const attribution of await canonical.listAttributions()) {
+    if (!containsSourceEvidence(attribution, sourceId)) continue;
+    const evidence = withoutSourceEvidence(attribution, sourceId);
+    if (evidence.length) await canonical.putAttribution({ ...attribution, evidence });
+    else await canonical.removeCurrent("attributions", attribution.id);
+    canonicalArtifacts += 1;
+  }
   for (const claim of await canonical.listClaims()) {
     if (!containsSourceEvidence(claim, sourceId)) continue;
     const evidence = withoutSourceEvidence(claim, sourceId);

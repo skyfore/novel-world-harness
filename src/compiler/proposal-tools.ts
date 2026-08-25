@@ -102,6 +102,8 @@ function proposalResult(
 
 const labels: Record<CompilerProposalKind, { name: string; label: string; description: string }> = {
   entity: { name: "propose_entity", label: "Propose entity", description: "Submit a typed entity candidate backed by source evidence. This creates a pending proposal only." },
+  proposition: { name: "propose_proposition", label: "Propose proposition", description: "Submit evidence-backed semantic content. Acceptance records the content but never makes it world truth; events, state deltas, and rules retain that authority." },
+  attribution: { name: "propose_attribution", label: "Propose attribution", description: "Submit who asserts, believes, reports, denies, or questions a proposition. The attitude remains separate from both proposition content and world truth." },
   claim: { name: "propose_claim", label: "Propose claim", description: "Submit an evidence-backed base-world claim candidate. Character knowledge or ignorance is never a claim predicate; represent learning only in a KnowledgeDelta. This does not commit canonical truth." },
   "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Later canon remains a candidate until runtime commitment." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },

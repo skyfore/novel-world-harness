@@ -9,7 +9,7 @@ import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../w
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema } from "../world/initial.js";
-import { WORLD_ENGINE_VERSION, canonicalEventSchema, claimSchema, entitySchema, worldRuleSchema, type EvidenceRef } from "../world/model.js";
+import { WORLD_ENGINE_VERSION, attributionSchema, canonicalEventSchema, claimSchema, entitySchema, propositionSchema, worldRuleSchema, type EvidenceRef } from "../world/model.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
@@ -29,7 +29,7 @@ import { EvidenceVerifier } from "./evidence.js";
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 16;
+export const COMPILER_PROMPT_VERSION = 17;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -52,6 +52,8 @@ const preparedNovelBundleSchema = z.object({
   batchIds: z.array(z.string().min(1)),
   canonical: z.object({
     entities: z.array(entitySchema),
+    propositions: z.array(propositionSchema).default([]),
+    attributions: z.array(attributionSchema).default([]),
     claims: z.array(claimSchema),
     events: z.array(canonicalEventSchema),
     rules: z.array(worldRuleSchema),
@@ -80,6 +82,8 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
   }
   const collections = [
     bundle.canonical.entities,
+    bundle.canonical.propositions,
+    bundle.canonical.attributions,
     bundle.canonical.claims,
     bundle.canonical.events,
     bundle.canonical.rules,
@@ -424,8 +428,10 @@ export class PreparedNovelCache {
         if (matches) assertEvidenceExclusiveToSource(item.evidence, source.id, `Prepared artifact ${item.id ?? item.actorId ?? "unknown"}`);
         return matches;
       });
-    const [entities, claims, events, rules, goals, models, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, rules, goals, models, possibilities] = await Promise.all([
       canonical.listEntities(),
+      canonical.listPropositions(),
+      canonical.listAttributions(),
       canonical.listClaims(),
       canonical.listEvents(),
       canonical.listRules(),
@@ -454,6 +460,8 @@ export class PreparedNovelCache {
         .sort(),
       canonical: {
         entities: fromSource(entities),
+        propositions: fromSource(propositions),
+        attributions: fromSource(attributions),
         claims: fromSource(claims),
         events: fromSource(events),
         rules: fromSource(rules),
@@ -489,6 +497,8 @@ export class PreparedNovelCache {
     const expected = bundle.canonical;
     const groups = [
       ["entity", current.entities, expected.entities, (item: { id: string }) => item.id],
+      ["proposition", current.propositions, expected.propositions, (item: { id: string }) => item.id],
+      ["attribution", current.attributions, expected.attributions, (item: { id: string }) => item.id],
       ["claim", current.claims, expected.claims, (item: { id: string }) => item.id],
       ["event", current.events, expected.events, (item: { id: string }) => item.id],
       ["rule", current.rules, expected.rules, (item: { id: string }) => item.id],
@@ -530,6 +540,8 @@ export class PreparedNovelCache {
       });
     const groups = [
       ["entities", fromSource(current.entities), bundle.canonical.entities, (item: { id: string }) => item.id],
+      ["propositions", fromSource(current.propositions), bundle.canonical.propositions, (item: { id: string }) => item.id],
+      ["attributions", fromSource(current.attributions), bundle.canonical.attributions, (item: { id: string }) => item.id],
       ["claims", fromSource(current.claims), bundle.canonical.claims, (item: { id: string }) => item.id],
       ["events", fromSource(current.events), bundle.canonical.events, (item: { id: string }) => item.id],
       ["rules", fromSource(current.rules), bundle.canonical.rules, (item: { id: string }) => item.id],
@@ -588,6 +600,8 @@ export class PreparedNovelCache {
         }
       };
       await removeMissing(current.entities, new Set(bundle.canonical.entities.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("entities", id));
+      await removeMissing(current.propositions, new Set(bundle.canonical.propositions.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("propositions", id));
+      await removeMissing(current.attributions, new Set(bundle.canonical.attributions.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("attributions", id));
       await removeMissing(current.claims, new Set(bundle.canonical.claims.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("claims", id));
       await removeMissing(current.events, new Set(bundle.canonical.events.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("events", id));
       await removeMissing(current.rules, new Set(bundle.canonical.rules.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("rules", id));
@@ -596,6 +610,8 @@ export class PreparedNovelCache {
       await removeMissing(current.possibilities, new Set(bundle.canonical.possibilities.map((item) => item.id)), (item) => item.id, (id) => possibilities.remove(id));
     }
     for (const entity of bundle.canonical.entities) await canonical.putEntity(entity);
+    for (const proposition of bundle.canonical.propositions) await canonical.putProposition(proposition);
+    for (const attribution of bundle.canonical.attributions) await canonical.putAttribution(attribution);
     for (const claim of bundle.canonical.claims) await canonical.putClaim(claim);
     for (const rule of bundle.canonical.rules) await canonical.putRule(rule);
     for (const event of bundle.canonical.events) await canonical.putEvent(event);
@@ -663,7 +679,7 @@ export class PreparedNovelCache {
       await fs.access(revisionDirectory);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await this.writeRevisionDirectory(contentMd5, legacy.manifest, legacy.bundle);
+      await this.writeRevisionDirectory(contentMd5, legacy.manifest, legacy.rawBundle);
     }
     if (!await this.readActive(contentMd5)) await this.writeActive(contentMd5, legacy.manifest.bundleHash);
   }
@@ -671,15 +687,18 @@ export class PreparedNovelCache {
   private async writeRevisionDirectory(
     contentMd5: string,
     manifest: z.infer<typeof preparedNovelManifestSchema>,
-    bundle: PreparedNovelBundle,
+    rawBundle: unknown,
   ): Promise<void> {
+    if (contentHash(rawBundle) !== manifest.bundleHash) {
+      throw new Error(`Prepared cache migration payload does not match immutable bundle hash ${manifest.bundleHash}.`);
+    }
     const revisionsRoot = path.join(this.cachePath(contentMd5), "revisions");
     await fs.mkdir(revisionsRoot, { recursive: true, mode: 0o700 });
     const target = this.revisionPath(contentMd5, manifest.bundleHash);
     const staging = path.join(revisionsRoot, `.${manifest.bundleHash}.${process.pid}.${crypto.randomUUID()}.tmp`);
     await fs.mkdir(staging, { mode: 0o700 });
     try {
-      await fs.writeFile(path.join(staging, "bundle.json"), `${canonicalJson(bundle)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
+      await fs.writeFile(path.join(staging, "bundle.json"), `${canonicalJson(rawBundle)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
       await fs.writeFile(path.join(staging, "manifest.json"), `${canonicalJson(manifest)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
       await fs.chmod(staging, 0o700);
       try { await fs.rename(staging, target); }
@@ -697,6 +716,7 @@ export class PreparedNovelCache {
   private async readCached(contentMd5: string, requestedHash?: string): Promise<{
     manifest: z.infer<typeof preparedNovelManifestSchema>;
     bundle: PreparedNovelBundle;
+    rawBundle: unknown;
     cachePath: string;
   } | null> {
     if (requestedHash) return this.readDirectory(contentMd5, this.revisionPath(contentMd5, requestedHash));
@@ -712,6 +732,7 @@ export class PreparedNovelCache {
   private async readDirectory(contentMd5: string, directory: string): Promise<{
     manifest: z.infer<typeof preparedNovelManifestSchema>;
     bundle: PreparedNovelBundle;
+    rawBundle: unknown;
     cachePath: string;
   } | null> {
     try {
@@ -720,7 +741,9 @@ export class PreparedNovelCache {
         fs.readFile(path.join(directory, "bundle.json"), "utf8"),
       ]);
       const manifest = preparedNovelManifestSchema.parse(JSON.parse(manifestRaw));
-      const bundle = preparedNovelBundleSchema.parse(JSON.parse(bundleRaw));
+      const rawBundle: unknown = JSON.parse(bundleRaw);
+      if (contentHash(rawBundle) !== manifest.bundleHash) throw new Error(`Prepared cache bundle hash mismatch: ${directory}`);
+      const bundle = preparedNovelBundleSchema.parse(rawBundle);
       assertPreparedBundleSourceScope(bundle);
       if (manifest.contentMd5 !== contentMd5 || bundle.source.contentMd5 !== contentMd5) throw new Error(`Prepared cache path/digest mismatch: ${directory}`);
       if (
@@ -728,8 +751,7 @@ export class PreparedNovelCache {
         || manifest.sourceId !== bundle.source.id
         || bundle.source.id !== bundle.source.contentSha256.slice(0, 20)
       ) throw new Error(`Prepared cache source identity mismatch: ${directory}`);
-      if (contentHash(bundle) !== manifest.bundleHash) throw new Error(`Prepared cache bundle hash mismatch: ${directory}`);
-      return { manifest, bundle, cachePath: directory };
+      return { manifest, bundle, rawBundle, cachePath: directory };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -785,6 +807,8 @@ async function currentCanonical(workspaceRoot: string) {
   const actors = new ActorModelStore(workspaceRoot);
   return {
     entities: await canonical.listEntities(),
+    propositions: await canonical.listPropositions(),
+    attributions: await canonical.listAttributions(),
     claims: await canonical.listClaims(),
     events: await canonical.listEvents(),
     rules: await canonical.listRules(),
@@ -820,6 +844,8 @@ function isAlreadyExists(error: unknown): boolean {
 function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore: CanonicalModelStore): void {
   const catalog: CompilerValidationCatalog = {
     entities: new Map(bundle.canonical.entities.map((item) => [item.id, item])),
+    propositions: new Map(bundle.canonical.propositions.map((item) => [item.id, item])),
+    attributions: new Map(bundle.canonical.attributions.map((item) => [item.id, item])),
     claims: new Map(bundle.canonical.claims.map((item) => [item.id, item])),
     events: new Map(bundle.canonical.events.map((item) => [item.id, item])),
     rules: new Map(bundle.canonical.rules.map((item) => [item.id, item])),
@@ -827,6 +853,8 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
   const validator = new CompilerValidator(canonicalStore);
   const artifacts: Array<{ kind: CanonicalProposalKind; label: string; payload: unknown }> = [
     ...bundle.canonical.entities.map((payload) => ({ kind: "entity" as const, label: payload.id, payload })),
+    ...bundle.canonical.propositions.map((payload) => ({ kind: "proposition" as const, label: payload.id, payload })),
+    ...bundle.canonical.attributions.map((payload) => ({ kind: "attribution" as const, label: payload.id, payload })),
     ...bundle.canonical.claims.map((payload) => ({ kind: "claim" as const, label: payload.id, payload })),
     ...bundle.canonical.rules.map((payload) => ({ kind: "world-rule" as const, label: payload.id, payload })),
     ...bundle.canonical.events.map((payload) => ({ kind: "canonical-event" as const, label: payload.id, payload })),

@@ -34,6 +34,49 @@ describe("CanonicalModelStore revisions", () => {
     await expect(canon.getEntityRevision("hero", first!.hash)).resolves.toMatchObject({ aliases: [] });
   });
 
+  it("pins proposition content and attribution separately from mutable canonical refs", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-semantic-context-revision-"));
+    roots.push(root);
+    const canon = new CanonicalModelStore(root);
+    const contexts = new WorldContextStore(root, canon);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] });
+    await canon.putProposition({
+      id: "hero-ready",
+      subjectEntityId: "hero",
+      relationId: "ready",
+      object: { kind: "literal", value: true },
+      polarity: "positive",
+      modality: "asserted",
+      evidence: [],
+    });
+    await canon.putAttribution({
+      id: "narrator-hero-ready",
+      propositionId: "hero-ready",
+      holderKind: "narrator",
+      attitude: "asserts",
+      certainty: 1,
+      evidence: [],
+    });
+    const first = await contexts.captureCurrent();
+
+    await canon.putProposition({
+      id: "hero-ready",
+      subjectEntityId: "hero",
+      relationId: "ready",
+      object: { kind: "literal", value: false },
+      polarity: "positive",
+      modality: "asserted",
+      evidence: [],
+    });
+    const latest = await contexts.captureCurrent();
+    const pinned = await contexts.load(first.canonicalSnapshotHash!);
+
+    expect(pinned.propositions?.get("hero-ready")?.object).toEqual({ kind: "literal", value: true });
+    expect(pinned.attributions?.get("narrator-hero-ready")?.propositionId).toBe("hero-ready");
+    expect(latest.propositions?.get("hero-ready")?.object).toEqual({ kind: "literal", value: false });
+    expect(pinned.claims?.size).toBe(0);
+  });
+
   it("pins branch projection to the canonical snapshot captured at genesis", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-context-snapshot-"));
     roots.push(root);

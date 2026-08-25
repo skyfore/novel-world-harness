@@ -237,7 +237,8 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("withdraw_compiler_proposal"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("kind=canon-analogue"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Use player-choice"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("host deterministically injects exact immutable EvidenceRefs"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("evidence_selectors"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("host alone resolves trusted byte/line ranges and hashes"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("do not call list_files, search_files, or read_file"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Never invent or edit an evidence handle"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("at most one state operation"))).toBe(true);

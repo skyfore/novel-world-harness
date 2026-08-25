@@ -37,6 +37,77 @@ export type SourceSpan = z.infer<typeof sourceSpanSchema>;
 export const evidenceRefSchema = z.object({ span: sourceSpanSchema, strength: z.enum(["explicit", "strong-inference", "weak-inference"]) }).strict();
 export type EvidenceRef = z.infer<typeof evidenceRefSchema>;
 
+export const textAnchorSchema = z
+  .object({
+    version: z.literal(1),
+    sourceId: idSchema,
+    startByte: z.number().int().nonnegative(),
+    endByte: z.number().int().positive(),
+    startLine: z.number().int().positive(),
+    endLine: z.number().int().positive(),
+    exactHash: z.string().regex(/^[a-f0-9]{64}$/),
+    prefixHash: z.string().regex(/^[a-f0-9]{64}$/),
+    suffixHash: z.string().regex(/^[a-f0-9]{64}$/),
+    contextBytes: z.literal(64),
+    normalization: z.literal("source-bytes-v1"),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.endByte <= value.startByte) {
+      ctx.addIssue({ code: "custom", message: "endByte must be greater than startByte", path: ["endByte"] });
+    }
+    if (value.endLine < value.startLine) {
+      ctx.addIssue({ code: "custom", message: "endLine must be >= startLine", path: ["endLine"] });
+    }
+  });
+export type TextAnchor = z.infer<typeof textAnchorSchema>;
+
+export const evidenceAssertionSchema = z
+  .object({
+    version: z.literal(1),
+    id: idSchema,
+    target: z.object({
+      artifactKind: idSchema,
+      artifactId: idSchema,
+      jsonPointer: z.string().refine(
+        (value) => /^(?:\/(?:[^~/]|~[01])*)*$/.test(value),
+        "jsonPointer must be an RFC 6901 pointer",
+      ),
+    }).strict(),
+    anchors: z.array(textAnchorSchema).min(1).max(16),
+    relation: z.enum(["supports", "contradicts", "contextualizes"]),
+    strength: z.enum(["explicit", "strong-inference", "weak-inference"]),
+    interpretation: z.string().trim().min(1).max(1_000).optional(),
+    derivation: z.object({
+      runId: z.string().min(1).max(300),
+      worker: z.string().min(1),
+      compilerBatchId: idSchema.optional(),
+      provider: z.string().min(1).optional(),
+      model: z.string().min(1).optional(),
+      promptHash: z.string().min(1).optional(),
+      ontologyVersion: z.literal("evidence-v1"),
+    }).strict(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.strength !== "explicit" && !value.interpretation) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Inferred evidence assertions require an interpretation",
+        path: ["interpretation"],
+      });
+    }
+    const sourceIds = new Set(value.anchors.map((anchor) => anchor.sourceId));
+    if (sourceIds.size !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "One evidence assertion cannot mix source documents",
+        path: ["anchors"],
+      });
+    }
+  });
+export type EvidenceAssertion = z.infer<typeof evidenceAssertionSchema>;
+
 export const entityKindSchema = z.enum(["character", "location", "faction", "artifact", "institution", "relationship", "concept", "other"]);
 export type EntityKind = z.infer<typeof entityKindSchema>;
 
@@ -692,9 +763,9 @@ export const validationReportSchema = z.object({ proposalId: idSchema, evaluated
 export type ValidationReport = z.infer<typeof validationReportSchema>;
 
 export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
-  z.object({ id: idSchema, kind: z.string().min(1), schemaVersion: z.number().int().positive(), payload, evidence: z.array(evidenceRefSchema), generatedBy: z.object({ worker: z.string().min(1), provider: z.string().optional(), model: z.string().optional(), promptHash: z.string().optional(), compilerBatchId: idSchema.optional() }).strict(), createdAt: z.string().min(1) }).strict();
+  z.object({ id: idSchema, kind: z.string().min(1), schemaVersion: z.number().int().positive(), payload, evidence: z.array(evidenceRefSchema), evidenceAssertions: z.array(evidenceAssertionSchema).default([]), generatedBy: z.object({ worker: z.string().min(1), provider: z.string().optional(), model: z.string().optional(), promptHash: z.string().optional(), compilerBatchId: idSchema.optional() }).strict(), createdAt: z.string().min(1) }).strict();
 
-export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
+export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
 export const WORLD_SCHEMA_VERSION = 1;
 export const WORLD_ENGINE_VERSION = "0.1.0";

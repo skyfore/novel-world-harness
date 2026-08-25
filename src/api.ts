@@ -4,10 +4,12 @@ export { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./com
 export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleSchema, chapterSplitPlanSchema, type ChapterHeadingRule, type ChapterSplitPlan, type ChapterStructureSample } from "./compiler/chapter-split.js";
 export { convergeWorldProposals, type WorldConvergenceProgress, type WorldProposalConvergence } from "./compiler/converge.js";
 export { EvidenceVerifier, type EvidenceInspection, type EvidenceVerification } from "./compiler/evidence.js";
+export { EvidenceAssertionStore, evidenceAssertionSourceIds, validateEvidenceAssertionTargets } from "./compiler/evidence-assertions.js";
+export { jsonPointerExists, modelEvidenceSelectorSchema, modelEvidenceSelectorsSchema, resolveTextAnchor, type ModelEvidenceSelector } from "./compiler/text-anchors.js";
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
 export { PreparedNovelCache, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
 export { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "./compiler/reconcile-world.js";
-export { CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
+export { compilerProposalArtifactId, CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
 export { CompilerCommitService, CompilerValidator, type CompilerConvergenceProgress, type CompilerValidation } from "./compiler/validator.js";
 export {
   evaluateCompilerAgainstGold,

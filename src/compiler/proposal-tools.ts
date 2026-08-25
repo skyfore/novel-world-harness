@@ -1,4 +1,5 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
@@ -9,9 +10,16 @@ import {
   sourceTitleProposalSchema,
   type SourceTitleProposal,
 } from "../storage/novel-title.js";
-import { evidenceRefSchema, idSchema, type EvidenceRef } from "../world/model.js";
+import {
+  evidenceAssertionSchema,
+  evidenceRefSchema,
+  idSchema,
+  type EvidenceAssertion,
+  type EvidenceRef,
+} from "../world/model.js";
 import {
   compilerProposalLogicalIdentity,
+  compilerProposalArtifactId,
   compilerProposalSchemas,
   COMPILER_STATE_FIELDS,
   CompilerProposalService,
@@ -31,6 +39,12 @@ import {
   type ChapterSplitPlan,
 } from "./chapter-split.js";
 import { EvidenceVerifier } from "./evidence.js";
+import {
+  jsonPointerExists,
+  modelEvidenceSelectorsSchema,
+  resolveTextAnchor,
+  type ModelEvidenceSelector,
+} from "./text-anchors.js";
 
 function proposalResult(text: string, details: CompilerProposalRecordedDetails) {
   return { content: [{ type: "text" as const, text }], details };
@@ -73,6 +87,7 @@ type ProposalToolInput = {
   proposal_id: string;
   payload: unknown;
   evidence_segment_ids?: string[];
+  evidence_selectors?: ModelEvidenceSelector[];
   /** Internal compatibility only; absent from the model-facing schema. */
   evidence?: unknown[];
 };
@@ -96,6 +111,9 @@ export function prepareProposalToolArguments(
   if ("payload" in normalized) normalized.payload = parseJsonArgument(normalized.payload, "payload");
   if ("evidence_segment_ids" in normalized) {
     normalized.evidence_segment_ids = parseJsonArgument(normalized.evidence_segment_ids, "evidence_segment_ids");
+  }
+  if ("evidence_selectors" in normalized) {
+    normalized.evidence_selectors = parseJsonArgument(normalized.evidence_selectors, "evidence_selectors");
   }
   if ("evidence" in normalized) normalized.evidence = parseJsonArgument(normalized.evidence, "evidence");
   if (
@@ -130,6 +148,11 @@ function proposalToolParameters(kind: CompilerProposalKind) {
     uniqueItems: true,
     description: "Host-issued immutable source segment IDs. The host injects exact EvidenceRefs; never include payload.evidence or raw hashes.",
   };
+  const { $schema: _selectorDialect, ...selectorJsonSchema } = z.toJSONSchema(modelEvidenceSelectorsSchema);
+  properties.evidence_selectors = {
+    ...selectorJsonSchema,
+    description: "Optional field/relation-level exact quote selectors. Supply source text and a payload JSON Pointer; the host resolves trusted byte offsets and hashes. Never submit hashes or offsets.",
+  };
   jsonSchema.required = [...new Set([...(jsonSchema.required ?? []), "evidence_segment_ids"])];
   constrainCompilerStateFields(jsonSchema);
   return Type.Unsafe<ProposalToolInput>(jsonSchema as TSchema);
@@ -145,9 +168,10 @@ function removeModelWritableEvidence(value: unknown): void {
   const properties = record.properties;
   if (properties && typeof properties === "object" && !Array.isArray(properties)) {
     delete (properties as Record<string, unknown>).evidence;
+    delete (properties as Record<string, unknown>).evidenceAssertions;
   }
   if (Array.isArray(record.required)) {
-    record.required = record.required.filter((name) => name !== "evidence");
+    record.required = record.required.filter((name) => name !== "evidence" && name !== "evidenceAssertions");
   }
   for (const nested of Object.values(record)) removeModelWritableEvidence(nested);
 }
@@ -161,7 +185,15 @@ function containsEvidenceField(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsEvidenceField);
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
-  return Object.hasOwn(record, "evidence") || Object.values(record).some(containsEvidenceField);
+  return Object.hasOwn(record, "evidence")
+    || Object.hasOwn(record, "evidenceAssertions")
+    || Object.values(record).some(containsEvidenceField);
+}
+
+function evidencePointerTargetsEvidence(pointer: string): boolean {
+  return pointer.slice(1).split("/")
+    .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"))
+    .some((token) => token === "evidence" || token === "evidenceAssertions");
 }
 
 function injectHostEvidence(
@@ -415,27 +447,88 @@ export function createCompilerProposalToolset(
       evidence: segments.map(segmentEvidenceRef),
     };
   };
-  const normalizeProposalEvidence = (
+  const normalizeProposalEvidence = async (
     kind: CompilerProposalKind,
     input: ProposalToolInput,
-  ): { payload: unknown; evidence?: unknown[] } => {
+  ): Promise<{ payload: unknown; evidence?: unknown[]; evidenceAssertions: EvidenceAssertion[] }> => {
     if (input.evidence_segment_ids === undefined) {
+      if (input.evidence_selectors !== undefined) {
+        throw new Error("evidence_selectors require evidence_segment_ids in an active source-scoped compiler batch.");
+      }
       if (activeSourceId || compilerBatchId) {
         throw new Error(
           "Source-scoped compiler proposals require evidence_segment_ids; raw EvidenceRef input is available only to the unscoped internal compatibility API.",
         );
       }
-      return { payload: input.payload, ...(input.evidence === undefined ? {} : { evidence: input.evidence }) };
+      return {
+        payload: input.payload,
+        ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
+        evidenceAssertions: [],
+      };
     }
     if (input.evidence !== undefined || containsEvidenceField(input.payload)) {
       throw new Error(
         "Model proposals using evidence_segment_ids must omit payload.evidence, nested evidence fields, and top-level evidence; the host owns EvidenceRef construction.",
       );
     }
-    const { evidence } = resolveEvidenceSegmentIds(input.evidence_segment_ids);
+    const { segments, evidence } = resolveEvidenceSegmentIds(input.evidence_segment_ids);
+    const payload = kind === "state-delta"
+      ? input.payload
+      : injectHostEvidence(kind, input.payload, evidence);
+    const selectors = input.evidence_selectors === undefined
+      ? []
+      : modelEvidenceSelectorsSchema.parse(input.evidence_selectors);
+    const segmentById = new Map(segments.map((segment) => [segment.id, segment]));
+    const artifactId = compilerProposalArtifactId(kind, payload, input.proposal_id);
+    const evidenceAssertions: EvidenceAssertion[] = [];
+    for (let index = 0; index < selectors.length; index += 1) {
+      const selector = selectors[index]!;
+      const segment = segmentById.get(selector.segment_id);
+      if (!segment) {
+        throw new Error(
+          `Evidence selector ${index + 1} references ${selector.segment_id}, which is not present in evidence_segment_ids.`,
+        );
+      }
+      if (evidencePointerTargetsEvidence(selector.target_path)) {
+        throw new Error(`Evidence selector target_path '${selector.target_path}' cannot target host-owned evidence fields.`);
+      }
+      if (!jsonPointerExists(input.payload, selector.target_path)) {
+        throw new Error(`Evidence selector target_path '${selector.target_path}' does not exist in the proposal payload.`);
+      }
+      const anchor = await resolveTextAnchor(workspaceRoot, segment, selector);
+      const assertionId = `evidence-${crypto.createHash("sha256").update([
+        input.proposal_id,
+        String(index),
+        selector.target_path,
+        selector.relation,
+        selector.strength,
+        selector.segment_id,
+        anchor.exactHash,
+      ].join("\u0000")).digest("hex").slice(0, 32)}`;
+      evidenceAssertions.push(evidenceAssertionSchema.parse({
+        version: 1,
+        id: assertionId,
+        target: {
+          artifactKind: kind,
+          artifactId,
+          jsonPointer: selector.target_path,
+        },
+        anchors: [anchor],
+        relation: selector.relation,
+        strength: selector.strength,
+        ...(selector.interpretation ? { interpretation: selector.interpretation } : {}),
+        derivation: {
+          runId: compilerBatchId ?? input.proposal_id,
+          worker: labels[kind].name,
+          ...(compilerBatchId ? { compilerBatchId } : {}),
+          ...generatedBy,
+          ontologyVersion: "evidence-v1",
+        },
+      }));
+    }
     return kind === "state-delta"
-      ? { payload: input.payload, evidence }
-      : { payload: injectHostEvidence(kind, input.payload, evidence) };
+      ? { payload, evidence, evidenceAssertions }
+      : { payload, evidenceAssertions };
   };
   const adjacentSegment = (direction: "previous" | "next") => {
     if (!activeSourceId || expectedSegmentIds.length === 0 || boundedSliceSegments.length !== expectedSegmentIds.length) {
@@ -755,7 +848,7 @@ export function createCompilerProposalToolset(
       label: metadata.label,
       description: metadata.description,
       promptSnippet: metadata.description,
-      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
+      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "For each material field or relation, add an evidence_selector with an exact source quote, its payload JSON Pointer, relation, and independently judged strength. Never submit offsets or hashes.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
       executionMode: "sequential",
       parameters,
       prepareArguments: (args) => prepareProposalToolArguments(args, kind),
@@ -767,7 +860,7 @@ export function createCompilerProposalToolset(
         if (isStructureDiscoveryBatch()) {
           throw new Error("World-artifact proposals are unavailable during chapter structure discovery.");
         }
-        const normalized = normalizeProposalEvidence(kind, input);
+        const normalized = await normalizeProposalEvidence(kind, input);
         await assertEvidenceWithinBoundedSlice(normalized.payload, normalized.evidence);
         await assertStableLogicalRevision(service, kind, normalized.payload, compilerBatchId);
         if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
@@ -777,6 +870,7 @@ export function createCompilerProposalToolset(
           proposalId: input.proposal_id,
           payload: normalized.payload,
           evidence: normalized.evidence,
+          evidenceAssertions: normalized.evidenceAssertions,
           generatedBy: {
             worker: metadata.name,
             ...generatedBy,

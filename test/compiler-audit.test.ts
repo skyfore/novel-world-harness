@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { auditCompiler } from "../src/compiler/audit.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { SegmentStore, segmentSource } from "../src/compiler/segments.js";
+import { resolveTextAnchor } from "../src/compiler/text-anchors.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
@@ -44,7 +45,7 @@ describe("compiler audit", () => {
     expect(report.readiness).toMatchObject({
       policyVersion: "baseline-v1",
       structural: "ready",
-      evidence: "ready",
+      evidence: "unknown",
       accounting: "unknown",
       resolution: "unknown",
       semantic: "unknown",
@@ -53,9 +54,56 @@ describe("compiler audit", () => {
     });
     expect(report.readiness.unknownDimensions).toEqual(expect.arrayContaining([
       "accounting",
+      "evidence",
       "resolution",
       "semantic",
     ]));
+  });
+
+  it("reports evidence readiness only when canonical artifacts have valid exact bindings", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-exact-evidence-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero appears.\n");
+    const segment = (await new SegmentStore(root).list(fixture.source.id))[0]!;
+    const payload = {
+      id: "hero",
+      kind: "character" as const,
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("Hero appears."),
+    };
+    const anchor = await resolveTextAnchor(root, segment, {
+      segment_id: segment.id,
+      exact: "Hero",
+      target_path: "/canonicalName",
+      relation: "supports",
+      strength: "explicit",
+    });
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "hero-exact",
+      payload,
+      evidenceAssertions: [{
+        version: 1,
+        id: "evidence-hero-name",
+        target: { artifactKind: "entity", artifactId: "hero", jsonPointer: "/canonicalName" },
+        anchors: [anchor],
+        relation: "supports",
+        strength: "explicit",
+        derivation: { runId: "audit-test", worker: "test", ontologyVersion: "evidence-v1" },
+      }],
+      generatedBy: { worker: "test" },
+    });
+    expect((await new CompilerCommitService(root).accept("entity", "hero-exact")).accepted).toBe(true);
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.evidence).toMatchObject({
+      assertionsChecked: 1,
+      artifactsWithExactEvidence: 1,
+      invalidAssertions: 0,
+      exactBindingRatio: 1,
+    });
+    expect(report.readiness.evidence).toBe("ready");
   });
 
   it("can audit one source without inheriting another source's changed file or artifacts", async () => {

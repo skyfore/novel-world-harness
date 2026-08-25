@@ -144,9 +144,46 @@ type EvidenceRef = {
   span: SourceSpan;
   strength: "explicit" | "strong-inference" | "weak-inference";
 };
+
+type TextAnchor = {
+  version: 1;
+  sourceId: string;
+  startByte: number;
+  endByte: number;
+  startLine: number;
+  endLine: number;
+  exactHash: string;
+  prefixHash: string;
+  suffixHash: string;
+  contextBytes: 64;
+  normalization: "source-bytes-v1";
+};
+
+type EvidenceAssertion = {
+  version: 1;
+  id: string;
+  target: { artifactKind: string; artifactId: string; jsonPointer: string };
+  anchors: TextAnchor[];
+  relation: "supports" | "contradicts" | "contextualizes";
+  strength: "explicit" | "strong-inference" | "weak-inference";
+  interpretation?: string;
+  derivation: { runId: string; worker: string; ontologyVersion: "evidence-v1" };
+};
 ```
 
-`quoteHash` lets the compiler detect stale evidence after a source file changes.
+`EvidenceRef` remains compatibility context for a bounded source segment. New
+field- and relation-level grounding uses `EvidenceAssertion`: its JSON Pointer
+identifies the supported semantic target, while its exact and adjacent-context
+hashes make the citation independently reviewable. Models submit only exact
+text selectors, context for disambiguation, target paths, relations, and
+strength; the host resolves byte/line ranges and every trusted hash from the
+immutable archived source. Inferred strengths require an interpretation.
+
+Exact assertions are immutable revisions stored separately from semantic world
+artifacts. On commit, an atomic binding connects the active artifact content
+hash to its current assertion revisions. This lets provenance change without
+manufacturing a new world-model revision, while audit and retrieval can reject
+stale bindings.
 
 ### 5.3 Entity
 

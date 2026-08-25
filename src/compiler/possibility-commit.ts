@@ -1,11 +1,17 @@
-import type { EvidenceRef, Predicate, ValidationIssue, WorldRule } from "../world/model.js";
+import type { EvidenceAssertion, EvidenceRef, Predicate, ValidationIssue, WorldRule } from "../world/model.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { EvidenceVerifier } from "./evidence.js";
 import { hasExecutablePossibilityEffect } from "./semantics.js";
-import { canonicalJson } from "../world/canonical.js";
+import { canonicalJson, contentHash } from "../world/canonical.js";
 import { canonicalScaffoldRoleNeutralityIssues } from "../world/canonical-adaptation.js";
+import {
+  EvidenceAssertionStore,
+  evidenceAssertionSourceIds,
+  validateEvidenceAssertionTargets,
+} from "./evidence-assertions.js";
+import { evidenceSourceIds } from "../world/source-scope.js";
 
 export type PossibilityValidation = {
   accepted: boolean;
@@ -17,6 +23,7 @@ export class PossibilityCommitService {
   readonly proposals: ProposalStore;
   readonly templates: PossibilityTemplateStore;
   readonly canon: CanonicalModelStore;
+  readonly exactEvidence: EvidenceAssertionStore;
   private readonly evidence: EvidenceVerifier;
   private readonly stateSchema = new StateSchemaRegistry(DEFAULT_STATE_FIELDS);
 
@@ -24,10 +31,15 @@ export class PossibilityCommitService {
     this.proposals = new ProposalStore(workspaceRoot);
     this.templates = new PossibilityTemplateStore(workspaceRoot);
     this.canon = new CanonicalModelStore(workspaceRoot);
+    this.exactEvidence = new EvidenceAssertionStore(workspaceRoot);
     this.evidence = new EvidenceVerifier(workspaceRoot);
   }
 
-  async validate(templateInput: unknown, envelopeEvidence: readonly EvidenceRef[] = []): Promise<PossibilityValidation> {
+  async validate(
+    templateInput: unknown,
+    envelopeEvidence: readonly EvidenceRef[] = [],
+    evidenceAssertions: readonly EvidenceAssertion[] = [],
+  ): Promise<PossibilityValidation> {
     const template = possibilityTemplateSchema.parse(templateInput);
     const [entities, rules, events, claims, templates] = await Promise.all([
       this.canon.listEntities(),
@@ -52,6 +64,19 @@ export class PossibilityCommitService {
     if (!template.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Possibility ${template.id} has no evidence`, "evidence"));
     const verified = await this.evidence.verifyAll([...template.evidence, ...envelopeEvidence]);
     errors.push(...verified.issues);
+    errors.push(...validateEvidenceAssertionTargets("possibility", template.id, template, evidenceAssertions));
+    const exactVerified = await this.evidence.verifyAssertions(evidenceAssertions);
+    errors.push(...exactVerified.issues);
+    const legacySourceIds = evidenceSourceIds([...template.evidence, ...envelopeEvidence]);
+    const exactSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
+    if (legacySourceIds.length && exactSourceIds.length
+      && (legacySourceIds.length !== 1 || exactSourceIds.length !== 1 || legacySourceIds[0] !== exactSourceIds[0])) {
+      errors.push(issue(
+        "EVIDENCE_SOURCE_MISMATCH",
+        `Possibility ${template.id} has legacy evidence from ${legacySourceIds.join(", ")} and exact evidence from ${exactSourceIds.join(", ")}.`,
+        "evidenceAssertions",
+      ));
+    }
 
     for (const participant of template.participants) {
       if (!entityMap.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Possibility ${template.id} references unknown participant ${participant}`, "participants"));
@@ -192,9 +217,16 @@ export class PossibilityCommitService {
 
   async accept(proposalId: string): Promise<PossibilityValidation> {
     const proposal = await this.proposals.read("pending", proposalId, possibilityTemplateSchema);
-    const validation = await this.validate(proposal.payload, proposal.evidence);
+    const evidenceAssertions = proposal.evidenceAssertions ?? [];
+    const validation = await this.validate(proposal.payload, proposal.evidence, evidenceAssertions);
     if (!validation.accepted) return validation;
     await this.templates.put(proposal.payload);
+    await this.exactEvidence.replaceForArtifact(
+      "possibility",
+      proposal.payload.id,
+      contentHash(proposal.payload),
+      evidenceAssertions,
+    );
     await this.proposals.transition(proposalId, "pending", "accepted");
     return validation;
   }

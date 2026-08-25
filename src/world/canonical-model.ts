@@ -275,6 +275,23 @@ function proposalEvidenceSourceIds(value: Record<string, unknown>): string[] {
       sourceIds.add((span as Record<string, unknown>).sourceId as string);
     }
   }
+  if (value.evidenceAssertions !== undefined) {
+    if (!Array.isArray(value.evidenceAssertions)) throw new Error("Proposal evidenceAssertions must be an array.");
+    for (const assertion of value.evidenceAssertions) {
+      if (!assertion || typeof assertion !== "object" || Array.isArray(assertion)) {
+        throw new Error("Proposal evidenceAssertions contains an invalid assertion.");
+      }
+      const anchors = (assertion as Record<string, unknown>).anchors;
+      if (!Array.isArray(anchors)) throw new Error("Proposal evidence assertion anchors must be an array.");
+      for (const anchor of anchors) {
+        if (!anchor || typeof anchor !== "object" || Array.isArray(anchor)
+          || typeof (anchor as Record<string, unknown>).sourceId !== "string") {
+          throw new Error("Proposal evidence assertion contains an invalid anchor.");
+        }
+        sourceIds.add((anchor as Record<string, unknown>).sourceId as string);
+      }
+    }
+  }
   return [...sourceIds].sort();
 }
 

@@ -1,7 +1,15 @@
 import crypto from "node:crypto";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
-import type { Entity, EvidenceRef, SourceSpan, ValidationIssue } from "../world/model.js";
+import {
+  evidenceAssertionSchema,
+  textAnchorSchema,
+  type Entity,
+  type EvidenceAssertion,
+  type EvidenceRef,
+  type TextAnchor,
+  type ValidationIssue,
+} from "../world/model.js";
 
 export type EvidenceVerification = {
   valid: boolean;
@@ -47,6 +55,71 @@ export class EvidenceVerifier {
 
   async inspect(reference: EvidenceRef): Promise<EvidenceVerification & { excerpt?: string }> {
     return this.inspectCached(reference);
+  }
+
+  async verifyAssertions(assertions: readonly EvidenceAssertion[]): Promise<EvidenceVerification> {
+    const { excerpts: _excerpts, ...verification } = await this.inspectAssertions(assertions);
+    return verification;
+  }
+
+  async inspectAssertions(assertionsInput: readonly EvidenceAssertion[]): Promise<EvidenceInspection> {
+    const issues: ValidationIssue[] = [];
+    const excerpts: string[] = [];
+    for (let assertionIndex = 0; assertionIndex < assertionsInput.length; assertionIndex += 1) {
+      const assertion = evidenceAssertionSchema.parse(assertionsInput[assertionIndex]);
+      for (let anchorIndex = 0; anchorIndex < assertion.anchors.length; anchorIndex += 1) {
+        const result = await this.inspectAnchor(assertion.anchors[anchorIndex]!);
+        for (const item of result.issues) {
+          issues.push({
+            ...item,
+            path: item.path
+              ? `evidenceAssertions.${assertionIndex}.anchors.${anchorIndex}.${item.path}`
+              : `evidenceAssertions.${assertionIndex}.anchors.${anchorIndex}`,
+          });
+        }
+        if (result.excerpt !== undefined) excerpts.push(result.excerpt);
+      }
+    }
+    return { valid: issues.length === 0, issues, excerpts };
+  }
+
+  async inspectAnchor(anchorInput: TextAnchor): Promise<EvidenceVerification & { excerpt?: string }> {
+    const anchor = textAnchorSchema.parse(anchorInput);
+    const exact = await this.inspectCached({
+      span: {
+        sourceId: anchor.sourceId,
+        startByte: anchor.startByte,
+        endByte: anchor.endByte,
+        startLine: anchor.startLine,
+        endLine: anchor.endLine,
+        quoteHash: anchor.exactHash,
+      },
+      strength: "explicit",
+    });
+    if (!exact.valid) return exact;
+    const cached = await this.getSource(anchor.sourceId);
+    if (!cached) {
+      return {
+        valid: false,
+        issues: [issue("UNKNOWN_EVIDENCE_SOURCE", `Evidence source ${anchor.sourceId} is not ingested`)],
+      };
+    }
+    const prefixHash = sha256(cached.buffer.subarray(
+      Math.max(0, anchor.startByte - anchor.contextBytes),
+      anchor.startByte,
+    ));
+    const suffixHash = sha256(cached.buffer.subarray(
+      anchor.endByte,
+      Math.min(cached.buffer.byteLength, anchor.endByte + anchor.contextBytes),
+    ));
+    const issues: ValidationIssue[] = [];
+    if (prefixHash !== anchor.prefixHash) {
+      issues.push(issue("EVIDENCE_PREFIX_HASH_MISMATCH", "Evidence prefix context hash does not match the archived source."));
+    }
+    if (suffixHash !== anchor.suffixHash) {
+      issues.push(issue("EVIDENCE_SUFFIX_HASH_MISMATCH", "Evidence suffix context hash does not match the archived source."));
+    }
+    return { valid: issues.length === 0, issues, ...(exact.excerpt === undefined ? {} : { excerpt: exact.excerpt }) };
   }
 
   clearCache(): void {

@@ -6,6 +6,9 @@ import { Compile } from "typebox/compile";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCompilerProposalTools, createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { CompilerCommitService } from "../src/compiler/validator.js";
+import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
+import { EvidenceVerifier } from "../src/compiler/evidence.js";
 import { segmentEvidenceRef, SegmentStore } from "../src/compiler/segments.js";
 import { ProposalStore } from "../src/world/canonical-model.js";
 import { entitySchema } from "../src/world/model.js";
@@ -28,9 +31,130 @@ describe("compiler proposal tools", () => {
     const schema = JSON.stringify(tool?.parameters);
     expect(schema).toContain("canonicalName");
     expect(schema).toContain("evidence_segment_ids");
+    expect(schema).toContain("evidence_selectors");
+    expect(schema).toContain("target_path");
+    expect(schema).toContain('"exact"');
     expect(schema).not.toContain("quoteHash");
+    expect(schema).not.toContain("exactHash");
+    expect(schema).not.toContain("startByte");
     expect(schema).not.toContain('"evidence":');
     expect(schema).not.toContain('"payload":{}');
+  });
+
+  it("resolves field-level quotes into host-trusted assertions and commits their binding", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-exact-evidence-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero enters the village.\n");
+    const batchId = `batch-${fixture.source.id}-exact`;
+    const toolset = createCompilerProposalToolset(root, { provider: "test", model: "anchor-model" });
+    await toolset.beginBatch([fixture.segmentId], batchId, fixture.source.id);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+
+    await entity.execute("exact-entity", {
+      proposal_id: "entity-hero-exact",
+      payload: {
+        id: "hero",
+        kind: "character",
+        canonicalName: "Hero",
+        aliases: [],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "Hero",
+        target_path: "/canonicalName",
+        relation: "supports",
+        strength: "explicit",
+      }, {
+        segment_id: fixture.segmentId,
+        exact: "Hero enters the village",
+        target_path: "/kind",
+        relation: "supports",
+        strength: "strong-inference",
+        interpretation: "The narrated agent is modeled as a character rather than a place or object.",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const pending = await new ProposalStore(root).read("pending", "entity-hero-exact", entitySchema);
+    expect(pending.schemaVersion).toBe(2);
+    expect(pending.evidenceAssertions).toHaveLength(2);
+    expect(pending.evidenceAssertions?.map((assertion) => assertion.target.jsonPointer))
+      .toEqual(["/canonicalName", "/kind"]);
+    expect(pending.evidenceAssertions?.[1]).toMatchObject({
+      strength: "strong-inference",
+      interpretation: expect.stringContaining("modeled as a character"),
+      derivation: {
+        runId: batchId,
+        compilerBatchId: batchId,
+        worker: "propose_entity",
+        provider: "test",
+        model: "anchor-model",
+        ontologyVersion: "evidence-v1",
+      },
+    });
+    await expect(new EvidenceVerifier(root).verifyAssertions(pending.evidenceAssertions ?? []))
+      .resolves.toMatchObject({ valid: true, issues: [] });
+
+    expect((await new CompilerCommitService(root).accept("entity", "entity-hero-exact")).accepted).toBe(true);
+    const binding = await new EvidenceAssertionStore(root).bindingForArtifact("entity", "hero");
+    expect(binding?.assertions).toHaveLength(2);
+    expect(binding?.assertions[0]?.target).toMatchObject({
+      artifactKind: "entity",
+      artifactId: "hero",
+      jsonPointer: "/canonicalName",
+    });
+    const readArtifact = toolset.tools.find((candidate) => candidate.name === "read_compiler_artifact")!;
+    const retrieval = await readArtifact.execute("read-exact-entity", {
+      ref: "canonical:entity:hero",
+    } as never, undefined, undefined, {} as ExtensionContext);
+    const retrievalText = (retrieval.content[0] as { type: "text"; text: string }).text;
+    const retrievalEnvelope = JSON.parse(retrievalText) as { chunk: string };
+    expect(retrievalEnvelope.chunk).toContain('"evidenceAssertions"');
+    expect(retrievalEnvelope.chunk).toContain('"jsonPointer":"/canonicalName"');
+
+    await new CompilerProposalService(root).submit("entity", {
+      proposalId: "entity-hero-legacy-revision",
+      payload: pending.payload,
+      generatedBy: { worker: "legacy-test" },
+    });
+    expect((await new CompilerCommitService(root).accept("entity", "entity-hero-legacy-revision")).accepted).toBe(true);
+    await expect(new EvidenceAssertionStore(root).listForArtifact("entity", "hero")).resolves.toEqual([]);
+  });
+
+  it("rejects nonexistent evidence targets and inferred selectors without interpretations", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-exact-target-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero enters.\n");
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-exact-target`, fixture.source.id);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+    const base = {
+      proposal_id: "entity-hero-bad-anchor",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+    };
+
+    expect(Compile(entity.parameters).Check({
+      ...base,
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "Hero",
+        target_path: "/kind",
+        relation: "supports",
+        strength: "strong-inference",
+      }],
+    })).toBe(false);
+    await expect(entity.execute("bad-target", {
+      ...base,
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "Hero",
+        target_path: "/missing",
+        relation: "supports",
+        strength: "explicit",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("does not exist");
+    await expect(new ProposalStore(root).list("pending")).resolves.toEqual([]);
   });
 
   it("publishes compilable strict schemas for every proposal kind", async () => {

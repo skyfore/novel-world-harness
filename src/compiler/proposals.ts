@@ -6,6 +6,7 @@ import {
   canonicalEventSchema,
   claimSchema,
   entitySchema,
+  evidenceAssertionSchema,
   evidenceRefSchema,
   idSchema,
   validateParticipantPresence,
@@ -18,6 +19,7 @@ import {
   type CanonicalEvent,
   type Claim,
   type EvidenceRef,
+  type EvidenceAssertion,
   type KnowledgeDelta,
   type ParticipantPresence,
   type Predicate,
@@ -31,6 +33,10 @@ import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSo
 import { hasExecutablePossibilityEffect, isMetaKnowledgePredicate } from "./semantics.js";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import {
+  evidenceAssertionSourceIds,
+  validateEvidenceAssertionTargets,
+} from "./evidence-assertions.js";
 
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
@@ -106,28 +112,61 @@ export function compilerProposalLogicalIdentity(kind: CompilerProposalKind, payl
   return typeof logicalId === "string" ? `${kind}:${logicalId}` : undefined;
 }
 
+/** Stable committed-artifact identity used by field-level evidence bindings. */
+export function compilerProposalArtifactId(
+  kind: CompilerProposalKind,
+  payload: unknown,
+  proposalId: string,
+): string {
+  if (kind === "initial-world") return "initial-world";
+  if (kind === "state-delta") return idSchema.parse(proposalId);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error(`Compiler proposal ${proposalId} has no object payload identity.`);
+  }
+  const record = payload as Record<string, unknown>;
+  return idSchema.parse(kind === "character-model" ? record.actorId : record.id);
+}
+
 export class CompilerProposalService {
   readonly store: ProposalStore;
   constructor(workspaceRoot: string) { this.store = new ProposalStore(workspaceRoot); }
-  async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string } }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
+  async submit(kind: CompilerProposalKind, input: { proposalId: string; payload: unknown; evidence?: unknown; evidenceAssertions?: unknown; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string } }): Promise<{ proposalId: string; kind: CompilerProposalKind }> {
     const schema = compilerProposalSchemas[kind];
     const payload = schema.parse(input.payload);
     if (kind !== "entity" && kind !== "claim" && kind !== "character-model") assertCompilerStateFields(payload);
     const evidence = input.evidence === undefined ? [] : evidenceRefSchema.array().parse(input.evidence);
+    const evidenceAssertions = input.evidenceAssertions === undefined
+      ? []
+      : evidenceAssertionSchema.array().parse(input.evidenceAssertions);
     const payloadEvidence = payload && typeof payload === "object" && !Array.isArray(payload)
       && Array.isArray((payload as { evidence?: unknown }).evidence)
       ? evidenceRefSchema.array().parse((payload as { evidence: unknown[] }).evidence)
       : [];
-    assertSingleEvidenceSource(
+    const legacySourceId = assertSingleEvidenceSource(
       [...payloadEvidence, ...evidence],
       `Compiler proposal ${input.proposalId}`,
     );
+    const assertionSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
+    if (assertionSourceIds.length > 1) {
+      throw new Error(`Compiler proposal ${input.proposalId} mixes exact evidence from multiple novel sources: ${assertionSourceIds.join(", ")}.`);
+    }
+    if (legacySourceId && assertionSourceIds[0] && legacySourceId !== assertionSourceIds[0]) {
+      throw new Error(
+        `Compiler proposal ${input.proposalId} has legacy evidence from ${legacySourceId} but exact evidence from ${assertionSourceIds[0]}.`,
+      );
+    }
+    const artifactId = compilerProposalArtifactId(kind, payload, input.proposalId);
+    const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
+    if (targetIssues.length) {
+      throw new Error(targetIssues.map((item) => `${item.code}${item.path ? ` at ${item.path}` : ""}: ${item.message}`).join("; "));
+    }
     const proposal: ArtifactProposal<unknown> = {
       id: input.proposalId,
       kind,
-      schemaVersion: 1,
+      schemaVersion: evidenceAssertions.length ? 2 : 1,
       payload,
       evidence: evidence as EvidenceRef[],
+      evidenceAssertions,
       generatedBy: input.generatedBy,
       createdAt: new Date().toISOString(),
     };
@@ -225,7 +264,12 @@ type ProposalClosureCatalog = {
   possibilities: Set<string>;
 };
 
-type StagedProposal = { kind: CompilerProposalKind; payload: unknown; evidence: EvidenceRef[] };
+type StagedProposal = {
+  kind: CompilerProposalKind;
+  payload: unknown;
+  evidence: EvidenceRef[];
+  evidenceAssertions: EvidenceAssertion[];
+};
 
 /**
  * Checks that every logical artifact referenced by this batch is supplied by
@@ -280,6 +324,7 @@ export async function validateCompilerProposalClosure(
       kind: summary.kind,
       payload,
       evidence: evidenceRefSchema.array().parse(envelope.evidence),
+      evidenceAssertions: evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []),
     });
     const logicalIdentity = compilerProposalLogicalIdentity(summary.kind, payload);
     if (logicalIdentity) proposalsByLogicalIdentity.set(logicalIdentity, [...(proposalsByLogicalIdentity.get(logicalIdentity) ?? []), summary.id]);
@@ -309,12 +354,27 @@ export async function validateCompilerProposalClosure(
     const payloadEvidence = (proposal.payload as { evidence?: EvidenceRef[] }).evidence ?? [];
     if (sourceId) {
       const proposalSourceIds = evidenceSourceIds([...payloadEvidence, ...proposal.evidence]);
-      if (proposalSourceIds.length !== 1 || proposalSourceIds[0] !== sourceId) {
-        issues.add(`${proposalId}: evidence must belong exclusively to active source '${sourceId}', found ${proposalSourceIds.join(", ") || "none"}`);
+      const exactSourceIds = evidenceAssertionSourceIds(proposal.evidenceAssertions);
+      const allSourceIds = [...new Set([...proposalSourceIds, ...exactSourceIds])].sort();
+      if (allSourceIds.length !== 1 || allSourceIds[0] !== sourceId) {
+        issues.add(`${proposalId}: evidence must belong exclusively to active source '${sourceId}', found ${allSourceIds.join(", ") || "none"}`);
       }
     }
     const inspected = await evidenceVerifier.inspectAll([...payloadEvidence, ...proposal.evidence]);
     for (const evidenceIssue of inspected.issues) {
+      issues.add(`${proposalId}: ${formatGroundingIssue(evidenceIssue)}`);
+    }
+    const artifactId = compilerProposalArtifactId(proposal.kind, proposal.payload, proposalId);
+    for (const targetIssue of validateEvidenceAssertionTargets(
+      proposal.kind,
+      artifactId,
+      proposal.payload,
+      proposal.evidenceAssertions,
+    )) {
+      issues.add(`${proposalId}: ${formatGroundingIssue(targetIssue)}`);
+    }
+    const exactInspection = await evidenceVerifier.inspectAssertions(proposal.evidenceAssertions);
+    for (const evidenceIssue of exactInspection.issues) {
       issues.add(`${proposalId}: ${formatGroundingIssue(evidenceIssue)}`);
     }
     if (proposal.kind === "entity" && inspected.valid) {

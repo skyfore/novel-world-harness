@@ -11,6 +11,7 @@ import {
   type CanonicalEvent,
   type Claim,
   type Entity,
+  type EvidenceAssertion,
   type EvidenceRef,
   type Predicate,
   type StoryTime,
@@ -18,9 +19,15 @@ import {
   type WorldRule,
 } from "../world/model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
-import { canonicalJson } from "../world/canonical.js";
+import { canonicalJson, contentHash } from "../world/canonical.js";
 import { isMetaKnowledgePredicate } from "./semantics.js";
-import { compilerProposalLogicalIdentity } from "./proposals.js";
+import { compilerProposalArtifactId, compilerProposalLogicalIdentity } from "./proposals.js";
+import {
+  EvidenceAssertionStore,
+  evidenceAssertionSourceIds,
+  validateEvidenceAssertionTargets,
+} from "./evidence-assertions.js";
+import { evidenceSourceIds } from "../world/source-scope.js";
 
 export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
@@ -465,6 +472,7 @@ export class CompilerCommitService {
   readonly validator: CompilerValidator;
   readonly initialWorld: InitialWorldStore;
   readonly actorModels: ActorModelStore;
+  readonly exactEvidence: EvidenceAssertionStore;
   private readonly evidence: EvidenceVerifier;
 
   constructor(workspaceRoot: string) {
@@ -474,22 +482,29 @@ export class CompilerCommitService {
     this.validator = new CompilerValidator(this.canon);
     this.initialWorld = new InitialWorldStore(workspaceRoot);
     this.actorModels = new ActorModelStore(workspaceRoot);
+    this.exactEvidence = new EvidenceAssertionStore(workspaceRoot);
     this.evidence = new EvidenceVerifier(workspaceRoot);
   }
 
   async accept(kind: CanonicalProposalKind, id: string): Promise<CompilerValidation> {
     const schema = schemaFor(kind);
     const proposal = await this.proposals.read("pending", id, schema);
-    const validation = await this.validateProposal(kind, proposal.payload, proposal.evidence);
+    const validation = await this.validateProposal(
+      id,
+      kind,
+      proposal.payload,
+      proposal.evidence,
+      proposal.evidenceAssertions ?? [],
+    );
     if (!validation.accepted) return validation;
-    if (kind === "entity") await this.compiler.acceptEntity(id);
-    else if (kind === "claim") await this.compiler.acceptClaim(id);
-    else if (kind === "canonical-event") await this.compiler.acceptEvent(id);
-    else if (kind === "world-rule") await this.compiler.acceptRule(id);
-    else if (kind === "initial-world") await this.initialWorld.put(initialWorldSchema.parse(proposal.payload));
-    else if (kind === "character-goal") await this.actorModels.putGoal(characterGoalSchema.parse(proposal.payload));
-    else await this.actorModels.putModel(characterModelSchema.parse(proposal.payload));
-    if (kind === "initial-world" || kind === "character-goal" || kind === "character-model") await this.proposals.transition(id, "pending", "accepted");
+    await this.commitParsed({
+      id,
+      kind,
+      payload: proposal.payload,
+      evidence: proposal.evidence,
+      evidenceAssertions: proposal.evidenceAssertions ?? [],
+      createdAt: proposal.createdAt,
+    });
     return validation;
   }
 
@@ -508,7 +523,14 @@ export class CompilerCommitService {
       }
       const schema = schemaFor(proposal.kind);
       const envelope = await this.proposals.read("pending", proposal.id, schema);
-      candidates.push({ id: proposal.id, kind: proposal.kind, payload: envelope.payload, evidence: envelope.evidence, createdAt: proposal.createdAt });
+      candidates.push({
+        id: proposal.id,
+        kind: proposal.kind,
+        payload: envelope.payload,
+        evidence: envelope.evidence,
+        evidenceAssertions: envelope.evidenceAssertions ?? [],
+        createdAt: proposal.createdAt,
+      });
     }
 
     const total = candidates.length;
@@ -529,7 +551,14 @@ export class CompilerCommitService {
 
     const catalog = await this.validator.loadCatalog();
     const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
-      const validation = await this.validateProposal(candidate.kind, candidate.payload, candidate.evidence, catalog);
+      const validation = await this.validateProposal(
+        candidate.id,
+        candidate.kind,
+        candidate.payload,
+        candidate.evidence,
+        candidate.evidenceAssertions,
+        catalog,
+      );
       if (!validation.accepted) {
         blocked.push({ id: candidate.id, kind: candidate.kind, errors: validation.errors });
       } else {
@@ -584,9 +613,11 @@ export class CompilerCommitService {
   }
 
   private async validateProposal(
+    proposalId: string,
     kind: CanonicalProposalKind,
     payload: unknown,
     envelopeEvidence: readonly EvidenceRef[],
+    evidenceAssertions: readonly EvidenceAssertion[],
     catalog?: CompilerValidationCatalog,
   ): Promise<CompilerValidation> {
     const validation = catalog
@@ -597,7 +628,27 @@ export class CompilerCommitService {
     const groundingIssues = kind === "entity" && inspected.valid
       ? validateEntityNameEvidence(entitySchema.parse(payload), inspected.excerpts)
       : [];
-    const errors = [...validation.errors, ...inspected.issues, ...groundingIssues];
+    const artifactId = compilerProposalArtifactId(kind, payload, proposalId);
+    const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
+    const exactInspection = await this.evidence.inspectAssertions(evidenceAssertions);
+    const legacySourceIds = evidenceSourceIds([...payloadEvidence, ...envelopeEvidence]);
+    const exactSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
+    const mixedSourceIssues = legacySourceIds.length && exactSourceIds.length
+      && (legacySourceIds.length !== 1 || exactSourceIds.length !== 1 || legacySourceIds[0] !== exactSourceIds[0])
+      ? [issue(
+          "EVIDENCE_SOURCE_MISMATCH",
+          `Proposal ${proposalId} has legacy evidence from ${legacySourceIds.join(", ")} and exact evidence from ${exactSourceIds.join(", ")}.`,
+          "evidenceAssertions",
+        )]
+      : [];
+    const errors = [
+      ...validation.errors,
+      ...inspected.issues,
+      ...groundingIssues,
+      ...targetIssues,
+      ...exactInspection.issues,
+      ...mixedSourceIssues,
+    ];
     return { accepted: errors.length === 0, errors, warnings: validation.warnings };
   }
 
@@ -610,6 +661,13 @@ export class CompilerCommitService {
     else if (kind === "initial-world") await this.initialWorld.put(initialWorldSchema.parse(payload));
     else if (kind === "character-goal") await this.actorModels.putGoal(characterGoalSchema.parse(payload));
     else await this.actorModels.putModel(characterModelSchema.parse(payload));
+    const artifactId = compilerProposalArtifactId(kind, payload, id);
+    await this.exactEvidence.replaceForArtifact(
+      kind,
+      artifactId,
+      contentHash(payload),
+      candidate.evidenceAssertions,
+    );
     await this.proposals.transition(id, "pending", "accepted");
   }
 }
@@ -619,6 +677,7 @@ type PendingCanonicalProposal = {
   kind: CanonicalProposalKind;
   payload: unknown;
   evidence: EvidenceRef[];
+  evidenceAssertions: EvidenceAssertion[];
   createdAt: string;
 };
 

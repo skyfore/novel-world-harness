@@ -12,6 +12,9 @@ import { PossibilityTemplateStore } from "../src/world/possibility-model.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { ActorModelStore } from "../src/world/actors.js";
 import { buildActorScopedActionContext } from "../src/world/player-action.js";
+import { SegmentStore } from "../src/compiler/segments.js";
+import { resolveTextAnchor } from "../src/compiler/text-anchors.js";
+import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -56,25 +59,48 @@ describe("generic possibility templates", () => {
     });
     expect((await canonical.accept("initial-world", "initial")).accepted).toBe(true);
 
+    const possibilityPayload = {
+      id: "storm-closes-hall",
+      kind: "background-pressure" as const,
+      title: "Storm closes the Hall",
+      preconditions: [{ op: "fact-equals" as const, entityId: "hero", field: "character.location", value: "hall" }],
+      blockers: [],
+      participants: ["hero", "hall"],
+      participantPresence: [{ entityId: "hero", mode: "physical" as const }],
+      causalParents: [],
+      pressure: 0.9,
+      relevance: 0.8,
+      proposedDelta: { version: 1 as const, operations: [{ op: "set" as const, entityId: "hero", field: "character.title", value: "Stormbound" }] },
+      evidence: source.evidence("A storm will close the Hall if Hero remains there."),
+    };
+    const possibilityAnchor = await resolveTextAnchor(
+      root,
+      (await new SegmentStore(root).list(source.source.id))[0]!,
+      {
+        segment_id: source.segmentId,
+        exact: "A storm will close the Hall if Hero remains there.",
+        target_path: "/preconditions/0",
+        relation: "supports",
+        strength: "explicit",
+      },
+    );
     await proposals.submit("possibility", {
       proposalId: "storm-proposal",
-      payload: {
-        id: "storm-closes-hall",
-        kind: "background-pressure",
-        title: "Storm closes the Hall",
-        preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
-        blockers: [],
-        participants: ["hero", "hall"],
-        participantPresence: [{ entityId: "hero", mode: "physical" }],
-        causalParents: [],
-        pressure: 0.9,
-        relevance: 0.8,
-        proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.title", value: "Stormbound" }] },
-        evidence: source.evidence("A storm will close the Hall if Hero remains there."),
-      },
+      payload: possibilityPayload,
+      evidenceAssertions: [{
+        version: 1,
+        id: "evidence-storm-precondition",
+        target: { artifactKind: "possibility", artifactId: "storm-closes-hall", jsonPointer: "/preconditions/0" },
+        anchors: [possibilityAnchor],
+        relation: "supports",
+        strength: "explicit",
+        derivation: { runId: "storm-test", worker: "test", ontologyVersion: "evidence-v1" },
+      }],
       generatedBy: { worker: "test" },
     });
     expect((await convergeWorldProposals(root)).possibilities.accepted).toEqual(["storm-proposal"]);
+    await expect(new EvidenceAssertionStore(root).listForArtifact("possibility", "storm-closes-hall"))
+      .resolves.toHaveLength(1);
 
     const initial = await new InitialWorldStore(root).get();
     const { engine, runtime } = await openWorkspaceWorld(root);

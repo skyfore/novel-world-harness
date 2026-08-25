@@ -4,12 +4,13 @@ import { ActorModelStore } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore } from "../world/initial.js";
-import type { EvidenceRef } from "../world/model.js";
+import { evidenceAssertionSchema, type EvidenceAssertion, type EvidenceRef } from "../world/model.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { promptJson } from "../util/prompt-data.js";
 import { assertSafeTextOffset, safeTextPageEnd } from "../util/text-pages.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import type { CompilerToolCallGate } from "./tool-call-gate.js";
+import { EvidenceAssertionStore, evidenceAssertionSourceIds } from "./evidence-assertions.js";
 
 type ArtifactStatus = "canonical" | "pending";
 export const COMPILER_ARTIFACT_KINDS = [
@@ -34,6 +35,7 @@ type ArtifactRecord = {
   label: string;
   payload: unknown;
   evidence: EvidenceRef[];
+  evidenceAssertions: EvidenceAssertion[];
 };
 
 const COMPILER_ARTIFACT_KIND_SET = new Set<string>(COMPILER_ARTIFACT_KINDS);
@@ -76,6 +78,7 @@ function canonicalRecord(
     label,
     payload,
     evidence,
+    evidenceAssertions: [],
   };
 }
 
@@ -119,6 +122,7 @@ export async function loadCompilerArtifactRecords(
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
   const initial = new InitialWorldStore(workspaceRoot);
   const proposals = new ProposalStore(workspaceRoot);
+  const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
   const [entities, claims, events, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
     canon.listEntities(),
     canon.listClaims(),
@@ -158,6 +162,22 @@ export async function loadCompilerArtifactRecords(
       records.push(canonicalRecord("initial-world", "singleton", "Initial world", structuredClone(initialWorld), evidence));
     }
   }
+  await Promise.all(records.map(async (record) => {
+    const artifactId = record.kind === "initial-world" ? "initial-world" : record.logicalId;
+    const binding = await exactEvidence.bindingForArtifact(record.kind, artifactId);
+    if (binding && binding.artifactHash !== contentHash(record.payload)) {
+      throw new Error(
+        `Canonical ${record.kind} ${record.logicalId} has a stale exact-evidence binding for another semantic revision.`,
+      );
+    }
+    record.evidenceAssertions = binding?.assertions ?? [];
+    const exactSourceIds = evidenceAssertionSourceIds(record.evidenceAssertions);
+    if (exactSourceIds.length && (exactSourceIds.length !== 1 || exactSourceIds[0] !== sourceId)) {
+      throw new Error(
+        `Canonical ${record.kind} ${record.logicalId} has exact evidence outside active source ${sourceId}: ${exactSourceIds.join(", ")}.`,
+      );
+    }
+  }));
   for (const summary of pending) {
     const envelope = await proposals.readEnvelope("pending", summary.id);
     const payload = envelope.payload;
@@ -171,6 +191,13 @@ export async function loadCompilerArtifactRecords(
         : []),
     ];
     assertEvidenceExclusiveToSource(allEvidence, sourceId, `Pending compiler proposal ${summary.id}`);
+    const evidenceAssertions = evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []);
+    const exactSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
+    if (exactSourceIds.length && (exactSourceIds.length !== 1 || exactSourceIds[0] !== sourceId)) {
+      throw new Error(
+        `Pending compiler proposal ${summary.id} has exact evidence outside active source ${sourceId}: ${exactSourceIds.join(", ")}.`,
+      );
+    }
     records.push({
       ref: `pending:${summary.id}`,
       status: "pending",
@@ -179,6 +206,7 @@ export async function loadCompilerArtifactRecords(
       label: pendingLabel(summary.kind, payload, logicalId),
       payload: structuredClone(payload),
       evidence,
+      evidenceAssertions,
     });
   }
   if (records.length > MAX_ARTIFACT_RECORDS) {
@@ -259,6 +287,18 @@ export function createCompilerArtifactRetrievalTools(
             strength: reference.strength,
           })),
           omittedEvidence: Math.max(0, record.evidence.length - 20),
+          exactEvidence: record.evidenceAssertions.slice(0, 20).map((assertion) => ({
+            id: assertion.id,
+            targetPath: assertion.target.jsonPointer,
+            relation: assertion.relation,
+            strength: assertion.strength,
+            anchors: assertion.anchors.map((anchor) => ({
+              sourceId: anchor.sourceId,
+              startLine: anchor.startLine,
+              endLine: anchor.endLine,
+            })),
+          })),
+          omittedExactEvidence: Math.max(0, record.evidenceAssertions.length - 20),
         }));
       return textResult(promptJson({
         sourceId,
@@ -305,6 +345,7 @@ export function createCompilerArtifactRetrievalTools(
         logicalId: record.logicalId,
         semanticHash: contentHash(record.payload),
         evidence: record.evidence,
+        evidenceAssertions: record.evidenceAssertions,
         payload: record.payload,
       });
       const offset = input.offset ?? 0;

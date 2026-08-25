@@ -9,6 +9,13 @@ import { readSourceMaterial } from "../storage/source-material-store.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { hasExecutablePossibilityEffect } from "./semantics.js";
+import { contentHash } from "../world/canonical.js";
+import {
+  EvidenceAssertionStore,
+  evidenceAssertionSourceIds,
+  validateEvidenceAssertionTargets,
+} from "./evidence-assertions.js";
+import { evidenceSourceIds } from "../world/source-scope.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -42,6 +49,10 @@ export type CompilerAuditReport = {
     referencesChecked: number;
     invalidReferences: number;
     validBindingRatio: number | null;
+    assertionsChecked: number;
+    artifactsWithExactEvidence: number;
+    invalidAssertions: number;
+    exactBindingRatio: number | null;
     errors: Array<{ artifact: string; code: string; message: string }>;
   };
   consistency: {
@@ -166,22 +177,56 @@ export async function auditCompiler(
   const possibilities = allPossibilities.filter(belongsToSelectedSource);
 
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const evidenceArtifacts: Array<{ name: string; evidence: EvidenceRef[] }> = [
-    ...entities.map((item) => ({ name: `entity:${item.id}`, evidence: item.evidence })),
-    ...claims.map((item) => ({ name: `claim:${item.id}`, evidence: item.evidence })),
-    ...events.map((item) => ({ name: `event:${item.id}`, evidence: item.evidence })),
-    ...rules.map((item) => ({ name: `rule:${item.id}`, evidence: item.evidence })),
-    ...(initialWorld ? [{ name: "initial-world", evidence: initialWorld.evidence }] : []),
-    ...goals.map((item) => ({ name: `goal:${item.id}`, evidence: item.evidence })),
-    ...models.map((item) => ({ name: `model:${item.actorId}`, evidence: item.evidence })),
-    ...possibilities.map((item) => ({ name: `possibility:${item.id}`, evidence: item.evidence })),
+  const evidenceArtifacts: Array<{ name: string; kind: string; id: string; payload: unknown; evidence: EvidenceRef[] }> = [
+    ...entities.map((item) => ({ name: `entity:${item.id}`, kind: "entity", id: item.id, payload: item, evidence: item.evidence })),
+    ...claims.map((item) => ({ name: `claim:${item.id}`, kind: "claim", id: item.id, payload: item, evidence: item.evidence })),
+    ...events.map((item) => ({ name: `event:${item.id}`, kind: "canonical-event", id: item.id, payload: item, evidence: item.evidence })),
+    ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: item.evidence })),
+    ...(initialWorld ? [{ name: "initial-world", kind: "initial-world", id: "initial-world", payload: initialWorld, evidence: initialWorld.evidence }] : []),
+    ...goals.map((item) => ({ name: `goal:${item.id}`, kind: "character-goal", id: item.id, payload: item, evidence: item.evidence })),
+    ...models.map((item) => ({ name: `model:${item.actorId}`, kind: "character-model", id: item.actorId, payload: item, evidence: item.evidence })),
+    ...possibilities.map((item) => ({ name: `possibility:${item.id}`, kind: "possibility", id: item.id, payload: item, evidence: item.evidence })),
   ];
   const evidenceErrors: CompilerAuditReport["evidence"]["errors"] = [];
+  const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
   let referencesChecked = 0;
+  let invalidReferences = 0;
+  let assertionsChecked = 0;
+  let artifactsWithExactEvidence = 0;
+  let invalidAssertions = 0;
+  let validExactBindings = 0;
   for (const artifact of evidenceArtifacts) {
     referencesChecked += artifact.evidence.length;
     const result = await evidenceVerifier.verifyAll(artifact.evidence);
+    invalidReferences += result.issues.length;
     for (const issue of result.issues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
+    const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
+    if (!binding?.assertions.length) continue;
+    artifactsWithExactEvidence += 1;
+    assertionsChecked += binding.assertions.length;
+    const exactIssues = [
+      ...validateEvidenceAssertionTargets(artifact.kind, artifact.id, artifact.payload, binding.assertions),
+      ...(await evidenceVerifier.verifyAssertions(binding.assertions)).issues,
+    ];
+    if (binding.artifactHash !== contentHash(artifact.payload)) {
+      exactIssues.push({
+        code: "STALE_EVIDENCE_BINDING",
+        message: `Exact evidence binding targets artifact hash ${binding.artifactHash}, current content is ${contentHash(artifact.payload)}.`,
+        path: "evidenceAssertions",
+      });
+    }
+    const legacySourceIds = evidenceSourceIds(artifact.evidence);
+    const exactSourceIds = evidenceAssertionSourceIds(binding.assertions);
+    if (legacySourceIds.length !== 1 || exactSourceIds.length !== 1 || legacySourceIds[0] !== exactSourceIds[0]) {
+      exactIssues.push({
+        code: "EVIDENCE_SOURCE_MISMATCH",
+        message: `Legacy evidence sources (${legacySourceIds.join(", ") || "none"}) do not match exact evidence sources (${exactSourceIds.join(", ") || "none"}).`,
+        path: "evidenceAssertions",
+      });
+    }
+    invalidAssertions += exactIssues.length;
+    for (const issue of exactIssues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
+    if (!exactIssues.length) validExactBindings += 1;
   }
 
   const graph = auditCausalGraph(events);
@@ -361,7 +406,8 @@ export async function auditCompiler(
         ? 1
         : Math.min(1, indexedBytes / sourceBytes)
     : null;
-  const validBindingRatio = referencesChecked ? Math.max(0, 1 - evidenceErrors.length / referencesChecked) : null;
+  const validBindingRatio = referencesChecked ? Math.max(0, 1 - invalidReferences / referencesChecked) : null;
+  const exactBindingRatio = evidenceArtifacts.length ? validExactBindings / evidenceArtifacts.length : null;
   const structuralReadiness: CompilerReadinessState = !sources.length
     ? "not-ready"
     : changedSinceIngest.length || segmented !== sources.length
@@ -369,9 +415,11 @@ export async function auditCompiler(
       : "ready";
   const evidenceReadiness: CompilerReadinessState = evidenceArtifacts.length === 0
     ? "unknown"
-    : evidenceErrors.length
+    : evidenceErrors.length || invalidAssertions
       ? "not-ready"
-      : "ready";
+      : validExactBindings === evidenceArtifacts.length
+        ? "ready"
+        : "unknown";
   const semanticReadiness: CompilerReadinessState = events.length < 20
     ? "unknown"
     : semanticIssues.length
@@ -438,8 +486,12 @@ export async function auditCompiler(
     evidence: {
       artifactsChecked: evidenceArtifacts.length,
       referencesChecked,
-      invalidReferences: evidenceErrors.length,
+      invalidReferences,
       validBindingRatio,
+      assertionsChecked,
+      artifactsWithExactEvidence,
+      invalidAssertions,
+      exactBindingRatio,
       errors: evidenceErrors,
     },
     consistency: {

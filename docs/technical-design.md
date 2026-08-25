@@ -248,6 +248,45 @@ novel's observations. Audit verifies all committed anchors, reports annotation
 counts and pending closure failures, while resolution readiness remains
 `unknown` until M3 provides explicit resolution records and a denominator.
 
+#### 5.2.3 Entity identity resolution
+
+`src/compiler/entity-resolution.ts` separates textual occurrence from stable
+identity. Each `IdentityResolution` addresses exactly one `EntityMention` and
+has one explicit status:
+
+- `resolved` selects an already-canonical entity;
+- `new-entity` selects an entity proposal included in the same finish
+  handshake;
+- `ambiguous` retains at least two compatible canonical candidates;
+- `unresolved` records that no safe selection is available.
+
+Candidate generation is deterministic and source-scoped. It compares the exact
+and NFKC-normalized mention surface with compatible canonical/pending entity
+names and aliases, filters by the mention's candidate kinds, and returns a
+stable rank. A lexical match is only a candidate; the model must still propose
+the decision, cite its basis mention IDs, and may preserve uncertainty.
+
+Current resolution refs are keyed by `mentionId`. Payloads are immutable,
+content-addressed revisions. Changing a decision requires a new resolution ID
+whose `supersedesResolutionId` names the current revision. This makes merging
+several mentions into one entity, or splitting one mention back out, explicit
+and reversible. Failed-batch cleanup restores the preceding current ref while
+retaining revision history.
+
+The finish handshake validates mention existence, source locality, kind
+compatibility, candidate/evidence IDs, status-specific target authority, and
+the supersession chain. When a source has activated mention inventory, a new
+canonical entity proposal must trace its canonical name to a selected mention;
+every proposed alias needs a separately alias-classified selected mention. The
+same trace is rechecked by `CompilerCommitService`, so a caller cannot bypass
+the finish gate by invoking canonical acceptance directly. Legacy sources with
+no mention inventory remain readable until explicit reparse.
+
+Audit now has a real entity-resolution denominator. Missing, pending,
+ambiguous, unresolved, or invalid decisions are `not-ready`; all observed
+entity mentions selected through valid resolutions are `ready`; sources with no
+mention inventory remain `unknown` rather than receiving synthetic coverage.
+
 ### 5.3 Entity
 
 An entity contains stable identity and classification only.

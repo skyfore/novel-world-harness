@@ -64,8 +64,23 @@ import {
   SOURCE_ANNOTATION_TOOL_NAMES,
   createSourceAnnotationRetrievalTools,
 } from "./annotation-retrieval.js";
+import {
+  ENTITY_RESOLUTION_ONTOLOGY_VERSION,
+  EntityResolutionStore,
+  identityResolutionSchema,
+  validateEntityProposalResolutionTrace,
+  validateIdentityResolutionClosure,
+  type IdentityResolution,
+} from "./entity-resolution.js";
+import {
+  ENTITY_RESOLUTION_RETRIEVAL_TOOL_NAMES,
+  createEntityResolutionRetrievalTools,
+} from "./entity-resolution-retrieval.js";
 
-function proposalResult(text: string, details: CompilerProposalRecordedDetails | SourceAnnotationProposalRecordedDetails) {
+function proposalResult(
+  text: string,
+  details: CompilerProposalRecordedDetails | SourceAnnotationProposalRecordedDetails | IdentityResolutionProposalRecordedDetails,
+) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
@@ -88,6 +103,7 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "find_compiler_artifacts",
   "read_compiler_artifact",
   ...SOURCE_ANNOTATION_TOOL_NAMES,
+  ...ENTITY_RESOLUTION_RETRIEVAL_TOOL_NAMES,
   ...SOURCE_EVIDENCE_TOOL_NAMES,
   "peek_adjacent_evidence",
   "defer_boundary_artifact",
@@ -95,6 +111,7 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "propose_entity_mention",
   "propose_quotation",
   "propose_discourse_segment",
+  "propose_entity_resolution",
   "withdraw_compiler_proposal",
   "replace_boundary_proposal",
   "finish_compiler_batch",
@@ -111,6 +128,8 @@ export const SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES = [
   "propose_quotation",
   "propose_discourse_segment",
 ] as const;
+
+export const ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES = ["propose_entity_resolution"] as const;
 
 type ProposalToolInput = {
   proposal_id: string;
@@ -314,10 +333,22 @@ type SourceAnnotationProposalRecordedDetails = {
   remainingToolCalls: number;
 };
 
+type IdentityResolutionProposalRecordedDetails = {
+  proposalId: string;
+  kind: "entity-resolution";
+  resolutionId: string;
+  mentionId: string;
+  status: IdentityResolution["status"];
+  activeProposalCount: number;
+  toolCallCount: number;
+  remainingToolCalls: number;
+};
+
 type CompilerProposalDetails =
   | CompilerBatchBlockedDetails
   | CompilerProposalRecordedDetails
-  | SourceAnnotationProposalRecordedDetails;
+  | SourceAnnotationProposalRecordedDetails
+  | IdentityResolutionProposalRecordedDetails;
 
 type NovelTitleProposalDetails =
   | CompilerBatchBlockedDetails
@@ -418,6 +449,70 @@ const discourseObservationParameters = Type.Object({
   interpretation: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
 }, { additionalProperties: false });
 
+const identityResolutionCandidateParameters = Type.Object({
+  entity_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  basis_mention_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), {
+    minItems: 1,
+    maxItems: 32,
+    uniqueItems: true,
+  }),
+  evidence_assertion_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), {
+    maxItems: 32,
+    uniqueItems: true,
+  }),
+  rationale: Type.String({ minLength: 1, maxLength: 1_000 }),
+}, { additionalProperties: false });
+
+const resolutionStoryTimeParameters = Type.Union([
+  Type.Object({
+    kind: Type.Literal("exact"),
+    value: Type.String({ minLength: 1 }),
+    precision: Type.Union([
+      Type.Literal("second"), Type.Literal("minute"), Type.Literal("hour"),
+      Type.Literal("day"), Type.Literal("month"), Type.Literal("year"),
+    ]),
+  }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal("range"),
+    earliest: Type.String({ minLength: 1 }),
+    latest: Type.String({ minLength: 1 }),
+  }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal("relative"),
+    anchorEventId: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+    relation: Type.Union([Type.Literal("before"), Type.Literal("after"), Type.Literal("during")]),
+    offset: Type.Optional(Type.String()),
+  }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal("ordinal"),
+    label: Type.String({ minLength: 1 }),
+    orderHint: Type.Optional(Type.Number()),
+  }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("unknown") }, { additionalProperties: false }),
+]);
+
+const identityResolutionParameters = Type.Object({
+  proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  resolution_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  mention_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  status: Type.Union([
+    Type.Literal("resolved"),
+    Type.Literal("ambiguous"),
+    Type.Literal("new-entity"),
+    Type.Literal("unresolved"),
+  ]),
+  entity_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  candidates: Type.Array(identityResolutionCandidateParameters, { maxItems: 32 }),
+  alias_type: Type.Optional(Type.Union([
+    Type.Literal("name"), Type.Literal("title"), Type.Literal("office"),
+    Type.Literal("kinship"), Type.Literal("nickname"), Type.Literal("other"),
+  ])),
+  valid_story_time: Type.Optional(resolutionStoryTimeParameters),
+  supersedes_resolution_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  rationale: Type.String({ minLength: 1, maxLength: 2_000 }),
+}, { additionalProperties: false });
+
 function safeTextSuffix(text: string, maxChars: number): string {
   let start = Math.max(0, text.length - maxChars);
   if (start > 0 && start < text.length
@@ -434,10 +529,12 @@ export function createCompilerProposalToolset(
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
+  const entityResolutionStore = new EntityResolutionStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
   const boundaryCalibrations = new BoundaryCalibrationStore(workspaceRoot);
   const successfulProposalIds = new Set<string>();
   const successfulAnnotationProposalIds = new Set<string>();
+  const successfulEntityResolutionProposalIds = new Set<string>();
   const peekedDirections = new Set<"previous" | "next">();
   let expectedSegmentIds: string[] = [];
   let boundedSliceSegments: SourceSegment[] = [];
@@ -498,6 +595,7 @@ export function createCompilerProposalToolset(
   };
   const activeProposalCount = () => successfulProposalIds.size
     + successfulAnnotationProposalIds.size
+    + successfulEntityResolutionProposalIds.size
     + (pendingNovelTitleProposal ? 1 : 0);
   const isStructureDiscoveryBatch = () => Boolean(
     activeSourceId
@@ -588,6 +686,9 @@ export function createCompilerProposalToolset(
   const assertAnnotationProposalSlot = (proposalId: string) => {
     if (successfulProposalIds.has(proposalId)) {
       throw new Error(`Proposal ID ${proposalId} is already used by a world-artifact proposal in this batch.`);
+    }
+    if (successfulEntityResolutionProposalIds.has(proposalId)) {
+      throw new Error(`Proposal ID ${proposalId} is already used by an entity-resolution proposal in this batch.`);
     }
     if (!successfulAnnotationProposalIds.has(proposalId) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
       throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
@@ -1006,6 +1107,12 @@ export function createCompilerProposalToolset(
   const retrievalTools = [
     ...createCompilerArtifactRetrievalTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
     ...createSourceAnnotationRetrievalTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
+    ...createEntityResolutionRetrievalTools(
+      workspaceRoot,
+      () => activeSourceId,
+      () => compilerBatchId,
+      () => beginToolCall("retrieval"),
+    ),
     ...createCompilerSourceEvidenceTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
   ];
 
@@ -1034,6 +1141,9 @@ export function createCompilerProposalToolset(
         await assertStableLogicalRevision(service, kind, normalized.payload, compilerBatchId);
         if (successfulAnnotationProposalIds.has(input.proposal_id)) {
           throw new Error(`Proposal ID ${input.proposal_id} is already used by a source-annotation proposal in this batch.`);
+        }
+        if (successfulEntityResolutionProposalIds.has(input.proposal_id)) {
+          throw new Error(`Proposal ID ${input.proposal_id} is already used by an entity-resolution proposal in this batch.`);
         }
         if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
           throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
@@ -1195,6 +1305,87 @@ export function createCompilerProposalToolset(
     },
   });
   const annotationProposalTools = [entityMentionTool, quotationTool, discourseObservationTool];
+  const identityResolutionTool = defineTool<typeof identityResolutionParameters, CompilerProposalDetails>({
+    name: "propose_entity_resolution",
+    label: "Propose entity resolution",
+    description: "Stage an explicit resolved, new-entity, ambiguous, or unresolved decision for one entity mention. This never creates canonical identity by itself.",
+    promptSnippet: "Resolve or deliberately leave open one source mention after deterministic candidate lookup",
+    promptGuidelines: [
+      "Call find_entity_resolution_candidates first unless the mention is an explicit new identity or has no lexical surface.",
+      "Use resolved only for an existing canonical entity; use new-entity only with a same-finish propose_entity candidate.",
+      "Ambiguous and unresolved are valid outcomes. Never select a candidate merely to eliminate an uncertainty count.",
+      "Every candidate basis must include the primary mention ID. evidence_assertion_ids may be empty when the exact mention anchors are the complete basis.",
+      "To revise a current decision, use a new resolution_id and set supersedes_resolution_id to the exact current resolution ID.",
+    ],
+    executionMode: "sequential",
+    parameters: identityResolutionParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (isStructureDiscoveryBatch()) throw new Error("Identity resolution is unavailable during chapter structure discovery.");
+      if (!activeSourceId) throw new Error("Identity resolution requires an active source-scoped compiler batch.");
+      if (successfulProposalIds.has(input.proposal_id) || successfulAnnotationProposalIds.has(input.proposal_id)) {
+        throw new Error(`Proposal ID ${input.proposal_id} is already used by another compiler proposal in this batch.`);
+      }
+      if (!successfulEntityResolutionProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
+        throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+      }
+      const resolution = identityResolutionSchema.parse({
+        version: 1,
+        id: input.resolution_id,
+        sourceId: activeSourceId,
+        mentionId: input.mention_id,
+        status: input.status,
+        ...(input.entity_id ? { entityId: input.entity_id } : {}),
+        candidates: input.candidates.map((candidate) => ({
+          entityId: candidate.entity_id,
+          confidence: candidate.confidence,
+          basisMentionIds: candidate.basis_mention_ids,
+          evidenceAssertionIds: candidate.evidence_assertion_ids,
+          rationale: candidate.rationale,
+        })),
+        ...(input.alias_type ? { aliasType: input.alias_type } : {}),
+        ...(input.valid_story_time ? { validStoryTime: input.valid_story_time } : {}),
+        ...(input.supersedes_resolution_id ? { supersedesResolutionId: input.supersedes_resolution_id } : {}),
+        rationale: input.rationale,
+        derivation: {
+          runId: compilerBatchId ?? input.proposal_id,
+          worker: "propose_entity_resolution",
+          ...(compilerBatchId ? { compilerBatchId } : {}),
+          ...generatedBy,
+          ontologyVersion: ENTITY_RESOLUTION_ONTOLOGY_VERSION,
+        },
+      });
+      await entityResolutionStore.stage(activeSourceId, {
+        version: 1,
+        id: input.proposal_id,
+        payload: resolution,
+        generatedBy: {
+          worker: "propose_entity_resolution",
+          ...(compilerBatchId ? { compilerBatchId } : {}),
+          ...generatedBy,
+        },
+        createdAt: new Date().toISOString(),
+      });
+      successfulEntityResolutionProposalIds.add(input.proposal_id);
+      recordProposalProgress();
+      return proposalResult(
+        `Pending entity-resolution proposal ${input.proposal_id} recorded for mention ${resolution.mentionId} with status ${resolution.status}. It is a source-to-identity decision, not canonical world truth. Active proposals: ${activeProposalCount()}/${MAX_ACTIVE_COMPILER_PROPOSALS}.`,
+        {
+          proposalId: input.proposal_id,
+          kind: "entity-resolution",
+          resolutionId: resolution.id,
+          mentionId: resolution.mentionId,
+          status: resolution.status,
+          activeProposalCount: activeProposalCount(),
+          toolCallCount: totalToolCalls,
+          remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+        },
+      );
+    },
+  });
   const withdrawParameters = Type.Object({
     proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
     reason: Type.String({ minLength: 1, maxLength: 500 }),
@@ -1223,6 +1414,28 @@ export function createCompilerProposalToolset(
         recordProposalProgress();
         return {
           content: [{ type: "text" as const, text: `Novel-title proposal ${input.proposal_id} withdrawn: ${input.reason}` }],
+          details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
+        };
+      }
+      if (successfulEntityResolutionProposalIds.has(input.proposal_id)) {
+        if (!activeSourceId) throw new Error("Identity-resolution proposal lost its active source identity.");
+        let alreadyCommitted = false;
+        try {
+          await entityResolutionStore.withdraw(activeSourceId, input.proposal_id);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          await entityResolutionStore.readProposal(activeSourceId, "accepted", input.proposal_id);
+          alreadyCommitted = true;
+        }
+        successfulEntityResolutionProposalIds.delete(input.proposal_id);
+        recordProposalProgress();
+        return {
+          content: [{
+            type: "text" as const,
+            text: alreadyCommitted
+              ? `Previously committed recovery resolution ${input.proposal_id} released from this finish handshake; immutable history remains available for a superseding correction: ${input.reason}`
+              : `Identity-resolution proposal ${input.proposal_id} withdrawn to rejected history: ${input.reason}`,
+          }],
           details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
         };
       }
@@ -1367,7 +1580,13 @@ export function createCompilerProposalToolset(
       if (blocked) return blocked;
       const listed = [...successfulProposalIds].sort();
       const listedAnnotations = [...successfulAnnotationProposalIds].sort();
-      const expected = [...listed, ...listedAnnotations, ...(pendingNovelTitleProposal ? [pendingNovelTitleProposal.proposalId] : [])].sort();
+      const listedEntityResolutions = [...successfulEntityResolutionProposalIds].sort();
+      const expected = [
+        ...listed,
+        ...listedAnnotations,
+        ...listedEntityResolutions,
+        ...(pendingNovelTitleProposal ? [pendingNovelTitleProposal.proposalId] : []),
+      ].sort();
       if (new Set(expected).size !== expected.length) {
         return failFinish("World, annotation, and metadata proposals must use distinct proposal IDs.");
       }
@@ -1402,6 +1621,30 @@ export function createCompilerProposalToolset(
       if (annotationClosureIssues.length) {
         return failFinish(`Source annotation graph is incomplete:\n- ${annotationClosureIssues.join("\n- ")}`);
       }
+      const resolutionClosureIssues = activeSourceId
+        ? await validateIdentityResolutionClosure(
+          workspaceRoot,
+          activeSourceId,
+          listedEntityResolutions,
+          listedAnnotations,
+          listed,
+        )
+        : [];
+      if (resolutionClosureIssues.length) {
+        return failFinish(`Entity-resolution graph is incomplete:\n- ${resolutionClosureIssues.join("\n- ")}`);
+      }
+      const entityTraceIssues = activeSourceId
+        ? await validateEntityProposalResolutionTrace(
+          workspaceRoot,
+          activeSourceId,
+          listed,
+          listedAnnotations,
+          listedEntityResolutions,
+        )
+        : [];
+      if (entityTraceIssues.length) {
+        return failFinish(`Canonical entity proposal trace is incomplete:\n- ${entityTraceIssues.join("\n- ")}`);
+      }
       if (pendingChapterSplitPlan) {
         if (!activeSourceId) return failFinish("Structure discovery lost its active source identity.");
         const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
@@ -1421,6 +1664,9 @@ export function createCompilerProposalToolset(
       const committedAnnotations = activeSourceId && listedAnnotations.length
         ? await annotationStore.commitProposals(activeSourceId, listedAnnotations)
         : [];
+      if (activeSourceId && listedEntityResolutions.length) {
+        await entityResolutionStore.commitProposals(activeSourceId, listedEntityResolutions);
+      }
       if (activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const workspace = await WorkspaceStore.create(workspaceRoot);
         const source = await workspace.getSource(activeSourceId);
@@ -1463,6 +1709,7 @@ export function createCompilerProposalToolset(
       deferBoundaryTool,
       ...proposalTools,
       ...annotationProposalTools,
+      identityResolutionTool,
       withdrawTool,
       replaceBoundaryTool,
       finishTool,
@@ -1470,6 +1717,7 @@ export function createCompilerProposalToolset(
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
       successfulProposalIds.clear();
       successfulAnnotationProposalIds.clear();
+      successfulEntityResolutionProposalIds.clear();
       peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];
@@ -1554,6 +1802,12 @@ export function createCompilerProposalToolset(
             throw new Error(`Compiler batch ${compilerBatchId} reuses proposal ID ${summary.id} across world and annotation stores.`);
           }
           successfulAnnotationProposalIds.add(summary.id);
+        }
+        for (const summary of await entityResolutionStore.listBatchProposals(activeSourceId, compilerBatchId)) {
+          if (successfulProposalIds.has(summary.id) || successfulAnnotationProposalIds.has(summary.id)) {
+            throw new Error(`Compiler batch ${compilerBatchId} reuses proposal ID ${summary.id} across proposal stores.`);
+          }
+          successfulEntityResolutionProposalIds.add(summary.id);
         }
       }
     },

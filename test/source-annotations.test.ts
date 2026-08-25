@@ -128,8 +128,8 @@ describe("source annotation compilation", () => {
         pendingAnnotations: 0,
         invalidAnchors: 0,
       },
-      coverage: { entityResolution: null },
-      readiness: { resolution: "unknown" },
+      coverage: { entityResolution: 0 },
+      readiness: { resolution: "not-ready" },
     });
 
     const find = toolset.tools.find((tool) => tool.name === "find_source_annotations")!;

@@ -9,6 +9,7 @@ import { ChapterSplitPlanStore } from "../compiler/chapter-split.js";
 import { SourceStructureStore } from "../compiler/structure.js";
 import { SourceAccountingStore } from "../compiler/source-accounting.js";
 import { SourceAnnotationStore } from "../compiler/annotations.js";
+import { EntityResolutionStore } from "../compiler/entity-resolution.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore } from "./actors.js";
 import { CanonicalModelStore, ProposalStore } from "./canonical-model.js";
@@ -149,20 +150,29 @@ export async function removeNovelAnalysis(
   const structureStore = new SourceStructureStore(root);
   const accountingStore = new SourceAccountingStore(root);
   const annotationStore = new SourceAnnotationStore(root);
+  const entityResolutionStore = new EntityResolutionStore(root);
   const annotationData = await Promise.all([
     annotationStore.list(sourceId),
     annotationStore.listProposals(sourceId, "pending"),
     annotationStore.listProposals(sourceId, "accepted"),
     annotationStore.listProposals(sourceId, "rejected"),
   ]);
+  const entityResolutionData = await Promise.all([
+    entityResolutionStore.list(sourceId),
+    entityResolutionStore.listProposals(sourceId, "pending"),
+    entityResolutionStore.listProposals(sourceId, "accepted"),
+    entityResolutionStore.listProposals(sourceId, "rejected"),
+  ]);
   const sourceObservations = Boolean(
     await structureStore.read(sourceId)
     || await accountingStore.read(sourceId)
-    || annotationData.some((items) => items.length > 0),
+    || annotationData.some((items) => items.length > 0)
+    || entityResolutionData.some((items) => items.length > 0),
   );
   await structureStore.remove(sourceId);
   await accountingStore.remove(sourceId);
   await annotationStore.removeSource(sourceId);
+  await entityResolutionStore.removeSource(sourceId);
 
   const batchStore = new CompilerBatchStore(root);
   const boundaryStore = new BoundaryCalibrationStore(root);

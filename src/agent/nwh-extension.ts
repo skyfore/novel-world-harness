@@ -7,6 +7,7 @@ import { createNwhWelcomeHeader, hasPlayerConversation, isFreshConversation, NWH
 import {
   BOUNDARY_CALIBRATION_TOOL_NAMES,
   COMPILER_TOOL_NAMES,
+  ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
   createCompilerProposalToolset,
   type CompilerProposalToolset,
 } from "../compiler/proposal-tools.js";
@@ -132,6 +133,7 @@ export function compilerToolNamesForScope(
       : name !== "configure_chapter_split")
     .filter((name) => scope === "reconciliation" || !SOURCE_EVIDENCE_TOOL_NAMES.includes(name as typeof SOURCE_EVIDENCE_TOOL_NAMES[number]))
     .filter((name) => scope === "source" || !BOUNDARY_CALIBRATION_TOOL_NAMES.includes(name as typeof BOUNDARY_CALIBRATION_TOOL_NAMES[number]))
+    .filter((name) => scope === "source" || !ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES.includes(name as typeof ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES[number]))
     .filter((name) => name !== "propose_novel_title"
       || (scope === "source" && sourcePurpose === "source-review"))
     .filter((name) => {

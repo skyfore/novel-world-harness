@@ -23,7 +23,10 @@ import {
   semanticRepairRequiresReparse,
 } from "../compiler/reconcile-world.js";
 import type { ReparseCommandOptions } from "./reparse.js";
-import { SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES } from "../compiler/proposal-tools.js";
+import {
+  ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
+  SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
+} from "../compiler/proposal-tools.js";
 
 export type PrepareAllCommandOptions = {
   root: string;
@@ -291,7 +294,11 @@ export async function prepareAllCommand(
         compilerBatchId: openingBatch.id,
         sourceId,
         includeLocalTools: false,
-        disabledProposalTools: ["propose_state_delta", ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES],
+        disabledProposalTools: [
+          "propose_state_delta",
+          ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
+          ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
+        ],
         acquireLock: false,
         signal: options.signal,
         onProgress: report,
@@ -461,7 +468,11 @@ async function runWorldReconciliationPass(input: {
     compilerBatchId: `reconcile-${input.sourceId}-${input.mode}-${input.options.reparseRunId ?? "v3"}-${input.iteration}`,
     sourceId: input.sourceId,
     includeLocalTools: false,
-    disabledProposalTools: ["propose_state_delta", ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES],
+    disabledProposalTools: [
+      "propose_state_delta",
+      ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
+      ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
+    ],
     acquireLock: false,
     signal: input.options.signal,
     onProgress: input.report,

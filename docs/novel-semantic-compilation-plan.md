@@ -1277,6 +1277,13 @@ Exit criteria:
 
 Objective: make cross-book identity and event fusion explicit and revisable.
 
+Implementation status (2026-08-25): M3a entity resolution is complete.
+`src/compiler/entity-resolution.ts` and
+`src/compiler/entity-resolution-retrieval.ts` provide deterministic lexical
+candidates, explicit resolved/new/ambiguous/unresolved decisions, immutable
+superseding revisions, source-scoped paging, audit denominators, and canonical
+name/alias trace gates. M3b event mentions and event resolution remain next.
+
 Work:
 
 - deterministic lexical candidate generation;

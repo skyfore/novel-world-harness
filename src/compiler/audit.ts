@@ -23,6 +23,7 @@ import {
   annotationAnchors,
   validateSourceAnnotationClosure,
 } from "./annotations.js";
+import { inspectEntityResolutionCoverage } from "./entity-resolution.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -56,6 +57,18 @@ export type CompilerAuditReport = {
     byteCoverage: number | null;
     statusCounts: Record<SourceAccountingStatus, number>;
     errors: Array<{ observation: string; code: string; message: string }>;
+  };
+  resolutions: {
+    entityMentions: number;
+    resolved: number;
+    newEntities: number;
+    ambiguous: number;
+    unresolved: number;
+    missing: number;
+    pending: number;
+    invalid: number;
+    missingMentionIds: string[];
+    errors: Array<{ sourceId: string; message: string }>;
   };
   canonical: {
     entities: number;
@@ -104,7 +117,7 @@ export type CompilerAuditReport = {
     temporalConsistency: number | null;
     stateDeltaExplicitness: number | null;
     causalityConsistency: number | null;
-    entityResolution: null;
+    entityResolution: number | null;
     majorEventResolution: null;
     epistemicCoverage: null;
     timelineAnchoring: number | null;
@@ -174,6 +187,15 @@ export async function auditCompiler(
   let quotations = 0;
   let discourseSegments = 0;
   let pendingAnnotations = 0;
+  let resolvedMentions = 0;
+  let newEntityMentions = 0;
+  let ambiguousMentions = 0;
+  let unresolvedMentions = 0;
+  let missingResolutions = 0;
+  let pendingResolutions = 0;
+  const missingResolutionMentionIds: string[] = [];
+  const invalidResolutionIds = new Set<string>();
+  const resolutionErrors: CompilerAuditReport["resolutions"]["errors"] = [];
   let accountedUnits = 0;
   let unaccountedUnits = 0;
   let blockingUnits = 0;
@@ -191,6 +213,16 @@ export async function auditCompiler(
     "intentionally-deferred": 0,
   };
   for (const source of sources) {
+    const resolutionCoverage = await inspectEntityResolutionCoverage(workspaceRoot, source.id);
+    resolvedMentions += resolutionCoverage.resolved;
+    newEntityMentions += resolutionCoverage.newEntities;
+    ambiguousMentions += resolutionCoverage.ambiguous;
+    unresolvedMentions += resolutionCoverage.unresolved;
+    missingResolutions += resolutionCoverage.missing;
+    pendingResolutions += resolutionCoverage.pending;
+    missingResolutionMentionIds.push(...resolutionCoverage.missingMentionIds);
+    for (const resolutionId of resolutionCoverage.invalidResolutionIds) invalidResolutionIds.add(resolutionId);
+    resolutionErrors.push(...resolutionCoverage.errors.map((message) => ({ sourceId: source.id, message })));
     const [annotations, annotationProposals] = await Promise.all([
       annotationStore.list(source.id),
       annotationStore.listProposals(source.id, "pending"),
@@ -558,14 +590,18 @@ export async function auditCompiler(
       : blockingUnits > 0
         ? "not-ready"
         : "ready";
-  // Source mentions now exist, but M3 introduces explicit resolution decisions
-  // and a completeness denominator. Observation count alone cannot imply that
-  // identity resolution is complete.
+  const resolutionReadiness: CompilerReadinessState = entityMentions === 0
+    ? "unknown"
+    : pendingResolutions || missingResolutions || ambiguousMentions || unresolvedMentions || resolutionErrors.length
+      ? "not-ready"
+      : resolvedMentions + newEntityMentions === entityMentions
+        ? "ready"
+        : "not-ready";
   const readinessStates = {
     structural: structuralReadiness,
     evidence: evidenceReadiness,
     accounting: accountingReadiness,
-    resolution: "unknown" as const,
+    resolution: resolutionReadiness,
     semantic: semanticReadiness,
     runtime: runtimeReadiness,
   };
@@ -580,6 +616,8 @@ export async function auditCompiler(
     ...changedSinceIngest.map((sourceId) => `Source ${sourceId} changed or failed immutable-source verification.`),
     ...evidenceErrors.map((error) => `${error.artifact}: ${error.code}: ${error.message}`),
     ...observationErrors.map((error) => `${error.observation}: ${error.code}: ${error.message}`),
+    ...resolutionErrors.map((error) => `Identity resolution ${error.sourceId}: ${error.message}`),
+    ...missingResolutionMentionIds.map((mentionId) => `Entity mention ${mentionId} has no current identity-resolution record.`),
     ...graph.cycles.map((cycle) => `Causal cycle: ${cycle.join(" -> ")}`),
     ...graph.missing.map(({ eventId, parentId }) => `Event ${eventId} has missing causal parent ${parentId}.`),
     ...graph.temporalRegressions.map(({ eventId, parentId }) => `Event ${eventId} is earlier than causal parent ${parentId}.`),
@@ -607,6 +645,18 @@ export async function auditCompiler(
       byteCoverage: observationBytes ? accountedObservationBytes / observationBytes : null,
       statusCounts: accountingStatusCounts,
       errors: observationErrors,
+    },
+    resolutions: {
+      entityMentions,
+      resolved: resolvedMentions,
+      newEntities: newEntityMentions,
+      ambiguous: ambiguousMentions,
+      unresolved: unresolvedMentions,
+      missing: missingResolutions,
+      pending: pendingResolutions,
+      invalid: invalidResolutionIds.size,
+      missingMentionIds: [...new Set(missingResolutionMentionIds)].sort(),
+      errors: resolutionErrors,
     },
     canonical: {
       entities: entities.length,
@@ -655,7 +705,9 @@ export async function auditCompiler(
       temporalConsistency: events.length ? (graph.cycles.length || graph.temporalRegressions.length ? 0 : 1) : null,
       stateDeltaExplicitness: events.length ? eventsWithExplicitDelta / events.length : null,
       causalityConsistency: events.length ? (graph.cycles.length || graph.missing.length || narrativeGraphNavigable === false ? 0 : 1) : null,
-      entityResolution: null,
+      entityResolution: entityMentions
+        ? Math.min(1, (resolvedMentions + newEntityMentions) / entityMentions)
+        : null,
       majorEventResolution: null,
       epistemicCoverage: null,
       timelineAnchoring,

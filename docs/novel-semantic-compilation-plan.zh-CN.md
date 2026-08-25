@@ -1186,6 +1186,13 @@ removal 与分页检索。Identity resolution 明确保留给 M3。
 
 目标：跨全书身份和事件融合可见、可 revision。
 
+实施状态（2026-08-25）：M3a entity resolution 已完成。
+`src/compiler/entity-resolution.ts` 与
+`src/compiler/entity-resolution-retrieval.ts` 已实现 deterministic lexical
+candidate、显式 resolved/new-entity/ambiguous/unresolved 决策、immutable
+superseding revision、source-scoped 分页、audit denominator，以及 canonical
+name/alias trace gate。M3b event mention/event resolution 是下一步。
+
 改造：
 
 - deterministic lexical candidates；

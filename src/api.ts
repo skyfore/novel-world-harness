@@ -30,6 +30,25 @@ export {
   type SourceAnnotationType,
 } from "./compiler/annotations.js";
 export {
+  ENTITY_RESOLUTION_ONTOLOGY_VERSION,
+  EntityResolutionStore,
+  generateEntityResolutionCandidates,
+  identityResolutionCandidateSchema,
+  identityResolutionProposalSchema,
+  identityResolutionSchema,
+  inspectEntityResolutionCoverage,
+  validateCommittedEntityResolutionTrace,
+  validateEntityProposalResolutionTrace,
+  validateIdentityResolutionClosure,
+  type EntityResolutionCoverage,
+  type IdentityResolution,
+  type IdentityResolutionCandidate,
+  type IdentityResolutionProposal,
+  type IdentityResolutionProposalStatus,
+  type IdentityResolutionProposalSummary,
+  type LexicalEntityResolutionCandidate,
+} from "./compiler/entity-resolution.js";
+export {
   STRUCTURE_VERSION,
   SourceStructureStore,
   baseStructuralUnits,

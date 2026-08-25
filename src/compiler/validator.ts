@@ -28,6 +28,7 @@ import {
   validateEvidenceAssertionTargets,
 } from "./evidence-assertions.js";
 import { evidenceSourceIds } from "../world/source-scope.js";
+import { validateCommittedEntityResolutionTrace } from "./entity-resolution.js";
 
 export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
@@ -474,8 +475,10 @@ export class CompilerCommitService {
   readonly actorModels: ActorModelStore;
   readonly exactEvidence: EvidenceAssertionStore;
   private readonly evidence: EvidenceVerifier;
+  private readonly workspaceRoot: string;
 
   constructor(workspaceRoot: string) {
+    this.workspaceRoot = workspaceRoot;
     this.canon = new CanonicalModelStore(workspaceRoot);
     this.proposals = new ProposalStore(workspaceRoot);
     this.compiler = new CanonicalCompiler(this.proposals, this.canon);
@@ -641,6 +644,14 @@ export class CompilerCommitService {
           "evidenceAssertions",
         )]
       : [];
+    const sourceIds = [...new Set([...legacySourceIds, ...exactSourceIds])];
+    const resolutionTraceIssues = kind === "entity" && sourceIds.length === 1
+      ? (await validateCommittedEntityResolutionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        entitySchema.parse(payload),
+      )).map((message) => issue("MISSING_ENTITY_RESOLUTION_TRACE", message, "id"))
+      : [];
     const errors = [
       ...validation.errors,
       ...inspected.issues,
@@ -648,6 +659,7 @@ export class CompilerCommitService {
       ...targetIssues,
       ...exactInspection.issues,
       ...mixedSourceIssues,
+      ...resolutionTraceIssues,
     ];
     return { accepted: errors.length === 0, errors, warnings: validation.warnings };
   }

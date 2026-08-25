@@ -1,6 +1,6 @@
 # Technical Plan: Evidence-Grounded Full-Novel Semantic Compilation
 
-- **Status:** In progress — M0 through M4 and M5a implemented; M5b through M7 remain
+- **Status:** In progress — M0 through M4, M5a, and M5b-1 implemented; M5b-2, M5c through M7 remain
 - **Date:** 2026-08-25
 - **Scope:** Novel ingest, structural segmentation, semantic annotation, identity resolution, canonical compilation, audit, reconciliation, and reparse
 - **Preserves:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0002](adr/0002-user-level-content-addressed-storage.md), and [ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
@@ -292,9 +292,88 @@ story-time gates are satisfied
 ([character-ontology.ts](../src/world/character-ontology.ts#L542)). Actor-facing
 model views remove evidence and internal artifact IDs, and suppress
 target-specific dispositions when the target is not visible to that actor
-([character-ontology.ts](../src/world/character-ontology.ts#L632)). The remaining
-M5 work is directed relationship state, spatial/rule domains, and deterministic
-salience selection.
+([character-ontology.ts](../src/world/character-ontology.ts#L632)).
+
+#### 3.7.1 M5b-1 finding: a relationship is not one symmetric strength
+
+Before M5b-1, the executable layer already had the right identity skeleton:
+relationships were stable entities, `relationship.from/to` were directional,
+and `character.relationships` stored relationship IDs. The retained legacy
+fields nevertheless exposed three lossy shortcuts: free-form
+`relationship.kind`, one `relationship.strength` scalar for conceptually
+different attitudes, and an untyped `relationship.obligations` entity set
+([state.ts](../src/world/state.ts#L160)). CharacterModel had no per-target
+stance, obligation content, change mechanism, or event/knowledge gate, so the
+runtime could know that a bond existed without a reviewable policy for how one
+specific actor regarded the other.
+
+External sources support the modeling principles, not this repository's exact
+labels. The W3C [N-ary Relations pattern](https://www.w3.org/TR/swbp-n-aryRelations/)
+recommends an addressable relation instance when a relation has confidence,
+strength, or other attributes. The Social Relations Model separates actor,
+partner, and dyad-specific effects and treats relationship effects as
+directional/asymmetric ([Kenny, SRM information](https://davidakenny.net/srm/soremo.htm)).
+Computational literary work likewise models relationships as changing through
+a book rather than as static lexicon hits
+([Feuding Families and Former Friends](https://aclanthology.org/N16-1180/)).
+[PersonaBank](https://aclanthology.org/L16-1163/) connects character timelines,
+goals/motivations, and the affective impact of events. The implemented design is
+therefore a deliberately small engineering subset: stable directed identity,
+multidimensional actor policy, and event/knowledge gates. Its six stance
+dimensions and nine obligation types are a versioned repository vocabulary,
+not a claim of universal psychological measurement.
+
+`relationship-v1` now provides:
+
+- 12 controlled primary relationship types, six behaviorally anchored directed
+  stance dimensions, and nine obligation types
+  ([relationship-ontology.ts](../src/world/relationship-ontology.ts#L16));
+- source/target/relation identity, stability, basis, temporal validity,
+  support/contest status, confidence, and item evidence for each stance; stable
+  non-explicit inference requires two distinct source spans
+  ([relationship-ontology.ts](../src/world/relationship-ontology.ts#L174));
+- proposition-backed obligation content with world-event, lived-event,
+  knowledge, and story-time activation/resolution; change episodes connect
+  same-pair before/after stance or obligation records to trigger events,
+  mechanism propositions, time windows, and reversals
+  ([relationship-ontology.ts](../src/world/relationship-ontology.ts#L199));
+- deterministic entity/event/claim/proposition/pair closure and exact assertion
+  equality with embedded evidence
+  ([relationship-ontology.ts](../src/world/relationship-ontology.ts#L283),
+  [relationship-ontology.ts](../src/world/relationship-ontology.ts#L359));
+- fail-closed runtime projection requiring current branch membership, exact
+  `from === actor`, exact `to === target`, `active === true`, and a controlled
+  type. Future changes wait for committed/experienced/known triggers and a
+  reversal restores displaced policy
+  ([relationship-ontology.ts](../src/world/relationship-ontology.ts#L434),
+  [relationship-ontology.ts](../src/world/relationship-ontology.ts#L582));
+- actor-safe grouping by visible target with evidence, proposition/event IDs,
+  relationship IDs, and compiler explanations removed. The same view now
+  reaches proactive actors, reactive NPCs, player choice, and narration
+  ([relationship-ontology.ts](../src/world/relationship-ontology.ts#L528),
+  [model-actor-policy.ts](../src/world/model-actor-policy.ts#L181),
+  [npc-reaction.ts](../src/world/npc-reaction.ts#L258),
+  [play-opening.ts](../src/world/play-opening.ts#L295)).
+
+Relationship existence/direction/type/activity remains branch WorldState derived
+from committed events. Stance and perceived obligation remain immutable-version
+CharacterModel policy inputs and never write world truth. StateSchema now
+deterministically constrains `relationship.type`; kind/strength/untyped
+obligations remain compatibility-only
+([model.ts](../src/world/model.ts#L297), [state.ts](../src/world/state.ts#L162)).
+Audit reports directed/type coverage, legacy operations, semantic inventory,
+and closure errors, while prepared publication repeats exact-evidence checks
+([audit.ts](../src/compiler/audit.ts#L636),
+[prepared-cache.ts](../src/compiler/prepared-cache.ts#L890)). Tests cover schema,
+closure, future isolation, wrong-direction fail-closed behavior, reversal,
+actor-safe redaction, exact selector injection, and audit coverage
+([relationship-ontology.test.ts](../test/relationship-ontology.test.ts#L1),
+[proposal-tools.test.ts](../test/proposal-tools.test.ts#L420),
+[compiler-audit.test.ts](../test/compiler-audit.test.ts#L263)).
+
+Remaining M5 work is M5b-2 spatial/world-rule domains and M5c deterministic
+salience. Goal hierarchy/conflict/commitment should be expanded only from
+measured failures.
 
 ### 3.8 Current audit cannot measure full-book semantic recall
 
@@ -337,7 +416,7 @@ state deltas, goals, and runtime checkpoints.
 Finding: repair and reparse need explicit source-accounting gaps and artifact
 dependencies.
 
-## 4. Current end-to-end flow after M0-M4 and M5a
+## 4. Current end-to-end flow after M0-M4, M5a, and M5b-1
 
 ```text
 nwh ingest
@@ -355,21 +434,22 @@ nwh compile-source / prepare-all
   -> model submits typed proposals plus exact supporting/contradicting selectors
   -> host resolves trusted anchors, EvidenceRefs, and derivation provenance
   -> character-v1 separates disposition, appraisal, and development proposals
+  -> relationship-v1 separates directed stance, typed obligation, and relationship change
   -> finish validates source accounting and the prospective semantic graph
   -> pending proposal store
 
 accept / prepare
   -> cryptographic evidence validation
   -> mention-resolution and exact-target trace validation
-  -> reference, state-schema, participation, epistemic, event-relation,
-     and character-ontology validation
+  -> reference, state-schema, participation, epistemic, event/character/
+     relationship-ontology validation
   -> dependency ordering / semantic cycle checks
   -> immutable canonical revision + current ref
   -> prepared publication repeats whole-catalog projection/readiness gates
 
 audit / reconcile
   -> source-accounting denominators and observation/resolution coverage
-  -> exact-evidence, participation, epistemic, typed-causality, and controlled-character metrics
+  -> exact-evidence, participation, epistemic, typed-causality, character, and relationship metrics
   -> bounded repair queues; dependency-aware invalidation remains M6
 
 reparse
@@ -381,7 +461,7 @@ runtime
   -> committed events are branch truth
   -> snapshot V6 pins proposition/attribution/participation/relation revisions
   -> typed semantic records derive compatibility event views, never branch truth
-  -> character semantics activate only from committed/experienced events and actor-safe visibility
+  -> character/relationship policy activates only from committed/experienced/known triggers and actor-safe visibility
   -> deterministic state, knowledge, scenes, and character development
 ```
 
@@ -391,8 +471,9 @@ validation -> explicit acceptance -> replay sequence
 resolution records are now non-canonical predecessors of world proposals;
 finish-time closure prevents an incomplete prospective graph from being
 checkpointed ([proposals.ts](../src/compiler/proposals.ts#L316)). M5a character
-semantics are now compiled, source-scoped, audited, and projected; M5b/M5c still
-need relationship/spatial/rule ontology and salience selection. M6 needs explicit
+and M5b-1 directed-relationship semantics are now compiled, source-scoped,
+audited, and projected; M5b-2/M5c still need spatial/rule ontology and salience
+selection. M6 needs explicit
 dependency-driven invalidation and publication policy, and M7 needs a labeled
 multi-novel semantic benchmark.
 
@@ -1271,6 +1352,7 @@ Inventory counts remain useful diagnostics but are never labeled coverage.
 | Knowledge | acquisition and actor visibility | operation F1 and leakage failures |
 | State | deterministic state/knowledge deltas | operation accuracy and replay invariants |
 | Character | goals, appraisals, development changes | expert agreement, evidence support, calibration |
+| Relationship | directed type, stance, obligation, change | pair/type F1, change F1, evidence support, future-leakage failures |
 | End-to-end | prepared world and branching | determinism, canon replay, divergence, spoiler isolation |
 
 Logical IDs alone are insufficient for matching. Evaluation aligns artifacts by
@@ -1506,20 +1588,22 @@ Exit criteria:
 Objective: make agent behavior depend on evidence-backed, contextual
 development rather than arbitrary trait names.
 
-Status: **M5a complete and verified; M5b/M5c pending.** The controlled registry,
-disposition/appraisal/development records, nested host-owned evidence,
+Status: **M5a and M5b-1 complete and verified; M5b-2/M5c pending.** Character
+and directed-relationship controlled registries, nested host-owned evidence,
 prospective/commit/prepared validation, audit metrics, and actor-safe runtime
 projection are implemented
 ([character-ontology.ts](../src/world/character-ontology.ts#L14),
+[relationship-ontology.ts](../src/world/relationship-ontology.ts#L16),
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L312),
-[audit.ts](../src/compiler/audit.ts#L993)).
+[audit.ts](../src/compiler/audit.ts#L636)).
 
 Work:
 
 - [implemented M5a] introduce controlled character dimension registry;
 - [implemented M5a] add dispositions, appraisals, and development episodes;
 - enrich goal hierarchy/conflict/commitment;
-- add directed, target-specific relationship state;
+- [implemented M5b-1] add directed target-specific identity/type, stance,
+  typed obligation, and before/after relationship change;
 - add spatial and world-rule domain modules;
 - replace fixed recent-event slicing with deterministic salience selection.
 
@@ -1528,6 +1612,7 @@ Primary files:
 - `src/world/actors.ts`;
 - `src/world/development.ts`;
 - `src/world/state.ts`;
+- `src/world/relationship-ontology.ts`;
 - `src/world/model-actor-policy.ts`;
 - `src/compiler/semantics.ts`;
 - related runtime and actor tests.
@@ -1538,6 +1623,9 @@ Exit criteria:
 - every disposition/development change has context and evidence;
 - current affect, stable disposition, relationship stance, and goal are
   separate;
+- reverse direction cannot reuse forward stance, and future relationship policy
+  cannot activate early;
+- every relationship semantic record has exact support/counter-evidence;
 - actor projection remains deterministic and knowledge-safe.
 
 ### M6: Dependency-aware audit, reconciliation, and reparse

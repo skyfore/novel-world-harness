@@ -32,6 +32,7 @@ import { committedHistory, realizedCanonicalEvents } from "./scene.js";
 import { AmbiguousLegacySourceError, evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { immutableClone } from "../util/immutable.js";
 import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
+import { modelVisibleRelationshipOntology, type ModelVisibleRelationshipOntology } from "./relationship-ontology.js";
 
 export const actorActionTemplateSchema = z
   .object({
@@ -64,6 +65,7 @@ export type ModelActorDispositionView = Pick<EffectiveCharacterModel, "traits" |
   dispositions?: ModelVisibleCharacterOntology["dispositions"];
   appraisals?: ModelVisibleCharacterOntology["appraisals"];
   development?: ModelVisibleCharacterOntology["development"];
+  relationships?: ModelVisibleRelationshipOntology;
 };
 
 export type ModelActorWorldView = {
@@ -176,6 +178,9 @@ export function modelActorProposalSource(
       const visibleOntology = development.model
         ? modelVisibleCharacterOntology(development.model, (entityId) => entityHandles.get(entityId))
         : undefined;
+      const visibleRelationships = development.model
+        ? modelVisibleRelationshipOntology(development.model, (entityId) => entityHandles.get(entityId))
+        : undefined;
       const actor: ModelActorWorldView = {
         actorId: modelScoped.actorId,
         selfState: structuredClone(modelScoped.selfState),
@@ -210,6 +215,7 @@ export function modelActorProposalSource(
               ...(visibleOntology?.dispositions.length ? { dispositions: structuredClone(visibleOntology.dispositions) } : {}),
               ...(visibleOntology?.appraisals.length ? { appraisals: structuredClone(visibleOntology.appraisals) } : {}),
               ...(visibleOntology?.development.length ? { development: structuredClone(visibleOntology.development) } : {}),
+              ...(visibleRelationships?.length ? { relationships: structuredClone(visibleRelationships) } : {}),
             }
           : null,
         development: {

@@ -279,8 +279,10 @@ function addCommittedRelationshipThreads(
     if (typeof otherActorId !== "string" || entities.get(otherActorId)?.kind !== "character") continue;
     const otherName = actorVisibleEntityName(scoped, otherActorId);
     if (!otherName) continue;
-    const relationshipKind = typeof state["relationship.kind"] === "string"
-      ? state["relationship.kind"].normalize("NFKC").trim().slice(0, 80)
+    const relationshipKind = typeof state["relationship.type"] === "string"
+      ? state["relationship.type"].normalize("NFKC").trim().slice(0, 80)
+      : typeof state["relationship.kind"] === "string"
+        ? state["relationship.kind"].normalize("NFKC").trim().slice(0, 80)
       : undefined;
     const linkId = `relationship-${relationshipId}`;
     threads.push({

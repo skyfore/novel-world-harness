@@ -112,6 +112,18 @@ The branch now implements a constrained end-to-end path from a local novel throu
   admits only realized or personally experienced triggers, derives development
   status from the current branch, and strips evidence, internal IDs, and
   unrestricted causal/intent prose before model exposure.
+- Character models may independently use the `relationship-v1` directed-policy
+  ontology. A relationship is active for one actor only when committed state
+  proves that actor's relationship membership, exact `from`/`to` direction,
+  `active === true`, and a controlled primary type. Trust, affinity, respect,
+  perceived threat, dependence, and influence remain separate stance dimensions;
+  proposition-backed typed obligations and same-pair before/after changes have
+  their own event, experience, knowledge, time, reversal, confidence, and exact
+  evidence gates. These records are immutable policy inputs, never world truth.
+  Actor-facing projections remove evidence and compiler identities and omit
+  invisible targets. Audit reports directed/type state coverage, legacy
+  kind/strength/obligation operations, relationship-policy inventory, and
+  reference failures; prepared publication repeats exact-evidence validation.
 - Canonical entities, propositions, attributions, claims, events, event
   participations, event relations, and rules use
   logical refs over immutable revisions.

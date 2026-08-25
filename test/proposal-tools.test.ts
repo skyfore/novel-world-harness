@@ -417,6 +417,63 @@ describe("compiler proposal tools", () => {
     } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("must target one disposition");
   });
 
+  it("injects exact support and counter-evidence into directed relationship policy", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-relationship-evidence-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "She trusted him after the rescue. Yet she still checked his story.\n",
+    );
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-relationship`, fixture.source.id);
+    const characterModel = toolset.tools.find((candidate) => candidate.name === "propose_character_model")!;
+
+    await characterModel.execute("relationship-evidence", {
+      proposal_id: "relationship-evidence",
+      payload: {
+        actorId: "hero",
+        traits: {},
+        decisionBiases: {},
+        relationshipOntologyVersion: "relationship-v1",
+        relationshipStances: [{
+          id: "hero-trusts-rival",
+          actorId: "hero",
+          relationshipEntityId: "hero-to-rival",
+          targetEntityId: "rival",
+          dimensionId: "trust",
+          value: 0.6,
+          stability: "situational",
+          basis: "inferred-pattern",
+          status: "contested",
+          confidence: 0.6,
+        }],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "trusted him after the rescue",
+        target_path: "/relationshipStances/0/value",
+        relation: "supports",
+        strength: "strong-inference",
+        interpretation: "Reliance after rescue supports a positive directed trust stance.",
+      }, {
+        segment_id: fixture.segmentId,
+        exact: "still checked his story",
+        target_path: "/relationshipStances/0/value",
+        relation: "contradicts",
+        strength: "strong-inference",
+        interpretation: "Continued verification contests unqualified trust.",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const pending = await new ProposalStore(root).read("pending", "relationship-evidence", characterModelSchema);
+    expect(pending.payload.relationshipStances?.[0]).toMatchObject({
+      evidence: [expect.objectContaining({ strength: "strong-inference" })],
+      counterEvidence: [expect.objectContaining({ strength: "strong-inference" })],
+    });
+    expect(pending.evidenceAssertions).toHaveLength(2);
+  });
+
   it("accepts a model-selected title from opening evidence only at the successful finish handshake", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-title-"));
     roots.push(root);

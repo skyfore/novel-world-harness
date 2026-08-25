@@ -33,6 +33,10 @@ import {
   validateCharacterOntologyEvidenceAssertions,
   validateCharacterOntologyReferences,
 } from "../world/character-ontology.js";
+import {
+  validateRelationshipOntologyEvidenceAssertions,
+  validateRelationshipOntologyReferences,
+} from "../world/relationship-ontology.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { isMetaKnowledgePredicate } from "./semantics.js";
@@ -599,6 +603,12 @@ export class CompilerValidator {
       events,
       goals,
     }));
+    errors.push(...validateRelationshipOntologyReferences(model, {
+      entities,
+      propositions: new Set(propositions.keys()),
+      claims: new Set(claims.keys()),
+      events,
+    }));
   }
 
   private validateOperations(operations: CanonicalEvent["observedOutcome"]["operations"], entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[], pathPrefix: string): void {
@@ -850,7 +860,10 @@ export class CompilerCommitService {
     const artifactId = compilerProposalArtifactId(kind, payload, proposalId);
     const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
     const characterEvidenceIssues = kind === "character-model"
-      ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
+      ? [
+          ...validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
+          ...validateRelationshipOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
+        ]
       : [];
     const exactInspection = await this.evidence.inspectAssertions(evidenceAssertions);
     const legacySourceIds = evidenceSourceIds([...payloadEvidence, ...envelopeEvidence]);

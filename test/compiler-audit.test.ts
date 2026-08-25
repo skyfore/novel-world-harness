@@ -276,6 +276,7 @@ describe("compiler audit", () => {
     const trustEvidence = fixture.evidence("Hero later trusts Rival.");
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: heroEvidence });
     await canon.putEntity({ id: "rival", kind: "character", canonicalName: "Rival", aliases: [], evidence: helpEvidence });
+    await canon.putEntity({ id: "hero-to-rival", kind: "relationship", canonicalName: "Hero to Rival", aliases: [], evidence: trustEvidence });
     await canon.putProposition({
       id: "rival-helped-hero",
       subjectEntityId: "rival",
@@ -291,7 +292,13 @@ describe("compiler audit", () => {
       participants: ["hero", "rival"],
       storyTime: { kind: "ordinal", label: "help", orderHint: 1 },
       preconditions: [],
-      observedOutcome: { version: 1, operations: [] },
+      observedOutcome: { version: 1, operations: [
+        { op: "set", entityId: "hero", field: "character.relationships", value: ["hero-to-rival"] },
+        { op: "set", entityId: "hero-to-rival", field: "relationship.from", value: "hero" },
+        { op: "set", entityId: "hero-to-rival", field: "relationship.to", value: "rival" },
+        { op: "set", entityId: "hero-to-rival", field: "relationship.type", value: "friendship" },
+        { op: "set", entityId: "hero-to-rival", field: "relationship.active", value: true },
+      ] },
       evidence: helpEvidence,
       causalParents: [],
       confidence: 1,
@@ -360,6 +367,52 @@ describe("compiler audit", () => {
         confidence: 0.8,
         evidence: helpEvidence,
       }],
+      relationshipOntologyVersion: "relationship-v1",
+      relationshipStances: [{
+        id: "hero-trust-stance",
+        actorId: "hero",
+        relationshipEntityId: "hero-to-rival",
+        targetEntityId: "rival",
+        dimensionId: "trust",
+        value: 0.7,
+        stability: "situational",
+        basis: "explicit-characterization",
+        validStoryTime: { kind: "relative", anchorEventId: "rival-helps", relation: "after" },
+        status: "supported",
+        confidence: 0.9,
+        evidence: trustEvidence,
+      }],
+      relationshipObligations: [{
+        id: "hero-cooperate-obligation",
+        actorId: "hero",
+        relationshipEntityId: "hero-to-rival",
+        targetEntityId: "rival",
+        typeId: "cooperate",
+        contentPropositionId: "rival-helped-hero",
+        priority: 0.7,
+        basis: "inferred-expectation",
+        status: "supported",
+        confidence: 0.7,
+        evidence: helpEvidence,
+      }],
+      relationshipChanges: [{
+        id: "help-revises-relationship",
+        actorId: "hero",
+        relationshipEntityId: "hero-to-rival",
+        targetEntityId: "rival",
+        triggerMode: "experienced",
+        triggerEventIds: ["rival-helps"],
+        beforeStanceIds: [],
+        afterStanceIds: ["hero-trust-stance"],
+        beforeObligationIds: [],
+        afterObligationIds: [],
+        mechanismPropositionId: "rival-helped-hero",
+        startsAt: { kind: "relative", anchorEventId: "rival-helps", relation: "after" },
+        decay: { kind: "none" },
+        evidenceStatus: "supported",
+        confidence: 0.8,
+        evidence: helpEvidence,
+      }],
       evidence: heroEvidence,
     });
 
@@ -380,6 +433,21 @@ describe("compiler audit", () => {
       errors: [],
     });
     expect(report.coverage.controlledCharacterModels).toBe(1);
+    expect(report.relationshipSemantics).toMatchObject({
+      ontologyVersion: "relationship-v1",
+      relationshipEntities: 1,
+      directedEntities: 1,
+      typedEntities: 1,
+      legacyStateOperations: 0,
+      controlledModels: 1,
+      stances: 1,
+      obligations: 1,
+      changeEpisodes: 1,
+      referenceValidationIssues: 0,
+      errors: [],
+    });
+    expect(report.coverage.directedRelationshipEntities).toBe(1);
+    expect(report.coverage.typedRelationshipEntities).toBe(1);
   });
 
   it("blocks semantic readiness when persisted character semantics contain dangling references", async () => {

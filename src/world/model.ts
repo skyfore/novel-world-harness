@@ -305,6 +305,7 @@ export const stateFieldSpecSchema = z
     exclusive: z.boolean().optional(),
     minimum: z.number().finite().optional(),
     maximum: z.number().finite().optional(),
+    allowedValues: z.array(z.union([z.boolean(), z.number().finite(), z.string()])).min(1).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -313,6 +314,22 @@ export const stateFieldSpecSchema = z
     }
     if (value.minimum !== undefined && value.maximum !== undefined && value.minimum > value.maximum) {
       ctx.addIssue({ code: "custom", message: "minimum must be <= maximum", path: ["minimum"] });
+    }
+    if (value.allowedValues && !["boolean", "number", "string", "json-scalar"].includes(value.valueType)) {
+      ctx.addIssue({ code: "custom", message: "allowedValues is valid only for scalar fields", path: ["allowedValues"] });
+    }
+    if (value.allowedValues && value.valueType !== "json-scalar") {
+      const invalidIndex = value.allowedValues.findIndex((item) => typeof item !== value.valueType);
+      if (invalidIndex >= 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: `allowedValues item must match valueType '${value.valueType}'`,
+          path: ["allowedValues", invalidIndex],
+        });
+      }
+    }
+    if (value.allowedValues && new Set(value.allowedValues.map((item) => `${typeof item}:${String(item)}`)).size !== value.allowedValues.length) {
+      ctx.addIssue({ code: "custom", message: "allowedValues must be unique", path: ["allowedValues"] });
     }
   });
 export type StateFieldSpec = z.infer<typeof stateFieldSpecSchema>;

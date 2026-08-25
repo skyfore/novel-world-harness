@@ -41,6 +41,10 @@ import {
   validateCharacterOntologyEvidenceAssertions,
   validateCharacterOntologyReferences,
 } from "../world/character-ontology.js";
+import {
+  validateRelationshipOntologyEvidenceAssertions,
+  validateRelationshipOntologyReferences,
+} from "../world/relationship-ontology.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
@@ -431,6 +435,7 @@ export async function validateCompilerProposalClosure(
   const characterOntologyCatalog = {
     entities: new Map(canonicalEntities.filter(fromActiveSource).map((entity) => [entity.id, { kind: entity.kind }])),
     propositions: new Set(canonicalPropositions.filter(fromActiveSource).map((proposition) => proposition.id)),
+    claims: new Set(canonicalClaims.filter(fromActiveSource).map((claim) => claim.id)),
     events: new Map(canonicalEvents.filter(fromActiveSource).map((event) => [event.id, {
       participants: event.participants,
       participantPresence: event.participantPresence,
@@ -458,6 +463,7 @@ export async function validateCompilerProposalClosure(
     } else if (proposal.kind === "claim") {
       const value = claimSchema.parse(proposal.payload);
       semanticCatalog.claims.set(value.id, value);
+      characterOntologyCatalog.claims.add(value.id);
     } else if (proposal.kind === "proposition") {
       const value = propositionSchema.parse(proposal.payload);
       semanticCatalog.propositions.set(value.id, value);
@@ -556,6 +562,8 @@ export async function validateCompilerProposalClosure(
     for (const ontologyIssue of [
       ...validateCharacterOntologyReferences(model, characterOntologyCatalog),
       ...validateCharacterOntologyEvidenceAssertions(model, proposal.evidenceAssertions),
+      ...validateRelationshipOntologyReferences(model, characterOntologyCatalog),
+      ...validateRelationshipOntologyEvidenceAssertions(model, proposal.evidenceAssertions),
     ]) {
       issues.add(`${proposalId}: ${ontologyIssue.code} at ${ontologyIssue.path ?? "payload"}: ${ontologyIssue.message}`);
     }

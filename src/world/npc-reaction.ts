@@ -31,6 +31,7 @@ import {
 } from "./player-action.js";
 import { committedHistory } from "./scene.js";
 import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
+import { modelVisibleRelationshipOntology, type ModelVisibleRelationshipOntology } from "./relationship-ontology.js";
 import { deepFreeze } from "../util/immutable.js";
 
 const npcResponseKindSchema = z.enum(["speak", "gesture", "refuse", "ignore", "other"]);
@@ -93,6 +94,7 @@ export type NpcReactionReasoningInput = Readonly<{
       dispositions?: ModelVisibleCharacterOntology["dispositions"];
       appraisals?: ModelVisibleCharacterOntology["appraisals"];
       development?: ModelVisibleCharacterOntology["development"];
+      relationships?: ModelVisibleRelationshipOntology;
     };
     currentAffect?: Omit<ActorAffect, "actorId">;
     recentExperiences: Array<{ summary: string; progressChannels: string[] }>;
@@ -253,6 +255,9 @@ async function respondOneNpc(input: {
   const visibleOntology = development.model
     ? modelVisibleCharacterOntology(development.model, (entityId) => visibleNames.get(entityId))
     : undefined;
+  const visibleRelationships = development.model
+    ? modelVisibleRelationshipOntology(development.model, (entityId) => visibleNames.get(entityId))
+    : undefined;
   const repetitionDepth = npcExchangeStagnationDepth(history, input.playerId, input.npcId);
   const rawProposal = await input.reasoner(deepFreeze({
     npc: { id: npc.id, name: npc.canonicalName },
@@ -274,6 +279,7 @@ async function respondOneNpc(input: {
           ...(visibleOntology?.dispositions.length ? { dispositions: structuredClone(visibleOntology.dispositions) } : {}),
           ...(visibleOntology?.appraisals.length ? { appraisals: structuredClone(visibleOntology.appraisals) } : {}),
           ...(visibleOntology?.development.length ? { development: structuredClone(visibleOntology.development) } : {}),
+          ...(visibleRelationships?.length ? { relationships: structuredClone(visibleRelationships) } : {}),
         },
       } : {}),
       ...(currentAffect ? {

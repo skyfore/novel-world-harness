@@ -115,7 +115,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed StateDelta used to create a runtime genesis branch." },
   "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
-  "character-model": { name: "propose_character_model", label: "Propose character model", description: "Submit an evidence-backed actor policy with registered contextual dispositions, event appraisals, development episodes, and legacy-compatible phases. It never grants omniscient knowledge or makes psychology world truth." },
+  "character-model": { name: "propose_character_model", label: "Propose character model", description: "Submit an evidence-backed actor policy with registered dispositions, appraisals, development, directed relationship stances, typed obligations, and relationship changes. It never grants omniscient knowledge or makes policy world truth." },
   "state-delta": { name: "propose_state_delta", label: "Propose state delta", description: "Submit a deterministic state-delta candidate for later validation. This never moves a branch head." },
   possibility: { name: "propose_possibility", label: "Propose possibility", description: "Submit an uncommitted future possibility. canon-analogue is reserved for a real canonicalEventId; an optional canonicalScaffold may expose only source-grounded functional roles for bounded post-divergence rebinding. A choice only the player may make must use player-choice. Do not submit actor-plan templates; actor intent belongs in character goals." },
 };
@@ -304,7 +304,14 @@ function characterSemanticTarget(targetPath: string): { field: string; index: nu
   const tokens = targetPath.slice(1).split("/")
     .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"));
   const [field, indexToken] = tokens;
-  if (!field || !new Set(["dispositions", "appraisalEpisodes", "developmentEpisodes"]).has(field)
+  if (!field || !new Set([
+    "dispositions",
+    "appraisalEpisodes",
+    "developmentEpisodes",
+    "relationshipStances",
+    "relationshipObligations",
+    "relationshipChanges",
+  ]).has(field)
     || !indexToken || !/^(0|[1-9]\d*)$/.test(indexToken)) return null;
   return { field, index: Number(indexToken) };
 }
@@ -316,7 +323,14 @@ function injectHostSemanticEvidence(
 ): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
   const enriched = structuredClone(payload) as Record<string, unknown>;
-  for (const field of ["dispositions", "appraisalEpisodes", "developmentEpisodes"] as const) {
+  for (const field of [
+    "dispositions",
+    "appraisalEpisodes",
+    "developmentEpisodes",
+    "relationshipStances",
+    "relationshipObligations",
+    "relationshipChanges",
+  ] as const) {
     const collection = enriched[field];
     if (!Array.isArray(collection)) continue;
     for (let index = 0; index < collection.length; index += 1) {
@@ -959,7 +973,7 @@ export function createCompilerProposalToolset(
       if ((kind === "event-relation" || kind === "character-model") && selector.relation === "contradicts") {
         if (kind === "character-model" && !characterSemanticTarget(selector.target_path)) {
           throw new Error(
-            `Character counter-evidence selector '${selector.target_path}' must target one disposition, appraisalEpisodes, or developmentEpisodes item.`,
+            `Character counter-evidence selector '${selector.target_path}' must target one disposition, appraisal, development, relationship stance, obligation, or relationship change item.`,
           );
         }
         counterEvidence.push({ targetPath: selector.target_path, reference: exactReference });

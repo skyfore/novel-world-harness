@@ -38,6 +38,12 @@ import {
   validateCharacterOntologyEvidenceAssertions,
   validateCharacterOntologyReferences,
 } from "../world/character-ontology.js";
+import {
+  RELATIONSHIP_ONTOLOGY_VERSION,
+  relationshipTypeIdSchema,
+  validateRelationshipOntologyEvidenceAssertions,
+  validateRelationshipOntologyReferences,
+} from "../world/relationship-ontology.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -141,6 +147,24 @@ export type CompilerAuditReport = {
     referenceValidationIssues: number;
     errors: Array<{ actorId: string; code: string; message: string; path?: string }>;
   };
+  relationshipSemantics: {
+    ontologyVersion: typeof RELATIONSHIP_ONTOLOGY_VERSION;
+    relationshipEntities: number;
+    directedEntities: number;
+    typedEntities: number;
+    legacyStateOperations: number;
+    controlledModels: number;
+    stances: number;
+    supportedStances: number;
+    contestedStances: number;
+    stableStances: number;
+    obligations: number;
+    contestedObligations: number;
+    changeEpisodes: number;
+    contestedChanges: number;
+    referenceValidationIssues: number;
+    errors: Array<{ actorId: string; code: string; message: string; path?: string }>;
+  };
   canonical: {
     entities: number;
     propositions: number;
@@ -200,6 +224,8 @@ export type CompilerAuditReport = {
     timelineAnchoring: number | null;
     eventEffectExplicitness: number | null;
     controlledCharacterModels: number | null;
+    directedRelationshipEntities: number | null;
+    typedRelationshipEntities: number | null;
     characterDevelopmentCoverage: number | null;
     openingCheckpointDeclared: number | null;
     participantPresenceCoverage: number | null;
@@ -470,12 +496,13 @@ export async function auditCompiler(
     const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
     if (!binding?.assertions.length) {
       if (artifact.kind === "character-model"
-        && characterModelSchema.parse(artifact.payload).ontologyVersion === CHARACTER_ONTOLOGY_VERSION) {
+        && (characterModelSchema.parse(artifact.payload).ontologyVersion === CHARACTER_ONTOLOGY_VERSION
+          || characterModelSchema.parse(artifact.payload).relationshipOntologyVersion === RELATIONSHIP_ONTOLOGY_VERSION)) {
         invalidAssertions += 1;
         evidenceErrors.push({
           artifact: artifact.name,
-          code: "MISSING_EXACT_CHARACTER_BINDING",
-          message: `Controlled character model ${artifact.id} has no exact evidence binding.`,
+          code: "MISSING_EXACT_CHARACTER_POLICY_BINDING",
+          message: `Controlled character/relationship model ${artifact.id} has no exact evidence binding.`,
         });
       }
       continue;
@@ -486,6 +513,12 @@ export async function auditCompiler(
       ...validateEvidenceAssertionTargets(artifact.kind, artifact.id, artifact.payload, binding.assertions),
       ...(artifact.kind === "character-model"
         ? validateCharacterOntologyEvidenceAssertions(
+            characterModelSchema.parse(artifact.payload),
+            binding.assertions,
+          )
+        : []),
+      ...(artifact.kind === "character-model"
+        ? validateRelationshipOntologyEvidenceAssertions(
             characterModelSchema.parse(artifact.payload),
             binding.assertions,
           )
@@ -604,6 +637,7 @@ export async function auditCompiler(
   const characterOntologyCatalog = {
     entities: new Map(entities.map((entity) => [entity.id, { kind: entity.kind }])),
     propositions: new Set(propositions.map((proposition) => proposition.id)),
+    claims: new Set(claims.map((claim) => claim.id)),
     events: new Map(events.map((event) => [event.id, {
       participants: event.participants,
       participantPresence: event.participantPresence,
@@ -620,6 +654,9 @@ export async function auditCompiler(
         }]),
     ...validateCharacterOntologyReferences(model, characterOntologyCatalog),
   ].map((error) => ({ actorId: model.actorId, ...error })));
+  const relationshipOntologyValidation = models.flatMap((model) =>
+    validateRelationshipOntologyReferences(model, characterOntologyCatalog)
+      .map((error) => ({ actorId: model.actorId, ...error })));
   const controlledCharacterModels = models.filter((model) =>
     model.ontologyVersion === CHARACTER_ONTOLOGY_VERSION).length;
   const controlledCharacterModelCoverage = models.length
@@ -628,6 +665,49 @@ export async function auditCompiler(
   const dispositions = models.flatMap((model) => model.dispositions ?? []);
   const appraisalEpisodes = models.flatMap((model) => model.appraisalEpisodes ?? []);
   const developmentEpisodes = models.flatMap((model) => model.developmentEpisodes ?? []);
+  const controlledRelationshipModels = models.filter((model) =>
+    model.relationshipOntologyVersion === RELATIONSHIP_ONTOLOGY_VERSION).length;
+  const relationshipStances = models.flatMap((model) => model.relationshipStances ?? []);
+  const relationshipObligations = models.flatMap((model) => model.relationshipObligations ?? []);
+  const relationshipChanges = models.flatMap((model) => model.relationshipChanges ?? []);
+  const relationshipEntities = entities.filter((entity) => entity.kind === "relationship");
+  const relationshipEntityIds = new Set(relationshipEntities.map((entity) => entity.id));
+  const canonicalStateOperations = [
+    ...(initialWorld?.delta.operations ?? []),
+    ...events.flatMap((event) => [
+      ...event.observedOutcome.operations,
+      ...(event.characterEntryCheckpoints ?? []).flatMap((checkpoint) => checkpoint.delta.operations),
+    ]),
+  ];
+  const relationshipOperations = canonicalStateOperations.filter((operation) =>
+    "entityId" in operation && relationshipEntityIds.has(operation.entityId));
+  const relationshipIdsWithField = (field: string) => new Set(relationshipOperations.flatMap((operation) =>
+    "field" in operation && operation.op === "set" && operation.field === field
+      ? [operation.entityId]
+      : []));
+  const fromRelationshipIds = relationshipIdsWithField("relationship.from");
+  const toRelationshipIds = relationshipIdsWithField("relationship.to");
+  const directedRelationshipEntities = relationshipEntities.filter((entity) =>
+    fromRelationshipIds.has(entity.id) && toRelationshipIds.has(entity.id)).length;
+  const typedRelationshipEntities = new Set(relationshipOperations.flatMap((operation) =>
+    "field" in operation
+      && operation.op === "set"
+      && operation.field === "relationship.type"
+      && relationshipTypeIdSchema.safeParse(operation.value).success
+      ? [operation.entityId]
+      : [])).size;
+  const legacyRelationshipStateOperations = relationshipOperations.filter((operation) =>
+    "field" in operation && [
+      "relationship.kind",
+      "relationship.strength",
+      "relationship.obligations",
+    ].includes(operation.field)).length;
+  const directedRelationshipCoverage = relationshipEntities.length
+    ? directedRelationshipEntities / relationshipEntities.length
+    : null;
+  const typedRelationshipCoverage = relationshipEntities.length
+    ? typedRelationshipEntities / relationshipEntities.length
+    : null;
 
   const graph = auditCausalGraph(events);
   const narrativeGraphNavigable = events.length ? graphNavigable(events, graph) : null;
@@ -816,6 +896,18 @@ export async function auditCompiler(
         .filter((model) => model.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION)
         .map((model) => model.actorId));
     }
+    if (relationshipEntities.length && directedRelationshipCoverage !== 1) {
+      semanticIssues.push(`Only ${formatRatio(directedRelationshipCoverage)} of relationship entities have explicit directed from/to state (required 100%).`);
+      semanticRepairRequiresFullReparse = true;
+    }
+    if (relationshipEntities.length && typedRelationshipCoverage !== 1) {
+      semanticIssues.push(`Only ${formatRatio(typedRelationshipCoverage)} of relationship entities use controlled relationship.type (required 100%).`);
+      semanticRepairRequiresFullReparse = true;
+    }
+    if (legacyRelationshipStateOperations) {
+      semanticIssues.push(`${legacyRelationshipStateOperations} legacy relationship.kind/strength/obligations state operation(s) remain; migrate new semantics to relationship.type plus ${RELATIONSHIP_ONTOLOGY_VERSION} policy records.`);
+      semanticRepairRequiresFullReparse = true;
+    }
   }
   const sourceIndexing = sources.length
     ? changedSinceIngest.length
@@ -842,6 +934,7 @@ export async function auditCompiler(
     || participationValidation.length
     || relationValidation.length
     || characterOntologyValidation.length
+    || relationshipOntologyValidation.length
     ? "not-ready"
     : events.length < 20
     ? "unknown"
@@ -908,6 +1001,8 @@ export async function auditCompiler(
     ...relationValidation.map((error) => `Event relation ${error.code}: ${error.message}`),
     ...characterOntologyValidation.map((error) =>
       `Character model ${error.actorId} ${error.code}${error.path ? ` at ${error.path}` : ""}: ${error.message}`),
+    ...relationshipOntologyValidation.map((error) =>
+      `Relationship model ${error.actorId} ${error.code}${error.path ? ` at ${error.path}` : ""}: ${error.message}`),
     ...graph.cycles.map((cycle) => `Causal cycle: ${cycle.join(" -> ")}`),
     ...graph.missing.map(({ eventId, parentId }) => `Event ${eventId} has missing causal parent ${parentId}.`),
     ...graph.temporalRegressions.map(({ eventId, parentId }) => `Event ${eventId} is earlier than causal parent ${parentId}.`),
@@ -1005,6 +1100,24 @@ export async function auditCompiler(
       referenceValidationIssues: characterOntologyValidation.length,
       errors: characterOntologyValidation,
     },
+    relationshipSemantics: {
+      ontologyVersion: RELATIONSHIP_ONTOLOGY_VERSION,
+      relationshipEntities: relationshipEntities.length,
+      directedEntities: directedRelationshipEntities,
+      typedEntities: typedRelationshipEntities,
+      legacyStateOperations: legacyRelationshipStateOperations,
+      controlledModels: controlledRelationshipModels,
+      stances: relationshipStances.length,
+      supportedStances: relationshipStances.filter((item) => item.status === "supported").length,
+      contestedStances: relationshipStances.filter((item) => item.status === "contested").length,
+      stableStances: relationshipStances.filter((item) => item.stability === "stable").length,
+      obligations: relationshipObligations.length,
+      contestedObligations: relationshipObligations.filter((item) => item.status === "contested").length,
+      changeEpisodes: relationshipChanges.length,
+      contestedChanges: relationshipChanges.filter((item) => item.evidenceStatus === "contested").length,
+      referenceValidationIssues: relationshipOntologyValidation.length,
+      errors: relationshipOntologyValidation,
+    },
     canonical: {
       entities: entities.length,
       propositions: propositions.length,
@@ -1045,6 +1158,7 @@ export async function auditCompiler(
           && participationValidation.length === 0
           && relationValidation.length === 0
           && characterOntologyValidation.length === 0
+          && relationshipOntologyValidation.length === 0
         : null,
       semanticIssues,
     },
@@ -1075,6 +1189,8 @@ export async function auditCompiler(
       timelineAnchoring,
       eventEffectExplicitness,
       controlledCharacterModels: controlledCharacterModelCoverage,
+      directedRelationshipEntities: directedRelationshipCoverage,
+      typedRelationshipEntities: typedRelationshipCoverage,
       characterDevelopmentCoverage,
       openingCheckpointDeclared: initialWorld ? (initialWorld.checkpoint ? 1 : 0) : null,
       participantPresenceCoverage,

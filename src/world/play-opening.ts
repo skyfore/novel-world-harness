@@ -24,6 +24,7 @@ import {
   type PlayConversationMessage,
 } from "./play-conversation.js";
 import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
+import { modelVisibleRelationshipOntology, type ModelVisibleRelationshipOntology } from "./relationship-ontology.js";
 
 export type PlayerChoiceBehavioralContext = {
   /** Effective at this committed head; policy guidance, never world truth. */
@@ -32,6 +33,7 @@ export type PlayerChoiceBehavioralContext = {
   dispositions?: ModelVisibleCharacterOntology["dispositions"];
   appraisals?: ModelVisibleCharacterOntology["appraisals"];
   development?: ModelVisibleCharacterOntology["development"];
+  relationships?: ModelVisibleRelationshipOntology;
   activeGoals: Array<{ description: string; priority: number }>;
 };
 
@@ -290,6 +292,9 @@ export async function buildPlayOpeningFrame(
   const visibleOntology = development.model
     ? modelVisibleCharacterOntology(development.model, (entityId) => referenceableNames.get(entityId))
     : undefined;
+  const visibleRelationships = development.model
+    ? modelVisibleRelationshipOntology(development.model, (entityId) => referenceableNames.get(entityId))
+    : undefined;
 
   return {
     branchId,
@@ -330,6 +335,7 @@ export async function buildPlayOpeningFrame(
       ...(visibleOntology?.dispositions.length ? { dispositions: structuredClone(visibleOntology.dispositions) } : {}),
       ...(visibleOntology?.appraisals.length ? { appraisals: structuredClone(visibleOntology.appraisals) } : {}),
       ...(visibleOntology?.development.length ? { development: structuredClone(visibleOntology.development) } : {}),
+      ...(visibleRelationships?.length ? { relationships: structuredClone(visibleRelationships) } : {}),
       activeGoals: (context.actorGoals ?? [])
         .filter((goal) => development.activeGoalIds.includes(goal.id) && goalSupportedInCurrentPhase(goal, history, actorId))
         .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))

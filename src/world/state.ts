@@ -10,6 +10,7 @@ import type {
   WorldRule,
 } from "./model.js";
 import { storyTimeAtOrAfter, storyTimeBefore } from "./time.js";
+import { RELATIONSHIP_TYPE_IDS } from "./relationship-ontology.js";
 
 export class StateSchemaRegistry {
   private readonly specs = new Map<string, StateFieldSpec>();
@@ -84,6 +85,9 @@ export class StateSchemaRegistry {
         }
         break;
     }
+    if (spec.allowedValues && !spec.allowedValues.some((allowed) => Object.is(allowed, value))) {
+      throw new Error(`${spec.key} must be one of: ${spec.allowedValues.map(String).join(", ")}`);
+    }
     if (spec.cardinality === "many" && !Array.isArray(value)) {
       throw new Error(`Expected many-valued state for ${spec.key}`);
     }
@@ -105,7 +109,7 @@ function legacyDefaultVisibility(key: string): StateFieldSpec["visibility"] {
   ].includes(key)) return "knowledge";
   if ([
     "artifact.custodian", "artifact.quantity", "artifact.condition", "artifact.delivered",
-    "relationship.from", "relationship.to", "relationship.kind", "relationship.active",
+    "relationship.from", "relationship.to", "relationship.type", "relationship.kind", "relationship.active",
     "relationship.obligations",
   ].includes(key)) return "owner";
   if ([
@@ -155,9 +159,20 @@ export const DEFAULT_STATE_FIELDS: StateFieldSpec[] = [
   { key: "faction.resources", appliesTo: ["faction"], valueType: "number", cardinality: "one", visibility: "engine" },
   { key: "relationship.from", appliesTo: ["relationship"], valueType: "entity-ref", cardinality: "one", visibility: "owner", required: true },
   { key: "relationship.to", appliesTo: ["relationship"], valueType: "entity-ref", cardinality: "one", visibility: "owner", required: true },
+  {
+    key: "relationship.type",
+    appliesTo: ["relationship"],
+    valueType: "string",
+    cardinality: "one",
+    visibility: "owner",
+    allowedValues: [...RELATIONSHIP_TYPE_IDS],
+  },
+  /** @deprecated Free-form compatibility field. New compilation uses relationship.type. */
   { key: "relationship.kind", appliesTo: ["relationship"], valueType: "string", cardinality: "one", visibility: "owner" },
+  /** @deprecated One scalar cannot represent multidimensional directed stance. */
   { key: "relationship.strength", appliesTo: ["relationship"], valueType: "number", cardinality: "one", visibility: "engine", minimum: -1, maximum: 1 },
   { key: "relationship.active", appliesTo: ["relationship"], valueType: "boolean", cardinality: "one", visibility: "owner" },
+  /** @deprecated Untyped entity references are retained for snapshot compatibility. */
   { key: "relationship.obligations", appliesTo: ["relationship"], valueType: "entity-ref-set", cardinality: "many", visibility: "owner" },
 ];
 

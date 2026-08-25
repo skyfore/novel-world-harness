@@ -1,6 +1,6 @@
 # 技术计划：可溯源的全书小说语义编译
 
-- **状态：** 进行中——M0 至 M4、M5a 已实现，M5b 至 M7 待完成
+- **状态：** 进行中——M0 至 M4、M5a、M5b-1 已实现；M5b-2、M5c 至 M7 待完成
 - **日期：** 2026-08-25
 - **范围：** 小说导入、结构拆分、语义标注、身份消歧、canonical 编译、审计、修复与重解析
 - **必须遵守：** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md)、[ADR 0002](adr/0002-user-level-content-addressed-storage.md)、[ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
@@ -291,8 +291,85 @@ audit 与 prepared publication 边界重复校验
 （[character-ontology.ts](../src/world/character-ontology.ts#L542)）。给模型的角色
 视图会剥离 evidence 与内部 artifact ID，并隐藏 actor 不可见目标的
 target-specific disposition
-（[character-ontology.ts](../src/world/character-ontology.ts#L632)）。M5 剩余工作
-是 directed relationship、spatial/rule domain 与 deterministic salience。
+（[character-ontology.ts](../src/world/character-ontology.ts#L632)）。
+
+#### 2.7.1 M5b-1：关系不是一个无方向的“强度”
+
+M5b-1 实施前，执行层其实已经有正确骨架：relationship 是稳定 entity，
+`relationship.from/to` 给出方向，`character.relationships` 只保存关系 entity ID。
+但仍保留的 legacy 字段暴露了三个压缩问题：`relationship.kind` 是任意字符串，
+`relationship.strength` 用一个数混合 trust、affinity、fear、dependence 等不同
+概念，`relationship.obligations` 只是无类型 entity set
+（[state.ts](../src/world/state.ts#L160)）。CharacterModel 当时也没有逐对象的关系
+stance、义务内容、变化原因或事件/知识门控，因而 renderer 能知道“有关系”，
+actor policy 却不能可靠回答“谁对谁、在哪个维度、因何、何时改变”。
+
+外部研究支持的是建模原则，而不是本仓库某一组标签。W3C 的
+[N-ary Relations ontology pattern](https://www.w3.org/TR/swbp-n-aryRelations/)
+建议：当一个关系还带置信度、强度或其他属性时，应把关系实例建成可单独引用的
+对象；Social Relations Model 则区分 actor、partner 和特定 dyad 的 effect，并
+明确 relationship effect 可以是方向不对称的
+（[Kenny, SRM information](https://davidakenny.net/srm/soremo.htm)）。文学计算研究
+同样发现整本小说中的关系会随时间演化，静态词典无法表达这种变化
+（[Feuding Families and Former Friends](https://aclanthology.org/N16-1180/)）。
+PersonaBank 把角色时间线、目标/动机和事件的 affective impact 相连，而不是把
+角色归纳成孤立标签
+（[PersonaBank](https://aclanthology.org/L16-1163/)）。因此本项目采用
+“稳定 directed relationship identity + 分维度 actor policy + event/knowledge
+gate”的工程子集；6 个 stance 维度和 9 个 obligation 类型是本仓库的版本化受控
+词表，不宣称是通用心理测量标准。
+
+已实现的 `relationship-v1` 包含：
+
+- 12 个 primary relationship type、6 个有负/中/正行为锚点的 directed stance
+  维度，以及 9 个 typed obligation 类别
+  （[relationship-ontology.ts](../src/world/relationship-ontology.ts#L16)）；
+- `RelationshipStance` 把 actor、relationship entity、target、维度、值、稳定性、
+  basis、有效时间、supported/contested、置信度与逐项证据绑定；非 narrator
+  明示的 stable stance 至少需要两个不同 source span
+  （[relationship-ontology.ts](../src/world/relationship-ontology.ts#L174)）；
+- `RelationshipObligation` 用 proposition 保存精确内容，用 event、actor
+  experience、knowledge 和 story time 控制激活/解除；`RelationshipChange`
+  显式连接同一 directed pair 的 before/after stance/obligation、trigger event、
+  mechanism proposition、时间窗口与 reversal
+  （[relationship-ontology.ts](../src/world/relationship-ontology.ts#L199)）；
+- reference closure 会检查 actor/target/relationship kind、event presence、claim、
+  proposition、before/after pair 一致性；exact assertion 必须逐项与嵌入
+  EvidenceRef 完全相等
+  （[relationship-ontology.ts](../src/world/relationship-ontology.ts#L283)、
+  [relationship-ontology.ts](../src/world/relationship-ontology.ts#L359)）；
+- runtime 只有在当前分支 state 同时证明 `character.relationships` membership、
+  `from === actor`、`to === target`、`active === true` 和受控 `type` 时才投影策略；
+  future change 必须等待 committed/experienced/known trigger，reversal 后恢复被替换
+  策略
+  （[relationship-ontology.ts](../src/world/relationship-ontology.ts#L434)、
+  [relationship-ontology.ts](../src/world/relationship-ontology.ts#L582)）；
+- actor-safe view 按可见 target 聚合，但删除 evidence、proposition/event ID、
+  relationship entity ID 和编译解释；同一投影现已进入 proactive actor、reactive
+  NPC、player choice/narration 三条模型边界
+  （[relationship-ontology.ts](../src/world/relationship-ontology.ts#L528)、
+  [model-actor-policy.ts](../src/world/model-actor-policy.ts#L181)、
+  [npc-reaction.ts](../src/world/npc-reaction.ts#L258)、
+  [play-opening.ts](../src/world/play-opening.ts#L295)）。
+
+关系存在/方向/type/active 仍是 committed event history 派生的 WorldState；stance
+和 perceived obligation 只是 CharacterModel 的版本化 policy input，绝不反向写
+世界真值。`relationship.type` 现在由 StateSchema 的 `allowedValues` 确定性拒绝
+自由值；旧 kind/strength/obligations 仅为 snapshot 兼容保留
+（[model.ts](../src/world/model.ts#L297)、[state.ts](../src/world/state.ts#L162)）。
+Audit 分别报告 relationship entity 的 directed/type coverage、legacy operation、
+stance/obligation/change 数量和引用错误；prepared publication 对
+`relationship-v1` 重跑 exact evidence gate
+（[audit.ts](../src/compiler/audit.ts#L636)、
+[prepared-cache.ts](../src/compiler/prepared-cache.ts#L890)）。测试覆盖 schema、
+reference closure、未来信息隔离、wrong-direction fail-closed、reversal、actor-safe
+脱敏、exact selector 注入与 audit coverage
+（[relationship-ontology.test.ts](../test/relationship-ontology.test.ts#L1)、
+[proposal-tools.test.ts](../test/proposal-tools.test.ts#L420)、
+[compiler-audit.test.ts](../test/compiler-audit.test.ts#L263)）。
+
+M5 剩余工作是 M5b-2 spatial/world-rule domain 与 M5c deterministic salience；
+goal hierarchy/conflict/commitment 仍需在后续基于实测失败决定是否扩展。
 
 ### 2.8 当前审计没有全书 recall 分母
 
@@ -329,7 +406,7 @@ resolution → event/relation → state/knowledge → character/possibility 的�
 **结论：** missing semantic unit 和 stale downstream artifact 必须成为
 显式对象。
 
-## 3. M0-M4 与 M5a 完成后的当前流程
+## 3. M0-M4、M5a 与 M5b-1 完成后的当前流程
 
 ```text
 nwh ingest
@@ -348,20 +425,21 @@ compile-source / prepare-all
   -> 模型提交 typed proposal 与 supporting/contradicting exact selector
   -> 宿主解析可信 anchor、EvidenceRef 与 derivation provenance
   -> character-v1 分离 disposition、appraisal 与 development proposal
+  -> relationship-v1 分离 directed stance、typed obligation 与 relationship change
   -> finish 校验 source accounting 与 prospective semantic graph
   -> pending proposal store
 
 accept / prepare
   -> 验证 source hash 与 span
   -> 验证 mention-resolution 与 exact target trace
-  -> 验证引用、state schema、participation、epistemic、event relation 与 character ontology
+  -> 验证引用、state schema、participation、epistemic、event/character/relationship ontology
   -> dependency order 与 semantic cycle check
   -> 接受为 immutable canonical revision
   -> prepared publication 重复 whole-catalog projection/readiness gate
 
 audit / reconcile
   -> source-accounting denominator 与 observation/resolution coverage
-  -> exact evidence、participation、epistemic、typed causality 与 controlled-character metric
+  -> exact evidence、participation、epistemic、typed causality、character 与 relationship metric
   -> bounded repair queue；dependency-driven invalidation 留待 M6
 
 reparse
@@ -373,7 +451,7 @@ runtime
   -> committed event history 为 branch truth
   -> Snapshot V6 固定 proposition/attribution/participation/relation revision
   -> typed semantic record 只派生 compatibility event view，不成为 branch truth
-  -> character semantic 仅由 committed/experienced event 激活并保持 actor-safe visibility
+  -> character/relationship policy 仅由 committed/experienced/known trigger 激活并保持 actor-safe visibility
   -> 确定性投影 state、knowledge、scene、development 和 frontier
 ```
 
@@ -381,9 +459,9 @@ runtime
 -> replay 的权威顺序（[technical-design.md](technical-design.md#L933)）。Source
 annotation 与 resolution 已成为 world proposal 之前的非 canonical 层；finish
 closure 会拒绝不完整的 prospective graph
-（[proposals.ts](../src/compiler/proposals.ts#L316)）。M5a 角色语义现已完成编译、
-source scope、审计与投影；后续仍需 M5b/M5c 的 relationship/spatial/rule
-ontology 与 salience selection，M6 的 dependency-driven invalidation 与 publication policy，
+（[proposals.ts](../src/compiler/proposals.ts#L316)）。M5a 角色语义与 M5b-1 directed
+relationship 语义现已完成编译、source scope、审计与投影；后续仍需 M5b-2/M5c
+的 spatial/rule ontology 与 salience selection，M6 的 dependency-driven invalidation 与 publication policy，
 以及 M7 的多小说人工标注 semantic benchmark。
 
 ### 3.1 研究基线的主要失真点
@@ -1190,6 +1268,7 @@ Artifact count 只叫 inventory，不能再叫 semantic coverage。
 | Knowledge | acquisition、visibility | operation F1、leakage failure |
 | State | state/knowledge delta | operation accuracy、replay invariant |
 | Character | goal、appraisal、development | expert agreement、evidence support |
+| Relationship | directed type、stance、obligation、change | pair/type F1、change F1、evidence support、future-leakage failure |
 | E2E | prepare、replay、branch | determinism、divergence、spoiler isolation |
 
 匹配不能只依赖 logical ID，应按 exact anchor、mention cluster、typed relation 和
@@ -1401,20 +1480,22 @@ snapshot/audit 生命周期，以及排除 contested 与 narrative-only 关系�
 
 目标：actor behavior 来自上下文化、有证据的角色发展。
 
-状态：**M5a 已完成并验证，M5b/M5c 待完成。** Controlled registry、
-disposition/appraisal/development record、nested host-owned evidence、
+状态：**M5a 与 M5b-1 已完成并验证，M5b-2/M5c 待完成。** Character 与
+directed relationship controlled registry、nested host-owned evidence、
 prospective/commit/prepared validation、audit metric 与 actor-safe runtime
 projection 均已实现
 （[character-ontology.ts](../src/world/character-ontology.ts#L14)、
+[relationship-ontology.ts](../src/world/relationship-ontology.ts#L16)、
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L312)、
-[audit.ts](../src/compiler/audit.ts#L993)）。
+[audit.ts](../src/compiler/audit.ts#L636)）。
 
 改造：
 
 - [M5a 已实现] controlled character dimension registry；
 - [M5a 已实现] disposition/appraisal/development episode；
 - goal hierarchy/conflict/commitment；
-- directed target-specific relationship；
+- [M5b-1 已实现] directed target-specific relationship identity/type、stance、
+  typed obligation 与 before/after change；
 - spatial/world-rule modules；
 - deterministic salience memory。
 
@@ -1423,6 +1504,7 @@ projection 均已实现
 - `src/world/actors.ts`；
 - `src/world/development.ts`；
 - `src/world/state.ts`；
+- `src/world/relationship-ontology.ts`；
 - `src/world/model-actor-policy.ts`；
 - `src/compiler/semantics.ts`。
 
@@ -1431,6 +1513,8 @@ projection 均已实现
 - V2 prepared world 不接受未注册 trait key；
 - disposition/development 有 context、time、evidence；
 - affect、disposition、stance、goal 分开；
+- reverse direction 不能复用 forward stance，future relationship policy 不会提前激活；
+- 每条 relationship semantic record 有逐项 exact support/counter-evidence；
 - actor projection 保持 deterministic 和 knowledge-safe。
 
 ### M6：Dependency-aware Audit、Reconcile 与 Reparse

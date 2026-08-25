@@ -33,6 +33,17 @@ import {
   type EffectiveCharacterDisposition,
   type EffectiveDevelopmentEpisode,
 } from "./character-ontology.js";
+import {
+  RELATIONSHIP_ONTOLOGY_VERSION,
+  relationshipOntologyModelFields,
+  resolveRelationshipOntology,
+  type EffectiveRelationshipChange,
+  type EffectiveRelationshipObligation,
+  type EffectiveRelationshipStance,
+  type RelationshipChangeEpisode,
+  type RelationshipObligation,
+  type RelationshipStance,
+} from "./relationship-ontology.js";
 
 const goalActionSchema = z
   .object({
@@ -116,6 +127,7 @@ export const characterModelSchema = z
     decisionBiases: z.record(z.string(), z.number().min(-1).max(1)),
     developmentPhases: z.array(characterDevelopmentPhaseSchema).optional(),
     ...characterOntologyModelFields,
+    ...relationshipOntologyModelFields,
     evidence: z.array(evidenceRefSchema).min(1),
   })
   .strict()
@@ -145,6 +157,32 @@ export const characterModelSchema = z
       });
     }
     for (const [field, items] of semanticCollections) {
+      const itemIds = items.map((item) => item.id);
+      if (new Set(itemIds).size !== itemIds.length) {
+        ctx.addIssue({ code: "custom", message: `${field} IDs must be unique`, path: [field] });
+      }
+    }
+    const relationshipCollections = [
+      ["relationshipStances", value.relationshipStances ?? []],
+      ["relationshipObligations", value.relationshipObligations ?? []],
+      ["relationshipChanges", value.relationshipChanges ?? []],
+    ] as const;
+    const hasRelationshipOntology = relationshipCollections.some(([, items]) => items.length > 0);
+    if (hasRelationshipOntology && value.relationshipOntologyVersion !== RELATIONSHIP_ONTOLOGY_VERSION) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Structured relationship semantics require relationshipOntologyVersion '${RELATIONSHIP_ONTOLOGY_VERSION}'`,
+        path: ["relationshipOntologyVersion"],
+      });
+    }
+    if (value.relationshipOntologyVersion === RELATIONSHIP_ONTOLOGY_VERSION && !hasRelationshipOntology) {
+      ctx.addIssue({
+        code: "custom",
+        message: `A ${RELATIONSHIP_ONTOLOGY_VERSION} model must contain at least one stance, obligation, or change episode`,
+        path: ["relationshipOntologyVersion"],
+      });
+    }
+    for (const [field, items] of relationshipCollections) {
       const itemIds = items.map((item) => item.id);
       if (new Set(itemIds).size !== itemIds.length) {
         ctx.addIssue({ code: "custom", message: `${field} IDs must be unique`, path: [field] });
@@ -185,6 +223,9 @@ export type EffectiveCharacterModel = {
   dispositions: EffectiveCharacterDisposition[];
   appraisals: EffectiveCharacterAppraisal[];
   developmentEpisodes: EffectiveDevelopmentEpisode[];
+  relationshipStances: EffectiveRelationshipStance[];
+  relationshipObligations: EffectiveRelationshipObligation[];
+  relationshipChanges: EffectiveRelationshipChange[];
 };
 
 export function resolveCharacterModel(
@@ -217,10 +258,12 @@ export function resolveCharacterModel(
     applyModifiers(decisionBiases, phase.decisionBiasModifiers);
   }
   const ontology = resolveCharacterOntology({ ...model, traits, decisionBiases }, input);
-  return { actorId: model.actorId, traits, decisionBiases, activePhaseIds, ...ontology };
+  const relationships = resolveRelationshipOntology(model, input);
+  return { actorId: model.actorId, traits, decisionBiases, activePhaseIds, ...ontology, ...relationships };
 }
 
 export type { AppraisalEpisode, CharacterDisposition, DevelopmentEpisode };
+export type { RelationshipChangeEpisode, RelationshipObligation, RelationshipStance };
 
 export type GoalActivation = {
   active: boolean;

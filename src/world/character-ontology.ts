@@ -9,7 +9,9 @@ import {
   type StoryTime,
   type ValidationIssue,
 } from "./model.js";
-import { compareStoryTime, storyTimeAtOrAfter, storyTimeBefore, storyTimesOverlap } from "./time.js";
+import { compareStoryTime } from "./time.js";
+import { policyEpisodeTimeActive, policyStoryScopeActive } from "./policy-time.js";
+import { relationshipOntologyEvidence } from "./relationship-ontology.js";
 
 export const CHARACTER_ONTOLOGY_VERSION = "character-v1" as const;
 
@@ -554,7 +556,7 @@ export function resolveCharacterOntology(
       ? input.experiencedCanonicalEventIds
       : input.realizedCanonicalEventIds;
     if (!item.triggerEventIds.every((eventId) => eventIds.has(eventId))) return false;
-    if (!characterDevelopmentTimeActive(input.storyTime, item.startsAt, item.endsAt, input.realizedCanonicalEventIds)) return false;
+    if (!policyEpisodeTimeActive(input.storyTime, item.startsAt, item.endsAt, input.realizedCanonicalEventIds)) return false;
     if (item.decay.kind === "event-dependent"
       && item.decay.reversalEventIds.some((eventId) => input.realizedCanonicalEventIds.has(eventId))) return false;
     return true;
@@ -567,7 +569,7 @@ export function resolveCharacterOntology(
     .flatMap((item) => item.beforeDispositionIds));
   const dispositions = (model.dispositions ?? [])
     .filter((item) => item.status !== "contested")
-    .filter((item) => characterStoryScopeActive(
+    .filter((item) => policyStoryScopeActive(
       input.storyTime,
       item.validStoryTime,
       input.realizedCanonicalEventIds,
@@ -688,7 +690,7 @@ export function legacyCharacterDimensionValues(
 export function characterOntologyEvidence(model: unknown): EvidenceRef[] {
   if (!model || typeof model !== "object" || Array.isArray(model)) return [];
   const record = model as Record<string, unknown>;
-  return [
+  return [...[
     record.developmentPhases,
     record.dispositions,
     record.appraisalEpisodes,
@@ -699,43 +701,7 @@ export function characterOntologyEvidence(model: unknown): EvidenceRef[] {
       const item = candidate as { evidence?: unknown; counterEvidence?: unknown };
       return [item.evidence, item.counterEvidence].flatMap((evidence) =>
         evidence === undefined ? [] : evidenceRefSchema.array().parse(evidence));
-    });
-}
-
-function characterStoryScopeActive(
-  current: StoryTime | undefined,
-  candidate: StoryTime | undefined,
-  realizedCanonicalEventIds: ReadonlySet<string>,
-): boolean {
-  if (!candidate || candidate.kind === "unknown") return true;
-  if (candidate.kind === "relative") {
-    return candidate.relation === "after"
-      ? realizedCanonicalEventIds.has(candidate.anchorEventId)
-      : !realizedCanonicalEventIds.has(candidate.anchorEventId);
-  }
-  if (!current || current.kind === "unknown" || current.kind === "relative") return false;
-  if (storyTimesOverlap(current, candidate)) return true;
-  return current.kind === "ordinal"
-    && candidate.kind === "ordinal"
-    && current.orderHint === undefined
-    && candidate.orderHint === undefined
-    && normalized(current.label) === normalized(candidate.label);
-}
-
-function characterDevelopmentTimeActive(
-  current: StoryTime | undefined,
-  startsAt: StoryTime,
-  endsAt: StoryTime | undefined,
-  realizedCanonicalEventIds: ReadonlySet<string>,
-): boolean {
-  const afterStart = startsAt.kind === "unknown"
-    || (startsAt.kind === "relative"
-      ? realizedCanonicalEventIds.has(startsAt.anchorEventId)
-      : storyTimeAtOrAfter(current, startsAt));
-  if (!afterStart) return false;
-  if (!endsAt || endsAt.kind === "unknown") return true;
-  if (endsAt.kind === "relative") return !realizedCanonicalEventIds.has(endsAt.anchorEventId);
-  return storyTimeBefore(current, endsAt);
+    }), ...relationshipOntologyEvidence(model)];
 }
 
 function validateCounterEvidence(
@@ -784,10 +750,6 @@ function distinctEvidenceSpans(evidence: readonly EvidenceRef[]): number {
 
 function sameSet<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
   return left.size === right.size && [...left].every((value) => right.has(value));
-}
-
-function normalized(value: string): string {
-  return value.normalize("NFKC").trim().toLocaleLowerCase();
 }
 
 function issue(code: string, message: string, path: string): ValidationIssue {

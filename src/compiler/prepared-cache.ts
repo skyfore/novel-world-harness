@@ -17,6 +17,10 @@ import {
   characterOntologyEvidence,
   validateCharacterOntologyEvidenceAssertions,
 } from "../world/character-ontology.js";
+import {
+  RELATIONSHIP_ONTOLOGY_VERSION,
+  validateRelationshipOntologyEvidenceAssertions,
+} from "../world/relationship-ontology.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
@@ -890,20 +894,22 @@ async function assertPreparedCharacterEvidence(
   const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
   const verifier = new EvidenceVerifier(workspaceRoot);
   for (const model of bundle.canonical.models) {
-    if (model.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION) continue;
+    if (model.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION
+      && model.relationshipOntologyVersion !== RELATIONSHIP_ONTOLOGY_VERSION) continue;
     const binding = await exactEvidence.bindingForArtifact("character-model", model.actorId);
     if (!binding?.assertions.length) {
-      throw new Error(`Prepared controlled character model ${model.actorId} has no exact evidence binding.`);
+      throw new Error(`Prepared controlled character/relationship model ${model.actorId} has no exact evidence binding.`);
     }
     if (binding.artifactHash !== contentHash(model)) {
-      throw new Error(`Prepared controlled character model ${model.actorId} has a stale exact evidence binding.`);
+      throw new Error(`Prepared controlled character/relationship model ${model.actorId} has a stale exact evidence binding.`);
     }
     const issues = [
       ...validateCharacterOntologyEvidenceAssertions(model, binding.assertions),
+      ...validateRelationshipOntologyEvidenceAssertions(model, binding.assertions),
       ...(await verifier.verifyAssertions(binding.assertions)).issues,
     ];
     if (issues.length) {
-      throw new Error(`Prepared controlled character model ${model.actorId} has invalid exact evidence: ${issues
+      throw new Error(`Prepared controlled character/relationship model ${model.actorId} has invalid exact evidence: ${issues
         .map((issue) => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)
         .join("; ")}`);
     }

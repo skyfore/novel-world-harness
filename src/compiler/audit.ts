@@ -1,7 +1,7 @@
 import { ActorModelStore, characterGoalHasDevelopmentBoundary, characterModelSchema } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore } from "../world/initial.js";
-import type { CanonicalEvent, EvidenceRef, StoryTime } from "../world/model.js";
+import type { CanonicalEvent, ControlledWorldRule, EvidenceRef, Predicate, StoryTime } from "../world/model.js";
 import { SegmentStore } from "./segments.js";
 import { EvidenceVerifier } from "./evidence.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -9,7 +9,7 @@ import { readSourceMaterial } from "../storage/source-material-store.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { hasExecutablePossibilityEffect } from "./semantics.js";
-import { contentHash } from "../world/canonical.js";
+import { canonicalJson, contentHash } from "../world/canonical.js";
 import {
   EvidenceAssertionStore,
   evidenceAssertionSourceIds,
@@ -51,6 +51,14 @@ import {
   validateSpatialEvidenceAssertions,
   validateSpatialRelationCatalog,
 } from "../world/spatial-ontology.js";
+import {
+  WORLD_RULE_ONTOLOGY_VERSION,
+  isControlledWorldRule,
+  validateWorldRuleCatalog,
+  validateWorldRuleEvidenceAssertions,
+  worldRuleEvidence,
+} from "../world/world-rule-ontology.js";
+import { compareStoryTime } from "../world/time.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -191,6 +199,40 @@ export type CompilerAuditReport = {
     referenceValidationIssues: number;
     errors: Array<{ code: string; message: string; path?: string }>;
   };
+  worldRuleSemantics: {
+    ontologyVersion: typeof WORLD_RULE_ONTOLOGY_VERSION;
+    rules: number;
+    controlledRules: number;
+    legacyRules: number;
+    supportedRules: number;
+    contestedRules: number;
+    kinds: Record<string, number>;
+    scopes: Record<string, number>;
+    clauses: number;
+    requireClauses: number;
+    forbidClauses: number;
+    contestedClauses: number;
+    exceptions: number;
+    contestedExceptions: number;
+    defeasibleRules: number;
+    overrideEdges: number;
+    authorityRules: number;
+    boundedJurisdictionRules: number;
+    publicRules: number;
+    observableRules: number;
+    knowledgeRules: number;
+    engineRules: number;
+    potentialConflicts: Array<{
+      requiringRuleId: string;
+      forbiddingRuleId: string;
+      predicate: Predicate;
+      resolvedByRuleId?: string;
+    }>;
+    unresolvedPotentialConflicts: number;
+    referenceValidationIssues: number;
+    exactEvidenceIssues: number;
+    errors: Array<{ code: string; message: string; path?: string }>;
+  };
   canonical: {
     entities: number;
     propositions: number;
@@ -233,6 +275,7 @@ export type CompilerAuditReport = {
   semanticRepairTargets: {
     eventIds: string[];
     characterIds: string[];
+    ruleIds: string[];
     initialWorld: boolean;
     requiresFullReparse: boolean;
   };
@@ -254,6 +297,7 @@ export type CompilerAuditReport = {
     directedRelationshipEntities: number | null;
     typedRelationshipEntities: number | null;
     locationsWithSpatialTopology: number | null;
+    controlledWorldRules: number | null;
     characterDevelopmentCoverage: number | null;
     openingCheckpointDeclared: number | null;
     participantPresenceCoverage: number | null;
@@ -491,7 +535,7 @@ export async function auditCompiler(
     evidence: item.evidence,
     counterEvidence: item.counterEvidence,
   }));
-  const rules = allRules.filter(belongsToSelectedSource);
+  const rules = allRules.filter((item) => belongsToSelectedSource({ evidence: worldRuleEvidence(item) }));
   const initialWorld = storedInitialWorld && belongsToSelectedSource(storedInitialWorld) ? storedInitialWorld : null;
   const goals = allGoals.filter(belongsToSelectedSource);
   const models = allModels.filter((model) => belongsToSelectedSource({
@@ -508,7 +552,7 @@ export async function auditCompiler(
     ...eventParticipations.map((item) => ({ name: `event-participation:${item.id}`, kind: "event-participation", id: item.id, payload: item, evidence: item.evidence })),
     ...eventRelations.map((item) => ({ name: `event-relation:${item.id}`, kind: "event-relation", id: item.id, payload: item, evidence: artifactEvidence(item) })),
     ...spatialRelations.map((item) => ({ name: `spatial-relation:${item.id}`, kind: "spatial-relation", id: item.id, payload: item, evidence: spatialRelationEvidence(item) })),
-    ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: item.evidence })),
+    ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: worldRuleEvidence(item) })),
     ...(initialWorld ? [{ name: "initial-world", kind: "initial-world", id: "initial-world", payload: initialWorld, evidence: initialWorld.evidence }] : []),
     ...goals.map((item) => ({ name: `goal:${item.id}`, kind: "character-goal", id: item.id, payload: item, evidence: item.evidence })),
     ...models.map((item) => ({ name: `model:${item.actorId}`, kind: "character-model", id: item.actorId, payload: item, evidence: [...item.evidence, ...characterOntologyEvidence(item)] })),
@@ -522,6 +566,7 @@ export async function auditCompiler(
   let artifactsWithExactEvidence = 0;
   let invalidAssertions = 0;
   let validExactBindings = 0;
+  let worldRuleExactEvidenceIssues = 0;
   for (const artifact of evidenceArtifacts) {
     referencesChecked += artifact.evidence.length;
     const result = await evidenceVerifier.verifyAll(artifact.evidence);
@@ -545,6 +590,17 @@ export async function auditCompiler(
           artifact: artifact.name,
           code: "MISSING_EXACT_SPATIAL_BINDING",
           message: `Spatial relation ${artifact.id} has no exact evidence binding.`,
+        });
+      }
+      if (artifact.kind === "world-rule" && isControlledWorldRule(
+        rules.find((rule) => rule.id === artifact.id)!,
+      )) {
+        invalidAssertions += 1;
+        worldRuleExactEvidenceIssues += 1;
+        evidenceErrors.push({
+          artifact: artifact.name,
+          code: "MISSING_EXACT_WORLD_RULE_BINDING",
+          message: `Controlled world rule ${artifact.id} has no exact evidence binding.`,
         });
       }
       continue;
@@ -571,6 +627,12 @@ export async function auditCompiler(
             binding.assertions,
           )
         : []),
+      ...(artifact.kind === "world-rule"
+        ? validateWorldRuleEvidenceAssertions(
+            rules.find((rule) => rule.id === artifact.id)!,
+            binding.assertions,
+          )
+        : []),
       ...(await evidenceVerifier.verifyAssertions(binding.assertions)).issues,
     ];
     if (binding.artifactHash !== contentHash(artifact.payload)) {
@@ -590,6 +652,7 @@ export async function auditCompiler(
       });
     }
     invalidAssertions += exactIssues.length;
+    if (artifact.kind === "world-rule") worldRuleExactEvidenceIssues += exactIssues.length;
     for (const issue of exactIssues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
     if (!exactIssues.length) validExactBindings += 1;
   }
@@ -696,6 +759,21 @@ export async function auditCompiler(
   const locationsWithSpatialTopology = locationEntities.length
     ? locationsInTopology / locationEntities.length
     : null;
+  const worldRuleValidation = validateWorldRuleCatalog(rules, {
+    entities: new Map(entities.map((entity) => [entity.id, { kind: entity.kind }])),
+    events: new Map(events.map((event) => [event.id, event])),
+    claims: new Set(claims.map((claim) => claim.id)),
+    rules: new Map(rules.map((rule) => [rule.id, rule])),
+  });
+  const controlledWorldRules = rules.filter(isControlledWorldRule);
+  const controlledWorldRuleCoverage = rules.length
+    ? controlledWorldRules.length / rules.length
+    : null;
+  const worldRuleClauses = controlledWorldRules.flatMap((rule) => rule.clauses);
+  const worldRuleExceptions = controlledWorldRules.flatMap((rule) => rule.exceptions);
+  const worldRuleKinds = countValues(controlledWorldRules.map((rule) => rule.kind));
+  const worldRuleScopes = countValues(controlledWorldRules.map((rule) => rule.scope));
+  const potentialWorldRuleConflicts = findPotentialWorldRuleConflicts(controlledWorldRules);
   const characterOntologyCatalog = {
     entities: new Map(entities.map((entity) => [entity.id, { kind: entity.kind }])),
     propositions: new Set(propositions.map((proposition) => proposition.id)),
@@ -880,8 +958,17 @@ export async function auditCompiler(
   const semanticIssues: string[] = [];
   const semanticRepairEventIds = new Set<string>();
   const semanticRepairCharacterIds: string[] = [];
+  const semanticRepairRuleIds = new Set<string>();
   let semanticRepairInitialWorld = false;
-  let semanticRepairRequiresFullReparse = false;
+  let semanticRepairRequiresFullReparse = worldRuleValidation.length > 0;
+  for (const issue of worldRuleValidation) {
+    const index = issue.path?.match(/^worldRules\.(\d+)(?:\.|$)/u)?.[1];
+    const rule = index === undefined ? undefined : rules[Number(index)];
+    if (rule) semanticRepairRuleIds.add(rule.id);
+  }
+  if (worldRuleValidation.length && semanticRepairRuleIds.size === 0) {
+    rules.forEach((rule) => semanticRepairRuleIds.add(rule.id));
+  }
   // Small fixtures and short stories may intentionally be sparse. The hard
   // semantic gate targets novel-scale compilations where omissions compound.
   if (events.length >= 20) {
@@ -970,6 +1057,12 @@ export async function auditCompiler(
       semanticIssues.push(`${legacyRelationshipStateOperations} legacy relationship.kind/strength/obligations state operation(s) remain; migrate new semantics to relationship.type plus ${RELATIONSHIP_ONTOLOGY_VERSION} policy records.`);
       semanticRepairRequiresFullReparse = true;
     }
+    if (rules.length && controlledWorldRuleCoverage !== 1) {
+      semanticIssues.push(`Only ${formatRatio(controlledWorldRuleCoverage)} of world rules use the controlled ${WORLD_RULE_ONTOLOGY_VERSION} vocabulary (required 100% for novel-scale publication).`);
+      rules.filter((rule) => !isControlledWorldRule(rule))
+        .forEach((rule) => semanticRepairRuleIds.add(rule.id));
+      semanticRepairRequiresFullReparse = true;
+    }
   }
   const sourceIndexing = sources.length
     ? changedSinceIngest.length
@@ -996,6 +1089,7 @@ export async function auditCompiler(
     || participationValidation.length
     || relationValidation.length
     || spatialValidation.length
+    || worldRuleValidation.length
     || characterOntologyValidation.length
     || relationshipOntologyValidation.length
     ? "not-ready"
@@ -1062,6 +1156,8 @@ export async function auditCompiler(
     ...epistemicErrors.map((error) => `${error.artifact}: ${error.message}`),
     ...participationValidation.map((error) => `Event participation ${error.code}: ${error.message}`),
     ...relationValidation.map((error) => `Event relation ${error.code}: ${error.message}`),
+    ...worldRuleValidation.map((error) =>
+      `World rule ${error.code}${error.path ? ` at ${error.path}` : ""}: ${error.message}`),
     ...characterOntologyValidation.map((error) =>
       `Character model ${error.actorId} ${error.code}${error.path ? ` at ${error.path}` : ""}: ${error.message}`),
     ...relationshipOntologyValidation.map((error) =>
@@ -1200,6 +1296,37 @@ export async function auditCompiler(
       referenceValidationIssues: spatialValidation.length,
       errors: spatialValidation,
     },
+    worldRuleSemantics: {
+      ontologyVersion: WORLD_RULE_ONTOLOGY_VERSION,
+      rules: rules.length,
+      controlledRules: controlledWorldRules.length,
+      legacyRules: rules.length - controlledWorldRules.length,
+      supportedRules: controlledWorldRules.filter((rule) => rule.status === "supported").length,
+      contestedRules: controlledWorldRules.filter((rule) => rule.status === "contested").length,
+      kinds: worldRuleKinds,
+      scopes: worldRuleScopes,
+      clauses: worldRuleClauses.length,
+      requireClauses: worldRuleClauses.filter((clause) => clause.modality === "require").length,
+      forbidClauses: worldRuleClauses.filter((clause) => clause.modality === "forbid").length,
+      contestedClauses: worldRuleClauses.filter((clause) => clause.status === "contested").length,
+      exceptions: worldRuleExceptions.length,
+      contestedExceptions: worldRuleExceptions.filter((exception) => exception.status === "contested").length,
+      defeasibleRules: controlledWorldRules.filter((rule) => rule.defeasible).length,
+      overrideEdges: controlledWorldRules.reduce((count, rule) => count + rule.overridesRuleIds.length, 0),
+      authorityRules: controlledWorldRules.filter((rule) => rule.authorityEntityId !== undefined).length,
+      boundedJurisdictionRules: controlledWorldRules.filter((rule) =>
+        rule.scope !== "global" && rule.jurisdictionEntityIds.length > 0).length,
+      publicRules: controlledWorldRules.filter((rule) => rule.visibility === "public").length,
+      observableRules: controlledWorldRules.filter((rule) => rule.visibility === "observable").length,
+      knowledgeRules: controlledWorldRules.filter((rule) => rule.visibility === "knowledge").length,
+      engineRules: controlledWorldRules.filter((rule) => rule.visibility === "engine").length,
+      potentialConflicts: potentialWorldRuleConflicts,
+      unresolvedPotentialConflicts: potentialWorldRuleConflicts.filter((conflict) =>
+        conflict.resolvedByRuleId === undefined).length,
+      referenceValidationIssues: worldRuleValidation.length,
+      exactEvidenceIssues: worldRuleExactEvidenceIssues,
+      errors: worldRuleValidation,
+    },
     canonical: {
       entities: entities.length,
       propositions: propositions.length,
@@ -1241,6 +1368,7 @@ export async function auditCompiler(
           && participationValidation.length === 0
           && relationValidation.length === 0
           && spatialValidation.length === 0
+          && worldRuleValidation.length === 0
           && characterOntologyValidation.length === 0
           && relationshipOntologyValidation.length === 0
         : null,
@@ -1249,6 +1377,7 @@ export async function auditCompiler(
     semanticRepairTargets: {
       eventIds: [...semanticRepairEventIds],
       characterIds: [...new Set(semanticRepairCharacterIds)],
+      ruleIds: [...semanticRepairRuleIds].sort(),
       initialWorld: semanticRepairInitialWorld,
       requiresFullReparse: semanticRepairRequiresFullReparse,
     },
@@ -1276,6 +1405,7 @@ export async function auditCompiler(
       directedRelationshipEntities: directedRelationshipCoverage,
       typedRelationshipEntities: typedRelationshipCoverage,
       locationsWithSpatialTopology,
+      controlledWorldRules: controlledWorldRuleCoverage,
       characterDevelopmentCoverage,
       openingCheckpointDeclared: initialWorld ? (initialWorld.checkpoint ? 1 : 0) : null,
       participantPresenceCoverage,
@@ -1302,9 +1432,78 @@ export async function auditCompiler(
         ? ["The canonical event graph is dominated by unconditional disconnected roots; recurring characters alone are not enough to make later canon active at the opening."]
         : []),
       ...(semanticIssues.length ? ["Novel-scale semantic readiness failed; structural validity alone is insufficient for publication."] : []),
+      ...(potentialWorldRuleConflicts.some((conflict) => conflict.resolvedByRuleId === undefined)
+        ? ["Potential cross-rule require/forbid conflicts are diagnostic: only an explicit valid override resolves them, while uncertain co-applicability does not by itself fail readiness."]
+        : []),
       "Source indexing measures indexed source bytes and may be below 1 when blank-only gaps are intentionally omitted.",
     ],
   };
+}
+
+function countValues(values: readonly string[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const value of values) counts[value] = (counts[value] ?? 0) + 1;
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function findPotentialWorldRuleConflicts(
+  rules: readonly ControlledWorldRule[],
+): CompilerAuditReport["worldRuleSemantics"]["potentialConflicts"] {
+  const supported = rules.filter((rule) => rule.status === "supported");
+  const conflicts = new Map<string, CompilerAuditReport["worldRuleSemantics"]["potentialConflicts"][number]>();
+  for (let leftIndex = 0; leftIndex < supported.length; leftIndex += 1) {
+    const left = supported[leftIndex]!;
+    for (let rightIndex = leftIndex + 1; rightIndex < supported.length; rightIndex += 1) {
+      const right = supported[rightIndex]!;
+      if (!worldRulesCouldOverlap(left, right)) continue;
+      const leftClauses = left.clauses.filter((clause) => clause.status === "supported");
+      const rightClauses = right.clauses.filter((clause) => clause.status === "supported");
+      for (const leftClause of leftClauses) {
+        for (const rightClause of rightClauses) {
+          if (leftClause.modality === rightClause.modality
+            || canonicalJson(leftClause.predicate) !== canonicalJson(rightClause.predicate)) continue;
+          const requiringRule = leftClause.modality === "require" ? left : right;
+          const forbiddingRule = leftClause.modality === "forbid" ? left : right;
+          const resolvedByRuleId = validExplicitOverride(requiringRule, forbiddingRule)
+            ? requiringRule.id
+            : validExplicitOverride(forbiddingRule, requiringRule)
+              ? forbiddingRule.id
+              : undefined;
+          const key = `${requiringRule.id}\u0000${forbiddingRule.id}\u0000${canonicalJson(leftClause.predicate)}`;
+          conflicts.set(key, {
+            requiringRuleId: requiringRule.id,
+            forbiddingRuleId: forbiddingRule.id,
+            predicate: structuredClone(leftClause.predicate),
+            ...(resolvedByRuleId ? { resolvedByRuleId } : {}),
+          });
+        }
+      }
+    }
+  }
+  return [...conflicts.values()].sort((left, right) =>
+    left.requiringRuleId.localeCompare(right.requiringRuleId)
+    || left.forbiddingRuleId.localeCompare(right.forbiddingRuleId)
+    || canonicalJson(left.predicate).localeCompare(canonicalJson(right.predicate)));
+}
+
+function worldRulesCouldOverlap(left: ControlledWorldRule, right: ControlledWorldRule): boolean {
+  // Distinct jurisdictions are not enough to prove mutual exclusion: one actor
+  // may simultaneously be subject to location, faction, and institution rules.
+  // Suppress a diagnostic only when concrete temporal scopes cannot overlap.
+  if (left.validStoryTime && right.validStoryTime) {
+    const order = compareStoryTime(left.validStoryTime, right.validStoryTime);
+    if (order === -1 || order === 1) return false;
+  }
+  return true;
+}
+
+function validExplicitOverride(
+  overriding: ControlledWorldRule,
+  target: ControlledWorldRule,
+): boolean {
+  return overriding.overridesRuleIds.includes(target.id)
+    && target.defeasible
+    && overriding.priority > target.priority;
 }
 
 function formatRatio(value: number | null): string {

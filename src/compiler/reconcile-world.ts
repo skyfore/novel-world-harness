@@ -450,7 +450,8 @@ export function semanticRepairIsIsolated(audit: CompilerAuditReport): boolean {
     return targetable
       && !targets.requiresFullReparse
       && targets.eventIds.length <= totalEventCapacity
-      && targets.characterIds.length <= totalCharacterCapacity;
+      && targets.characterIds.length <= totalCharacterCapacity
+      && targets.ruleIds.length === 0;
   }
   const repairsToReach = (coverage: number | null, target: number) => coverage === null
     ? 0

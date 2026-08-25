@@ -13,6 +13,7 @@ import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { ActorModelStore } from "../src/world/actors.js";
 import { contentHash } from "../src/world/canonical.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { controlledWorldRuleSchema } from "../src/world/model.js";
 import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
@@ -185,6 +186,236 @@ describe("compiler audit", () => {
     expect(report.canonical.spatialRelations).toBe(1);
     expect(report.coverage.locationsWithSpatialTopology).toBe(1);
     expect(report.evidence.errors).not.toContainEqual(expect.objectContaining({ artifact: "spatial-relation:village-harbor-road" }));
+  });
+
+  it("audits controlled world-rule clauses, explicit overrides, and exact evidence", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-world-rules-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, [
+      "By village law, Hero must remain at the gate.",
+      "A royal decree forbids Hero from remaining at the gate and supersedes village law.",
+      "Merchant custom also requires Hero to remain at the gate.",
+      "",
+    ].join("\n"));
+    const segment = (await new SegmentStore(root).list(fixture.source.id))[0]!;
+    const anchorFor = async (exact: string, targetPath: string) => resolveTextAnchor(root, segment, {
+      segment_id: segment.id,
+      exact,
+      target_path: targetPath,
+      relation: "supports",
+      strength: "explicit",
+    });
+    const anchors = {
+      villageTop: await anchorFor("By village law", "/name"),
+      villageClause: await anchorFor("Hero must remain at the gate", "/clauses/0/predicate"),
+      royalTop: await anchorFor("royal decree", "/name"),
+      royalClause: await anchorFor("forbids Hero from remaining at the gate", "/clauses/0/predicate"),
+      customTop: await anchorFor("Merchant custom", "/name"),
+      customClause: await anchorFor("also requires Hero to remain at the gate", "/clauses/0/predicate"),
+    };
+    const evidenceFor = (anchor: typeof anchors.villageTop) => [{
+      span: {
+        sourceId: anchor.sourceId,
+        startByte: anchor.startByte,
+        endByte: anchor.endByte,
+        startLine: anchor.startLine,
+        endLine: anchor.endLine,
+        quoteHash: anchor.exactHash,
+      },
+      strength: "explicit" as const,
+    }];
+    const predicate = { op: "fact-equals" as const, entityId: "hero", field: "character.location", value: "gate" };
+    const villageRule = controlledWorldRuleSchema.parse({
+      ontologyVersion: "world-rule-v2",
+      id: "village-gate-duty",
+      name: "Village gate duty",
+      kind: "legal",
+      scope: "global",
+      authorityEntityId: "village-council",
+      jurisdictionEntityIds: [],
+      appliesWhen: [],
+      visibility: "public",
+      knownByClaimIds: [],
+      priority: 10,
+      defeasible: true,
+      overridesRuleIds: [],
+      clauses: [{
+        id: "village-gate-duty-clause",
+        modality: "require",
+        predicate,
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence: evidenceFor(anchors.villageClause),
+      }],
+      exceptions: [],
+      basis: "explicit",
+      status: "supported",
+      confidence: 1,
+      evidence: evidenceFor(anchors.villageTop),
+    });
+    const royalRule = controlledWorldRuleSchema.parse({
+      ...villageRule,
+      id: "royal-gate-ban",
+      name: "Royal gate ban",
+      authorityEntityId: "crown",
+      priority: 20,
+      defeasible: false,
+      overridesRuleIds: [villageRule.id],
+      clauses: [{
+        id: "royal-gate-ban-clause",
+        modality: "forbid",
+        predicate,
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence: evidenceFor(anchors.royalClause),
+      }],
+      evidence: evidenceFor(anchors.royalTop),
+    });
+    const customRule = controlledWorldRuleSchema.parse({
+      ...villageRule,
+      id: "merchant-gate-custom",
+      name: "Merchant gate custom",
+      kind: "social",
+      authorityEntityId: undefined,
+      priority: 999,
+      defeasible: false,
+      overridesRuleIds: [],
+      clauses: [{
+        id: "merchant-gate-custom-clause",
+        modality: "require",
+        predicate,
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence: evidenceFor(anchors.customClause),
+      }],
+      evidence: evidenceFor(anchors.customTop),
+    });
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") });
+    await canon.putEntity({ id: "gate", kind: "location", canonicalName: "Gate", aliases: [], evidence: fixture.evidence("gate") });
+    await canon.putEntity({ id: "village-council", kind: "institution", canonicalName: "Village Council", aliases: [], evidence: fixture.evidence("village law") });
+    await canon.putEntity({ id: "crown", kind: "institution", canonicalName: "Crown", aliases: [], evidence: fixture.evidence("royal decree") });
+    await canon.putRule(villageRule);
+    await canon.putRule(royalRule);
+    await canon.putRule(customRule);
+    const assertions = new EvidenceAssertionStore(root);
+    for (const [rule, topAnchor, clauseAnchor] of [
+      [villageRule, anchors.villageTop, anchors.villageClause],
+      [royalRule, anchors.royalTop, anchors.royalClause],
+      [customRule, anchors.customTop, anchors.customClause],
+    ] as const) {
+      await assertions.replaceForArtifact("world-rule", rule.id, contentHash(rule), [{
+        version: 1,
+        id: `${rule.id}-top-support`,
+        target: { artifactKind: "world-rule", artifactId: rule.id, jsonPointer: "/name" },
+        anchors: [topAnchor],
+        relation: "supports",
+        strength: "explicit",
+        derivation: { runId: "audit-world-rule", worker: "test", ontologyVersion: "evidence-v1" },
+      }, {
+        version: 1,
+        id: `${rule.id}-clause-support`,
+        target: { artifactKind: "world-rule", artifactId: rule.id, jsonPointer: "/clauses/0/predicate" },
+        anchors: [clauseAnchor],
+        relation: "supports",
+        strength: "explicit",
+        derivation: { runId: "audit-world-rule", worker: "test", ontologyVersion: "evidence-v1" },
+      }]);
+    }
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.worldRuleSemantics).toMatchObject({
+      ontologyVersion: "world-rule-v2",
+      rules: 3,
+      controlledRules: 3,
+      legacyRules: 0,
+      supportedRules: 3,
+      clauses: 3,
+      requireClauses: 2,
+      forbidClauses: 1,
+      defeasibleRules: 1,
+      overrideEdges: 1,
+      authorityRules: 2,
+      publicRules: 3,
+      referenceValidationIssues: 0,
+      exactEvidenceIssues: 0,
+      unresolvedPotentialConflicts: 1,
+      errors: [],
+    });
+    expect(report.worldRuleSemantics.potentialConflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        requiringRuleId: villageRule.id,
+        forbiddingRuleId: royalRule.id,
+        resolvedByRuleId: royalRule.id,
+        predicate,
+      }),
+      expect.objectContaining({
+        requiringRuleId: customRule.id,
+        forbiddingRuleId: royalRule.id,
+        predicate,
+      }),
+    ]));
+    expect(report.worldRuleSemantics.potentialConflicts.find((conflict) =>
+      conflict.requiringRuleId === customRule.id)).not.toHaveProperty("resolvedByRuleId");
+    expect(report.coverage.controlledWorldRules).toBe(1);
+    expect(report.evidence.errors).not.toContainEqual(expect.objectContaining({ artifact: `rule:${villageRule.id}` }));
+  });
+
+  it("blocks invalid controlled world-rule references and missing exact bindings", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-invalid-world-rule-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "The missing council requires Hero to remain at the gate.\n");
+    const evidence = fixture.evidence("missing council requires Hero to remain at the gate");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+    const rule = controlledWorldRuleSchema.parse({
+      ontologyVersion: "world-rule-v2",
+      id: "missing-council-rule",
+      name: "Missing council rule",
+      kind: "legal",
+      scope: "global",
+      authorityEntityId: "missing-council",
+      jurisdictionEntityIds: [],
+      appliesWhen: [],
+      visibility: "public",
+      knownByClaimIds: [],
+      priority: 10,
+      defeasible: false,
+      overridesRuleIds: [],
+      clauses: [{
+        id: "missing-council-rule-clause",
+        modality: "require",
+        predicate: { op: "fact-equals", entityId: "hero", field: "character.location", value: "gate" },
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence,
+      }],
+      exceptions: [],
+      basis: "explicit",
+      status: "supported",
+      confidence: 1,
+      evidence,
+    });
+    await canon.putRule(rule);
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.worldRuleSemantics.referenceValidationIssues).toBe(1);
+    expect(report.worldRuleSemantics.exactEvidenceIssues).toBe(1);
+    expect(report.worldRuleSemantics.errors).toEqual([
+      expect.objectContaining({ code: "UNKNOWN_RULE_AUTHORITY" }),
+    ]);
+    expect(report.readiness.evidence).toBe("not-ready");
+    expect(report.readiness.semantic).toBe("not-ready");
+    expect(report.semanticRepairTargets.ruleIds).toEqual([rule.id]);
+    expect(report.semanticRepairTargets.requiresFullReparse).toBe(true);
+    expect(report.readiness.blockingIssues).toEqual(expect.arrayContaining([
+      expect.stringContaining("MISSING_EXACT_WORLD_RULE_BINDING"),
+      expect.stringContaining("UNKNOWN_RULE_AUTHORITY"),
+    ]));
   });
 
   it("accounts for proposition attribution and semantic knowledge provenance", async () => {

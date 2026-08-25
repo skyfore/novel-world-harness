@@ -101,6 +101,7 @@ describe("world semantic reconciliation", () => {
       semanticRepairTargets: {
         eventIds: Array.from({ length: 10 }, (_value, index) => `event-${String(index + 1).padStart(2, "0")}`),
         characterIds: ["hero"],
+        ruleIds: [],
         initialWorld: false,
         requiresFullReparse: true,
       },
@@ -146,6 +147,7 @@ describe("world semantic reconciliation", () => {
           (_value, index) => `missing-summary-${index + 1}`,
         ),
         characterIds: [],
+        ruleIds: [],
         initialWorld: false,
         requiresFullReparse: false,
       },
@@ -158,5 +160,15 @@ describe("world semantic reconciliation", () => {
     const bounded = report(20, 0.8);
     expect(semanticRepairIsIsolated(bounded)).toBe(true);
     expect(semanticRepairRequiresReparse(bounded)).toBe(false);
+
+    const ruleMigration = {
+      ...bounded,
+      semanticRepairTargets: {
+        ...bounded.semanticRepairTargets,
+        ruleIds: ["legacy-rule"],
+      },
+    };
+    expect(semanticRepairIsIsolated(ruleMigration)).toBe(false);
+    expect(semanticRepairRequiresReparse(ruleMigration)).toBe(true);
   });
 });

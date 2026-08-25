@@ -113,7 +113,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "event-participation": { name: "propose_event_participation", label: "Propose event participation", description: "Submit one evidence-backed semantic role for an entity in a canonical event as part of a complete same-finish inventory. Role and character scene-presence are independent; accepting this record does not create or execute the event." },
   "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Only non-contested causes/enables can project to legacy causalParents; narrative sequence never implies causation." },
   "spatial-relation": { name: "propose_spatial_relation", label: "Propose spatial relation", description: "Submit one exact-evidence-backed contains, adjacency, or traversable-route relation. Adjacency never implies passage; route activation, visibility, direction, and duration remain explicit." },
-  "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },
+  "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a world-rule-v2 candidate with typed kind/scope, explicit authority and jurisdiction, per-clause modality/evidence, exceptions, visibility, defeasibility, and explicit priority overrides. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed StateDelta used to create a runtime genesis branch." },
   "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
   "character-model": { name: "propose_character_model", label: "Propose character model", description: "Submit an evidence-backed actor policy with registered dispositions, appraisals, development, directed relationship stances, typed obligations, and relationship changes. It never grants omniscient knowledge or makes policy world truth." },
@@ -350,6 +350,54 @@ function injectHostSemanticEvidence(
           return target?.field === field && target.index === index;
         })
         .map((item) => structuredClone(item.reference));
+      if (counterEvidence.length) semantic.counterEvidence = counterEvidence;
+      else delete semantic.counterEvidence;
+    }
+  }
+  return enriched;
+}
+
+function worldRuleSemanticTarget(targetPath: string): { field: "clauses" | "exceptions"; index: number } | null {
+  const tokens = targetPath.slice(1).split("/")
+    .map((token) => token.replace(/~1/g, "/").replace(/~0/g, "~"));
+  const [field, indexToken] = tokens;
+  if ((field !== "clauses" && field !== "exceptions")
+    || !indexToken || !/^(0|[1-9]\d*)$/.test(indexToken)) return null;
+  return { field, index: Number(indexToken) };
+}
+
+function injectHostWorldRuleEvidence(
+  payload: unknown,
+  supporting: readonly LocatedSemanticEvidence[],
+  contradicting: readonly LocatedSemanticEvidence[],
+): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const enriched = structuredClone(payload) as Record<string, unknown>;
+  if (enriched.ontologyVersion !== "world-rule-v2") return enriched;
+  const topSupporting = supporting.filter((item) => !worldRuleSemanticTarget(item.targetPath));
+  const topContradicting = contradicting.filter((item) => !worldRuleSemanticTarget(item.targetPath));
+  enriched.evidence = topSupporting.map((item) => structuredClone(item.reference));
+  if (topContradicting.length) enriched.counterEvidence = topContradicting.map((item) => structuredClone(item.reference));
+  else delete enriched.counterEvidence;
+  for (const field of ["clauses", "exceptions"] as const) {
+    const collection = enriched[field];
+    if (!Array.isArray(collection)) continue;
+    for (let index = 0; index < collection.length; index += 1) {
+      const item = collection[index];
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const semantic = item as Record<string, unknown>;
+      semantic.evidence = supporting
+        .filter((candidate) => {
+          const target = worldRuleSemanticTarget(candidate.targetPath);
+          return target?.field === field && target.index === index;
+        })
+        .map((candidate) => structuredClone(candidate.reference));
+      const counterEvidence = contradicting
+        .filter((candidate) => {
+          const target = worldRuleSemanticTarget(candidate.targetPath);
+          return target?.field === field && target.index === index;
+        })
+        .map((candidate) => structuredClone(candidate.reference));
       if (counterEvidence.length) semantic.counterEvidence = counterEvidence;
       else delete semantic.counterEvidence;
     }
@@ -968,10 +1016,10 @@ export function createCompilerProposalToolset(
           },
           strength: selector.strength,
         });
-      if ((kind === "character-model" || kind === "spatial-relation") && selector.relation === "supports") {
+      if ((kind === "character-model" || kind === "spatial-relation" || kind === "world-rule") && selector.relation === "supports") {
         supportingSemanticEvidence.push({ targetPath: selector.target_path, reference: exactReference });
       }
-      if ((kind === "event-relation" || kind === "character-model" || kind === "spatial-relation") && selector.relation === "contradicts") {
+      if ((kind === "event-relation" || kind === "character-model" || kind === "spatial-relation" || kind === "world-rule") && selector.relation === "contradicts") {
         if (kind === "character-model" && !characterSemanticTarget(selector.target_path)) {
           throw new Error(
             `Character counter-evidence selector '${selector.target_path}' must target one disposition, appraisal, development, relationship stance, obligation, or relationship change item.`,
@@ -1026,6 +1074,9 @@ export function createCompilerProposalToolset(
     }
     if (kind === "character-model") {
       payload = injectHostSemanticEvidence(payload, supportingSemanticEvidence, counterEvidence);
+    }
+    if (kind === "world-rule") {
+      payload = injectHostWorldRuleEvidence(payload, supportingSemanticEvidence, counterEvidence);
     }
     return kind === "state-delta"
       ? { payload, evidence, evidenceAssertions }

@@ -707,8 +707,132 @@ export const canonicalEventSchema = z.object({
 }).strict();
 export type CanonicalEvent = z.infer<typeof canonicalEventSchema>;
 
-export const worldRuleSchema = z.object({ id: idSchema, name: z.string().min(1), scope: z.enum(["global", "entity", "location", "faction", "institution"]), appliesWhen: z.array(predicateSchema), forbids: z.array(predicateSchema).optional(), requires: z.array(predicateSchema).optional(), evidence: z.array(evidenceRefSchema) }).strict();
+export const worldRuleScopeSchema = z.enum(["global", "entity", "location", "faction", "institution"]);
+export const worldRuleKindSchema = z.enum(["physical", "social", "legal", "magical", "institutional"]);
+export const worldRuleVisibilitySchema = z.enum(["public", "observable", "knowledge", "engine"]);
+export const worldRuleClauseModalitySchema = z.enum(["require", "forbid"]);
+const worldRuleStoryTimeSchema = storyTimeSchema.refine(
+  (value) => value.kind !== "relative" && value.kind !== "unknown",
+  "World-rule validity must use a concrete calendar/range/ordinal scope; event-driven changes use committed activate-rule/deactivate-rule operations",
+);
+
+const worldRuleEvidenceShape = {
+  basis: z.enum(["explicit", "inferred"]),
+  status: z.enum(["supported", "contested"]),
+  confidence: z.number().finite().min(0).max(1),
+  evidence: z.array(evidenceRefSchema).min(1),
+  counterEvidence: z.array(evidenceRefSchema).optional(),
+} as const;
+
+export const worldRuleClauseSchema = z.object({
+  id: idSchema,
+  modality: worldRuleClauseModalitySchema,
+  predicate: predicateSchema,
+  ...worldRuleEvidenceShape,
+}).strict().superRefine(validateWorldRuleEvidenceShape);
+export type WorldRuleClause = z.infer<typeof worldRuleClauseSchema>;
+
+export const worldRuleExceptionSchema = z.object({
+  id: idSchema,
+  appliesWhen: z.array(predicateSchema).min(1).max(32),
+  ...worldRuleEvidenceShape,
+}).strict().superRefine(validateWorldRuleEvidenceShape);
+export type WorldRuleException = z.infer<typeof worldRuleExceptionSchema>;
+
+export const legacyWorldRuleSchema = z.object({
+  id: idSchema,
+  name: z.string().min(1),
+  scope: worldRuleScopeSchema,
+  appliesWhen: z.array(predicateSchema),
+  forbids: z.array(predicateSchema).optional(),
+  requires: z.array(predicateSchema).optional(),
+  evidence: z.array(evidenceRefSchema),
+}).strict();
+export type LegacyWorldRule = z.infer<typeof legacyWorldRuleSchema>;
+
+export const controlledWorldRuleSchema = z.object({
+  ontologyVersion: z.literal("world-rule-v2"),
+  id: idSchema,
+  name: z.string().trim().min(1).max(500),
+  kind: worldRuleKindSchema,
+  scope: worldRuleScopeSchema,
+  authorityEntityId: idSchema.optional(),
+  jurisdictionEntityIds: z.array(idSchema).max(64).default([]),
+  appliesWhen: z.array(predicateSchema).max(64).default([]),
+  validStoryTime: worldRuleStoryTimeSchema.optional(),
+  visibility: worldRuleVisibilitySchema,
+  knownByClaimIds: z.array(idSchema).max(64).default([]),
+  priority: z.number().int().min(0).max(10_000),
+  defeasible: z.boolean(),
+  overridesRuleIds: z.array(idSchema).max(64).default([]),
+  clauses: z.array(worldRuleClauseSchema).min(1).max(64),
+  exceptions: z.array(worldRuleExceptionSchema).max(32).default([]),
+  ...worldRuleEvidenceShape,
+}).strict().superRefine((rule, ctx) => {
+  validateWorldRuleEvidenceShape(rule, ctx);
+  for (const [field, values] of [
+    ["jurisdictionEntityIds", rule.jurisdictionEntityIds],
+    ["knownByClaimIds", rule.knownByClaimIds],
+    ["overridesRuleIds", rule.overridesRuleIds],
+  ] as const) {
+    if (new Set(values).size !== values.length) {
+      ctx.addIssue({ code: "custom", path: [field], message: `${field} must contain unique IDs` });
+    }
+  }
+  if (rule.scope === "global" && rule.jurisdictionEntityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["jurisdictionEntityIds"], message: "A global rule cannot declare a bounded jurisdiction" });
+  }
+  if (rule.scope !== "global" && !rule.jurisdictionEntityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["jurisdictionEntityIds"], message: `A ${rule.scope}-scoped rule requires at least one jurisdiction entity` });
+  }
+  if (rule.visibility === "knowledge" && !rule.knownByClaimIds.length) {
+    ctx.addIssue({ code: "custom", path: ["knownByClaimIds"], message: "A knowledge-visible rule requires at least one grounding claim" });
+  }
+  if (rule.visibility !== "knowledge" && rule.knownByClaimIds.length) {
+    ctx.addIssue({ code: "custom", path: ["knownByClaimIds"], message: "knownByClaimIds is reserved for knowledge-visible rules" });
+  }
+  if (rule.overridesRuleIds.includes(rule.id)) {
+    ctx.addIssue({ code: "custom", path: ["overridesRuleIds"], message: "A rule cannot override itself" });
+  }
+  const semanticIds = [...rule.clauses, ...rule.exceptions].map((item) => item.id);
+  if (new Set(semanticIds).size !== semanticIds.length) {
+    ctx.addIssue({ code: "custom", path: ["clauses"], message: "Clause and exception IDs must be unique within one rule" });
+  }
+  if (rule.status === "supported" && !rule.clauses.some((clause) => clause.status === "supported")) {
+    ctx.addIssue({ code: "custom", path: ["clauses"], message: "A supported rule requires at least one supported executable clause" });
+  }
+});
+export type ControlledWorldRule = z.infer<typeof controlledWorldRuleSchema>;
+
+export const worldRuleSchema = z.union([controlledWorldRuleSchema, legacyWorldRuleSchema]);
 export type WorldRule = z.infer<typeof worldRuleSchema>;
+
+function validateWorldRuleEvidenceShape(
+  value: { basis: "explicit" | "inferred"; status: "supported" | "contested"; evidence: EvidenceRef[]; counterEvidence?: EvidenceRef[] },
+  ctx: z.RefinementCtx,
+): void {
+  const evidenceKeys = value.evidence.map((reference) => JSON.stringify(reference));
+  if (new Set(evidenceKeys).size !== evidenceKeys.length) {
+    ctx.addIssue({ code: "custom", path: ["evidence"], message: "Rule evidence references must be unique" });
+  }
+  const counterKeys = (value.counterEvidence ?? []).map((reference) => JSON.stringify(reference));
+  if (new Set(counterKeys).size !== counterKeys.length) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "Rule counter-evidence references must be unique" });
+  }
+  const overlap = counterKeys.filter((key) => evidenceKeys.includes(key));
+  if (overlap.length) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "One exact source reference cannot both support and contradict the same rule semantic" });
+  }
+  if (value.status === "contested" && !value.counterEvidence?.length) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "A contested rule semantic requires counter-evidence" });
+  }
+  if (value.status === "supported" && value.counterEvidence?.length) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "Counter-evidence requires contested status" });
+  }
+  if (value.basis === "explicit" && !value.evidence.some((reference) => reference.strength === "explicit")) {
+    ctx.addIssue({ code: "custom", path: ["basis"], message: "An explicit rule semantic requires explicit evidence" });
+  }
+}
 
 export const actorEventObservationSchema = z.object({
   actorId: idSchema,

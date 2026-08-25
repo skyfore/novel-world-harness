@@ -27,6 +27,12 @@ import {
   validateSpatialEvidenceAssertions,
   validateSpatialRelationCatalog,
 } from "../world/spatial-ontology.js";
+import {
+  isControlledWorldRule,
+  validateWorldRuleCatalog,
+  validateWorldRuleEvidenceAssertions,
+  worldRuleEvidence,
+} from "../world/world-rule-ontology.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
@@ -47,7 +53,7 @@ import { EvidenceAssertionStore } from "./evidence-assertions.js";
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 22;
+export const COMPILER_PROMPT_VERSION = 23;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -132,6 +138,13 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
       spatialRelationEvidence(relation),
       sourceId,
       `Prepared spatial relation ${relation.id}`,
+    );
+  }
+  for (const rule of bundle.canonical.rules) {
+    assertEvidenceExclusiveToSource(
+      worldRuleEvidence(rule),
+      sourceId,
+      `Prepared world rule ${rule.id}`,
     );
   }
   for (const model of bundle.canonical.models) {
@@ -526,6 +539,7 @@ export class PreparedNovelCache {
     assertPreparedBundleSourceScope(bundle);
     await assertPreparedCharacterEvidence(this.workspaceRoot, bundle);
     await assertPreparedSpatialEvidence(this.workspaceRoot, bundle);
+    await assertPreparedWorldRuleEvidence(this.workspaceRoot, bundle);
     assertSelfContainedBaseline(bundle, canonical);
     return bundle;
   }
@@ -965,6 +979,33 @@ async function assertPreparedSpatialEvidence(
   }
 }
 
+async function assertPreparedWorldRuleEvidence(
+  workspaceRoot: string,
+  bundle: PreparedNovelBundle,
+): Promise<void> {
+  const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
+  const verifier = new EvidenceVerifier(workspaceRoot);
+  for (const rule of bundle.canonical.rules) {
+    if (!isControlledWorldRule(rule)) continue;
+    const binding = await exactEvidence.bindingForArtifact("world-rule", rule.id);
+    if (!binding?.assertions.length) {
+      throw new Error(`Prepared controlled world rule ${rule.id} has no exact evidence binding.`);
+    }
+    if (binding.artifactHash !== contentHash(rule)) {
+      throw new Error(`Prepared controlled world rule ${rule.id} has a stale exact evidence binding.`);
+    }
+    const issues = [
+      ...validateWorldRuleEvidenceAssertions(rule, binding.assertions),
+      ...(await verifier.verifyAssertions(binding.assertions)).issues,
+    ];
+    if (issues.length) {
+      throw new Error(`Prepared controlled world rule ${rule.id} has invalid exact evidence: ${issues
+        .map((issue) => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)
+        .join("; ")}`);
+    }
+  }
+}
+
 function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore: CanonicalModelStore): void {
   const catalog: CompilerValidationCatalog = {
     entities: new Map(bundle.canonical.entities.map((item) => [item.id, item])),
@@ -1023,6 +1064,15 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
   });
   if (spatialIssues.length) {
     throw new Error(`Cannot cache source-isolated baseline: spatial relation projection is invalid (${spatialIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}).`);
+  }
+  const ruleIssues = validateWorldRuleCatalog(bundle.canonical.rules, {
+    entities: catalog.entities,
+    events: catalog.events,
+    claims: new Set(catalog.claims.keys()),
+    rules: catalog.rules,
+  });
+  if (ruleIssues.length) {
+    throw new Error(`Cannot cache source-isolated baseline: world-rule projection is invalid (${ruleIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}).`);
   }
   const possibilityIds = new Set(bundle.canonical.possibilities.map((item) => item.id));
   for (const possibility of bundle.canonical.possibilities) {

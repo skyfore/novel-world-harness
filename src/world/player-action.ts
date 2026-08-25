@@ -37,7 +37,6 @@ import type { CanonicalChoiceResolution } from "./runtime.js";
 import { committedHistory, projectActorScene } from "./scene.js";
 import { advanceStoryTime, timeAdvanceInDays } from "./time.js";
 import { projectActorVisibleState } from "./actor-visible.js";
-import { evaluatePredicate } from "./state.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { deepFreeze, immutableClone } from "../util/immutable.js";
 import {
@@ -54,6 +53,7 @@ import {
   spatialLocationsMayOverlap,
   spatialTravelModeSchema,
 } from "./spatial-ontology.js";
+import { modelVisibleWorldRules, resolveEffectiveWorldRules } from "./world-rule-ontology.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -2079,16 +2079,20 @@ function buildPlayerWorldAdjudicationContext(
         name: entity.name,
         state: safeState(entity.id),
       })),
-    activeRules: worldState.activeRuleIds.flatMap((ruleId) => {
-      const rule = worldContext.rules.get(ruleId);
-      return rule && rule.appliesWhen.every((predicate) => evaluatePredicate(worldState, predicate)) ? [{
-        name: rule.name,
-        scope: rule.scope,
-        appliesWhen: structuredClone(rule.appliesWhen),
-        requires: structuredClone(rule.requires ?? []),
-        forbids: structuredClone(rule.forbids ?? []),
-      }] : [];
-    }),
+    activeRules: modelVisibleWorldRules(
+      resolveEffectiveWorldRules(worldContext.rules, worldState).effective,
+      {
+        knownClaimIds: new Set(actorContext.knowledge
+          .filter((item) => item.status !== "disbelieves")
+          .map((item) => item.claimId)),
+        visibleEntityIds: new Set(actorContext.referenceableEntities.map((entity) => entity.id)),
+        observableEntityIds: new Set([
+          ...actorContext.presentEntities.map((entity) => entity.id),
+          ...(actorContext.scene.locationId ? [actorContext.scene.locationId] : []),
+        ]),
+        entities: worldContext.entities,
+      },
+    ),
     scene: {
       ...(actorContext.scene.label ? { label: actorContext.scene.label } : {}),
       ...(actorContext.scene.locationId ? { locationId: actorContext.scene.locationId } : {}),

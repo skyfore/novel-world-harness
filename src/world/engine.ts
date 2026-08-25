@@ -45,6 +45,11 @@ import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import { validateKnowledgeSemanticReferences } from "./knowledge-semantics.js";
 import { committedHistory, projectActorScene } from "./scene.js";
 import type { SpatialRelation } from "./spatial-ontology.js";
+import {
+  isControlledWorldRule,
+  resolveEffectiveWorldRules,
+  type EffectiveWorldRule,
+} from "./world-rule-ontology.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -247,17 +252,18 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
     }
   }
 
-  const applicableRules: WorldRule[] = [];
+  const applicableRules: EffectiveWorldRule[] = [];
   for (const ruleId of evaluationState.activeRuleIds) {
-    const rule = context.rules.get(ruleId);
-    if (!rule) {
+    if (!context.rules.has(ruleId)) {
       errors.push({ code: "UNKNOWN_ACTIVE_RULE", message: `Active rule ${ruleId} is not in the model` });
-      continue;
     }
-    if (!rule.appliesWhen.every((predicate) => evaluatePredicate(evaluationState, predicate))) continue;
-    applicableRules.push(rule);
-    if (rule.requires?.some((predicate) => !evaluatePredicate(evaluationState, predicate))) {
-      errors.push({ code: "RULE_REQUIREMENT_FAILED", message: `Rule ${ruleId} requirement is not satisfied` });
+  }
+  if (!errors.some((error) => error.code === "UNKNOWN_ACTIVE_RULE")) {
+    applicableRules.push(...resolveEffectiveWorldRules(context.rules, evaluationState).effective);
+    for (const rule of applicableRules) {
+      if (rule.requires.some((predicate) => !evaluatePredicate(evaluationState, predicate))) {
+        errors.push({ code: "RULE_REQUIREMENT_FAILED", message: `Rule ${rule.id} requirement is not satisfied` });
+      }
     }
   }
 
@@ -268,7 +274,10 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
       postState = applyStateDelta(evaluationState, delta, context.stateSchema, context.entities, context.rules);
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
       for (const rule of applicableRules) {
-        if (rule.forbids?.length && rule.forbids.every((predicate) => evaluatePredicate(postState!, predicate))) {
+        const forbidden = isControlledWorldRule(rule.rule)
+          ? rule.forbids.some((predicate) => evaluatePredicate(postState!, predicate))
+          : rule.forbids.length > 0 && rule.forbids.every((predicate) => evaluatePredicate(postState!, predicate));
+        if (forbidden) {
           errors.push({ code: "RULE_FORBIDS", message: `Rule ${rule.id} forbids the proposed post-state` });
         }
       }

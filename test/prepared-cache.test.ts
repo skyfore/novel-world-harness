@@ -78,6 +78,53 @@ describe("versioned prepared novel cache", () => {
       .rejects.toThrow("has no exact evidence binding");
   });
 
+  it("refuses to publish a controlled world rule without exact per-clause evidence", async () => {
+    const cacheRoot = await temporaryRoot("nwh-prepared-world-rule-evidence-cache-");
+    const sourceRoot = await temporaryRoot("nwh-prepared-world-rule-evidence-source-");
+    const fixture = await createEvidenceFixture(sourceRoot, "Hero must remain alive by the old law.\n");
+    const evidence = fixture.evidence("Hero must remain alive by the old law.");
+    const canon = new CanonicalModelStore(sourceRoot);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+    await canon.putRule({
+      ontologyVersion: "world-rule-v2",
+      id: "old-law",
+      name: "The old law protects Hero",
+      kind: "social",
+      scope: "global",
+      jurisdictionEntityIds: [],
+      appliesWhen: [],
+      visibility: "public",
+      knownByClaimIds: [],
+      priority: 1,
+      defeasible: true,
+      overridesRuleIds: [],
+      clauses: [{
+        id: "old-law-requirement",
+        modality: "require",
+        predicate: { op: "fact-equals", entityId: "hero", field: "character.alive", value: true },
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence,
+      }],
+      exceptions: [],
+      basis: "explicit",
+      status: "supported",
+      confidence: 1,
+      evidence,
+    });
+    await new InitialWorldStore(sourceRoot).put({
+      version: 1,
+      delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+      evidence,
+    });
+    const batches = await prepareCompilerBatches(sourceRoot, fixture.source);
+    await new CompilerBatchStore(sourceRoot).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+
+    await expect(new PreparedNovelCache(sourceRoot, cacheRoot).publish(fixture.source))
+      .rejects.toThrow("controlled world rule old-law has no exact evidence binding");
+  });
+
   it("restores accepted model-inferred title metadata across different upload filenames", async () => {
     const cacheRoot = await temporaryRoot("nwh-prepared-title-cache-");
     const sourceRoot = await temporaryRoot("nwh-prepared-title-source-");

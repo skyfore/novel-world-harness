@@ -33,6 +33,7 @@ import { committedHistory } from "./scene.js";
 import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
 import { modelVisibleRelationshipOntology, type ModelVisibleRelationshipOntology } from "./relationship-ontology.js";
 import { deepFreeze } from "../util/immutable.js";
+import { modelVisibleWorldRules, resolveEffectiveWorldRules } from "./world-rule-ontology.js";
 
 const npcResponseKindSchema = z.enum(["speak", "gesture", "refuse", "ignore", "other"]);
 export type NpcResponseKind = z.infer<typeof npcResponseKindSchema>;
@@ -239,16 +240,20 @@ async function respondOneNpc(input: {
     .filter((goal) => goal.actorId === input.npcId && activeGoalIds.has(goal.id))
     .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
     .map((goal) => ({ description: goal.description, priority: goal.priority }));
-  const activeWorldRules = state.activeRuleIds.flatMap((ruleId) => {
-    const rule = worldContext.rules.get(ruleId);
-    return rule ? [{
-      name: rule.name,
-      scope: rule.scope,
-      appliesWhen: structuredClone(rule.appliesWhen),
-      requires: structuredClone(rule.requires ?? []),
-      forbids: structuredClone(rule.forbids ?? []),
-    }] : [];
-  });
+  const activeWorldRules = modelVisibleWorldRules(
+    resolveEffectiveWorldRules(worldContext.rules, state).effective,
+    {
+      knownClaimIds: new Set(actorContext.knowledge
+        .filter((item) => item.status !== "disbelieves")
+        .map((item) => item.claimId)),
+      visibleEntityIds: new Set(actorContext.referenceableEntities.map((entity) => entity.id)),
+      observableEntityIds: new Set([
+        ...actorContext.presentEntities.map((entity) => entity.id),
+        ...(actorContext.scene.locationId ? [actorContext.scene.locationId] : []),
+      ]),
+      entities: worldContext.entities,
+    },
+  );
   const currentAffect = [...history].reverse()
     .flatMap(({ event }) => event.actorAffects ?? [])
     .find((affect) => affect.actorId === input.npcId);

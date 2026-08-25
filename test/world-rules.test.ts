@@ -59,5 +59,112 @@ describe("temporal world rules", () => {
     expect(result.newHead).toBe(genesis);
     expect((await engine.projector.project(genesis)).values.hero?.["character.location"]).toBe("hall");
   });
-});
 
+  it("enforces controlled clauses and suspends them only while a supported exception holds", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-controlled-rules-"));
+    roots.push(root);
+    const entities: Entity[] = [
+      { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] },
+      { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: [] },
+      { id: "forbidden", kind: "location", canonicalName: "Forbidden", aliases: [], evidence: [] },
+    ];
+    const evidence = [{
+      span: { sourceId: "novel", startByte: 0, endByte: 4, startLine: 1, endLine: 1, quoteHash: "a".repeat(64) },
+      strength: "explicit" as const,
+    }];
+    const rule: WorldRule = {
+      ontologyVersion: "world-rule-v2",
+      id: "ban-entry-v2",
+      name: "Ban entry unless permitted",
+      kind: "social",
+      scope: "global",
+      jurisdictionEntityIds: [],
+      appliesWhen: [],
+      visibility: "public",
+      knownByClaimIds: [],
+      priority: 10,
+      defeasible: true,
+      overridesRuleIds: [],
+      clauses: [{
+        id: "ban-entry-clause",
+        modality: "forbid",
+        predicate: { op: "fact-equals", entityId: "hero", field: "character.location", value: "forbidden" },
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence,
+      }],
+      exceptions: [{
+        id: "entry-permit",
+        appliesWhen: [{ op: "fact-equals", entityId: "hero", field: "character.plan", value: "permit" }],
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence,
+      }],
+      basis: "explicit",
+      status: "supported",
+      confidence: 1,
+      evidence,
+    };
+    const engine = new WorldEngine(root, {
+      entities: new Map(entities.map((entity) => [entity.id, entity])),
+      rules: new Map([[rule.id, rule]]),
+      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    });
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+        { op: "set", entityId: "hero", field: "character.plan", value: "none" },
+        { op: "activate-rule", ruleId: rule.id },
+      ],
+    });
+    const blocked = await engine.commitProposal({
+      proposalId: "enter-without-permit",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "player",
+      actorId: "hero",
+      title: "Enter without a permit",
+      participants: ["hero"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "forbidden" }] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(blocked.report.errors).toContainEqual(expect.objectContaining({ code: "RULE_FORBIDS" }));
+
+    const permit = await engine.commitProposal({
+      proposalId: "receive-permit",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "background",
+      title: "Receive a permit",
+      participants: ["hero"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "permit" }] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(permit.report.accepted).toBe(true);
+    const allowed = await engine.commitProposal({
+      proposalId: "enter-with-permit",
+      branchId: "main",
+      expectedParentCommit: permit.newHead,
+      source: "player",
+      actorId: "hero",
+      title: "Enter with a permit",
+      participants: ["hero"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "forbidden" }] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(allowed.report.accepted).toBe(true);
+  });
+});

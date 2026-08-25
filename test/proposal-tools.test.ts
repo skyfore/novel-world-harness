@@ -11,7 +11,7 @@ import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
 import { EvidenceVerifier } from "../src/compiler/evidence.js";
 import { segmentEvidenceRef, SegmentStore } from "../src/compiler/segments.js";
 import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
-import { entitySchema, eventRelationSchema } from "../src/world/model.js";
+import { entitySchema, eventRelationSchema, worldRuleSchema } from "../src/world/model.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { SourceStructureStore } from "../src/compiler/structure.js";
@@ -539,6 +539,95 @@ describe("compiler proposal tools", () => {
       fromLocationId: "village",
       toLocationId: "harbor",
     });
+  });
+
+  it("injects separate exact evidence into a controlled rule, its clause, and its exception", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-world-rule-evidence-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "The garden was closed by custom. Entry was forbidden. A royal permit was the sole exception.\n",
+    );
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-world-rule`, fixture.source.id);
+    const proposeRule = toolset.tools.find((candidate) => candidate.name === "propose_world_rule")!;
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("Entry"),
+    });
+    await canon.putEntity({
+      id: "garden",
+      kind: "location",
+      canonicalName: "garden",
+      aliases: [],
+      evidence: fixture.evidence("garden"),
+    });
+
+    await proposeRule.execute("world-rule-evidence", {
+      proposal_id: "rule-garden-custom",
+      payload: {
+        ontologyVersion: "world-rule-v2",
+        id: "garden-custom",
+        name: "The garden is closed by custom",
+        kind: "social",
+        scope: "global",
+        visibility: "public",
+        priority: 10,
+        defeasible: true,
+        clauses: [{
+          id: "garden-entry-forbidden",
+          modality: "forbid",
+          predicate: { op: "fact-equals", entityId: "hero", field: "character.location", value: "garden" },
+          basis: "explicit",
+          status: "supported",
+          confidence: 1,
+        }],
+        exceptions: [{
+          id: "royal-permit-exception",
+          appliesWhen: [{ op: "fact-equals", entityId: "hero", field: "character.plan", value: "royal-permit" }],
+          basis: "explicit",
+          status: "supported",
+          confidence: 1,
+        }],
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+      },
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "garden was closed by custom",
+        target_path: "/name",
+        relation: "supports",
+        strength: "explicit",
+      }, {
+        segment_id: fixture.segmentId,
+        exact: "Entry was forbidden",
+        target_path: "/clauses/0/predicate",
+        relation: "supports",
+        strength: "explicit",
+      }, {
+        segment_id: fixture.segmentId,
+        exact: "royal permit was the sole exception",
+        target_path: "/exceptions/0/appliesWhen",
+        relation: "supports",
+        strength: "explicit",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const pending = await new ProposalStore(root).read("pending", "rule-garden-custom", worldRuleSchema);
+    expect(pending.payload).toMatchObject({
+      evidence: [expect.objectContaining({ strength: "explicit" })],
+      clauses: [{ evidence: [expect.objectContaining({ strength: "explicit" })] }],
+      exceptions: [{ evidence: [expect.objectContaining({ strength: "explicit" })] }],
+    });
+    expect(pending.evidenceAssertions).toHaveLength(3);
+    expect((await new CompilerCommitService(root).accept("world-rule", "rule-garden-custom")).accepted).toBe(true);
+    await expect(canon.getRule("garden-custom")).resolves.toMatchObject({ ontologyVersion: "world-rule-v2" });
   });
 
   it("accepts a model-selected title from opening evidence only at the successful finish handshake", async () => {

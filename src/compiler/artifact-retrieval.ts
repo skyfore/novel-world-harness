@@ -12,6 +12,7 @@ import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import type { CompilerToolCallGate } from "./tool-call-gate.js";
 import { EvidenceAssertionStore, evidenceAssertionSourceIds } from "./evidence-assertions.js";
 import { spatialRelationEvidence } from "../world/spatial-ontology.js";
+import { worldRuleEvidence } from "../world/world-rule-ontology.js";
 
 type ArtifactStatus = "canonical" | "pending";
 export const COMPILER_ARTIFACT_KINDS = [
@@ -178,7 +179,12 @@ export async function loadCompilerArtifactRecords(
       evidence,
     ));
   }
-  addCanonical(rules, "world-rule", (value) => ({ id: value.id, label: value.name }));
+  for (const rule of rules) {
+    const evidence = worldRuleEvidence(rule);
+    if (!evidence.some((reference) => reference.span.sourceId === sourceId)) continue;
+    assertEvidenceExclusiveToSource(evidence, sourceId, `Canonical world-rule ${rule.id}`);
+    records.push(canonicalRecord("world-rule", rule.id, rule.name, structuredClone(rule), evidence));
+  }
   addCanonical(goals, "character-goal", (value) => ({ id: value.id, label: value.description }));
   addCanonical(models, "character-model", (value) => ({ id: value.actorId, label: `Character model: ${value.actorId}` }));
   addCanonical(templates, "possibility", (value) => ({ id: value.id, label: value.title }));

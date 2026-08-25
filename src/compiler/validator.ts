@@ -43,6 +43,12 @@ import {
   validateSpatialRelationCatalog,
   type SpatialRelation,
 } from "../world/spatial-ontology.js";
+import {
+  isControlledWorldRule,
+  validateWorldRuleCatalog,
+  validateWorldRuleEvidenceAssertions,
+  worldRulePredicates,
+} from "../world/world-rule-ontology.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { isMetaKnowledgePredicate } from "./semantics.js";
@@ -161,7 +167,18 @@ export class CompilerValidator {
         rules: new Set(rules.keys()),
       }));
     }
-    if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
+    if (kind === "world-rule") {
+      const rule = worldRuleSchema.parse(payload);
+      this.validateRule(rule, entities, rules, errors);
+      const prospectiveRules = new Map(rules);
+      prospectiveRules.set(rule.id, rule);
+      errors.push(...validateWorldRuleCatalog(prospectiveRules.values(), {
+        entities,
+        events,
+        claims: new Set(claims.keys()),
+        rules: prospectiveRules,
+      }));
+    }
     if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, propositions, claims, events, rules, goals, errors);
@@ -364,19 +381,9 @@ export class CompilerValidator {
 
   private validateRule(rule: WorldRule, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
     if (!rule.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Rule ${rule.id} has no source evidence`, "evidence"));
-    if (!(rule.requires?.length || rule.forbids?.length)) {
-      errors.push(issue("INERT_WORLD_RULE", `Rule ${rule.id} has neither requires nor forbids constraints and cannot affect deterministic validation`, "requires"));
-    }
-    const forbidden = new Set((rule.forbids ?? []).map((predicate) => canonicalJson(predicate)));
-    if (rule.appliesWhen.some((predicate) => forbidden.has(canonicalJson(predicate)))) {
-      errors.push(issue("SELF_FORBIDDING_WORLD_RULE", `Rule ${rule.id} forbids the same condition that makes it applicable`, "forbids"));
-    }
-    if ((rule.requires ?? []).some((predicate) => forbidden.has(canonicalJson(predicate)))) {
-      errors.push(issue("CONTRADICTORY_WORLD_RULE", `Rule ${rule.id} both requires and forbids the same condition`, "forbids"));
-    }
     const visibleRules = new Map(rules);
     visibleRules.set(rule.id, rule);
-    for (const predicate of [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]) this.validatePredicate(predicate, entities, visibleRules, errors);
+    for (const predicate of worldRulePredicates(rule)) this.validatePredicate(predicate, entities, visibleRules, errors);
   }
 
   private validateEventParticipation(
@@ -893,6 +900,9 @@ export class CompilerCommitService {
     const spatialEvidenceIssues = kind === "spatial-relation"
       ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)
       : [];
+    const worldRuleEvidenceIssues = kind === "world-rule"
+      ? validateWorldRuleEvidenceAssertions(worldRuleSchema.parse(payload), evidenceAssertions)
+      : [];
     const exactInspection = await this.evidence.inspectAssertions(evidenceAssertions);
     const legacySourceIds = evidenceSourceIds([...payloadEvidence, ...envelopeEvidence]);
     const exactSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
@@ -940,6 +950,7 @@ export class CompilerCommitService {
       ...targetIssues,
       ...characterEvidenceIssues,
       ...spatialEvidenceIssues,
+      ...worldRuleEvidenceIssues,
       ...exactInspection.issues,
       ...mixedSourceIssues,
       ...resolutionTraceIssues,
@@ -1051,8 +1062,8 @@ async function processDependencyKind<T extends { id: string }>(
 }
 
 function ruleDependencies(rule: WorldRule): string[] {
-  const dependencies: string[] = [];
-  for (const predicate of [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]) collectRuleDependencies(predicate, dependencies);
+  const dependencies = isControlledWorldRule(rule) ? [...rule.overridesRuleIds] : [];
+  for (const predicate of worldRulePredicates(rule)) collectRuleDependencies(predicate, dependencies);
   return dependencies;
 }
 

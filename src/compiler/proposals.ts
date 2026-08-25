@@ -18,6 +18,10 @@ import {
   stateOperationSchema,
   stateValueSchema,
   storyTimeSchema,
+  controlledWorldRuleSchema,
+  legacyWorldRuleSchema,
+  worldRuleClauseSchema,
+  worldRuleExceptionSchema,
   worldRuleSchema,
   type ArtifactProposal,
   type Attribution,
@@ -51,6 +55,11 @@ import {
   validateSpatialRelationCatalog,
   type SpatialRelation,
 } from "../world/spatial-ontology.js";
+import {
+  validateWorldRuleCatalog,
+  validateWorldRuleEvidenceAssertions,
+  worldRulePredicates,
+} from "../world/world-rule-ontology.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
@@ -83,11 +92,22 @@ const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
     z.object({ op: z.literal("not"), item: compilerRulePredicateSchema }).strict(),
   ]),
 );
-const compilerWorldRuleSchema = worldRuleSchema.extend({
+const compilerLegacyWorldRuleSchema = legacyWorldRuleSchema.extend({
   appliesWhen: z.array(compilerRulePredicateSchema),
   forbids: z.array(compilerRulePredicateSchema).optional(),
   requires: z.array(compilerRulePredicateSchema).optional(),
+  evidence: evidenceRefSchema.array().min(1),
 });
+const compilerWorldRuleClauseSchema = worldRuleClauseSchema.safeExtend({ predicate: compilerRulePredicateSchema });
+const compilerWorldRuleExceptionSchema = worldRuleExceptionSchema.safeExtend({
+  appliesWhen: z.array(compilerRulePredicateSchema).min(1).max(32),
+});
+const compilerControlledWorldRuleSchema = controlledWorldRuleSchema.safeExtend({
+  appliesWhen: z.array(compilerRulePredicateSchema).max(64).default([]),
+  clauses: z.array(compilerWorldRuleClauseSchema).min(1).max(64),
+  exceptions: z.array(compilerWorldRuleExceptionSchema).max(32).default([]),
+});
+const compilerWorldRuleSchema = z.union([compilerControlledWorldRuleSchema, compilerLegacyWorldRuleSchema]);
 const compilerCanonicalEventSchema = canonicalEventSchema.extend({
   observedOutcome: stateDeltaSchema.extend({
     operations: z.array(stateOperationSchema).max(16, "A single atomic canonical event may contain at most 16 typed world-state effects."),
@@ -141,7 +161,7 @@ export const compilerProposalSchemas = {
   "event-participation": compilerEventParticipationSchema,
   "event-relation": compilerEventRelationSchema,
   "spatial-relation": spatialRelationSchema,
-  "world-rule": compilerWorldRuleSchema.extend({ evidence: evidenceRefSchema.array().min(1) }),
+  "world-rule": compilerWorldRuleSchema,
   "initial-world": initialWorldSchema,
   "character-goal": characterGoalSchema,
   "character-model": characterModelSchema,
@@ -181,6 +201,11 @@ export function compilerPayloadEvidence(payload: unknown): EvidenceRef[] {
     nested.dispositions,
     nested.appraisalEpisodes,
     nested.developmentEpisodes,
+    nested.relationshipStances,
+    nested.relationshipObligations,
+    nested.relationshipChanges,
+    nested.clauses,
+    nested.exceptions,
   ].flatMap((candidate) => Array.isArray(candidate) ? candidate : []);
   return [record, ...semanticChildren].flatMap((candidate) => {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
@@ -223,8 +248,11 @@ export class CompilerProposalService {
     const spatialEvidenceIssues = kind === "spatial-relation"
       ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)
       : [];
-    if (targetIssues.length || characterEvidenceIssues.length || spatialEvidenceIssues.length) {
-      throw new Error([...targetIssues, ...characterEvidenceIssues, ...spatialEvidenceIssues]
+    const worldRuleEvidenceIssues = kind === "world-rule"
+      ? validateWorldRuleEvidenceAssertions(worldRuleSchema.parse(payload), evidenceAssertions)
+      : [];
+    if (targetIssues.length || characterEvidenceIssues.length || spatialEvidenceIssues.length || worldRuleEvidenceIssues.length) {
+      throw new Error([...targetIssues, ...characterEvidenceIssues, ...spatialEvidenceIssues, ...worldRuleEvidenceIssues]
         .map((item) => `${item.code}${item.path ? ` at ${item.path}` : ""}: ${item.message}`).join("; "));
     }
     const proposal: ArtifactProposal<unknown> = {
@@ -450,6 +478,12 @@ export async function validateCompilerProposalClosure(
     rules: new Set(canonicalRules.filter(fromActiveSource).map((rule) => rule.id)),
     relations: new Map(canonicalSpatialRelations.filter(fromActiveSource).map((relation) => [relation.id, relation])),
   };
+  const worldRuleCatalog = {
+    entities: new Map(canonicalEntities.filter(fromActiveSource).map((entity) => [entity.id, { kind: entity.kind }])),
+    events: new Map(canonicalEvents.filter(fromActiveSource).map((event) => [event.id, event])),
+    claims: new Set(canonicalClaims.filter(fromActiveSource).map((claim) => claim.id)),
+    rules: new Map(canonicalRules.filter(fromActiveSource).map((rule) => [rule.id, rule])),
+  };
   const characterOntologyCatalog = {
     entities: new Map(canonicalEntities.filter(fromActiveSource).map((entity) => [entity.id, { kind: entity.kind }])),
     propositions: new Set(canonicalPropositions.filter(fromActiveSource).map((proposition) => proposition.id)),
@@ -466,6 +500,7 @@ export async function validateCompilerProposalClosure(
       participationCatalog.entities.set(value.id, value);
       characterOntologyCatalog.entities.set(value.id, { kind: value.kind });
       spatialCatalog.entities.set(value.id, { kind: value.kind });
+      worldRuleCatalog.entities.set(value.id, { kind: value.kind });
     } else if (proposal.kind === "canonical-event") {
       const value = canonicalEventSchema.parse(proposal.payload);
       participationCatalog.events.set(value.id, value);
@@ -474,6 +509,7 @@ export async function validateCompilerProposalClosure(
         participantPresence: value.participantPresence,
       });
       spatialCatalog.events.set(value.id, value);
+      worldRuleCatalog.events.set(value.id, value);
     } else if (proposal.kind === "event-participation") {
       const value = eventParticipationSchema.parse(proposal.payload);
       participationCatalog.participations.set(value.id, value);
@@ -488,6 +524,7 @@ export async function validateCompilerProposalClosure(
       semanticCatalog.claims.set(value.id, value);
       characterOntologyCatalog.claims.add(value.id);
       spatialCatalog.claims.add(value.id);
+      worldRuleCatalog.claims.add(value.id);
     } else if (proposal.kind === "proposition") {
       const value = propositionSchema.parse(proposal.payload);
       semanticCatalog.propositions.set(value.id, value);
@@ -499,7 +536,9 @@ export async function validateCompilerProposalClosure(
       const value = characterGoalSchema.parse(proposal.payload);
       characterOntologyCatalog.goals.set(value.id, { actorId: value.actorId });
     } else if (proposal.kind === "world-rule") {
-      spatialCatalog.rules.add((proposal.payload as WorldRule).id);
+      const value = worldRuleSchema.parse(proposal.payload);
+      spatialCatalog.rules.add(value.id);
+      worldRuleCatalog.rules.set(value.id, value);
     }
     if (proposal.kind === "canonical-event") {
       const event = canonicalEventSchema.parse(proposal.payload);
@@ -557,6 +596,12 @@ export async function validateCompilerProposalClosure(
         proposal.evidenceAssertions,
       )) issues.add(`${proposalId}: ${formatGroundingIssue(spatialEvidenceIssue)}`);
     }
+    if (proposal.kind === "world-rule") {
+      for (const ruleEvidenceIssue of validateWorldRuleEvidenceAssertions(
+        worldRuleSchema.parse(proposal.payload),
+        proposal.evidenceAssertions,
+      )) issues.add(`${proposalId}: ${formatGroundingIssue(ruleEvidenceIssue)}`);
+    }
     collectProposalClosureIssues(proposalId, proposal, catalog, issues);
     for (const located of findKnowledgeDeltas(proposal.payload)) {
       for (let index = 0; index < located.delta.operations.length; index += 1) {
@@ -590,6 +635,9 @@ export async function validateCompilerProposalClosure(
   }
   for (const spatialIssue of validateSpatialRelationCatalog(spatialCatalog.relations.values(), spatialCatalog)) {
     issues.add(`spatial-relation: ${spatialIssue.code} at ${spatialIssue.path ?? "payload"}: ${spatialIssue.message}`);
+  }
+  for (const ruleIssue of validateWorldRuleCatalog(worldRuleCatalog.rules.values(), worldRuleCatalog)) {
+    issues.add(`world-rule: ${ruleIssue.code} at ${ruleIssue.path ?? "payload"}: ${ruleIssue.message}`);
   }
   for (const [proposalId, proposal] of staged) {
     if (proposal.kind !== "character-model") continue;
@@ -742,7 +790,7 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "world-rule") {
     const rule = payload as WorldRule;
-    [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]
+    worldRulePredicates(rule)
       .forEach((predicate, index) => collectPredicateIssues(predicate, `predicates.${index}`, missing, fieldReference));
     return;
   }

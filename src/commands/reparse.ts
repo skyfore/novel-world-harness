@@ -9,6 +9,7 @@ import { rejectPendingCompilerBatchProposals, rejectPendingCompilerSourceProposa
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore } from "../world/actors.js";
 import { CanonicalModelStore } from "../world/canonical-model.js";
+import { characterOntologyEvidence } from "../world/character-ontology.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
@@ -274,34 +275,70 @@ function reparsePrompt(prompt: string, batch: CompilerBatch, runId: string, whol
     + `Do not resubmit an unchanged artifact merely to manufacture a revision. Finish this batch normally after the evidence has been reconsidered.\n\n${prompt}`;
 }
 
-async function invalidatePreparationArtifacts(
+export async function invalidatePreparationArtifacts(
   root: string,
   sourceId: string,
   selectedBatches: readonly CompilerBatch[],
   whole: boolean,
 ): Promise<number> {
-  const selectedSpans = new Set(selectedBatches.flatMap((batch) => batch.evidence.map((reference) => spanKey(reference.span))));
+  const selectedSpans = selectedBatches.flatMap((batch) => batch.evidence.map((reference) => reference.span));
   const shouldInvalidate = (item: { evidence: readonly { span: EvidenceSpanKey }[] }) => {
     if (!item.evidence.length) return false;
     if (whole) return item.evidence.every((reference) => reference.span.sourceId === sourceId);
-    return item.evidence.every((reference) => selectedSpans.has(spanKey(reference.span)));
+    return item.evidence.every((reference) => selectedSpans.some((selected) => spanContains(selected, reference.span)));
   };
   const canon = new CanonicalModelStore(root);
   const actors = new ActorModelStore(root);
   const possibilities = new PossibilityTemplateStore(root);
   const initial = new InitialWorldStore(root);
-  const [entities, claims, events, spatialRelations, rules, goals, models, templates, opening] = await Promise.all([
-    canon.listEntities(), canon.listClaims(), canon.listEvents(), canon.listSpatialRelations(), canon.listRules(),
+  const [
+    entities,
+    propositions,
+    attributions,
+    claims,
+    events,
+    eventParticipations,
+    eventRelations,
+    spatialRelations,
+    rules,
+    goals,
+    models,
+    templates,
+    opening,
+  ] = await Promise.all([
+    canon.listEntities(),
+    canon.listPropositions(),
+    canon.listAttributions(),
+    canon.listClaims(),
+    canon.listEvents(),
+    canon.listEventParticipations(),
+    canon.listEventRelations(),
+    canon.listSpatialRelations(),
+    canon.listRules(),
     actors.listGoals(), actors.listModels(), possibilities.list(), initial.get(),
   ]);
   let count = 0;
   for (const item of entities) if (shouldInvalidate(item)) { await canon.removeCurrent("entities", item.id); count += 1; }
+  for (const item of propositions) if (shouldInvalidate(item)) { await canon.removeCurrent("propositions", item.id); count += 1; }
+  for (const item of attributions) if (shouldInvalidate(item)) { await canon.removeCurrent("attributions", item.id); count += 1; }
   for (const item of claims) if (shouldInvalidate(item)) { await canon.removeCurrent("claims", item.id); count += 1; }
   for (const item of events) if (shouldInvalidate(item)) { await canon.removeCurrent("events", item.id); count += 1; }
+  for (const item of eventParticipations) if (shouldInvalidate(item)) { await canon.removeCurrent("event-participations", item.id); count += 1; }
+  for (const item of eventRelations) {
+    if (shouldInvalidate({ evidence: [...item.evidence, ...(item.counterEvidence ?? [])] })) {
+      await canon.removeCurrent("event-relations", item.id);
+      count += 1;
+    }
+  }
   for (const item of spatialRelations) if (shouldInvalidate({ evidence: spatialRelationEvidence(item) })) { await canon.removeCurrent("spatial-relations", item.id); count += 1; }
   for (const item of rules) if (shouldInvalidate({ evidence: worldRuleEvidence(item) })) { await canon.removeCurrent("rules", item.id); count += 1; }
   for (const item of goals) if (shouldInvalidate(item)) { await actors.removeGoal(item.id); count += 1; }
-  for (const item of models) if (shouldInvalidate(item)) { await actors.removeModel(item.actorId); count += 1; }
+  for (const item of models) {
+    if (shouldInvalidate({ evidence: [...item.evidence, ...characterOntologyEvidence(item)] })) {
+      await actors.removeModel(item.actorId);
+      count += 1;
+    }
+  }
   for (const item of templates) if (shouldInvalidate(item)) { await possibilities.remove(item.id); count += 1; }
   if (opening && shouldInvalidate(opening)) { await initial.clear(); count += 1; }
   return count;
@@ -316,6 +353,13 @@ type EvidenceSpanKey = {
   quoteHash: string;
 };
 
-function spanKey(span: EvidenceSpanKey): string {
-  return `${span.sourceId}:${span.startByte ?? `line-${span.startLine}`}:${span.endByte ?? `line-${span.endLine}`}:${span.quoteHash}`;
+function spanContains(container: EvidenceSpanKey, candidate: EvidenceSpanKey): boolean {
+  if (container.sourceId !== candidate.sourceId) return false;
+  if (container.startByte !== undefined
+    && container.endByte !== undefined
+    && candidate.startByte !== undefined
+    && candidate.endByte !== undefined) {
+    return container.startByte <= candidate.startByte && container.endByte >= candidate.endByte;
+  }
+  return container.startLine <= candidate.startLine && container.endLine >= candidate.endLine;
 }

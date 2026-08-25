@@ -6,7 +6,7 @@ import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batc
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
-import { parseOrdinalSelection, reparseCommand } from "../src/commands/reparse.js";
+import { invalidatePreparationArtifacts, parseOrdinalSelection, reparseCommand } from "../src/commands/reparse.js";
 import { ActorModelStore } from "../src/world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
 import { InitialWorldStore } from "../src/world/initial.js";
@@ -141,6 +141,104 @@ describe("explicit prepared-novel reparsing", () => {
     expect(parseOrdinalSelection("1,3-4", [1, 2, 3, 4], "--chapters")).toEqual([1, 3, 4]);
     expect(() => parseOrdinalSelection("4-2", [1, 2, 3, 4], "--chapters")).toThrow("invalid range");
     expect(() => parseOrdinalSelection("5", [1, 2, 3, 4], "--chapters")).toThrow("unavailable");
+  });
+
+  it("invalidates chapter-local semantic dependencies backed by exact quote subspans", async () => {
+    const root = await temporaryRoot("nwh-reparse-semantic-dependencies-");
+    const fixture = await createEvidenceFixture(root, "# One\nHero waits.\n# Two\nVillain acts.\n");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    const chapterOneEvidence = fixture.evidence("Hero waits.");
+    const exactChapterTwoEvidence = fixture.evidence("Villain acts.");
+    const canon = new CanonicalModelStore(root);
+    const actors = new ActorModelStore(root);
+
+    await canon.putProposition({
+      id: "villain-acts",
+      subjectEntityId: "villain",
+      relationId: "acts",
+      object: { kind: "literal", value: true },
+      polarity: "positive",
+      modality: "asserted",
+      evidence: exactChapterTwoEvidence,
+    });
+    await canon.putAttribution({
+      id: "narrator-villain-acts",
+      propositionId: "villain-acts",
+      holderKind: "narrator",
+      attitude: "asserts",
+      certainty: 1,
+      evidence: exactChapterTwoEvidence,
+    });
+    const event = (id: string, evidence: typeof exactChapterTwoEvidence) => ({
+      id,
+      title: id,
+      participants: ["villain"],
+      storyTime: { kind: "ordinal" as const, label: id, orderHint: id === "villain-decides" ? 1 : 2 },
+      preconditions: [],
+      observedOutcome: { version: 1 as const, operations: [] },
+      evidence,
+      causalParents: id === "villain-acts-event" ? ["villain-decides"] : [],
+      confidence: 1,
+    });
+    await canon.putEvent(event("villain-decides", exactChapterTwoEvidence));
+    await canon.putEvent(event("villain-acts-event", exactChapterTwoEvidence));
+    await canon.putEventParticipation({
+      id: "villain-acts-agent",
+      eventId: "villain-acts-event",
+      entityId: "villain",
+      role: "agent",
+      confidence: 1,
+      evidence: exactChapterTwoEvidence,
+    });
+    await canon.putEventRelation({
+      id: "decision-causes-action",
+      fromEventId: "villain-decides",
+      toEventId: "villain-acts-event",
+      type: "causes",
+      status: "explicit",
+      confidence: 1,
+      evidence: exactChapterTwoEvidence,
+    });
+    await actors.putModel({
+      actorId: "villain",
+      traits: {},
+      decisionBiases: {},
+      ontologyVersion: "character-v1",
+      dispositions: [{
+        id: "villain-risk",
+        actorId: "villain",
+        dimensionId: "risk-tolerance",
+        value: 0.5,
+        scope: { kind: "context", contextId: "physical-danger" },
+        stability: "situational",
+        basis: "explicit-characterization",
+        status: "supported",
+        confidence: 1,
+        evidence: exactChapterTwoEvidence,
+      }],
+      evidence: exactChapterTwoEvidence,
+    });
+    await canon.putProposition({
+      id: "cross-chapter-proposition",
+      subjectEntityId: "hero",
+      relationId: "opposes",
+      object: { kind: "entity", entityId: "villain" },
+      polarity: "positive",
+      modality: "asserted",
+      evidence: [...chapterOneEvidence, ...exactChapterTwoEvidence],
+    });
+
+    const invalidated = await invalidatePreparationArtifacts(root, fixture.source.id, [batches[1]!], false);
+
+    expect(invalidated).toBe(7);
+    await expect(canon.getProposition("villain-acts")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getAttribution("narrator-villain-acts")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getEvent("villain-decides")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getEvent("villain-acts-event")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getEventParticipation("villain-acts-agent")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getEventRelation("decision-causes-action")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(actors.listModels()).resolves.toEqual([]);
+    await expect(canon.getProposition("cross-chapter-proposition")).resolves.toMatchObject({ id: "cross-chapter-proposition" });
   });
 
   it("rebuilds the whole source and opening state, retaining the prior revision", async () => {

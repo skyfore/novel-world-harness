@@ -18,6 +18,11 @@ import {
 import { evidenceSourceIds } from "../world/source-scope.js";
 import { SourceStructureStore, baseStructuralUnits, type SourceStructureManifest } from "./structure.js";
 import { SourceAccountingStore, type SourceAccountingStatus } from "./source-accounting.js";
+import {
+  SourceAnnotationStore,
+  annotationAnchors,
+  validateSourceAnnotationClosure,
+} from "./annotations.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -39,6 +44,10 @@ export type CompilerAuditReport = {
     structuredSources: number;
     structuralUnits: number;
     baseUnits: number;
+    entityMentions: number;
+    quotations: number;
+    discourseSegments: number;
+    pendingAnnotations: number;
     accountedUnits: number;
     unaccountedUnits: number;
     blockingUnits: number;
@@ -161,6 +170,10 @@ export async function auditCompiler(
   const structures: SourceStructureManifest[] = [];
   let structuralUnits = 0;
   let baseUnits = 0;
+  let entityMentions = 0;
+  let quotations = 0;
+  let discourseSegments = 0;
+  let pendingAnnotations = 0;
   let accountedUnits = 0;
   let unaccountedUnits = 0;
   let blockingUnits = 0;
@@ -168,6 +181,7 @@ export async function auditCompiler(
   let observationBytes = 0;
   let invalidObservationAnchors = 0;
   const observationErrors: CompilerAuditReport["observations"]["errors"] = [];
+  const annotationStore = new SourceAnnotationStore(workspaceRoot);
   const accountingStatusCounts: Record<SourceAccountingStatus, number> = {
     represented: 0,
     "background-only": 0,
@@ -177,6 +191,35 @@ export async function auditCompiler(
     "intentionally-deferred": 0,
   };
   for (const source of sources) {
+    const [annotations, annotationProposals] = await Promise.all([
+      annotationStore.list(source.id),
+      annotationStore.listProposals(source.id, "pending"),
+    ]);
+    entityMentions += annotations.filter((annotation) => annotation.annotationType === "entity-mention").length;
+    quotations += annotations.filter((annotation) => annotation.annotationType === "quotation").length;
+    discourseSegments += annotations.filter((annotation) => annotation.annotationType === "discourse-segment").length;
+    pendingAnnotations += annotationProposals.length;
+    for (const annotation of annotations) {
+      for (const anchor of annotationAnchors(annotation)) {
+        const inspection = await evidenceVerifier.inspectAnchor(anchor);
+        invalidObservationAnchors += inspection.issues.length;
+        for (const issue of inspection.issues) {
+          observationErrors.push({
+            observation: `${annotation.annotationType}:${annotation.id}`,
+            code: issue.code,
+            message: issue.message,
+          });
+        }
+      }
+    }
+    for (const issue of await validateSourceAnnotationClosure(
+      workspaceRoot,
+      source.id,
+      annotationProposals.map((proposal) => proposal.id),
+      { includeCommitted: true, verifyAnchors: false },
+    )) {
+      observationErrors.push({ observation: `annotation-proposal:${source.id}`, code: "annotation-closure", message: issue });
+    }
     const structure = await structureStore.read(source.id);
     if (!structure || structure.sourceSha256 !== source.contentSha256) continue;
     structures.push(structure);
@@ -478,7 +521,7 @@ export async function auditCompiler(
   const exactBindingRatio = evidenceArtifacts.length ? validExactBindings / evidenceArtifacts.length : null;
   const structuralReadiness: CompilerReadinessState = !sources.length
     ? "not-ready"
-    : changedSinceIngest.length || segmented !== sources.length || structures.length !== sources.length || invalidObservationAnchors
+    : changedSinceIngest.length || segmented !== sources.length || structures.length !== sources.length || observationErrors.length
       ? "not-ready"
       : "ready";
   const evidenceReadiness: CompilerReadinessState = evidenceArtifacts.length === 0
@@ -515,9 +558,9 @@ export async function auditCompiler(
       : blockingUnits > 0
         ? "not-ready"
         : "ready";
-  // Mention-resolution stores are introduced by the next compiler milestone.
-  // Keep resolution explicitly unknown rather than deriving a false
-  // denominator from already-extracted canonical artifacts.
+  // Source mentions now exist, but M3 introduces explicit resolution decisions
+  // and a completeness denominator. Observation count alone cannot imply that
+  // identity resolution is complete.
   const readinessStates = {
     structural: structuralReadiness,
     evidence: evidenceReadiness,
@@ -552,6 +595,10 @@ export async function auditCompiler(
       structuredSources: structures.length,
       structuralUnits,
       baseUnits,
+      entityMentions,
+      quotations,
+      discourseSegments,
+      pendingAnnotations,
       accountedUnits,
       unaccountedUnits,
       blockingUnits,

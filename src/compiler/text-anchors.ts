@@ -5,12 +5,24 @@ import { WorkspaceStore } from "../storage/workspace-store.js";
 import { idSchema, textAnchorSchema, type TextAnchor } from "../world/model.js";
 import { readSegmentText, type SourceSegment } from "./segments.js";
 
-const modelEvidenceSelectorBase = {
+const modelTextSelectorFields = {
   segment_id: idSchema,
   exact: z.string().min(1).max(4_000),
   prefix: z.string().max(500).optional(),
   suffix: z.string().max(500).optional(),
   occurrence: z.number().int().positive().optional(),
+};
+
+/**
+ * Model-facing source selector. It deliberately contains no byte offsets,
+ * line numbers, or hashes: those are resolved against immutable source bytes
+ * by the host before an observation can be staged.
+ */
+export const modelTextSelectorSchema = z.object(modelTextSelectorFields).strict();
+export type ModelTextSelector = z.infer<typeof modelTextSelectorSchema>;
+
+const modelEvidenceSelectorBase = {
+  ...modelTextSelectorFields,
   target_path: z.string().min(1).refine(
     (value) => /^(?:\/(?:[^~/]|~[01])*)*$/.test(value),
     "target_path must be an RFC 6901 JSON Pointer",
@@ -53,6 +65,24 @@ export async function resolveTextAnchor(
   selectorInput: unknown,
 ): Promise<TextAnchor> {
   const selector = modelEvidenceSelectorSchema.parse(selectorInput);
+  return resolveParsedTextSelectorAnchor(workspaceRoot, segment, selector);
+}
+
+/** Resolve a plain model selector for source observations such as mentions. */
+export async function resolveTextSelectorAnchor(
+  workspaceRoot: string,
+  segment: SourceSegment,
+  selectorInput: unknown,
+): Promise<TextAnchor> {
+  const selector = modelTextSelectorSchema.parse(selectorInput);
+  return resolveParsedTextSelectorAnchor(workspaceRoot, segment, selector);
+}
+
+async function resolveParsedTextSelectorAnchor(
+  workspaceRoot: string,
+  segment: SourceSegment,
+  selector: ModelTextSelector,
+): Promise<TextAnchor> {
   if (selector.segment_id !== segment.id) {
     throw new Error(`Evidence selector references segment ${selector.segment_id}, not ${segment.id}.`);
   }
@@ -155,7 +185,7 @@ export function jsonPointerExists(value: unknown, pointer: string): boolean {
   return true;
 }
 
-function matchingOffsets(text: string, selector: ModelEvidenceSelector): number[] {
+function matchingOffsets(text: string, selector: ModelTextSelector): number[] {
   const offsets: number[] = [];
   let from = 0;
   for (;;) {

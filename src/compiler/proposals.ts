@@ -37,6 +37,7 @@ import {
   evidenceAssertionSourceIds,
   validateEvidenceAssertionTargets,
 } from "./evidence-assertions.js";
+import { SourceAnnotationStore } from "./annotations.js";
 
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
@@ -203,6 +204,7 @@ export async function rejectPendingCompilerBatchProposals(
     await workspace.withdrawSourceTitleProposal(source.id, titleProposal.proposalId);
     rejected.push(titleProposal.proposalId);
   }
+  rejected.push(...await new SourceAnnotationStore(workspaceRoot).rejectBatch(compilerBatchId));
   return rejected;
 }
 
@@ -243,6 +245,7 @@ export async function rejectPendingCompilerSourceProposals(
     await workspace.withdrawSourceTitleProposal(sourceId, source.pendingTitleProposal.proposalId);
     rejected.push(source.pendingTitleProposal.proposalId);
   }
+  rejected.push(...await new SourceAnnotationStore(workspaceRoot).rejectSource(sourceId));
   return rejected;
 }
 

@@ -43,12 +43,29 @@ import {
   jsonPointerExists,
   modelEvidenceSelectorsSchema,
   resolveTextAnchor,
+  resolveTextSelectorAnchor,
   type ModelEvidenceSelector,
+  type ModelTextSelector,
 } from "./text-anchors.js";
 import { ensureSourceStructure } from "./structure.js";
 import { SourceAccountingStore } from "./source-accounting.js";
+import {
+  SOURCE_ANNOTATION_ONTOLOGY_VERSION,
+  SourceAnnotationStore,
+  annotationAnchors,
+  entityMentionSchema,
+  quotationSchema,
+  discourseObservationSchema,
+  validateSourceAnnotationClosure,
+  type SourceAnnotation,
+  type SourceAnnotationType,
+} from "./annotations.js";
+import {
+  SOURCE_ANNOTATION_TOOL_NAMES,
+  createSourceAnnotationRetrievalTools,
+} from "./annotation-retrieval.js";
 
-function proposalResult(text: string, details: CompilerProposalRecordedDetails) {
+function proposalResult(text: string, details: CompilerProposalRecordedDetails | SourceAnnotationProposalRecordedDetails) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
@@ -70,10 +87,14 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "propose_novel_title",
   "find_compiler_artifacts",
   "read_compiler_artifact",
+  ...SOURCE_ANNOTATION_TOOL_NAMES,
   ...SOURCE_EVIDENCE_TOOL_NAMES,
   "peek_adjacent_evidence",
   "defer_boundary_artifact",
   ...Object.values(labels).map(({ name }) => name),
+  "propose_entity_mention",
+  "propose_quotation",
+  "propose_discourse_segment",
   "withdraw_compiler_proposal",
   "replace_boundary_proposal",
   "finish_compiler_batch",
@@ -83,6 +104,12 @@ export const BOUNDARY_CALIBRATION_TOOL_NAMES = [
   "peek_adjacent_evidence",
   "defer_boundary_artifact",
   "replace_boundary_proposal",
+] as const;
+
+export const SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES = [
+  "propose_entity_mention",
+  "propose_quotation",
+  "propose_discourse_segment",
 ] as const;
 
 type ProposalToolInput = {
@@ -278,9 +305,19 @@ type CompilerProposalRecordedDetails = {
   remainingToolCalls: number;
 };
 
+type SourceAnnotationProposalRecordedDetails = {
+  proposalId: string;
+  kind: SourceAnnotationType;
+  annotationId: string;
+  activeProposalCount: number;
+  toolCallCount: number;
+  remainingToolCalls: number;
+};
+
 type CompilerProposalDetails =
   | CompilerBatchBlockedDetails
-  | CompilerProposalRecordedDetails;
+  | CompilerProposalRecordedDetails
+  | SourceAnnotationProposalRecordedDetails;
 
 type NovelTitleProposalDetails =
   | CompilerBatchBlockedDetails
@@ -306,6 +343,81 @@ type ChapterSplitDetails =
   | CompilerBatchBlockedDetails
   | { compilerChapterSplitConfigured: true; mode: "builtin" | "custom"; headingCount: number };
 
+const modelTextSelectorParameters = Type.Object({
+  segment_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  exact: Type.String({ minLength: 1, maxLength: 4_000 }),
+  prefix: Type.Optional(Type.String({ maxLength: 500 })),
+  suffix: Type.Optional(Type.String({ maxLength: 500 })),
+  occurrence: Type.Optional(Type.Integer({ minimum: 1 })),
+}, { additionalProperties: false });
+
+const annotationIdentityParameters = {
+  proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  annotation_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+};
+
+const entityKindCandidateParameters = Type.Union([
+  Type.Literal("character"),
+  Type.Literal("location"),
+  Type.Literal("faction"),
+  Type.Literal("artifact"),
+  Type.Literal("institution"),
+  Type.Literal("relationship"),
+  Type.Literal("concept"),
+  Type.Literal("other"),
+]);
+
+const entityMentionParameters = Type.Object({
+  ...annotationIdentityParameters,
+  selector: modelTextSelectorParameters,
+  surface: Type.String({ maxLength: 4_000 }),
+  form: Type.Union([
+    Type.Literal("proper"),
+    Type.Literal("nominal"),
+    Type.Literal("pronoun"),
+    Type.Literal("title"),
+    Type.Literal("kinship"),
+    Type.Literal("collective"),
+    Type.Literal("zero-anaphora"),
+  ]),
+  kind_candidates: Type.Array(entityKindCandidateParameters, { minItems: 1, maxItems: 8, uniqueItems: true }),
+  scene_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  interpretation: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
+}, { additionalProperties: false });
+
+const quotationParameters = Type.Object({
+  ...annotationIdentityParameters,
+  selector: modelTextSelectorParameters,
+  mode: Type.Union([Type.Literal("direct"), Type.Literal("indirect"), Type.Literal("free-indirect")]),
+  speaker_mention_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  addressee_mention_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), { maxItems: 32, uniqueItems: true }),
+  cue_selector: Type.Optional(modelTextSelectorParameters),
+  scene_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  attribution_confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  interpretation: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
+}, { additionalProperties: false });
+
+const discourseObservationParameters = Type.Object({
+  ...annotationIdentityParameters,
+  kind: Type.Union([
+    Type.Literal("scene"),
+    Type.Literal("summary"),
+    Type.Literal("flashback"),
+    Type.Literal("flashforward"),
+    Type.Literal("frame"),
+    Type.Literal("recollection"),
+    Type.Literal("hypothetical"),
+    Type.Literal("dream"),
+    Type.Literal("embedded-document"),
+    Type.Literal("narrator-commentary"),
+  ]),
+  selectors: Type.Array(modelTextSelectorParameters, { minItems: 1, maxItems: 32 }),
+  viewpoint_mention_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  interpretation: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
+}, { additionalProperties: false });
+
 function safeTextSuffix(text: string, maxChars: number): string {
   let start = Math.max(0, text.length - maxChars);
   if (start > 0 && start < text.length
@@ -321,9 +433,11 @@ export function createCompilerProposalToolset(
   generatedBy: { provider?: string; model?: string } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
+  const annotationStore = new SourceAnnotationStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
   const boundaryCalibrations = new BoundaryCalibrationStore(workspaceRoot);
   const successfulProposalIds = new Set<string>();
+  const successfulAnnotationProposalIds = new Set<string>();
   const peekedDirections = new Set<"previous" | "next">();
   let expectedSegmentIds: string[] = [];
   let boundedSliceSegments: SourceSegment[] = [];
@@ -382,7 +496,9 @@ export function createCompilerProposalToolset(
     if (finished) throw new Error("Compiler batch was already finished; no more proposals may be submitted in this turn.");
     if (circuitBreak) throw new Error("Compiler batch was stopped by its compiler circuit breaker; start a new batch turn to retry.");
   };
-  const activeProposalCount = () => successfulProposalIds.size + (pendingNovelTitleProposal ? 1 : 0);
+  const activeProposalCount = () => successfulProposalIds.size
+    + successfulAnnotationProposalIds.size
+    + (pendingNovelTitleProposal ? 1 : 0);
   const isStructureDiscoveryBatch = () => Boolean(
     activeSourceId
     && compilerBatchId === `structure-${activeSourceId}-v${CHAPTER_SPLIT_DISCOVERY_VERSION}`,
@@ -448,6 +564,56 @@ export function createCompilerProposalToolset(
       segments: structuredClone(segments),
       evidence: segments.map(segmentEvidenceRef),
     };
+  };
+  const resolveObservationSelector = async (selector: ModelTextSelector) => {
+    if (!activeSourceId || validatedSourceSegments.length === 0) {
+      throw new Error("Source annotations require an active source-scoped compiler batch.");
+    }
+    const segment = validatedSourceSegments.find((candidate) => candidate.id === selector.segment_id);
+    if (!segment) throw new Error(`Unknown annotation selector segment ${selector.segment_id} for source ${activeSourceId}.`);
+    if (expectedSegmentIds.length && !expectedSegmentIds.includes(segment.id)) {
+      throw new Error(
+        `Annotation selector ${segment.id} is outside the host-supplied compiler segment slice (${expectedSegmentIds.join(", ")}).`,
+      );
+    }
+    return resolveTextSelectorAnchor(workspaceRoot, segment, selector);
+  };
+  const annotationDerivation = (worker: string, proposalId: string) => ({
+    runId: compilerBatchId ?? proposalId,
+    worker,
+    ...(compilerBatchId ? { compilerBatchId } : {}),
+    ...generatedBy,
+    ontologyVersion: SOURCE_ANNOTATION_ONTOLOGY_VERSION,
+  });
+  const assertAnnotationProposalSlot = (proposalId: string) => {
+    if (successfulProposalIds.has(proposalId)) {
+      throw new Error(`Proposal ID ${proposalId} is already used by a world-artifact proposal in this batch.`);
+    }
+    if (!successfulAnnotationProposalIds.has(proposalId) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
+      throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+    }
+  };
+  const stageAnnotation = async (
+    proposalId: string,
+    annotation: SourceAnnotation,
+    worker: string,
+  ): Promise<void> => {
+    if (!activeSourceId) throw new Error("Source annotations require an active source-scoped compiler batch.");
+    assertAnnotationProposalSlot(proposalId);
+    await annotationStore.stage(activeSourceId, {
+      version: 1,
+      id: proposalId,
+      annotationType: annotation.annotationType,
+      payload: annotation,
+      generatedBy: {
+        worker,
+        ...(compilerBatchId ? { compilerBatchId } : {}),
+        ...generatedBy,
+      },
+      createdAt: new Date().toISOString(),
+    });
+    successfulAnnotationProposalIds.add(proposalId);
+    recordProposalProgress();
   };
   const normalizeProposalEvidence = async (
     kind: CompilerProposalKind,
@@ -839,6 +1005,7 @@ export function createCompilerProposalToolset(
   });
   const retrievalTools = [
     ...createCompilerArtifactRetrievalTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
+    ...createSourceAnnotationRetrievalTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
     ...createCompilerSourceEvidenceTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
   ];
 
@@ -865,6 +1032,9 @@ export function createCompilerProposalToolset(
         const normalized = await normalizeProposalEvidence(kind, input);
         await assertEvidenceWithinBoundedSlice(normalized.payload, normalized.evidence);
         await assertStableLogicalRevision(service, kind, normalized.payload, compilerBatchId);
+        if (successfulAnnotationProposalIds.has(input.proposal_id)) {
+          throw new Error(`Proposal ID ${input.proposal_id} is already used by a source-annotation proposal in this batch.`);
+        }
         if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
           throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
         }
@@ -893,6 +1063,138 @@ export function createCompilerProposalToolset(
       },
     });
   });
+  const annotationResult = (
+    proposalId: string,
+    annotation: SourceAnnotation,
+  ) => proposalResult(
+    `Pending ${annotation.annotationType} observation ${proposalId} recorded for annotation ${annotation.id}. It records source semantics only and does not create canonical world truth. Active proposals: ${activeProposalCount()}/${MAX_ACTIVE_COMPILER_PROPOSALS}.`,
+    {
+      proposalId,
+      kind: annotation.annotationType,
+      annotationId: annotation.id,
+      activeProposalCount: activeProposalCount(),
+      toolCallCount: totalToolCalls,
+      remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+    },
+  );
+  const entityMentionTool = defineTool<typeof entityMentionParameters, CompilerProposalDetails>({
+    name: "propose_entity_mention",
+    label: "Propose entity mention",
+    description: "Stage an exact source mention with candidate entity kinds. This never creates, resolves, or aliases a canonical entity.",
+    promptSnippet: "Record a source mention before making any identity-resolution claim",
+    promptGuidelines: [
+      "Copy non-zero surface text exactly from selector.exact.",
+      "Use zero-anaphora only when the actor/object is grammatically omitted; anchor the exact predicate or cue and explain the inference.",
+      "Do not put a canonical entity ID in this observation. Identity resolution is a separate validated stage.",
+    ],
+    executionMode: "sequential",
+    parameters: entityMentionParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (isStructureDiscoveryBatch()) throw new Error("Source annotations are unavailable during chapter structure discovery.");
+      if (input.form !== "zero-anaphora" && input.surface !== input.selector.exact) {
+        throw new Error("A non-zero entity mention surface must exactly equal selector.exact.");
+      }
+      const anchor = await resolveObservationSelector(input.selector);
+      const annotation = entityMentionSchema.parse({
+        version: 1,
+        annotationType: "entity-mention",
+        id: input.annotation_id,
+        sourceId: activeSourceId,
+        anchor,
+        surface: input.surface,
+        form: input.form,
+        kindCandidates: input.kind_candidates,
+        ...(input.scene_id ? { sceneId: input.scene_id } : {}),
+        confidence: input.confidence,
+        ...(input.interpretation ? { interpretation: input.interpretation } : {}),
+        derivation: annotationDerivation("propose_entity_mention", input.proposal_id),
+      });
+      await stageAnnotation(input.proposal_id, annotation, "propose_entity_mention");
+      return annotationResult(input.proposal_id, annotation);
+    },
+  });
+  const quotationTool = defineTool<typeof quotationParameters, CompilerProposalDetails>({
+    name: "propose_quotation",
+    label: "Propose quotation",
+    description: "Stage an exact direct, indirect, or free-indirect discourse observation with mention-based attribution.",
+    promptSnippet: "Record quoted or represented speech without collapsing speaker mentions into canonical identity",
+    promptGuidelines: [
+      "Reference speaker/addressee mention IDs, not canonical character IDs.",
+      "Use a cue selector when an attribution phrase sits outside the quoted span.",
+      "Explain indirect and free-indirect readings; the source span alone may not determine their discourse mode.",
+    ],
+    executionMode: "sequential",
+    parameters: quotationParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (isStructureDiscoveryBatch()) throw new Error("Source annotations are unavailable during chapter structure discovery.");
+      const [anchor, cueAnchor] = await Promise.all([
+        resolveObservationSelector(input.selector),
+        input.cue_selector ? resolveObservationSelector(input.cue_selector) : Promise.resolve(undefined),
+      ]);
+      const annotation = quotationSchema.parse({
+        version: 1,
+        annotationType: "quotation",
+        id: input.annotation_id,
+        sourceId: activeSourceId,
+        anchor,
+        mode: input.mode,
+        ...(input.speaker_mention_id ? { speakerMentionId: input.speaker_mention_id } : {}),
+        addresseeMentionIds: input.addressee_mention_ids,
+        ...(cueAnchor ? { cueAnchor } : {}),
+        ...(input.scene_id ? { sceneId: input.scene_id } : {}),
+        attributionConfidence: input.attribution_confidence,
+        ...(input.interpretation ? { interpretation: input.interpretation } : {}),
+        derivation: annotationDerivation("propose_quotation", input.proposal_id),
+      });
+      await stageAnnotation(input.proposal_id, annotation, "propose_quotation");
+      return annotationResult(input.proposal_id, annotation);
+    },
+  });
+  const discourseObservationTool = defineTool<typeof discourseObservationParameters, CompilerProposalDetails>({
+    name: "propose_discourse_segment",
+    label: "Propose discourse segment",
+    description: "Stage an overlapping scene, summary, temporal displacement, frame, document, dream, or commentary span without changing source order or world time.",
+    promptSnippet: "Record discourse organization independently from chronological world events",
+    promptGuidelines: [
+      "Overlapping observations are allowed; use multiple exact selectors for a discontinuous span.",
+      "A viewpoint reference is a mention ID. Do not infer a canonical actor identity here.",
+      "Flashback/flashforward describes discourse presentation only and never commits chronological world truth.",
+    ],
+    executionMode: "sequential",
+    parameters: discourseObservationParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (isStructureDiscoveryBatch()) throw new Error("Source annotations are unavailable during chapter structure discovery.");
+      const anchors = (await Promise.all(input.selectors.map(resolveObservationSelector)))
+        .sort((left, right) => left.startByte - right.startByte || left.endByte - right.endByte);
+      const annotation = discourseObservationSchema.parse({
+        version: 1,
+        annotationType: "discourse-segment",
+        id: input.annotation_id,
+        sourceId: activeSourceId,
+        kind: input.kind,
+        anchors,
+        ...(input.viewpoint_mention_id ? { viewpointMentionId: input.viewpoint_mention_id } : {}),
+        confidence: input.confidence,
+        ...(input.interpretation ? { interpretation: input.interpretation } : {}),
+        derivation: annotationDerivation("propose_discourse_segment", input.proposal_id),
+      });
+      await stageAnnotation(input.proposal_id, annotation, "propose_discourse_segment");
+      return annotationResult(input.proposal_id, annotation);
+    },
+  });
+  const annotationProposalTools = [entityMentionTool, quotationTool, discourseObservationTool];
   const withdrawParameters = Type.Object({
     proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
     reason: Type.String({ minLength: 1, maxLength: 500 }),
@@ -921,6 +1223,28 @@ export function createCompilerProposalToolset(
         recordProposalProgress();
         return {
           content: [{ type: "text" as const, text: `Novel-title proposal ${input.proposal_id} withdrawn: ${input.reason}` }],
+          details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
+        };
+      }
+      if (successfulAnnotationProposalIds.has(input.proposal_id)) {
+        if (!activeSourceId) throw new Error("Source-annotation proposal lost its active source identity.");
+        let alreadyCommitted = false;
+        try {
+          await annotationStore.withdraw(activeSourceId, input.proposal_id);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          await annotationStore.readProposal(activeSourceId, "accepted", input.proposal_id);
+          alreadyCommitted = true;
+        }
+        successfulAnnotationProposalIds.delete(input.proposal_id);
+        recordProposalProgress();
+        return {
+          content: [{
+            type: "text" as const,
+            text: alreadyCommitted
+              ? `Previously committed recovery annotation ${input.proposal_id} released from this finish handshake; its immutable history remains available until a corrected same-identity revision is committed: ${input.reason}`
+              : `Source-annotation proposal ${input.proposal_id} withdrawn to rejected history: ${input.reason}`,
+          }],
           details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
         };
       }
@@ -1042,7 +1366,11 @@ export function createCompilerProposalToolset(
       const blocked = beginToolCall("finish");
       if (blocked) return blocked;
       const listed = [...successfulProposalIds].sort();
-      const expected = [...listed, ...(pendingNovelTitleProposal ? [pendingNovelTitleProposal.proposalId] : [])].sort();
+      const listedAnnotations = [...successfulAnnotationProposalIds].sort();
+      const expected = [...listed, ...listedAnnotations, ...(pendingNovelTitleProposal ? [pendingNovelTitleProposal.proposalId] : [])].sort();
+      if (new Set(expected).size !== expected.length) {
+        return failFinish("World, annotation, and metadata proposals must use distinct proposal IDs.");
+      }
       if (isStructureDiscoveryBatch() && !pendingChapterSplitPlan) {
         return failFinish("Structure discovery requires one successful configure_chapter_split call before finish.");
       }
@@ -1065,6 +1393,15 @@ export function createCompilerProposalToolset(
       if (closureIssues.length) {
         return failFinish(`Compiler batch proposal graph is incomplete:\n- ${closureIssues.join("\n- ")}`);
       }
+      if (listedAnnotations.length && !activeSourceId) {
+        return failFinish("Source annotations require an active source-scoped compiler batch.");
+      }
+      const annotationClosureIssues = activeSourceId
+        ? await validateSourceAnnotationClosure(workspaceRoot, activeSourceId, listedAnnotations)
+        : [];
+      if (annotationClosureIssues.length) {
+        return failFinish(`Source annotation graph is incomplete:\n- ${annotationClosureIssues.join("\n- ")}`);
+      }
       if (pendingChapterSplitPlan) {
         if (!activeSourceId) return failFinish("Structure discovery lost its active source identity.");
         const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
@@ -1081,6 +1418,9 @@ export function createCompilerProposalToolset(
         await (await WorkspaceStore.create(workspaceRoot))
           .commitSourceTitleProposal(activeSourceId, pendingNovelTitleProposal.proposalId);
       }
+      const committedAnnotations = activeSourceId && listedAnnotations.length
+        ? await annotationStore.commitProposals(activeSourceId, listedAnnotations)
+        : [];
       if (activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const workspace = await WorkspaceStore.create(workspaceRoot);
         const source = await workspace.getSource(activeSourceId);
@@ -1101,6 +1441,10 @@ export function createCompilerProposalToolset(
             return { segment, disposition: review.disposition, summary: review.summary };
           }),
           evidenceAssertions: assertions,
+          annotations: committedAnnotations.map((annotation) => ({
+            id: annotation.id,
+            anchors: annotationAnchors(annotation),
+          })),
         });
       }
       finished = true;
@@ -1118,12 +1462,14 @@ export function createCompilerProposalToolset(
       peekAdjacentTool,
       deferBoundaryTool,
       ...proposalTools,
+      ...annotationProposalTools,
       withdrawTool,
       replaceBoundaryTool,
       finishTool,
     ],
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
       successfulProposalIds.clear();
+      successfulAnnotationProposalIds.clear();
       peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];
@@ -1200,6 +1546,14 @@ export function createCompilerProposalToolset(
           && (origin as Record<string, unknown>).compilerBatchId === compilerBatchId
         ) {
           successfulProposalIds.add(summary.id);
+        }
+      }
+      if (activeSourceId) {
+        for (const summary of await annotationStore.listBatchProposals(activeSourceId, compilerBatchId)) {
+          if (successfulProposalIds.has(summary.id)) {
+            throw new Error(`Compiler batch ${compilerBatchId} reuses proposal ID ${summary.id} across world and annotation stores.`);
+          }
+          successfulAnnotationProposalIds.add(summary.id);
         }
       }
     },

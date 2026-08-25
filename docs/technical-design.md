@@ -213,6 +213,41 @@ Audit reports both unit and byte denominators. Missing reviews remain
 `unknown`; fully reviewed unresolved/deferred units are `not-ready`; only full
 accounting without blockers is `ready`.
 
+#### 5.2.2 Source-annotation lifecycle
+
+`src/compiler/annotations.ts` is the authority for three non-canonical source
+observations:
+
+- `EntityMention` stores exact source surface (or an explicitly interpreted
+  zero anaphor), mention form, and entity-kind candidates. It deliberately has
+  no `entityId`, canonical name, or alias field.
+- `Quotation` stores direct/indirect/free-indirect mode and refers to speaker
+  and addressee *mention IDs*. Attribution therefore remains auditable before
+  identity resolution.
+- `DiscourseObservation` stores one or more possibly overlapping anchors for a
+  scene, summary, flashback, frame, recollection, hypothetical, dream,
+  embedded document, or narrator commentary. Viewpoint also refers to a
+  mention ID, so discourse analysis cannot grant canonical identity.
+
+Models submit exact text selectors only. `src/compiler/text-anchors.ts`
+resolves each selector against a host-validated source segment and constructs
+the trusted `TextAnchor`. Repeated text without context or an explicit
+one-based occurrence is rejected as ambiguous.
+
+Annotations use a distinct pending/accepted/rejected proposal history. A
+successful `finish_compiler_batch` first validates the complete source-local
+reference graph, then writes an immutable content-addressed annotation revision
+and atomically moves its current ref. Retrying the same compiler batch restores
+both pending proposals and annotations already committed by a partially
+completed finish. Rejecting that batch restores the preceding current revision
+without deleting immutable history.
+
+`find_source_annotations` returns bounded, source-scoped summaries;
+`read_source_annotation` pages the exact payload. Neither tool exposes another
+novel's observations. Audit verifies all committed anchors, reports annotation
+counts and pending closure failures, while resolution readiness remains
+`unknown` until M3 provides explicit resolution records and a denominator.
+
 ### 5.3 Entity
 
 An entity contains stable identity and classification only.

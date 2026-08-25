@@ -184,7 +184,7 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(20);
+    expect(tools).toHaveLength(25);
     for (const tool of tools.filter((candidate) => candidate.name.startsWith("propose_"))) {
       const validator = Compile(tool.parameters);
       expect(tool.executionMode).toBe("sequential");
@@ -192,6 +192,13 @@ describe("compiler proposal tools", () => {
       expect(JSON.stringify(tool.parameters), tool.name).not.toContain('"payload":{}');
       expect(JSON.stringify(tool.parameters), tool.name).not.toContain("quoteHash");
       expect(JSON.stringify(tool.parameters), tool.name).not.toContain('"evidence":');
+    }
+    for (const name of ["propose_entity_mention", "propose_quotation", "propose_discourse_segment"]) {
+      const schema = JSON.stringify(tools.find((tool) => tool.name === name)?.parameters);
+      expect(schema, name).toContain('"exact"');
+      expect(schema, name).not.toContain("startByte");
+      expect(schema, name).not.toContain("exactHash");
+      expect(schema, name).not.toContain("entityId");
     }
   });
 

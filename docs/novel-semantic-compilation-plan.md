@@ -1240,6 +1240,14 @@ Exit criteria:
 
 Objective: insert a source-observation layer before canonicalization.
 
+Implementation status (2026-08-25): complete. Deterministic structure and
+accounting are implemented in `src/compiler/structure.ts` and
+`src/compiler/source-accounting.ts`; proposal-backed mentions, quotations,
+overlapping discourse observations, immutable revisions, closure validation,
+batch recovery, audit, removal, and paged retrieval are implemented in
+`src/compiler/annotations.ts`, `src/compiler/annotation-retrieval.ts`, and
+`src/compiler/proposal-tools.ts`. Identity resolution intentionally remains M3.
+
 Work:
 
 - add structural/discourse schemas and stores;

@@ -1153,6 +1153,13 @@ Corpus 顺序：
 
 目标：在 canonical 之前建立 source observation 层。
 
+实施状态（2026-08-25）：已完成。`src/compiler/structure.ts` 与
+`src/compiler/source-accounting.ts` 实现 deterministic structure/accounting；
+`src/compiler/annotations.ts`、`src/compiler/annotation-retrieval.ts` 与
+`src/compiler/proposal-tools.ts` 实现 mention、quotation、可重叠 discourse
+observation、immutable revision、closure validation、batch recovery、audit、
+removal 与分页检索。Identity resolution 明确保留给 M3。
+
 改造：
 
 - structural/discourse schema 和 store；

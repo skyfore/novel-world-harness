@@ -5,7 +5,30 @@ export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleS
 export { convergeWorldProposals, type WorldConvergenceProgress, type WorldProposalConvergence } from "./compiler/converge.js";
 export { EvidenceVerifier, type EvidenceInspection, type EvidenceVerification } from "./compiler/evidence.js";
 export { EvidenceAssertionStore, evidenceAssertionSourceIds, validateEvidenceAssertionTargets } from "./compiler/evidence-assertions.js";
-export { jsonPointerExists, modelEvidenceSelectorSchema, modelEvidenceSelectorsSchema, resolveTextAnchor, textAnchorForByteRange, type ModelEvidenceSelector } from "./compiler/text-anchors.js";
+export { jsonPointerExists, modelEvidenceSelectorSchema, modelEvidenceSelectorsSchema, modelTextSelectorSchema, resolveTextAnchor, resolveTextSelectorAnchor, textAnchorForByteRange, type ModelEvidenceSelector, type ModelTextSelector } from "./compiler/text-anchors.js";
+export {
+  SOURCE_ANNOTATION_ONTOLOGY_VERSION,
+  SourceAnnotationStore,
+  annotationAnchors,
+  annotationReferenceIds,
+  discourseObservationSchema,
+  entityMentionSchema,
+  quotationSchema,
+  sourceAnnotationDerivationSchema,
+  sourceAnnotationProposalSchema,
+  sourceAnnotationSchema,
+  sourceAnnotationTypeSchema,
+  validateSourceAnnotationClosure,
+  type DiscourseObservation,
+  type EntityMention,
+  type Quotation,
+  type SourceAnnotation,
+  type SourceAnnotationDerivation,
+  type SourceAnnotationProposal,
+  type SourceAnnotationProposalStatus,
+  type SourceAnnotationProposalSummary,
+  type SourceAnnotationType,
+} from "./compiler/annotations.js";
 export {
   STRUCTURE_VERSION,
   SourceStructureStore,

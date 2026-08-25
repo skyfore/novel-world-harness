@@ -44,6 +44,7 @@ import {
 import { SourceAnnotationStore } from "./annotations.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
 import { EventResolutionStore } from "./event-resolution.js";
+import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
 
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
@@ -372,6 +373,24 @@ export async function validateCompilerProposalClosure(
     if (summary.kind === "possibility") catalog.possibilities.add((payload as { id: string }).id);
   }
 
+  const semanticCatalog = {
+    claims: new Map(canonicalClaims.filter(fromActiveSource).map((claim) => [claim.id, claim])),
+    propositions: new Map(canonicalPropositions.filter(fromActiveSource).map((proposition) => [proposition.id, proposition])),
+    attributions: new Map(canonicalAttributions.filter(fromActiveSource).map((attribution) => [attribution.id, attribution])),
+  };
+  for (const proposal of staged.values()) {
+    if (proposal.kind === "claim") {
+      const value = claimSchema.parse(proposal.payload);
+      semanticCatalog.claims.set(value.id, value);
+    } else if (proposal.kind === "proposition") {
+      const value = propositionSchema.parse(proposal.payload);
+      semanticCatalog.propositions.set(value.id, value);
+    } else if (proposal.kind === "attribution") {
+      const value = attributionSchema.parse(proposal.payload);
+      semanticCatalog.attributions.set(value.id, value);
+    }
+  }
+
   const issues = new Set<string>();
   for (const proposalId of proposalIds) {
     const proposal = staged.get(proposalId);
@@ -416,6 +435,18 @@ export async function validateCompilerProposalClosure(
       }
     }
     collectProposalClosureIssues(proposalId, proposal, catalog, issues);
+    for (const located of findKnowledgeDeltas(proposal.payload)) {
+      for (let index = 0; index < located.delta.operations.length; index += 1) {
+        const operationPath = `${located.path || "payload"}.operations.${index}`;
+        for (const semanticIssue of validateKnowledgeSemanticReferences(
+          located.delta.operations[index]!,
+          semanticCatalog,
+          operationPath,
+        )) {
+          issues.add(`${proposalId}: ${semanticIssue.code} at ${semanticIssue.path ?? operationPath}: ${semanticIssue.message}`);
+        }
+      }
+    }
   }
   collectSemanticDependencyCycles(staged, new Set(proposalIds), "proposition", issues);
   collectSemanticDependencyCycles(staged, new Set(proposalIds), "attribution", issues);
@@ -686,6 +717,10 @@ function collectKnowledgeDeltaIssues(delta: KnowledgeDelta, path: string, missin
     const operationPath = `${path}.operations.${index}`;
     missing("entities", operation.actorId, `${operationPath}.actorId`);
     missing("claims", operation.claimId, `${operationPath}.claimId`);
+    if (operation.propositionId) missing("propositions", operation.propositionId, `${operationPath}.propositionId`);
+    if (operation.op === "learn" && operation.attributionId) {
+      missing("attributions", operation.attributionId, `${operationPath}.attributionId`);
+    }
     if (operation.op === "learn" && operation.sourceActorId) missing("entities", operation.sourceActorId, `${operationPath}.sourceActorId`);
   });
 }

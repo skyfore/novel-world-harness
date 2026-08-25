@@ -108,6 +108,81 @@ describe("compiler audit", () => {
     expect(report.readiness.evidence).toBe("ready");
   });
 
+  it("accounts for proposition attribution and semantic knowledge provenance", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-epistemic-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero reports that the Gate is open.\n");
+    const evidence = fixture.evidence("Hero reports that the Gate is open.");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+    await canon.putEntity({ id: "gate", kind: "location", canonicalName: "Gate", aliases: [], evidence });
+    await canon.putClaim({
+      id: "gate-open-claim",
+      subject: "gate",
+      predicate: "open",
+      object: true,
+      epistemicType: "character-claim",
+      speaker: "hero",
+      evidence,
+    });
+    await canon.putProposition({
+      id: "gate-open",
+      subjectEntityId: "gate",
+      relationId: "open",
+      object: { kind: "literal", value: true },
+      polarity: "positive",
+      modality: "asserted",
+      evidence,
+    });
+    await canon.putAttribution({
+      id: "hero-reports-gate-open",
+      propositionId: "gate-open",
+      holderKind: "character",
+      holderEntityId: "hero",
+      attitude: "reports",
+      certainty: 1,
+      evidence,
+    });
+    await canon.putEvent({
+      id: "hero-infers-gate-open",
+      title: "Hero forms a belief about the gate",
+      participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      storyTime: { kind: "unknown" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      observedKnowledge: {
+        version: 1,
+        operations: [{
+          op: "learn",
+          actorId: "hero",
+          claimId: "gate-open-claim",
+          propositionId: "gate-open",
+          attributionId: "hero-reports-gate-open",
+          acquisitionMode: "inferred",
+          status: "believes",
+          confidence: 0.8,
+        }],
+      },
+      evidence,
+      causalParents: [],
+      confidence: 1,
+    });
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.epistemic).toMatchObject({
+      propositions: 1,
+      attributions: 1,
+      quotationLinkedAttributions: 0,
+      knowledgeOperations: 1,
+      semanticKnowledgeOperations: 1,
+      acquisitionModes: { inferred: 1 },
+      invalidTraces: 0,
+      errors: [],
+    });
+    expect(report.coverage.epistemicCoverage).toBe(1);
+  });
+
   it("can audit one source without inheriting another source's changed file or artifacts", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-source-"));
     roots.push(root);

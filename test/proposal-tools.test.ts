@@ -1145,6 +1145,205 @@ describe("compiler proposal tools", () => {
       .resolves.toMatchObject({ details: { compilerBatchFinished: true } });
   });
 
+  it("binds quotations to resolved speakers and addressees before committing told knowledge", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-quotation-knowledge-trace-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, 'Alice told Bob, "the gate is open."\n');
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], "quotation-knowledge-trace", fixture.source.id);
+    const tool = (name: string) => toolset.tools.find((candidate) => candidate.name === name)!;
+    const context = {} as ExtensionContext;
+
+    for (const [proposalId, annotationId, exact, form, kind, entityId] of [
+      ["mention-alice-proposal", "mention-alice", "Alice", "proper", "character", "alice"],
+      ["mention-bob-proposal", "mention-bob", "Bob", "proper", "character", "bob"],
+      ["mention-gate-proposal", "mention-gate", "gate", "nominal", "location", "gate"],
+    ] as const) {
+      await tool("propose_entity_mention").execute(proposalId, {
+        proposal_id: proposalId,
+        annotation_id: annotationId,
+        selector: { segment_id: fixture.segmentId, exact },
+        surface: exact,
+        form,
+        kind_candidates: [kind],
+        confidence: 1,
+      } as never, undefined, undefined, context);
+      await tool("propose_entity_resolution").execute(`resolve-${entityId}`, {
+        proposal_id: `resolution-${entityId}-proposal`,
+        resolution_id: `resolution-${entityId}`,
+        mention_id: annotationId,
+        status: "new-entity",
+        entity_id: entityId,
+        candidates: [{
+          entity_id: entityId,
+          confidence: 1,
+          basis_mention_ids: [annotationId],
+          evidence_assertion_ids: [],
+          rationale: `${exact} introduces ${entityId}.`,
+        }],
+        rationale: `${annotationId} resolves to the same-batch entity ${entityId}.`,
+      } as never, undefined, undefined, context);
+      await tool("propose_entity").execute(`entity-${entityId}`, {
+        proposal_id: `entity-${entityId}-proposal`,
+        payload: { id: entityId, kind, canonicalName: exact, aliases: [] },
+        evidence_segment_ids: [fixture.segmentId],
+      } as never, undefined, undefined, context);
+    }
+
+    await tool("propose_quotation").execute("quotation", {
+      proposal_id: "quotation-gate-open-proposal",
+      annotation_id: "quotation-gate-open",
+      selector: { segment_id: fixture.segmentId, exact: '"the gate is open."' },
+      mode: "direct",
+      speaker_mention_id: "mention-alice",
+      addressee_mention_ids: ["mention-bob"],
+      cue_selector: { segment_id: fixture.segmentId, exact: "Alice told Bob" },
+      attribution_confidence: 1,
+    } as never, undefined, undefined, context);
+    await tool("propose_claim").execute("claim", {
+      proposal_id: "gate-open-claim-proposal",
+      payload: {
+        id: "gate-open-claim",
+        subject: "gate",
+        predicate: "open",
+        object: true,
+        epistemicType: "character-claim",
+        speaker: "alice",
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await tool("propose_proposition").execute("proposition", {
+      proposal_id: "gate-open-proposition-proposal",
+      payload: {
+        id: "gate-open-proposition",
+        subjectEntityId: "gate",
+        relationId: "open",
+        object: { kind: "literal", value: true },
+        polarity: "positive",
+        modality: "asserted",
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await tool("propose_attribution").execute("wrong-speaker", {
+      proposal_id: "wrong-speaker-attribution-proposal",
+      payload: {
+        id: "wrong-speaker-attribution",
+        propositionId: "gate-open-proposition",
+        holderKind: "character",
+        holderEntityId: "bob",
+        attitude: "reports",
+        certainty: 1,
+        quotationIds: ["quotation-gate-open"],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+
+    const finishInput = {
+      outcome: "complete",
+      reviewed_segments: [{
+        segment_id: fixture.segmentId,
+        disposition: "proposed",
+        summary: "Recorded the speaker, addressee, quoted proposition, and knowledge transfer.",
+      }],
+      summary: "Close the quotation-backed knowledge graph.",
+    };
+    await expect(tool("finish_compiler_batch").execute(
+      "wrong-speaker-finish",
+      finishInput as never,
+      undefined,
+      undefined,
+      context,
+    )).rejects.toThrow(/holder 'bob'.*speaker 'alice'/u);
+
+    await tool("withdraw_compiler_proposal").execute("withdraw-wrong-speaker", {
+      proposal_id: "wrong-speaker-attribution-proposal",
+      reason: "The quotation speaker resolves to Alice, not Bob.",
+    } as never, undefined, undefined, context);
+    await tool("propose_attribution").execute("correct-speaker", {
+      proposal_id: "alice-attribution-proposal",
+      payload: {
+        id: "alice-reports-gate-open",
+        propositionId: "gate-open-proposition",
+        holderKind: "character",
+        holderEntityId: "alice",
+        attitude: "reports",
+        certainty: 1,
+        quotationIds: ["quotation-gate-open"],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+
+    const eventPayload = (actorId: string) => ({
+      id: `${actorId}-hears-gate-open`,
+      title: "Alice tells Bob that the gate is open",
+      participants: ["alice", "bob"],
+      participantPresence: [
+        { entityId: "alice", mode: "physical" as const },
+        { entityId: "bob", mode: "physical" as const },
+      ],
+      storyTime: { kind: "unknown" as const },
+      preconditions: [],
+      observedOutcome: { version: 1 as const, operations: [] },
+      observedKnowledge: {
+        version: 1 as const,
+        operations: [{
+          op: "learn" as const,
+          actorId,
+          claimId: "gate-open-claim",
+          propositionId: "gate-open-proposition",
+          attributionId: "alice-reports-gate-open",
+          acquisitionMode: "told" as const,
+          sourceActorId: "alice",
+          status: "heard" as const,
+          confidence: 1,
+        }],
+      },
+      causalParents: [],
+      confidence: 1,
+    });
+    await tool("propose_canonical_event").execute("wrong-addressee", {
+      proposal_id: "wrong-addressee-event-proposal",
+      payload: eventPayload("alice"),
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await expect(tool("finish_compiler_batch").execute(
+      "wrong-addressee-finish",
+      finishInput as never,
+      undefined,
+      undefined,
+      context,
+    )).rejects.toThrow(/actor 'alice'.*not a resolved addressee/u);
+
+    await tool("withdraw_compiler_proposal").execute("withdraw-wrong-addressee", {
+      proposal_id: "wrong-addressee-event-proposal",
+      reason: "Alice is the speaker; Bob is the resolved addressee.",
+    } as never, undefined, undefined, context);
+    await tool("propose_canonical_event").execute("correct-addressee", {
+      proposal_id: "bob-hears-event-proposal",
+      payload: eventPayload("bob"),
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await expect(tool("finish_compiler_batch").execute(
+      "correct-trace-finish",
+      finishInput as never,
+      undefined,
+      undefined,
+      context,
+    )).resolves.toMatchObject({ details: { compilerBatchFinished: true } });
+
+    const committed = await new CompilerCommitService(root).acceptAllValid(fixture.source.id);
+    expect(committed.blocked).toEqual([]);
+    expect(committed.accepted.map((candidate) => candidate.kind)).toEqual([
+      "entity",
+      "entity",
+      "entity",
+      "claim",
+      "proposition",
+      "attribution",
+      "canonical-event",
+    ]);
+  });
+
   it("rejects non-character or missing event presence before checkpoint and accepts the corrected replacement", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-presence-closure-"));
     roots.push(root);

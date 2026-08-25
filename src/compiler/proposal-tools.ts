@@ -89,6 +89,10 @@ import {
   EVENT_RESOLUTION_RETRIEVAL_TOOL_NAMES,
   createEventResolutionRetrievalTools,
 } from "./event-resolution-retrieval.js";
+import {
+  validateAttributionProposalTrace,
+  validateKnowledgeAcquisitionProposalTrace,
+} from "./attribution-trace.js";
 
 function proposalResult(
   text: string,
@@ -103,7 +107,7 @@ function proposalResult(
 const labels: Record<CompilerProposalKind, { name: string; label: string; description: string }> = {
   entity: { name: "propose_entity", label: "Propose entity", description: "Submit a typed entity candidate backed by source evidence. This creates a pending proposal only." },
   proposition: { name: "propose_proposition", label: "Propose proposition", description: "Submit evidence-backed semantic content. Acceptance records the content but never makes it world truth; events, state deltas, and rules retain that authority." },
-  attribution: { name: "propose_attribution", label: "Propose attribution", description: "Submit who asserts, believes, reports, denies, or questions a proposition. The attitude remains separate from both proposition content and world truth." },
+  attribution: { name: "propose_attribution", label: "Propose attribution", description: "Submit who asserts, believes, reports, denies, or questions a proposition, citing quotation IDs when discourse supplies it. Holder identity must trace through quotation-speaker resolution. The attitude remains separate from content and world truth." },
   claim: { name: "propose_claim", label: "Propose claim", description: "Submit an evidence-backed base-world claim candidate. Character knowledge or ignorance is never a claim predicate; represent learning only in a KnowledgeDelta. This does not commit canonical truth." },
   "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Later canon remains a candidate until runtime commitment." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a temporal in-world rule candidate. Engine invariants cannot be modified through this tool." },
@@ -1932,6 +1936,30 @@ export function createCompilerProposalToolset(
         : [];
       if (entityTraceIssues.length) {
         return failFinish(`Canonical entity proposal trace is incomplete:\n- ${entityTraceIssues.join("\n- ")}`);
+      }
+      const attributionTraceIssues = activeSourceId
+        ? await validateAttributionProposalTrace(
+          workspaceRoot,
+          activeSourceId,
+          listed,
+          listedAnnotations,
+          listedEntityResolutions,
+        )
+        : [];
+      if (attributionTraceIssues.length) {
+        return failFinish(`Attribution quotation trace is incomplete:\n- ${attributionTraceIssues.join("\n- ")}`);
+      }
+      const acquisitionTraceIssues = activeSourceId
+        ? await validateKnowledgeAcquisitionProposalTrace(
+          workspaceRoot,
+          activeSourceId,
+          listed,
+          listedAnnotations,
+          listedEntityResolutions,
+        )
+        : [];
+      if (acquisitionTraceIssues.length) {
+        return failFinish(`Knowledge acquisition trace is incomplete:\n- ${acquisitionTraceIssues.join("\n- ")}`);
       }
       const eventResolutionClosureIssues = activeSourceId
         ? await validateEventResolutionClosure(

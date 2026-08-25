@@ -40,6 +40,7 @@ import {
   validateCanonicalAdaptationContract,
 } from "./canonical-adaptation.js";
 import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { validateKnowledgeSemanticReferences } from "./knowledge-semantics.js";
 import { committedHistory, projectActorScene } from "./scene.js";
 
 export type WorldModelContext = {
@@ -231,6 +232,11 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
           if (!source || source.kind !== "character") errors.push({ code: "INVALID_KNOWLEDGE_SOURCE", message: `Knowledge source ${operation.sourceActorId} is not a character`, path: `proposedKnowledge.operations.${index}` });
         }
       }
+      errors.push(...validateKnowledgeSemanticReferences(operation, {
+        claims: context.claims ?? new Map(),
+        propositions: context.propositions,
+        attributions: context.attributions,
+      }, `proposedKnowledge.operations.${index}`));
     }
   }
 
@@ -621,7 +627,8 @@ export class WorldEngine {
 }
 
 function validateKnowledgeDeltaForContext(knowledge: KnowledgeDelta, context: WorldModelContext): void {
-  for (const operation of knowledge.operations) {
+  for (let index = 0; index < knowledge.operations.length; index += 1) {
+    const operation = knowledge.operations[index]!;
     const actor = context.entities.get(operation.actorId);
     if (!actor || actor.kind !== "character") throw new Error(`Initial knowledge actor ${operation.actorId} is not a character`);
     if (operation.op === "learn") {
@@ -630,6 +637,14 @@ function validateKnowledgeDeltaForContext(knowledge: KnowledgeDelta, context: Wo
         const source = context.entities.get(operation.sourceActorId);
         if (!source || source.kind !== "character") throw new Error(`Initial knowledge source ${operation.sourceActorId} is not a character`);
       }
+    }
+    const semanticErrors = validateKnowledgeSemanticReferences(operation, {
+      claims: context.claims ?? new Map(),
+      propositions: context.propositions,
+      attributions: context.attributions,
+    }, `knowledge.operations.${index}`);
+    if (semanticErrors.length) {
+      throw new Error(semanticErrors.map((error) => `${error.code}: ${error.message}`).join("; "));
     }
   }
 }

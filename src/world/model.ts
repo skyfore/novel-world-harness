@@ -186,6 +186,9 @@ export const attributionSchema = z
     attitude: z.enum(["asserts", "knows", "believes", "suspects", "reports", "denies", "questions"]),
     certainty: z.number().finite().min(0).max(1),
     sourceAttributionId: idSchema.optional(),
+    quotationIds: z.array(idSchema).min(1).max(64)
+      .refine((values) => new Set(values).size === values.length, "quotationIds must be unique")
+      .optional(),
     evidence: z.array(evidenceRefSchema),
   })
   .strict()
@@ -335,10 +338,59 @@ export const stateDeltaSchema = z.object({ version: z.literal(1), operations: z.
 export type StateDelta = z.infer<typeof stateDeltaSchema>;
 
 export const knowledgeStatusSchema = z.enum(["knows", "believes", "suspects", "heard", "disbelieves"]);
-export const knowledgeOperationSchema = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("learn"), actorId: idSchema, claimId: idSchema, status: knowledgeStatusSchema, confidence: z.number().min(0).max(1), sourceActorId: idSchema.optional() }).strict(),
-  z.object({ op: z.literal("forget"), actorId: idSchema, claimId: idSchema }).strict(),
+export const knowledgeAcquisitionModeSchema = z.enum([
+  "observed",
+  "told",
+  "read",
+  "inferred",
+  "remembered",
+  "deceived-misattributed",
 ]);
+export type KnowledgeAcquisitionMode = z.infer<typeof knowledgeAcquisitionModeSchema>;
+export const knowledgeOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("learn"),
+    actorId: idSchema,
+    claimId: idSchema,
+    propositionId: idSchema.optional(),
+    attributionId: idSchema.optional(),
+    acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
+    status: knowledgeStatusSchema,
+    confidence: z.number().min(0).max(1),
+    sourceActorId: idSchema.optional(),
+  }).strict(),
+  z.object({ op: z.literal("forget"), actorId: idSchema, claimId: idSchema, propositionId: idSchema.optional() }).strict(),
+]).superRefine((value, ctx) => {
+  if (value.op !== "learn") return;
+  const semantic = Boolean(value.propositionId || value.attributionId || value.acquisitionMode);
+  if (semantic && !value.propositionId) {
+    ctx.addIssue({ code: "custom", path: ["propositionId"], message: "Semantic knowledge acquisition requires propositionId" });
+  }
+  if (semantic && !value.acquisitionMode) {
+    ctx.addIssue({ code: "custom", path: ["acquisitionMode"], message: "Semantic knowledge acquisition requires acquisitionMode" });
+  }
+  if (value.attributionId && !value.propositionId) {
+    ctx.addIssue({ code: "custom", path: ["attributionId"], message: "attributionId requires propositionId" });
+  }
+  if (value.acquisitionMode === "told") {
+    if (!value.sourceActorId) ctx.addIssue({ code: "custom", path: ["sourceActorId"], message: "Told acquisition requires sourceActorId" });
+    if (!value.attributionId) ctx.addIssue({ code: "custom", path: ["attributionId"], message: "Told acquisition requires attributionId" });
+  }
+  if ((value.acquisitionMode === "read" || value.acquisitionMode === "deceived-misattributed") && !value.attributionId) {
+    ctx.addIssue({ code: "custom", path: ["attributionId"], message: `${value.acquisitionMode} acquisition requires attributionId` });
+  }
+  if (
+    value.acquisitionMode
+    && value.sourceActorId
+    && value.acquisitionMode !== "told"
+    && value.acquisitionMode !== "deceived-misattributed"
+  ) {
+    ctx.addIssue({ code: "custom", path: ["sourceActorId"], message: `${value.acquisitionMode} acquisition cannot name a source actor` });
+  }
+  if (value.acquisitionMode === "deceived-misattributed" && value.status === "knows") {
+    ctx.addIssue({ code: "custom", path: ["status"], message: "Deceived or misattributed content cannot have knows status" });
+  }
+});
 export type KnowledgeOperation = z.infer<typeof knowledgeOperationSchema>;
 export const knowledgeDeltaSchema = z.object({ version: z.literal(1), operations: z.array(knowledgeOperationSchema) }).strict();
 export type KnowledgeDelta = z.infer<typeof knowledgeDeltaSchema>;
@@ -820,7 +872,17 @@ export function validateParticipantPresence(
   }
 }
 
-export const knowledgeFactSchema = z.object({ actorId: idSchema, claimId: idSchema, status: knowledgeStatusSchema, confidence: z.number().min(0).max(1), acquiredAtCommit: idSchema, sourceActorId: idSchema.optional() }).strict();
+export const knowledgeFactSchema = z.object({
+  actorId: idSchema,
+  claimId: idSchema,
+  propositionId: idSchema.optional(),
+  attributionId: idSchema.optional(),
+  acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
+  status: knowledgeStatusSchema,
+  confidence: z.number().min(0).max(1),
+  acquiredAtCommit: idSchema,
+  sourceActorId: idSchema.optional(),
+}).strict();
 export type KnowledgeFact = z.infer<typeof knowledgeFactSchema>;
 
 export const validationIssueSchema = z.object({ code: z.string().min(1), message: z.string().min(1), path: z.string().optional() }).strict();

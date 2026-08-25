@@ -12,6 +12,8 @@ import {
   validateEvidenceAssertionTargets,
 } from "./evidence-assertions.js";
 import { evidenceSourceIds } from "../world/source-scope.js";
+import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
+import { validateCommittedKnowledgeAcquisitionTrace } from "./attribution-trace.js";
 
 export type PossibilityValidation = {
   accepted: boolean;
@@ -41,17 +43,21 @@ export class PossibilityCommitService {
     evidenceAssertions: readonly EvidenceAssertion[] = [],
   ): Promise<PossibilityValidation> {
     const template = possibilityTemplateSchema.parse(templateInput);
-    const [entities, rules, events, claims, templates] = await Promise.all([
+    const [entities, rules, events, claims, propositions, attributions, templates] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listRules(),
       this.canon.listEvents(),
       this.canon.listClaims(),
+      this.canon.listPropositions(),
+      this.canon.listAttributions(),
       this.templates.list(),
     ]);
     const entityMap = new Map(entities.map((entity) => [entity.id, entity]));
     const ruleMap = new Map(rules.map((rule) => [rule.id, rule]));
     const eventMap = new Map(events.map((event) => [event.id, event]));
     const claimMap = new Map(claims.map((claim) => [claim.id, claim]));
+    const propositionMap = new Map(propositions.map((proposition) => [proposition.id, proposition]));
+    const attributionMap = new Map(attributions.map((attribution) => [attribution.id, attribution]));
     const eventIds = new Set(events.map((event) => event.id));
     const claimIds = new Set(claims.map((claim) => claim.id));
     const templateIds = new Set(templates.map((candidate) => candidate.id));
@@ -211,6 +217,19 @@ export class PossibilityCommitService {
           if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Possibility knowledge source ${operation.sourceActorId} is not a canonical character`, `proposedKnowledge.operations.${index}`));
         }
       }
+      errors.push(...validateKnowledgeSemanticReferences(operation, {
+        claims: claimMap,
+        propositions: propositionMap,
+        attributions: attributionMap,
+      }, `proposedKnowledge.operations.${index}`));
+    }
+    const sourceIds = [...new Set([...legacySourceIds, ...exactSourceIds])];
+    if (sourceIds.length === 1) {
+      errors.push(...(await validateCommittedKnowledgeAcquisitionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        findKnowledgeDeltas(template),
+      )).map((message) => issue("INVALID_KNOWLEDGE_ACQUISITION_TRACE", message)));
     }
     return { accepted: errors.length === 0, errors, warnings };
   }

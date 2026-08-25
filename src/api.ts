@@ -100,6 +100,12 @@ export { PossibilityCommitService, type PossibilityValidation } from "./compiler
 export { PreparedNovelCache, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
 export { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "./compiler/reconcile-world.js";
 export { compilerProposalArtifactId, CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
+export {
+  validateAttributionProposalTrace,
+  validateCommittedAttributionTrace,
+  validateCommittedKnowledgeAcquisitionTrace,
+  validateKnowledgeAcquisitionProposalTrace,
+} from "./compiler/attribution-trace.js";
 export { CompilerCommitService, CompilerValidator, type CompilerConvergenceProgress, type CompilerValidation } from "./compiler/validator.js";
 export {
   evaluateCompilerAgainstGold,
@@ -148,6 +154,14 @@ export {
   type ReaderEntryContext,
 } from "./world/entry-context.js";
 export { KnowledgeProjector, type ActorWorldView } from "./world/knowledge.js";
+export {
+  claimProjectionMismatches,
+  findKnowledgeDeltas,
+  projectPropositionObject,
+  validateKnowledgeSemanticReferences,
+  type KnowledgeSemanticCatalog,
+  type LocatedKnowledgeDelta,
+} from "./world/knowledge-semantics.js";
 export { isNarrativeInterpretation, NarrativeMetaView, type NarrativeObservation, type NarrativeMetaKind } from "./world/meta.js";
 export { modelActorProposalSource, actorActionTemplateSchema, type ActorActionTemplate, type ActorReasoner, type ActorReasoningInput, type ModelActorDevelopmentView, type ModelActorDispositionView, type ModelActorGoalView, type ModelActorWorldView } from "./world/model-actor-policy.js";
 export * from "./world/model.js";

@@ -16,7 +16,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Source observations | M2 + M3b-1 implemented | Immutable-source paragraph/sentence partition, exact entity/event mention, quotation, and discourse annotations, source-local closure, accounting, audit, batch recovery, and paged retrieval; event mentions carry no truth or canonical-event authority |
 | Entity resolution | M3a implemented | Deterministic source-scoped lexical candidates, explicit resolved/new/ambiguous/unresolved decisions, immutable superseding revisions, unresolved audit queues, and canonical name/alias trace gates |
 | Event resolution | M3b implemented | Source-scoped evidence/title/participant candidates, explicit coreference vs subevent clusters, resolved/new/ambiguous/unresolved decisions, merge/split revisions, major-event coverage, participant trace, and canonical-event commit gates |
-| Proposition and attribution | M4a-1 implemented | Reusable proposition content is separated from narrator/character/document attitudes; both are evidence-backed, dependency-validated semantic records and neither writes world state or actor knowledge |
+| Proposition, attribution, and knowledge acquisition | M4a implemented | Reusable proposition content is separated from narrator/character/document attitudes; quotation IDs trace holders to resolved speakers, and additive knowledge provenance records proposition, attribution, and acquisition mode without breaking legacy claim-keyed replay |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
@@ -78,8 +78,19 @@ The branch now implements a constrained end-to-end path from a local novel throu
   reports, denies, or questions that content. Subject/object, holder kind,
   nested proposition, source-attribution, and dependency-cycle validation all
   fail closed. These artifacts are retained in prepared bundles and branch
-  snapshots but do not enter state projection or legacy claim-based actor
-  knowledge automatically.
+  snapshots but do not enter state projection automatically.
+- Quotation-backed attribution is independently traceable through source-local
+  quotation IDs and entity-resolution decisions. Character holders must match
+  resolved speakers; narrator/unknown holder rules fail closed. `told` and
+  `read` knowledge acquisition additionally require an attributed quotation,
+  and `told` recipients must match a resolved addressee.
+- Knowledge remains keyed by `claimId` for old prepared revisions and runtime
+  compatibility. New operations may add `propositionId`, `attributionId`, and
+  one of six acquisition modes. The validator proves a lossless positive,
+  asserted claim/proposition projection and source/holder coherence before commit; actor projection
+  preserves this provenance without exposing global state or compiler
+  omniscience. Audit reports semantic-operation coverage, modes, and broken
+  quotation/acquisition traces.
 - Canonical entities, propositions, attributions, claims, events, and rules use
   logical refs over immutable revisions.
 - `proposals accept-all` accepts dependency-valid canonical artifacts and valid generic possibility templates; unsupported `state-delta` proposals remain staging artifacts.

@@ -16,6 +16,7 @@ import {
   type Entity,
   type EvidenceAssertion,
   type EvidenceRef,
+  type KnowledgeDelta,
   type Predicate,
   type Proposition,
   type StoryTime,
@@ -34,6 +35,11 @@ import {
 import { evidenceSourceIds } from "../world/source-scope.js";
 import { validateCommittedEntityResolutionTrace } from "./entity-resolution.js";
 import { validateCommittedEventResolutionTrace } from "./event-resolution.js";
+import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
+import {
+  validateCommittedAttributionTrace,
+  validateCommittedKnowledgeAcquisitionTrace,
+} from "./attribution-trace.js";
 
 export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
@@ -94,10 +100,10 @@ export class CompilerValidator {
     if (kind === "proposition") this.validateProposition(propositionSchema.parse(payload), entities, propositions, events, errors);
     if (kind === "attribution") this.validateAttribution(attributionSchema.parse(payload), entities, propositions, attributions, errors);
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
-    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, claims, events, rules, errors);
+    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
-    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, claims, events, rules, errors);
-    if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, claims, events, rules, errors);
+    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
+    if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, claims, events, rules, errors);
     return { accepted: errors.length === 0, errors, warnings };
   }
@@ -176,6 +182,8 @@ export class CompilerValidator {
   private validateEvent(
     event: CanonicalEvent,
     entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
     claims: ReadonlyMap<string, Claim>,
     events: ReadonlyMap<string, CanonicalEvent>,
     rules: ReadonlyMap<string, WorldRule>,
@@ -234,6 +242,7 @@ export class CompilerValidator {
         }
       }
     }
+    this.validateKnowledgeSemantics(event.observedKnowledge, propositions, attributions, claims, "observedKnowledge", errors);
     const entryActors = new Set<string>();
     for (let index = 0; index < (event.characterEntryCheckpoints?.length ?? 0); index += 1) {
       const checkpoint = event.characterEntryCheckpoints![index]!;
@@ -283,6 +292,7 @@ export class CompilerValidator {
           }
         }
       }
+      this.validateKnowledgeSemantics(checkpoint.knowledge, propositions, attributions, claims, `${prefix}.knowledge`, errors);
     }
   }
 
@@ -306,6 +316,8 @@ export class CompilerValidator {
   private validateInitialWorld(
     initial: InitialWorld,
     entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
     claims: ReadonlyMap<string, Claim>,
     events: ReadonlyMap<string, CanonicalEvent>,
     rules: ReadonlyMap<string, WorldRule>,
@@ -328,6 +340,7 @@ export class CompilerValidator {
         }
       }
     }
+    this.validateKnowledgeSemantics(initial.knowledge, propositions, attributions, claims, "knowledge", errors);
     const representedCharacters = new Set<string>();
     const explicitlyDead = new Set<string>();
     const openingPresenceIds = new Set<string>();
@@ -397,6 +410,8 @@ export class CompilerValidator {
   private validateGoal(
     goal: CharacterGoal,
     entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
     claims: ReadonlyMap<string, Claim>,
     events: ReadonlyMap<string, CanonicalEvent>,
     rules: ReadonlyMap<string, WorldRule>,
@@ -454,6 +469,24 @@ export class CompilerValidator {
           if (!sourceActor || sourceActor.kind !== "character") errors.push(issue("UNKNOWN_KNOWLEDGE_SOURCE", `Unknown knowledge source ${operation.sourceActorId}`, `${path}.proposedKnowledge.operations.${index}.sourceActorId`));
         }
       }
+      this.validateKnowledgeSemantics(value.proposedKnowledge, propositions, attributions, claims, `${path}.proposedKnowledge`, errors);
+    }
+  }
+
+  private validateKnowledgeSemantics(
+    delta: KnowledgeDelta | undefined,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
+    claims: ReadonlyMap<string, Claim>,
+    path: string,
+    errors: ValidationIssue[],
+  ): void {
+    for (let index = 0; index < (delta?.operations.length ?? 0); index += 1) {
+      errors.push(...validateKnowledgeSemanticReferences(delta!.operations[index]!, {
+        claims,
+        propositions,
+        attributions,
+      }, `${path}.operations.${index}`));
     }
   }
 
@@ -667,18 +700,6 @@ export class CompilerCommitService {
       "RULE_DEPENDENCY_CYCLE",
     );
     await processDependencyKind(
-      eligible.filter((item) => item.kind === "canonical-event"),
-      catalog.events,
-      eventDependencies,
-      processCandidate,
-      blocked,
-      () => {
-        processed += 1;
-        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
-      },
-      "CAUSAL_CYCLE",
-    );
-    await processDependencyKind(
       eligible.filter((item) => item.kind === "proposition"),
       catalog.propositions,
       propositionDependencies,
@@ -701,6 +722,18 @@ export class CompilerCommitService {
         onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
       },
       "ATTRIBUTION_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "canonical-event"),
+      catalog.events,
+      eventDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "CAUSAL_CYCLE",
     );
     for (const kind of ["initial-world", "character-model", "character-goal"] as const) {
       for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
@@ -753,6 +786,20 @@ export class CompilerCommitService {
         canonicalEventSchema.parse(payload),
       )).map((message) => issue("MISSING_EVENT_RESOLUTION_TRACE", message, "id"))
       : [];
+    const attributionTraceIssues = kind === "attribution" && sourceIds.length === 1
+      ? (await validateCommittedAttributionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        attributionSchema.parse(payload),
+      )).map((message) => issue("INVALID_ATTRIBUTION_TRACE", message, "quotationIds"))
+      : [];
+    const knowledgeTraceIssues = sourceIds.length === 1
+      ? (await validateCommittedKnowledgeAcquisitionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        findKnowledgeDeltas(payload),
+      )).map((message) => issue("INVALID_KNOWLEDGE_ACQUISITION_TRACE", message))
+      : [];
     const errors = [
       ...validation.errors,
       ...inspected.issues,
@@ -762,6 +809,8 @@ export class CompilerCommitService {
       ...mixedSourceIssues,
       ...resolutionTraceIssues,
       ...eventResolutionTraceIssues,
+      ...attributionTraceIssues,
+      ...knowledgeTraceIssues,
     ];
     return { accepted: errors.length === 0, errors, warnings: validation.warnings };
   }

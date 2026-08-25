@@ -25,6 +25,11 @@ import {
 } from "./annotations.js";
 import { inspectEntityResolutionCoverage } from "./entity-resolution.js";
 import { inspectEventResolutionCoverage } from "./event-resolution.js";
+import {
+  validateCommittedAttributionTrace,
+  validateCommittedKnowledgeAcquisitionTrace,
+} from "./attribution-trace.js";
+import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -86,6 +91,16 @@ export type CompilerAuditReport = {
     invalid: number;
     missingMentionIds: string[];
     errors: Array<{ sourceId: string; message: string }>;
+  };
+  epistemic: {
+    propositions: number;
+    attributions: number;
+    quotationLinkedAttributions: number;
+    knowledgeOperations: number;
+    semanticKnowledgeOperations: number;
+    acquisitionModes: Record<string, number>;
+    invalidTraces: number;
+    errors: Array<{ sourceId: string; artifact: string; message: string }>;
   };
   canonical: {
     entities: number;
@@ -426,6 +441,62 @@ export async function auditCompiler(
     if (!exactIssues.length) validExactBindings += 1;
   }
 
+  const epistemicErrors: CompilerAuditReport["epistemic"]["errors"] = [];
+  const acquisitionModes: Record<string, number> = {};
+  let knowledgeOperations = 0;
+  let semanticKnowledgeOperations = 0;
+  const semanticCatalog = {
+    claims: new Map(claims.map((claim) => [claim.id, claim])),
+    propositions: new Map(propositions.map((proposition) => [proposition.id, proposition])),
+    attributions: new Map(attributions.map((attribution) => [attribution.id, attribution])),
+  };
+  const locatedKnowledge = evidenceArtifacts.flatMap((artifact) => {
+    const sourceId = artifact.evidence[0]?.span.sourceId;
+    if (!sourceId) return [];
+    return findKnowledgeDeltas(artifact.payload).map((located) => ({
+      sourceId,
+      artifact: artifact.name,
+      path: `${artifact.name}.${located.path || "payload"}`,
+      delta: located.delta,
+    }));
+  });
+  for (const located of locatedKnowledge) {
+    for (let index = 0; index < located.delta.operations.length; index += 1) {
+      const operation = located.delta.operations[index]!;
+      knowledgeOperations += 1;
+      for (const semanticIssue of validateKnowledgeSemanticReferences(
+        operation,
+        semanticCatalog,
+        `${located.path}.operations.${index}`,
+      )) {
+        epistemicErrors.push({
+          sourceId: located.sourceId,
+          artifact: located.artifact,
+          message: `${semanticIssue.code}${semanticIssue.path ? ` at ${semanticIssue.path}` : ""}: ${semanticIssue.message}`,
+        });
+      }
+      if (!operation.propositionId) continue;
+      semanticKnowledgeOperations += 1;
+      if (operation.op === "learn" && operation.acquisitionMode) {
+        acquisitionModes[operation.acquisitionMode] = (acquisitionModes[operation.acquisitionMode] ?? 0) + 1;
+      }
+    }
+  }
+  for (const source of sources) {
+    for (const attribution of attributions.filter((item) =>
+      item.evidence.some((reference) => reference.span.sourceId === source.id))) {
+      for (const message of await validateCommittedAttributionTrace(workspaceRoot, source.id, attribution)) {
+        epistemicErrors.push({ sourceId: source.id, artifact: `attribution:${attribution.id}`, message });
+      }
+    }
+    const sourceKnowledge = locatedKnowledge
+      .filter((located) => located.sourceId === source.id)
+      .map(({ path, delta }) => ({ path, delta }));
+    for (const message of await validateCommittedKnowledgeAcquisitionTrace(workspaceRoot, source.id, sourceKnowledge)) {
+      epistemicErrors.push({ sourceId: source.id, artifact: "knowledge", message });
+    }
+  }
+
   const graph = auditCausalGraph(events);
   const narrativeGraphNavigable = events.length ? graphNavigable(events, graph) : null;
   const eventsWithExplicitDelta = events.filter((event) => event.observedOutcome.operations.length > 0).length;
@@ -617,7 +688,9 @@ export async function auditCompiler(
       : validExactBindings === evidenceArtifacts.length
         ? "ready"
         : "unknown";
-  const semanticReadiness: CompilerReadinessState = events.length < 20
+  const semanticReadiness: CompilerReadinessState = epistemicErrors.length
+    ? "not-ready"
+    : events.length < 20
     ? "unknown"
     : semanticIssues.length
       ? "not-ready"
@@ -677,6 +750,7 @@ export async function auditCompiler(
     ...missingResolutionMentionIds.map((mentionId) => `Entity mention ${mentionId} has no current identity-resolution record.`),
     ...eventResolutionErrors.map((error) => `Event resolution ${error.sourceId}: ${error.message}`),
     ...missingEventResolutionMentionIds.map((mentionId) => `Event mention ${mentionId} has no current event-resolution record.`),
+    ...epistemicErrors.map((error) => `${error.artifact}: ${error.message}`),
     ...graph.cycles.map((cycle) => `Causal cycle: ${cycle.join(" -> ")}`),
     ...graph.missing.map(({ eventId, parentId }) => `Event ${eventId} has missing causal parent ${parentId}.`),
     ...graph.temporalRegressions.map(({ eventId, parentId }) => `Event ${eventId} is earlier than causal parent ${parentId}.`),
@@ -732,6 +806,16 @@ export async function auditCompiler(
       invalid: invalidEventResolutionIds.size,
       missingMentionIds: [...new Set(missingEventResolutionMentionIds)].sort(),
       errors: eventResolutionErrors,
+    },
+    epistemic: {
+      propositions: propositions.length,
+      attributions: attributions.length,
+      quotationLinkedAttributions: attributions.filter((attribution) => attribution.quotationIds?.length).length,
+      knowledgeOperations,
+      semanticKnowledgeOperations,
+      acquisitionModes,
+      invalidTraces: epistemicErrors.length,
+      errors: epistemicErrors,
     },
     canonical: {
       entities: entities.length,

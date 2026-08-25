@@ -608,38 +608,79 @@ describe("CompilerCommitService", () => {
     expect(await commits.canon.listEvents()).toEqual([]);
   });
 
-  it("commits a same-pass event before a proposition that uses it as a story-time anchor", async () => {
+  it("commits a same-pass claim, proposition, attribution, and semantic knowledge event in dependency order", async () => {
     const { proposals, commits, evidence } = await fixture();
-    await proposals.submit("entity", {
-      proposalId: "entity-cao",
-      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+    for (const [proposalId, id, kind, canonicalName, quote] of [
+      ["entity-cao", "cao-cao", "character", "曹操", "曹操"],
+      ["entity-gate", "north-gate", "location", "北门", "北门"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind, canonicalName, aliases: [], evidence: evidence(quote) },
+        generatedBy: { worker: "test" },
+      });
+    }
+    await proposals.submit("claim", {
+      proposalId: "gate-open-claim-proposal",
+      payload: {
+        id: "gate-open-claim",
+        subject: "north-gate",
+        predicate: "open",
+        object: true,
+        epistemicType: "explicit-fact",
+        evidence: evidence("北门"),
+      },
       generatedBy: { worker: "test" },
     });
     await proposals.submit("proposition", {
-      proposalId: "post-arrival-condition",
+      proposalId: "gate-open-proposition",
       payload: {
-        id: "cao-after-arrival",
-        subjectEntityId: "cao-cao",
-        relationId: "present",
+        id: "gate-open",
+        subjectEntityId: "north-gate",
+        relationId: "open",
         object: { kind: "literal", value: true },
         polarity: "positive",
         modality: "asserted",
-        validStoryTime: { kind: "relative", anchorEventId: "cao-arrives", relation: "after" },
-        evidence: evidence("曹操"),
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("attribution", {
+      proposalId: "narrator-reports-gate",
+      payload: {
+        id: "narrator-reports-gate",
+        propositionId: "gate-open",
+        holderKind: "narrator",
+        attitude: "reports",
+        certainty: 1,
+        evidence: evidence("北门"),
       },
       generatedBy: { worker: "test" },
     });
     await proposals.submit("canonical-event", {
-      proposalId: "arrival-event",
+      proposalId: "knowledge-event",
       payload: {
-        id: "cao-arrives",
-        title: "曹操 arrives",
+        id: "cao-remembers-gate-open",
+        title: "曹操记起北门状态",
         participants: ["cao-cao"],
         participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
         storyTime: { kind: "unknown" },
         preconditions: [],
         observedOutcome: { version: 1, operations: [] },
-        evidence: evidence("曹操"),
+        observedKnowledge: {
+          version: 1,
+          operations: [{
+            op: "learn",
+            actorId: "cao-cao",
+            claimId: "gate-open-claim",
+            propositionId: "gate-open",
+            attributionId: "narrator-reports-gate",
+            acquisitionMode: "remembered",
+            status: "knows",
+            confidence: 1,
+          }],
+        },
+        evidence: evidence("曹操，字孟德\n北门"),
         causalParents: [],
         confidence: 1,
       },
@@ -648,7 +689,23 @@ describe("CompilerCommitService", () => {
 
     const result = await commits.acceptAllValid();
     expect(result.blocked).toEqual([]);
-    expect(result.accepted.map((item) => item.kind)).toEqual(["entity", "canonical-event", "proposition"]);
+    expect(result.accepted.map((item) => item.kind)).toEqual([
+      "entity",
+      "entity",
+      "claim",
+      "proposition",
+      "attribution",
+      "canonical-event",
+    ]);
+    await expect(commits.canon.getEvent("cao-remembers-gate-open")).resolves.toMatchObject({
+      observedKnowledge: {
+        operations: [expect.objectContaining({
+          propositionId: "gate-open",
+          attributionId: "narrator-reports-gate",
+          acquisitionMode: "remembered",
+        })],
+      },
+    });
   });
 
   it("rejects invalid proposition references and epistemic relations", async () => {

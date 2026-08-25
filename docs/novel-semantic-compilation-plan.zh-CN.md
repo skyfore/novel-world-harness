@@ -596,6 +596,7 @@ type Attribution = {
     | "questions";
   certainty: number;
   sourceAttributionId?: string;
+  quotationIds?: string[];
   evidenceAssertionIds: string[];
 };
 ```
@@ -611,13 +612,20 @@ type Attribution = {
 
 World truth、narrator assertion 和 actor belief 始终是三个不同投影。
 
-实现进度说明（2026-08-25）：M4a-1 已将 `Proposition` 与
+实现进度说明（2026-08-25）：M4a 已完成。M4a-1 将 `Proposition` 与
 `Attribution` 落为 source-scoped、不可变 revision 语义 artifact，并接通
 proposal、closure、依赖排序、validator、检索、audit、prepared cache、
 branch snapshot 与删除生命周期。payload 暂时保留兼容用
 `EvidenceRef[]`；字段级 `EvidenceAssertion` 继续由 host 以 artifact revision
-为键独立存储，避免在 payload 内复制 assertion ID。quotation/mention trace
-以及 `KnowledgeDelta` acquisition 串联留在 M4a-2。
+为键独立存储，避免在 payload 内复制 assertion ID。M4a-2 为 attribution
+增加 quotation ID，校验 character holder 与已解析 speaker、`told` 接收者与已解析
+addressee，并将 proposition/attribution/acquisition provenance 接入 compiler
+closure、commit、possibility validation、replay、actor projection、prepared
+revision 和 audit。`claimId` 继续作为必需的 runtime key，因此旧 prepared
+revision 和事件历史仍可读取，新语义字段保持 additive。bridge 只接受能
+无损投影到 legacy claim 的 positive/asserted proposition；更丰富的
+polarity/modality 在 M4b 替换该 projection 前保持 semantic-only。proposition
+与 attribution 均不会自动升级为 world truth。
 
 ### 5.5 EventMention、Participation 与 EventRelation
 
@@ -1233,6 +1241,11 @@ coverage；M3 至此完成。
 ### M4：Typed Event、Proposition 与 Knowledge
 
 目标：拆开时间、因果、归因和知识路径。
+
+实现状态（2026-08-25）：M4a 已完成。proposition/attribution identity 与
+quotation-backed knowledge acquisition 已接通 source、identity resolution、
+closure、commit、replay 和 audit gate。M4b 尚待完成：typed event
+participation、独立证据化的 temporal/causal relation，以及 legacy projection。
 
 改造：
 

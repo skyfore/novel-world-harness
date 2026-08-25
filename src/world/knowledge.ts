@@ -1,4 +1,4 @@
-import type { Claim, CommitId, EntityId, KnowledgeFact, WorldState } from "./model.js";
+import type { Attribution, Claim, CommitId, EntityId, KnowledgeFact, Proposition, WorldState } from "./model.js";
 import type { WorldEngine } from "./engine.js";
 import { knownStateFieldKeys, projectActorVisibleState } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
@@ -12,7 +12,7 @@ export type ActorWorldView = {
   actorId: EntityId;
   atCommit: CommitId;
   selfState: Record<string, unknown>;
-  knowledge: Array<{ fact: KnowledgeFact; claim?: Claim }>;
+  knowledge: Array<{ fact: KnowledgeFact; claim?: Claim; proposition?: Proposition; attribution?: Attribution }>;
 };
 
 export function isActionableKnowledge(fact: KnowledgeFact): boolean {
@@ -63,6 +63,9 @@ export class KnowledgeProjector {
           actor[operation.claimId] = {
             actorId: operation.actorId,
             claimId: operation.claimId,
+            ...(operation.propositionId ? { propositionId: operation.propositionId } : {}),
+            ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
+            ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
             status: operation.status,
             confidence: operation.confidence,
             acquiredAtCommit: entry.id,
@@ -83,8 +86,18 @@ export class KnowledgeProjector {
     const knowledge = await this.project(commitId);
     const facts = Object.values(knowledge.actors[actorId] ?? {})
       .sort((left, right) => left.claimId.localeCompare(right.claimId))
-      .map((fact) => ({ fact, claim: context.claims?.get(fact.claimId) }))
-      .map(({ fact, claim }) => (claim ? { fact, claim } : { fact }));
+      .map((fact) => ({
+        fact,
+        claim: context.claims?.get(fact.claimId),
+        proposition: fact.propositionId ? context.propositions?.get(fact.propositionId) : undefined,
+        attribution: fact.attributionId ? context.attributions?.get(fact.attributionId) : undefined,
+      }))
+      .map(({ fact, claim, proposition, attribution }) => ({
+        fact,
+        ...(claim ? { claim } : {}),
+        ...(proposition ? { proposition } : {}),
+        ...(attribution ? { attribution } : {}),
+      }));
     const stateKnowledge = knownStateFieldKeys(
       actorId,
       facts

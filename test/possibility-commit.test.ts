@@ -108,6 +108,77 @@ describe("PossibilityCommitService", () => {
     expect(valid.accepted).toBe(true);
   });
 
+  it("rejects read acquisition whose document attribution has no quotation trace", async () => {
+    const { service, evidence } = await fixture();
+    await service.canon.putEntity({
+      id: "notice",
+      kind: "artifact",
+      canonicalName: "Notice",
+      aliases: [],
+      evidence,
+    });
+    await service.canon.putClaim({
+      id: "hero-may-refuse-claim",
+      subject: "hero",
+      predicate: "may-refuse-key",
+      object: true,
+      epistemicType: "explicit-fact",
+      evidence,
+    });
+    await service.canon.putProposition({
+      id: "hero-may-refuse",
+      subjectEntityId: "hero",
+      relationId: "may-refuse-key",
+      object: { kind: "literal", value: true },
+      polarity: "positive",
+      modality: "possible",
+      evidence,
+    });
+    await service.canon.putAttribution({
+      id: "notice-says-hero-may-refuse",
+      propositionId: "hero-may-refuse",
+      holderKind: "document",
+      holderEntityId: "notice",
+      attitude: "reports",
+      certainty: 1,
+      evidence,
+    });
+
+    const validation = await service.validate({
+      id: "hero-reads-notice",
+      kind: "generated",
+      title: "Hero reads the notice",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      causalParents: [],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      proposedKnowledge: {
+        version: 1,
+        operations: [{
+          op: "learn",
+          actorId: "hero",
+          claimId: "hero-may-refuse-claim",
+          propositionId: "hero-may-refuse",
+          attributionId: "notice-says-hero-may-refuse",
+          acquisitionMode: "read",
+          status: "believes",
+          confidence: 0.8,
+        }],
+      },
+      evidence,
+    });
+
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({
+      code: "INVALID_KNOWLEDGE_ACQUISITION_TRACE",
+      message: expect.stringContaining("requires attribution 'notice-says-hero-may-refuse' to cite a quotation"),
+    }));
+  });
+
   it("reserves canon-* ids for canonical-derived possibilities", async () => {
     const { service, evidence } = await fixture();
     const validation = await service.validate({

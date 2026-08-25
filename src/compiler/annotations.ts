@@ -16,6 +16,7 @@ export const SOURCE_ANNOTATION_ONTOLOGY_VERSION = "observation-v1" as const;
 
 export const sourceAnnotationTypeSchema = z.enum([
   "entity-mention",
+  "event-mention",
   "quotation",
   "discourse-segment",
 ]);
@@ -71,6 +72,55 @@ export const entityMentionSchema = z.object({
 });
 export type EntityMention = z.infer<typeof entityMentionSchema>;
 
+export const eventMentionTypeSchema = z.enum([
+  "communication",
+  "movement",
+  "transfer",
+  "conflict",
+  "perception",
+  "cognition",
+  "decision",
+  "social-interaction",
+  "state-change",
+  "creation",
+  "destruction",
+  "natural-process",
+  "institutional-action",
+  "other",
+]);
+export type EventMentionType = z.infer<typeof eventMentionTypeSchema>;
+
+export const eventMentionSchema = z.object({
+  ...annotationCommon,
+  annotationType: z.literal("event-mention"),
+  triggerAnchor: textAnchorSchema,
+  trigger: z.string().min(1).max(4_000),
+  extentAnchors: z.array(textAnchorSchema).min(1).max(32),
+  eventTypeCandidates: z.array(eventMentionTypeSchema).min(1).max(16)
+    .refine((values) => new Set(values).size === values.length, "eventTypeCandidates must be unique"),
+  participantMentionIds: z.array(idSchema).max(64)
+    .refine((values) => new Set(values).size === values.length, "participantMentionIds must be unique"),
+  sceneId: idSchema.optional(),
+  discourseSegmentId: idSchema.optional(),
+  salience: z.enum(["major", "supporting", "minor"]),
+  confidence: z.number().min(0).max(1),
+  interpretation: z.string().trim().min(1).max(1_000).optional(),
+}).strict().superRefine((value, ctx) => {
+  const anchors = [value.triggerAnchor, ...value.extentAnchors];
+  if (anchors.some((anchor) => anchor.sourceId !== value.sourceId)) {
+    ctx.addIssue({ code: "custom", path: ["extentAnchors"], message: "Event-mention anchors must belong to their source" });
+  }
+  const distinct = new Set(value.extentAnchors.map((anchor) => `${anchor.startByte}:${anchor.endByte}`));
+  if (distinct.size !== value.extentAnchors.length) {
+    ctx.addIssue({ code: "custom", path: ["extentAnchors"], message: "Event-mention extent anchors must be unique" });
+  }
+  if (!value.extentAnchors.some((anchor) =>
+    anchor.startByte <= value.triggerAnchor.startByte && anchor.endByte >= value.triggerAnchor.endByte)) {
+    ctx.addIssue({ code: "custom", path: ["triggerAnchor"], message: "An event trigger must be contained in one extent anchor" });
+  }
+});
+export type EventMention = z.infer<typeof eventMentionSchema>;
+
 export const quotationSchema = z.object({
   ...annotationCommon,
   annotationType: z.literal("quotation"),
@@ -125,6 +175,7 @@ export type DiscourseObservation = z.infer<typeof discourseObservationSchema>;
 
 export const sourceAnnotationSchema = z.discriminatedUnion("annotationType", [
   entityMentionSchema,
+  eventMentionSchema,
   quotationSchema,
   discourseObservationSchema,
 ]);
@@ -508,9 +559,32 @@ export async function validateSourceAnnotationClosure(
         const inspection = await verifier.inspectAnchor(anchor);
         for (const issue of inspection.issues) issues.add(`${label}: ${issue.code}: ${issue.message}`);
       }
+      if (annotation.annotationType === "entity-mention" && annotation.form !== "zero-anaphora") {
+        const inspection = await verifier.inspectAnchor(annotation.anchor);
+        if (inspection.valid && inspection.excerpt !== annotation.surface) {
+          issues.add(`${label}: entity mention surface does not equal its exact source anchor`);
+        }
+      }
+      if (annotation.annotationType === "event-mention") {
+        const inspection = await verifier.inspectAnchor(annotation.triggerAnchor);
+        if (inspection.valid && inspection.excerpt !== annotation.trigger) {
+          issues.add(`${label}: event trigger does not equal its exact source anchor`);
+        }
+      }
     }
     if (annotation.annotationType === "entity-mention" && annotation.sceneId) {
       requireAnnotationReference(issues, label, byId, annotation.sceneId, "discourse-segment", "sceneId", "scene");
+    }
+    if (annotation.annotationType === "event-mention") {
+      for (const participantMentionId of annotation.participantMentionIds) {
+        requireAnnotationReference(issues, label, byId, participantMentionId, "entity-mention", "participantMentionIds");
+      }
+      if (annotation.sceneId) {
+        requireAnnotationReference(issues, label, byId, annotation.sceneId, "discourse-segment", "sceneId", "scene");
+      }
+      if (annotation.discourseSegmentId) {
+        requireAnnotationReference(issues, label, byId, annotation.discourseSegmentId, "discourse-segment", "discourseSegmentId");
+      }
     }
     if (annotation.annotationType === "quotation") {
       if (annotation.speakerMentionId) {
@@ -532,6 +606,9 @@ export async function validateSourceAnnotationClosure(
 
 export function annotationAnchors(annotation: SourceAnnotation): TextAnchor[] {
   if (annotation.annotationType === "discourse-segment") return structuredClone(annotation.anchors);
+  if (annotation.annotationType === "event-mention") {
+    return [structuredClone(annotation.triggerAnchor), ...structuredClone(annotation.extentAnchors)];
+  }
   if (annotation.annotationType === "quotation" && annotation.cueAnchor) {
     return [structuredClone(annotation.anchor), structuredClone(annotation.cueAnchor)];
   }
@@ -540,6 +617,13 @@ export function annotationAnchors(annotation: SourceAnnotation): TextAnchor[] {
 
 export function annotationReferenceIds(annotation: SourceAnnotation): string[] {
   if (annotation.annotationType === "entity-mention") return annotation.sceneId ? [annotation.sceneId] : [];
+  if (annotation.annotationType === "event-mention") {
+    return [...new Set([
+      ...annotation.participantMentionIds,
+      ...(annotation.sceneId ? [annotation.sceneId] : []),
+      ...(annotation.discourseSegmentId ? [annotation.discourseSegmentId] : []),
+    ])].sort();
+  }
   if (annotation.annotationType === "quotation") {
     return [...new Set([
       ...(annotation.speakerMentionId ? [annotation.speakerMentionId] : []),
@@ -587,7 +671,9 @@ function requireAnnotationReference(
 }
 
 function firstAnchor(annotation: SourceAnnotation): TextAnchor {
-  return annotation.annotationType === "discourse-segment" ? annotation.anchors[0]! : annotation.anchor;
+  if (annotation.annotationType === "discourse-segment") return annotation.anchors[0]!;
+  if (annotation.annotationType === "event-mention") return annotation.extentAnchors[0]!;
+  return annotation.anchor;
 }
 
 function proposalIdentity(proposal: SourceAnnotationProposal): Omit<SourceAnnotationProposal, "createdAt"> {

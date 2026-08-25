@@ -1191,7 +1191,10 @@ removal 与分页检索。Identity resolution 明确保留给 M3。
 `src/compiler/entity-resolution-retrieval.ts` 已实现 deterministic lexical
 candidate、显式 resolved/new-entity/ambiguous/unresolved 决策、immutable
 superseding revision、source-scoped 分页、audit denominator，以及 canonical
-name/alias trace gate。M3b event mention/event resolution 是下一步。
+name/alias trace gate。M3b-1 event mention 也已进入 non-canonical observation
+层：保留 exact trigger/extent anchor、participant mention reference、discourse
+context、salience、closure、分页与 audit count。M3b-2 event identity/resolution
+是下一步。
 
 改造：
 

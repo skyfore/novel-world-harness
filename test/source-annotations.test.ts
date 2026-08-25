@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 describe("source annotation compilation", () => {
-  it("commits a source-local mention/quotation/discourse graph without creating canonical identities", async () => {
+  it("commits a source-local entity/event/quotation/discourse graph without creating canonical truth", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-source-annotations-"));
     roots.push(root);
     const content = `Hero said, "Wait." The villager listened.\nHero remembered the fire.\n`;
@@ -31,6 +31,7 @@ describe("source annotation compilation", () => {
     const toolset = createCompilerProposalToolset(root, { provider: "test", model: "observation-model" });
     await toolset.beginBatch([fixture.segmentId], batchId, fixture.source.id);
     const mention = toolset.tools.find((tool) => tool.name === "propose_entity_mention")!;
+    const eventMention = toolset.tools.find((tool) => tool.name === "propose_event_mention")!;
     const quotation = toolset.tools.find((tool) => tool.name === "propose_quotation")!;
     const discourse = toolset.tools.find((tool) => tool.name === "propose_discourse_segment")!;
     const finish = toolset.tools.find((tool) => tool.name === "finish_compiler_batch")!;
@@ -63,6 +64,19 @@ describe("source annotation compilation", () => {
       viewpoint_mention_id: "mention-hero-opening",
       confidence: 0.95,
     } as never, undefined, undefined, context);
+    await eventMention.execute("speech-event", {
+      proposal_id: "proposal-event-said",
+      annotation_id: "event-said-wait",
+      trigger_selector: { segment_id: fixture.segmentId, exact: "said" },
+      trigger: "said",
+      extent_selectors: [{ segment_id: fixture.segmentId, exact: 'Hero said, "Wait."' }],
+      event_type_candidates: ["communication", "social-interaction"],
+      participant_mention_ids: ["mention-hero-opening", "mention-villager"],
+      scene_id: "scene-opening",
+      salience: "supporting",
+      confidence: 0.96,
+      interpretation: "The speech and its intended listener form one represented communication event.",
+    } as never, undefined, undefined, context);
     await quotation.execute("wait-quote", {
       proposal_id: "proposal-quote-wait",
       annotation_id: "quote-wait",
@@ -89,7 +103,7 @@ describe("source annotation compilation", () => {
       reviewed_segments: [{
         segment_id: fixture.segmentId,
         disposition: "proposed",
-        summary: "Recorded two mentions, attributed speech, an enclosing scene, and an overlapping recollection.",
+        summary: "Recorded entity and event mentions, attributed speech, an enclosing scene, and an overlapping recollection.",
       }],
       summary: "Committed source observations only.",
     } as never, undefined, undefined, context)).resolves.toMatchObject({
@@ -97,6 +111,7 @@ describe("source annotation compilation", () => {
         compilerBatchFinished: true,
         proposalIds: [
           "proposal-discourse-memory",
+          "proposal-event-said",
           "proposal-mention-hero",
           "proposal-mention-villager",
           "proposal-quote-wait",
@@ -107,10 +122,13 @@ describe("source annotation compilation", () => {
 
     const annotations = await new SourceAnnotationStore(root).list(fixture.source.id);
     expect(annotations.filter((annotation) => annotation.annotationType === "entity-mention")).toHaveLength(2);
+    expect(annotations.filter((annotation) => annotation.annotationType === "event-mention")).toHaveLength(1);
     expect(annotations.filter((annotation) => annotation.annotationType === "quotation")).toHaveLength(1);
     expect(annotations.filter((annotation) => annotation.annotationType === "discourse-segment")).toHaveLength(2);
     expect(annotations.find((annotation) => annotation.id === "mention-hero-opening")).not.toHaveProperty("entityId");
+    expect(annotations.find((annotation) => annotation.id === "event-said-wait")).not.toHaveProperty("canonicalEventId");
     await expect(new CanonicalModelStore(root).listEntities()).resolves.toEqual([]);
+    await expect(new CanonicalModelStore(root).listEvents()).resolves.toEqual([]);
     await expect(new ProposalStore(root).list("pending")).resolves.toEqual([]);
 
     const structure = await new SourceStructureStore(root).read(fixture.source.id);
@@ -123,6 +141,7 @@ describe("source annotation compilation", () => {
     await expect(auditCompiler(root, { sourceId: fixture.source.id })).resolves.toMatchObject({
       observations: {
         entityMentions: 2,
+        eventMentions: 1,
         quotations: 1,
         discourseSegments: 2,
         pendingAnnotations: 0,
@@ -141,6 +160,14 @@ describe("source annotation compilation", () => {
       sourceId: fixture.source.id,
       returned: 1,
       results: [{ ref: "committed:quote-wait", annotationType: "quotation" }],
+    });
+    const foundEvent = await find.execute("find-event-mention", {
+      query: "said",
+      annotation_type: "event-mention",
+    } as never, undefined, undefined, context);
+    expect(JSON.parse(resultText(foundEvent))).toMatchObject({
+      returned: 1,
+      results: [{ ref: "committed:event-said-wait", annotationType: "event-mention", label: "said (supporting event mention)" }],
     });
 
     const removal = await removeNovelAnalysis(root, fixture.source);
@@ -183,6 +210,51 @@ describe("source annotation compilation", () => {
     });
     await expect(new SourceAnnotationStore(root).listProposals(fixture.source.id, "rejected"))
       .resolves.toContainEqual(expect.objectContaining({ id: "proposal-dangling-quote" }));
+  });
+
+  it("requires an event trigger inside its extent and closes participant/discourse references", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-mention-closure-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero waited, then left.\n");
+    const batchId = `batch-${fixture.source.id}-event-mention-closure`;
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], batchId, fixture.source.id);
+    const eventMention = toolset.tools.find((tool) => tool.name === "propose_event_mention")!;
+    const finish = toolset.tools.find((tool) => tool.name === "finish_compiler_batch")!;
+
+    await expect(eventMention.execute("outside-extent", {
+      proposal_id: "proposal-event-outside",
+      annotation_id: "event-left-outside",
+      trigger_selector: { segment_id: fixture.segmentId, exact: "left" },
+      trigger: "left",
+      extent_selectors: [{ segment_id: fixture.segmentId, exact: "Hero waited" }],
+      event_type_candidates: ["movement"],
+      participant_mention_ids: [],
+      salience: "major",
+      confidence: 0.8,
+    } as never, undefined, undefined, context)).rejects.toThrow("trigger must be contained");
+
+    await eventMention.execute("dangling-event", {
+      proposal_id: "proposal-event-dangling",
+      annotation_id: "event-left",
+      trigger_selector: { segment_id: fixture.segmentId, exact: "left" },
+      trigger: "left",
+      extent_selectors: [{ segment_id: fixture.segmentId, exact: "then left" }],
+      event_type_candidates: ["movement", "state-change"],
+      participant_mention_ids: ["mention-missing-hero"],
+      scene_id: "scene-missing",
+      discourse_segment_id: "discourse-missing",
+      salience: "major",
+      confidence: 0.8,
+    } as never, undefined, undefined, context);
+    await expect(finish.execute("finish-dangling-event", {
+      outcome: "complete",
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Event references require closure." }],
+      summary: "Attempt event mention closure.",
+    } as never, undefined, undefined, context)).rejects.toThrow(
+      /unknown annotation 'discourse-missing'.*unknown annotation 'mention-missing-hero'.*unknown annotation 'scene-missing'/s,
+    );
+    await expect(new SourceAnnotationStore(root).list(fixture.source.id)).resolves.toEqual([]);
   });
 
   it("disambiguates repeated surface forms and recovers staged annotations after a process restart", async () => {

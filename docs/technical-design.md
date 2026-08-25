@@ -215,12 +215,18 @@ accounting without blockers is `ready`.
 
 #### 5.2.2 Source-annotation lifecycle
 
-`src/compiler/annotations.ts` is the authority for three non-canonical source
+`src/compiler/annotations.ts` is the authority for four non-canonical source
 observations:
 
 - `EntityMention` stores exact source surface (or an explicitly interpreted
   zero anaphor), mention form, and entity-kind candidates. It deliberately has
   no `entityId`, canonical name, or alias field.
+- `EventMention` stores an exact trigger, one or more possibly discontinuous
+  extent anchors, event-type candidates, participant *mention IDs*, enclosing
+  discourse references, and major/supporting/minor salience. It deliberately
+  has no canonical event ID, truth status, state delta, or causal edge: a
+  remembered, dreamed, hypothetical, denied, or summarized event is still only
+  a textual observation at this layer.
 - `Quotation` stores direct/indirect/free-indirect mode and refers to speaker
   and addressee *mention IDs*. Attribution therefore remains auditable before
   identity resolution.
@@ -245,8 +251,9 @@ without deleting immutable history.
 `find_source_annotations` returns bounded, source-scoped summaries;
 `read_source_annotation` pages the exact payload. Neither tool exposes another
 novel's observations. Audit verifies all committed anchors, reports annotation
-counts and pending closure failures, while resolution readiness remains
-`unknown` until M3 provides explicit resolution records and a denominator.
+counts and pending closure failures. Entity resolution has an explicit M3a
+denominator; event mentions remain visibly unresolved until M3b adds event
+identity records.
 
 #### 5.2.3 Entity identity resolution
 

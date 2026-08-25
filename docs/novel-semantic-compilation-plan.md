@@ -1282,7 +1282,10 @@ Implementation status (2026-08-25): M3a entity resolution is complete.
 `src/compiler/entity-resolution-retrieval.ts` provide deterministic lexical
 candidates, explicit resolved/new/ambiguous/unresolved decisions, immutable
 superseding revisions, source-scoped paging, audit denominators, and canonical
-name/alias trace gates. M3b event mentions and event resolution remain next.
+name/alias trace gates. M3b-1 event mentions are also implemented in the
+non-canonical observation layer with exact trigger/extent anchors, participant
+mention references, discourse context, salience, closure, paging, and audit
+counts. M3b-2 event identity/resolution remains next.
 
 Work:
 

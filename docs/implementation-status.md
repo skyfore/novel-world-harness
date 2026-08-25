@@ -13,7 +13,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Terminal hub | Implemented | Claude Code-style TUI, workspace catalogs, committed progress, durable world resume, local lexical discovery, and bounded reads; general model tools remain read-only |
 | Source ingest | Implemented | Exact file/stdin/inline bytes archived globally by SHA-256, source manifest, widened deterministic evidence segments, plus finish-gated declarative chapter discovery when built-in headings are insufficient |
 | Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce source-exclusive typed pending proposals, recover drafts across retries, allow narrow withdrawal, and use host-owned finish and total-tool-call circuit breakers |
-| Source observations | M2 implemented | Immutable-source paragraph/sentence partition, exact mention/quotation/discourse annotations, source-local closure, accounting, audit, batch recovery, and paged retrieval; identity/event resolution remains M3 |
+| Source observations | M2 + M3b-1 implemented | Immutable-source paragraph/sentence partition, exact entity/event mention, quotation, and discourse annotations, source-local closure, accounting, audit, batch recovery, and paged retrieval; event mentions carry no truth or canonical-event authority |
 | Entity resolution | M3a implemented | Deterministic source-scoped lexical candidates, explicit resolved/new/ambiguous/unresolved decisions, immutable superseding revisions, unresolved audit queues, and canonical name/alias trace gates; event resolution remains M3b |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
@@ -41,6 +41,11 @@ The branch now implements a constrained end-to-end path from a local novel throu
   and atomic current refs. Models submit exact text selectors; the host resolves
   offsets and hashes. Mention and quotation relations use mention IDs, so this
   layer cannot silently manufacture canonical entities or aliases.
+- Event mentions preserve exact trigger/extent evidence, participant mention
+  references, discourse context, type candidates, and salience without
+  asserting occurrence, chronology, effects, or causality. Their source-local
+  references are finish-gated and their payloads use the same immutable
+  observation revision lifecycle.
 - Entity identity is a separate versioned decision keyed by mention. Exact and
   normalized name/alias matches generate candidates deterministically, but do
   not auto-merge. Canonical names and aliases from sources with mention

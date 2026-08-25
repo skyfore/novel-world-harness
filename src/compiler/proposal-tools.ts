@@ -53,6 +53,7 @@ import {
   SOURCE_ANNOTATION_ONTOLOGY_VERSION,
   SourceAnnotationStore,
   annotationAnchors,
+  eventMentionSchema,
   entityMentionSchema,
   quotationSchema,
   discourseObservationSchema,
@@ -109,6 +110,7 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "defer_boundary_artifact",
   ...Object.values(labels).map(({ name }) => name),
   "propose_entity_mention",
+  "propose_event_mention",
   "propose_quotation",
   "propose_discourse_segment",
   "propose_entity_resolution",
@@ -125,6 +127,7 @@ export const BOUNDARY_CALIBRATION_TOOL_NAMES = [
 
 export const SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES = [
   "propose_entity_mention",
+  "propose_event_mention",
   "propose_quotation",
   "propose_discourse_segment",
 ] as const;
@@ -413,6 +416,40 @@ const entityMentionParameters = Type.Object({
   ]),
   kind_candidates: Type.Array(entityKindCandidateParameters, { minItems: 1, maxItems: 8, uniqueItems: true }),
   scene_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  confidence: Type.Number({ minimum: 0, maximum: 1 }),
+  interpretation: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
+}, { additionalProperties: false });
+
+const eventMentionTypeParameters = Type.Union([
+  Type.Literal("communication"),
+  Type.Literal("movement"),
+  Type.Literal("transfer"),
+  Type.Literal("conflict"),
+  Type.Literal("perception"),
+  Type.Literal("cognition"),
+  Type.Literal("decision"),
+  Type.Literal("social-interaction"),
+  Type.Literal("state-change"),
+  Type.Literal("creation"),
+  Type.Literal("destruction"),
+  Type.Literal("natural-process"),
+  Type.Literal("institutional-action"),
+  Type.Literal("other"),
+]);
+
+const eventMentionParameters = Type.Object({
+  ...annotationIdentityParameters,
+  trigger_selector: modelTextSelectorParameters,
+  trigger: Type.String({ minLength: 1, maxLength: 4_000 }),
+  extent_selectors: Type.Array(modelTextSelectorParameters, { minItems: 1, maxItems: 32 }),
+  event_type_candidates: Type.Array(eventMentionTypeParameters, { minItems: 1, maxItems: 16, uniqueItems: true }),
+  participant_mention_ids: Type.Array(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }), {
+    maxItems: 64,
+    uniqueItems: true,
+  }),
+  scene_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  discourse_segment_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  salience: Type.Union([Type.Literal("major"), Type.Literal("supporting"), Type.Literal("minor")]),
   confidence: Type.Number({ minimum: 0, maximum: 1 }),
   interpretation: Type.Optional(Type.String({ minLength: 1, maxLength: 1_000 })),
 }, { additionalProperties: false });
@@ -1227,6 +1264,54 @@ export function createCompilerProposalToolset(
       return annotationResult(input.proposal_id, annotation);
     },
   });
+  const eventMentionTool = defineTool<typeof eventMentionParameters, CompilerProposalDetails>({
+    name: "propose_event_mention",
+    label: "Propose event mention",
+    description: "Stage an exact textual event occurrence with trigger, extent, participant mentions, and discourse context. This never asserts that the event happened or creates a canonical event.",
+    promptSnippet: "Record a source event mention before proposing event identity or world effects",
+    promptGuidelines: [
+      "Copy trigger exactly from trigger_selector.exact and make sure one extent selector contains it.",
+      "Reference participant mention IDs, never canonical entity IDs.",
+      "Salience describes compilation importance, not factuality. Hypothetical, remembered, dreamed, denied, or narrated events remain observations until later adjudication.",
+      "Use scene_id for an enclosing scene and discourse_segment_id for the most relevant flashback, dream, document, summary, or other discourse layer.",
+    ],
+    executionMode: "sequential",
+    parameters: eventMentionParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      if (isStructureDiscoveryBatch()) throw new Error("Source annotations are unavailable during chapter structure discovery.");
+      if (input.trigger !== input.trigger_selector.exact) {
+        throw new Error("An event mention trigger must exactly equal trigger_selector.exact.");
+      }
+      const [triggerAnchor, extentAnchors] = await Promise.all([
+        resolveObservationSelector(input.trigger_selector),
+        Promise.all(input.extent_selectors.map(resolveObservationSelector)),
+      ]);
+      const annotation = eventMentionSchema.parse({
+        version: 1,
+        annotationType: "event-mention",
+        id: input.annotation_id,
+        sourceId: activeSourceId,
+        triggerAnchor,
+        trigger: input.trigger,
+        extentAnchors: extentAnchors
+          .sort((left, right) => left.startByte - right.startByte || left.endByte - right.endByte),
+        eventTypeCandidates: input.event_type_candidates,
+        participantMentionIds: input.participant_mention_ids,
+        ...(input.scene_id ? { sceneId: input.scene_id } : {}),
+        ...(input.discourse_segment_id ? { discourseSegmentId: input.discourse_segment_id } : {}),
+        salience: input.salience,
+        confidence: input.confidence,
+        ...(input.interpretation ? { interpretation: input.interpretation } : {}),
+        derivation: annotationDerivation("propose_event_mention", input.proposal_id),
+      });
+      await stageAnnotation(input.proposal_id, annotation, "propose_event_mention");
+      return annotationResult(input.proposal_id, annotation);
+    },
+  });
   const quotationTool = defineTool<typeof quotationParameters, CompilerProposalDetails>({
     name: "propose_quotation",
     label: "Propose quotation",
@@ -1304,7 +1389,7 @@ export function createCompilerProposalToolset(
       return annotationResult(input.proposal_id, annotation);
     },
   });
-  const annotationProposalTools = [entityMentionTool, quotationTool, discourseObservationTool];
+  const annotationProposalTools = [entityMentionTool, eventMentionTool, quotationTool, discourseObservationTool];
   const identityResolutionTool = defineTool<typeof identityResolutionParameters, CompilerProposalDetails>({
     name: "propose_entity_resolution",
     label: "Propose entity resolution",

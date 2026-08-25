@@ -78,6 +78,7 @@ export function createSourceAnnotationRetrievalTools(
     query: Type.String({ minLength: 1, maxLength: 500, description: "Literal case-insensitive observation text/ID, or * for all." }),
     annotation_type: Type.Optional(Type.Union([
       Type.Literal("entity-mention"),
+      Type.Literal("event-mention"),
       Type.Literal("quotation"),
       Type.Literal("discourse-segment"),
     ])),
@@ -88,11 +89,12 @@ export function createSourceAnnotationRetrievalTools(
   const find = defineTool({
     name: "find_source_annotations",
     label: "Find source annotations",
-    description: "Search committed and current pending source observations without treating mentions as canonical identities.",
-    promptSnippet: "Find prior mentions, quotations, and discourse spans before proposing duplicates",
+    description: "Search committed and current pending source observations without treating mentions as canonical identities or events.",
+    promptSnippet: "Find prior entity/event mentions, quotations, and discourse spans before proposing duplicates",
     promptGuidelines: [
       "Use observation refs only inside the active source.",
       "An entity mention is source evidence awaiting identity resolution, not a canonical entity.",
+      "An event mention records textual presentation, not a committed occurrence.",
     ],
     executionMode: "sequential" as const,
     parameters: findParameters,
@@ -149,7 +151,7 @@ export function createSourceAnnotationRetrievalTools(
     name: "read_source_annotation",
     label: "Read source annotation",
     description: "Read one exact source-scoped observation by stable ref. Large records are losslessly paged.",
-    promptSnippet: "Read an exact mention, quotation, or discourse observation",
+    promptSnippet: "Read an exact entity/event mention, quotation, or discourse observation",
     promptGuidelines: ["Continue from nextOffset until complete before revising a paged observation."],
     executionMode: "sequential" as const,
     parameters: readParameters,
@@ -193,14 +195,15 @@ function annotationLabel(annotation: SourceAnnotation): string {
   if (annotation.annotationType === "entity-mention") {
     return annotation.surface || `[zero anaphora: ${annotation.interpretation ?? annotation.id}]`;
   }
+  if (annotation.annotationType === "event-mention") return `${annotation.trigger} (${annotation.salience} event mention)`;
   if (annotation.annotationType === "quotation") return `${annotation.mode} quotation ${annotation.id}`;
   return `${annotation.kind} discourse ${annotation.id}`;
 }
 
 function firstStartByte(annotation: SourceAnnotation): number {
-  return annotation.annotationType === "discourse-segment"
-    ? annotation.anchors[0]!.startByte
-    : annotation.anchor.startByte;
+  if (annotation.annotationType === "discourse-segment") return annotation.anchors[0]!.startByte;
+  if (annotation.annotationType === "event-mention") return annotation.extentAnchors[0]!.startByte;
+  return annotation.anchor.startByte;
 }
 
 function requireSourceId(getSourceId: () => string | undefined): string {

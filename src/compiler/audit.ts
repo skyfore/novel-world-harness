@@ -46,6 +46,7 @@ export type CompilerAuditReport = {
     structuralUnits: number;
     baseUnits: number;
     entityMentions: number;
+    eventMentions: number;
     quotations: number;
     discourseSegments: number;
     pendingAnnotations: number;
@@ -184,6 +185,7 @@ export async function auditCompiler(
   let structuralUnits = 0;
   let baseUnits = 0;
   let entityMentions = 0;
+  let eventMentions = 0;
   let quotations = 0;
   let discourseSegments = 0;
   let pendingAnnotations = 0;
@@ -228,6 +230,7 @@ export async function auditCompiler(
       annotationStore.listProposals(source.id, "pending"),
     ]);
     entityMentions += annotations.filter((annotation) => annotation.annotationType === "entity-mention").length;
+    eventMentions += annotations.filter((annotation) => annotation.annotationType === "event-mention").length;
     quotations += annotations.filter((annotation) => annotation.annotationType === "quotation").length;
     discourseSegments += annotations.filter((annotation) => annotation.annotationType === "discourse-segment").length;
     pendingAnnotations += annotationProposals.length;
@@ -634,6 +637,7 @@ export async function auditCompiler(
       structuralUnits,
       baseUnits,
       entityMentions,
+      eventMentions,
       quotations,
       discourseSegments,
       pendingAnnotations,

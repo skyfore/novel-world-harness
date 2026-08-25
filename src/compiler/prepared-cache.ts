@@ -12,6 +12,11 @@ import { InitialWorldStore, initialWorldSchema } from "../world/initial.js";
 import { WORLD_ENGINE_VERSION, attributionSchema, canonicalEventSchema, claimSchema, entitySchema, eventParticipationSchema, eventRelationSchema, propositionSchema, worldRuleSchema, type EvidenceRef } from "../world/model.js";
 import { validateEventParticipationCatalog } from "../world/event-semantics.js";
 import { validateEventRelationCatalog } from "../world/event-relations.js";
+import {
+  CHARACTER_ONTOLOGY_VERSION,
+  characterOntologyEvidence,
+  validateCharacterOntologyEvidenceAssertions,
+} from "../world/character-ontology.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
@@ -27,11 +32,12 @@ import {
   sourceTitleInferenceSchema,
 } from "../storage/novel-title.js";
 import { EvidenceVerifier } from "./evidence.js";
+import { EvidenceAssertionStore } from "./evidence-assertions.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 20;
+export const COMPILER_PROMPT_VERSION = 21;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -107,6 +113,13 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
       [...relation.evidence, ...(relation.counterEvidence ?? [])],
       sourceId,
       `Prepared event relation ${relation.id}`,
+    );
+  }
+  for (const model of bundle.canonical.models) {
+    assertEvidenceExclusiveToSource(
+      [...model.evidence, ...characterOntologyEvidence(model)],
+      sourceId,
+      `Prepared character model ${model.actorId}`,
     );
   }
   assertEvidenceExclusiveToSource(bundle.canonical.initialWorld.evidence, sourceId, "Prepared bundle initial world");
@@ -489,6 +502,8 @@ export class PreparedNovelCache {
       },
     });
     await this.assertTitleInferenceEvidence(bundle);
+    assertPreparedBundleSourceScope(bundle);
+    await assertPreparedCharacterEvidence(this.workspaceRoot, bundle);
     assertSelfContainedBaseline(bundle, canonical);
     return bundle;
   }
@@ -868,6 +883,33 @@ function isAlreadyExists(error: unknown): boolean {
   return code === "EEXIST" || code === "ENOTEMPTY";
 }
 
+async function assertPreparedCharacterEvidence(
+  workspaceRoot: string,
+  bundle: PreparedNovelBundle,
+): Promise<void> {
+  const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
+  const verifier = new EvidenceVerifier(workspaceRoot);
+  for (const model of bundle.canonical.models) {
+    if (model.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION) continue;
+    const binding = await exactEvidence.bindingForArtifact("character-model", model.actorId);
+    if (!binding?.assertions.length) {
+      throw new Error(`Prepared controlled character model ${model.actorId} has no exact evidence binding.`);
+    }
+    if (binding.artifactHash !== contentHash(model)) {
+      throw new Error(`Prepared controlled character model ${model.actorId} has a stale exact evidence binding.`);
+    }
+    const issues = [
+      ...validateCharacterOntologyEvidenceAssertions(model, binding.assertions),
+      ...(await verifier.verifyAssertions(binding.assertions)).issues,
+    ];
+    if (issues.length) {
+      throw new Error(`Prepared controlled character model ${model.actorId} has invalid exact evidence: ${issues
+        .map((issue) => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)
+        .join("; ")}`);
+    }
+  }
+}
+
 function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore: CanonicalModelStore): void {
   const catalog: CompilerValidationCatalog = {
     entities: new Map(bundle.canonical.entities.map((item) => [item.id, item])),
@@ -878,6 +920,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     eventParticipations: new Map(bundle.canonical.eventParticipations.map((item) => [item.id, item])),
     eventRelations: new Map(bundle.canonical.eventRelations.map((item) => [item.id, item])),
     rules: new Map(bundle.canonical.rules.map((item) => [item.id, item])),
+    goals: new Map(bundle.canonical.goals.map((item) => [item.id, item])),
   };
   const validator = new CompilerValidator(canonicalStore);
   const artifacts: Array<{ kind: CanonicalProposalKind; label: string; payload: unknown }> = [

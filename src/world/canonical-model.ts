@@ -24,6 +24,7 @@ import {
   type Proposition,
   type WorldRule,
 } from "./model.js";
+import { characterOntologyEvidence } from "./character-ontology.js";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "event-participations" | "event-relations" | "rules";
@@ -286,7 +287,7 @@ function proposalEvidenceSourceIds(value: Record<string, unknown>): string[] {
   const payload = value.payload && typeof value.payload === "object" && !Array.isArray(value.payload)
     ? value.payload as Record<string, unknown>
     : undefined;
-  const candidates = [value.evidence, payload?.evidence, payload?.counterEvidence];
+  const candidates = [value.evidence, payload?.evidence, payload?.counterEvidence, characterOntologyEvidence(payload)];
   const sourceIds = new Set<string>();
   for (const candidate of candidates) {
     if (candidate === undefined) continue;

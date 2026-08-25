@@ -14,6 +14,7 @@ import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { ChapterSplitPlanStore, evaluateChapterSplitPlan } from "../src/compiler/chapter-split.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
+import { ActorModelStore } from "../src/world/actors.js";
 
 const roots: string[] = [];
 
@@ -28,6 +29,55 @@ async function temporaryRoot(prefix: string): Promise<string> {
 }
 
 describe("versioned prepared novel cache", () => {
+  it("refuses to publish controlled character semantics without exact per-item evidence", async () => {
+    const cacheRoot = await temporaryRoot("nwh-prepared-character-evidence-cache-");
+    const sourceRoot = await temporaryRoot("nwh-prepared-character-evidence-source-");
+    const fixture = await createEvidenceFixture(sourceRoot, "Hero waits and carefully weighs the danger.\n");
+    const evidence = fixture.evidence("Hero waits and carefully weighs the danger.");
+    await new CanonicalModelStore(sourceRoot).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence,
+    });
+    await new InitialWorldStore(sourceRoot).put({
+      version: 1,
+      delta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+      },
+      evidence,
+    });
+    await new ActorModelStore(sourceRoot).putModel({
+      actorId: "hero",
+      ontologyVersion: "character-v1",
+      traits: {},
+      decisionBiases: {},
+      dispositions: [{
+        id: "hero-deliberates",
+        actorId: "hero",
+        dimensionId: "deliberation",
+        value: 0.8,
+        scope: { kind: "global" },
+        stability: "stable",
+        basis: "explicit-characterization",
+        status: "supported",
+        confidence: 0.9,
+        evidence,
+      }],
+      evidence,
+    });
+    const batches = await prepareCompilerBatches(sourceRoot, fixture.source);
+    await new CompilerBatchStore(sourceRoot).replaceCompleted(
+      fixture.source.id,
+      batches.map((batch) => batch.id),
+    );
+
+    await expect(new PreparedNovelCache(sourceRoot, cacheRoot).publish(fixture.source))
+      .rejects.toThrow("has no exact evidence binding");
+  });
+
   it("restores accepted model-inferred title metadata across different upload filenames", async () => {
     const cacheRoot = await temporaryRoot("nwh-prepared-title-cache-");
     const sourceRoot = await temporaryRoot("nwh-prepared-title-source-");

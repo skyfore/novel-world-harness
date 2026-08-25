@@ -1,6 +1,6 @@
 # Technical Plan: Evidence-Grounded Full-Novel Semantic Compilation
 
-- **Status:** In progress — M0 through M4 implemented; M5 through M7 remain
+- **Status:** In progress — M0 through M4 and M5a implemented; M5b through M7 remain
 - **Date:** 2026-08-25
 - **Scope:** Novel ingest, structural segmentation, semantic annotation, identity resolution, canonical compilation, audit, reconciliation, and reparse
 - **Preserves:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0002](adr/0002-user-level-content-addressed-storage.md), and [ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
@@ -246,13 +246,13 @@ projected from committed history and private knowledge rather than stored as a
 second mutable timeline
 ([development.ts](../src/world/development.ts#L61)).
 
-The weak point is the unrestricted map from arbitrary trait/bias names to scalar
-values
-([actors.ts](../src/world/actors.ts#L101)). The values have no shared
+The pre-M5a weak point—and the remaining legacy compatibility path—is the
+unrestricted map from arbitrary trait/bias names to scalar values
+([actors.ts](../src/world/actors.ts#L115)). Those legacy values have no shared
 definition, behavioral anchors, context, target, duration, supporting versus
 contradicting evidence, or uncertainty. The runtime projection also exposes only
 the last 12 directly participated events as recent lived experience
-([development.ts](../src/world/development.ts#L84)).
+([development.ts](../src/world/development.ts#L104)).
 
 [PersonaBank](https://aclanthology.org/L16-1163/) combines timeline, character
 goals/motivations, and affective impacts;
@@ -261,6 +261,40 @@ motivation and emotional reaction chains.
 
 Finding: preserve derived development, but replace ungoverned trait labels with
 versioned behavioral dimensions and event-linked development episodes.
+
+M5a now implements that finding. `character-v1` registers eight deliberately
+behavioral, non-diagnostic dimensions and ten controlled situation contexts
+with shared definitions and observable anchors
+([character-ontology.ts](../src/world/character-ontology.ts#L14),
+[character-ontology.ts](../src/world/character-ontology.ts#L30)). Dispositions
+separate scope, stability, evidential basis, validity time, confidence, and
+supported versus contested interpretation; stable behavioral inference needs
+two distinct spans, while explicit characterization needs explicit evidence
+([character-ontology.ts](../src/world/character-ontology.ts#L170)). Appraisals
+link an experienced/reported/inferred event to an interpretation proposition,
+controlled emotion, affected goals, and resulting intention; development
+episodes separately record trigger mode, before/after dispositions, mechanism,
+time, decay, and reversal
+([character-ontology.ts](../src/world/character-ontology.ts#L223),
+[character-ontology.ts](../src/world/character-ontology.ts#L242)).
+
+This is enforced at three boundaries rather than trusted as prompt convention:
+V2 schemas reject unregistered free-form keys unless explicitly namespaced
+`legacy:` ([actors.ts](../src/world/actors.ts#L112)); prospective and committed
+catalog validation rejects dangling actor/event/proposition/goal/disposition
+references ([validator.ts](../src/compiler/validator.ts#L570)); exact per-item
+support/counter assertions must match the embedded source spans at submit,
+closure, commit, audit, and prepared publication boundaries
+([character-ontology.ts](../src/world/character-ontology.ts#L390),
+[prepared-cache.ts](../src/compiler/prepared-cache.ts#L886)); and runtime
+projection activates only non-contested records whose event, experience, and
+story-time gates are satisfied
+([character-ontology.ts](../src/world/character-ontology.ts#L542)). Actor-facing
+model views remove evidence and internal artifact IDs, and suppress
+target-specific dispositions when the target is not visible to that actor
+([character-ontology.ts](../src/world/character-ontology.ts#L632)). The remaining
+M5 work is directed relationship state, spatial/rule domains, and deterministic
+salience selection.
 
 ### 3.8 Current audit cannot measure full-book semantic recall
 
@@ -303,7 +337,7 @@ state deltas, goals, and runtime checkpoints.
 Finding: repair and reparse need explicit source-accounting gaps and artifact
 dependencies.
 
-## 4. Current end-to-end flow after M0-M4
+## 4. Current end-to-end flow after M0-M4 and M5a
 
 ```text
 nwh ingest
@@ -320,20 +354,22 @@ nwh compile-source / prepare-all
   -> stage explicit entity/event resolution decisions
   -> model submits typed proposals plus exact supporting/contradicting selectors
   -> host resolves trusted anchors, EvidenceRefs, and derivation provenance
+  -> character-v1 separates disposition, appraisal, and development proposals
   -> finish validates source accounting and the prospective semantic graph
   -> pending proposal store
 
 accept / prepare
   -> cryptographic evidence validation
   -> mention-resolution and exact-target trace validation
-  -> reference, state-schema, participation, epistemic, and event-relation validation
+  -> reference, state-schema, participation, epistemic, event-relation,
+     and character-ontology validation
   -> dependency ordering / semantic cycle checks
   -> immutable canonical revision + current ref
   -> prepared publication repeats whole-catalog projection/readiness gates
 
 audit / reconcile
   -> source-accounting denominators and observation/resolution coverage
-  -> exact-evidence, participation, epistemic, and typed-causality metrics
+  -> exact-evidence, participation, epistemic, typed-causality, and controlled-character metrics
   -> bounded repair queues; dependency-aware invalidation remains M6
 
 reparse
@@ -345,6 +381,7 @@ runtime
   -> committed events are branch truth
   -> snapshot V6 pins proposition/attribution/participation/relation revisions
   -> typed semantic records derive compatibility event views, never branch truth
+  -> character semantics activate only from committed/experienced events and actor-safe visibility
   -> deterministic state, knowledge, scenes, and character development
 ```
 
@@ -353,8 +390,9 @@ validation -> explicit acceptance -> replay sequence
 ([technical-design.md](technical-design.md#L933)). Source annotations and
 resolution records are now non-canonical predecessors of world proposals;
 finish-time closure prevents an incomplete prospective graph from being
-checkpointed ([proposals.ts](../src/compiler/proposals.ts#L316)). M5 still needs
-the richer character/relationship/spatial/rule ontology, M6 needs explicit
+checkpointed ([proposals.ts](../src/compiler/proposals.ts#L316)). M5a character
+semantics are now compiled, source-scoped, audited, and projected; M5b/M5c still
+need relationship/spatial/rule ontology and salience selection. M6 needs explicit
 dependency-driven invalidation and publication policy, and M7 needs a labeled
 multi-novel semantic benchmark.
 
@@ -842,12 +880,14 @@ type CharacterDisposition = {
   actorId: string;
   dimensionId: string;
   value: number;
-  context?: string;
-  targetEntityId?: string;
+  scope: Global | Context | Target | ContextTarget;
+  stability: "stable" | "situational";
+  basis: "explicit-characterization" | "repeated-behavior" | "inferred-pattern";
   validStoryTime?: StoryTime;
+  status: "supported" | "contested";
   confidence: number;
-  supportingEvidenceAssertionIds: string[];
-  contradictingEvidenceAssertionIds: string[];
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 
 type AppraisalEpisode = {
@@ -855,24 +895,29 @@ type AppraisalEpisode = {
   actorId: string;
   eventId: string;
   interpretationPropositionId: string;
+  basis: "experienced" | "reported" | "inferred";
   emotion: { label: string; intensity: number };
   affectedGoalIds: string[];
   resultingIntention?: string;
-  evidenceAssertionIds: string[];
+  status: "supported" | "contested";
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 
 type DevelopmentEpisode = {
   id: string;
   actorId: string;
+  triggerMode: "world" | "experienced";
   triggerEventIds: string[];
   beforeDispositionIds: string[];
   afterDispositionIds: string[];
   mechanism: string;
   startsAt: StoryTime;
   endsAt?: StoryTime;
-  decay?: { kind: "none" | "linear" | "event-dependent"; rate?: number };
-  status: "active" | "resolved" | "reversed";
-  evidenceAssertionIds: string[];
+  decay: None | EventDependent;
+  evidenceStatus: "supported" | "contested";
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 ```
 
@@ -880,6 +925,8 @@ Rules:
 
 - Begin with a small, versioned vocabulary needed by actor policy. Do not
   attempt to encode all literary personality theory.
+- Context is also a small controlled ID vocabulary; arbitrary prose stays in
+  evidenced interpretation fields and never becomes an unbounded policy key.
 - A one-off action cannot establish a stable disposition without either
   repeated evidence or explicit narrator characterization.
 - Global disposition, current affect, target-specific stance, values, goals,
@@ -889,6 +936,9 @@ Rules:
 - Development remains a projection over committed history. Development episode
   records describe interpretation policy and evidence; they do not create a
   second authoritative history.
+- Active/resolved/reversed runtime status is derived from the branch head, not
+  copied from compiler knowledge of the complete canonical arc. Linear decay is
+  deferred until trigger events can be mapped to deterministic elapsed time.
 - Replace the fixed “last 12 events” context with a deterministic salience
   selector that includes recent, goal-relevant, relationship-changing, and
   high-impact lived events under a hard token budget.
@@ -1456,10 +1506,18 @@ Exit criteria:
 Objective: make agent behavior depend on evidence-backed, contextual
 development rather than arbitrary trait names.
 
+Status: **M5a complete and verified; M5b/M5c pending.** The controlled registry,
+disposition/appraisal/development records, nested host-owned evidence,
+prospective/commit/prepared validation, audit metrics, and actor-safe runtime
+projection are implemented
+([character-ontology.ts](../src/world/character-ontology.ts#L14),
+[proposal-tools.ts](../src/compiler/proposal-tools.ts#L312),
+[audit.ts](../src/compiler/audit.ts#L993)).
+
 Work:
 
-- introduce controlled character dimension registry;
-- add dispositions, appraisals, and development episodes;
+- [implemented M5a] introduce controlled character dimension registry;
+- [implemented M5a] add dispositions, appraisals, and development episodes;
 - enrich goal hierarchy/conflict/commitment;
 - add directed, target-specific relationship state;
 - add spatial and world-rule domain modules;

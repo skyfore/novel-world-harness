@@ -9,6 +9,7 @@ import { resolveTextAnchor } from "../src/compiler/text-anchors.js";
 import { ensureSourceStructure } from "../src/compiler/structure.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
+import { ActorModelStore } from "../src/world/actors.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
@@ -259,6 +260,171 @@ describe("compiler audit", () => {
     expect(report.notes[0]).toContain(`scoped to source ${selected.source.id}`);
   });
 
+  it("reports controlled character semantics without collapsing dispositions, appraisals, and development", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-character-ontology-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, [
+      "Hero pauses before danger.",
+      "Rival helps Hero.",
+      "Hero later trusts Rival.",
+      "",
+    ].join("\n"));
+    const canon = new CanonicalModelStore(root);
+    const actors = new ActorModelStore(root);
+    const heroEvidence = fixture.evidence("Hero pauses before danger.");
+    const helpEvidence = fixture.evidence("Rival helps Hero.");
+    const trustEvidence = fixture.evidence("Hero later trusts Rival.");
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: heroEvidence });
+    await canon.putEntity({ id: "rival", kind: "character", canonicalName: "Rival", aliases: [], evidence: helpEvidence });
+    await canon.putProposition({
+      id: "rival-helped-hero",
+      subjectEntityId: "rival",
+      relationId: "helped",
+      object: { kind: "entity", entityId: "hero" },
+      polarity: "positive",
+      modality: "asserted",
+      evidence: helpEvidence,
+    });
+    await canon.putEvent({
+      id: "rival-helps",
+      title: "Rival helps Hero",
+      participants: ["hero", "rival"],
+      storyTime: { kind: "ordinal", label: "help", orderHint: 1 },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: helpEvidence,
+      causalParents: [],
+      confidence: 1,
+    });
+    await actors.putGoal({
+      id: "hero-safety",
+      actorId: "hero",
+      description: "Remain safe",
+      priority: 0.8,
+      requiresKnowledge: [],
+      evidence: heroEvidence,
+    });
+    await actors.putModel({
+      actorId: "hero",
+      ontologyVersion: "character-v1",
+      traits: {},
+      decisionBiases: {},
+      dispositions: [{
+        id: "hero-deliberates",
+        actorId: "hero",
+        dimensionId: "deliberation",
+        value: 0.8,
+        scope: { kind: "global" },
+        stability: "stable",
+        basis: "explicit-characterization",
+        status: "supported",
+        confidence: 0.9,
+        evidence: heroEvidence,
+      }, {
+        id: "hero-trusts-rival",
+        actorId: "hero",
+        dimensionId: "trust-readiness",
+        value: 0.6,
+        scope: { kind: "target", targetEntityId: "rival" },
+        stability: "situational",
+        basis: "inferred-pattern",
+        status: "contested",
+        confidence: 0.6,
+        evidence: trustEvidence,
+        counterEvidence: heroEvidence,
+      }],
+      appraisalEpisodes: [{
+        id: "hero-appraises-help",
+        actorId: "hero",
+        eventId: "rival-helps",
+        interpretationPropositionId: "rival-helped-hero",
+        basis: "experienced",
+        emotion: { label: "gratitude", intensity: 0.7 },
+        affectedGoalIds: ["hero-safety"],
+        resultingIntention: "Cooperate with Rival",
+        status: "supported",
+        confidence: 0.8,
+        evidence: helpEvidence,
+      }],
+      developmentEpisodes: [{
+        id: "hero-revises-rival",
+        actorId: "hero",
+        triggerMode: "experienced",
+        triggerEventIds: ["rival-helps"],
+        beforeDispositionIds: ["hero-deliberates"],
+        afterDispositionIds: ["hero-trusts-rival"],
+        mechanism: "Receiving concrete help changes Hero's willingness to rely on Rival.",
+        startsAt: { kind: "relative", anchorEventId: "rival-helps", relation: "after" },
+        decay: { kind: "none" },
+        evidenceStatus: "supported",
+        confidence: 0.8,
+        evidence: helpEvidence,
+      }],
+      evidence: heroEvidence,
+    });
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.characterSemantics).toMatchObject({
+      ontologyVersion: "character-v1",
+      controlledModels: 1,
+      legacyModels: 0,
+      dispositions: 2,
+      supportedDispositions: 1,
+      contestedDispositions: 1,
+      stableDispositions: 1,
+      appraisalEpisodes: 1,
+      contestedAppraisals: 0,
+      developmentEpisodes: 1,
+      contestedDevelopmentEpisodes: 0,
+      referenceValidationIssues: 0,
+      errors: [],
+    });
+    expect(report.coverage.controlledCharacterModels).toBe(1);
+  });
+
+  it("blocks semantic readiness when persisted character semantics contain dangling references", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-character-reference-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero distrusts the stranger.\n");
+    const evidence = fixture.evidence("Hero distrusts the stranger.");
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence,
+    });
+    await new ActorModelStore(root).putModel({
+      actorId: "hero",
+      ontologyVersion: "character-v1",
+      traits: {},
+      decisionBiases: {},
+      dispositions: [{
+        id: "hero-distrusts-stranger",
+        actorId: "hero",
+        dimensionId: "trust-readiness",
+        value: -0.8,
+        scope: { kind: "target", targetEntityId: "missing-stranger" },
+        stability: "situational",
+        basis: "explicit-characterization",
+        status: "supported",
+        confidence: 0.9,
+        evidence,
+      }],
+      evidence,
+    });
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.characterSemantics.referenceValidationIssues).toBe(1);
+    expect(report.characterSemantics.errors).toEqual([
+      expect.objectContaining({ actorId: "hero", code: "UNKNOWN_DISPOSITION_TARGET" }),
+    ]);
+    expect(report.readiness.semantic).toBe("not-ready");
+    expect(report.readiness.blockingIssues).toContainEqual(
+      expect.stringContaining("UNKNOWN_DISPOSITION_TARGET"),
+    );
+  });
+
   it("flags a large canon compiled as disconnected unconditional roots instead of treating every episode as immediately reachable", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-graph-"));
     roots.push(root);
@@ -335,7 +501,7 @@ describe("compiler audit", () => {
     });
     expect(report.consistency.semanticIssues).toEqual(expect.arrayContaining([
       expect.stringContaining("typed state or knowledge effect"),
-      expect.stringContaining("phase-bounded goals or development phases"),
+      expect.stringContaining("phase-bounded goals or evidence-grounded development episodes"),
       expect.stringContaining("participant slots declare"),
       expect.stringContaining("source-grounded reader recap"),
       expect.stringContaining("no executable actor goal or non-canonical autonomous possibility"),

@@ -9,6 +9,7 @@ import type { WorldModelContext } from "./engine.js";
 import { idSchema, stateFieldSpecSchema, type Attribution, type CanonicalEvent, type Claim, type Entity, type EventParticipation, type EventRelation, type EvidenceRef, type Proposition, type WorldRule } from "./model.js";
 import { eventParticipationsByEvent, projectEventParticipations, validateEventParticipationCatalog } from "./event-semantics.js";
 import { eventRelationsByTarget, projectEventRelations, validateEventRelationCatalog } from "./event-relations.js";
+import { characterOntologyEvidence } from "./character-ontology.js";
 import { PossibilityTemplateStore, type PossibilityTemplate } from "./possibility-model.js";
 import type { CharacterGoal, CharacterModel } from "./actors.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "./state.js";
@@ -239,7 +240,8 @@ export class WorldContextStore {
     const evidenceFitsLegacySnapshot = (evidence: readonly EvidenceRef[]) => !snapshotSourceIds.size
       || (evidence.length > 0 && evidence.every((reference) => snapshotSourceIds.has(reference.span.sourceId)));
     const scopedGoals = goals.filter((goal) => characterIds.has(goal.actorId) && evidenceFitsLegacySnapshot(goal.evidence));
-    const scopedModels = models.filter((model) => characterIds.has(model.actorId) && evidenceFitsLegacySnapshot(model.evidence));
+    const scopedModels = models.filter((model) => characterIds.has(model.actorId)
+      && evidenceFitsLegacySnapshot([...model.evidence, ...characterOntologyEvidence(model)]));
     const scopedPossibilities = possibilities.filter((possibility) =>
       possibility.participants.every((participantId) => entityIds.has(participantId))
       && possibility.causalParents.every((eventId) => eventIds.has(eventId))
@@ -403,7 +405,7 @@ function assertArtifactCollectionsExclusiveToSource(
   for (const items of collections) {
     for (const item of items) {
       assertEvidenceExclusiveToSource(
-        [...item.evidence, ...(item.counterEvidence ?? [])],
+        [...item.evidence, ...(item.counterEvidence ?? []), ...characterOntologyEvidence(item)],
         sourceId,
         `World snapshot artifact ${item.id ?? item.actorId ?? "unknown"}`,
       );

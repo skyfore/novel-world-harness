@@ -22,6 +22,17 @@ import { evaluatePredicate } from "./state.js";
 import { committedHistory, projectActorScene, realizedCanonicalEvents } from "./scene.js";
 import { AmbiguousLegacySourceError, evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { storyTimesOverlap } from "./time.js";
+import {
+  CHARACTER_ONTOLOGY_VERSION,
+  characterOntologyModelFields,
+  resolveCharacterOntology,
+  type AppraisalEpisode,
+  type CharacterDisposition,
+  type DevelopmentEpisode,
+  type EffectiveCharacterAppraisal,
+  type EffectiveCharacterDisposition,
+  type EffectiveDevelopmentEpisode,
+} from "./character-ontology.js";
 
 const goalActionSchema = z
   .object({
@@ -104,6 +115,7 @@ export const characterModelSchema = z
     traits: z.record(z.string(), z.number().min(-1).max(1)),
     decisionBiases: z.record(z.string(), z.number().min(-1).max(1)),
     developmentPhases: z.array(characterDevelopmentPhaseSchema).optional(),
+    ...characterOntologyModelFields,
     evidence: z.array(evidenceRefSchema).min(1),
   })
   .strict()
@@ -111,6 +123,55 @@ export const characterModelSchema = z
     const ids = value.developmentPhases?.map((phase) => phase.id) ?? [];
     if (new Set(ids).size !== ids.length) {
       ctx.addIssue({ code: "custom", message: "Character development phase IDs must be unique", path: ["developmentPhases"] });
+    }
+    const semanticCollections = [
+      ["dispositions", value.dispositions ?? []],
+      ["appraisalEpisodes", value.appraisalEpisodes ?? []],
+      ["developmentEpisodes", value.developmentEpisodes ?? []],
+    ] as const;
+    const hasCharacterOntology = semanticCollections.some(([, items]) => items.length > 0);
+    if (hasCharacterOntology && value.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Structured character semantics require ontologyVersion '${CHARACTER_ONTOLOGY_VERSION}'`,
+        path: ["ontologyVersion"],
+      });
+    }
+    if (value.ontologyVersion === CHARACTER_ONTOLOGY_VERSION && !hasCharacterOntology) {
+      ctx.addIssue({
+        code: "custom",
+        message: `A ${CHARACTER_ONTOLOGY_VERSION} model must contain at least one disposition, appraisal, or development episode`,
+        path: ["ontologyVersion"],
+      });
+    }
+    for (const [field, items] of semanticCollections) {
+      const itemIds = items.map((item) => item.id);
+      if (new Set(itemIds).size !== itemIds.length) {
+        ctx.addIssue({ code: "custom", message: `${field} IDs must be unique`, path: [field] });
+      }
+    }
+    if (value.ontologyVersion === CHARACTER_ONTOLOGY_VERSION) {
+      for (const [field, record] of [["traits", value.traits], ["decisionBiases", value.decisionBiases]] as const) {
+        const unnamespaced = Object.keys(record).filter((key) => !key.startsWith("legacy:"));
+        if (unnamespaced.length) {
+          ctx.addIssue({
+            code: "custom",
+            message: `V2 character models may retain free-form ${field} only under an explicit legacy: namespace; use registered dispositions for new semantics`,
+            path: [field],
+          });
+        }
+      }
+      value.developmentPhases?.forEach((phase, phaseIndex) => {
+        for (const [field, record] of [["traitModifiers", phase.traitModifiers], ["decisionBiasModifiers", phase.decisionBiasModifiers]] as const) {
+          if (Object.keys(record).some((key) => !key.startsWith("legacy:"))) {
+            ctx.addIssue({
+              code: "custom",
+              message: `V2 development phases may modify only explicit legacy: keys; use DevelopmentEpisode plus registered dispositions for new semantics`,
+              path: ["developmentPhases", phaseIndex, field],
+            });
+          }
+        }
+      });
     }
   });
 export type CharacterModel = z.infer<typeof characterModelSchema>;
@@ -120,6 +181,10 @@ export type EffectiveCharacterModel = {
   traits: Record<string, number>;
   decisionBiases: Record<string, number>;
   activePhaseIds: string[];
+  legacyDimensions: Record<string, number>;
+  dispositions: EffectiveCharacterDisposition[];
+  appraisals: EffectiveCharacterAppraisal[];
+  developmentEpisodes: EffectiveDevelopmentEpisode[];
 };
 
 export function resolveCharacterModel(
@@ -151,8 +216,11 @@ export function resolveCharacterModel(
     applyModifiers(traits, phase.traitModifiers);
     applyModifiers(decisionBiases, phase.decisionBiasModifiers);
   }
-  return { actorId: model.actorId, traits, decisionBiases, activePhaseIds };
+  const ontology = resolveCharacterOntology({ ...model, traits, decisionBiases }, input);
+  return { actorId: model.actorId, traits, decisionBiases, activePhaseIds, ...ontology };
 }
+
+export type { AppraisalEpisode, CharacterDisposition, DevelopmentEpisode };
 
 export type GoalActivation = {
   active: boolean;

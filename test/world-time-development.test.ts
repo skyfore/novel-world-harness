@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
-async function world(): Promise<{ engine: WorldEngine; turningPoint: CanonicalEvent }> {
+async function world(presence?: "physical" | "mentioned"): Promise<{ engine: WorldEngine; turningPoint: CanonicalEvent }> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-world-time-"));
   roots.push(root);
   const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence };
@@ -25,6 +25,7 @@ async function world(): Promise<{ engine: WorldEngine; turningPoint: CanonicalEv
     id: "turning-point",
     title: "Hero survives a turning point",
     participants: ["hero"],
+    ...(presence ? { participantPresence: [{ entityId: "hero", mode: presence }] } : {}),
     storyTime: { kind: "exact", value: "2001", precision: "year" },
     timeAdvance: { amount: 1, unit: "year" },
     preconditions: [],
@@ -182,6 +183,34 @@ describe("world time and character development", () => {
     expect(development.model?.activePhaseIds).toEqual(["after-turning-point"]);
     expect(development.model?.traits.trust).toBeCloseTo(0.1);
     expect(development.model?.decisionBiases.caution).toBeCloseTo(0.8);
+  });
+
+  it("does not treat a merely mentioned canonical participant as lived experience", async () => {
+    const { engine } = await world("mentioned");
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+    });
+    const committed = await engine.commitProposal({
+      proposalId: "mentioned-turning-point",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "canon-candidate",
+      title: "Others mention Hero while describing the turning point",
+      participants: ["hero"],
+      proposedTime: { kind: "exact", value: "2001", precision: "year" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence,
+      possibilityId: "canon-turning-point",
+    });
+    expect(committed.report.accepted).toBe(true);
+
+    const development = await projectCharacterDevelopment(engine, "hero", committed.newHead);
+    expect(development.experiencedCanonicalEventIds).toEqual([]);
+    expect(development.recentLivedExperiences).toEqual([]);
+    expect(development.model?.activePhaseIds).toEqual([]);
   });
 
   it("rejects a definitely earlier story time", async () => {

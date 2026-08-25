@@ -10,12 +10,13 @@ import { CompilerCommitService } from "../src/compiler/validator.js";
 import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
 import { EvidenceVerifier } from "../src/compiler/evidence.js";
 import { segmentEvidenceRef, SegmentStore } from "../src/compiler/segments.js";
-import { ProposalStore } from "../src/world/canonical-model.js";
+import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
 import { entitySchema, eventRelationSchema } from "../src/world/model.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { SourceStructureStore } from "../src/compiler/structure.js";
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
+import { characterModelSchema } from "../src/world/actors.js";
 
 const roots: string[] = [];
 
@@ -264,6 +265,156 @@ describe("compiler proposal tools", () => {
       },
       strength: "explicit",
     });
+  });
+
+  it("injects nested character counter-evidence from exact selectors", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-character-counter-evidence-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "She paused to weigh the risk. On another occasion she rushed ahead.\n",
+    );
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-character-counter`, fixture.source.id);
+    const characterModel = toolset.tools.find((candidate) => candidate.name === "propose_character_model")!;
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "She",
+      aliases: [],
+      evidence: fixture.evidence("She"),
+    });
+
+    await characterModel.execute("character-counter", {
+      proposal_id: "character-counter",
+      payload: {
+        actorId: "hero",
+        ontologyVersion: "character-v1",
+        traits: {},
+        decisionBiases: {},
+        dispositions: [{
+          id: "hero-deliberation-contested",
+          actorId: "hero",
+          dimensionId: "deliberation",
+          value: 0.6,
+          scope: { kind: "global" },
+          stability: "situational",
+          basis: "inferred-pattern",
+          status: "contested",
+          confidence: 0.55,
+        }],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "paused to weigh the risk",
+        target_path: "/dispositions/0/value",
+        relation: "supports",
+        strength: "strong-inference",
+        interpretation: "Pausing to compare risk supports deliberation in this situation.",
+      }, {
+        segment_id: fixture.segmentId,
+        exact: "rushed ahead",
+        target_path: "/dispositions/0/value",
+        relation: "contradicts",
+        strength: "explicit",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const pending = await new ProposalStore(root).read("pending", "character-counter", characterModelSchema);
+    expect(pending.payload.dispositions?.[0]?.evidence).toHaveLength(1);
+    expect(pending.payload.dispositions?.[0]?.evidence[0]).toMatchObject({
+      span: fixture.evidence("paused to weigh the risk")[0]!.span,
+      strength: "strong-inference",
+    });
+    expect(pending.payload.dispositions?.[0]?.counterEvidence).toHaveLength(1);
+    expect(pending.payload.dispositions?.[0]?.counterEvidence?.[0]?.span).toMatchObject({
+      sourceId: fixture.source.id,
+      quoteHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      startByte: expect.any(Number),
+      endByte: expect.any(Number),
+    });
+    expect((await new CompilerCommitService(root).accept("character-model", "character-counter")).accepted).toBe(true);
+    await expect(new EvidenceAssertionStore(root).bindingForArtifact("character-model", "hero"))
+      .resolves.toMatchObject({ assertions: expect.arrayContaining([
+        expect.objectContaining({ relation: "supports" }),
+        expect.objectContaining({ relation: "contradicts" }),
+      ]) });
+  });
+
+  it("counts exact character support spans instead of coarse compiler segments", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-character-exact-support-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "She weighed the first risk before acting. Later she compared the second danger before choosing.\n",
+    );
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-character-support`, fixture.source.id);
+    const characterModel = toolset.tools.find((candidate) => candidate.name === "propose_character_model")!;
+    const payload = {
+      actorId: "hero",
+      ontologyVersion: "character-v1",
+      traits: {},
+      decisionBiases: {},
+      dispositions: [{
+        id: "hero-deliberates-repeatedly",
+        actorId: "hero",
+        dimensionId: "deliberation",
+        value: 0.8,
+        scope: { kind: "global" },
+        stability: "stable",
+        basis: "repeated-behavior",
+        status: "supported",
+        confidence: 0.8,
+      }],
+    };
+
+    await characterModel.execute("character-support", {
+      proposal_id: "character-support",
+      payload,
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "weighed the first risk before acting",
+        target_path: "/dispositions/0/value",
+        relation: "supports",
+        strength: "strong-inference",
+        interpretation: "The first choice shows deliberate comparison.",
+      }, {
+        segment_id: fixture.segmentId,
+        exact: "compared the second danger before choosing",
+        target_path: "/dispositions/0/value",
+        relation: "supports",
+        strength: "strong-inference",
+        interpretation: "A separate later choice repeats the same behavior.",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const pending = await new ProposalStore(root).read("pending", "character-support", characterModelSchema);
+    expect(pending.payload.dispositions?.[0]?.evidence).toHaveLength(2);
+    expect(new Set(pending.payload.dispositions?.[0]?.evidence.map((item) => item.span.quoteHash)).size).toBe(2);
+
+    await expect(characterModel.execute("character-support-missing", {
+      proposal_id: "character-support-missing",
+      payload,
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow();
+    await expect(characterModel.execute("character-counter-wrong-path", {
+      proposal_id: "character-counter-wrong-path",
+      payload: {
+        ...payload,
+        dispositions: [{ ...payload.dispositions[0], stability: "situational", status: "contested" }],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "weighed the first risk before acting",
+        target_path: "/actorId",
+        relation: "contradicts",
+        strength: "explicit",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("must target one disposition");
   });
 
   it("accepts a model-selected title from opening evidence only at the successful finish handshake", async () => {

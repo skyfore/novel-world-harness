@@ -1,6 +1,6 @@
 # 技术计划：可溯源的全书小说语义编译
 
-- **状态：** 进行中——M0 至 M4 已实现，M5 至 M7 待完成
+- **状态：** 进行中——M0 至 M4、M5a 已实现，M5b 至 M7 待完成
 - **日期：** 2026-08-25
 - **范围：** 小说导入、结构拆分、语义标注、身份消歧、canonical 编译、审计、修复与重解析
 - **必须遵守：** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md)、[ADR 0002](adr/0002-user-level-content-addressed-storage.md)、[ADR 0003](adr/0003-world-time-character-development-and-divergence.md)
@@ -241,8 +241,9 @@ actor-specific acquisition，断言不能自动成为世界真值。
 状态、canonical event、角色亲历事件、知识和 story time
 （[actors.ts](../src/world/actors.ts#L67)）。
 
-问题在于 traits 与 decisionBiases 是任意字符串到数值的 map
-（[actors.ts](../src/world/actors.ts#L101)）：
+M5a 之前的主要问题——现在保留的 legacy 兼容路径——是 traits 与
+decisionBiases 仍可表示任意字符串到数值的 map
+（[actors.ts](../src/world/actors.ts#L115)）：
 
 - `brave`、`courage`、`勇敢` 可能成为三个维度；
 - 数值没有行为锚点；
@@ -252,7 +253,7 @@ actor-specific acquisition，断言不能自动成为世界真值。
 - 多次模型运行之间无法可靠比较。
 
 角色近期经历还固定取最后 12 个直接参与事件
-（[development.ts](../src/world/development.ts#L84)），不一定能保留最重要的
+（[development.ts](../src/world/development.ts#L104)），不一定能保留最重要的
 目标、关系和创伤性经历。
 
 [PersonaBank](https://aclanthology.org/L16-1163/) 将角色目标、动机、
@@ -263,6 +264,35 @@ actor-specific acquisition，断言不能自动成为世界真值。
 **结论：** 保留“从历史派生角色发展”的设计，但用版本化行为维度、
 target-specific relationship stance、appraisal episode 和 development
 episode 代替无定义 trait 字符串。
+
+M5a 已把这个结论落到代码。`character-v1` 注册了 8 个有共同定义与行为
+锚点的非诊断性维度，以及 10 个受控情境 ID
+（[character-ontology.ts](../src/world/character-ontology.ts#L14)、
+[character-ontology.ts](../src/world/character-ontology.ts#L30)）。Disposition
+显式拆分 scope、稳定性、推断依据、有效时间、置信度与
+supported/contested；基于行为推断 stable disposition 至少需要两个不同原文
+span，narrator 明示则必须包含 explicit evidence
+（[character-ontology.ts](../src/world/character-ontology.ts#L170)）。Appraisal
+把 experienced/reported/inferred event 与 interpretation proposition、受控情绪、
+受影响 goal 和 resulting intention 相连；DevelopmentEpisode 则独立记录
+trigger mode、before/after disposition、机制、时间、衰减与反转
+（[character-ontology.ts](../src/world/character-ontology.ts#L223)、
+[character-ontology.ts](../src/world/character-ontology.ts#L242)）。
+
+这些约束不是只写在 prompt 中：V2 schema 拒绝未加 `legacy:` namespace 的
+自由 trait/bias key（[actors.ts](../src/world/actors.ts#L112)）；prospective graph
+和 commit validator 会拒绝悬空 actor/event/proposition/goal/disposition 引用
+（[validator.ts](../src/compiler/validator.ts#L570)）；逐条 supporting/counter
+exact assertion 必须与嵌入的 source span 一致，并在 submit、closure、commit、
+audit 与 prepared publication 边界重复校验
+（[character-ontology.ts](../src/world/character-ontology.ts#L390)、
+[prepared-cache.ts](../src/compiler/prepared-cache.ts#L886)）；runtime 仅激活非 contested、
+且 event/experience/story-time gate 已满足的记录
+（[character-ontology.ts](../src/world/character-ontology.ts#L542)）。给模型的角色
+视图会剥离 evidence 与内部 artifact ID，并隐藏 actor 不可见目标的
+target-specific disposition
+（[character-ontology.ts](../src/world/character-ontology.ts#L632)）。M5 剩余工作
+是 directed relationship、spatial/rule domain 与 deterministic salience。
 
 ### 2.8 当前审计没有全书 recall 分母
 
@@ -299,7 +329,7 @@ resolution → event/relation → state/knowledge → character/possibility 的�
 **结论：** missing semantic unit 和 stale downstream artifact 必须成为
 显式对象。
 
-## 3. M0-M4 完成后的当前流程
+## 3. M0-M4 与 M5a 完成后的当前流程
 
 ```text
 nwh ingest
@@ -317,20 +347,21 @@ compile-source / prepare-all
   -> 记录显式 entity/event resolution decision
   -> 模型提交 typed proposal 与 supporting/contradicting exact selector
   -> 宿主解析可信 anchor、EvidenceRef 与 derivation provenance
+  -> character-v1 分离 disposition、appraisal 与 development proposal
   -> finish 校验 source accounting 与 prospective semantic graph
   -> pending proposal store
 
 accept / prepare
   -> 验证 source hash 与 span
   -> 验证 mention-resolution 与 exact target trace
-  -> 验证引用、state schema、participation、epistemic 与 event relation
+  -> 验证引用、state schema、participation、epistemic、event relation 与 character ontology
   -> dependency order 与 semantic cycle check
   -> 接受为 immutable canonical revision
   -> prepared publication 重复 whole-catalog projection/readiness gate
 
 audit / reconcile
   -> source-accounting denominator 与 observation/resolution coverage
-  -> exact evidence、participation、epistemic、typed causality metric
+  -> exact evidence、participation、epistemic、typed causality 与 controlled-character metric
   -> bounded repair queue；dependency-driven invalidation 留待 M6
 
 reparse
@@ -342,6 +373,7 @@ runtime
   -> committed event history 为 branch truth
   -> Snapshot V6 固定 proposition/attribution/participation/relation revision
   -> typed semantic record 只派生 compatibility event view，不成为 branch truth
+  -> character semantic 仅由 committed/experienced event 激活并保持 actor-safe visibility
   -> 确定性投影 state、knowledge、scene、development 和 frontier
 ```
 
@@ -349,8 +381,9 @@ runtime
 -> replay 的权威顺序（[technical-design.md](technical-design.md#L933)）。Source
 annotation 与 resolution 已成为 world proposal 之前的非 canonical 层；finish
 closure 会拒绝不完整的 prospective graph
-（[proposals.ts](../src/compiler/proposals.ts#L316)）。后续仍需：M5 的角色/关系/
-空间/rule ontology，M6 的 dependency-driven invalidation 与 publication policy，
+（[proposals.ts](../src/compiler/proposals.ts#L316)）。M5a 角色语义现已完成编译、
+source scope、审计与投影；后续仍需 M5b/M5c 的 relationship/spatial/rule
+ontology 与 salience selection，M6 的 dependency-driven invalidation 与 publication policy，
 以及 M7 的多小说人工标注 semantic benchmark。
 
 ### 3.1 研究基线的主要失真点
@@ -839,12 +872,14 @@ type CharacterDisposition = {
   actorId: string;
   dimensionId: string;
   value: number;
-  context?: string;
-  targetEntityId?: string;
+  scope: Global | Context | Target | ContextTarget;
+  stability: "stable" | "situational";
+  basis: "explicit-characterization" | "repeated-behavior" | "inferred-pattern";
   validStoryTime?: StoryTime;
+  status: "supported" | "contested";
   confidence: number;
-  supportingEvidenceAssertionIds: string[];
-  contradictingEvidenceAssertionIds: string[];
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 
 type AppraisalEpisode = {
@@ -852,34 +887,43 @@ type AppraisalEpisode = {
   actorId: string;
   eventId: string;
   interpretationPropositionId: string;
+  basis: "experienced" | "reported" | "inferred";
   emotion: { label: string; intensity: number };
   affectedGoalIds: string[];
   resultingIntention?: string;
-  evidenceAssertionIds: string[];
+  status: "supported" | "contested";
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 
 type DevelopmentEpisode = {
   id: string;
   actorId: string;
+  triggerMode: "world" | "experienced";
   triggerEventIds: string[];
   beforeDispositionIds: string[];
   afterDispositionIds: string[];
   mechanism: string;
   startsAt: StoryTime;
   endsAt?: StoryTime;
-  decay?: { kind: "none" | "linear" | "event-dependent"; rate?: number };
-  status: "active" | "resolved" | "reversed";
-  evidenceAssertionIds: string[];
+  decay: None | EventDependent;
+  evidenceStatus: "supported" | "contested";
+  evidence: EvidenceRef[];
+  counterEvidence?: EvidenceRef[];
 };
 ```
 
 约束：
 
 - 初始只建立 actor policy 真正需要的小型受控词汇。
+- Context 同样使用小型受控 ID，不让任意 prose 重新变成不可比较的 policy key。
 - 单次行为不能自动证明稳定性格，除非有 narrator 明示或重复证据。
 - disposition、current affect、target-specific stance、value、goal、tactic 分开。
 - 旧自由 trait key 迁移成 `legacy:<key>`，不静默映射。
 - Development 仍从 committed history 投影。
+- active/resolved/reversed runtime status 必须从 branch head 派生，不能复制编译器
+  对完整 canonical arc 的全知结论；linear decay 等 trigger event 能映射到确定性
+  elapsed time 后再实现。
 - 将固定“最后 12 个事件”替换为确定性 salience selection：recent、
   goal-relevant、relationship-changing、high-impact，在硬 token budget 内选取。
 
@@ -1357,10 +1401,18 @@ snapshot/audit 生命周期，以及排除 contested 与 narrative-only 关系�
 
 目标：actor behavior 来自上下文化、有证据的角色发展。
 
+状态：**M5a 已完成并验证，M5b/M5c 待完成。** Controlled registry、
+disposition/appraisal/development record、nested host-owned evidence、
+prospective/commit/prepared validation、audit metric 与 actor-safe runtime
+projection 均已实现
+（[character-ontology.ts](../src/world/character-ontology.ts#L14)、
+[proposal-tools.ts](../src/compiler/proposal-tools.ts#L312)、
+[audit.ts](../src/compiler/audit.ts#L993)）。
+
 改造：
 
-- controlled character dimension registry；
-- disposition/appraisal/development episode；
+- [M5a 已实现] controlled character dimension registry；
+- [M5a 已实现] disposition/appraisal/development episode；
 - goal hierarchy/conflict/commitment；
 - directed target-specific relationship；
 - spatial/world-rule modules；

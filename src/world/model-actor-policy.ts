@@ -31,6 +31,7 @@ import {
 import { committedHistory, realizedCanonicalEvents } from "./scene.js";
 import { AmbiguousLegacySourceError, evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { immutableClone } from "../util/immutable.js";
+import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
 
 export const actorActionTemplateSchema = z
   .object({
@@ -59,7 +60,11 @@ export type ModelActorDevelopmentView = {
   }>;
 };
 
-export type ModelActorDispositionView = Pick<EffectiveCharacterModel, "traits" | "decisionBiases">;
+export type ModelActorDispositionView = Pick<EffectiveCharacterModel, "traits" | "decisionBiases"> & {
+  dispositions?: ModelVisibleCharacterOntology["dispositions"];
+  appraisals?: ModelVisibleCharacterOntology["appraisals"];
+  development?: ModelVisibleCharacterOntology["development"];
+};
 
 export type ModelActorWorldView = {
   actorId: ActorScopedActionContext["actorId"];
@@ -168,6 +173,9 @@ export function modelActorProposalSource(
         return handle ? [[entity.id, handle] as const] : [];
       }));
       const visibleDevelopment = actorVisibleCharacterDevelopment(development, []);
+      const visibleOntology = development.model
+        ? modelVisibleCharacterOntology(development.model, (entityId) => entityHandles.get(entityId))
+        : undefined;
       const actor: ModelActorWorldView = {
         actorId: modelScoped.actorId,
         selfState: structuredClone(modelScoped.selfState),
@@ -199,6 +207,9 @@ export function modelActorProposalSource(
           ? {
               traits: structuredClone(development.model.traits),
               decisionBiases: structuredClone(development.model.decisionBiases),
+              ...(visibleOntology?.dispositions.length ? { dispositions: structuredClone(visibleOntology.dispositions) } : {}),
+              ...(visibleOntology?.appraisals.length ? { appraisals: structuredClone(visibleOntology.appraisals) } : {}),
+              ...(visibleOntology?.development.length ? { development: structuredClone(visibleOntology.development) } : {}),
             }
           : null,
         development: {

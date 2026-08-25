@@ -1,4 +1,4 @@
-import { ActorModelStore, characterGoalHasDevelopmentBoundary } from "../world/actors.js";
+import { ActorModelStore, characterGoalHasDevelopmentBoundary, characterModelSchema } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore } from "../world/initial.js";
 import type { CanonicalEvent, EvidenceRef, StoryTime } from "../world/model.js";
@@ -32,6 +32,12 @@ import {
 import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
 import { validateEventParticipationCatalog } from "../world/event-semantics.js";
 import { eventRelationProjectsLegacyCausalParent, validateEventRelationCatalog } from "../world/event-relations.js";
+import {
+  CHARACTER_ONTOLOGY_VERSION,
+  characterOntologyEvidence,
+  validateCharacterOntologyEvidenceAssertions,
+  validateCharacterOntologyReferences,
+} from "../world/character-ontology.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 
@@ -120,6 +126,21 @@ export type CompilerAuditReport = {
     relationValidationIssues: number;
     relationErrors: Array<{ code: string; message: string; path?: string }>;
   };
+  characterSemantics: {
+    ontologyVersion: typeof CHARACTER_ONTOLOGY_VERSION;
+    controlledModels: number;
+    legacyModels: number;
+    dispositions: number;
+    supportedDispositions: number;
+    contestedDispositions: number;
+    stableDispositions: number;
+    appraisalEpisodes: number;
+    contestedAppraisals: number;
+    developmentEpisodes: number;
+    contestedDevelopmentEpisodes: number;
+    referenceValidationIssues: number;
+    errors: Array<{ actorId: string; code: string; message: string; path?: string }>;
+  };
   canonical: {
     entities: number;
     propositions: number;
@@ -178,6 +199,7 @@ export type CompilerAuditReport = {
     typedCausalRelations: number | null;
     timelineAnchoring: number | null;
     eventEffectExplicitness: number | null;
+    controlledCharacterModels: number | null;
     characterDevelopmentCoverage: number | null;
     openingCheckpointDeclared: number | null;
     participantPresenceCoverage: number | null;
@@ -413,7 +435,9 @@ export async function auditCompiler(
   const rules = allRules.filter(belongsToSelectedSource);
   const initialWorld = storedInitialWorld && belongsToSelectedSource(storedInitialWorld) ? storedInitialWorld : null;
   const goals = allGoals.filter(belongsToSelectedSource);
-  const models = allModels.filter(belongsToSelectedSource);
+  const models = allModels.filter((model) => belongsToSelectedSource({
+    evidence: [...model.evidence, ...characterOntologyEvidence(model)],
+  }));
   const possibilities = allPossibilities.filter(belongsToSelectedSource);
 
   const evidenceArtifacts: Array<{ name: string; kind: string; id: string; payload: unknown; evidence: EvidenceRef[] }> = [
@@ -427,7 +451,7 @@ export async function auditCompiler(
     ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: item.evidence })),
     ...(initialWorld ? [{ name: "initial-world", kind: "initial-world", id: "initial-world", payload: initialWorld, evidence: initialWorld.evidence }] : []),
     ...goals.map((item) => ({ name: `goal:${item.id}`, kind: "character-goal", id: item.id, payload: item, evidence: item.evidence })),
-    ...models.map((item) => ({ name: `model:${item.actorId}`, kind: "character-model", id: item.actorId, payload: item, evidence: item.evidence })),
+    ...models.map((item) => ({ name: `model:${item.actorId}`, kind: "character-model", id: item.actorId, payload: item, evidence: [...item.evidence, ...characterOntologyEvidence(item)] })),
     ...possibilities.map((item) => ({ name: `possibility:${item.id}`, kind: "possibility", id: item.id, payload: item, evidence: item.evidence })),
   ];
   const evidenceErrors: CompilerAuditReport["evidence"]["errors"] = [];
@@ -444,11 +468,28 @@ export async function auditCompiler(
     invalidReferences += result.issues.length;
     for (const issue of result.issues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
     const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
-    if (!binding?.assertions.length) continue;
+    if (!binding?.assertions.length) {
+      if (artifact.kind === "character-model"
+        && characterModelSchema.parse(artifact.payload).ontologyVersion === CHARACTER_ONTOLOGY_VERSION) {
+        invalidAssertions += 1;
+        evidenceErrors.push({
+          artifact: artifact.name,
+          code: "MISSING_EXACT_CHARACTER_BINDING",
+          message: `Controlled character model ${artifact.id} has no exact evidence binding.`,
+        });
+      }
+      continue;
+    }
     artifactsWithExactEvidence += 1;
     assertionsChecked += binding.assertions.length;
     const exactIssues = [
       ...validateEvidenceAssertionTargets(artifact.kind, artifact.id, artifact.payload, binding.assertions),
+      ...(artifact.kind === "character-model"
+        ? validateCharacterOntologyEvidenceAssertions(
+            characterModelSchema.parse(artifact.payload),
+            binding.assertions,
+          )
+        : []),
       ...(await evidenceVerifier.verifyAssertions(binding.assertions)).issues,
     ];
     if (binding.artifactHash !== contentHash(artifact.payload)) {
@@ -560,6 +601,33 @@ export async function auditCompiler(
   const typedCausalRelations = legacyCausalKeys.size
     ? typedCausalKeys.size / legacyCausalKeys.size
     : null;
+  const characterOntologyCatalog = {
+    entities: new Map(entities.map((entity) => [entity.id, { kind: entity.kind }])),
+    propositions: new Set(propositions.map((proposition) => proposition.id)),
+    events: new Map(events.map((event) => [event.id, {
+      participants: event.participants,
+      participantPresence: event.participantPresence,
+    }])),
+    goals: new Map(goals.map((goal) => [goal.id, { actorId: goal.actorId }])),
+  };
+  const characterOntologyValidation = models.flatMap((model) => [
+    ...(entities.find((entity) => entity.id === model.actorId)?.kind === "character"
+      ? []
+      : [{
+          code: "INVALID_MODEL_ACTOR",
+          message: `Character model actor ${model.actorId} is not a canonical character`,
+          path: "actorId",
+        }]),
+    ...validateCharacterOntologyReferences(model, characterOntologyCatalog),
+  ].map((error) => ({ actorId: model.actorId, ...error })));
+  const controlledCharacterModels = models.filter((model) =>
+    model.ontologyVersion === CHARACTER_ONTOLOGY_VERSION).length;
+  const controlledCharacterModelCoverage = models.length
+    ? controlledCharacterModels / models.length
+    : null;
+  const dispositions = models.flatMap((model) => model.dispositions ?? []);
+  const appraisalEpisodes = models.flatMap((model) => model.appraisalEpisodes ?? []);
+  const developmentEpisodes = models.flatMap((model) => model.developmentEpisodes ?? []);
 
   const graph = auditCausalGraph(events);
   const narrativeGraphNavigable = events.length ? graphNavigable(events, graph) : null;
@@ -579,7 +647,9 @@ export async function auditCompiler(
   }
   const recurringCharacters = [...participationCounts].filter(([, count]) => count >= 3).map(([id]) => id);
   const growthActors = new Set([
-    ...models.filter((model) => (model.developmentPhases?.length ?? 0) > 0).map((model) => model.actorId),
+    ...models.filter((model) =>
+      (model.developmentPhases?.length ?? 0) > 0
+      || (model.developmentEpisodes?.length ?? 0) > 0).map((model) => model.actorId),
     ...goals.filter(characterGoalHasDevelopmentBoundary).map((goal) => goal.actorId),
   ]);
   const characterDevelopmentCoverage = recurringCharacters.length
@@ -683,7 +753,7 @@ export async function auditCompiler(
       events.filter((event) => event.storyTime.kind === "unknown").forEach((event) => semanticRepairEventIds.add(event.id));
     }
     if (recurringCharacters.length && (characterDevelopmentCoverage ?? 0) < 0.5) {
-      semanticIssues.push(`Only ${formatRatio(characterDevelopmentCoverage)} of recurring characters have phase-bounded goals or development phases (minimum 50%).`);
+      semanticIssues.push(`Only ${formatRatio(characterDevelopmentCoverage)} of recurring characters have phase-bounded goals or evidence-grounded development episodes (minimum 50%).`);
       const requiredDeveloped = Math.ceil(recurringCharacters.length * 0.5);
       const currentlyDeveloped = recurringCharacters.filter((actorId) => growthActors.has(actorId)).length;
       semanticRepairCharacterIds.push(...recurringCharacters
@@ -740,6 +810,12 @@ export async function auditCompiler(
       semanticIssues.push("The compiled world has no executable actor goal or non-canonical autonomous possibility, so divergence can only wait for canon or repeat local dialogue.");
       semanticRepairRequiresFullReparse = true;
     }
+    if (models.length && controlledCharacterModelCoverage !== 1) {
+      semanticIssues.push(`Only ${formatRatio(controlledCharacterModelCoverage)} of character models use the controlled ${CHARACTER_ONTOLOGY_VERSION} vocabulary (required 100% for novel-scale publication).`);
+      semanticRepairCharacterIds.push(...models
+        .filter((model) => model.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION)
+        .map((model) => model.actorId));
+    }
   }
   const sourceIndexing = sources.length
     ? changedSinceIngest.length
@@ -762,7 +838,10 @@ export async function auditCompiler(
       : validExactBindings === evidenceArtifacts.length
         ? "ready"
         : "unknown";
-  const semanticReadiness: CompilerReadinessState = epistemicErrors.length || participationValidation.length || relationValidation.length
+  const semanticReadiness: CompilerReadinessState = epistemicErrors.length
+    || participationValidation.length
+    || relationValidation.length
+    || characterOntologyValidation.length
     ? "not-ready"
     : events.length < 20
     ? "unknown"
@@ -827,6 +906,8 @@ export async function auditCompiler(
     ...epistemicErrors.map((error) => `${error.artifact}: ${error.message}`),
     ...participationValidation.map((error) => `Event participation ${error.code}: ${error.message}`),
     ...relationValidation.map((error) => `Event relation ${error.code}: ${error.message}`),
+    ...characterOntologyValidation.map((error) =>
+      `Character model ${error.actorId} ${error.code}${error.path ? ` at ${error.path}` : ""}: ${error.message}`),
     ...graph.cycles.map((cycle) => `Causal cycle: ${cycle.join(" -> ")}`),
     ...graph.missing.map(({ eventId, parentId }) => `Event ${eventId} has missing causal parent ${parentId}.`),
     ...graph.temporalRegressions.map(({ eventId, parentId }) => `Event ${eventId} is earlier than causal parent ${parentId}.`),
@@ -909,6 +990,21 @@ export async function auditCompiler(
       relationValidationIssues: relationValidation.length,
       relationErrors: relationValidation,
     },
+    characterSemantics: {
+      ontologyVersion: CHARACTER_ONTOLOGY_VERSION,
+      controlledModels: controlledCharacterModels,
+      legacyModels: models.length - controlledCharacterModels,
+      dispositions: dispositions.length,
+      supportedDispositions: dispositions.filter((item) => item.status === "supported").length,
+      contestedDispositions: dispositions.filter((item) => item.status === "contested").length,
+      stableDispositions: dispositions.filter((item) => item.stability === "stable").length,
+      appraisalEpisodes: appraisalEpisodes.length,
+      contestedAppraisals: appraisalEpisodes.filter((item) => item.status === "contested").length,
+      developmentEpisodes: developmentEpisodes.length,
+      contestedDevelopmentEpisodes: developmentEpisodes.filter((item) => item.evidenceStatus === "contested").length,
+      referenceValidationIssues: characterOntologyValidation.length,
+      errors: characterOntologyValidation,
+    },
     canonical: {
       entities: entities.length,
       propositions: propositions.length,
@@ -944,12 +1040,17 @@ export async function auditCompiler(
       causalComponents: graph.components.length,
       largestCausalComponent: Math.max(0, ...graph.components.map((component) => component.length)),
       unconditionalRootEvents: graph.unconditionalRoots,
-      semanticReady: events.length >= 20 ? semanticIssues.length === 0 && participationValidation.length === 0 && relationValidation.length === 0 : null,
+      semanticReady: events.length >= 20
+        ? semanticIssues.length === 0
+          && participationValidation.length === 0
+          && relationValidation.length === 0
+          && characterOntologyValidation.length === 0
+        : null,
       semanticIssues,
     },
     semanticRepairTargets: {
       eventIds: [...semanticRepairEventIds],
-      characterIds: semanticRepairCharacterIds,
+      characterIds: [...new Set(semanticRepairCharacterIds)],
       initialWorld: semanticRepairInitialWorld,
       requiresFullReparse: semanticRepairRequiresFullReparse,
     },
@@ -973,6 +1074,7 @@ export async function auditCompiler(
       typedCausalRelations,
       timelineAnchoring,
       eventEffectExplicitness,
+      controlledCharacterModels: controlledCharacterModelCoverage,
       characterDevelopmentCoverage,
       openingCheckpointDeclared: initialWorld ? (initialWorld.checkpoint ? 1 : 0) : null,
       participantPresenceCoverage,

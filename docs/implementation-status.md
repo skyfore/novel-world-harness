@@ -19,6 +19,7 @@ The branch now implements a constrained end-to-end path from a local novel throu
 | Proposition, attribution, and knowledge acquisition | M4a implemented | Reusable proposition content is separated from narrator/character/document attitudes; quotation IDs trace holders to resolved speakers, and additive knowledge provenance records proposition, attribution, and acquisition mode without breaking legacy claim-keyed replay |
 | Event participation semantics | M4b-1 implemented | Versioned event/entity/semantic-role records keep character presence independent from agency, require a complete lossless projection to legacy `participants`/`participantPresence`, participate in compiler closure and prepared-publication gates, and are pinned in runtime snapshot V5 |
 | Event relation semantics | M4b-2 implemented | Independently evidenced temporal, causal, explanatory, identity/subevent, and narrative-continuation records have deterministic closure, contradiction, cycle, and legacy-projection validation; only non-contested `causes`/`enables` relations project to `causalParents`, and runtime snapshot V6 pins their revisions |
+| Character semantics | M5a implemented | Versioned behavioral dimensions separate contextual dispositions, event appraisals, and event-gated development episodes; stable inference and counter-evidence rules fail closed, legacy free-form keys are explicitly namespaced, and actor-facing projections remain future-canon and visibility safe |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
@@ -100,6 +101,17 @@ The branch now implements a constrained end-to-end path from a local novel throu
   story-time order, duplicate/inverse contradictions, and relevant graph
   cycles. Only non-contested `causes` and `enables` relations can reproduce the
   legacy causal-parent projection; narrative continuation never does.
+- Character models may use the `character-v1` controlled ontology. Dispositions
+  record global/context/target scope, stable versus situational applicability,
+  inference basis, validity time, confidence, and support/contest status.
+  Event appraisal and development episodes remain distinct records. Host-owned
+  exact selectors supply nested evidence and counter-evidence; catalog closure
+  rejects dangling event, proposition, goal, target, and before/after
+  disposition references. Exact assertions and embedded spans must agree before
+  submit, closure, commit, audit, and prepared publication. Runtime projection
+  admits only realized or personally experienced triggers, derives development
+  status from the current branch, and strips evidence, internal IDs, and
+  unrestricted causal/intent prose before model exposure.
 - Canonical entities, propositions, attributions, claims, events, event
   participations, event relations, and rules use
   logical refs over immutable revisions.

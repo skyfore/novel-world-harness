@@ -132,6 +132,7 @@ export async function inspectPreparation(
   if (
     audit.sources.changedSinceIngest.length > 0
     || audit.evidence.invalidReferences > 0
+    || audit.evidence.invalidAssertions > 0
     || audit.consistency.causalGraphValid === false
     || audit.consistency.narrativeGraphNavigable === false
   ) {

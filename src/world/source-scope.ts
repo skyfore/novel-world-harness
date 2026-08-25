@@ -1,5 +1,6 @@
 import type { EvidenceRef } from "./model.js";
 import type { WorldEngine, WorldModelContext } from "./engine.js";
+import { characterOntologyEvidence } from "./character-ontology.js";
 
 export class AmbiguousLegacySourceError extends Error {
   constructor(message: string) {
@@ -20,7 +21,10 @@ export function contextEvidenceSourceIds(context: WorldModelContext): string[] {
     ...[...(context.events?.values() ?? [])].flatMap((artifact) => artifact.evidence),
     ...[...context.rules.values()].flatMap((artifact) => artifact.evidence),
     ...(context.actorGoals ?? []).flatMap((artifact) => artifact.evidence),
-    ...[...(context.actorModels?.values() ?? [])].flatMap((artifact) => artifact.evidence),
+    ...[...(context.actorModels?.values() ?? [])].flatMap((artifact) => [
+      ...artifact.evidence,
+      ...characterOntologyEvidence(artifact),
+    ]),
     ...(context.possibilityTemplates ?? []).flatMap((artifact) => artifact.evidence),
   ]);
 }

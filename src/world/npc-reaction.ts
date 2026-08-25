@@ -30,6 +30,7 @@ import {
   type PlayerInteraction,
 } from "./player-action.js";
 import { committedHistory } from "./scene.js";
+import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
 import { deepFreeze } from "../util/immutable.js";
 
 const npcResponseKindSchema = z.enum(["speak", "gesture", "refuse", "ignore", "other"]);
@@ -89,6 +90,9 @@ export type NpcReactionReasoningInput = Readonly<{
     model?: {
       traits: Record<string, number>;
       decisionBiases: Record<string, number>;
+      dispositions?: ModelVisibleCharacterOntology["dispositions"];
+      appraisals?: ModelVisibleCharacterOntology["appraisals"];
+      development?: ModelVisibleCharacterOntology["development"];
     };
     currentAffect?: Omit<ActorAffect, "actorId">;
     recentExperiences: Array<{ summary: string; progressChannels: string[] }>;
@@ -246,6 +250,9 @@ async function respondOneNpc(input: {
   const currentAffect = [...history].reverse()
     .flatMap(({ event }) => event.actorAffects ?? [])
     .find((affect) => affect.actorId === input.npcId);
+  const visibleOntology = development.model
+    ? modelVisibleCharacterOntology(development.model, (entityId) => visibleNames.get(entityId))
+    : undefined;
   const repetitionDepth = npcExchangeStagnationDepth(history, input.playerId, input.npcId);
   const rawProposal = await input.reasoner(deepFreeze({
     npc: { id: npc.id, name: npc.canonicalName },
@@ -264,6 +271,9 @@ async function respondOneNpc(input: {
         model: {
           traits: structuredClone(development.model.traits),
           decisionBiases: structuredClone(development.model.decisionBiases),
+          ...(visibleOntology?.dispositions.length ? { dispositions: structuredClone(visibleOntology.dispositions) } : {}),
+          ...(visibleOntology?.appraisals.length ? { appraisals: structuredClone(visibleOntology.appraisals) } : {}),
+          ...(visibleOntology?.development.length ? { development: structuredClone(visibleOntology.development) } : {}),
         },
       } : {}),
       ...(currentAffect ? {

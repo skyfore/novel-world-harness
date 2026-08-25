@@ -23,11 +23,15 @@ import {
   type ModelPlayConversationMessage,
   type PlayConversationMessage,
 } from "./play-conversation.js";
+import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
 
 export type PlayerChoiceBehavioralContext = {
   /** Effective at this committed head; policy guidance, never world truth. */
   traits: Record<string, number>;
   decisionBiases: Record<string, number>;
+  dispositions?: ModelVisibleCharacterOntology["dispositions"];
+  appraisals?: ModelVisibleCharacterOntology["appraisals"];
+  development?: ModelVisibleCharacterOntology["development"];
   activeGoals: Array<{ description: string; priority: number }>;
 };
 
@@ -282,6 +286,10 @@ export async function buildPlayOpeningFrame(
   }
   const resolvedAct = playerNarrativeResolvedAct(messageHistory, history, context.entities, actorId, referenceableIds);
   const playContinuity = playerNarrativePlayContinuity(messageHistory);
+  const referenceableNames = new Map(scoped.referenceableEntities.map((entity) => [entity.id, entity.name]));
+  const visibleOntology = development.model
+    ? modelVisibleCharacterOntology(development.model, (entityId) => referenceableNames.get(entityId))
+    : undefined;
 
   return {
     branchId,
@@ -319,6 +327,9 @@ export async function buildPlayOpeningFrame(
     behavioralContext: {
       traits: structuredClone(development.model?.traits ?? {}),
       decisionBiases: structuredClone(development.model?.decisionBiases ?? {}),
+      ...(visibleOntology?.dispositions.length ? { dispositions: structuredClone(visibleOntology.dispositions) } : {}),
+      ...(visibleOntology?.appraisals.length ? { appraisals: structuredClone(visibleOntology.appraisals) } : {}),
+      ...(visibleOntology?.development.length ? { development: structuredClone(visibleOntology.development) } : {}),
       activeGoals: (context.actorGoals ?? [])
         .filter((goal) => development.activeGoalIds.includes(goal.id) && goalSupportedInCurrentPhase(goal, history, actorId))
         .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))

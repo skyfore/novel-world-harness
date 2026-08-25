@@ -29,6 +29,10 @@ import {
 } from "../world/model.js";
 import { validateEventParticipationRecord } from "../world/event-semantics.js";
 import { validateEventRelationCatalog } from "../world/event-relations.js";
+import {
+  validateCharacterOntologyEvidenceAssertions,
+  validateCharacterOntologyReferences,
+} from "../world/character-ontology.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { isMetaKnowledgePredicate } from "./semantics.js";
@@ -58,6 +62,7 @@ export type CompilerValidationCatalog = {
   eventParticipations: Map<string, EventParticipation>;
   eventRelations: Map<string, EventRelation>;
   rules: Map<string, WorldRule>;
+  goals: Map<string, CharacterGoal>;
 };
 export type CompilerConvergenceProgress = {
   phase: "load" | "canonical" | "complete";
@@ -74,14 +79,18 @@ export type BatchAcceptResult = {
 };
 
 export class CompilerValidator {
-  constructor(private readonly canon: CanonicalModelStore, private readonly stateSchema = new StateSchemaRegistry(DEFAULT_STATE_FIELDS)) {}
+  constructor(
+    private readonly canon: CanonicalModelStore,
+    private readonly stateSchema = new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    private readonly actors?: ActorModelStore,
+  ) {}
 
   async validate(kind: CanonicalProposalKind, payload: unknown): Promise<CompilerValidation> {
     return this.validateWithCatalog(kind, payload, await this.loadCatalog());
   }
 
   async loadCatalog(): Promise<CompilerValidationCatalog> {
-    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, eventRelationList, ruleList] = await Promise.all([
+    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, eventRelationList, ruleList, goalList] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listPropositions(),
       this.canon.listAttributions(),
@@ -90,6 +99,7 @@ export class CompilerValidator {
       this.canon.listEventParticipations(),
       this.canon.listEventRelations(),
       this.canon.listRules(),
+      this.actors?.listGoals() ?? [],
     ]);
     return {
       entities: new Map(entityList.map((entity) => [entity.id, entity])),
@@ -100,11 +110,12 @@ export class CompilerValidator {
       eventParticipations: new Map(eventParticipationList.map((item) => [item.id, item])),
       eventRelations: new Map(eventRelationList.map((item) => [item.id, item])),
       rules: new Map(ruleList.map((rule) => [rule.id, rule])),
+      goals: new Map(goalList.map((goal) => [goal.id, goal])),
     };
   }
 
   validateWithCatalog(kind: CanonicalProposalKind, payload: unknown, catalog: CompilerValidationCatalog): CompilerValidation {
-    const { entities, propositions, attributions, claims, events, eventParticipations, eventRelations, rules } = catalog;
+    const { entities, propositions, attributions, claims, events, eventParticipations, eventRelations, rules, goals } = catalog;
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
@@ -127,7 +138,7 @@ export class CompilerValidator {
     if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
     if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
     if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
-    if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, claims, events, rules, errors);
+    if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, propositions, claims, events, rules, goals, errors);
     return { accepted: errors.length === 0, errors, warnings };
   }
 
@@ -559,9 +570,11 @@ export class CompilerValidator {
   private validateCharacterModel(
     model: CharacterModel,
     entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
     claims: ReadonlyMap<string, Claim>,
     events: ReadonlyMap<string, CanonicalEvent>,
     rules: ReadonlyMap<string, WorldRule>,
+    goals: ReadonlyMap<string, CharacterGoal>,
     errors: ValidationIssue[],
   ): void {
     const actor = entities.get(model.actorId);
@@ -580,6 +593,12 @@ export class CompilerValidator {
         errors.push(issue("UNKNOWN_DEVELOPMENT_EVENT", `Character phase ${phase.id} story window references unknown canonical event ${phase.activation.storyWindow.anchorEventId}`, `developmentPhases.${phaseIndex}.activation.storyWindow`));
       }
     }
+    errors.push(...validateCharacterOntologyReferences(model, {
+      entities,
+      propositions: new Set(propositions.keys()),
+      events,
+      goals,
+    }));
   }
 
   private validateOperations(operations: CanonicalEvent["observedOutcome"]["operations"], entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[], pathPrefix: string): void {
@@ -652,9 +671,9 @@ export class CompilerCommitService {
     this.canon = new CanonicalModelStore(workspaceRoot);
     this.proposals = new ProposalStore(workspaceRoot);
     this.compiler = new CanonicalCompiler(this.proposals, this.canon);
-    this.validator = new CompilerValidator(this.canon);
     this.initialWorld = new InitialWorldStore(workspaceRoot);
     this.actorModels = new ActorModelStore(workspaceRoot);
+    this.validator = new CompilerValidator(this.canon, new StateSchemaRegistry(DEFAULT_STATE_FIELDS), this.actorModels);
     this.exactEvidence = new EvidenceAssertionStore(workspaceRoot);
     this.evidence = new EvidenceVerifier(workspaceRoot);
   }
@@ -805,7 +824,7 @@ export class CompilerCommitService {
     const relationCandidates = eligible.filter((item) => item.kind === "event-relation");
     for (const candidate of relationCandidates) addToCatalog(catalog, candidate.kind, candidate.payload);
     for (const candidate of relationCandidates) await processCandidate(candidate);
-    for (const kind of ["initial-world", "character-model", "character-goal"] as const) {
+    for (const kind of ["initial-world", "character-goal", "character-model"] as const) {
       for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
     }
     onProgress?.({ phase: "complete", processed, total, accepted: accepted.length, blocked: blocked.length });
@@ -830,6 +849,9 @@ export class CompilerCommitService {
       : [];
     const artifactId = compilerProposalArtifactId(kind, payload, proposalId);
     const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
+    const characterEvidenceIssues = kind === "character-model"
+      ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
+      : [];
     const exactInspection = await this.evidence.inspectAssertions(evidenceAssertions);
     const legacySourceIds = evidenceSourceIds([...payloadEvidence, ...envelopeEvidence]);
     const exactSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
@@ -875,6 +897,7 @@ export class CompilerCommitService {
       ...inspected.issues,
       ...groundingIssues,
       ...targetIssues,
+      ...characterEvidenceIssues,
       ...exactInspection.issues,
       ...mixedSourceIssues,
       ...resolutionTraceIssues,
@@ -1017,6 +1040,7 @@ function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposa
   if (kind === "event-participation") { const value = eventParticipationSchema.parse(payload); catalog.eventParticipations.set(value.id, value); }
   if (kind === "event-relation") { const value = eventRelationSchema.parse(payload); catalog.eventRelations.set(value.id, value); }
   if (kind === "world-rule") { const value = worldRuleSchema.parse(payload); catalog.rules.set(value.id, value); }
+  if (kind === "character-goal") { const value = characterGoalSchema.parse(payload); catalog.goals.set(value.id, value); }
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {

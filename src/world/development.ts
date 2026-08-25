@@ -12,6 +12,7 @@ import { committedHistory, realizedCanonicalEvents } from "./scene.js";
 import { evaluatePredicate } from "./state.js";
 import { observeCommittedEvent } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
+import { characterOntologyEvidence } from "./character-ontology.js";
 
 export type CharacterLifeStage = {
   value: string;
@@ -85,8 +86,19 @@ export async function projectCharacterDevelopment(
   const scopedHistory = history.filter((entry) => !entry.event.evidence.length
     || evidenceBelongsExclusivelyToSource(entry.event.evidence, effectiveSourceId));
   const realized = realizedCanonicalEvents(scopedHistory);
-  const experiencedEntries = scopedHistory.filter((entry) => entry.event.participants.includes(actorId));
-  const experiencedCanonical = new Set(experiencedEntries.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? []));
+  const actorCanExperienceCanonical = (eventId: string) => {
+    const event = context.events?.get(eventId);
+    if (!event?.participants.includes(actorId)) return false;
+    const presence = event.participantPresence?.find((item) => item.entityId === actorId)?.mode;
+    return presence ? presence !== "mentioned" && presence !== "represented" : true;
+  };
+  const experiencedEntries = scopedHistory.filter((entry) => {
+    if (!entry.event.participants.includes(actorId)) return false;
+    const canonicalIds = entry.event.realizesCanonicalEventIds ?? [];
+    return !canonicalIds.length || canonicalIds.some(actorCanExperienceCanonical);
+  });
+  const experiencedCanonical = new Set(experiencedEntries.flatMap((entry) =>
+    (entry.event.realizesCanonicalEventIds ?? []).filter(actorCanExperienceCanonical)));
   const recentLivedExperiences = experiencedEntries
     .filter((entry) => entry.event.title !== "Genesis")
     .slice(-12)
@@ -104,7 +116,10 @@ export async function projectCharacterDevelopment(
     });
   const candidateModel = overrides.model === undefined ? context.actorModels?.get(actorId) : overrides.model;
   const model = candidateModel
-    && evidenceBelongsExclusivelyToSource(candidateModel.evidence, effectiveSourceId)
+    && evidenceBelongsExclusivelyToSource([
+      ...candidateModel.evidence,
+      ...characterOntologyEvidence(candidateModel),
+    ], effectiveSourceId)
     ? candidateModel
     : undefined;
   const effectiveModel = model ? resolveCharacterModel(model, {

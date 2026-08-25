@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
+import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { initialWorldSchema } from "../world/initial.js";
 import {
@@ -37,6 +37,10 @@ import {
 } from "../world/model.js";
 import { validateEventParticipationCatalog } from "../world/event-semantics.js";
 import { validateEventRelationCatalog } from "../world/event-relations.js";
+import {
+  validateCharacterOntologyEvidenceAssertions,
+  validateCharacterOntologyReferences,
+} from "../world/character-ontology.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { assertEvidenceExclusiveToSource, assertSingleEvidenceSource, evidenceSourceIds } from "../world/source-scope.js";
@@ -160,8 +164,19 @@ export function compilerProposalArtifactId(
 export function compilerPayloadEvidence(payload: unknown): EvidenceRef[] {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
   const record = payload as { evidence?: unknown; counterEvidence?: unknown };
-  return [record.evidence, record.counterEvidence].flatMap((candidate) =>
-    candidate === undefined ? [] : evidenceRefSchema.array().parse(candidate));
+  const nested = payload as Record<string, unknown>;
+  const semanticChildren = [
+    nested.developmentPhases,
+    nested.dispositions,
+    nested.appraisalEpisodes,
+    nested.developmentEpisodes,
+  ].flatMap((candidate) => Array.isArray(candidate) ? candidate : []);
+  return [record, ...semanticChildren].flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const item = candidate as { evidence?: unknown; counterEvidence?: unknown };
+    return [item.evidence, item.counterEvidence].flatMap((evidence) =>
+      evidence === undefined ? [] : evidenceRefSchema.array().parse(evidence));
+  });
 }
 
 export class CompilerProposalService {
@@ -191,8 +206,12 @@ export class CompilerProposalService {
     }
     const artifactId = compilerProposalArtifactId(kind, payload, input.proposalId);
     const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
-    if (targetIssues.length) {
-      throw new Error(targetIssues.map((item) => `${item.code}${item.path ? ` at ${item.path}` : ""}: ${item.message}`).join("; "));
+    const characterEvidenceIssues = kind === "character-model"
+      ? validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions)
+      : [];
+    if (targetIssues.length || characterEvidenceIssues.length) {
+      throw new Error([...targetIssues, ...characterEvidenceIssues]
+        .map((item) => `${item.code}${item.path ? ` at ${item.path}` : ""}: ${item.message}`).join("; "));
     }
     const proposal: ArtifactProposal<unknown> = {
       id: input.proposalId,
@@ -303,6 +322,7 @@ type ProposalClosureCatalog = {
   claims: Set<string>;
   events: Set<string>;
   rules: Set<string>;
+  goals: Set<string>;
   possibilities: Set<string>;
 };
 
@@ -328,8 +348,9 @@ export async function validateCompilerProposalClosure(
   const proposals = new ProposalStore(workspaceRoot);
   const canon = new CanonicalModelStore(workspaceRoot);
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
+  const actors = new ActorModelStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalRules, canonicalPossibilities, pending] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalRules, canonicalGoals, canonicalPossibilities, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -338,6 +359,7 @@ export async function validateCompilerProposalClosure(
     canon.listEventParticipations(),
     canon.listEventRelations(),
     canon.listRules(),
+    actors.listGoals(),
     possibilities.list(),
     proposals.list("pending"),
   ]);
@@ -356,6 +378,7 @@ export async function validateCompilerProposalClosure(
     claims: new Set(canonicalClaims.filter(fromActiveSource).map((item) => item.id)),
     events: new Set(canonicalEvents.filter(fromActiveSource).map((item) => item.id)),
     rules: new Set(canonicalRules.filter(fromActiveSource).map((item) => item.id)),
+    goals: new Set(canonicalGoals.filter(fromActiveSource).map((item) => item.id)),
     possibilities: new Set(canonicalPossibilities.filter(fromActiveSource).map((item) => item.id)),
   };
   const staged = new Map<string, StagedProposal>();
@@ -386,6 +409,7 @@ export async function validateCompilerProposalClosure(
     if (summary.kind === "claim") catalog.claims.add((payload as { id: string }).id);
     if (summary.kind === "canonical-event") catalog.events.add((payload as { id: string }).id);
     if (summary.kind === "world-rule") catalog.rules.add((payload as { id: string }).id);
+    if (summary.kind === "character-goal") catalog.goals.add((payload as { id: string }).id);
     if (summary.kind === "possibility") catalog.possibilities.add((payload as { id: string }).id);
   }
 
@@ -404,13 +428,27 @@ export async function validateCompilerProposalClosure(
     relations: new Map(canonicalEventRelations.filter(fromActiveSource).map((item) => [item.id, item])),
     requireCompleteCausalProjectionForEventIds: new Set<string>(),
   };
+  const characterOntologyCatalog = {
+    entities: new Map(canonicalEntities.filter(fromActiveSource).map((entity) => [entity.id, { kind: entity.kind }])),
+    propositions: new Set(canonicalPropositions.filter(fromActiveSource).map((proposition) => proposition.id)),
+    events: new Map(canonicalEvents.filter(fromActiveSource).map((event) => [event.id, {
+      participants: event.participants,
+      participantPresence: event.participantPresence,
+    }])),
+    goals: new Map(canonicalGoals.filter(fromActiveSource).map((goal) => [goal.id, { actorId: goal.actorId }])),
+  };
   for (const proposal of staged.values()) {
     if (proposal.kind === "entity") {
       const value = entitySchema.parse(proposal.payload);
       participationCatalog.entities.set(value.id, value);
+      characterOntologyCatalog.entities.set(value.id, { kind: value.kind });
     } else if (proposal.kind === "canonical-event") {
       const value = canonicalEventSchema.parse(proposal.payload);
       participationCatalog.events.set(value.id, value);
+      characterOntologyCatalog.events.set(value.id, {
+        participants: value.participants,
+        participantPresence: value.participantPresence,
+      });
     } else if (proposal.kind === "event-participation") {
       const value = eventParticipationSchema.parse(proposal.payload);
       participationCatalog.participations.set(value.id, value);
@@ -423,9 +461,13 @@ export async function validateCompilerProposalClosure(
     } else if (proposal.kind === "proposition") {
       const value = propositionSchema.parse(proposal.payload);
       semanticCatalog.propositions.set(value.id, value);
+      characterOntologyCatalog.propositions.add(value.id);
     } else if (proposal.kind === "attribution") {
       const value = attributionSchema.parse(proposal.payload);
       semanticCatalog.attributions.set(value.id, value);
+    } else if (proposal.kind === "character-goal") {
+      const value = characterGoalSchema.parse(proposal.payload);
+      characterOntologyCatalog.goals.set(value.id, { actorId: value.actorId });
     }
     if (proposal.kind === "canonical-event") {
       const event = canonicalEventSchema.parse(proposal.payload);
@@ -507,6 +549,16 @@ export async function validateCompilerProposalClosure(
     requireCompleteCausalProjectionForEventIds: relationCatalog.requireCompleteCausalProjectionForEventIds,
   })) {
     issues.add(`event-relation: ${relationIssue.code} at ${relationIssue.path ?? "payload"}: ${relationIssue.message}`);
+  }
+  for (const [proposalId, proposal] of staged) {
+    if (proposal.kind !== "character-model") continue;
+    const model = characterModelSchema.parse(proposal.payload);
+    for (const ontologyIssue of [
+      ...validateCharacterOntologyReferences(model, characterOntologyCatalog),
+      ...validateCharacterOntologyEvidenceAssertions(model, proposal.evidenceAssertions),
+    ]) {
+      issues.add(`${proposalId}: ${ontologyIssue.code} at ${ontologyIssue.path ?? "payload"}: ${ontologyIssue.message}`);
+    }
   }
   return [...issues].sort();
 }

@@ -104,6 +104,7 @@ describe("Pi player-world response resolver", () => {
     const statuses: string[] = [];
     let created = 0;
     let disposed = 0;
+    const prompts: string[] = [];
     vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
       created += 1;
       const attempt = created;
@@ -111,7 +112,8 @@ describe("Pi player-world response resolver", () => {
       return {
         abort: async () => undefined,
         dispose: async () => { disposed += 1; },
-        promptWithReport: async () => {
+        promptWithReport: async (prompt: string) => {
+          prompts.push(prompt);
           if (attempt === 1) {
             await tool.execute("invalid", {
               decision: "select",
@@ -134,5 +136,9 @@ describe("Pi player-world response resolver", () => {
     expect(created).toBe(2);
     expect(disposed).toBe(2);
     expect(statuses).toContain("即时回应尚未收束，正在重新判断…");
+    expect(prompts[1]).toContain('"category":"lookup-miss"');
+    expect(prompts[1]).toContain("response-999");
+    expect(prompts[1]).toContain("response-001");
+    expect(prompts[1]).toContain("do not search outside");
   });
 });

@@ -1,8 +1,8 @@
 # Implementation status
 
-Date: 2026-08-25
+Date: 2026-08-26
 
-Verified baseline: `pnpm build`; `pnpm test` (109 test files, 618 tests passing).
+Verified baseline: `pnpm build`; `pnpm test` (110 test files, 625 tests passing).
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 

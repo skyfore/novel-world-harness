@@ -42,6 +42,7 @@ import { createPiPlayerWorldAdjudicator } from "./pi-player-world-adjudicator.js
 import { createPiPlayerWorldResponseResolver } from "./pi-player-world-response.js";
 import { createPiNpcReactionReasoner } from "./pi-npc-reaction.js";
 import { createPiCanonicalAttachmentResolver } from "./pi-canonical-attachment.js";
+import { withNwhToolRecovery } from "./tool-recovery.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
   deterministicPlayerIntentCandidate,
@@ -490,7 +491,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (current && current !== managedSessionName) return;
       setAgentSessionName(title);
     };
-    pi.registerTool(createRenameSessionTool(setAgentSessionName));
+    pi.registerTool(withNwhToolRecovery(createRenameSessionTool(setAgentSessionName)));
     let assistantToolNames: string[];
     try {
       assistantToolNames = [...new Set([...pi.getActiveTools(), "rename_session"])];
@@ -1418,7 +1419,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
         registeredCompilerToolset = createCompilerProposalToolset(workspace.root, generatedBy);
         for (const tool of registeredCompilerToolset.tools) {
-          if (!SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name)) pi.registerTool(tool);
+          if (!SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name)) pi.registerTool(withNwhToolRecovery(tool));
         }
         compilerToolsRegistered = true;
       }
@@ -1780,13 +1781,13 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (playerMode) {
         return {
           block: true,
-          reason: "Player narration is limited to the committed actor frame; tools are unavailable in player mode.",
+          reason: "Player narration is limited to the committed actor frame; tools are unavailable in player mode. Do not retry the tool call; continue from the supplied committed frame.",
         };
       }
       if (compilerCircuitBroken) {
         return {
           block: true,
-          reason: "The compiler circuit breaker opened; this batch turn is stopping without a checkpoint.",
+          reason: "The compiler circuit breaker opened; this batch turn is stopping without a checkpoint. Do not retry any tool in this turn; resume through a fresh host-started compiler turn.",
           terminate: true,
         };
       }
@@ -1798,21 +1799,21 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (pendingTurn && event.toolName === "propose_initial_world") {
         return {
           block: true,
-          reason: "Ordinary source-review batches cannot propose the initial world; NWH runs a dedicated opening-world pass after source compilation.",
+          reason: "Ordinary source-review batches cannot propose the initial world; NWH runs a dedicated opening-world pass after source compilation. Do not retry this tool in the current batch; finish the source review with the tools currently active.",
         };
       }
       if (COMPILER_TOOL_NAME_SET.has(event.toolName)) {
         if (mode === "assistant" && !compilerTurnActive) {
           return {
             block: true,
-            reason: "Compiler proposal tools are unavailable outside an explicit compiler turn.",
+            reason: "Compiler proposal tools are unavailable outside an explicit compiler turn. Do not retry the call here; start an explicit compile/source-preparation turn first.",
           };
         }
         try {
           if (!pi.getActiveTools().includes(event.toolName)) {
             return {
               block: true,
-              reason: `Compiler tool ${event.toolName} is outside the active compiler scope.`,
+              reason: `Compiler tool ${event.toolName} is outside the active compiler scope. Do not probe it again; use one of the tools explicitly active for this compiler phase.`,
             };
           }
         } catch {
@@ -1823,7 +1824,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (!pendingTurn || !LOCAL_EVIDENCE_TOOL_NAMES.has(event.toolName)) return;
       return {
         block: true,
-        reason: "This compiler batch may use only the evidence slice supplied by the host; workspace file tools are disabled until the batch settles.",
+        reason: "This compiler batch may use only the evidence slice supplied by the host; workspace file tools are disabled until the batch settles. Do not retry the file tool; use the current <source-segment> blocks and in-scope compiler retrieval tools.",
       };
     });
 

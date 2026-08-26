@@ -7,6 +7,7 @@ import { LocalFileWorkspace } from "../workspace/local-files.js";
 import { promptJson } from "../util/prompt-data.js";
 import { createCanonicalAttachmentCaptureTool } from "./canonical-attachment-tool.js";
 import { formatRetryNotice, PiAgentSession } from "./pi-session.js";
+import { buildNwhToolRecoveryAdvice, type NwhToolRecoveryAdvice } from "./tool-recovery.js";
 
 export type PiCanonicalAttachmentResolverOptions = {
   root: string;
@@ -47,7 +48,10 @@ export function createPiCanonicalAttachmentResolver(
       recentCommittedEvents: structuredClone(input.recentCommittedEvents),
     };
 
-    const runAttempt = async (attempt: 1 | 2) => {
+    const runAttempt = async (
+      attempt: 1 | 2,
+      recovery?: { previousDiagnostic: string; sop: NwhToolRecoveryAdvice },
+    ) => {
       const capture = createCanonicalAttachmentCaptureTool();
       const session = await PiAgentSession.create({
         workspace,
@@ -73,6 +77,7 @@ export function createPiCanonicalAttachmentResolver(
           task: attempt === 1
             ? "Select one coherent offered binding and add bounded expansion, or choose none, with exactly one tool call."
             : "Fresh protocol-recovery attempt: call attach_canonical_scaffold exactly once. Do not answer with prose.",
+          ...(recovery ? { recovery } : {}),
           ...promptData,
         }), { timeoutMs: options.promptTimeoutMs ?? CANONICAL_ATTACHMENT_TIMEOUT_MS });
         options.signal?.throwIfAborted();
@@ -83,13 +88,43 @@ export function createPiCanonicalAttachmentResolver(
       }
     };
 
+    const resolutionFailure = (attempt: Awaited<ReturnType<typeof runAttempt>>): string | undefined => {
+      if (attempt.attempts !== 1) {
+        return `Expected exactly one successful attach_canonical_scaffold call; observed ${attempt.attempts}.`;
+      }
+      if (!attempt.resolution) return "No valid attach_canonical_scaffold result was captured.";
+      const resolution = attempt.resolution;
+      if (resolution.decision === "none") return undefined;
+      const selected = input.bindingOptions.find((option) => option.bindingOptionId === resolution.bindingOptionId);
+      if (!selected) {
+        return `Unknown bindingOptionId '${resolution.bindingOptionId}'. Offered binding IDs: ${input.bindingOptions.map((option) => option.bindingOptionId).join(", ") || "none"}.`;
+      }
+      const characterRoleIds = new Set(selected.roles
+        .filter((role) => role.boundKind === "character")
+        .map((role) => role.roleId));
+      const invalidRoleId = [
+        ...resolution.roleObservations.map((observation) => observation.roleId),
+        ...resolution.roleAffects.map((affect) => affect.roleId),
+      ].find((roleId) => !characterRoleIds.has(roleId));
+      if (invalidRoleId) {
+        return `Unknown or non-character roleId '${invalidRoleId}' for binding '${selected.bindingOptionId}'. Offered character role IDs: ${[...characterRoleIds].join(", ") || "none"}.`;
+      }
+      return undefined;
+    };
     let attempt = await runAttempt(1);
-    if (!attempt.resolution || attempt.attempts !== 1) {
+    let failure = resolutionFailure(attempt);
+    if (failure) {
       options.onStatus?.("事件衔接尚未收束，正在重新判断…");
-      attempt = await runAttempt(2);
+      attempt = await runAttempt(2, {
+        previousDiagnostic: failure,
+        sop: buildNwhToolRecoveryAdvice("attach_canonical_scaffold", failure),
+      });
+      failure = resolutionFailure(attempt);
     }
-    if (!attempt.resolution || attempt.attempts !== 1) {
-      throw new Error(`Expected exactly one valid attach_canonical_scaffold call; observed ${attempt.attempts}.`);
+    if (failure || !attempt.resolution) {
+      throw new Error(
+        `${failure ?? "No usable canonical attachment was captured."} Recovery exhausted after one fresh isolated retry. Stop this optional attachment attempt and report the blocker; do not repeat an unchanged binding call.`,
+      );
     }
     return canonicalAttachmentResolutionSchema.parse(attempt.resolution);
   };

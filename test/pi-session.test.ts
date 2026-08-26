@@ -155,6 +155,8 @@ describe("PiAgentSession", () => {
     expect(contract).toContain('"name":"custom_host_capability","authority":"host-defined"');
     expect(contract).toContain('"playerTranscript":"display-only"');
     expect(contract).toContain('"configuredProjectInstructions":[]');
+    expect(contract).toContain('"toolFailureRecovery":{"protocolVersion":1');
+    expect(contract).toContain('"unchangedRetry":"forbidden"');
   });
 
   it("defaults to fullscreen while honoring saved and command-line choices", () => {

@@ -8,6 +8,7 @@ import { promptJson } from "../util/prompt-data.js";
 import { formatRetryNotice, PiAgentSession } from "./pi-session.js";
 import { createPlayerWorldResponseCaptureTool } from "./player-world-response-tool.js";
 import { createRelatedMessageAccess } from "./related-message-retrieval.js";
+import { buildNwhToolRecoveryAdvice, type NwhToolRecoveryAdvice } from "./tool-recovery.js";
 
 export type PiPlayerWorldResponseResolverOptions = {
   root: string;
@@ -100,7 +101,10 @@ export function createPiPlayerWorldResponseResolver(
       })),
     };
 
-    const runAttempt = async (attempt: 1 | 2) => {
+    const runAttempt = async (
+      attempt: 1 | 2,
+      recovery?: { previousDiagnostic: string; sop: NwhToolRecoveryAdvice },
+    ) => {
       const capture = createPlayerWorldResponseCaptureTool();
       const messageAccess = createRelatedMessageAccess((input.relatedMessages ?? []).map((message) => ({
         kind: message.role,
@@ -132,6 +136,7 @@ export function createPiPlayerWorldResponseResolver(
           task: attempt === 1
             ? "Select the uniquely direct immediate world response, or none, with exactly one tool call."
             : "Fresh protocol-recovery attempt: call select_player_world_response exactly once. Do not answer with prose.",
+          ...(recovery ? { recovery } : {}),
           ...promptData,
         }), { timeoutMs: options.promptTimeoutMs ?? PLAYER_WORLD_RESPONSE_TIMEOUT_MS });
         options.signal?.throwIfAborted();
@@ -145,19 +150,29 @@ export function createPiPlayerWorldResponseResolver(
       }
     };
 
-    const selectionIsUsable = (attempt: Awaited<ReturnType<typeof runAttempt>>): boolean => Boolean(
-      attempt.selection
-      && attempt.executionAttempts === 1
-      && (attempt.selection.decision === "none" || reverseResponseIds.has(attempt.selection.responseId)),
-    );
+    const selectionFailure = (attempt: Awaited<ReturnType<typeof runAttempt>>): string | undefined => {
+      if (attempt.executionAttempts !== 1) {
+        return `Expected exactly one successful select_player_world_response call; observed ${attempt.executionAttempts}.`;
+      }
+      if (!attempt.selection) return "No valid select_player_world_response result was captured.";
+      if (attempt.selection.decision === "select" && !reverseResponseIds.has(attempt.selection.responseId)) {
+        return `Unknown responseId '${attempt.selection.responseId}'. Offered response IDs: ${[...reverseResponseIds.keys()].join(", ") || "none"}.`;
+      }
+      return undefined;
+    };
     let attempt = await runAttempt(1);
-    if (!selectionIsUsable(attempt)) {
+    let failure = selectionFailure(attempt);
+    if (failure) {
       options.onStatus?.("即时回应尚未收束，正在重新判断…");
-      attempt = await runAttempt(2);
+      attempt = await runAttempt(2, {
+        previousDiagnostic: failure,
+        sop: buildNwhToolRecoveryAdvice("select_player_world_response", failure),
+      });
+      failure = selectionFailure(attempt);
     }
-    if (!selectionIsUsable(attempt) || !attempt.selection) {
+    if (failure || !attempt.selection) {
       throw new Error(
-        `Expected exactly one valid offered select_player_world_response choice after one fresh retry; observed ${attempt.executionAttempts} call(s).`,
+        `${failure ?? "No usable world-response selection was captured."} Recovery exhausted after one fresh isolated retry. Stop this resolver and report the blocker; do not repeat an unchanged selection call.`,
       );
     }
     if (attempt.selection.decision === "none") {

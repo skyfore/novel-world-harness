@@ -85,4 +85,50 @@ describe("Pi canonical attachment resolver", () => {
     expect(prompt).not.toContain("courier-stable-id");
     expect(disposed).toBe(true);
   });
+
+  it("retries an unoffered binding with an explicit same-prompt ID recovery SOP", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-canon-attachment-retry-"));
+    roots.push(root);
+    const statuses: string[] = [];
+    const prompts: string[] = [];
+    let created = 0;
+    let disposed = 0;
+    vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
+      created += 1;
+      const attempt = created;
+      const tool = options.additionalTools![0]!;
+      return {
+        abort: async () => undefined,
+        dispose: async () => { disposed += 1; },
+        promptWithReport: async (prompt: string) => {
+          prompts.push(prompt);
+          const resolution = attempt === 1
+            ? {
+                decision: "attach",
+                bindingOptionId: "binding-999",
+                title: "An unoffered courier takes the order",
+                roleObservations: [],
+                roleAffects: [],
+              }
+            : { decision: "none" };
+          await tool.execute(`attach-${attempt}`, resolution as never, undefined, undefined, {} as never);
+          return { text: "" } as never;
+        },
+      } as unknown as PiAgentSession;
+    });
+
+    const result = await createPiCanonicalAttachmentResolver({
+      root,
+      onStatus: (status) => statuses.push(status),
+    })(input());
+
+    expect(result).toEqual({ decision: "none" });
+    expect(created).toBe(2);
+    expect(disposed).toBe(2);
+    expect(statuses).toContain("事件衔接尚未收束，正在重新判断…");
+    expect(prompts[1]).toContain('"category":"lookup-miss"');
+    expect(prompts[1]).toContain("binding-999");
+    expect(prompts[1]).toContain("binding-001");
+    expect(prompts[1]).toContain("do not search outside");
+  });
 });

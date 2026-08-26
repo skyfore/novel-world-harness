@@ -108,6 +108,14 @@ handles and the host decodes them before deterministic validation. Neither
 nested session inherits the ordinary transcript, project instructions, local
 tools, compiler context, or future canon.
 
+All NWH model-facing tools, including tools in isolated sessions that disable the
+main NWH extension, pass through a common failure-recovery boundary. Pi retains
+`isError=true` for validation and execution failures, while the host appends a
+bounded SOP that names any safe paired discovery tool, distinguishes retrieval
+refs from domain IDs, and allows only one retry after a concrete correction.
+Single-use, scope, host-repair, and circuit-breaker failures explicitly prohibit
+same-turn retries. See `agent-tool-recovery.md` for the development contract.
+
 Persisted sessions are pinned to one NWH context role. Player/narrator entries
 are display-only and compiler spans are turn-local; live provider context,
 compaction inputs, and branch/tree summarization all use the same projection.

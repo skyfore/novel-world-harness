@@ -888,7 +888,7 @@ describe("NWH TUI extension", () => {
       input: {},
       content: [],
       isError: false,
-      details: { compilerBatchBlocked: true, reason: "tool-call budget exceeded", finishFailureCount: 0, toolCallCount: 201 },
+      details: { compilerBatchBlocked: true, reason: "compiler tool-call safety fuse tripped", finishFailureCount: 0, toolCallCount: 1_001 },
     }, ctx)).toEqual({ isError: true });
     expect(events.get("tool_call")?.({
       type: "tool_call",
@@ -2650,9 +2650,9 @@ describe("NWH TUI extension", () => {
         content: [],
         details: {
           compilerBatchBlocked: true,
-          reason: "compiler tool-call budget exceeded",
+          reason: "compiler tool-call safety fuse tripped",
           finishFailureCount: 0,
-          toolCallCount: 201,
+          toolCallCount: 1_001,
         },
       }],
     }, ctx);
@@ -2902,7 +2902,7 @@ describe("NWH TUI extension", () => {
     expect(progress.completedBatchIds).toEqual([]);
   });
 
-  it("retries one tool-budget-interrupted /prepare-all batch with its active drafts", async () => {
+  it("retries one safety-fuse-interrupted /prepare-all batch with its active drafts", async () => {
     const { commands, events, root, sentHiddenMessages } = await fixture();
     const content = Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n");
     const evidence = await createEvidenceFixture(root, content, "tool-budget-retry.txt");
@@ -2921,9 +2921,9 @@ describe("NWH TUI extension", () => {
         content: [],
         details: {
           compilerBatchBlocked: true,
-          reason: "compiler tool-call budget exceeded its 200-call limit",
+          reason: "compiler tool-call safety fuse tripped after 1000 calls",
           finishFailureCount: 1,
-          toolCallCount: 201,
+          toolCallCount: 1_001,
         },
       },
       { role: "assistant", content: [{ type: "text", text: "attempt stopped" }], stopReason: "stop" },
@@ -2939,7 +2939,7 @@ describe("NWH TUI extension", () => {
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
     expect(sentHiddenMessages).toHaveLength(2);
-    expect(notifications).toContainEqual(expect.stringContaining("tool-call budget exceeded"));
+    expect(notifications).toContainEqual(expect.stringContaining("tool-call safety fuse tripped"));
     expect(notifications).toContainEqual(expect.stringContaining("Retry /prepare-all to resume"));
     const progress = await new CompilerBatchStore(root).read(evidence.source.id);
     expect(progress.completedBatchIds).toEqual([]);

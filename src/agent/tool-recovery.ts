@@ -295,7 +295,7 @@ export function buildNwhToolRecoveryAdvice(
 ): NwhToolRecoveryAdvice {
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
 
-  if (/tool-call budget|tool call budget|circuit breaker|circuit-breaker/u.test(lower)) {
+  if (/tool-call budget|tool call budget|tool-call safety fuse|circuit breaker|circuit-breaker/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,

@@ -21,9 +21,6 @@ afterEach(async () => {
 type ReconciliationContext = {
   repairPlan: {
     targetCount: number;
-    estimatedToolCalls: number;
-    toolCallLimit: number;
-    reservedCalls: number;
     maxIterations: number;
     mode: string;
     requireAutonomousDriver: boolean;
@@ -83,12 +80,15 @@ describe("world semantic reconciliation", () => {
       "story-time-unknown",
       "no-typed-effect",
     ]));
-    expect(first.repairPlan).toMatchObject({ toolCallLimit: 200, maxIterations: 10 });
-    expect(first.repairPlan.estimatedToolCalls).toBeLessThanOrEqual(85);
-    expect(first.repairPlan.reservedCalls).toBeGreaterThanOrEqual(115);
-    expect(second.repairPlan.estimatedToolCalls).toBeLessThanOrEqual(85);
+    expect(first.repairPlan).toMatchObject({ targetCount: 17, maxIterations: 10 });
+    expect(second.repairPlan).toMatchObject({ targetCount: 16, maxIterations: 10 });
+    expect(first.repairPlan).not.toHaveProperty("estimatedToolCalls");
+    expect(first.repairPlan).not.toHaveProperty("toolCallLimit");
+    expect(first.repairPlan).not.toHaveProperty("reservedCalls");
     expect(firstPrompt).toContain("Call read_compiler_artifact directly with that ref");
     expect(firstPrompt).toContain("do not spend a find_compiler_artifacts call rediscovering a listed ref");
+    expect(firstPrompt).toContain("never omit or withdraw a valid repair merely to save calls");
+    expect(firstPrompt).not.toContain("preserve the reserved tool calls");
     expect(firstPrompt).not.toContain("for every omitted or referenced exact payload");
 
     const reparseFirst = reconciliationContext(await buildWorldReconciliationPrompt(

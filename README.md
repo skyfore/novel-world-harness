@@ -111,16 +111,16 @@ Each successful batch is checkpointed under `$NWH_HOME/workspaces/v1/`. `/compil
 continues the active novel from the next unfinished batch. The loop is deliberately
 one batch per user action so importing a long novel cannot silently trigger an
 unbounded sequence of model requests. Generated artifacts remain pending proposals
-until deterministic validation and explicit acceptance. A batch may retain up
-to 160 active proposals so the MVP compiler can cover all enabled semantic
-layers in a dense section. A defective proposal can be withdrawn to rejected
-history within its originating batch, and repeated
-unchanged finish failures or a 200-call general compiler-tool budget trip a circuit breaker
-instead of extending the Pi tool loop.
+until deterministic validation and explicit acceptance. The MVP compiler does
+not expose capacity counters or ask the model to prioritize semantics by cost.
+A defective proposal can be withdrawn to rejected history within its originating
+batch, but valid material must never be withdrawn merely to save calls. Repeated
+unchanged finish failures remain circuit-broken, while host-only runaway safety
+fuses sit far above expected work at 800 active proposals and 1,000 tool calls.
 One additional final `finish_compiler_batch` call is reserved for the required
 checkpoint handshake. Concurrent CLI compiler writers are rejected by a
 workspace lock instead of racing proposal files.
-Non-interactive compiler turns also have a thirty-minute wall-clock deadline; a
+Non-interactive compiler turns also have a one-hour wall-clock deadline; a
 timed-out turn is aborted without checkpointing and resumes from durable progress.
 Batch identity is persisted on each proposal, so retrying an interrupted batch
 recovers its active drafts, supplies their exact proposal IDs to the retry turn,
@@ -443,7 +443,8 @@ nwh world actor hero --branch main
 ```
 
 NWH does not impose a token budget, request-count ceiling, or smaller output cap
-on Pi model calls. Transient provider failures use Pi's automatic retry policy;
+on Pi model calls. The compiler's high host-only runaway fuse is an execution
+safeguard, not a model-visible content budget. Transient provider failures use Pi's automatic retry policy;
 the CLI reports retry progress and only returns a failure after retries are
 exhausted.
 

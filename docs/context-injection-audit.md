@@ -351,8 +351,10 @@ and [compiler-artifact-retrieval.test.ts](../test/compiler-artifact-retrieval.te
 Before any typed proposal is persisted, the host strict-schema parses it,
 requires source evidence where appropriate, rejects mixed-source artifacts,
 checks every evidence span against the captured selected slice, validates
-stable revision identity and typed field/reference rules, and caps a batch at
-160 active proposals and 200 general tool calls plus one final finish call.
+stable revision identity and typed field/reference rules. Successful tool results
+expose no capacity counters, and the model is explicitly forbidden from semantic
+triage based on execution cost. Host-only runaway safety fuses remain at 800
+active proposals and 1,000 tool calls plus one final finish call.
 Proposal calls are sequential. `finish_compiler_batch` derives the active set
 on the host, validates graph closure and exact segment review, and merely
 allows the host to checkpoint the batch. Canonical acceptance is a later

@@ -94,9 +94,9 @@ import {
   validateKnowledgeAcquisitionProposalTrace,
 } from "./attribution-trace.js";
 import {
-  COMPILER_ACTIVE_PROPOSAL_LIMIT,
+  COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE,
   COMPILER_FINISH_GRACE_CALLS,
-  COMPILER_TOOL_CALL_LIMIT,
+  COMPILER_TOOL_CALL_SAFETY_FUSE,
 } from "./limits.js";
 
 function proposalResult(
@@ -462,18 +462,12 @@ type CompilerFinishDetails =
 type CompilerProposalRecordedDetails = {
   proposalId: string;
   kind: CompilerProposalKind;
-  activeProposalCount: number;
-  toolCallCount: number;
-  remainingToolCalls: number;
 };
 
 type SourceAnnotationProposalRecordedDetails = {
   proposalId: string;
   kind: SourceAnnotationType;
   annotationId: string;
-  activeProposalCount: number;
-  toolCallCount: number;
-  remainingToolCalls: number;
 };
 
 type IdentityResolutionProposalRecordedDetails = {
@@ -482,9 +476,6 @@ type IdentityResolutionProposalRecordedDetails = {
   resolutionId: string;
   mentionId: string;
   status: IdentityResolution["status"];
-  activeProposalCount: number;
-  toolCallCount: number;
-  remainingToolCalls: number;
 };
 
 type EventResolutionProposalRecordedDetails = {
@@ -493,9 +484,6 @@ type EventResolutionProposalRecordedDetails = {
   resolutionId: string;
   eventMentionIds: string[];
   status: EventResolution["status"];
-  activeProposalCount: number;
-  toolCallCount: number;
-  remainingToolCalls: number;
 };
 
 type CompilerProposalDetails =
@@ -507,7 +495,7 @@ type CompilerProposalDetails =
 
 type NovelTitleProposalDetails =
   | CompilerBatchBlockedDetails
-  | { proposalId: string; kind: "novel-title"; activeProposalCount: number; toolCallCount: number; remainingToolCalls: number };
+  | { proposalId: string; kind: "novel-title" };
 
 type CompilerWithdrawDetails =
   | CompilerBatchBlockedDetails
@@ -798,12 +786,12 @@ export function createCompilerProposalToolset(
   const beginToolCall = (kind: "retrieval" | "mutation" | "finish") => {
     if (circuitBreak) return circuitBreakResult(circuitBreak.reason, circuitBreak.failureCount);
     totalToolCalls += 1;
-    if (totalToolCalls <= COMPILER_TOOL_CALL_LIMIT) return undefined;
+    if (totalToolCalls <= COMPILER_TOOL_CALL_SAFETY_FUSE) return undefined;
     if (kind === "finish" && finishGraceCalls < COMPILER_FINISH_GRACE_CALLS) {
       finishGraceCalls += 1;
       return undefined;
     }
-    const reason = `compiler tool-call budget exceeded its ${COMPILER_TOOL_CALL_LIMIT}-call limit`;
+    const reason = `compiler tool-call safety fuse tripped after ${COMPILER_TOOL_CALL_SAFETY_FUSE} calls`;
     circuitBreak = { reason, failureCount: totalFinishFailures };
     return circuitBreakResult(reason, totalFinishFailures);
   };
@@ -930,8 +918,8 @@ export function createCompilerProposalToolset(
     if (successfulEventResolutionProposalIds.has(proposalId)) {
       throw new Error(`Proposal ID ${proposalId} is already used by an event-resolution proposal in this batch.`);
     }
-    if (!successfulAnnotationProposalIds.has(proposalId) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
-      throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+    if (!successfulAnnotationProposalIds.has(proposalId) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
+      throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse. Do not withdraw semantically valid work to make room; stop this turn and preserve the exact drafts for diagnosis.`);
     }
   };
   const stageAnnotation = async (
@@ -1241,8 +1229,8 @@ export function createCompilerProposalToolset(
       const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
       if (!source) throw new Error(`Unknown active compiler source: ${activeSourceId}`);
       if (source.titleInference) throw new Error(`Source ${activeSourceId} already has an accepted model-inferred title '${source.title}'.`);
-      if (!pendingNovelTitleProposal && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
-        throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals.`);
+      if (!pendingNovelTitleProposal && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
+        throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse.`);
       }
       const proposal = sourceTitleProposalSchema.parse({
         version: 1,
@@ -1268,9 +1256,6 @@ export function createCompilerProposalToolset(
         details: {
           proposalId: proposal.proposalId,
           kind: "novel-title",
-          activeProposalCount: activeProposalCount(),
-          toolCallCount: totalToolCalls,
-          remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
         },
       };
     },
@@ -1439,8 +1424,8 @@ export function createCompilerProposalToolset(
         if (successfulEventResolutionProposalIds.has(input.proposal_id)) {
           throw new Error(`Proposal ID ${input.proposal_id} is already used by an event-resolution proposal in this batch.`);
         }
-        if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
-          throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+        if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
+          throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse. Do not withdraw semantically valid work to make room; stop this turn and preserve the exact drafts for diagnosis.`);
         }
         const accepted = await service.submit(kind, {
           proposalId: input.proposal_id,
@@ -1456,12 +1441,9 @@ export function createCompilerProposalToolset(
         successfulProposalIds.add(accepted.proposalId);
         recordProposalProgress();
         return proposalResult(
-          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth. Active proposals: ${activeProposalCount()}/${COMPILER_ACTIVE_PROPOSAL_LIMIT}. General compiler calls remaining: ${Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls)}. When that reaches zero, the only additional permitted call is finish_compiler_batch; any other call stops this attempt.`,
+          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth. Continue until every material evidence-backed unit and required closure record in the supplied scope has been handled; never omit or withdraw valid work merely to conserve execution capacity.`,
           {
             ...accepted,
-            activeProposalCount: activeProposalCount(),
-            toolCallCount: totalToolCalls,
-            remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
           },
         );
       },
@@ -1471,14 +1453,11 @@ export function createCompilerProposalToolset(
     proposalId: string,
     annotation: SourceAnnotation,
   ) => proposalResult(
-    `Pending ${annotation.annotationType} observation ${proposalId} recorded for annotation ${annotation.id}. It records source semantics only and does not create canonical world truth. Active proposals: ${activeProposalCount()}/${COMPILER_ACTIVE_PROPOSAL_LIMIT}.`,
+    `Pending ${annotation.annotationType} observation ${proposalId} recorded for annotation ${annotation.id}. It records source semantics only and does not create canonical world truth. Continue with all material evidence-backed observations and their required resolution/closure records.`,
     {
       proposalId,
       kind: annotation.annotationType,
       annotationId: annotation.id,
-      activeProposalCount: activeProposalCount(),
-      toolCallCount: totalToolCalls,
-      remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
     },
   );
   const entityMentionTool = defineTool<typeof entityMentionParameters, CompilerProposalDetails>({
@@ -1673,8 +1652,8 @@ export function createCompilerProposalToolset(
         || successfulEventResolutionProposalIds.has(input.proposal_id)) {
         throw new Error(`Proposal ID ${input.proposal_id} is already used by another compiler proposal in this batch.`);
       }
-      if (!successfulEntityResolutionProposalIds.has(input.proposal_id) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
-        throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+      if (!successfulEntityResolutionProposalIds.has(input.proposal_id) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
+        throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse. Do not withdraw semantically valid work to make room; stop this turn and preserve the exact drafts for diagnosis.`);
       }
       const resolution = identityResolutionSchema.parse({
         version: 1,
@@ -1716,16 +1695,13 @@ export function createCompilerProposalToolset(
       successfulEntityResolutionProposalIds.add(input.proposal_id);
       recordProposalProgress();
       return proposalResult(
-        `Pending entity-resolution proposal ${input.proposal_id} recorded for mention ${resolution.mentionId} with status ${resolution.status}. It is a source-to-identity decision, not canonical world truth. Active proposals: ${activeProposalCount()}/${COMPILER_ACTIVE_PROPOSAL_LIMIT}.`,
+        `Pending entity-resolution proposal ${input.proposal_id} recorded for mention ${resolution.mentionId} with status ${resolution.status}. It is a source-to-identity decision, not canonical world truth.`,
         {
           proposalId: input.proposal_id,
           kind: "entity-resolution",
           resolutionId: resolution.id,
           mentionId: resolution.mentionId,
           status: resolution.status,
-          activeProposalCount: activeProposalCount(),
-          toolCallCount: totalToolCalls,
-          remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
         },
       );
     },
@@ -1758,8 +1734,8 @@ export function createCompilerProposalToolset(
         throw new Error(`Proposal ID ${input.proposal_id} is already used by another compiler proposal in this batch.`);
       }
       if (!successfulEventResolutionProposalIds.has(input.proposal_id)
-        && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
-        throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+        && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
+        throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse. Do not withdraw semantically valid work to make room; stop this turn and preserve the exact drafts for diagnosis.`);
       }
       const resolution = eventResolutionSchema.parse({
         version: 1,
@@ -1801,16 +1777,13 @@ export function createCompilerProposalToolset(
       successfulEventResolutionProposalIds.add(input.proposal_id);
       recordProposalProgress();
       return proposalResult(
-        `Pending event-resolution proposal ${input.proposal_id} recorded for ${resolution.eventMentionIds.length} event mention(s) with status ${resolution.status}. It is an identity decision, not committed occurrence or world truth. Active proposals: ${activeProposalCount()}/${COMPILER_ACTIVE_PROPOSAL_LIMIT}.`,
+        `Pending event-resolution proposal ${input.proposal_id} recorded for ${resolution.eventMentionIds.length} event mention(s) with status ${resolution.status}. It is an identity decision, not committed occurrence or world truth.`,
         {
           proposalId: input.proposal_id,
           kind: "event-resolution",
           resolutionId: resolution.id,
           eventMentionIds: resolution.eventMentionIds,
           status: resolution.status,
-          activeProposalCount: activeProposalCount(),
-          toolCallCount: totalToolCalls,
-          remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
         },
       );
     },

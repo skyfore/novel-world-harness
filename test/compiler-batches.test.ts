@@ -102,7 +102,7 @@ describe("compiler batches", () => {
     expect(isRecoverableCompilerBatchInterruption(outcome)).toBe(true);
     expect(isRecoverableCompilerBatchInterruption({
       ...outcome,
-      blockedReason: "compiler tool-call budget exceeded its 200-call limit",
+      blockedReason: "compiler tool-call safety fuse tripped after 1000 calls",
     })).toBe(true);
     expect(isRecoverableCompilerBatchInterruption({ ...outcome, blockedReason: "proposal graph remains incomplete" })).toBe(false);
   });
@@ -190,7 +190,7 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure(outcome)).toContain("compiler circuit breaker");
   });
 
-  it("reports a tool-budget circuit breaker from a proposal call as a batch failure", () => {
+  it("reports a tool-call safety fuse from a proposal call as a batch failure", () => {
     const outcome = compilerBatchOutcomeFromMessages([
       { role: "assistant", content: [{ type: "toolCall", id: "proposal", name: "propose_entity", arguments: { proposal_id: "entity-over-budget" } }], stopReason: "toolUse" },
       {
@@ -199,11 +199,11 @@ describe("compiler batches", () => {
         toolName: "propose_entity",
         isError: true,
         content: [],
-        details: { compilerBatchBlocked: true, reason: "compiler tool-call budget exceeded", finishFailureCount: 0, toolCallCount: 201 },
+        details: { compilerBatchBlocked: true, reason: "compiler tool-call safety fuse tripped", finishFailureCount: 0, toolCallCount: 1_001 },
       },
     ]);
 
-    expect(outcome).toMatchObject({ completionSignaled: false, blockedReason: "compiler tool-call budget exceeded" });
+    expect(outcome).toMatchObject({ completionSignaled: false, blockedReason: "compiler tool-call safety fuse tripped" });
     expect(compilerBatchFailure(outcome)).toContain("compiler circuit breaker");
   });
 
@@ -215,12 +215,12 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.segmentIds.length === 1)).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("evidence_segment_ids"))).toBe(true);
     expect(batches.every((batch) => !batch.prompt.includes("quoteHash"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("Use up to 150 evidence-grounded active proposals"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("rejects a 161st active proposal"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Execution capacity is a host-owned runaway safety fuse, never a semantic prioritization budget"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Never drop a lower-priority but material supported unit"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Ordinary source-review batches must not propose an initial-world"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("A failed propose_* tool call never enters the active set"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("empty aliases are valid"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("200 general compiler tool calls"))).toBe(true);
+    expect(batches.every((batch) => !batch.prompt.includes("general compiler tool calls"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Preserve the payload's stable logical id"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);

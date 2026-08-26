@@ -565,7 +565,9 @@ failures rather than speculative ontology growth.
 ### 3.8 Source accounting has internal denominators, not independent semantic recall
 
 The MVP compiler asks for comprehensive material coverage across the enabled
-semantic layers and permits up to 160 active proposals and 200 general tool calls per batch
+semantic layers, hides capacity counters from the model, and forbids dropping
+valid work to save calls. Host-only runaway fuses remain at 800 active proposals
+and 1,000 tool calls per turn
 ([batches.ts](../src/compiler/batches.ts#L705-L727),
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L442-L447)). Audit now
 computes source accounting, entity/event resolution, and proposition-

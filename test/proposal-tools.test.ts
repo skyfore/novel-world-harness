@@ -659,7 +659,7 @@ describe("compiler proposal tools", () => {
       evidence_segment_id: opening.id,
       reason: "Provider retried the same semantic title candidate.",
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
-      details: { proposalId: "novel-title-huozhe", activeProposalCount: 1 },
+      details: { proposalId: "novel-title-huozhe" },
     });
     await expect(WorkspaceStore.create(root)
       .then((store) => store.getSource(fixture.source.id))).resolves.toMatchObject({
@@ -1340,7 +1340,7 @@ describe("compiler proposal tools", () => {
     }
   });
 
-  it("terminates a compiler batch that exceeds its total tool-call budget", async () => {
+  it("keeps capacity counters host-only and trips only the high tool-call safety fuse", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-call-budget-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "众人来到前厅。\n");
@@ -1348,8 +1348,8 @@ describe("compiler proposal tools", () => {
     const entity = tools.find((candidate) => candidate.name === "propose_entity")!;
     const withdraw = tools.find((candidate) => candidate.name === "withdraw_compiler_proposal")!;
 
-    for (let index = 1; index <= 100; index += 1) {
-      await expect(entity.execute(`proposal-${index}`, {
+    for (let index = 1; index <= 500; index += 1) {
+      const recorded = await entity.execute(`proposal-${index}`, {
         proposal_id: `entity-${index}`,
         payload: {
           id: `person-${index}`,
@@ -1358,13 +1358,20 @@ describe("compiler proposal tools", () => {
           aliases: [],
           evidence: fixture.evidence("众人来到前厅。"),
         },
-      } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      } as never, undefined, undefined, {} as ExtensionContext);
+      expect(recorded).toMatchObject({
         details: {
           proposalId: `entity-${index}`,
-          activeProposalCount: 1,
-          remainingToolCalls: 200 - (index * 2 - 1),
         },
       });
+      if (index === 1) {
+        const text = recorded.content.map((item) => item.type === "text" ? item.text : "").join("\n");
+        expect(text).toContain("never omit or withdraw valid work merely to conserve execution capacity");
+        expect(text).not.toMatch(/remaining|active proposals|budget/iu);
+        expect(recorded.details).not.toHaveProperty("remainingToolCalls");
+        expect(recorded.details).not.toHaveProperty("activeProposalCount");
+        expect(recorded.details).not.toHaveProperty("toolCallCount");
+      }
       await expect(withdraw.execute(`withdraw-${index}`, {
         proposal_id: `entity-${index}`,
         reason: "Exercise the bounded total-call circuit breaker.",
@@ -1387,12 +1394,12 @@ describe("compiler proposal tools", () => {
       details: {
         compilerBatchBlocked: true,
         finishFailureCount: 0,
-        toolCallCount: 201,
+        toolCallCount: 1_001,
       },
     });
   });
 
-  it("reserves one final finish call after the general tool-call budget", async () => {
+  it("reserves one final finish call after the tool-call safety fuse", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-finish-grace-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "人物来到前厅。\n");
@@ -1411,7 +1418,7 @@ describe("compiler proposal tools", () => {
       evidence_segment_ids: [fixture.segmentId],
     };
 
-    for (let index = 1; index <= 200; index += 1) {
+    for (let index = 1; index <= 1_000; index += 1) {
       await entity.execute(`proposal-${index}`, input as never, undefined, undefined, {} as ExtensionContext);
     }
 
@@ -1424,13 +1431,13 @@ describe("compiler proposal tools", () => {
     });
   });
 
-  it("rejects a 161st active proposal before a dense batch can crowd out finish", async () => {
+  it("keeps an 800-proposal runaway safety fuse without advertising it as a target", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-active-budget-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "众人来到前厅。\n");
     const entity = createCompilerProposalTools(root).find((candidate) => candidate.name === "propose_entity")!;
 
-    for (let index = 1; index <= 160; index += 1) {
+    for (let index = 1; index <= 800; index += 1) {
       await entity.execute(`proposal-${index}`, {
         proposal_id: `entity-${index}`,
         payload: {
@@ -1443,16 +1450,16 @@ describe("compiler proposal tools", () => {
       } as never, undefined, undefined, {} as ExtensionContext);
     }
 
-    await expect(entity.execute("proposal-161", {
-      proposal_id: "entity-161",
+    await expect(entity.execute("proposal-801", {
+      proposal_id: "entity-801",
       payload: {
-        id: "person-161",
+        id: "person-801",
         kind: "character",
-        canonicalName: "人物161",
+        canonicalName: "人物801",
         aliases: [],
         evidence: fixture.evidence("众人来到前厅。"),
       },
-    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("already has 160 active proposals");
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("800-proposal safety fuse");
   });
 
   it("does not checkpoint proposals until their logical references form a closed graph", async () => {

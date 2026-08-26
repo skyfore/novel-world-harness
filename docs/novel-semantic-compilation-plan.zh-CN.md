@@ -537,8 +537,9 @@ institution/faction/artifact/economy domain module 应由 benchmark 暴露的真
 
 ### 2.8 Source accounting 已有内部 denominator，仍没有独立语义 recall 分母
 
-MVP 编译 prompt 要求覆盖当前启用语义层中的重要单元；单 batch
-最多 160 个 active proposal、200 次一般工具调用
+MVP 编译 prompt 要求覆盖当前启用语义层中的重要单元，不向模型暴露容量计数，
+并禁止为节省调用而删除有效语义工作。后台仅保留高位 runaway fuse：
+800 个 active proposal、单轮 1,000 次工具调用
 （[batches.ts](../src/compiler/batches.ts#L705-L727)、
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L442-L447)）。M2/M3 后，Audit 已能
 用基础 structural unit 与已产生 observation 计算 source accounting、entity/event

@@ -80,7 +80,7 @@ describe("compiler source evidence retrieval", () => {
     )).rejects.toThrow(`active source '${first.source.id}'`);
   });
 
-  it("counts retrieval calls in the compiler circuit-breaker budget", async () => {
+  it("counts retrieval calls in the compiler runaway safety fuse", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-source-evidence-budget-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "Hero enters.\n");
@@ -88,7 +88,7 @@ describe("compiler source evidence retrieval", () => {
     const toolset = createCompilerProposalToolset(root);
     await toolset.beginBatch([], "reconcile-budget", fixture.source.id);
     const find = toolset.tools.find((tool) => tool.name === "find_source_evidence")!;
-    for (let index = 0; index < 200; index += 1) {
+    for (let index = 0; index < 1_000; index += 1) {
       await expect(find.execute(
         `find-${index}`,
         { query: "missing" } as never,
@@ -105,7 +105,7 @@ describe("compiler source evidence retrieval", () => {
       {} as ExtensionContext,
     )).resolves.toMatchObject({
       terminate: true,
-      details: { compilerBatchBlocked: true, toolCallCount: 201 },
+      details: { compilerBatchBlocked: true, toolCallCount: 1_001 },
     });
   });
 

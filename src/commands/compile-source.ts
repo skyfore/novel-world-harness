@@ -211,7 +211,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           // A wall-clock/network failure can be thrown before Pi can produce a
           // CompilerBatchOutcome. Preserve the exact pending drafts and retry
           // this batch once in a fresh session, just like a report-level
-          // provider interruption or tool-budget circuit break.
+          // provider interruption or host-owned runaway safety fuse.
           options.signal?.throwIfAborted();
           if (attempt < MAX_COMPILER_BATCH_RECOVERY_RETRIES && isRecoverableCompilerSessionException(error)) {
             const failure = error instanceof Error ? error.message : String(error);

@@ -48,7 +48,7 @@ describe("agent tool recovery", () => {
     )).toMatchObject({ category: "scope-or-lifecycle", retryable: false });
     expect(buildNwhToolRecoveryAdvice(
       "propose_entity",
-      "Compiler tool-call budget exceeded; circuit breaker opened.",
+      "Compiler tool-call safety fuse tripped after 1000 calls.",
     )).toMatchObject({ category: "budget-or-circuit-breaker", retryable: false });
     expect(buildNwhToolRecoveryAdvice(
       "read_source_evidence",

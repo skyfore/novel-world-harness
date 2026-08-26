@@ -3,8 +3,8 @@ import { isRecoverableCompilerSessionException } from "../src/commands/compile-s
 import { COMPILER_PROMPT_TIMEOUT_MS } from "../src/compiler/limits.js";
 
 describe("compiler source session recovery", () => {
-  it("allows a thirty-minute compiler turn for the expanded MVP budgets", () => {
-    expect(COMPILER_PROMPT_TIMEOUT_MS).toBe(30 * 60 * 1_000);
+  it("allows a one-hour compiler turn for effect-first MVP compilation", () => {
+    expect(COMPILER_PROMPT_TIMEOUT_MS).toBe(60 * 60 * 1_000);
   });
 
   it("recovers bounded timeout and transient network exceptions", () => {

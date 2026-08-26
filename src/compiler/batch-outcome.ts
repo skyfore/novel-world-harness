@@ -169,7 +169,8 @@ export function isRecoverableCompilerBatchInterruption(outcome: CompilerBatchOut
     // counter, and continue from deterministic closure diagnostics. Other
     // circuit-breaker causes (for example repeated identical finish failures)
     // indicate a semantic loop and must remain terminal.
-    return outcome.blockedReason.startsWith("compiler tool-call budget exceeded");
+    return outcome.blockedReason.startsWith("compiler tool-call safety fuse tripped")
+      || outcome.blockedReason.startsWith("compiler tool-call budget exceeded");
   }
   return outcome.assistantStopReason === "error";
 }

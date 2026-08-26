@@ -888,7 +888,7 @@ describe("NWH TUI extension", () => {
       input: {},
       content: [],
       isError: false,
-      details: { compilerBatchBlocked: true, reason: "tool-call budget exceeded", finishFailureCount: 0, toolCallCount: 41 },
+      details: { compilerBatchBlocked: true, reason: "tool-call budget exceeded", finishFailureCount: 0, toolCallCount: 201 },
     }, ctx)).toEqual({ isError: true });
     expect(events.get("tool_call")?.({
       type: "tool_call",
@@ -2652,7 +2652,7 @@ describe("NWH TUI extension", () => {
           compilerBatchBlocked: true,
           reason: "compiler tool-call budget exceeded",
           finishFailureCount: 0,
-          toolCallCount: 41,
+          toolCallCount: 201,
         },
       }],
     }, ctx);
@@ -2921,9 +2921,9 @@ describe("NWH TUI extension", () => {
         content: [],
         details: {
           compilerBatchBlocked: true,
-          reason: "compiler tool-call budget exceeded its 40-call limit",
+          reason: "compiler tool-call budget exceeded its 200-call limit",
           finishFailureCount: 1,
-          toolCallCount: 41,
+          toolCallCount: 201,
         },
       },
       { role: "assistant", content: [{ type: "text", text: "attempt stopped" }], stopReason: "stop" },

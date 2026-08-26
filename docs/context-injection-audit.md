@@ -327,7 +327,7 @@ Evidence: `prepareOpeningWorldCompilerBatch` and
 
 Reconciliation is the one compiler role that can inspect the complete selected
 novel through exact retrieval. Its initial prompt is a source-exclusive,
-120,000-character-bounded audit/index containing bounded semantic issues,
+200,000-character-bounded audit/index containing bounded semantic issues,
 coverage, entity/claim/event indexes, weak event/character targets and opening
 metadata. It exposes no generic local file tool.
 
@@ -336,6 +336,8 @@ rederive and deep-compare the source segment manifest, return exact text plus
 its `EvidenceRef`, and page without splitting Unicode surrogate pairs.
 `find_compiler_artifacts`/`read_compiler_artifact` similarly expose only
 canonical/pending artifacts whose evidence belongs exclusively to that source.
+Compiler retrieval schemas permit up to 200 index results or 120,000 characters
+in one requested page while retaining exact offsets and lossless pagination.
 Both channels share the compiler tool-call circuit breaker.
 
 Evidence: [reconcile-world.ts](../src/compiler/reconcile-world.ts),
@@ -350,7 +352,7 @@ Before any typed proposal is persisted, the host strict-schema parses it,
 requires source evidence where appropriate, rejects mixed-source artifacts,
 checks every evidence span against the captured selected slice, validates
 stable revision identity and typed field/reference rules, and caps a batch at
-24 active proposals and 40 general tool calls plus one final finish call.
+160 active proposals and 200 general tool calls plus one final finish call.
 Proposal calls are sequential. `finish_compiler_batch` derives the active set
 on the host, validates graph closure and exact segment review, and merely
 allows the host to checkpoint the batch. Canonical acceptance is a later

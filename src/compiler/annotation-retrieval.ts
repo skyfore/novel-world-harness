@@ -11,6 +11,10 @@ import {
   type SourceAnnotationType,
 } from "./annotations.js";
 import type { CompilerToolCallGate } from "./tool-call-gate.js";
+import {
+  COMPILER_RETRIEVAL_MAX_FIND_RESULTS as MAX_FIND_RESULTS,
+  COMPILER_RETRIEVAL_MAX_READ_CHARS as MAX_READ_CHARS,
+} from "./limits.js";
 
 export const SOURCE_ANNOTATION_TOOL_NAMES = [
   "find_source_annotations",
@@ -28,8 +32,6 @@ type AnnotationRecord = {
 };
 
 const MAX_ANNOTATION_RECORDS = 100_000;
-const MAX_FIND_RESULTS = 50;
-const MAX_READ_CHARS = 30_000;
 
 export async function loadSourceAnnotationRecords(
   workspaceRoot: string,

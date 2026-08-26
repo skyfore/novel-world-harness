@@ -3,6 +3,7 @@ import { formatRetryNotice } from "../agent/pi-session.js";
 import type { AgentSessionEvent, TuiMode } from "@earendil-works/pi-coding-agent";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
 import { compilerBatchFailure } from "../compiler/batch-outcome.js";
+import { COMPILER_PROMPT_TIMEOUT_MS } from "../compiler/limits.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { startElapsedStatus } from "../util/elapsed-status.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
@@ -32,8 +33,6 @@ export type CompileCommandOptions = {
   onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
   onModelEvent?: (event: AgentSessionEvent) => void;
 };
-
-const COMPILER_PROMPT_TIMEOUT_MS = 15 * 60 * 1_000;
 
 const DEFAULT_COMPILER_PROMPT = `Inspect the novel workspace and build a small, evidence-backed compiler batch. Start by searching and reading relevant source spans. Prefer stable entity proposals first, then claims, world rules, and canonical events whose references can be validated. Use propose_state_delta or propose_possibility only when they are useful staging artifacts. Do not attempt to commit anything and do not describe pending proposals as truth.`;
 

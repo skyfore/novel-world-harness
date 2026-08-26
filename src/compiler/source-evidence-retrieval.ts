@@ -6,10 +6,12 @@ import { assertSafeTextOffset, safeTextPageEnd, safeTextPrefix } from "../util/t
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSegmentText, segmentSource, SegmentStore, type SourceSegment } from "./segments.js";
 import type { CompilerToolCallGate } from "./tool-call-gate.js";
+import {
+  COMPILER_RETRIEVAL_MAX_FIND_RESULTS as MAX_FIND_RESULTS,
+  COMPILER_RETRIEVAL_MAX_READ_CHARS as MAX_READ_CHARS,
+} from "./limits.js";
 
 const MAX_SOURCE_SEGMENTS = 100_000;
-const MAX_FIND_RESULTS = 50;
-const MAX_READ_CHARS = 30_000;
 
 export const SOURCE_EVIDENCE_TOOL_NAMES = [
   "find_source_evidence",

@@ -9,6 +9,10 @@ import {
   type IdentityResolution,
 } from "./entity-resolution.js";
 import type { CompilerToolCallGate } from "./tool-call-gate.js";
+import {
+  COMPILER_RETRIEVAL_MAX_FIND_RESULTS as MAX_FIND_RESULTS,
+  COMPILER_RETRIEVAL_MAX_READ_CHARS as MAX_READ_CHARS,
+} from "./limits.js";
 
 export const ENTITY_RESOLUTION_RETRIEVAL_TOOL_NAMES = [
   "find_entity_resolution_candidates",
@@ -27,8 +31,6 @@ type ResolutionRecord = {
 };
 
 const MAX_RESOLUTION_RECORDS = 100_000;
-const MAX_FIND_RESULTS = 50;
-const MAX_READ_CHARS = 30_000;
 
 export async function loadIdentityResolutionRecords(
   workspaceRoot: string,

@@ -102,7 +102,7 @@ describe("compiler batches", () => {
     expect(isRecoverableCompilerBatchInterruption(outcome)).toBe(true);
     expect(isRecoverableCompilerBatchInterruption({
       ...outcome,
-      blockedReason: "compiler tool-call budget exceeded its 40-call limit",
+      blockedReason: "compiler tool-call budget exceeded its 200-call limit",
     })).toBe(true);
     expect(isRecoverableCompilerBatchInterruption({ ...outcome, blockedReason: "proposal graph remains incomplete" })).toBe(false);
   });
@@ -199,7 +199,7 @@ describe("compiler batches", () => {
         toolName: "propose_entity",
         isError: true,
         content: [],
-        details: { compilerBatchBlocked: true, reason: "compiler tool-call budget exceeded", finishFailureCount: 0, toolCallCount: 41 },
+        details: { compilerBatchBlocked: true, reason: "compiler tool-call budget exceeded", finishFailureCount: 0, toolCallCount: 201 },
       },
     ]);
 
@@ -215,12 +215,12 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.segmentIds.length === 1)).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("evidence_segment_ids"))).toBe(true);
     expect(batches.every((batch) => !batch.prompt.includes("quoteHash"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("Target at most 20 high-leverage active proposals"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("rejects a 25th active proposal"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Use up to 150 evidence-grounded active proposals"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("rejects a 161st active proposal"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Ordinary source-review batches must not propose an initial-world"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("A failed propose_* tool call never enters the active set"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("empty aliases are valid"))).toBe(true);
-    expect(batches.every((batch) => batch.prompt.includes("40 general compiler tool calls"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("200 general compiler tool calls"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Preserve the payload's stable logical id"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);

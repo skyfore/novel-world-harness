@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { isRecoverableCompilerSessionException } from "../src/commands/compile-source.js";
+import { COMPILER_PROMPT_TIMEOUT_MS } from "../src/compiler/limits.js";
 
 describe("compiler source session recovery", () => {
+  it("allows a thirty-minute compiler turn for the expanded MVP budgets", () => {
+    expect(COMPILER_PROMPT_TIMEOUT_MS).toBe(30 * 60 * 1_000);
+  });
+
   it("recovers bounded timeout and transient network exceptions", () => {
     expect(isRecoverableCompilerSessionException(
       new Error("Model turn exceeded its 600000ms wall-clock limit."),

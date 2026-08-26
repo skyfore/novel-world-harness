@@ -6,6 +6,7 @@ import type { CompilerBatch } from "../compiler/batches.js";
 import { compilerBatchFailure, isRecoverableCompilerBatchInterruption } from "../compiler/batch-outcome.js";
 import { createPiCompilerSession } from "../compiler/pi-compiler.js";
 import { COMPILER_TOOL_NAMES } from "../compiler/proposal-tools.js";
+import { COMPILER_PROMPT_TIMEOUT_MS } from "../compiler/limits.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { startElapsedStatus } from "../util/elapsed-status.js";
@@ -33,7 +34,6 @@ export type CompileSourceOptions = {
   onModelEvent?: (event: AgentSessionEvent) => void;
 };
 
-const COMPILER_PROMPT_TIMEOUT_MS = 15 * 60 * 1_000;
 const MAX_COMPILER_BATCH_RECOVERY_RETRIES = 1;
 
 export function isRecoverableCompilerSessionException(error: unknown): boolean {

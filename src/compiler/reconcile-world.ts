@@ -11,17 +11,17 @@ import { promptJson } from "../util/prompt-data.js";
 import type { EvidenceRef, StoryTime } from "../world/model.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { COMPILER_TOOL_CALL_LIMIT } from "./limits.js";
 
-export const MAX_RECONCILIATION_ITERATIONS = 2;
-export const MAX_REPARSE_RECONCILIATION_ITERATIONS = 20;
-const MAX_EVENT_REPAIR_TARGETS = 5;
-const MAX_CHARACTER_REPAIR_TARGETS = 1;
-const MAX_REPARSE_EVENT_REPAIR_TARGETS = 3;
-const MAX_REPARSE_CHARACTER_REPAIR_TARGETS = 2;
-const MAX_EVENT_ANCHORS_PER_CHARACTER = 24;
-const MAX_RECONCILIATION_JSON_CHARS = 120_000;
+export const MAX_RECONCILIATION_ITERATIONS = 10;
+export const MAX_REPARSE_RECONCILIATION_ITERATIONS = 100;
+const MAX_EVENT_REPAIR_TARGETS = 16;
+const MAX_CHARACTER_REPAIR_TARGETS = 4;
+const MAX_REPARSE_EVENT_REPAIR_TARGETS = 16;
+const MAX_REPARSE_CHARACTER_REPAIR_TARGETS = 4;
+const MAX_EVENT_ANCHORS_PER_CHARACTER = 64;
+const MAX_RECONCILIATION_JSON_CHARS = 200_000;
 const ESTIMATED_CALLS_PER_TARGET = 4;
-const RECONCILIATION_TOOL_CALL_LIMIT = 40;
 const RECONCILIATION_RESERVED_CALLS = 7;
 
 export type WorldReconciliationMode = "bounded" | "reparse-finalization";
@@ -309,7 +309,7 @@ export async function buildWorldReconciliationPrompt(
   const includeInitialWorld = iteration === 1 && plan.includeInitialWorld;
   const repairTargetCount = weakEvents.length + weakActors.length + (includeInitialWorld ? 1 : 0);
   const estimatedToolCalls = repairTargetCount * ESTIMATED_CALLS_PER_TARGET + 1;
-  if (estimatedToolCalls > RECONCILIATION_TOOL_CALL_LIMIT - RECONCILIATION_RESERVED_CALLS) {
+  if (estimatedToolCalls > COMPILER_TOOL_CALL_LIMIT - RECONCILIATION_RESERVED_CALLS) {
     throw new Error(
       `Reconciliation plan estimates ${estimatedToolCalls} tool calls and leaves fewer than ${RECONCILIATION_RESERVED_CALLS} calls of safety reserve.`,
     );
@@ -323,8 +323,8 @@ export async function buildWorldReconciliationPrompt(
       requireAutonomousDriver: plan.requireAutonomousDriver,
       targetCount: repairTargetCount,
       estimatedToolCalls,
-      toolCallLimit: RECONCILIATION_TOOL_CALL_LIMIT,
-      reservedCalls: RECONCILIATION_TOOL_CALL_LIMIT - estimatedToolCalls,
+      toolCallLimit: COMPILER_TOOL_CALL_LIMIT,
+      reservedCalls: COMPILER_TOOL_CALL_LIMIT - estimatedToolCalls,
       eventTargetOffset: weakEventOffset,
       characterTargetOffset: weakActorOffset,
     },

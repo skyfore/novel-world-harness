@@ -19,7 +19,15 @@ afterEach(async () => {
 });
 
 type ReconciliationContext = {
-  repairPlan: { targetCount: number; estimatedToolCalls: number; reservedCalls: number; mode: string; requireAutonomousDriver: boolean };
+  repairPlan: {
+    targetCount: number;
+    estimatedToolCalls: number;
+    toolCallLimit: number;
+    reservedCalls: number;
+    maxIterations: number;
+    mode: string;
+    requireAutonomousDriver: boolean;
+  };
   weakEventCandidates: Array<{ id: string; weaknesses: string[] }>;
   weakCharacterCandidates: Array<{ actor: { id: string }; needsExecutableDriver: boolean }>;
 };
@@ -43,7 +51,7 @@ describe("world semantic reconciliation", () => {
       aliases: [],
       evidence: fixture.evidence("Hero"),
     });
-    for (let index = 1; index <= 10; index += 1) {
+    for (let index = 1; index <= 32; index += 1) {
       await canon.putEvent({
         id: `event-${String(index).padStart(2, "0")}`,
         title: `Event ${index}`,
@@ -65,8 +73,8 @@ describe("world semantic reconciliation", () => {
     const firstIds = first.weakEventCandidates.map(({ id }) => id);
     const secondIds = second.weakEventCandidates.map(({ id }) => id);
 
-    expect(firstIds).toHaveLength(5);
-    expect(secondIds).toHaveLength(5);
+    expect(firstIds).toHaveLength(16);
+    expect(secondIds).toHaveLength(16);
     expect(firstIds).not.toEqual(secondIds);
     expect(firstIds.some((id) => secondIds.includes(id))).toBe(false);
     expect(first.weakEventCandidates[0]?.weaknesses).toEqual(expect.arrayContaining([
@@ -75,9 +83,10 @@ describe("world semantic reconciliation", () => {
       "story-time-unknown",
       "no-typed-effect",
     ]));
-    expect(first.repairPlan.estimatedToolCalls).toBeLessThanOrEqual(33);
-    expect(first.repairPlan.reservedCalls).toBeGreaterThanOrEqual(7);
-    expect(second.repairPlan.estimatedToolCalls).toBeLessThanOrEqual(33);
+    expect(first.repairPlan).toMatchObject({ toolCallLimit: 200, maxIterations: 10 });
+    expect(first.repairPlan.estimatedToolCalls).toBeLessThanOrEqual(85);
+    expect(first.repairPlan.reservedCalls).toBeGreaterThanOrEqual(115);
+    expect(second.repairPlan.estimatedToolCalls).toBeLessThanOrEqual(85);
     expect(firstPrompt).toContain("Call read_compiler_artifact directly with that ref");
     expect(firstPrompt).toContain("do not spend a find_compiler_artifacts call rediscovering a listed ref");
     expect(firstPrompt).not.toContain("for every omitted or referenced exact payload");
@@ -99,16 +108,16 @@ describe("world semantic reconciliation", () => {
     expect(reparseReconciliationIterations({
       ...audit,
       semanticRepairTargets: {
-        eventIds: Array.from({ length: 10 }, (_value, index) => `event-${String(index + 1).padStart(2, "0")}`),
+        eventIds: Array.from({ length: 34 }, (_value, index) => `event-${String(index + 1).padStart(2, "0")}`),
         characterIds: ["hero"],
         ruleIds: [],
         initialWorld: false,
         requiresFullReparse: true,
       },
-    })).toBe(4);
+    })).toBe(3);
     expect(reparseFirst.repairPlan).toMatchObject({ mode: "reparse-finalization", requireAutonomousDriver: true });
-    expect(reparseFirst.weakEventCandidates).toHaveLength(3);
-    expect(reparseSecond.weakEventCandidates).toHaveLength(3);
+    expect(reparseFirst.weakEventCandidates).toHaveLength(16);
+    expect(reparseSecond.weakEventCandidates).toHaveLength(16);
     expect(reparseFirst.weakCharacterCandidates).toEqual([
       expect.objectContaining({ actor: expect.objectContaining({ id: "hero" }), needsExecutableDriver: true }),
     ]);
@@ -153,11 +162,11 @@ describe("world semantic reconciliation", () => {
       },
     });
 
-    const systemic = report(158, 0);
+    const systemic = report(161, 0);
     expect(semanticRepairIsIsolated(systemic)).toBe(false);
     expect(semanticRepairRequiresReparse(systemic)).toBe(true);
 
-    const bounded = report(20, 0.8);
+    const bounded = report(160, 0);
     expect(semanticRepairIsIsolated(bounded)).toBe(true);
     expect(semanticRepairRequiresReparse(bounded)).toBe(false);
 

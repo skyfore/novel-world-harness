@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Compile } from "typebox/compile";
 import { afterEach, describe, expect, it } from "vitest";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { segmentSource, SegmentStore } from "../src/compiler/segments.js";
@@ -20,6 +21,19 @@ function resultText(result: unknown): string {
 }
 
 describe("compiler source evidence retrieval", () => {
+  it("allows larger MVP retrieval pages without removing pagination", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-source-evidence-capacity-"));
+    roots.push(root);
+    const toolset = createCompilerProposalToolset(root);
+    const find = toolset.tools.find((tool) => tool.name === "find_source_evidence")!;
+    const read = toolset.tools.find((tool) => tool.name === "read_source_evidence")!;
+
+    expect(Compile(find.parameters).Check({ query: "*", max_results: 200 })).toBe(true);
+    expect(Compile(find.parameters).Check({ query: "*", max_results: 201 })).toBe(false);
+    expect(Compile(read.parameters).Check({ ref: "source-segment:segment-1", max_chars: 120_000 })).toBe(true);
+    expect(Compile(read.parameters).Check({ ref: "source-segment:segment-1", max_chars: 120_001 })).toBe(false);
+  });
+
   it("searches and reads exact segments only from the active novel source", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-source-evidence-retrieval-"));
     roots.push(root);
@@ -74,7 +88,7 @@ describe("compiler source evidence retrieval", () => {
     const toolset = createCompilerProposalToolset(root);
     await toolset.beginBatch([], "reconcile-budget", fixture.source.id);
     const find = toolset.tools.find((tool) => tool.name === "find_source_evidence")!;
-    for (let index = 0; index < 40; index += 1) {
+    for (let index = 0; index < 200; index += 1) {
       await expect(find.execute(
         `find-${index}`,
         { query: "missing" } as never,
@@ -91,7 +105,7 @@ describe("compiler source evidence retrieval", () => {
       {} as ExtensionContext,
     )).resolves.toMatchObject({
       terminate: true,
-      details: { compilerBatchBlocked: true, toolCallCount: 41 },
+      details: { compilerBatchBlocked: true, toolCallCount: 201 },
     });
   });
 

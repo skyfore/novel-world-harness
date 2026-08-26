@@ -57,13 +57,13 @@ sessions. Ordinary source-review sessions do not expose the initial-world tool;
 that singleton is reserved for the dedicated opening pass. `finish_compiler_batch` derives the active proposal
 set on the host and only asks the model to account for supplied evidence segments;
 this keeps the handshake bounded even for dense chapters. Active drafts are capped
-at 24, proposal calls execute sequentially, successful tool results report the
-remaining budget, and a 40-call general compiler-tool budget also terminates
+at 160, proposal calls execute sequentially, successful tool results report the
+remaining budget, and a 200-call general compiler-tool budget also terminates
 proposal loops that keep changing just enough to evade an
 identical-failure detector. One additional final finish call is reserved for the
 checkpoint protocol. CLI compiler
 commands share a workspace lock so interrupted or concurrent invocations cannot
-race proposal files. Non-interactive compiler turns have a ten-minute wall-clock
+race proposal files. Non-interactive compiler turns have a thirty-minute wall-clock
 deadline in addition to provider idle timeouts and abort without checkpointing when
 that deadline expires. Automated source turns
 also omit raw staging-only state deltas, and supplemental opening-state turns are
@@ -87,7 +87,7 @@ The bounded catalog is an index rather than a semantic memory boundary: compiler
 turns can search source-scoped canonical/pending artifacts and page one exact
 payload by stable ref. Reconciliation can likewise search/page exact raw evidence,
 but only from its bound source; ordinary source/opening turns cannot use that
-whole-source channel. Retrieval calls share the 40-call compiler circuit-breaker
+whole-source channel. Retrieval calls share the 200-call compiler circuit-breaker
 budget. Cross-source lookup and evidence outside a supplied source-batch segment
 fail closed.
 

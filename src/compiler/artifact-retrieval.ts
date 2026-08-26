@@ -13,6 +13,10 @@ import type { CompilerToolCallGate } from "./tool-call-gate.js";
 import { EvidenceAssertionStore, evidenceAssertionSourceIds } from "./evidence-assertions.js";
 import { spatialRelationEvidence } from "../world/spatial-ontology.js";
 import { worldRuleEvidence } from "../world/world-rule-ontology.js";
+import {
+  COMPILER_RETRIEVAL_MAX_FIND_RESULTS as MAX_FIND_RESULTS,
+  COMPILER_RETRIEVAL_MAX_READ_CHARS as MAX_READ_CHARS,
+} from "./limits.js";
 
 type ArtifactStatus = "canonical" | "pending";
 export const COMPILER_ARTIFACT_KINDS = [
@@ -59,8 +63,6 @@ function normalizeCompilerArtifactKind(kind?: string): CompilerArtifactKind | un
 
 const MAX_ARTIFACT_RECORDS = 50_000;
 const MAX_ARTIFACT_SERIALIZED_CHARS = 20_000_000;
-const MAX_FIND_RESULTS = 50;
-const MAX_READ_CHARS = 30_000;
 
 function boundedLabel(value: string): string {
   return value.length <= 500 ? value : `${value.slice(0, 500)}…[truncated]`;

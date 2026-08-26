@@ -537,8 +537,8 @@ institution/faction/artifact/economy domain module 应由 benchmark 暴露的真
 
 ### 2.8 Source accounting 已有内部 denominator，仍没有独立语义 recall 分母
 
-编译 prompt 明确优先构造 bounded high-leverage graph，而不是穷举 mention；单 batch
-最多 24 个 active proposal、40 次一般工具调用
+MVP 编译 prompt 要求覆盖当前启用语义层中的重要单元；单 batch
+最多 160 个 active proposal、200 次一般工具调用
 （[batches.ts](../src/compiler/batches.ts#L705-L727)、
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L442-L447)）。M2/M3 后，Audit 已能
 用基础 structural unit 与已产生 observation 计算 source accounting、entity/event
@@ -563,7 +563,7 @@ causal parent ID；每个被标注的 semantic layer 都返回 `not-implemented`
 
 ### 2.9 Reparse 已修直接证据失效，仍缺传递 dependency closure
 
-Bounded reconciliation 只有两轮，并限制每轮修复的 event/character 数量
+Bounded reconciliation 现放宽到最多十轮，每轮最多修复 16 个 event 和 4 个 character
 （[reconcile-world.ts](../src/compiler/reconcile-world.ts#L15-L25)）。当前目标主要是
 已知事件、角色或规则问题，而不是发现模型从未抽取的语义单元
 （[reconcile-world.ts](../src/compiler/reconcile-world.ts#L417-L476)）。

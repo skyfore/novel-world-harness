@@ -9,6 +9,10 @@ import {
   type EventResolution,
 } from "./event-resolution.js";
 import type { CompilerToolCallGate } from "./tool-call-gate.js";
+import {
+  COMPILER_RETRIEVAL_MAX_FIND_RESULTS as MAX_FIND_RESULTS,
+  COMPILER_RETRIEVAL_MAX_READ_CHARS as MAX_READ_CHARS,
+} from "./limits.js";
 
 export const EVENT_RESOLUTION_RETRIEVAL_TOOL_NAMES = [
   "find_event_resolution_candidates",
@@ -27,8 +31,6 @@ type EventResolutionRecord = {
 };
 
 const MAX_RESOLUTION_RECORDS = 100_000;
-const MAX_FIND_RESULTS = 50;
-const MAX_READ_CHARS = 30_000;
 
 export async function loadEventResolutionRecords(
   workspaceRoot: string,

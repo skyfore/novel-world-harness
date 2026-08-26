@@ -93,6 +93,11 @@ import {
   validateAttributionProposalTrace,
   validateKnowledgeAcquisitionProposalTrace,
 } from "./attribution-trace.js";
+import {
+  COMPILER_ACTIVE_PROPOSAL_LIMIT,
+  COMPILER_FINISH_GRACE_CALLS,
+  COMPILER_TOOL_CALL_LIMIT,
+} from "./limits.js";
 
 function proposalResult(
   text: string,
@@ -442,9 +447,6 @@ export type CompilerProposalToolset = {
 const MAX_CONSECUTIVE_FINISH_FAILURES = 3;
 const MAX_IDENTICAL_FINISH_FAILURES = 2;
 const MAX_TOTAL_FINISH_FAILURES = 5;
-const MAX_COMPILER_TOOL_CALLS = 40;
-const MAX_ACTIVE_COMPILER_PROPOSALS = 24;
-const MAX_FINISH_GRACE_CALLS = 1;
 
 type CompilerBatchBlockedDetails = {
   compilerBatchBlocked: true;
@@ -796,12 +798,12 @@ export function createCompilerProposalToolset(
   const beginToolCall = (kind: "retrieval" | "mutation" | "finish") => {
     if (circuitBreak) return circuitBreakResult(circuitBreak.reason, circuitBreak.failureCount);
     totalToolCalls += 1;
-    if (totalToolCalls <= MAX_COMPILER_TOOL_CALLS) return undefined;
-    if (kind === "finish" && finishGraceCalls < MAX_FINISH_GRACE_CALLS) {
+    if (totalToolCalls <= COMPILER_TOOL_CALL_LIMIT) return undefined;
+    if (kind === "finish" && finishGraceCalls < COMPILER_FINISH_GRACE_CALLS) {
       finishGraceCalls += 1;
       return undefined;
     }
-    const reason = `compiler tool-call budget exceeded its ${MAX_COMPILER_TOOL_CALLS}-call limit`;
+    const reason = `compiler tool-call budget exceeded its ${COMPILER_TOOL_CALL_LIMIT}-call limit`;
     circuitBreak = { reason, failureCount: totalFinishFailures };
     return circuitBreakResult(reason, totalFinishFailures);
   };
@@ -928,8 +930,8 @@ export function createCompilerProposalToolset(
     if (successfulEventResolutionProposalIds.has(proposalId)) {
       throw new Error(`Proposal ID ${proposalId} is already used by an event-resolution proposal in this batch.`);
     }
-    if (!successfulAnnotationProposalIds.has(proposalId) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
-      throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+    if (!successfulAnnotationProposalIds.has(proposalId) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
+      throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
     }
   };
   const stageAnnotation = async (
@@ -1239,8 +1241,8 @@ export function createCompilerProposalToolset(
       const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
       if (!source) throw new Error(`Unknown active compiler source: ${activeSourceId}`);
       if (source.titleInference) throw new Error(`Source ${activeSourceId} already has an accepted model-inferred title '${source.title}'.`);
-      if (!pendingNovelTitleProposal && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
-        throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals.`);
+      if (!pendingNovelTitleProposal && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
+        throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals.`);
       }
       const proposal = sourceTitleProposalSchema.parse({
         version: 1,
@@ -1268,7 +1270,7 @@ export function createCompilerProposalToolset(
           kind: "novel-title",
           activeProposalCount: activeProposalCount(),
           toolCallCount: totalToolCalls,
-          remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+          remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
         },
       };
     },
@@ -1437,8 +1439,8 @@ export function createCompilerProposalToolset(
         if (successfulEventResolutionProposalIds.has(input.proposal_id)) {
           throw new Error(`Proposal ID ${input.proposal_id} is already used by an event-resolution proposal in this batch.`);
         }
-        if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
-          throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+        if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
+          throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
         }
         const accepted = await service.submit(kind, {
           proposalId: input.proposal_id,
@@ -1454,12 +1456,12 @@ export function createCompilerProposalToolset(
         successfulProposalIds.add(accepted.proposalId);
         recordProposalProgress();
         return proposalResult(
-          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth. Active proposals: ${activeProposalCount()}/${MAX_ACTIVE_COMPILER_PROPOSALS}. General compiler calls remaining: ${Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls)}. When that reaches zero, the only additional permitted call is finish_compiler_batch; any other call stops this attempt.`,
+          `Pending ${accepted.kind} proposal ${accepted.proposalId} recorded. It is not committed truth. Active proposals: ${activeProposalCount()}/${COMPILER_ACTIVE_PROPOSAL_LIMIT}. General compiler calls remaining: ${Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls)}. When that reaches zero, the only additional permitted call is finish_compiler_batch; any other call stops this attempt.`,
           {
             ...accepted,
             activeProposalCount: activeProposalCount(),
             toolCallCount: totalToolCalls,
-            remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+            remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
           },
         );
       },
@@ -1469,14 +1471,14 @@ export function createCompilerProposalToolset(
     proposalId: string,
     annotation: SourceAnnotation,
   ) => proposalResult(
-    `Pending ${annotation.annotationType} observation ${proposalId} recorded for annotation ${annotation.id}. It records source semantics only and does not create canonical world truth. Active proposals: ${activeProposalCount()}/${MAX_ACTIVE_COMPILER_PROPOSALS}.`,
+    `Pending ${annotation.annotationType} observation ${proposalId} recorded for annotation ${annotation.id}. It records source semantics only and does not create canonical world truth. Active proposals: ${activeProposalCount()}/${COMPILER_ACTIVE_PROPOSAL_LIMIT}.`,
     {
       proposalId,
       kind: annotation.annotationType,
       annotationId: annotation.id,
       activeProposalCount: activeProposalCount(),
       toolCallCount: totalToolCalls,
-      remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+      remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
     },
   );
   const entityMentionTool = defineTool<typeof entityMentionParameters, CompilerProposalDetails>({
@@ -1671,8 +1673,8 @@ export function createCompilerProposalToolset(
         || successfulEventResolutionProposalIds.has(input.proposal_id)) {
         throw new Error(`Proposal ID ${input.proposal_id} is already used by another compiler proposal in this batch.`);
       }
-      if (!successfulEntityResolutionProposalIds.has(input.proposal_id) && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
-        throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+      if (!successfulEntityResolutionProposalIds.has(input.proposal_id) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
+        throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
       }
       const resolution = identityResolutionSchema.parse({
         version: 1,
@@ -1714,7 +1716,7 @@ export function createCompilerProposalToolset(
       successfulEntityResolutionProposalIds.add(input.proposal_id);
       recordProposalProgress();
       return proposalResult(
-        `Pending entity-resolution proposal ${input.proposal_id} recorded for mention ${resolution.mentionId} with status ${resolution.status}. It is a source-to-identity decision, not canonical world truth. Active proposals: ${activeProposalCount()}/${MAX_ACTIVE_COMPILER_PROPOSALS}.`,
+        `Pending entity-resolution proposal ${input.proposal_id} recorded for mention ${resolution.mentionId} with status ${resolution.status}. It is a source-to-identity decision, not canonical world truth. Active proposals: ${activeProposalCount()}/${COMPILER_ACTIVE_PROPOSAL_LIMIT}.`,
         {
           proposalId: input.proposal_id,
           kind: "entity-resolution",
@@ -1723,7 +1725,7 @@ export function createCompilerProposalToolset(
           status: resolution.status,
           activeProposalCount: activeProposalCount(),
           toolCallCount: totalToolCalls,
-          remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+          remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
         },
       );
     },
@@ -1756,8 +1758,8 @@ export function createCompilerProposalToolset(
         throw new Error(`Proposal ID ${input.proposal_id} is already used by another compiler proposal in this batch.`);
       }
       if (!successfulEventResolutionProposalIds.has(input.proposal_id)
-        && activeProposalCount() >= MAX_ACTIVE_COMPILER_PROPOSALS) {
-        throw new Error(`The compiler batch already has ${MAX_ACTIVE_COMPILER_PROPOSALS} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
+        && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_LIMIT) {
+        throw new Error(`The compiler batch already has ${COMPILER_ACTIVE_PROPOSAL_LIMIT} active proposals. Stop adding candidates, withdraw a genuinely defective successful draft only when necessary, and call finish_compiler_batch.`);
       }
       const resolution = eventResolutionSchema.parse({
         version: 1,
@@ -1799,7 +1801,7 @@ export function createCompilerProposalToolset(
       successfulEventResolutionProposalIds.add(input.proposal_id);
       recordProposalProgress();
       return proposalResult(
-        `Pending event-resolution proposal ${input.proposal_id} recorded for ${resolution.eventMentionIds.length} event mention(s) with status ${resolution.status}. It is an identity decision, not committed occurrence or world truth. Active proposals: ${activeProposalCount()}/${MAX_ACTIVE_COMPILER_PROPOSALS}.`,
+        `Pending event-resolution proposal ${input.proposal_id} recorded for ${resolution.eventMentionIds.length} event mention(s) with status ${resolution.status}. It is an identity decision, not committed occurrence or world truth. Active proposals: ${activeProposalCount()}/${COMPILER_ACTIVE_PROPOSAL_LIMIT}.`,
         {
           proposalId: input.proposal_id,
           kind: "event-resolution",
@@ -1808,7 +1810,7 @@ export function createCompilerProposalToolset(
           status: resolution.status,
           activeProposalCount: activeProposalCount(),
           toolCallCount: totalToolCalls,
-          remainingToolCalls: Math.max(0, MAX_COMPILER_TOOL_CALLS - totalToolCalls),
+          remainingToolCalls: Math.max(0, COMPILER_TOOL_CALL_LIMIT - totalToolCalls),
         },
       );
     },

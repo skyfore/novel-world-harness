@@ -564,8 +564,8 @@ failures rather than speculative ontology growth.
 
 ### 3.8 Source accounting has internal denominators, not independent semantic recall
 
-The compiler deliberately prefers a bounded high-leverage graph and permits at
-most 24 active proposals and 40 general tool calls per batch
+The MVP compiler asks for comprehensive material coverage across the enabled
+semantic layers and permits up to 160 active proposals and 200 general tool calls per batch
 ([batches.ts](../src/compiler/batches.ts#L705-L727),
 [proposal-tools.ts](../src/compiler/proposal-tools.ts#L442-L447)). Audit now
 computes source accounting, entity/event resolution, and proposition-

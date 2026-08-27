@@ -8,6 +8,7 @@ import {
   generateEntityResolutionCandidates,
 } from "../src/compiler/entity-resolution.js";
 import { auditCompiler } from "../src/compiler/audit.js";
+import { CompilerBatchStore } from "../src/compiler/batches.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
@@ -110,6 +111,8 @@ describe("entity mention resolution", () => {
       matchedText: "the traveler",
       match: "exact-alias",
       status: "pending",
+      availability: "current-batch-pending",
+      resolutionMode: "new-entity",
       entityKind: "character",
       canonicalName: "Hero",
     });
@@ -174,6 +177,122 @@ describe("entity mention resolution", () => {
       coverage: { entityResolution: 1 },
       readiness: { resolution: "ready" },
     });
+  });
+
+  it("reuses a checkpointed pending entity across batches without allowing uncheckpointed cross-batch drafts", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-checkpointed-pending-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero arrived. Hero waited.\n");
+    const firstBatchId = `batch-${fixture.source.id}-00001-first`;
+    const first = createCompilerProposalToolset(root);
+    await first.beginBatch([fixture.segmentId], firstBatchId, fixture.source.id);
+    const firstTool = (name: string) => first.tools.find((tool) => tool.name === name)!;
+
+    await firstTool("propose_entity_mention").execute("first-hero-mention", {
+      proposal_id: "proposal-mention-hero-first",
+      annotation_id: "mention-hero-first",
+      selector: { segment_id: fixture.segmentId, exact: "Hero", occurrence: 1 },
+      surface: "Hero",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 1,
+    } as never, undefined, undefined, context);
+    await firstTool("propose_entity").execute("first-hero-entity", {
+      proposal_id: "proposal-entity-hero-first",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await firstTool("propose_entity_resolution").execute("first-hero-resolution", resolutionInput({
+      proposalId: "proposal-resolution-hero-first",
+      resolutionId: "resolution-hero-first",
+      mentionId: "mention-hero-first",
+      status: "new-entity",
+      entityId: "hero",
+      confidence: 1,
+    }) as never, undefined, undefined, context);
+    await finishOnly(first, fixture.segmentId, "Introduced Hero in the first batch.");
+
+    const secondBatchId = `batch-${fixture.source.id}-00002-second`;
+    const second = createCompilerProposalToolset(root);
+    await second.beginBatch([fixture.segmentId], secondBatchId, fixture.source.id);
+    const secondTool = (name: string) => second.tools.find((tool) => tool.name === name)!;
+    await secondTool("propose_entity_mention").execute("second-hero-mention", {
+      proposal_id: "proposal-mention-hero-second",
+      annotation_id: "mention-hero-second",
+      selector: { segment_id: fixture.segmentId, exact: "Hero", occurrence: 2 },
+      surface: "Hero",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 1,
+    } as never, undefined, undefined, context);
+
+    const beforeCheckpoint = JSON.parse(resultText(await secondTool("find_entity_resolution_candidates").execute(
+      "find-before-checkpoint",
+      { mention_id: "mention-hero-second" } as never,
+      undefined,
+      undefined,
+      context,
+    ))) as { candidates: unknown[] };
+    expect(beforeCheckpoint.candidates).toEqual([]);
+
+    await new CompilerBatchStore(root).markComplete(fixture.source.id, firstBatchId);
+    const afterCheckpoint = JSON.parse(resultText(await secondTool("find_entity_resolution_candidates").execute(
+      "find-after-checkpoint",
+      { mention_id: "mention-hero-second" } as never,
+      undefined,
+      undefined,
+      context,
+    ))) as { candidates: Array<Record<string, unknown>> };
+    expect(afterCheckpoint.candidates).toContainEqual(expect.objectContaining({
+      entityId: "hero",
+      status: "pending",
+      availability: "checkpointed-pending",
+      resolutionMode: "resolved",
+    }));
+
+    await secondTool("propose_entity_resolution").execute("wrong-second-hero-resolution", resolutionInput({
+      proposalId: "proposal-resolution-hero-second-wrong",
+      resolutionId: "resolution-hero-second-wrong",
+      mentionId: "mention-hero-second",
+      status: "new-entity",
+      entityId: "hero",
+      confidence: 1,
+    }) as never, undefined, undefined, context);
+    await expect(secondTool("finish_compiler_batch").execute(
+      "finish-second-batch-with-wrong-mode",
+      finishInput(fixture.segmentId, "Attempted to reuse Hero with the wrong mode."),
+      undefined,
+      undefined,
+      context,
+    )).rejects.toThrow("previously checkpointed source batch; reuse it with status resolved");
+    await secondTool("withdraw_compiler_proposal").execute("withdraw-wrong-second-resolution", {
+      proposal_id: "proposal-resolution-hero-second-wrong",
+      reason: "The candidate explicitly requires resolved mode for a checkpointed pending identity.",
+    } as never, undefined, undefined, context);
+
+    await secondTool("propose_entity_resolution").execute("second-hero-resolution", resolutionInput({
+      proposalId: "proposal-resolution-hero-second",
+      resolutionId: "resolution-hero-second",
+      mentionId: "mention-hero-second",
+      status: "resolved",
+      entityId: "hero",
+      confidence: 1,
+    }) as never, undefined, undefined, context);
+    await expect(secondTool("finish_compiler_batch").execute(
+      "finish-second-batch",
+      finishInput(fixture.segmentId, "Reused the checkpointed Hero identity."),
+      undefined,
+      undefined,
+      context,
+    )).resolves.toMatchObject({ details: { compilerBatchFinished: true } });
+
+    await expect(new CanonicalModelStore(root).listEntities()).resolves.toEqual([]);
+    await expect(new EntityResolutionStore(root).currentForMention(fixture.source.id, "mention-hero-second"))
+      .resolves.toMatchObject({ status: "resolved", entityId: "hero" });
+    await expect(new CompilerCommitService(root).acceptAllValid(fixture.source.id)).resolves.toMatchObject({
+      accepted: [expect.objectContaining({ id: "proposal-entity-hero-first", kind: "entity" })],
+    });
+    await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ canonicalName: "Hero" });
   });
 
   it("generates deterministic kind-compatible lexical candidates and preserves ambiguity", async () => {

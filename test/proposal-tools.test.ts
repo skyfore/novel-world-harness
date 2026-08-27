@@ -1295,7 +1295,7 @@ describe("compiler proposal tools", () => {
       });
   });
 
-  it("hard-caps finish failures even when each failed attempt follows new proposal activity", async () => {
+  it("allows more than five distinct finish repairs when each attempt follows proposal progress", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-circuit-hard-cap-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "众人来到前厅。\n");
@@ -1303,7 +1303,7 @@ describe("compiler proposal tools", () => {
     const entity = tools.find((candidate) => candidate.name === "propose_entity")!;
     const initial = tools.find((candidate) => candidate.name === "propose_initial_world")!;
     const finish = tools.find((candidate) => candidate.name === "finish_compiler_batch")!;
-    for (let index = 1; index <= 5; index += 1) {
+    for (let index = 1; index <= 6; index += 1) {
       await entity.execute(`proposal-${index}`, {
         proposal_id: `entity-${index}`,
         payload: {
@@ -1330,14 +1330,21 @@ describe("compiler proposal tools", () => {
         reviewed_segments: [],
         summary: "incomplete",
       } as never, undefined, undefined, {} as ExtensionContext);
-      if (index < 5) await expect(attempt).rejects.toThrow("proposal graph is incomplete");
-      else {
-        await expect(attempt).resolves.toMatchObject({
-          terminate: true,
-          details: { compilerBatchBlocked: true, finishFailureCount: 5 },
-        });
-      }
+      await expect(attempt).rejects.toThrow("proposal graph is incomplete");
     }
+
+    await expect(entity.execute("proposal-after-six-repairs", {
+      proposal_id: "entity-after-six-repairs",
+      payload: {
+        id: "person-after-six-repairs",
+        kind: "character",
+        canonicalName: "额外人物",
+        aliases: [],
+        evidence: fixture.evidence("众人来到前厅。"),
+      },
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { proposalId: "entity-after-six-repairs" },
+    });
   });
 
   it("keeps capacity counters host-only and trips only the high tool-call safety fuse", async () => {
@@ -1517,6 +1524,52 @@ describe("compiler proposal tools", () => {
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { compilerBatchFinished: true },
     });
+  });
+
+  it("reports every independent finish validation section in one diagnostic", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-finish-aggregate-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero entered.\n");
+    const toolset = createCompilerProposalToolset(root);
+    const tool = (name: string) => toolset.tools.find((candidate) => candidate.name === name)!;
+    await toolset.beginBatch([fixture.segmentId], "aggregate-finish-batch", fixture.source.id);
+    await tool("propose_entity_mention").execute("hero-mention", {
+      proposal_id: "aggregate-hero-mention-proposal",
+      annotation_id: "aggregate-hero-mention",
+      selector: { segment_id: fixture.segmentId, exact: "Hero" },
+      surface: "Hero",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 1,
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await tool("propose_entity").execute("hero-entity", {
+      proposal_id: "aggregate-hero-entity-proposal",
+      payload: { id: "aggregate-hero", kind: "character", canonicalName: "Hero", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await tool("propose_initial_world").execute("opening", {
+      proposal_id: "aggregate-opening-proposal",
+      payload: {
+        version: 1,
+        delta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "aggregate-hero", field: "character.location", value: "missing-place" }],
+        },
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const error = await tool("finish_compiler_batch").execute("aggregate-finish", {
+      outcome: "complete",
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Recorded the opening actor." }],
+      summary: "Validate all graph layers.",
+    } as never, undefined, undefined, {} as ExtensionContext).then(
+      () => undefined,
+      (failure: unknown) => failure,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("Compiler batch proposal graph is incomplete");
+    expect((error as Error).message).toContain("Canonical entity proposal trace is incomplete");
   });
 
   it("requires proposition and attribution references to close before batch checkpoint", async () => {

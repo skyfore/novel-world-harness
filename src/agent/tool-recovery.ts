@@ -400,6 +400,22 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  if (toolName === "finish_compiler_batch" && /(?:graph|trace) is incomplete/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry once only after correcting every reported graph/trace section through successful propose, withdraw, or replace calls.",
+      steps: [
+        "Treat the complete finish diagnostic as one validation report; preserve valid drafts and correct each listed logical dependency or trace.",
+        "For entity identity, call find_entity_resolution_candidates and follow its resolutionMode: resolved reuses canonical/checkpointed identity, while new-entity requires a same-finish entity proposal.",
+        "Use source-scoped finder results only when an exact existing ID is genuinely missing; do not re-propose a checkpointed pending identity or guess a replacement ID.",
+        `Retry ${toolName} once after concrete proposal progress. If the same full diagnostic repeats, stop instead of looping.`,
+      ],
+    };
+  }
+
   if (lookupMiss(lower)) {
     const advice = lookupAdvice(toolName, lower);
     if (advice) return advice;

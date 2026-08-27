@@ -446,7 +446,10 @@ export type CompilerProposalToolset = {
 
 const MAX_CONSECUTIVE_FINISH_FAILURES = 3;
 const MAX_IDENTICAL_FINISH_FAILURES = 2;
-const MAX_TOTAL_FINISH_FAILURES = 5;
+
+function finishIssueSection(label: string, issues: readonly string[]): string[] {
+  return issues.length ? [`${label} is incomplete:\n- ${issues.join("\n- ")}`] : [];
+}
 
 type CompilerBatchBlockedDetails = {
   compilerBatchBlocked: true;
@@ -803,7 +806,6 @@ export function createCompilerProposalToolset(
     if (
       consecutiveFinishFailures >= MAX_CONSECUTIVE_FINISH_FAILURES
       || identicalFailures >= MAX_IDENTICAL_FINISH_FAILURES
-      || totalFinishFailures >= MAX_TOTAL_FINISH_FAILURES
     ) {
       circuitBreak = { reason, failureCount: totalFinishFailures };
       return circuitBreakResult(reason, totalFinishFailures);
@@ -1633,7 +1635,7 @@ export function createCompilerProposalToolset(
     promptSnippet: "Resolve or deliberately leave open one source mention after deterministic candidate lookup",
     promptGuidelines: [
       "Call find_entity_resolution_candidates first unless the mention is an explicit new identity or has no lexical surface.",
-      "Use resolved only for an existing canonical entity; use new-entity only with a same-finish propose_entity candidate.",
+      "Use the candidate's resolutionMode: resolved may reuse a canonical entity or an active entity proposal from a previously checkpointed source batch; new-entity requires a same-finish propose_entity candidate.",
       "Ambiguous and unresolved are valid outcomes. Never select a candidate merely to eliminate an uncertainty count.",
       "Every candidate basis must include the primary mention ID. evidence_assertion_ids may be empty when the exact mention anchors are the complete basis.",
       "To revise a current decision, use a new resolution_id and set supersedes_resolution_id to the exact current resolution ID.",
@@ -2034,93 +2036,91 @@ export function createCompilerProposalToolset(
       ) {
         return failFinish(`reviewed_segments must account exactly once for: ${expectedSegmentIds.join(", ") || "(none)"}`);
       }
-      const closureIssues = await validateCompilerProposalClosure(workspaceRoot, listed, activeSourceId);
-      if (closureIssues.length) {
-        return failFinish(`Compiler batch proposal graph is incomplete:\n- ${closureIssues.join("\n- ")}`);
-      }
-      if (listedAnnotations.length && !activeSourceId) {
-        return failFinish("Source annotations require an active source-scoped compiler batch.");
-      }
-      const annotationClosureIssues = activeSourceId
-        ? await validateSourceAnnotationClosure(workspaceRoot, activeSourceId, listedAnnotations)
-        : [];
-      if (annotationClosureIssues.length) {
-        return failFinish(`Source annotation graph is incomplete:\n- ${annotationClosureIssues.join("\n- ")}`);
-      }
-      const resolutionClosureIssues = activeSourceId
-        ? await validateIdentityResolutionClosure(
-          workspaceRoot,
-          activeSourceId,
-          listedEntityResolutions,
-          listedAnnotations,
-          listed,
-        )
-        : [];
-      if (resolutionClosureIssues.length) {
-        return failFinish(`Entity-resolution graph is incomplete:\n- ${resolutionClosureIssues.join("\n- ")}`);
-      }
-      const entityTraceIssues = activeSourceId
-        ? await validateEntityProposalResolutionTrace(
-          workspaceRoot,
-          activeSourceId,
-          listed,
-          listedAnnotations,
-          listedEntityResolutions,
-        )
-        : [];
-      if (entityTraceIssues.length) {
-        return failFinish(`Canonical entity proposal trace is incomplete:\n- ${entityTraceIssues.join("\n- ")}`);
-      }
-      const attributionTraceIssues = activeSourceId
-        ? await validateAttributionProposalTrace(
-          workspaceRoot,
-          activeSourceId,
-          listed,
-          listedAnnotations,
-          listedEntityResolutions,
-        )
-        : [];
-      if (attributionTraceIssues.length) {
-        return failFinish(`Attribution quotation trace is incomplete:\n- ${attributionTraceIssues.join("\n- ")}`);
-      }
-      const acquisitionTraceIssues = activeSourceId
-        ? await validateKnowledgeAcquisitionProposalTrace(
-          workspaceRoot,
-          activeSourceId,
-          listed,
-          listedAnnotations,
-          listedEntityResolutions,
-        )
-        : [];
-      if (acquisitionTraceIssues.length) {
-        return failFinish(`Knowledge acquisition trace is incomplete:\n- ${acquisitionTraceIssues.join("\n- ")}`);
-      }
-      const eventResolutionClosureIssues = activeSourceId
-        ? await validateEventResolutionClosure(
-          workspaceRoot,
-          activeSourceId,
-          listedEventResolutions,
-          listedAnnotations,
-          listedEntityResolutions,
-          listed,
-        )
-        : [];
-      if (eventResolutionClosureIssues.length) {
-        return failFinish(`Event-resolution graph is incomplete:\n- ${eventResolutionClosureIssues.join("\n- ")}`);
-      }
-      const eventTraceIssues = activeSourceId
-        ? await validateEventProposalResolutionTrace(
-          workspaceRoot,
-          activeSourceId,
-          listed,
-          listedAnnotations,
-          listedEntityResolutions,
-          listedEventResolutions,
-        )
-        : [];
-      if (eventTraceIssues.length) {
-        return failFinish(`Canonical event proposal trace is incomplete:\n- ${eventTraceIssues.join("\n- ")}`);
-      }
+      const [
+        closureIssues,
+        annotationClosureIssues,
+        resolutionClosureIssues,
+        entityTraceIssues,
+        attributionTraceIssues,
+        acquisitionTraceIssues,
+        eventResolutionClosureIssues,
+        eventTraceIssues,
+      ] = await Promise.all([
+        validateCompilerProposalClosure(workspaceRoot, listed, activeSourceId),
+        activeSourceId
+          ? validateSourceAnnotationClosure(workspaceRoot, activeSourceId, listedAnnotations)
+          : Promise.resolve([]),
+        activeSourceId
+          ? validateIdentityResolutionClosure(
+            workspaceRoot,
+            activeSourceId,
+            listedEntityResolutions,
+            listedAnnotations,
+            listed,
+          )
+          : Promise.resolve([]),
+        activeSourceId
+          ? validateEntityProposalResolutionTrace(
+            workspaceRoot,
+            activeSourceId,
+            listed,
+            listedAnnotations,
+            listedEntityResolutions,
+          )
+          : Promise.resolve([]),
+        activeSourceId
+          ? validateAttributionProposalTrace(
+            workspaceRoot,
+            activeSourceId,
+            listed,
+            listedAnnotations,
+            listedEntityResolutions,
+          )
+          : Promise.resolve([]),
+        activeSourceId
+          ? validateKnowledgeAcquisitionProposalTrace(
+            workspaceRoot,
+            activeSourceId,
+            listed,
+            listedAnnotations,
+            listedEntityResolutions,
+          )
+          : Promise.resolve([]),
+        activeSourceId
+          ? validateEventResolutionClosure(
+            workspaceRoot,
+            activeSourceId,
+            listedEventResolutions,
+            listedAnnotations,
+            listedEntityResolutions,
+            listed,
+          )
+          : Promise.resolve([]),
+        activeSourceId
+          ? validateEventProposalResolutionTrace(
+            workspaceRoot,
+            activeSourceId,
+            listed,
+            listedAnnotations,
+            listedEntityResolutions,
+            listedEventResolutions,
+          )
+          : Promise.resolve([]),
+      ]);
+      const validationSections = [
+        ...(listedAnnotations.length && !activeSourceId
+          ? ["Source annotations require an active source-scoped compiler batch."]
+          : []),
+        ...finishIssueSection("Compiler batch proposal graph", closureIssues),
+        ...finishIssueSection("Source annotation graph", annotationClosureIssues),
+        ...finishIssueSection("Entity-resolution graph", resolutionClosureIssues),
+        ...finishIssueSection("Canonical entity proposal trace", entityTraceIssues),
+        ...finishIssueSection("Attribution quotation trace", attributionTraceIssues),
+        ...finishIssueSection("Knowledge acquisition trace", acquisitionTraceIssues),
+        ...finishIssueSection("Event-resolution graph", eventResolutionClosureIssues),
+        ...finishIssueSection("Canonical event proposal trace", eventTraceIssues),
+      ];
+      if (validationSections.length) return failFinish(validationSections.join("\n\n"));
       if (pendingChapterSplitPlan) {
         if (!activeSourceId) return failFinish("Structure discovery lost its active source identity.");
         const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);

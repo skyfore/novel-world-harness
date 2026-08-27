@@ -20,6 +20,7 @@ import {
   entityMentionSchema,
   type EntityMention,
 } from "./annotations.js";
+import { CompilerBatchStore } from "./batches.js";
 
 export const ENTITY_RESOLUTION_ONTOLOGY_VERSION = "entity-resolution-v1" as const;
 
@@ -388,6 +389,8 @@ export type LexicalEntityResolutionCandidate = {
   matchedText: string;
   match: "exact-canonical-name" | "exact-alias" | "normalized-canonical-name" | "normalized-alias";
   status: "canonical" | "pending";
+  availability: "canonical" | "checkpointed-pending" | "current-batch-pending" | "pending";
+  resolutionMode?: "resolved" | "new-entity";
 };
 
 /** Deterministic, source-scoped lexical candidate generation; no model call. */
@@ -400,7 +403,7 @@ export async function generateEntityResolutionCandidates(
   idSchema.parse(sourceId);
   idSchema.parse(mentionId);
   const mention = await loadEntityMention(workspaceRoot, sourceId, mentionId, compilerBatchId);
-  const entities = await sourceEntityCatalog(workspaceRoot, sourceId);
+  const entities = await sourceEntityCatalog(workspaceRoot, sourceId, compilerBatchId);
   const normalizedSurface = normalizeEntitySurface(mention.surface);
   const candidates = new Map<string, LexicalEntityResolutionCandidate>();
   const ranks: Record<LexicalEntityResolutionCandidate["match"], number> = {
@@ -410,7 +413,7 @@ export async function generateEntityResolutionCandidates(
     "normalized-alias": 3,
   };
   if (mention.surface) {
-    for (const { entity, status } of entities) {
+    for (const { entity, status, availability } of entities) {
       if (!mention.kindCandidates.includes(entity.kind)) continue;
       const labels = [
         { text: entity.canonicalName, canonical: true },
@@ -430,6 +433,12 @@ export async function generateEntityResolutionCandidates(
           matchedText: label.text,
           match,
           status,
+          availability,
+          ...(availability === "canonical" || availability === "checkpointed-pending"
+            ? { resolutionMode: "resolved" as const }
+            : availability === "current-batch-pending"
+              ? { resolutionMode: "new-entity" as const }
+              : {}),
         } satisfies LexicalEntityResolutionCandidate;
         const prior = candidates.get(entity.id);
         if (!prior || ranks[match] < ranks[prior.match] || (ranks[match] === ranks[prior.match] && status === "canonical")) {
@@ -521,15 +530,21 @@ export async function validateIdentityResolutionClosure(
         }
       }
     }
-    if (resolution.status === "resolved" && resolution.entityId && !entityCatalog.canonical.has(resolution.entityId)) {
-      issues.add(`${proposal.id}: resolved identity '${resolution.entityId}' must already be canonical; use new-entity for a current-batch entity proposal`);
+    if (resolution.status === "resolved" && resolution.entityId
+      && !entityCatalog.canonical.has(resolution.entityId)
+      && !entityCatalog.checkpointedPending.has(resolution.entityId)) {
+      issues.add(`${proposal.id}: resolved identity '${resolution.entityId}' must be canonical or an active entity proposal from a previously checkpointed source batch; use new-entity only for a same-finish entity proposal`);
     }
     if (resolution.status === "new-entity" && resolution.entityId && !entityCatalog.selectedPending.has(resolution.entityId)) {
-      issues.add(`${proposal.id}: new-entity identity '${resolution.entityId}' requires a same-finish entity proposal`);
+      issues.add(entityCatalog.checkpointedPending.has(resolution.entityId)
+        ? `${proposal.id}: new-entity identity '${resolution.entityId}' was proposed by a previously checkpointed source batch; reuse it with status resolved instead of proposing it again`
+        : `${proposal.id}: new-entity identity '${resolution.entityId}' requires a same-finish entity proposal`);
     }
     if ((resolution.status === "ambiguous" || resolution.status === "unresolved")
-      && resolution.candidates.some((candidate) => !entityCatalog.canonical.has(candidate.entityId))) {
-      issues.add(`${proposal.id}: ${resolution.status} candidates must refer to existing canonical entities`);
+      && resolution.candidates.some((candidate) =>
+        !entityCatalog.canonical.has(candidate.entityId)
+        && !entityCatalog.checkpointedPending.has(candidate.entityId))) {
+      issues.add(`${proposal.id}: ${resolution.status} candidates must refer to canonical entities or active entity proposals from previously checkpointed source batches`);
     }
   }
   return [...issues].sort();
@@ -729,12 +744,25 @@ async function loadResolutionEntityCatalog(
   worldProposalIds: readonly string[],
 ): Promise<{
   canonical: Map<string, Entity>;
+  checkpointedPending: Map<string, Entity>;
   selectedPending: Map<string, Entity>;
   all: Map<string, Entity>;
   evidenceAssertionIds: Map<string, Set<string>>;
 }> {
-  const canonical = new Map((await sourceCanonicalEntities(workspaceRoot, sourceId)).map((entity) => [entity.id, entity]));
-  const selectedPending = await loadSelectedEntityProposals(workspaceRoot, sourceId, worldProposalIds);
+  const [canonicalEntities, selectedPending, pendingEntries, progress] = await Promise.all([
+    sourceCanonicalEntities(workspaceRoot, sourceId),
+    loadSelectedEntityProposals(workspaceRoot, sourceId, worldProposalIds),
+    loadSourcePendingEntityProposals(workspaceRoot, sourceId),
+    new CompilerBatchStore(workspaceRoot).read(sourceId),
+  ]);
+  const canonical = new Map(canonicalEntities.map((entity) => [entity.id, entity]));
+  const completedBatchIds = new Set(progress.completedBatchIds);
+  const checkpointedPending = new Map<string, Entity>();
+  for (const entry of pendingEntries) {
+    if (entry.compilerBatchId && completedBatchIds.has(entry.compilerBatchId)) {
+      checkpointedPending.set(entry.entity.id, entry.entity);
+    }
+  }
   const evidenceAssertionIds = new Map<string, Set<string>>();
   const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
   for (const entityId of canonical.keys()) {
@@ -745,25 +773,20 @@ async function loadResolutionEntityCatalog(
     }
     evidenceAssertionIds.set(entityId, new Set(assertions.map((assertion) => assertion.id)));
   }
-  const proposals = new ProposalStore(workspaceRoot);
-  for (const proposalId of uniqueParsedIds(worldProposalIds)) {
-    let envelope: Record<string, unknown>;
-    try {
-      envelope = await proposals.readEnvelope("pending", proposalId);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      continue;
+  for (const entry of pendingEntries) {
+    const selected = worldProposalIds.includes(entry.proposalId);
+    const checkpointed = entry.compilerBatchId ? completedBatchIds.has(entry.compilerBatchId) : false;
+    if (selected || checkpointed) {
+      evidenceAssertionIds.set(entry.entity.id, entry.evidenceAssertionIds);
     }
-    if (envelope.kind !== "entity") continue;
-    const entity = entitySchema.parse(envelope.payload);
-    const assertions = evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []);
-    const sourceIds = evidenceAssertionSourceIds(assertions);
-    if (sourceIds.length && (sourceIds.length !== 1 || sourceIds[0] !== sourceId)) {
-      throw new Error(`Entity proposal ${proposalId} has exact evidence outside source ${sourceId}.`);
-    }
-    evidenceAssertionIds.set(entity.id, new Set(assertions.map((assertion) => assertion.id)));
   }
-  return { canonical, selectedPending, all: new Map([...canonical, ...selectedPending]), evidenceAssertionIds };
+  return {
+    canonical,
+    checkpointedPending,
+    selectedPending,
+    all: new Map([...canonical, ...checkpointedPending, ...selectedPending]),
+    evidenceAssertionIds,
+  };
 }
 
 async function loadSelectedEntityProposals(
@@ -792,19 +815,79 @@ async function loadSelectedEntityProposals(
 async function sourceEntityCatalog(
   workspaceRoot: string,
   sourceId: string,
-): Promise<Array<{ entity: Entity; status: "canonical" | "pending" }>> {
-  const canonical = await sourceCanonicalEntities(workspaceRoot, sourceId);
+  compilerBatchId?: string,
+): Promise<Array<{
+  entity: Entity;
+  status: "canonical" | "pending";
+  availability: LexicalEntityResolutionCandidate["availability"];
+}>> {
+  const [canonical, pending, progress] = await Promise.all([
+    sourceCanonicalEntities(workspaceRoot, sourceId),
+    loadSourcePendingEntityProposals(workspaceRoot, sourceId),
+    compilerBatchId ? new CompilerBatchStore(workspaceRoot).read(sourceId) : undefined,
+  ]);
+  const completedBatchIds = new Set(progress?.completedBatchIds ?? []);
+  const catalog = new Map<string, {
+    entity: Entity;
+    status: "canonical" | "pending";
+    availability: LexicalEntityResolutionCandidate["availability"];
+  }>();
+  for (const entity of canonical) {
+    catalog.set(entity.id, { entity, status: "canonical", availability: "canonical" });
+  }
+  for (const entry of pending) {
+    const availability = !compilerBatchId
+      ? "pending" as const
+      : entry.compilerBatchId === compilerBatchId
+        ? "current-batch-pending" as const
+        : entry.compilerBatchId && completedBatchIds.has(entry.compilerBatchId)
+          ? "checkpointed-pending" as const
+          : undefined;
+    if (!availability) continue;
+    const existing = catalog.get(entry.entity.id);
+    if (existing?.availability === "canonical" || existing?.availability === "checkpointed-pending") continue;
+    if (existing?.availability === "current-batch-pending" && availability === "pending") continue;
+    catalog.set(entry.entity.id, { entity: entry.entity, status: "pending", availability });
+  }
+  return [...catalog.values()];
+}
+
+type PendingEntityProposalCatalogEntry = {
+  proposalId: string;
+  compilerBatchId?: string;
+  entity: Entity;
+  evidenceAssertionIds: Set<string>;
+};
+
+async function loadSourcePendingEntityProposals(
+  workspaceRoot: string,
+  sourceId: string,
+): Promise<PendingEntityProposalCatalogEntry[]> {
   const proposals = new ProposalStore(workspaceRoot);
-  const pending: Entity[] = [];
+  const pending: PendingEntityProposalCatalogEntry[] = [];
   for (const summary of await proposals.list("pending", sourceId)) {
     if (summary.kind !== "entity") continue;
     const envelope = await proposals.readEnvelope("pending", summary.id);
-    pending.push(entitySchema.parse(envelope.payload));
+    const entity = entitySchema.parse(envelope.payload);
+    assertEvidenceExclusiveToSource(entity.evidence, sourceId, `Entity proposal ${summary.id}`);
+    const assertions = evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []);
+    const sourceIds = evidenceAssertionSourceIds(assertions);
+    if (sourceIds.length && (sourceIds.length !== 1 || sourceIds[0] !== sourceId)) {
+      throw new Error(`Entity proposal ${summary.id} has exact evidence outside source ${sourceId}.`);
+    }
+    const generatedBy = envelope.generatedBy;
+    const batchId = generatedBy && typeof generatedBy === "object" && !Array.isArray(generatedBy)
+      && typeof (generatedBy as Record<string, unknown>).compilerBatchId === "string"
+      ? (generatedBy as Record<string, unknown>).compilerBatchId as string
+      : undefined;
+    pending.push({
+      proposalId: summary.id,
+      ...(batchId ? { compilerBatchId: batchId } : {}),
+      entity,
+      evidenceAssertionIds: new Set(assertions.map((assertion) => assertion.id)),
+    });
   }
-  const catalog = new Map<string, { entity: Entity; status: "canonical" | "pending" }>();
-  for (const entity of canonical) catalog.set(entity.id, { entity, status: "canonical" });
-  for (const entity of pending) catalog.set(entity.id, { entity, status: "pending" });
-  return [...catalog.values()];
+  return pending;
 }
 
 async function sourceCanonicalEntities(workspaceRoot: string, sourceId: string): Promise<Entity[]> {

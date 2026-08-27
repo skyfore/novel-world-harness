@@ -56,6 +56,22 @@ describe("agent tool recovery", () => {
     )).toMatchObject({ category: "host-repair-required", retryable: false });
   });
 
+  it("classifies finish graph diagnostics as repairable validation instead of a generic lookup miss", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "finish_compiler_batch",
+      "Entity-resolution graph is incomplete:\n- resolution-hero: candidate references unknown entity 'hero'",
+    );
+
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+    });
+    expect(advice.suggestedCall).toBeUndefined();
+    expect(advice.retryCondition).toContain("correcting every reported graph/trace section");
+    expect(advice.steps.join(" ")).toContain("resolutionMode");
+    expect(advice.steps.join(" ")).toContain("do not re-propose a checkpointed pending identity");
+  });
+
   it("marks terminate-style retrieval budget results as errors and appends the stop SOP", () => {
     const recovered = recoverNwhToolResult({
       type: "tool_result",

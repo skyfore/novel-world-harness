@@ -81,11 +81,12 @@ export function createEntityResolutionRetrievalTools(
   const candidates = defineTool({
     name: "find_entity_resolution_candidates",
     label: "Find entity resolution candidates",
-    description: "Generate deterministic source-scoped lexical identity candidates for one entity mention from canonical names, aliases, and pending entity revisions.",
+    description: "Generate deterministic source-scoped lexical identity candidates from canonical entities, this batch's entity drafts, and active entity proposals from previously checkpointed batches.",
     promptSnippet: "Generate host-ranked lexical candidates before proposing an identity decision",
     promptGuidelines: [
       "An empty result is valid and may require new-entity or unresolved status.",
       "Lexical equality is candidate generation, not proof of identity; use source context and preserve ambiguity.",
+      "Copy each candidate's resolutionMode: resolved reuses canonical/checkpointed identity, while new-entity requires the current-batch entity proposal.",
     ],
     executionMode: "sequential" as const,
     parameters: candidatesParameters,
@@ -111,7 +112,7 @@ export function createEntityResolutionRetrievalTools(
         },
         candidates: result.candidates,
         message: result.candidates.length
-          ? "Candidates are deterministic lexical matches only; the identity decision remains a proposal."
+          ? "Candidates are deterministic lexical matches only; the identity decision remains a proposal. Use each candidate's resolutionMode instead of guessing from pending status."
           : "No compatible lexical candidate matched. Preserve unresolved ambiguity or propose a new entity only when source context supports it.",
       }));
     },

@@ -319,6 +319,27 @@ export class EventResolutionStore {
     return rejected.sort();
   }
 
+  /** Remove invalid current bindings while preserving their immutable proposal/revision history. */
+  async rejectAcceptedResolutionIds(
+    sourceIdInput: string,
+    resolutionIdsInput: readonly string[],
+  ): Promise<string[]> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const resolutionIds = new Set(resolutionIdsInput.map((id) => idSchema.parse(id)));
+    if (!resolutionIds.size) return [];
+    const proposals: EventResolutionProposal[] = [];
+    for (const summary of await this.listProposals(sourceId, "accepted")) {
+      if (!resolutionIds.has(summary.resolutionId)) continue;
+      proposals.push(await this.readProposal(sourceId, "accepted", summary.id));
+    }
+    if (!proposals.length) return [];
+    await this.rollbackAcceptedBatch(sourceId, proposals);
+    for (const proposal of proposals) {
+      await this.transition(sourceId, proposal.id, "accepted", "rejected");
+    }
+    return proposals.map((proposal) => proposal.id).sort();
+  }
+
   async removeSource(sourceIdInput: string): Promise<void> {
     await fs.rm(this.sourceDirectory(idSchema.parse(sourceIdInput)), { recursive: true, force: true });
   }

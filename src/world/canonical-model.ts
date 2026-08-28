@@ -22,6 +22,7 @@ import {
   type EventParticipation,
   type EventRelation,
   type Proposition,
+  type ValidationIssue,
   type WorldRule,
 } from "./model.js";
 import { characterOntologyEvidence } from "./character-ontology.js";
@@ -33,6 +34,13 @@ export type CanonicalRevisionRef = { id: string; hash: string };
 type StoredCanonicalRef = { version: 1; id: string; hash: string };
 export type ProposalStatus = "pending" | "accepted" | "rejected";
 export type ProposalSummary = { id: string; kind: string; schemaVersion: number; createdAt: string; worker: string };
+export type ProposalRejectionReport = {
+  version: 1;
+  proposalId: string;
+  kind: string;
+  rejectedAt: string;
+  errors: ValidationIssue[];
+};
 
 function safeId(id: string): string {
   if (!SAFE_ID.test(id)) throw new Error(`Unsafe artifact id: ${id}`);
@@ -276,6 +284,62 @@ export class ProposalStore {
     try { await fs.rename(source, target); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`Proposal not found: ${id}`); throw error; }
   }
+  async reject(id: string, errors: readonly ValidationIssue[]): Promise<ProposalRejectionReport> {
+    const envelope = await this.readEnvelope("pending", id);
+    const kind = typeof envelope.kind === "string" ? envelope.kind : "unknown";
+    // Persist the immutable reason first. If the process stops between these
+    // operations, a retry can complete the transition without ever producing
+    // a rejected proposal whose diagnostic was lost.
+    const report = await this.recordRejection(id, kind, errors);
+    await this.transition(id, "pending", "rejected");
+    return report;
+  }
+  async recordRejection(
+    proposalIdInput: string,
+    kind: string,
+    errorsInput: readonly ValidationIssue[],
+  ): Promise<ProposalRejectionReport> {
+    const proposalId = safeId(proposalIdInput);
+    const filePath = path.join(this.root, "rejection-reports", `${proposalId}.json`);
+    try {
+      return parseProposalRejectionReport(JSON.parse(await fs.readFile(filePath, "utf8")), proposalId);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const report: ProposalRejectionReport = {
+      version: 1,
+      proposalId,
+      kind,
+      rejectedAt: new Date().toISOString(),
+      errors: errorsInput.length
+        ? structuredClone(errorsInput) as ValidationIssue[]
+        : [{ code: "UNSPECIFIED_REJECTION", message: "Proposal was moved to rejected history without a supplied diagnostic." }],
+    };
+    await writeImmutable(filePath, report);
+    return report;
+  }
+  async readRejection(proposalIdInput: string): Promise<ProposalRejectionReport | null> {
+    const proposalId = safeId(proposalIdInput);
+    try {
+      return parseProposalRejectionReport(
+        JSON.parse(await fs.readFile(path.join(this.root, "rejection-reports", `${proposalId}.json`), "utf8")),
+        proposalId,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+  async listRejections(): Promise<ProposalRejectionReport[]> {
+    const directory = path.join(this.root, "rejection-reports");
+    let names: string[];
+    try { names = (await fs.readdir(directory)).filter((name) => name.endsWith(".json")).sort(); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    return Promise.all(names.map(async (name) => parseProposalRejectionReport(
+      JSON.parse(await fs.readFile(path.join(directory, name), "utf8")),
+      name.slice(0, -5),
+    )));
+  }
   async removeForSource(sourceId: string): Promise<number> {
     let removed = 0;
     for (const status of ["pending", "accepted", "rejected"] as const) {
@@ -287,6 +351,33 @@ export class ProposalStore {
     return removed;
   }
   private proposalPath(status: ProposalStatus, id: string): string { return path.join(this.root, status, `${safeId(id)}.json`); }
+}
+
+function parseProposalRejectionReport(value: unknown, expectedProposalId: string): ProposalRejectionReport {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid proposal rejection report: ${expectedProposalId}`);
+  const record = value as Record<string, unknown>;
+  if (record.version !== 1 || record.proposalId !== expectedProposalId || typeof record.kind !== "string"
+    || typeof record.rejectedAt !== "string" || !Array.isArray(record.errors) || !record.errors.length) {
+    throw new Error(`Invalid proposal rejection report: ${expectedProposalId}`);
+  }
+  const errors: ValidationIssue[] = record.errors.map((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new Error(`Invalid proposal rejection report: ${expectedProposalId}`);
+    const issue = candidate as Record<string, unknown>;
+    if (typeof issue.code !== "string" || typeof issue.message !== "string"
+      || (issue.path !== undefined && typeof issue.path !== "string")) {
+      throw new Error(`Invalid proposal rejection report: ${expectedProposalId}`);
+    }
+    return issue.path === undefined
+      ? { code: issue.code, message: issue.message }
+      : { code: issue.code, message: issue.message, path: issue.path };
+  });
+  return {
+    version: 1,
+    proposalId: expectedProposalId,
+    kind: record.kind,
+    rejectedAt: record.rejectedAt,
+    errors,
+  };
 }
 
 function proposalEvidenceSourceIds(value: Record<string, unknown>): string[] {
@@ -345,5 +436,7 @@ export class CanonicalCompiler {
   async acceptEventParticipation(id: string): Promise<EventParticipation> { const proposal = await this.proposals.read("pending", id, eventParticipationSchema); await this.canon.putEventParticipation(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptEventRelation(id: string): Promise<EventRelation> { const proposal = await this.proposals.read("pending", id, eventRelationSchema); await this.canon.putEventRelation(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptRule(id: string): Promise<WorldRule> { const proposal = await this.proposals.read("pending", id, worldRuleSchema); await this.canon.putRule(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
-  reject(id: string): Promise<void> { return this.proposals.transition(id, "pending", "rejected"); }
+  async reject(id: string): Promise<void> {
+    await this.proposals.reject(id, [{ code: "CANONICAL_COMPILER_REJECTION", message: "Proposal was explicitly rejected by the canonical compiler." }]);
+  }
 }

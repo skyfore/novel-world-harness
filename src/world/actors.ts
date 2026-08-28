@@ -6,6 +6,7 @@ import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
 import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
+import { isCommunicatingKnowledgeSource } from "./knowledge-semantics.js";
 import {
   evidenceRefSchema,
   idSchema,
@@ -14,6 +15,7 @@ import {
   storyTimeSchema,
   stateDeltaSchema,
   type EventProposal,
+  type Entity,
   type NarrativeProgress,
   type StoryTime,
   type WorldState,
@@ -720,7 +722,7 @@ function actorActionIsLocal(
   initiatingActorId: string,
   localActors: ReadonlySet<string>,
   state: WorldState,
-  entities: ReadonlyMap<string, { kind: string }>,
+  entities: ReadonlyMap<string, Pick<Entity, "kind">>,
 ): boolean {
   const localCharacters = new Set([actorId, initiatingActorId, ...localActors]);
   for (const participantId of action.participants ?? []) {
@@ -744,7 +746,11 @@ function actorActionIsLocal(
   }
   for (const operation of action.proposedKnowledge?.operations ?? []) {
     if (!localCharacters.has(operation.actorId)) return false;
-    if (operation.op === "learn" && operation.sourceActorId && !localCharacters.has(operation.sourceActorId)) return false;
+    if (operation.op === "learn" && operation.sourceActorId) {
+      const source = entities.get(operation.sourceActorId);
+      if (!isCommunicatingKnowledgeSource(source)
+        || (source.kind === "character" && !localCharacters.has(operation.sourceActorId))) return false;
+    }
   }
   return true;
 }

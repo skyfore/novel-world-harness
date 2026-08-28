@@ -181,7 +181,7 @@ export const attributionSchema = z
   .object({
     id: idSchema,
     propositionId: idSchema,
-    holderKind: z.enum(["narrator", "character", "document", "unknown"]),
+    holderKind: z.enum(["narrator", "character", "system", "document", "unknown"]),
     holderEntityId: idSchema.optional(),
     attitude: z.enum(["asserts", "knows", "believes", "suspects", "reports", "denies", "questions"]),
     certainty: z.number().finite().min(0).max(1),
@@ -193,7 +193,7 @@ export const attributionSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if ((value.holderKind === "character" || value.holderKind === "document") && !value.holderEntityId) {
+    if ((value.holderKind === "character" || value.holderKind === "system" || value.holderKind === "document") && !value.holderEntityId) {
       ctx.addIssue({ code: "custom", path: ["holderEntityId"], message: `${value.holderKind} attribution requires holderEntityId` });
     }
     if ((value.holderKind === "narrator" || value.holderKind === "unknown") && value.holderEntityId) {

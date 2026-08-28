@@ -6,6 +6,8 @@ export type CompilerBatchOutcome = {
   completionSignaled: boolean;
   completionOutcome?: "complete" | "no-artifacts";
   blockedReason?: string;
+  /** Compiler mutation/control calls that never received a tool result and were not superseded by a verified retry. */
+  unresolvedToolCalls?: number;
 };
 
 export function isCompilerProposalTool(toolName: string): boolean {
@@ -16,6 +18,8 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
   const calls = new Map<string, { toolName: string; proposalId?: string; withdrawnProposalId?: string; finishOutcome?: "complete" | "no-artifacts" }>();
   const failed = new Set<string>();
   const succeeded = new Set<string>();
+  const withdrawn = new Set<string>();
+  const resultCallIds = new Set<string>();
   let assistantStopReason: string | undefined;
   let assistantErrorMessage: string | undefined;
   let completionOutcome: "complete" | "no-artifacts" | undefined;
@@ -56,6 +60,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
       continue;
     }
     if (message.role !== "toolResult" || typeof message.toolCallId !== "string") continue;
+    resultCallIds.add(message.toolCallId);
     const call = calls.get(message.toolCallId);
     const toolName = call?.toolName ?? (typeof message.toolName === "string" ? message.toolName : "");
     const details = message.details && typeof message.details === "object" && !Array.isArray(message.details)
@@ -80,6 +85,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     }
     if (toolName === "withdraw_compiler_proposal") {
       if (message.isError !== true && call?.withdrawnProposalId) {
+        withdrawn.add(call.withdrawnProposalId);
         for (const key of succeeded) {
           if (key.endsWith(`:${call.withdrawnProposalId}`)) succeeded.delete(key);
         }
@@ -95,6 +101,19 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     }
   }
 
+  let unresolvedToolCalls = 0;
+  for (const [toolCallId, call] of calls) {
+    if (resultCallIds.has(toolCallId)) continue;
+    if (call.proposalId) {
+      const proposalRecovered = [...succeeded].some((key) => key.endsWith(`:${call.proposalId}`))
+        || withdrawn.has(call.proposalId);
+      if (proposalRecovered) continue;
+    }
+    if (call.finishOutcome && completionOutcome !== undefined) continue;
+    if (call.withdrawnProposalId && withdrawn.has(call.withdrawnProposalId)) continue;
+    unresolvedToolCalls += 1;
+  }
+
   return {
     assistantStopReason,
     ...(assistantErrorMessage ? { assistantErrorMessage } : {}),
@@ -103,6 +122,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     completionSignaled: completionOutcome !== undefined,
     ...(completionOutcome ? { completionOutcome } : {}),
     ...(blockedReason ? { blockedReason } : {}),
+    ...(unresolvedToolCalls ? { unresolvedToolCalls } : {}),
   };
 }
 
@@ -146,6 +166,9 @@ export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | un
     const detail = outcome.assistantErrorMessage ? `: ${outcome.assistantErrorMessage}` : "";
     return `model ended with ${outcome.assistantStopReason ?? "no final assistant response"}${detail}`;
   }
+  if (outcome.unresolvedToolCalls) {
+    return `${outcome.unresolvedToolCalls} compiler tool call(s) ended without a tool result`;
+  }
   if (!outcome.completionSignaled) {
     if (outcome.proposalFailed > 0) return `${outcome.proposalFailed} proposal tool call(s) failed`;
     return "the model did not explicitly finish the compiler batch";
@@ -172,5 +195,5 @@ export function isRecoverableCompilerBatchInterruption(outcome: CompilerBatchOut
     return outcome.blockedReason.startsWith("compiler tool-call safety fuse tripped")
       || outcome.blockedReason.startsWith("compiler tool-call budget exceeded");
   }
-  return outcome.assistantStopReason === "error";
+  return outcome.assistantStopReason === "error" || Boolean(outcome.unresolvedToolCalls);
 }

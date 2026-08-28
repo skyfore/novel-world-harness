@@ -303,6 +303,25 @@ export class EntityResolutionStore {
     return rejected.sort();
   }
 
+  /** Remove invalid current bindings while preserving their immutable proposal/revision history. */
+  async rejectAcceptedResolutionIds(
+    sourceIdInput: string,
+    resolutionIdsInput: readonly string[],
+  ): Promise<string[]> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const resolutionIds = new Set(resolutionIdsInput.map((id) => idSchema.parse(id)));
+    if (!resolutionIds.size) return [];
+    const rejected: string[] = [];
+    for (const summary of await this.listProposals(sourceId, "accepted")) {
+      if (!resolutionIds.has(summary.resolutionId)) continue;
+      const proposal = await this.readProposal(sourceId, "accepted", summary.id);
+      await this.rollbackAcceptedProposal(sourceId, proposal);
+      await this.transition(sourceId, summary.id, "accepted", "rejected");
+      rejected.push(summary.id);
+    }
+    return rejected.sort();
+  }
+
   async removeSource(sourceIdInput: string): Promise<void> {
     const sourceId = idSchema.parse(sourceIdInput);
     await fs.rm(this.sourceDirectory(sourceId), { recursive: true, force: true });

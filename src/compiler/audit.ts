@@ -74,6 +74,8 @@ export type CompilerAuditReport = {
     pending: number;
     accepted: number;
     rejected: number;
+    rejectionsWithDiagnostics: number;
+    rejectionsMissingDiagnostics: number;
     pendingByKind: Record<string, number>;
   };
   observations: {
@@ -490,11 +492,14 @@ export async function auditCompiler(
   }
 
   const proposalStore = new ProposalStore(workspaceRoot);
-  const [pending, accepted, rejected] = await Promise.all([
+  const [pending, accepted, rejected, rejectionReports] = await Promise.all([
     proposalStore.list("pending", options.sourceId),
     proposalStore.list("accepted", options.sourceId),
     proposalStore.list("rejected", options.sourceId),
+    proposalStore.listRejections(),
   ]);
+  const rejectedIds = new Set(rejected.map((proposal) => proposal.id));
+  const rejectionsWithDiagnostics = rejectionReports.filter((report) => rejectedIds.has(report.proposalId)).length;
   const pendingByKind: Record<string, number> = {};
   for (const proposal of pending) pendingByKind[proposal.kind] = (pendingByKind[proposal.kind] ?? 0) + 1;
 
@@ -1172,7 +1177,14 @@ export async function auditCompiler(
   return {
     version: 1,
     sources: { registered: sources.length, segmented, segments: segmentCount, changedSinceIngest },
-    proposals: { pending: pending.length, accepted: accepted.length, rejected: rejected.length, pendingByKind },
+    proposals: {
+      pending: pending.length,
+      accepted: accepted.length,
+      rejected: rejected.length,
+      rejectionsWithDiagnostics,
+      rejectionsMissingDiagnostics: rejected.length - rejectionsWithDiagnostics,
+      pendingByKind,
+    },
     observations: {
       structuredSources: structures.length,
       structuralUnits,

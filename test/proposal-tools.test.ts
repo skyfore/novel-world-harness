@@ -541,6 +541,67 @@ describe("compiler proposal tools", () => {
     });
   });
 
+  it("accepts an independent spatial edge when another pending edge has an invalid endpoint", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-spatial-isolation-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "The road connects Alpha to Beta. Ghost is elsewhere.\n",
+    );
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-spatial-isolation`, fixture.source.id);
+    const spatial = toolset.tools.find((candidate) => candidate.name === "propose_spatial_relation")!;
+    const canon = new CanonicalModelStore(root);
+    for (const [id, name] of [["alpha", "Alpha"], ["beta", "Beta"]] as const) {
+      await canon.putEntity({
+        id,
+        kind: "location",
+        canonicalName: name,
+        aliases: [],
+        evidence: fixture.evidence(name),
+      });
+    }
+    const common = {
+      ontologyVersion: "spatial-v1" as const,
+      kind: "route" as const,
+      fromLocationId: "alpha",
+      direction: "two-way" as const,
+      modes: ["foot" as const],
+      basis: "explicit" as const,
+      visibility: "public" as const,
+      status: "supported" as const,
+      confidence: 1,
+    };
+    for (const [proposalId, id, toLocationId, exact] of [
+      ["01-valid-spatial", "alpha-beta-road", "beta", "road connects Alpha to Beta"],
+      ["02-invalid-spatial", "alpha-ghost-road", "missing-ghost", "Ghost is elsewhere"],
+    ] as const) {
+      await spatial.execute(proposalId, {
+        proposal_id: proposalId,
+        payload: { ...common, id, toLocationId },
+        evidence_segment_ids: [fixture.segmentId],
+        evidence_selectors: [{
+          segment_id: fixture.segmentId,
+          exact,
+          target_path: "/kind",
+          relation: "supports",
+          strength: "explicit",
+        }],
+      } as never, undefined, undefined, {} as ExtensionContext);
+    }
+
+    const result = await new CompilerCommitService(root).acceptAllValid(fixture.source.id);
+
+    expect(result.accepted).toEqual([{ id: "01-valid-spatial", kind: "spatial-relation" }]);
+    expect(result.blocked).toEqual([expect.objectContaining({
+      id: "02-invalid-spatial",
+      errors: expect.arrayContaining([expect.objectContaining({ code: "UNKNOWN_SPATIAL_LOCATION" })]),
+    })]);
+    await expect(canon.listSpatialRelations()).resolves.toEqual([
+      expect.objectContaining({ id: "alpha-beta-road" }),
+    ]);
+  });
+
   it("injects separate exact evidence into a controlled rule, its clause, and its exception", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-world-rule-evidence-"));
     roots.push(root);
@@ -1524,6 +1585,80 @@ describe("compiler proposal tools", () => {
     } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
       details: { compilerBatchFinished: true },
     });
+  });
+
+  it("runs deterministic commit semantics at finish before committing resolution metadata", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-finish-commit-preview-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "North Gate is open.\n");
+    const toolset = createCompilerProposalToolset(root);
+    const tool = (name: string) => toolset.tools.find((candidate) => candidate.name === name)!;
+    await toolset.beginBatch([fixture.segmentId], "commit-preview-batch", fixture.source.id);
+    await tool("propose_entity").execute("gate", {
+      proposal_id: "preview-gate-proposal",
+      payload: { id: "preview-gate", kind: "location", canonicalName: "North Gate", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await tool("propose_proposition").execute("open", {
+      proposal_id: "preview-open-proposition",
+      payload: {
+        id: "preview-gate-open",
+        subjectEntityId: "preview-gate",
+        relationId: "open",
+        object: { kind: "literal", value: true },
+        polarity: "positive",
+        modality: "asserted",
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await tool("propose_attribution").execute("bad-holder", {
+      proposal_id: "preview-bad-holder",
+      payload: {
+        id: "preview-gate-report",
+        propositionId: "preview-gate-open",
+        holderKind: "character",
+        holderEntityId: "preview-gate",
+        attitude: "reports",
+        certainty: 1,
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+    const finishInput = {
+      outcome: "complete",
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Recorded the gate statement." }],
+      summary: "done",
+    };
+
+    await expect(tool("finish_compiler_batch").execute(
+      "invalid-holder-finish",
+      finishInput as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    )).rejects.toThrow(/Deterministic canonical commit preview.*INVALID_ATTRIBUTION_HOLDER/su);
+
+    await tool("withdraw_compiler_proposal").execute("withdraw-holder", {
+      proposal_id: "preview-bad-holder",
+      reason: "A location cannot be a character attribution holder.",
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await tool("propose_attribution").execute("narrator-holder", {
+      proposal_id: "preview-narrator-holder",
+      payload: {
+        id: "preview-gate-report",
+        propositionId: "preview-gate-open",
+        holderKind: "narrator",
+        attitude: "reports",
+        certainty: 1,
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await expect(tool("finish_compiler_batch").execute(
+      "valid-holder-finish",
+      finishInput as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    )).resolves.toMatchObject({ details: { compilerBatchFinished: true } });
   });
 
   it("reports every independent finish validation section in one diagnostic", async () => {

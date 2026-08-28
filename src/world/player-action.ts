@@ -1173,7 +1173,8 @@ export async function validatePlayerActionSpatialScope(
     }
   }
   for (const operation of candidate.proposedKnowledge?.operations ?? []) {
-    if (operation.op === "learn" && operation.sourceActorId && operation.sourceActorId !== actorId) {
+    if (operation.op === "learn" && operation.sourceActorId && operation.sourceActorId !== actorId
+      && context.entities.get(operation.sourceActorId)?.kind === "character") {
       interactionCharacters.add(operation.sourceActorId);
     }
   }

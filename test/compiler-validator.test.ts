@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CompilerProposalService, validateCompilerProposalClosure } from "../src/compiler/proposals.js";
-import { convergeWorldProposals } from "../src/compiler/converge.js";
+import { convergeWorldProposals, quarantineUncommittableProposals } from "../src/compiler/converge.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
@@ -107,6 +107,31 @@ describe("CompilerCommitService", () => {
     expect(validation.errors.some((error) => error.code === "UNKNOWN_PARTICIPANT")).toBe(true);
     await expect(commits.canon.getEvent("event-1")).rejects.toThrow();
     await expect(commits.proposals.read("pending", "bad-event", (await import("../src/world/model.js")).canonicalEventSchema)).resolves.toMatchObject({ id: "bad-event" });
+  });
+
+  it("persists exact deterministic diagnostics when convergence quarantines a proposal", async () => {
+    const { root, proposals, commits, evidence } = await fixture();
+    await proposals.submit("claim", {
+      proposalId: "diagnosed-bad-claim",
+      payload: {
+        id: "diagnosed-bad-claim-artifact",
+        subject: "missing-subject",
+        predicate: "present",
+        object: true,
+        epistemicType: "explicit-fact",
+        evidence: evidence("Unknown person appears"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const convergence = await convergeWorldProposals(root);
+    await quarantineUncommittableProposals(root, convergence);
+
+    await expect(commits.proposals.readRejection("diagnosed-bad-claim")).resolves.toMatchObject({
+      proposalId: "diagnosed-bad-claim",
+      kind: "claim",
+      errors: [expect.objectContaining({ code: "UNKNOWN_SUBJECT", path: "subject" })],
+    });
   });
 
   it("requires exactly character-scoped event presence during canonical validation", async () => {
@@ -871,6 +896,121 @@ describe("CompilerCommitService", () => {
     });
   });
 
+  it("isolates a malformed event relation while atomically accepting a complete causal-parent group", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [id, causalParents] of [
+      ["parent-a", []],
+      ["parent-b", []],
+      ["target", ["parent-a", "parent-b"]],
+    ] as const) {
+      await commits.canon.putEvent({
+        id,
+        title: id,
+        participants: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [...causalParents],
+        confidence: 1,
+      });
+    }
+    for (const [proposalId, payload] of [
+      ["01-parent-a-causes-target", {
+        id: "parent-a-causes-target",
+        fromEventId: "parent-a",
+        toEventId: "target",
+        type: "causes",
+        status: "explicit",
+        confidence: 1,
+        mechanism: "Parent A directly contributes to the target.",
+        evidence: evidence("曹操"),
+      }],
+      ["02-parent-b-enables-target", {
+        id: "parent-b-enables-target",
+        fromEventId: "parent-b",
+        toEventId: "target",
+        type: "enables",
+        status: "explicit",
+        confidence: 1,
+        mechanism: "Parent B supplies another required condition.",
+        evidence: evidence("北门"),
+      }],
+      ["03-malformed-relation", {
+        id: "missing-before-target",
+        fromEventId: "missing-event",
+        toEventId: "target",
+        type: "before",
+        status: "explicit",
+        confidence: 1,
+        evidence: evidence("曹操，字孟德\n北门"),
+      }],
+    ] as const) {
+      await proposals.submit("event-relation", {
+        proposalId,
+        payload,
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+
+    expect(result.accepted.map((item) => item.id)).toEqual([
+      "01-parent-a-causes-target",
+      "02-parent-b-enables-target",
+    ]);
+    expect(result.blocked).toEqual([expect.objectContaining({
+      id: "03-malformed-relation",
+      errors: expect.arrayContaining([expect.objectContaining({ code: "UNKNOWN_RELATION_SOURCE_EVENT" })]),
+    })]);
+    await expect(commits.canon.listEventRelations()).resolves.toHaveLength(2);
+  });
+
+  it("previews graph proposals in commit order so one cycle does not poison an earlier valid relation", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const id of ["event-a", "event-b"]) {
+      await commits.canon.putEvent({
+        id,
+        title: id,
+        participants: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      });
+    }
+    for (const [proposalId, relationId, fromEventId, toEventId] of [
+      ["01-a-before-b-proposal", "a-before-b", "event-a", "event-b"],
+      ["02-b-before-a-proposal", "b-before-a", "event-b", "event-a"],
+    ] as const) {
+      await proposals.submit("event-relation", {
+        proposalId,
+        payload: {
+          id: relationId,
+          fromEventId,
+          toEventId,
+          type: "before",
+          status: "explicit",
+          confidence: 1,
+          evidence: evidence("曹操"),
+        },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const preview = await commits.validatePendingStructure();
+    expect(preview).toEqual([expect.objectContaining({
+      id: "02-b-before-a-proposal",
+      errors: expect.arrayContaining([expect.objectContaining({ code: "TEMPORAL_RELATION_CYCLE" })]),
+    })]);
+
+    const result = await commits.acceptAllValid();
+    expect(result.accepted).toEqual([{ id: "01-a-before-b-proposal", kind: "event-relation" }]);
+    expect(result.blocked).toEqual([expect.objectContaining({ id: "02-b-before-a-proposal" })]);
+  });
+
   it("rejects event relations with unknown endpoints", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("event-relation", {
@@ -1063,6 +1203,55 @@ describe("CompilerCommitService", () => {
     });
     expect((await commits.accept("attribution", "mismatched-chain")).errors)
       .toContainEqual(expect.objectContaining({ code: "ATTRIBUTION_CHAIN_MISMATCH" }));
+  });
+
+  it("accepts a system-held attribution only for a modeled communication-system entity", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await commits.canon.putEntity({
+      id: "norma",
+      kind: "other",
+      canonicalName: "Unknown person",
+      aliases: [],
+      evidence: evidence("Unknown person"),
+    });
+    await commits.canon.putEntity({
+      id: "north-gate",
+      kind: "location",
+      canonicalName: "北门",
+      aliases: [],
+      evidence: evidence("北门"),
+    });
+    await commits.canon.putProposition({
+      id: "gate-open-system-content",
+      subjectEntityId: "north-gate",
+      relationId: "open",
+      object: { kind: "literal", value: true },
+      polarity: "positive",
+      modality: "asserted",
+      evidence: evidence("北门"),
+    });
+    for (const [proposalId, holderEntityId] of [
+      ["valid-system-holder", "norma"],
+      ["invalid-system-holder", "north-gate"],
+    ] as const) {
+      await proposals.submit("attribution", {
+        proposalId,
+        payload: {
+          id: proposalId,
+          propositionId: "gate-open-system-content",
+          holderKind: "system",
+          holderEntityId,
+          attitude: "reports",
+          certainty: 1,
+          evidence: evidence("Unknown person appears"),
+        },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    expect((await commits.accept("attribution", "valid-system-holder")).accepted).toBe(true);
+    expect((await commits.accept("attribution", "invalid-system-holder")).errors)
+      .toContainEqual(expect.objectContaining({ code: "INVALID_ATTRIBUTION_HOLDER" }));
   });
 
   it("reports proposition and attribution dependency cycles deterministically", async () => {

@@ -2753,7 +2753,10 @@ describe("NWH TUI extension", () => {
       proposal_id: "tui-generated-opening",
       payload: {
         version: 1,
-        delta: { version: 1, operations: [] },
+        delta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "wait at the opening" }],
+        },
       },
       evidence_segment_ids: [segmentId!],
     };

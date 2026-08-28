@@ -268,8 +268,8 @@ export class CompilerProposalService {
     await this.store.writePending(proposal, schema);
     return { proposalId: input.proposalId, kind };
   }
-  async withdraw(proposalId: string): Promise<void> {
-    await this.store.transition(proposalId, "pending", "rejected");
+  async withdraw(proposalId: string, reason = "Withdrawn by the compiler operator or model."): Promise<void> {
+    await this.store.reject(proposalId, [{ code: "WITHDRAWN_COMPILER_PROPOSAL", message: reason }]);
   }
 }
 
@@ -288,7 +288,10 @@ export async function rejectPendingCompilerBatchProposals(
       || Array.isArray(generatedBy)
       || (generatedBy as Record<string, unknown>).compilerBatchId !== compilerBatchId
     ) continue;
-    await store.transition(summary.id, "pending", "rejected");
+    await store.reject(summary.id, [{
+      code: "INCOMPLETE_COMPILER_BATCH",
+      message: `Compiler batch ${compilerBatchId} ended without a valid finish handshake.`,
+    }]);
     rejected.push(summary.id);
   }
   const workspace = await WorkspaceStore.create(workspaceRoot);
@@ -332,7 +335,10 @@ export async function rejectPendingCompilerSourceProposals(
       !sourceEvidenceIds.has(summary.id)
       && !(typeof compilerBatchId === "string" && compilerBatchBelongsToSource(compilerBatchId, sourceId))
     ) continue;
-    await store.transition(summary.id, "pending", "rejected");
+    await store.reject(summary.id, [{
+      code: "SOURCE_REPARSE_INVALIDATION",
+      message: `Pending proposal was invalidated while reparsing source ${sourceId}.`,
+    }]);
     rejected.push(summary.id);
   }
   const workspace = await WorkspaceStore.create(workspaceRoot);

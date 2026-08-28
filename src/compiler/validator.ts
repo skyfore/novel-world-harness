@@ -28,7 +28,11 @@ import {
   type WorldRule,
 } from "../world/model.js";
 import { validateEventParticipationRecord } from "../world/event-semantics.js";
-import { validateEventRelationCatalog } from "../world/event-relations.js";
+import {
+  eventRelationProjectsLegacyCausalParent,
+  validateEventRelationCatalog,
+  validateEventRelationRecord,
+} from "../world/event-relations.js";
 import {
   validateCharacterOntologyEvidenceAssertions,
   validateCharacterOntologyReferences,
@@ -61,7 +65,11 @@ import {
 import { evidenceSourceIds } from "../world/source-scope.js";
 import { validateCommittedEntityResolutionTrace } from "./entity-resolution.js";
 import { validateCommittedEventResolutionTrace } from "./event-resolution.js";
-import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
+import {
+  findKnowledgeDeltas,
+  isCommunicatingKnowledgeSource,
+  validateKnowledgeSemanticReferences,
+} from "../world/knowledge-semantics.js";
 import {
   validateCommittedAttributionTrace,
   validateCommittedKnowledgeAcquisitionTrace,
@@ -69,6 +77,7 @@ import {
 
 export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
+export type CompilerCatalogValidationScope = "catalog" | "record";
 export type CompilerValidationCatalog = {
   entities: Map<string, Entity>;
   propositions: Map<string, Proposition>;
@@ -133,7 +142,12 @@ export class CompilerValidator {
     };
   }
 
-  validateWithCatalog(kind: CanonicalProposalKind, payload: unknown, catalog: CompilerValidationCatalog): CompilerValidation {
+  validateWithCatalog(
+    kind: CanonicalProposalKind,
+    payload: unknown,
+    catalog: CompilerValidationCatalog,
+    options: { graphScope?: CompilerCatalogValidationScope } = {},
+  ): CompilerValidation {
     const { entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, rules, goals } = catalog;
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
@@ -147,20 +161,25 @@ export class CompilerValidator {
     if (kind === "event-relation") {
       const relation = eventRelationSchema.parse(payload);
       this.validateEventRelation(relation, entities, rules, errors);
-      const prospectiveRelations = new Map(eventRelations);
-      prospectiveRelations.set(relation.id, relation);
-      errors.push(...validateEventRelationCatalog({
-        events,
-        relations: prospectiveRelations.values(),
-      }));
+      if (options.graphScope === "record") {
+        errors.push(...validateEventRelationRecord(relation, events));
+      } else {
+        const prospectiveRelations = new Map(eventRelations);
+        prospectiveRelations.set(relation.id, relation);
+        errors.push(...validateEventRelationCatalog({
+          events,
+          relations: prospectiveRelations.values(),
+        }));
+      }
     }
     if (kind === "spatial-relation") {
       const relation = spatialRelationSchema.parse(payload);
       relation.requires.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
       relation.blockedWhen.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
-      const prospectiveRelations = new Map(spatialRelations);
-      prospectiveRelations.set(relation.id, relation);
-      errors.push(...validateSpatialRelationCatalog(prospectiveRelations.values(), {
+      const prospectiveRelations = options.graphScope === "record"
+        ? [relation]
+        : new Map(spatialRelations).set(relation.id, relation).values();
+      errors.push(...validateSpatialRelationCatalog(prospectiveRelations, {
         entities,
         events,
         claims: new Set(claims.keys()),
@@ -235,6 +254,12 @@ export class CompilerValidator {
       const holder = attribution.holderEntityId ? entities.get(attribution.holderEntityId) : undefined;
       if (!holder || holder.kind !== "artifact") {
         errors.push(issue("INVALID_ATTRIBUTION_HOLDER", `Document attribution holder ${attribution.holderEntityId ?? "missing"} is not a canonical artifact`, "holderEntityId"));
+      }
+    }
+    if (attribution.holderKind === "system") {
+      const holder = attribution.holderEntityId ? entities.get(attribution.holderEntityId) : undefined;
+      if (!holder || !["institution", "artifact", "other"].includes(holder.kind)) {
+        errors.push(issue("INVALID_ATTRIBUTION_HOLDER", `System attribution holder ${attribution.holderEntityId ?? "missing"} is not a canonical institution, artifact, or other system entity`, "holderEntityId"));
       }
     }
     if (attribution.sourceAttributionId) {
@@ -321,7 +346,7 @@ export class CompilerValidator {
         if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Event knowledge references unknown claim ${operation.claimId}`, `observedKnowledge.operations.${index}`));
         if (operation.sourceActorId) {
           const source = entities.get(operation.sourceActorId);
-          if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Event knowledge source ${operation.sourceActorId} is not a canonical character`, `observedKnowledge.operations.${index}`));
+          if (!isCommunicatingKnowledgeSource(source)) errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Event knowledge source ${operation.sourceActorId} is not a canonical character or communication system`, `observedKnowledge.operations.${index}`));
         }
       }
     }
@@ -371,7 +396,7 @@ export class CompilerValidator {
           if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Entry knowledge references unknown claim ${operation.claimId}`, knowledgePath));
           if (operation.sourceActorId) {
             const source = entities.get(operation.sourceActorId);
-            if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Entry knowledge source ${operation.sourceActorId} is not a canonical character`, knowledgePath));
+            if (!isCommunicatingKnowledgeSource(source)) errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Entry knowledge source ${operation.sourceActorId} is not a canonical character or communication system`, knowledgePath));
           }
         }
       }
@@ -446,7 +471,7 @@ export class CompilerValidator {
         if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Initial knowledge references unknown claim ${operation.claimId}`, `knowledge.operations.${index}`));
         if (operation.sourceActorId) {
           const source = entities.get(operation.sourceActorId);
-          if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Initial knowledge source ${operation.sourceActorId} is not a canonical character`, `knowledge.operations.${index}`));
+          if (!isCommunicatingKnowledgeSource(source)) errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Initial knowledge source ${operation.sourceActorId} is not a canonical character or communication system`, `knowledge.operations.${index}`));
         }
       }
     }
@@ -576,7 +601,7 @@ export class CompilerValidator {
         if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Unknown knowledge claim ${operation.claimId}`, `${path}.proposedKnowledge.operations.${index}.claimId`));
         if (operation.op === "learn" && operation.sourceActorId) {
           const sourceActor = entities.get(operation.sourceActorId);
-          if (!sourceActor || sourceActor.kind !== "character") errors.push(issue("UNKNOWN_KNOWLEDGE_SOURCE", `Unknown knowledge source ${operation.sourceActorId}`, `${path}.proposedKnowledge.operations.${index}.sourceActorId`));
+          if (!isCommunicatingKnowledgeSource(sourceActor)) errors.push(issue("UNKNOWN_KNOWLEDGE_SOURCE", `Unknown character/system knowledge source ${operation.sourceActorId}`, `${path}.proposedKnowledge.operations.${index}.sourceActorId`));
         }
       }
       this.validateKnowledgeSemantics(value.proposedKnowledge, propositions, attributions, claims, `${path}.proposedKnowledge`, errors);
@@ -770,43 +795,67 @@ export class CompilerCommitService {
     const deduplicated = selectLogicalCandidates(candidates);
     const eligible = deduplicated.selected;
     for (const { candidate, selectedId, identity } of deduplicated.superseded) {
-      await this.proposals.transition(candidate.id, "pending", "rejected");
+      const errors = [issue("SUPERSEDED_LOGICAL_PROPOSAL", `Proposal is superseded by newer active proposal '${selectedId}' for ${identity}.`)];
+      await this.proposals.reject(candidate.id, errors);
       blocked.push({
         id: candidate.id,
         kind: candidate.kind,
-        errors: [issue("SUPERSEDED_LOGICAL_PROPOSAL", `Proposal is superseded by newer active proposal '${selectedId}' for ${identity}.`)],
+        errors,
       });
       processed += 1;
       onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length, proposalId: candidate.id });
     }
 
     const catalog = await this.validator.loadCatalog();
-    const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
-      const validation = await this.validateProposal(
-        candidate.id,
-        candidate.kind,
-        candidate.payload,
-        candidate.evidence,
-        candidate.evidenceAssertions,
-        catalog,
-      );
-      if (!validation.accepted) {
-        blocked.push({ id: candidate.id, kind: candidate.kind, errors: validation.errors });
-      } else {
-        try {
-          await this.commitParsed(candidate);
-          addToCatalog(catalog, candidate.kind, candidate.payload);
-          accepted.push({ id: candidate.id, kind: candidate.kind });
-        } catch (error) {
-          blocked.push({
-            id: candidate.id,
-            kind: candidate.kind,
-            errors: [issue("COMMIT_CONFLICT", error instanceof Error ? error.message : String(error))],
-          });
-        }
-      }
+    const recordProgress = (candidate?: PendingCanonicalProposal): void => {
       processed += 1;
-      onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length, proposalId: candidate.id });
+      onProgress?.({
+        phase: "canonical",
+        processed,
+        total,
+        accepted: accepted.length,
+        blocked: blocked.length,
+        ...(candidate ? { proposalId: candidate.id } : {}),
+      });
+    };
+    const blockCandidate = (candidate: PendingCanonicalProposal, errors: ValidationIssue[]): void => {
+      blocked.push({ id: candidate.id, kind: candidate.kind, errors });
+      recordProgress(candidate);
+    };
+    const commitCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
+      try {
+        await this.commitParsed(candidate);
+        addToCatalog(catalog, candidate.kind, candidate.payload);
+        accepted.push({ id: candidate.id, kind: candidate.kind });
+      } catch (error) {
+        blocked.push({
+          id: candidate.id,
+          kind: candidate.kind,
+          errors: [issue("COMMIT_CONFLICT", error instanceof Error ? error.message : String(error))],
+        });
+      }
+      recordProgress(candidate);
+    };
+    const validateCandidate = (
+      candidate: PendingCanonicalProposal,
+      candidateCatalog = catalog,
+      graphScope: CompilerCatalogValidationScope = "catalog",
+    ): Promise<CompilerValidation> => this.validateProposal(
+      candidate.id,
+      candidate.kind,
+      candidate.payload,
+      candidate.evidence,
+      candidate.evidenceAssertions,
+      candidateCatalog,
+      { graphScope },
+    );
+    const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
+      const validation = await validateCandidate(candidate);
+      if (!validation.accepted) {
+        blockCandidate(candidate, validation.errors);
+      } else {
+        await commitCandidate(candidate);
+      }
     };
 
     for (const candidate of eligible.filter((item) => item.kind === "entity")) await processCandidate(candidate);
@@ -860,17 +909,202 @@ export class CompilerCommitService {
       "CAUSAL_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "event-participation")) await processCandidate(candidate);
-    const relationCandidates = eligible.filter((item) => item.kind === "event-relation");
-    for (const candidate of relationCandidates) addToCatalog(catalog, candidate.kind, candidate.payload);
-    for (const candidate of relationCandidates) await processCandidate(candidate);
-    const spatialCandidates = eligible.filter((item) => item.kind === "spatial-relation");
-    for (const candidate of spatialCandidates) addToCatalog(catalog, candidate.kind, candidate.payload);
+    const relationCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of eligible.filter((item) => item.kind === "event-relation")) {
+      const validation = await validateCandidate(candidate, catalog, "record");
+      if (validation.accepted) relationCandidates.push(candidate);
+      else blockCandidate(candidate, validation.errors);
+    }
+    const causalRelationGroups = new Map<string, PendingCanonicalProposal[]>();
+    const independentRelationCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of relationCandidates) {
+      const relation = eventRelationSchema.parse(candidate.payload);
+      if (eventRelationProjectsLegacyCausalParent(relation)) {
+        causalRelationGroups.set(relation.toEventId, [
+          ...(causalRelationGroups.get(relation.toEventId) ?? []),
+          candidate,
+        ]);
+      } else {
+        independentRelationCandidates.push(candidate);
+      }
+    }
+    for (const group of causalRelationGroups.values()) {
+      const prospectiveCatalog = cloneValidationCatalog(catalog);
+      group.forEach((candidate) => addToCatalog(prospectiveCatalog, candidate.kind, candidate.payload));
+      const validations = await Promise.all(group.map((candidate) => validateCandidate(candidate, prospectiveCatalog)));
+      if (validations.every((validation) => validation.accepted)) {
+        for (const candidate of group) await commitCandidate(candidate);
+        continue;
+      }
+      const groupErrors = uniqueIssues(validations.flatMap((validation) => validation.errors));
+      for (const [index, candidate] of group.entries()) {
+        blockCandidate(candidate, validations[index]!.errors.length
+          ? validations[index]!.errors
+          : [
+              issue(
+                "CAUSAL_RELATION_GROUP_BLOCKED",
+                `Causal relation group for ${eventRelationSchema.parse(candidate.payload).toEventId} is invalid: ${groupErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+              ),
+            ]);
+      }
+    }
+    for (const candidate of independentRelationCandidates) await processCandidate(candidate);
+
+    const spatialCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of eligible.filter((item) => item.kind === "spatial-relation")) {
+      const validation = await validateCandidate(candidate, catalog, "record");
+      if (validation.accepted) spatialCandidates.push(candidate);
+      else blockCandidate(candidate, validation.errors);
+    }
     for (const candidate of spatialCandidates) await processCandidate(candidate);
     for (const kind of ["initial-world", "character-goal", "character-model"] as const) {
       for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
     }
     onProgress?.({ phase: "complete", processed, total, accepted: accepted.length, blocked: blocked.length });
     return { accepted, blocked, staging };
+  }
+
+  /**
+   * Run the deterministic structural commit validator over the complete
+   * source-scoped pending graph without inspecting committed resolution traces
+   * or mutating proposal/canonical state. The finish handshake separately
+   * validates the pending annotation and resolution traces, so combining both
+   * checks gives finish the same semantic boundary used by convergence.
+   */
+  async validatePendingStructure(sourceId?: string): Promise<BatchAcceptResult["blocked"]> {
+    const candidates: PendingCanonicalProposal[] = [];
+    for (const proposal of await this.proposals.list("pending", sourceId)) {
+      if (!isCanonicalKind(proposal.kind)) continue;
+      const schema = schemaFor(proposal.kind);
+      const envelope = await this.proposals.read("pending", proposal.id, schema);
+      candidates.push({
+        id: proposal.id,
+        kind: proposal.kind,
+        payload: envelope.payload,
+        evidence: envelope.evidence,
+        evidenceAssertions: envelope.evidenceAssertions ?? [],
+        createdAt: proposal.createdAt,
+      });
+    }
+    const deduplicated = selectLogicalCandidates(candidates);
+    const catalog = await this.validator.loadCatalog();
+    const blocked: BatchAcceptResult["blocked"] = deduplicated.superseded.map(({ candidate, selectedId, identity }) => ({
+      id: candidate.id,
+      kind: candidate.kind,
+      errors: [issue("SUPERSEDED_LOGICAL_PROPOSAL", `Proposal is superseded by newer active proposal '${selectedId}' for ${identity}.`)],
+    }));
+    const eligible = deduplicated.selected;
+    const blockCandidate = (candidate: PendingCanonicalProposal, errors: readonly ValidationIssue[]): void => {
+      blocked.push({ id: candidate.id, kind: candidate.kind, errors: uniqueIssues(errors) });
+    };
+    const validateCandidate = (
+      candidate: PendingCanonicalProposal,
+      candidateCatalog = catalog,
+      graphScope: CompilerCatalogValidationScope = "catalog",
+    ): CompilerValidation => this.validator.validateWithCatalog(
+      candidate.kind,
+      candidate.payload,
+      candidateCatalog,
+      { graphScope },
+    );
+    const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
+      const validation = validateCandidate(candidate);
+      if (!validation.accepted) blockCandidate(candidate, validation.errors);
+      else addToCatalog(catalog, candidate.kind, candidate.payload);
+    };
+
+    for (const candidate of eligible.filter((item) => item.kind === "entity")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "claim")) await processCandidate(candidate);
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "world-rule"),
+      catalog.rules,
+      ruleDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "RULE_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "proposition"),
+      catalog.propositions,
+      propositionDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "PROPOSITION_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "attribution"),
+      catalog.attributions,
+      attributionDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "ATTRIBUTION_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "canonical-event"),
+      catalog.events,
+      eventDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "CAUSAL_CYCLE",
+    );
+    for (const candidate of eligible.filter((item) => item.kind === "event-participation")) await processCandidate(candidate);
+
+    const relationCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of eligible.filter((item) => item.kind === "event-relation")) {
+      const validation = validateCandidate(candidate, catalog, "record");
+      if (validation.accepted) relationCandidates.push(candidate);
+      else blockCandidate(candidate, validation.errors);
+    }
+    const causalRelationGroups = new Map<string, PendingCanonicalProposal[]>();
+    const independentRelationCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of relationCandidates) {
+      const relation = eventRelationSchema.parse(candidate.payload);
+      if (eventRelationProjectsLegacyCausalParent(relation)) {
+        causalRelationGroups.set(relation.toEventId, [
+          ...(causalRelationGroups.get(relation.toEventId) ?? []),
+          candidate,
+        ]);
+      } else {
+        independentRelationCandidates.push(candidate);
+      }
+    }
+    for (const group of causalRelationGroups.values()) {
+      const prospectiveCatalog = cloneValidationCatalog(catalog);
+      group.forEach((candidate) => addToCatalog(prospectiveCatalog, candidate.kind, candidate.payload));
+      const validations = group.map((candidate) => validateCandidate(candidate, prospectiveCatalog));
+      if (validations.every((validation) => validation.accepted)) {
+        group.forEach((candidate) => addToCatalog(catalog, candidate.kind, candidate.payload));
+        continue;
+      }
+      const groupErrors = uniqueIssues(validations.flatMap((validation) => validation.errors));
+      for (const [index, candidate] of group.entries()) {
+        blockCandidate(candidate, validations[index]!.errors.length
+          ? validations[index]!.errors
+          : [
+              issue(
+                "CAUSAL_RELATION_GROUP_BLOCKED",
+                `Causal relation group for ${eventRelationSchema.parse(candidate.payload).toEventId} is invalid: ${groupErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+              ),
+            ]);
+      }
+    }
+    for (const candidate of independentRelationCandidates) await processCandidate(candidate);
+
+    const spatialCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of eligible.filter((item) => item.kind === "spatial-relation")) {
+      const validation = validateCandidate(candidate, catalog, "record");
+      if (validation.accepted) spatialCandidates.push(candidate);
+      else blockCandidate(candidate, validation.errors);
+    }
+    for (const candidate of spatialCandidates) await processCandidate(candidate);
+    for (const kind of ["initial-world", "character-goal", "character-model"] as const) {
+      for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
+    }
+    return blocked.sort((left, right) => left.id.localeCompare(right.id));
   }
 
   private async validateProposal(
@@ -880,9 +1114,10 @@ export class CompilerCommitService {
     envelopeEvidence: readonly EvidenceRef[],
     evidenceAssertions: readonly EvidenceAssertion[],
     catalog?: CompilerValidationCatalog,
+    options: { graphScope?: CompilerCatalogValidationScope } = {},
   ): Promise<CompilerValidation> {
     const validation = catalog
-      ? this.validator.validateWithCatalog(kind, payload, catalog)
+      ? this.validator.validateWithCatalog(kind, payload, catalog, options)
       : await this.validator.validate(kind, payload);
     const payloadEvidence = compilerPayloadEvidence(payload);
     const inspected = await this.evidence.inspectAll([...payloadEvidence, ...envelopeEvidence]);
@@ -1096,6 +1331,25 @@ function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposa
   if (kind === "spatial-relation") { const value = spatialRelationSchema.parse(payload); catalog.spatialRelations.set(value.id, value); }
   if (kind === "world-rule") { const value = worldRuleSchema.parse(payload); catalog.rules.set(value.id, value); }
   if (kind === "character-goal") { const value = characterGoalSchema.parse(payload); catalog.goals.set(value.id, value); }
+}
+
+function cloneValidationCatalog(catalog: CompilerValidationCatalog): CompilerValidationCatalog {
+  return {
+    entities: new Map(catalog.entities),
+    propositions: new Map(catalog.propositions),
+    attributions: new Map(catalog.attributions),
+    claims: new Map(catalog.claims),
+    events: new Map(catalog.events),
+    eventParticipations: new Map(catalog.eventParticipations),
+    eventRelations: new Map(catalog.eventRelations),
+    spatialRelations: new Map(catalog.spatialRelations),
+    rules: new Map(catalog.rules),
+    goals: new Map(catalog.goals),
+  };
+}
+
+function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
+  return [...new Map(issues.map((value) => [canonicalJson(value), value])).values()];
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {

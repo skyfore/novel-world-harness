@@ -12,7 +12,11 @@ import {
   validateEvidenceAssertionTargets,
 } from "./evidence-assertions.js";
 import { evidenceSourceIds } from "../world/source-scope.js";
-import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
+import {
+  findKnowledgeDeltas,
+  isCommunicatingKnowledgeSource,
+  validateKnowledgeSemanticReferences,
+} from "../world/knowledge-semantics.js";
 import { validateCommittedKnowledgeAcquisitionTrace } from "./attribution-trace.js";
 
 export type PossibilityValidation = {
@@ -214,7 +218,7 @@ export class PossibilityCommitService {
         if (!claimIds.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Possibility knowledge references unknown claim ${operation.claimId}`, `proposedKnowledge.operations.${index}`));
         if (operation.sourceActorId) {
           const source = entityMap.get(operation.sourceActorId);
-          if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Possibility knowledge source ${operation.sourceActorId} is not a canonical character`, `proposedKnowledge.operations.${index}`));
+          if (!isCommunicatingKnowledgeSource(source)) errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Possibility knowledge source ${operation.sourceActorId} is not a canonical character or communication system`, `proposedKnowledge.operations.${index}`));
         }
       }
       errors.push(...validateKnowledgeSemanticReferences(operation, {

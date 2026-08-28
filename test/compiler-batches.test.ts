@@ -121,6 +121,40 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure(outcome)).toBeUndefined();
   });
 
+  it("does not checkpoint a clean model stop when a compiler mutation never returned", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "lost", name: "propose_claim", arguments: { proposal_id: "claim-lost" } }], stopReason: "toolUse" },
+      { role: "assistant", content: [{ type: "toolCall", id: "kept", name: "propose_claim", arguments: { proposal_id: "claim-kept" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "kept", toolName: "propose_claim", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", reviewed_segments: [], summary: "done" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "finish", toolName: "finish_compiler_batch", isError: false, content: [], details: { proposalIds: ["claim-kept"] } },
+      { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+    ]);
+
+    expect(outcome).toMatchObject({
+      assistantStopReason: "stop",
+      proposalSucceeded: 1,
+      completionSignaled: true,
+      unresolvedToolCalls: 1,
+    });
+    expect(compilerBatchFailure(outcome)).toContain("without a tool result");
+    expect(isRecoverableCompilerBatchInterruption(outcome)).toBe(true);
+  });
+
+  it("treats a verified replay of an unmatched proposal call as recovered", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "assistant", content: [{ type: "toolCall", id: "lost", name: "propose_claim", arguments: { proposal_id: "claim-replayed" } }], stopReason: "toolUse" },
+      { role: "assistant", content: [{ type: "toolCall", id: "replayed", name: "propose_claim", arguments: { proposal_id: "claim-replayed" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "replayed", toolName: "propose_claim", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "toolCall", id: "finish", name: "finish_compiler_batch", arguments: { outcome: "complete", reviewed_segments: [], summary: "done" } }], stopReason: "toolUse" },
+      { role: "toolResult", toolCallId: "finish", toolName: "finish_compiler_batch", isError: false, content: [] },
+      { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+    ]);
+
+    expect(outcome.unresolvedToolCalls).toBeUndefined();
+    expect(compilerBatchFailure(outcome)).toBeUndefined();
+  });
+
   it("keeps an abandoned proposal error unresolved", () => {
     const outcome = compilerBatchOutcomeFromMessages([
       { role: "assistant", content: [{ type: "toolCall", id: "bad", name: "propose_claim", arguments: { proposal_id: "claim-1" } }], stopReason: "toolUse" },
@@ -228,6 +262,7 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("character.relationships stores relationship entity IDs"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Compile explicitly narrated later canonical events too"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("observedKnowledge"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("holderKind=system"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("location.open"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("artifact.delivered"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("one explicitly narrated transition at a time"))).toBe(true);

@@ -124,6 +124,32 @@ describe("knowledge semantic bridge", () => {
     expect(lossyErrors.filter((error) => error.code === "KNOWLEDGE_PROJECTION_MISMATCH")).toHaveLength(2);
   });
 
+  it("supports attributed speech from an explicitly modeled communication system", () => {
+    const systemAttribution: Attribution = {
+      ...attribution,
+      id: "norma-reports-gate-open",
+      holderKind: "system",
+      holderEntityId: "norma",
+    };
+    const errors = validateKnowledgeSemanticReferences({
+      op: "learn",
+      actorId: "bob",
+      claimId: claim.id,
+      propositionId: proposition.id,
+      attributionId: systemAttribution.id,
+      acquisitionMode: "told",
+      sourceActorId: "norma",
+      status: "knows",
+      confidence: 1,
+    }, {
+      claims: new Map([[claim.id, claim]]),
+      propositions: new Map([[proposition.id, proposition]]),
+      attributions: new Map([[systemAttribution.id, systemAttribution]]),
+    }, "knowledge.operations.0");
+
+    expect(errors).toEqual([]);
+  });
+
   it("locates knowledge deltas inside supported compiler payload shapes", () => {
     const payload = {
       nested: {

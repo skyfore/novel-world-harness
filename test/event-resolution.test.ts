@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { auditCompiler } from "../src/compiler/audit.js";
+import { quarantineInvalidResolutionBindings } from "../src/compiler/converge.js";
 import {
   EventResolutionStore,
   generateEventResolutionCandidates,
@@ -23,6 +24,56 @@ afterEach(async () => {
 });
 
 describe("event mention resolution", () => {
+  it("quarantines an accepted event resolution when its canonical event did not survive convergence", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-resolution-dangling-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Rain began.\n");
+    const store = new EventResolutionStore(root);
+    await store.stage(fixture.source.id, {
+      version: 1,
+      id: "dangling-event-resolution-proposal",
+      payload: {
+        version: 1,
+        id: "dangling-event-resolution",
+        sourceId: fixture.source.id,
+        eventMentionIds: ["missing-event-mention"],
+        status: "new-event",
+        canonicalEventId: "event-that-was-rejected",
+        relation: "coreference",
+        candidates: [{
+          canonicalEventId: "event-that-was-rejected",
+          relation: "coreference",
+          confidence: 1,
+          basisEventMentionIds: ["missing-event-mention"],
+          evidenceAssertionIds: [],
+          rationale: "The proposal originally selected this event.",
+        }],
+        supersedesResolutionIds: [],
+        rationale: "Exercise deterministic dangling-reference cleanup.",
+        derivation: {
+          runId: "dangling-resolution-test",
+          worker: "test",
+          ontologyVersion: "event-resolution-v1",
+        },
+      },
+      generatedBy: { worker: "test" },
+      createdAt: new Date(0).toISOString(),
+    });
+    await store.commitProposals(fixture.source.id, ["dangling-event-resolution-proposal"]);
+    await expect(store.list(fixture.source.id)).resolves.toHaveLength(1);
+
+    await expect(quarantineInvalidResolutionBindings(root, fixture.source.id)).resolves.toEqual([{
+      id: "dangling-event-resolution-proposal",
+      kind: "event-resolution",
+    }]);
+
+    await expect(store.list(fixture.source.id)).resolves.toEqual([]);
+    await expect(store.listProposals(fixture.source.id, "accepted")).resolves.toEqual([]);
+    await expect(store.listProposals(fixture.source.id, "rejected")).resolves.toEqual([
+      expect.objectContaining({ id: "dangling-event-resolution-proposal" }),
+    ]);
+  });
+
   it("blocks direct canonical-event acceptance when event mentions have no identity trace", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-resolution-bypass-"));
     roots.push(root);

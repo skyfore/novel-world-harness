@@ -2,6 +2,7 @@ import { canonicalJson } from "./canonical.js";
 import type {
   Attribution,
   Claim,
+  Entity,
   KnowledgeOperation,
   KnowledgeDelta,
   Proposition,
@@ -17,6 +18,13 @@ export type KnowledgeSemanticCatalog = {
 };
 
 export type LocatedKnowledgeDelta = { path: string; delta: KnowledgeDelta };
+
+/** Characters and explicitly modeled communication systems may be quoted/information sources. */
+export function isCommunicatingKnowledgeSource(
+  entity: Pick<Entity, "kind"> | undefined,
+): entity is Pick<Entity, "kind"> {
+  return Boolean(entity && ["character", "institution", "artifact", "other"].includes(entity.kind));
+}
 
 /** Locates typed knowledge deltas inside compiler artifact payloads. */
 export function findKnowledgeDeltas(value: unknown): LocatedKnowledgeDelta[] {
@@ -97,10 +105,11 @@ export function validateKnowledgeSemanticReferences(
     ));
   }
   if (operation.acquisitionMode === "told") {
-    if (attribution.holderKind !== "character" || attribution.holderEntityId !== operation.sourceActorId) {
+    if ((attribution.holderKind !== "character" && attribution.holderKind !== "system")
+      || attribution.holderEntityId !== operation.sourceActorId) {
       errors.push(issue(
         "TOLD_SOURCE_ATTRIBUTION_MISMATCH",
-        `Told acquisition source ${operation.sourceActorId ?? "missing"} must be the character holder of attribution ${attribution.id}`,
+        `Told acquisition source ${operation.sourceActorId ?? "missing"} must be the character/system holder of attribution ${attribution.id}`,
         `${path}.attributionId`,
       ));
     }
@@ -115,7 +124,7 @@ export function validateKnowledgeSemanticReferences(
   if (
     operation.acquisitionMode === "deceived-misattributed"
     && operation.sourceActorId
-    && attribution.holderKind === "character"
+    && (attribution.holderKind === "character" || attribution.holderKind === "system")
     && attribution.holderEntityId !== operation.sourceActorId
   ) {
     errors.push(issue(

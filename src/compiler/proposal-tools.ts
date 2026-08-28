@@ -93,6 +93,7 @@ import {
   validateAttributionProposalTrace,
   validateKnowledgeAcquisitionProposalTrace,
 } from "./attribution-trace.js";
+import { CompilerCommitService } from "./validator.js";
 import {
   COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE,
   COMPILER_FINISH_GRACE_CALLS,
@@ -1890,7 +1891,7 @@ export function createCompilerProposalToolset(
       if (!successfulProposalIds.has(input.proposal_id)) {
         throw new Error(`Cannot withdraw ${input.proposal_id}: it is not an active successful submission in this compiler batch.`);
       }
-      await service.withdraw(input.proposal_id);
+      await service.withdraw(input.proposal_id, input.reason);
       successfulProposalIds.delete(input.proposal_id);
       recordProposalProgress();
       return {
@@ -1962,7 +1963,7 @@ export function createCompilerProposalToolset(
         throw new Error("Only a pending proposal from an ordinary source-review batch may be replaced here.");
       }
       await assertEvidenceWithinBoundedSlice(priorPayload, prior.evidence);
-      await service.withdraw(input.proposal_id);
+      await service.withdraw(input.proposal_id, `Replaced by ${input.replacement_proposal_id}: ${input.reason}`);
       recordProposalProgress();
       return {
         content: [{
@@ -2045,6 +2046,7 @@ export function createCompilerProposalToolset(
         acquisitionTraceIssues,
         eventResolutionClosureIssues,
         eventTraceIssues,
+        canonicalStructureIssues,
       ] = await Promise.all([
         validateCompilerProposalClosure(workspaceRoot, listed, activeSourceId),
         activeSourceId
@@ -2106,6 +2108,7 @@ export function createCompilerProposalToolset(
             listedEventResolutions,
           )
           : Promise.resolve([]),
+        new CompilerCommitService(workspaceRoot).validatePendingStructure(activeSourceId),
       ]);
       const validationSections = [
         ...(listedAnnotations.length && !activeSourceId
@@ -2119,6 +2122,11 @@ export function createCompilerProposalToolset(
         ...finishIssueSection("Knowledge acquisition trace", acquisitionTraceIssues),
         ...finishIssueSection("Event-resolution graph", eventResolutionClosureIssues),
         ...finishIssueSection("Canonical event proposal trace", eventTraceIssues),
+        ...finishIssueSection(
+          "Deterministic canonical commit preview",
+          canonicalStructureIssues.flatMap((candidate) => candidate.errors.map((error) =>
+            `${candidate.id}: ${error.code}${error.path ? ` at ${error.path}` : ""}: ${error.message}`)),
+        ),
       ];
       if (validationSections.length) return failFinish(validationSections.join("\n\n"));
       if (pendingChapterSplitPlan) {

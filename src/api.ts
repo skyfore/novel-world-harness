@@ -2,7 +2,13 @@ export { auditCompiler, type CompilerAuditReport, type CompilerReadinessState } 
 export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
 export { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./compiler/boundary-calibration.js";
 export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleSchema, chapterSplitPlanSchema, type ChapterHeadingRule, type ChapterSplitPlan, type ChapterStructureSample } from "./compiler/chapter-split.js";
-export { convergeWorldProposals, type WorldConvergenceProgress, type WorldProposalConvergence } from "./compiler/converge.js";
+export {
+  convergeWorldProposals,
+  quarantineInvalidResolutionBindings,
+  quarantineUncommittableProposals,
+  type WorldConvergenceProgress,
+  type WorldProposalConvergence,
+} from "./compiler/converge.js";
 export { EvidenceVerifier, type EvidenceInspection, type EvidenceVerification } from "./compiler/evidence.js";
 export { EvidenceAssertionStore, evidenceAssertionSourceIds, validateEvidenceAssertionTargets } from "./compiler/evidence-assertions.js";
 export { jsonPointerExists, modelEvidenceSelectorSchema, modelEvidenceSelectorsSchema, modelTextSelectorSchema, resolveTextAnchor, resolveTextSelectorAnchor, textAnchorForByteRange, type ModelEvidenceSelector, type ModelTextSelector } from "./compiler/text-anchors.js";
@@ -99,6 +105,16 @@ export {
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
 export { PreparedNovelCache, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
 export { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "./compiler/reconcile-world.js";
+export {
+  backfillLegacyProposalRejectionDiagnostics,
+  recoverLegacyCompilerState,
+  type LegacyArtifactRepair,
+  type LegacyCompilerRecoveryOptions,
+  type LegacyCompilerRecoveryPlan,
+  type LegacyCompilerRecoveryResult,
+  type LegacyInitialWorldRepair,
+  type LegacyRecoverySkip,
+} from "./compiler/legacy-recovery.js";
 export { compilerProposalArtifactId, CompilerProposalService, type CompilerProposalKind } from "./compiler/proposals.js";
 export {
   validateAttributionProposalTrace,
@@ -131,7 +147,13 @@ export { RELATIONSHIP_OBLIGATION_TYPE_IDS, RELATIONSHIP_ONTOLOGY_VERSION, RELATI
 export { SPATIAL_ONTOLOGY_VERSION, SPATIAL_TRAVEL_MODE_IDS, findSpatialRoute, modelVisibleSpatialRelationSchema, modelVisibleSpatialRelations, resolveActiveSpatialRelations, spatialDurationSchema, spatialEndpoints, spatialLocationsMayOverlap, spatialRelationEvidence, spatialRelationSchema, spatialTravelModeSchema, spatialVisibilitySchema, validateActiveSpatialTopology, validateSpatialEvidenceAssertions, validateSpatialRelationCatalog, type ActiveSpatialRelation, type ModelVisibleSpatialRelation, type SpatialAdjacentRelation, type SpatialContainsRelation, type SpatialDuration, type SpatialReferenceCatalog, type SpatialRelation, type SpatialRoutePath, type SpatialRouteRelation, type SpatialTravelMode, type SpatialVisibility } from "./world/spatial-ontology.js";
 export { WORLD_RULE_ONTOLOGY_VERSION, isControlledWorldRule, modelVisibleWorldRules, resolveEffectiveWorldRules, validateWorldRuleCatalog, validateWorldRuleEvidenceAssertions, worldRuleEvidence, worldRuleForbids, worldRulePredicates, worldRuleRequires, type EffectiveWorldRule, type ModelVisibleWorldRule, type WorldRuleReferenceCatalog, type WorldRuleResolution } from "./world/world-rule-ontology.js";
 export { commitKnowledgeAwareAction, knowledgeAwareActionSchema, validateActionKnowledge, type ActionGateReport, type KnowledgeAwareAction } from "./world/action-gate.js";
-export { CanonicalModelStore, ProposalStore, type CanonicalKind, type CanonicalRevisionRef } from "./world/canonical-model.js";
+export {
+  CanonicalModelStore,
+  ProposalStore,
+  type CanonicalKind,
+  type CanonicalRevisionRef,
+  type ProposalRejectionReport,
+} from "./world/canonical-model.js";
 export { canonicalEventToPossibility } from "./world/canon-runtime.js";
 export { loadWorldContext, pinBranchPreparationContexts, WorldContextStore, type CanonicalSnapshot, type ScopedWorldArtifacts } from "./world/context.js";
 export { diffWorldBranches, diffWorldStates, type HistoryDifference, type KnowledgeDifference, type StateDifference, type WorldBranchDiff } from "./world/diff.js";

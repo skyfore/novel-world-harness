@@ -381,7 +381,7 @@ export function playerSceneModelFrame(frame: PlayOpeningFrame): PlayerSceneNarra
     return [{
       status: entry.status,
       confidence: entry.confidence,
-      ...(entry.sourceActorId ? { source: namedEntities.get(entry.sourceActorId) ?? "known character" } : {}),
+      ...(entry.sourceActorId ? { source: namedEntities.get(entry.sourceActorId) ?? "known source" } : {}),
       claim: {
         subject: namedEntities.get(entry.claim.subject) ?? entry.claim.subject,
         predicate: entry.claim.predicate,

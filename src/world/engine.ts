@@ -42,7 +42,7 @@ import {
   validateCanonicalAdaptationContract,
 } from "./canonical-adaptation.js";
 import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
-import { validateKnowledgeSemanticReferences } from "./knowledge-semantics.js";
+import { isCommunicatingKnowledgeSource, validateKnowledgeSemanticReferences } from "./knowledge-semantics.js";
 import { committedHistory, projectActorScene } from "./scene.js";
 import type { SpatialRelation } from "./spatial-ontology.js";
 import {
@@ -241,7 +241,7 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
       if (operation.op === "learn") {
         if (operation.sourceActorId) {
           const source = context.entities.get(operation.sourceActorId);
-          if (!source || source.kind !== "character") errors.push({ code: "INVALID_KNOWLEDGE_SOURCE", message: `Knowledge source ${operation.sourceActorId} is not a character`, path: `proposedKnowledge.operations.${index}` });
+          if (!isCommunicatingKnowledgeSource(source)) errors.push({ code: "INVALID_KNOWLEDGE_SOURCE", message: `Knowledge source ${operation.sourceActorId} is not a character or communication system`, path: `proposedKnowledge.operations.${index}` });
         }
       }
       errors.push(...validateKnowledgeSemanticReferences(operation, {
@@ -651,7 +651,7 @@ function validateKnowledgeDeltaForContext(knowledge: KnowledgeDelta, context: Wo
       if (context.claims && !context.claims.has(operation.claimId)) throw new Error(`Initial knowledge references unknown claim ${operation.claimId}`);
       if (operation.sourceActorId) {
         const source = context.entities.get(operation.sourceActorId);
-        if (!source || source.kind !== "character") throw new Error(`Initial knowledge source ${operation.sourceActorId} is not a character`);
+        if (!isCommunicatingKnowledgeSource(source)) throw new Error(`Initial knowledge source ${operation.sourceActorId} is not a character or communication system`);
       }
     }
     const semanticErrors = validateKnowledgeSemanticReferences(operation, {

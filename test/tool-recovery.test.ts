@@ -72,6 +72,39 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("do not re-propose a checkpointed pending identity");
   });
 
+  it("pairs source-accounting misses and finish gaps with bounded unit discovery", () => {
+    const lookup = buildNwhToolRecoveryAdvice(
+      "account_source_units",
+      "Unknown deterministic source unit guessed-unit; call find_source_accounting_units.",
+    );
+    expect(lookup).toMatchObject({
+      category: "lookup-miss",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_source_accounting_units",
+        arguments: { status: "all", offset: 0, max_results: 200 },
+      },
+    });
+    expect(lookup.steps.join(" ")).toContain("Copy the exact unitId");
+    expect(lookup.steps.join(" ")).toContain("do not guess");
+    expect(lookup.steps.join(" ")).toContain("Retry account_source_units once");
+
+    const finish = buildNwhToolRecoveryAdvice(
+      "finish_compiler_batch",
+      "Source-unit accounting is incomplete:\n- Source unit sentence-9 has no account_source_units disposition.",
+    );
+    expect(finish).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_source_accounting_units",
+        arguments: { status: "unresolved", offset: 0, max_results: 200 },
+      },
+    });
+    expect(finish.steps.join(" ")).toContain("exact returned nextOffset");
+    expect(finish.steps.join(" ")).toContain("same full diagnostic repeats");
+  });
+
   it("marks terminate-style retrieval budget results as errors and appends the stop SOP", () => {
     const recovered = recoverNwhToolResult({
       type: "tool_result",

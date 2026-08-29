@@ -41,7 +41,7 @@ type NwhToolResultRecovery = {
 type LookupRecovery = {
   finder: string;
   arguments: Record<string, unknown>;
-  resultField: "path" | "ref";
+  resultField: "path" | "ref" | "unitId";
 };
 
 const LOOKUP_RECOVERY: Readonly<Record<string, LookupRecovery>> = Object.freeze({
@@ -85,6 +85,11 @@ const LOOKUP_RECOVERY: Readonly<Record<string, LookupRecovery>> = Object.freeze(
     arguments: { query: "*", max_results: 20 },
     resultField: "ref",
   },
+  account_source_units: {
+    finder: "find_source_accounting_units",
+    arguments: { status: "all", offset: 0, max_results: 200 },
+    resultField: "unitId",
+  },
 });
 
 const CAPTURE_ONLY_TOOLS = new Set([
@@ -99,6 +104,7 @@ const CAPTURE_ONLY_TOOLS = new Set([
 ]);
 
 const COMPILER_PROPOSAL_TOOLS = new Set([
+  "account_source_units",
   "configure_chapter_split",
   "defer_boundary_artifact",
   "finish_compiler_batch",
@@ -397,6 +403,26 @@ export function buildNwhToolRecoveryAdvice(
         "Continue with the supplied evidence/context and an in-scope tool, or let the host open the required compiler/player phase.",
         "Never widen source, actor, or future-canon scope to make the call succeed.",
       ],
+    };
+  }
+
+  if (toolName === "finish_compiler_batch" && /source-unit accounting is incomplete/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry once only after every reported source unit has exact semantic coverage or a successful typed accounting proposal.",
+      steps: [
+        "Call find_source_accounting_units with status=unresolved in the same active batch and page only through each exact returned nextOffset until it is null.",
+        "Copy each exact unitId into account_source_units; never guess an ID or label represented/non-scene units yourself.",
+        "Keep unresolved or intentionally-deferred when the source cannot be decided honestly; those statuses remain publication blockers.",
+        `Retry ${toolName} once after concrete accounting progress. If the same full diagnostic repeats, stop instead of looping.`,
+      ],
+      suggestedCall: {
+        tool: "find_source_accounting_units",
+        arguments: { status: "unresolved", offset: 0, max_results: 200 },
+      },
     };
   }
 

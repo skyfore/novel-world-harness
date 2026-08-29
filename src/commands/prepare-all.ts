@@ -18,6 +18,8 @@ import { resolveNovelSource } from "../world/play-experience.js";
 import {
   buildWorldReconciliationPrompt,
   MAX_RECONCILIATION_ITERATIONS,
+  narrativeGraphRepairIsTargetable,
+  narrativeGraphRepairIterations,
   reparseReconciliationIterations,
   semanticRepairIsIsolated,
   semanticRepairRequiresReparse,
@@ -26,6 +28,7 @@ import type { ReparseCommandOptions } from "./reparse.js";
 import {
   ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
   EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
+  SOURCE_ACCOUNTING_TOOL_NAMES,
   SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
 } from "../compiler/proposal-tools.js";
 
@@ -206,6 +209,7 @@ export async function prepareAllCommand(
       inspection.audit
       && (
         semanticRepairIsIsolated(inspection.audit)
+        || narrativeGraphRepairIsTargetable(inspection.audit)
         || (Boolean(options.reparseBaselineBundleHash) && semanticRepairRequiresReparse(inspection.audit))
       )
     )
@@ -341,6 +345,42 @@ export async function prepareAllCommand(
     }
   }
 
+  if (inspection.audit && narrativeGraphRepairIsTargetable(inspection.audit)) {
+    const plannedIterations = narrativeGraphRepairIterations(inspection.audit);
+    const decision = await ask({
+      header: "Event graph",
+      question: `The canonical timeline has ${inspection.audit.consistency.unconditionalRootEvents.length} disconnected unconditional roots. Run ${plannedIterations} evidence-constrained graph adjudication shard(s)?`,
+      options: [
+        { value: "repair", label: "Adjudicate graph", description: "Review roots for explicit causes, enabling conditions, or genuine independence through normal validation.", recommended: true },
+        { value: "pause", label: "Pause here", description: "Keep the graph finding for manual evidence review." },
+      ],
+    });
+    if (decision === "pause") return pausePreparation(inspection, report);
+    for (
+      let iteration = 1;
+      iteration <= plannedIterations && inspection.audit && narrativeGraphRepairIsTargetable(inspection.audit);
+      iteration += 1
+    ) {
+      report(`Running narrative-graph adjudication shard ${iteration}/${plannedIterations}.`);
+      await runWorldReconciliationPass({
+        root,
+        sourceId,
+        branchId,
+        configPath,
+        iteration,
+        mode: "graph-adjudication",
+        inspection,
+        options,
+        dependencies,
+        report,
+      });
+      inspection = await inspectPreparation(root, { sourceId, branchId });
+    }
+    if (inspection.audit?.consistency.narrativeGraphNavigable === false) {
+      throw preparationFailure(inspection);
+    }
+  }
+
   if (inspection.audit && semanticRepairIsIsolated(inspection.audit)) {
     const decision = await ask({
       header: "World semantics",
@@ -443,7 +483,7 @@ async function runWorldReconciliationPass(input: {
   branchId: string;
   configPath: string;
   iteration: number;
-  mode: "bounded" | "reparse-finalization";
+  mode: "bounded" | "reparse-finalization" | "graph-adjudication";
   inspection: PreparationInspection;
   options: PrepareAllCommandOptions;
   dependencies: PrepareAllDependencies;
@@ -475,6 +515,7 @@ async function runWorldReconciliationPass(input: {
       ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
       ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
       ...EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
+      ...SOURCE_ACCOUNTING_TOOL_NAMES,
     ],
     acquireLock: false,
     signal: input.options.signal,

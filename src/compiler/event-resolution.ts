@@ -286,6 +286,26 @@ export class EventResolutionStore {
       || left.id.localeCompare(right.id));
   }
 
+  /** Replace materialized mention refs exactly while preserving immutable history. */
+  async replaceCurrent(sourceIdInput: string, resolutionsInput: readonly EventResolution[]): Promise<void> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const resolutions = resolutionsInput.map((resolution) => eventResolutionSchema.parse(resolution));
+    if (resolutions.some((resolution) => resolution.sourceId !== sourceId)) {
+      throw new Error(`Event-resolution snapshot contains a decision outside source ${sourceId}.`);
+    }
+    const assigned = new Set<string>();
+    for (const resolution of resolutions) {
+      for (const mentionId of resolution.eventMentionIds) {
+        if (assigned.has(mentionId)) {
+          throw new Error(`Event-resolution snapshot for ${sourceId} assigns mention ${mentionId} more than once.`);
+        }
+        assigned.add(mentionId);
+      }
+    }
+    await fs.rm(this.refsDirectory(sourceId), { recursive: true, force: true });
+    for (const resolution of resolutions) await this.bindResolution(sourceId, resolution);
+  }
+
   async rejectBatch(compilerBatchId: string): Promise<string[]> {
     idSchema.parse(compilerBatchId);
     const rejected: string[] = [];

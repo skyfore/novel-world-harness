@@ -19,6 +19,47 @@ export const sourceAccountingStatusSchema = z.enum([
 ]);
 export type SourceAccountingStatus = z.infer<typeof sourceAccountingStatusSchema>;
 
+/**
+ * `represented` is host-derived from exact assertions/annotations. A model may
+ * review every other semantic disposition, but it cannot declare evidence
+ * coverage that does not exist.
+ */
+export const sourceUnitReviewStatusSchema = z.enum([
+  "background-only",
+  "paratext",
+  "duplicate-description",
+  "unresolved",
+  "intentionally-deferred",
+]);
+export type SourceUnitReviewStatus = z.infer<typeof sourceUnitReviewStatusSchema>;
+
+export const sourceUnitAccountingDecisionSchema = z.object({
+  unitId: idSchema,
+  status: sourceUnitReviewStatusSchema,
+  reason: z.string().trim().min(1).max(1_000),
+  proposalId: idSchema.optional(),
+}).strict();
+export type SourceUnitAccountingDecision = z.infer<typeof sourceUnitAccountingDecisionSchema>;
+
+export const sourceAccountingProposalSchema = z.object({
+  version: z.literal(1),
+  id: idSchema,
+  sourceId: idSchema,
+  compilerBatchId: idSchema,
+  decisions: z.array(sourceUnitAccountingDecisionSchema.omit({ proposalId: true }))
+    .min(1)
+    .max(512)
+    .refine((items) => new Set(items.map((item) => item.unitId)).size === items.length, "unit decisions must be unique"),
+  generatedBy: z.object({
+    worker: z.literal("account_source_units"),
+    provider: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+  }).strict(),
+  createdAt: z.string().datetime(),
+}).strict();
+export type SourceAccountingProposal = z.infer<typeof sourceAccountingProposalSchema>;
+export type SourceAccountingProposalStatus = "pending" | "accepted" | "rejected";
+
 export const sourceAccountingRecordSchema = z.object({
   version: z.literal(1),
   unitId: idSchema,
@@ -50,10 +91,11 @@ const batchReviewSchema = z.object({
   }).strict()).min(1),
   evidenceSpans: z.array(semanticSpanSchema),
   annotationSpans: z.array(semanticSpanSchema),
+  unitDecisions: z.array(sourceUnitAccountingDecisionSchema).default([]),
 }).strict();
 type BatchReview = z.infer<typeof batchReviewSchema>;
 
-const sourceAccountingManifestSchema = z.object({
+export const sourceAccountingManifestSchema = z.object({
   version: z.literal(1),
   sourceId: idSchema,
   sourceSha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -103,6 +145,7 @@ export class SourceAccountingStore {
     reviews: Array<{ segment: SourceSegment; disposition: "proposed" | "no-artifacts"; summary: string }>;
     evidenceAssertions?: readonly EvidenceAssertion[];
     annotations?: ReadonlyArray<{ id: string; anchors: readonly TextAnchor[] }>;
+    unitDecisions?: readonly SourceUnitAccountingDecision[];
   }): Promise<SourceAccountingManifest> {
     idSchema.parse(input.batchId);
     if (input.structure.sourceId !== input.source.id || input.structure.sourceSha256 !== input.source.contentSha256) {
@@ -143,6 +186,7 @@ export class SourceAccountingStore {
       segments,
       evidenceSpans,
       annotationSpans,
+      unitDecisions: input.unitDecisions ?? [],
     });
     const current = await this.read(input.source.id);
     const priorReviews = current
@@ -163,6 +207,252 @@ export class SourceAccountingStore {
     });
     await atomicJson(this.filePath(input.source.id), manifest);
     return manifest;
+  }
+
+  /**
+   * Validate the prospective batch accounting before the finish handshake
+   * commits any annotation/resolution state. Long-form source batches use this
+   * as a deterministic completeness barrier.
+   */
+  validateBatchReview(input: {
+    structure: SourceStructureManifest;
+    reviews: Array<{ startByte: number; endByte: number; disposition: "proposed" | "no-artifacts" }>;
+    evidenceAssertions?: readonly EvidenceAssertion[];
+    annotations?: ReadonlyArray<{ id: string; anchors: readonly TextAnchor[] }>;
+    unitDecisions?: readonly SourceUnitAccountingDecision[];
+    requireExplicitSemanticDisposition?: boolean;
+  }): string[] {
+    const base = baseStructuralUnits(input.structure);
+    const byId = new Map(base.map((unit) => [unit.id, unit]));
+    const decisions = (input.unitDecisions ?? []).map((decision) => sourceUnitAccountingDecisionSchema.parse(decision));
+    const issues: string[] = [];
+    const seen = new Set<string>();
+    const evidenceSpans = (input.evidenceAssertions ?? []).flatMap((assertion) => assertion.anchors);
+    const annotationSpans = (input.annotations ?? []).flatMap((annotation) => annotation.anchors);
+    for (const decision of decisions) {
+      if (seen.has(decision.unitId)) {
+        issues.push(`Source unit ${decision.unitId} has more than one active accounting decision.`);
+        continue;
+      }
+      seen.add(decision.unitId);
+      const unit = byId.get(decision.unitId);
+      if (!unit) {
+        issues.push(`Accounting decision references unknown base unit ${decision.unitId}.`);
+        continue;
+      }
+      if (unit.kind === "non-scene") {
+        issues.push(`Non-scene unit ${decision.unitId} is classified deterministically and cannot receive a model decision.`);
+      }
+      if (!rangeCovered(unit.anchor.startByte, unit.anchor.endByte, input.reviews)) {
+        issues.push(`Accounting decision for ${decision.unitId} escapes the reviewed compiler slice.`);
+      }
+      const overlappingReviews = input.reviews.filter((review) =>
+        rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, review.startByte, review.endByte));
+      if (overlappingReviews.length > 0
+        && overlappingReviews.every((review) => review.disposition === "no-artifacts")) {
+        issues.push(`Source unit ${decision.unitId} is inside a no-artifacts segment and is already host-classified as background-only.`);
+      }
+      const represented = [...evidenceSpans, ...annotationSpans].some((span) =>
+        span.sourceId === input.structure.sourceId
+        && rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
+      if (represented) {
+        issues.push(`Source unit ${decision.unitId} overlaps exact semantic evidence and is host-derived as represented; withdraw its model disposition.`);
+      }
+    }
+    if (!input.requireExplicitSemanticDisposition) return issues;
+    for (const unit of base) {
+      if (unit.kind === "non-scene") continue;
+      const overlappingReviews = input.reviews.filter((review) =>
+        rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, review.startByte, review.endByte));
+      if (!rangeCovered(unit.anchor.startByte, unit.anchor.endByte, overlappingReviews)) continue;
+      const represented = [...evidenceSpans, ...annotationSpans].some((span) =>
+        span.sourceId === input.structure.sourceId
+        && rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
+      const allBackground = overlappingReviews.length > 0
+        && overlappingReviews.every((review) => review.disposition === "no-artifacts");
+      if (!represented && !allBackground && !seen.has(unit.id)) {
+        issues.push(
+          `Source unit ${unit.id} was reviewed inside a proposal-bearing segment but has neither exact semantic coverage nor an explicit account_source_units disposition.`,
+        );
+      }
+    }
+    return issues;
+  }
+
+  async stageProposal(proposalInput: SourceAccountingProposal): Promise<void> {
+    const proposal = sourceAccountingProposalSchema.parse(proposalInput);
+    const filePath = this.proposalPath(proposal.sourceId, "pending", proposal.id);
+    try {
+      const existing = sourceAccountingProposalSchema.parse(JSON.parse(await fs.readFile(filePath, "utf8")));
+      if (canonicalJson(proposalIdentity(existing)) === canonicalJson(proposalIdentity(proposal))) return;
+      throw new Error(`Pending source-accounting proposal ${proposal.id} already exists with different content; use a new proposal id.`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    for (const status of ["accepted", "rejected"] as const) {
+      if (await exists(this.proposalPath(proposal.sourceId, status, proposal.id))) {
+        throw new Error(`Source-accounting proposal ${proposal.id} already exists in ${status} history; use a new proposal id.`);
+      }
+    }
+    await writeImmutable(filePath, proposal);
+  }
+
+  async readProposal(
+    sourceIdInput: string,
+    status: SourceAccountingProposalStatus,
+    proposalIdInput: string,
+  ): Promise<SourceAccountingProposal> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const proposalId = idSchema.parse(proposalIdInput);
+    return sourceAccountingProposalSchema.parse(JSON.parse(
+      await fs.readFile(this.proposalPath(sourceId, status, proposalId), "utf8"),
+    ));
+  }
+
+  async listBatchProposals(
+    sourceIdInput: string,
+    compilerBatchIdInput: string,
+  ): Promise<Array<{ id: string; status: SourceAccountingProposalStatus; createdAt: string }>> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const compilerBatchId = idSchema.parse(compilerBatchIdInput);
+    const summaries: Array<{ id: string; status: SourceAccountingProposalStatus; createdAt: string }> = [];
+    for (const status of ["pending", "accepted"] as const) {
+      let names: string[];
+      try {
+        names = (await fs.readdir(this.proposalDirectory(sourceId, status)))
+          .filter((name) => name.endsWith(".json"))
+          .sort();
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      for (const name of names) {
+        const proposal = await this.readProposal(sourceId, status, name.slice(0, -5));
+        if (proposal.compilerBatchId === compilerBatchId) {
+          summaries.push({ id: proposal.id, status, createdAt: proposal.createdAt });
+        }
+      }
+    }
+    return summaries.sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  async listProposals(
+    sourceIdInput: string,
+    status: SourceAccountingProposalStatus = "pending",
+  ): Promise<SourceAccountingProposal[]> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    let names: string[];
+    try {
+      names = (await fs.readdir(this.proposalDirectory(sourceId, status)))
+        .filter((name) => name.endsWith(".json"))
+        .sort();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    return Promise.all(names.map((name) => this.readProposal(sourceId, status, name.slice(0, -5))));
+  }
+
+  async withdrawProposal(sourceIdInput: string, proposalIdInput: string): Promise<void> {
+    await this.transition(idSchema.parse(sourceIdInput), idSchema.parse(proposalIdInput), "pending", "rejected");
+  }
+
+  async acceptProposals(sourceIdInput: string, proposalIdsInput: readonly string[]): Promise<void> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    for (const proposalId of [...new Set(proposalIdsInput.map((id) => idSchema.parse(id)))].sort()) {
+      try {
+        await this.transition(sourceId, proposalId, "pending", "accepted");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        await this.readProposal(sourceId, "accepted", proposalId);
+      }
+    }
+  }
+
+  async rejectSourceProposals(sourceIdInput: string): Promise<string[]> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const rejected: string[] = [];
+    let names: string[];
+    try {
+      names = (await fs.readdir(this.proposalDirectory(sourceId, "pending")))
+        .filter((name) => name.endsWith(".json"))
+        .sort();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    for (const name of names) {
+      const proposalId = name.slice(0, -5);
+      await this.withdrawProposal(sourceId, proposalId);
+      rejected.push(proposalId);
+    }
+    return rejected;
+  }
+
+  async rejectBatchProposals(sourceIdInput: string, compilerBatchIdInput: string): Promise<string[]> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const compilerBatchId = idSchema.parse(compilerBatchIdInput);
+    const rejected: string[] = [];
+    for (const summary of await this.listBatchProposals(sourceId, compilerBatchId)) {
+      if (summary.status === "pending") {
+        await this.withdrawProposal(sourceId, summary.id);
+      } else {
+        // A successful finish accepts accounting proposals before the outer
+        // compiler loop checkpoints the batch. Reparse/incomplete-batch
+        // invalidation must retire that accepted history too; otherwise a
+        // later beginBatch would recover decisions from the invalidated run.
+        await this.transition(sourceId, summary.id, "accepted", "rejected");
+      }
+      rejected.push(summary.id);
+    }
+    return rejected.sort();
+  }
+
+  /** Replace only the materialized accounting manifest; proposal history stays immutable. */
+  async replace(manifestInput: SourceAccountingManifest | null): Promise<void> {
+    if (!manifestInput) return;
+    const manifest = sourceAccountingManifestSchema.parse(manifestInput);
+    await atomicJson(this.filePath(manifest.sourceId), manifest);
+  }
+
+  async replaceCurrent(sourceIdInput: string, manifestInput: SourceAccountingManifest | null): Promise<void> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    if (!manifestInput) {
+      await this.remove(sourceId);
+      return;
+    }
+    const manifest = sourceAccountingManifestSchema.parse(manifestInput);
+    if (manifest.sourceId !== sourceId) {
+      throw new Error(`Source-accounting snapshot belongs to ${manifest.sourceId}, not ${sourceId}.`);
+    }
+    await atomicJson(this.filePath(sourceId), manifest);
+  }
+
+  async removeBatchReviews(
+    sourceIdInput: string,
+    compilerBatchIdsInput: readonly string[],
+    structure: SourceStructureManifest,
+  ): Promise<number> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const compilerBatchIds = new Set(compilerBatchIdsInput.map((id) => idSchema.parse(id)));
+    const current = await this.read(sourceId);
+    if (!current || !compilerBatchIds.size) return 0;
+    if (structure.sourceId !== sourceId
+      || current.sourceSha256 !== structure.sourceSha256
+      || current.structureVersion !== structure.structureVersion) {
+      await this.remove(sourceId);
+      return current.batchReviews.length;
+    }
+    const retained = current.batchReviews.filter((review) => !compilerBatchIds.has(review.batchId));
+    const removed = current.batchReviews.length - retained.length;
+    if (!removed) return 0;
+    await atomicJson(this.filePath(sourceId), sourceAccountingManifestSchema.parse({
+      ...current,
+      batchReviews: retained,
+      records: deriveAccountingRecords(structure, retained),
+      updatedAt: new Date().toISOString(),
+    }));
+    return removed;
   }
 
   async summarize(structure: SourceStructureManifest): Promise<SourceAccountingSummary> {
@@ -214,6 +504,33 @@ export class SourceAccountingStore {
   private filePath(sourceId: string): string {
     return path.join(this.root, `${sourceId}.json`);
   }
+
+  private proposalDirectory(sourceId: string, status: SourceAccountingProposalStatus): string {
+    return path.join(this.root, "proposals", idSchema.parse(sourceId), status);
+  }
+
+  private proposalPath(sourceId: string, status: SourceAccountingProposalStatus, proposalId: string): string {
+    return path.join(this.proposalDirectory(sourceId, status), `${idSchema.parse(proposalId)}.json`);
+  }
+
+  private async transition(
+    sourceId: string,
+    proposalId: string,
+    from: SourceAccountingProposalStatus,
+    to: Exclude<SourceAccountingProposalStatus, "pending">,
+  ): Promise<void> {
+    const source = this.proposalPath(sourceId, from, proposalId);
+    const target = this.proposalPath(sourceId, to, proposalId);
+    await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+    try {
+      await fs.rename(source, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw Object.assign(new Error(`Source-accounting proposal not found: ${proposalId}`), { code: "ENOENT" });
+      }
+      throw error;
+    }
+  }
 }
 
 function deriveAccountingRecords(
@@ -254,11 +571,18 @@ function deriveAccountingRecords(
       .map((span) => span.id));
     const represented = unitEvidence.length > 0 || unitAnnotations.length > 0;
     const allBackground = overlapping.every(({ disposition }) => disposition === "no-artifacts");
+    const explicitDecision = [...overlapping]
+      .sort((left, right) => right.review.reviewedAt.localeCompare(left.review.reviewedAt)
+        || right.review.batchId.localeCompare(left.review.batchId))
+      .flatMap(({ review }) => review.unitDecisions)
+      .find((decision) => decision.unitId === unit.id);
     const status: SourceAccountingStatus = represented
       ? "represented"
-      : allBackground
-        ? "background-only"
-        : "unresolved";
+      : explicitDecision?.status
+        ? explicitDecision.status
+        : allBackground
+          ? "background-only"
+          : "unresolved";
     const latestReview = [...new Set(overlapping.map(({ review }) => review))]
       .sort((left, right) => right.reviewedAt.localeCompare(left.reviewedAt))[0]!;
     records.push(sourceAccountingRecordSchema.parse({
@@ -269,15 +593,51 @@ function deriveAccountingRecords(
       evidenceAssertionIds: unitEvidence,
       reason: status === "represented"
         ? "The unit overlaps an exact semantic assertion or committed source annotation."
-        : status === "background-only"
-          ? boundedReason(overlapping.map(({ summary }) => summary).join(" | "))
-          : "The unit was reviewed in a proposal-bearing segment, but no exact assertion or source annotation covers it.",
+        : explicitDecision
+          ? explicitDecision.reason
+          : status === "background-only"
+            ? boundedReason(overlapping.map(({ summary }) => summary).join(" | "))
+            : "The unit was reviewed in a proposal-bearing segment, but no exact assertion or source annotation covers it.",
       reviewedBy: "model",
       reviewedAt: latestReview.reviewedAt,
       batchIds: uniqueIds(overlapping.map(({ review }) => review.batchId)),
     }));
   }
   return records.sort((left, right) => left.unitId.localeCompare(right.unitId));
+}
+
+function proposalIdentity(proposal: SourceAccountingProposal): unknown {
+  return {
+    version: proposal.version,
+    id: proposal.id,
+    sourceId: proposal.sourceId,
+    compilerBatchId: proposal.compilerBatchId,
+    decisions: proposal.decisions,
+    generatedBy: proposal.generatedBy,
+  };
+}
+
+async function exists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function writeImmutable(filePath: string, value: unknown): Promise<void> {
+  const serialized = `${canonicalJson(value)}\n`;
+  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  try {
+    await fs.writeFile(filePath, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if ((await fs.readFile(filePath, "utf8")) !== serialized) {
+      throw new Error(`Source-accounting proposal already exists with different content: ${filePath}`);
+    }
+  }
 }
 
 function rangeCovered(

@@ -15,6 +15,12 @@ import { InitialWorldStore } from "../world/initial.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { spatialRelationEvidence } from "../world/spatial-ontology.js";
 import { worldRuleEvidence } from "../world/world-rule-ontology.js";
+import { SourceAnnotationStore, annotationAnchors } from "../compiler/annotations.js";
+import { EntityResolutionStore } from "../compiler/entity-resolution.js";
+import { EventResolutionStore } from "../compiler/event-resolution.js";
+import { SourceAccountingStore } from "../compiler/source-accounting.js";
+import { ensureSourceStructure } from "../compiler/structure.js";
+import { EvidenceAssertionStore } from "../compiler/evidence-assertions.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { promptJson } from "../util/prompt-data.js";
 import { compileSourceCommand } from "./compile-source.js";
@@ -291,6 +297,10 @@ export async function invalidatePreparationArtifacts(
   const actors = new ActorModelStore(root);
   const possibilities = new PossibilityTemplateStore(root);
   const initial = new InitialWorldStore(root);
+  const exactEvidence = new EvidenceAssertionStore(root);
+  const source = await (await WorkspaceStore.create(root)).getSource(sourceId);
+  if (!source) throw new Error(`Unknown source id: ${sourceId}`);
+  let count = await invalidateCompilerMetadata(root, source, selectedBatches, selectedSpans, whole);
   const [
     entities,
     propositions,
@@ -317,31 +327,98 @@ export async function invalidatePreparationArtifacts(
     canon.listRules(),
     actors.listGoals(), actors.listModels(), possibilities.list(), initial.get(),
   ]);
-  let count = 0;
-  for (const item of entities) if (shouldInvalidate(item)) { await canon.removeCurrent("entities", item.id); count += 1; }
-  for (const item of propositions) if (shouldInvalidate(item)) { await canon.removeCurrent("propositions", item.id); count += 1; }
-  for (const item of attributions) if (shouldInvalidate(item)) { await canon.removeCurrent("attributions", item.id); count += 1; }
-  for (const item of claims) if (shouldInvalidate(item)) { await canon.removeCurrent("claims", item.id); count += 1; }
-  for (const item of events) if (shouldInvalidate(item)) { await canon.removeCurrent("events", item.id); count += 1; }
-  for (const item of eventParticipations) if (shouldInvalidate(item)) { await canon.removeCurrent("event-participations", item.id); count += 1; }
+  const invalidate = async (kind: string, id: string, remove: () => Promise<void>) => {
+    await remove();
+    await exactEvidence.removeForArtifact(kind, id);
+    count += 1;
+  };
+  for (const item of entities) if (shouldInvalidate(item)) await invalidate("entity", item.id, () => canon.removeCurrent("entities", item.id));
+  for (const item of propositions) if (shouldInvalidate(item)) await invalidate("proposition", item.id, () => canon.removeCurrent("propositions", item.id));
+  for (const item of attributions) if (shouldInvalidate(item)) await invalidate("attribution", item.id, () => canon.removeCurrent("attributions", item.id));
+  for (const item of claims) if (shouldInvalidate(item)) await invalidate("claim", item.id, () => canon.removeCurrent("claims", item.id));
+  for (const item of events) if (shouldInvalidate(item)) await invalidate("canonical-event", item.id, () => canon.removeCurrent("events", item.id));
+  for (const item of eventParticipations) if (shouldInvalidate(item)) await invalidate("event-participation", item.id, () => canon.removeCurrent("event-participations", item.id));
   for (const item of eventRelations) {
     if (shouldInvalidate({ evidence: [...item.evidence, ...(item.counterEvidence ?? [])] })) {
-      await canon.removeCurrent("event-relations", item.id);
-      count += 1;
+      await invalidate("event-relation", item.id, () => canon.removeCurrent("event-relations", item.id));
     }
   }
-  for (const item of spatialRelations) if (shouldInvalidate({ evidence: spatialRelationEvidence(item) })) { await canon.removeCurrent("spatial-relations", item.id); count += 1; }
-  for (const item of rules) if (shouldInvalidate({ evidence: worldRuleEvidence(item) })) { await canon.removeCurrent("rules", item.id); count += 1; }
-  for (const item of goals) if (shouldInvalidate(item)) { await actors.removeGoal(item.id); count += 1; }
+  for (const item of spatialRelations) if (shouldInvalidate({ evidence: spatialRelationEvidence(item) })) await invalidate("spatial-relation", item.id, () => canon.removeCurrent("spatial-relations", item.id));
+  for (const item of rules) if (shouldInvalidate({ evidence: worldRuleEvidence(item) })) await invalidate("world-rule", item.id, () => canon.removeCurrent("rules", item.id));
+  for (const item of goals) if (shouldInvalidate(item)) await invalidate("character-goal", item.id, () => actors.removeGoal(item.id));
   for (const item of models) {
     if (shouldInvalidate({ evidence: [...item.evidence, ...characterOntologyEvidence(item)] })) {
-      await actors.removeModel(item.actorId);
-      count += 1;
+      await invalidate("character-model", item.actorId, () => actors.removeModel(item.actorId));
     }
   }
-  for (const item of templates) if (shouldInvalidate(item)) { await possibilities.remove(item.id); count += 1; }
-  if (opening && shouldInvalidate(opening)) { await initial.clear(); count += 1; }
+  for (const item of templates) if (shouldInvalidate(item)) await invalidate("possibility", item.id, () => possibilities.remove(item.id));
+  if (opening && shouldInvalidate(opening)) await invalidate("initial-world", "initial-world", () => initial.clear());
   return count;
+}
+
+async function invalidateCompilerMetadata(
+  root: string,
+  source: SourceDocument,
+  selectedBatches: readonly CompilerBatch[],
+  selectedSpans: readonly EvidenceSpanKey[],
+  whole: boolean,
+): Promise<number> {
+  const annotations = new SourceAnnotationStore(root);
+  const entityResolutions = new EntityResolutionStore(root);
+  const eventResolutions = new EventResolutionStore(root);
+  const accounting = new SourceAccountingStore(root);
+  const [currentAnnotations, currentEntityResolutions, currentEventResolutions, currentAccounting] = await Promise.all([
+    annotations.list(source.id),
+    entityResolutions.list(source.id),
+    eventResolutions.list(source.id),
+    accounting.read(source.id),
+  ]);
+  if (whole) {
+    await Promise.all([
+      annotations.replaceCurrent(source.id, []),
+      entityResolutions.replaceCurrent(source.id, []),
+      eventResolutions.replaceCurrent(source.id, []),
+      accounting.replaceCurrent(source.id, null),
+    ]);
+    return currentAnnotations.length
+      + currentEntityResolutions.length
+      + currentEventResolutions.length
+      + (currentAccounting ? 1 : 0);
+  }
+  const selectedAnnotationIds = new Set<string>();
+  for (const annotation of currentAnnotations) {
+    const anchors = annotationAnchors(annotation);
+    const contained = anchors.map((anchor) => selectedSpans.some((span) => spanContains(span, anchor)));
+    const touched = anchors.map((anchor) => selectedSpans.some((span) => spansOverlap(span, anchor)));
+    if (touched.some(Boolean) && (!contained.every(Boolean) || touched.some((value, index) => value && !contained[index]))) {
+      throw new Error(`Source annotation ${annotation.id} crosses the selected chapter boundary; rerun reparse with --all.`);
+    }
+    if (contained.length > 0 && contained.every(Boolean)) selectedAnnotationIds.add(annotation.id);
+  }
+  const retainedEntityResolutions = currentEntityResolutions.filter((resolution) =>
+    !selectedAnnotationIds.has(resolution.mentionId));
+  const retainedEventResolutions = currentEventResolutions.filter((resolution) => {
+    const selected = resolution.eventMentionIds.filter((id) => selectedAnnotationIds.has(id));
+    if (selected.length > 0 && selected.length !== resolution.eventMentionIds.length) {
+      throw new Error(`Event resolution ${resolution.id} crosses the selected chapter boundary; rerun reparse with --all.`);
+    }
+    return selected.length === 0;
+  });
+  await annotations.replaceCurrent(
+    source.id,
+    currentAnnotations.filter((annotation) => !selectedAnnotationIds.has(annotation.id)),
+  );
+  await entityResolutions.replaceCurrent(source.id, retainedEntityResolutions);
+  await eventResolutions.replaceCurrent(source.id, retainedEventResolutions);
+  const removedReviews = await accounting.removeBatchReviews(
+    source.id,
+    selectedBatches.map((batch) => batch.id),
+    await ensureSourceStructure(root, source),
+  );
+  return selectedAnnotationIds.size
+    + (currentEntityResolutions.length - retainedEntityResolutions.length)
+    + (currentEventResolutions.length - retainedEventResolutions.length)
+    + removedReviews;
 }
 
 type EvidenceSpanKey = {
@@ -350,7 +427,7 @@ type EvidenceSpanKey = {
   endLine: number;
   startByte?: number;
   endByte?: number;
-  quoteHash: string;
+  quoteHash?: string;
 };
 
 function spanContains(container: EvidenceSpanKey, candidate: EvidenceSpanKey): boolean {
@@ -362,4 +439,15 @@ function spanContains(container: EvidenceSpanKey, candidate: EvidenceSpanKey): b
     return container.startByte <= candidate.startByte && container.endByte >= candidate.endByte;
   }
   return container.startLine <= candidate.startLine && container.endLine >= candidate.endLine;
+}
+
+function spansOverlap(left: EvidenceSpanKey, right: EvidenceSpanKey): boolean {
+  if (left.sourceId !== right.sourceId) return false;
+  if (left.startByte !== undefined
+    && left.endByte !== undefined
+    && right.startByte !== undefined
+    && right.endByte !== undefined) {
+    return left.startByte < right.endByte && right.startByte < left.endByte;
+  }
+  return left.startLine <= right.endLine && right.startLine <= left.endLine;
 }

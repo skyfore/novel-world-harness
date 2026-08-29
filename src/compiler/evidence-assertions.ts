@@ -24,6 +24,14 @@ const bindingSchema = z.object({
 }).strict();
 type EvidenceAssertionBinding = z.infer<typeof bindingSchema>;
 
+export const evidenceAssertionBindingSnapshotSchema = z.object({
+  artifactKind: idSchema,
+  artifactId: idSchema,
+  artifactHash: z.string().regex(/^[a-f0-9]{64}$/),
+  assertions: z.array(evidenceAssertionSchema),
+}).strict();
+export type EvidenceAssertionBindingSnapshot = z.infer<typeof evidenceAssertionBindingSnapshotSchema>;
+
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
@@ -117,6 +125,28 @@ export class EvidenceAssertionStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
+    }
+  }
+
+  async removeForArtifact(artifactKindInput: string, artifactIdInput: string): Promise<void> {
+    const artifactKind = safeId(artifactKindInput, "artifact kind");
+    const artifactId = safeId(artifactIdInput, "artifact id");
+    await fs.rm(this.bindingPath(artifactKind, artifactId), { force: true });
+  }
+
+  async restoreBindings(snapshotInput: readonly EvidenceAssertionBindingSnapshot[]): Promise<void> {
+    const snapshots = snapshotInput.map((snapshot) => evidenceAssertionBindingSnapshotSchema.parse(snapshot));
+    const keys = new Set<string>();
+    for (const snapshot of snapshots) {
+      const key = `${snapshot.artifactKind}/${snapshot.artifactId}`;
+      if (keys.has(key)) throw new Error(`Duplicate exact-evidence binding snapshot ${key}.`);
+      keys.add(key);
+      await this.replaceForArtifact(
+        snapshot.artifactKind,
+        snapshot.artifactId,
+        snapshot.artifactHash,
+        snapshot.assertions,
+      );
     }
   }
 

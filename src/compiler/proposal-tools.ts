@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 import { WorkspaceStore } from "../storage/workspace-store.js";
+import { readSourceMaterial } from "../storage/source-material-store.js";
 import {
   inferredTitleOccursInEvidence,
   normalizeModelInferredNovelTitle,
@@ -47,8 +48,13 @@ import {
   type ModelEvidenceSelector,
   type ModelTextSelector,
 } from "./text-anchors.js";
-import { ensureSourceStructure } from "./structure.js";
-import { SourceAccountingStore } from "./source-accounting.js";
+import { baseStructuralUnits, ensureSourceStructure } from "./structure.js";
+import {
+  SourceAccountingStore,
+  sourceUnitAccountingDecisionSchema,
+  type SourceAccountingProposal,
+  type SourceUnitAccountingDecision,
+} from "./source-accounting.js";
 import {
   SOURCE_ANNOTATION_ONTOLOGY_VERSION,
   SourceAnnotationStore,
@@ -105,7 +111,8 @@ function proposalResult(
   details: CompilerProposalRecordedDetails
     | SourceAnnotationProposalRecordedDetails
     | IdentityResolutionProposalRecordedDetails
-    | EventResolutionProposalRecordedDetails,
+    | EventResolutionProposalRecordedDetails
+    | SourceAccountingProposalRecordedDetails,
 ) {
   return { content: [{ type: "text" as const, text }], details };
 }
@@ -146,6 +153,8 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "propose_discourse_segment",
   "propose_entity_resolution",
   "propose_event_resolution",
+  "find_source_accounting_units",
+  "account_source_units",
   "withdraw_compiler_proposal",
   "replace_boundary_proposal",
   "finish_compiler_batch",
@@ -166,6 +175,19 @@ export const SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES = [
 
 export const ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES = ["propose_entity_resolution"] as const;
 export const EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES = ["propose_event_resolution"] as const;
+
+export const SOURCE_ACCOUNTING_TOOL_NAMES = [
+  "find_source_accounting_units",
+  "account_source_units",
+] as const;
+
+export const SOURCE_ACCOUNTING_PROPOSAL_TOOL_NAMES = ["account_source_units"] as const;
+
+/**
+ * Small fixtures remain ergonomic; novel-scale batches must explicitly
+ * disposition every semantic base unit that exact evidence did not represent.
+ */
+export const EXPLICIT_SOURCE_ACCOUNTING_MIN_SOURCE_BYTES = 24 * 1_024;
 
 type ProposalToolInput = {
   proposal_id: string;
@@ -490,12 +512,19 @@ type EventResolutionProposalRecordedDetails = {
   status: EventResolution["status"];
 };
 
+type SourceAccountingProposalRecordedDetails = {
+  proposalId: string;
+  kind: "source-accounting";
+  unitIds: string[];
+};
+
 type CompilerProposalDetails =
   | CompilerBatchBlockedDetails
   | CompilerProposalRecordedDetails
   | SourceAnnotationProposalRecordedDetails
   | IdentityResolutionProposalRecordedDetails
-  | EventResolutionProposalRecordedDetails;
+  | EventResolutionProposalRecordedDetails
+  | SourceAccountingProposalRecordedDetails;
 
 type NovelTitleProposalDetails =
   | CompilerBatchBlockedDetails
@@ -739,6 +768,34 @@ const eventResolutionParameters = Type.Object({
   rationale: Type.String({ minLength: 1, maxLength: 2_000 }),
 }, { additionalProperties: false });
 
+const sourceAccountingFindParameters = Type.Object({
+  segment_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  status: Type.Optional(Type.Union([
+    Type.Literal("all"),
+    Type.Literal("unresolved"),
+    Type.Literal("pending"),
+  ])),
+  offset: Type.Optional(Type.Integer({ minimum: 0 })),
+  max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+}, { additionalProperties: false });
+
+const sourceAccountingDecisionParameters = Type.Object({
+  unit_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  status: Type.Union([
+    Type.Literal("background-only"),
+    Type.Literal("paratext"),
+    Type.Literal("duplicate-description"),
+    Type.Literal("unresolved"),
+    Type.Literal("intentionally-deferred"),
+  ]),
+  reason: Type.String({ minLength: 1, maxLength: 1_000 }),
+}, { additionalProperties: false });
+
+const sourceAccountingParameters = Type.Object({
+  proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+  decisions: Type.Array(sourceAccountingDecisionParameters, { minItems: 1, maxItems: 512 }),
+}, { additionalProperties: false });
+
 function safeTextSuffix(text: string, maxChars: number): string {
   let start = Math.max(0, text.length - maxChars);
   if (start > 0 && start < text.length
@@ -757,12 +814,14 @@ export function createCompilerProposalToolset(
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
   const entityResolutionStore = new EntityResolutionStore(workspaceRoot);
   const eventResolutionStore = new EventResolutionStore(workspaceRoot);
+  const accountingStore = new SourceAccountingStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
   const boundaryCalibrations = new BoundaryCalibrationStore(workspaceRoot);
   const successfulProposalIds = new Set<string>();
   const successfulAnnotationProposalIds = new Set<string>();
   const successfulEntityResolutionProposalIds = new Set<string>();
   const successfulEventResolutionProposalIds = new Set<string>();
+  const successfulAccountingProposalIds = new Set<string>();
   const peekedDirections = new Set<"previous" | "next">();
   let expectedSegmentIds: string[] = [];
   let boundedSliceSegments: SourceSegment[] = [];
@@ -824,6 +883,7 @@ export function createCompilerProposalToolset(
     + successfulAnnotationProposalIds.size
     + successfulEntityResolutionProposalIds.size
     + successfulEventResolutionProposalIds.size
+    + successfulAccountingProposalIds.size
     + (pendingNovelTitleProposal ? 1 : 0);
   const isStructureDiscoveryBatch = () => Boolean(
     activeSourceId
@@ -920,6 +980,9 @@ export function createCompilerProposalToolset(
     }
     if (successfulEventResolutionProposalIds.has(proposalId)) {
       throw new Error(`Proposal ID ${proposalId} is already used by an event-resolution proposal in this batch.`);
+    }
+    if (successfulAccountingProposalIds.has(proposalId)) {
+      throw new Error(`Proposal ID ${proposalId} is already used by a source-accounting proposal in this batch.`);
     }
     if (!successfulAnnotationProposalIds.has(proposalId) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
       throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse. Do not withdraw semantically valid work to make room; stop this turn and preserve the exact drafts for diagnosis.`);
@@ -1377,6 +1440,236 @@ export function createCompilerProposalToolset(
       };
     },
   });
+
+  const readActiveAccountingProposals = async (): Promise<SourceAccountingProposal[]> => {
+    if (!activeSourceId) return [];
+    const proposals: SourceAccountingProposal[] = [];
+    for (const proposalId of [...successfulAccountingProposalIds].sort()) {
+      try {
+        proposals.push(await accountingStore.readProposal(activeSourceId, "pending", proposalId));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        proposals.push(await accountingStore.readProposal(activeSourceId, "accepted", proposalId));
+      }
+    }
+    return proposals;
+  };
+
+  const readProspectiveSemanticCoverage = async (): Promise<{
+    assertions: EvidenceAssertion[];
+    annotations: Array<{ id: string; anchors: ReturnType<typeof annotationAnchors> }>;
+  }> => {
+    const assertions: EvidenceAssertion[] = [];
+    for (const proposalId of [...successfulProposalIds].sort()) {
+      const envelope = await service.store.readEnvelope("pending", proposalId);
+      assertions.push(...evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []));
+    }
+    const annotations: Array<{ id: string; anchors: ReturnType<typeof annotationAnchors> }> = [];
+    if (activeSourceId) {
+      for (const proposalId of [...successfulAnnotationProposalIds].sort()) {
+        let proposal;
+        try {
+          proposal = await annotationStore.readProposal(activeSourceId, "pending", proposalId);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          proposal = await annotationStore.readProposal(activeSourceId, "accepted", proposalId);
+        }
+        annotations.push({ id: proposal.payload.id, anchors: annotationAnchors(proposal.payload) });
+      }
+    }
+    return { assertions, annotations };
+  };
+
+  const assertOrdinaryAccountingBatch = () => {
+    if (!activeSourceId || !compilerBatchId || !expectedSegmentIds.length) {
+      throw new Error("Source-unit accounting requires an ordinary bounded source-review batch.");
+    }
+    if (isStructureDiscoveryBatch() || activeBoundaryCalibration || !compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
+      throw new Error("Source-unit accounting is unavailable in discovery, boundary-calibration, and reconciliation batches.");
+    }
+  };
+
+  const findSourceAccountingUnitsTool = defineTool<typeof sourceAccountingFindParameters, CompilerProposalDetails>({
+    name: "find_source_accounting_units",
+    label: "Find source accounting units",
+    description: "Page through deterministic sentence-level source units in the active bounded batch, including exact text and their current or pending accounting status. This is read-only.",
+    promptSnippet: "Inspect every unrepresented source unit before finishing a novel-scale batch",
+    promptGuidelines: [
+      "Page until nextOffset is null; never guess a unit ID.",
+      "Units marked represented are host-derived from exact evidence or annotations and must not be dispositioned by the model.",
+      "Classify every remaining unit in a proposal-bearing segment with account_source_units; use unresolved or intentionally-deferred honestly when semantics remain open.",
+    ],
+    executionMode: "sequential",
+    parameters: sourceAccountingFindParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("retrieval");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      assertOrdinaryAccountingBatch();
+      if (input.segment_id && !expectedSegmentIds.includes(input.segment_id)) {
+        throw new Error(`Accounting segment ${input.segment_id} is outside the active compiler slice (${expectedSegmentIds.join(", ")}).`);
+      }
+      const workspace = await WorkspaceStore.create(workspaceRoot);
+      const source = await workspace.getSource(activeSourceId!);
+      if (!source) throw new Error(`Unknown active compiler source: ${activeSourceId}`);
+      const [structure, bytes, manifest, activeAccounting, semanticCoverage] = await Promise.all([
+        ensureSourceStructure(workspaceRoot, source),
+        readSourceMaterial(workspaceRoot, source),
+        accountingStore.read(source.id),
+        readActiveAccountingProposals(),
+        readProspectiveSemanticCoverage(),
+      ]);
+      const targetSegments = input.segment_id
+        ? boundedSliceSegments.filter((segment) => segment.id === input.segment_id)
+        : boundedSliceSegments;
+      const currentByUnit = new Map((manifest?.records ?? []).map((record) => [record.unitId, record]));
+      const pendingByUnit = new Map(activeAccounting.flatMap((proposal) => proposal.decisions.map((decision) => [
+        decision.unitId,
+        { proposalId: proposal.id, status: decision.status, reason: decision.reason },
+      ] as const)));
+      const semanticSpans = [
+        ...semanticCoverage.assertions.flatMap((assertion) => assertion.anchors),
+        ...semanticCoverage.annotations.flatMap((annotation) => annotation.anchors),
+      ];
+      const statusFilter = input.status ?? "all";
+      const candidates = baseStructuralUnits(structure)
+        .filter((unit) => byteRangeCoveredBySegments(unit.anchor.startByte, unit.anchor.endByte, targetSegments))
+        .map((unit) => {
+          const represented = unit.kind !== "non-scene" && semanticSpans.some((span) =>
+            span.sourceId === source.id
+            && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
+          const pending = pendingByUnit.get(unit.id);
+          const current = currentByUnit.get(unit.id);
+          const status = unit.kind === "non-scene"
+            ? "background-only"
+            : represented
+              ? "represented"
+              : pending?.status ?? current?.status ?? "unresolved";
+          return {
+            unitId: unit.id,
+            kind: unit.kind,
+            lines: [unit.anchor.startLine, unit.anchor.endLine],
+            bytes: [unit.anchor.startByte, unit.anchor.endByte],
+            status,
+            ...(pending ? { pending } : {}),
+            ...(current?.reason && !pending ? { reason: current.reason } : {}),
+            text: bytes.subarray(unit.anchor.startByte, unit.anchor.endByte).toString("utf8"),
+          };
+        })
+        .filter((unit) => statusFilter === "all"
+          || (statusFilter === "pending" ? Boolean(unit.pending) : unit.status === "unresolved"));
+      const offset = input.offset ?? 0;
+      const maxResults = input.max_results ?? 100;
+      const page = candidates.slice(offset, offset + maxResults);
+      const nextOffset = offset + page.length < candidates.length ? offset + page.length : null;
+      return {
+        content: [{ type: "text" as const, text: promptJson({
+          type: "source-accounting-units",
+          sourceId: source.id,
+          compilerBatchId,
+          total: candidates.length,
+          offset,
+          nextOffset,
+          units: page,
+          policy: "represented is host-derived; non-scene is deterministic; copy unitId into account_source_units only for other statuses",
+        }) }],
+        details: { proposalId: `accounting-page-${offset}`, kind: "source-accounting", unitIds: page.map((unit) => unit.unitId) },
+      };
+    },
+  });
+
+  const accountSourceUnitsTool = defineTool<typeof sourceAccountingParameters, CompilerProposalDetails>({
+    name: "account_source_units",
+    label: "Account source units",
+    description: "Stage typed review dispositions for exact deterministic source-unit IDs. It cannot assert represented coverage and does not create world truth.",
+    promptSnippet: "Disposition every unrepresented semantic unit in a proposal-bearing source segment",
+    promptGuidelines: [
+      "Use only unit IDs returned by find_source_accounting_units in this active batch.",
+      "Do not classify a represented or deterministic non-scene unit.",
+      "Use background-only only for non-material narration; use duplicate-description only when semantics are already represented elsewhere; unresolved and intentionally-deferred remain preparation blockers.",
+    ],
+    executionMode: "sequential",
+    parameters: sourceAccountingParameters,
+    async execute(_id, input, signal) {
+      signal?.throwIfAborted();
+      const blocked = beginToolCall("mutation");
+      if (blocked) return blocked;
+      assertBatchWritable();
+      assertOrdinaryAccountingBatch();
+      if (successfulProposalIds.has(input.proposal_id)
+        || successfulAnnotationProposalIds.has(input.proposal_id)
+        || successfulEntityResolutionProposalIds.has(input.proposal_id)
+        || successfulEventResolutionProposalIds.has(input.proposal_id)
+        || pendingNovelTitleProposal?.proposalId === input.proposal_id) {
+        throw new Error(`Proposal ID ${input.proposal_id} is already used by another proposal store in this batch.`);
+      }
+      if (!successfulAccountingProposalIds.has(input.proposal_id)
+        && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
+        throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse.`);
+      }
+      const workspace = await WorkspaceStore.create(workspaceRoot);
+      const source = await workspace.getSource(activeSourceId!);
+      if (!source) throw new Error(`Unknown active compiler source: ${activeSourceId}`);
+      const [structure, activeProposals, semanticCoverage] = await Promise.all([
+        ensureSourceStructure(workspaceRoot, source),
+        readActiveAccountingProposals(),
+        readProspectiveSemanticCoverage(),
+      ]);
+      const byId = new Map(baseStructuralUnits(structure).map((unit) => [unit.id, unit]));
+      const alreadyDecided = new Map(activeProposals.flatMap((proposal) => proposal.decisions.map((decision) => [
+        decision.unitId,
+        proposal.id,
+      ] as const)));
+      const decisions = input.decisions.map((decision) => sourceUnitAccountingDecisionSchema.omit({ proposalId: true }).parse({
+        unitId: decision.unit_id,
+        status: decision.status,
+        reason: decision.reason,
+      }));
+      if (new Set(decisions.map((decision) => decision.unitId)).size !== decisions.length) {
+        throw new Error("account_source_units decisions must use unique unit IDs.");
+      }
+      const semanticSpans = [
+        ...semanticCoverage.assertions.flatMap((assertion) => assertion.anchors),
+        ...semanticCoverage.annotations.flatMap((annotation) => annotation.anchors),
+      ];
+      for (const decision of decisions) {
+        const unit = byId.get(decision.unitId);
+        if (!unit) throw new Error(`Unknown deterministic source unit ${decision.unitId}; call find_source_accounting_units and copy unitId exactly.`);
+        if (!byteRangeCoveredBySegments(unit.anchor.startByte, unit.anchor.endByte, boundedSliceSegments)) {
+          throw new Error(`Source unit ${decision.unitId} is outside the active bounded compiler slice.`);
+        }
+        if (unit.kind === "non-scene") {
+          throw new Error(`Source unit ${decision.unitId} is deterministic non-scene content and cannot receive a model disposition.`);
+        }
+        if (semanticSpans.some((span) => span.sourceId === source.id
+          && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte))) {
+          throw new Error(`Source unit ${decision.unitId} is represented by exact current-batch semantics and cannot receive a model disposition.`);
+        }
+        const priorProposalId = alreadyDecided.get(decision.unitId);
+        if (priorProposalId && priorProposalId !== input.proposal_id) {
+          throw new Error(`Source unit ${decision.unitId} is already dispositioned by active proposal ${priorProposalId}; withdraw it before replacing the decision.`);
+        }
+      }
+      const proposal: SourceAccountingProposal = {
+        version: 1,
+        id: input.proposal_id,
+        sourceId: source.id,
+        compilerBatchId: compilerBatchId!,
+        decisions,
+        generatedBy: { worker: "account_source_units", ...generatedBy },
+        createdAt: new Date().toISOString(),
+      };
+      await accountingStore.stageProposal(proposal);
+      successfulAccountingProposalIds.add(proposal.id);
+      recordProposalProgress();
+      return proposalResult(
+        `Pending source-accounting proposal ${proposal.id} recorded for ${decisions.length} unit(s). These review dispositions do not create world truth.`,
+        { proposalId: proposal.id, kind: "source-accounting", unitIds: decisions.map((decision) => decision.unitId) },
+      );
+    },
+  });
+
   const retrievalTools = [
     ...createCompilerArtifactRetrievalTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
     ...createSourceAnnotationRetrievalTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
@@ -1393,6 +1686,7 @@ export function createCompilerProposalToolset(
       () => beginToolCall("retrieval"),
     ),
     ...createCompilerSourceEvidenceTools(workspaceRoot, () => activeSourceId, () => beginToolCall("retrieval")),
+    findSourceAccountingUnitsTool,
   ];
 
   const proposalTools = (Object.keys(labels) as CompilerProposalKind[]).map((kind) => {
@@ -1426,6 +1720,9 @@ export function createCompilerProposalToolset(
         }
         if (successfulEventResolutionProposalIds.has(input.proposal_id)) {
           throw new Error(`Proposal ID ${input.proposal_id} is already used by an event-resolution proposal in this batch.`);
+        }
+        if (successfulAccountingProposalIds.has(input.proposal_id)) {
+          throw new Error(`Proposal ID ${input.proposal_id} is already used by a source-accounting proposal in this batch.`);
         }
         if (!successfulProposalIds.has(input.proposal_id) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
           throw new Error(`The compiler batch reached its ${COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE}-proposal safety fuse. Do not withdraw semantically valid work to make room; stop this turn and preserve the exact drafts for diagnosis.`);
@@ -1652,7 +1949,8 @@ export function createCompilerProposalToolset(
       if (!activeSourceId) throw new Error("Identity resolution requires an active source-scoped compiler batch.");
       if (successfulProposalIds.has(input.proposal_id)
         || successfulAnnotationProposalIds.has(input.proposal_id)
-        || successfulEventResolutionProposalIds.has(input.proposal_id)) {
+        || successfulEventResolutionProposalIds.has(input.proposal_id)
+        || successfulAccountingProposalIds.has(input.proposal_id)) {
         throw new Error(`Proposal ID ${input.proposal_id} is already used by another compiler proposal in this batch.`);
       }
       if (!successfulEntityResolutionProposalIds.has(input.proposal_id) && activeProposalCount() >= COMPILER_ACTIVE_PROPOSAL_SAFETY_FUSE) {
@@ -1733,7 +2031,8 @@ export function createCompilerProposalToolset(
       if (!activeSourceId) throw new Error("Event resolution requires an active source-scoped compiler batch.");
       if (successfulProposalIds.has(input.proposal_id)
         || successfulAnnotationProposalIds.has(input.proposal_id)
-        || successfulEntityResolutionProposalIds.has(input.proposal_id)) {
+        || successfulEntityResolutionProposalIds.has(input.proposal_id)
+        || successfulAccountingProposalIds.has(input.proposal_id)) {
         throw new Error(`Proposal ID ${input.proposal_id} is already used by another compiler proposal in this batch.`);
       }
       if (!successfulEventResolutionProposalIds.has(input.proposal_id)
@@ -1819,6 +2118,28 @@ export function createCompilerProposalToolset(
         recordProposalProgress();
         return {
           content: [{ type: "text" as const, text: `Novel-title proposal ${input.proposal_id} withdrawn: ${input.reason}` }],
+          details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
+        };
+      }
+      if (successfulAccountingProposalIds.has(input.proposal_id)) {
+        if (!activeSourceId) throw new Error("Source-accounting proposal lost its active source identity.");
+        let alreadyAccepted = false;
+        try {
+          await accountingStore.withdrawProposal(activeSourceId, input.proposal_id);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          await accountingStore.readProposal(activeSourceId, "accepted", input.proposal_id);
+          alreadyAccepted = true;
+        }
+        successfulAccountingProposalIds.delete(input.proposal_id);
+        recordProposalProgress();
+        return {
+          content: [{
+            type: "text" as const,
+            text: alreadyAccepted
+              ? `Previously accepted source-accounting proposal ${input.proposal_id} released from this finish handshake: ${input.reason}`
+              : `Source-accounting proposal ${input.proposal_id} withdrawn to rejected history: ${input.reason}`,
+          }],
           details: { compilerProposalWithdrawn: true as const, proposalId: input.proposal_id, reason: input.reason },
         };
       }
@@ -2009,11 +2330,13 @@ export function createCompilerProposalToolset(
       const listedAnnotations = [...successfulAnnotationProposalIds].sort();
       const listedEntityResolutions = [...successfulEntityResolutionProposalIds].sort();
       const listedEventResolutions = [...successfulEventResolutionProposalIds].sort();
+      const listedAccounting = [...successfulAccountingProposalIds].sort();
       const expected = [
         ...listed,
         ...listedAnnotations,
         ...listedEntityResolutions,
         ...listedEventResolutions,
+        ...listedAccounting,
         ...(pendingNovelTitleProposal ? [pendingNovelTitleProposal.proposalId] : []),
       ].sort();
       if (new Set(expected).size !== expected.length) {
@@ -2036,6 +2359,45 @@ export function createCompilerProposalToolset(
         || reviewedIds.length !== uniqueReviewedIds.length
       ) {
         return failFinish(`reviewed_segments must account exactly once for: ${expectedSegmentIds.join(", ") || "(none)"}`);
+      }
+      let accountingIssues: string[] = [];
+      let prospectiveCoverage: Awaited<ReturnType<typeof readProspectiveSemanticCoverage>> = {
+        assertions: [],
+        annotations: [],
+      };
+      let activeAccountingProposals: SourceAccountingProposal[] = [];
+      let accountingSource: Awaited<ReturnType<WorkspaceStore["getSource"]>> | undefined;
+      let accountingStructure: Awaited<ReturnType<typeof ensureSourceStructure>> | undefined;
+      if (activeSourceId && compilerBatchId && input.reviewed_segments.length) {
+        const workspace = await WorkspaceStore.create(workspaceRoot);
+        accountingSource = await workspace.getSource(activeSourceId) ?? undefined;
+        if (!accountingSource) return failFinish(`Unknown active compiler source: ${activeSourceId}`);
+        accountingStructure = await ensureSourceStructure(workspaceRoot, accountingSource);
+        prospectiveCoverage = await readProspectiveSemanticCoverage();
+        activeAccountingProposals = await readActiveAccountingProposals();
+        const segmentsById = new Map(validatedSourceSegments.map((segment) => [segment.id, segment]));
+        const prospectiveReviews = input.reviewed_segments.map((review) => {
+          const segment = segmentsById.get(review.segment_id);
+          if (!segment) throw new Error(`Reviewed segment ${review.segment_id} is not in the validated source manifest.`);
+          return {
+            startByte: segment.startByte,
+            endByte: segment.endByte,
+            disposition: review.disposition,
+          };
+        });
+        accountingIssues = accountingStore.validateBatchReview({
+          structure: accountingStructure,
+          reviews: prospectiveReviews,
+          evidenceAssertions: prospectiveCoverage.assertions,
+          annotations: prospectiveCoverage.annotations,
+          unitDecisions: activeAccountingProposals.flatMap((proposal) => proposal.decisions.map((decision) => ({
+            ...decision,
+            proposalId: proposal.id,
+          }))),
+          requireExplicitSemanticDisposition: accountingSource.bytes >= EXPLICIT_SOURCE_ACCOUNTING_MIN_SOURCE_BYTES
+            && compilerBatchId.startsWith(`batch-${activeSourceId}-`)
+            && !activeBoundaryCalibration,
+        });
       }
       const [
         closureIssues,
@@ -2122,6 +2484,7 @@ export function createCompilerProposalToolset(
         ...finishIssueSection("Knowledge acquisition trace", acquisitionTraceIssues),
         ...finishIssueSection("Event-resolution graph", eventResolutionClosureIssues),
         ...finishIssueSection("Canonical event proposal trace", eventTraceIssues),
+        ...finishIssueSection("Source-unit accounting", accountingIssues),
         ...finishIssueSection(
           "Deterministic canonical commit preview",
           canonicalStructureIssues.flatMap((candidate) => candidate.errors.map((error) =>
@@ -2145,9 +2508,9 @@ export function createCompilerProposalToolset(
         await (await WorkspaceStore.create(workspaceRoot))
           .commitSourceTitleProposal(activeSourceId, pendingNovelTitleProposal.proposalId);
       }
-      const committedAnnotations = activeSourceId && listedAnnotations.length
-        ? await annotationStore.commitProposals(activeSourceId, listedAnnotations)
-        : [];
+      if (activeSourceId && listedAnnotations.length) {
+        await annotationStore.commitProposals(activeSourceId, listedAnnotations);
+      }
       if (activeSourceId && listedEntityResolutions.length) {
         await entityResolutionStore.commitProposals(activeSourceId, listedEntityResolutions);
       }
@@ -2155,30 +2518,26 @@ export function createCompilerProposalToolset(
         await eventResolutionStore.commitProposals(activeSourceId, listedEventResolutions);
       }
       if (activeSourceId && compilerBatchId && input.reviewed_segments.length) {
-        const workspace = await WorkspaceStore.create(workspaceRoot);
-        const source = await workspace.getSource(activeSourceId);
-        if (!source) return failFinish(`Unknown active compiler source: ${activeSourceId}`);
+        const source = accountingSource;
+        if (!source || !accountingStructure) return failFinish(`Source-accounting validation state was unavailable for ${activeSourceId}.`);
         const segmentsById = new Map(validatedSourceSegments.map((segment) => [segment.id, segment]));
-        const assertions: EvidenceAssertion[] = [];
-        for (const proposalId of listed) {
-          const envelope = await service.store.readEnvelope("pending", proposalId);
-          assertions.push(...evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []));
-        }
-        await new SourceAccountingStore(workspaceRoot).recordBatchReview({
+        await accountingStore.recordBatchReview({
           source,
-          structure: await ensureSourceStructure(workspaceRoot, source),
+          structure: accountingStructure,
           batchId: compilerBatchId,
           reviews: input.reviewed_segments.map((review) => {
             const segment = segmentsById.get(review.segment_id);
             if (!segment) throw new Error(`Reviewed segment ${review.segment_id} is not in the validated source manifest.`);
             return { segment, disposition: review.disposition, summary: review.summary };
           }),
-          evidenceAssertions: assertions,
-          annotations: committedAnnotations.map((annotation) => ({
-            id: annotation.id,
-            anchors: annotationAnchors(annotation),
-          })),
+          evidenceAssertions: prospectiveCoverage.assertions,
+          annotations: prospectiveCoverage.annotations,
+          unitDecisions: activeAccountingProposals.flatMap((proposal) => proposal.decisions.map((decision) => ({
+            ...decision,
+            proposalId: proposal.id,
+          }))),
         });
+        await accountingStore.acceptProposals(activeSourceId, listedAccounting);
       }
       finished = true;
       return {
@@ -2198,6 +2557,7 @@ export function createCompilerProposalToolset(
       ...annotationProposalTools,
       identityResolutionTool,
       eventResolutionTool,
+      accountSourceUnitsTool,
       withdrawTool,
       replaceBoundaryTool,
       finishTool,
@@ -2207,6 +2567,7 @@ export function createCompilerProposalToolset(
       successfulAnnotationProposalIds.clear();
       successfulEntityResolutionProposalIds.clear();
       successfulEventResolutionProposalIds.clear();
+      successfulAccountingProposalIds.clear();
       peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];
@@ -2306,9 +2667,43 @@ export function createCompilerProposalToolset(
           }
           successfulEventResolutionProposalIds.add(summary.id);
         }
+        for (const summary of await accountingStore.listBatchProposals(activeSourceId, compilerBatchId)) {
+          if (successfulProposalIds.has(summary.id)
+            || successfulAnnotationProposalIds.has(summary.id)
+            || successfulEntityResolutionProposalIds.has(summary.id)
+            || successfulEventResolutionProposalIds.has(summary.id)) {
+            throw new Error(`Compiler batch ${compilerBatchId} reuses proposal ID ${summary.id} across proposal stores.`);
+          }
+          successfulAccountingProposalIds.add(summary.id);
+        }
       }
     },
   };
+}
+
+function byteRangeCoveredBySegments(
+  startByte: number,
+  endByte: number,
+  segments: ReadonlyArray<Pick<SourceSegment, "startByte" | "endByte">>,
+): boolean {
+  const ranges = segments
+    .map((segment) => ({
+      startByte: Math.max(startByte, segment.startByte),
+      endByte: Math.min(endByte, segment.endByte),
+    }))
+    .filter((range) => range.endByte > range.startByte)
+    .sort((left, right) => left.startByte - right.startByte || left.endByte - right.endByte);
+  let cursor = startByte;
+  for (const range of ranges) {
+    if (range.startByte > cursor) return false;
+    cursor = Math.max(cursor, range.endByte);
+    if (cursor >= endByte) return true;
+  }
+  return false;
+}
+
+function byteRangesOverlap(leftStart: number, leftEnd: number, rightStart: number, rightEnd: number): boolean {
+  return leftStart < rightEnd && rightStart < leftEnd;
 }
 
 async function assertStableLogicalRevision(

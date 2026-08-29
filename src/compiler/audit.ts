@@ -61,6 +61,7 @@ import {
 import { compareStoryTime } from "../world/time.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
+export const NOVEL_SCALE_EVENT_THRESHOLD = 20;
 
 export type CompilerAuditReport = {
   version: 1;
@@ -976,7 +977,7 @@ export async function auditCompiler(
   }
   // Small fixtures and short stories may intentionally be sparse. The hard
   // semantic gate targets novel-scale compilations where omissions compound.
-  if (events.length >= 20) {
+  if (events.length >= NOVEL_SCALE_EVENT_THRESHOLD) {
     if ((eventEffectExplicitness ?? 0) < 0.65) {
       semanticIssues.push(`Only ${formatRatio(eventEffectExplicitness)} of canonical events have a typed state or knowledge effect (minimum 65%).`);
       events.filter((event) => event.observedOutcome.operations.length === 0 && (event.observedKnowledge?.operations.length ?? 0) === 0)
@@ -1098,7 +1099,7 @@ export async function auditCompiler(
     || characterOntologyValidation.length
     || relationshipOntologyValidation.length
     ? "not-ready"
-    : events.length < 20
+    : events.length < NOVEL_SCALE_EVENT_THRESHOLD
     ? "unknown"
     : semanticIssues.length
       ? "not-ready"
@@ -1375,7 +1376,7 @@ export async function auditCompiler(
       causalComponents: graph.components.length,
       largestCausalComponent: Math.max(0, ...graph.components.map((component) => component.length)),
       unconditionalRootEvents: graph.unconditionalRoots,
-      semanticReady: events.length >= 20
+      semanticReady: events.length >= NOVEL_SCALE_EVENT_THRESHOLD
         ? semanticIssues.length === 0
           && participationValidation.length === 0
           && relationValidation.length === 0

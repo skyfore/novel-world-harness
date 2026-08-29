@@ -14,6 +14,13 @@ import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { inspectPreparation } from "../src/workflow/prepare.js";
 import { canonicalJson, contentHash } from "../src/world/canonical.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { SourceAnnotationStore, annotationAnchors } from "../src/compiler/annotations.js";
+import { EntityResolutionStore } from "../src/compiler/entity-resolution.js";
+import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
+import { ensureSourceStructure } from "../src/compiler/structure.js";
+import { SegmentStore } from "../src/compiler/segments.js";
+import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
+import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
 
 const roots: string[] = [];
 
@@ -239,6 +246,101 @@ describe("explicit prepared-novel reparsing", () => {
     await expect(canon.getEventRelation("decision-causes-action")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(actors.listModels()).resolves.toEqual([]);
     await expect(canon.getProposition("cross-chapter-proposition")).resolves.toMatchObject({ id: "cross-chapter-proposition" });
+  });
+
+  it("invalidates current observations, resolutions, accounting, and exact bindings with a whole-source reparse", async () => {
+    const root = await temporaryRoot("nwh-reparse-compiler-metadata-");
+    const content = "Hero waits.\n";
+    const fixture = await createEvidenceFixture(root, content);
+    const batch = (await prepareCompilerBatches(root, fixture.source))
+      .find((candidate) => candidate.purpose === "source-review")!;
+    const bytes = Buffer.from(content, "utf8");
+    const heroStart = bytes.indexOf(Buffer.from("Hero"));
+    const heroAnchor = textAnchorForByteRange(fixture.source.id, bytes, heroStart, heroStart + 4);
+    const annotation = {
+      version: 1 as const,
+      id: "mention-hero-reparse",
+      sourceId: fixture.source.id,
+      annotationType: "entity-mention" as const,
+      anchor: heroAnchor,
+      surface: "Hero",
+      form: "proper" as const,
+      kindCandidates: ["character" as const],
+      confidence: 1,
+      derivation: {
+        runId: "reparse-metadata-test",
+        worker: "test",
+        ontologyVersion: "observation-v1" as const,
+      },
+    };
+    const annotationStore = new SourceAnnotationStore(root);
+    await annotationStore.replaceCurrent(fixture.source.id, [annotation]);
+    await new EntityResolutionStore(root).replaceCurrent(fixture.source.id, [{
+      version: 1,
+      id: "resolve-hero-reparse",
+      sourceId: fixture.source.id,
+      mentionId: annotation.id,
+      status: "resolved",
+      entityId: "hero",
+      candidates: [{
+        entityId: "hero",
+        confidence: 1,
+        basisMentionIds: [annotation.id],
+        evidenceAssertionIds: ["assert-hero-reparse"],
+        rationale: "Exact named mention.",
+      }],
+      rationale: "Exact named mention.",
+      derivation: {
+        runId: "reparse-metadata-test",
+        worker: "test",
+        ontologyVersion: "entity-resolution-v1",
+      },
+    }]);
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("Hero"),
+    });
+    const hero = await canon.getEntity("hero");
+    const assertion = {
+      version: 1 as const,
+      id: "assert-hero-reparse",
+      target: { artifactKind: "entity", artifactId: "hero", jsonPointer: "/canonicalName" },
+      anchors: [heroAnchor],
+      relation: "supports" as const,
+      strength: "explicit" as const,
+      derivation: {
+        runId: "reparse-metadata-test",
+        worker: "test",
+        ontologyVersion: "evidence-v1" as const,
+      },
+    };
+    const exactEvidence = new EvidenceAssertionStore(root);
+    await exactEvidence.replaceForArtifact("entity", "hero", contentHash(hero), [assertion]);
+    const segments = await new SegmentStore(root).list(fixture.source.id);
+    const accounting = new SourceAccountingStore(root);
+    await accounting.recordBatchReview({
+      source: fixture.source,
+      structure: await ensureSourceStructure(root, fixture.source),
+      batchId: batch.id,
+      reviews: segments.map((segment) => ({
+        segment,
+        disposition: "proposed" as const,
+        summary: "The named character is represented.",
+      })),
+      evidenceAssertions: [assertion],
+      annotations: [{ id: annotation.id, anchors: annotationAnchors(annotation) }],
+    });
+
+    await expect(invalidatePreparationArtifacts(root, fixture.source.id, [batch], true)).resolves.toBe(4);
+    await expect(annotationStore.list(fixture.source.id)).resolves.toEqual([]);
+    await expect(new EntityResolutionStore(root).list(fixture.source.id)).resolves.toEqual([]);
+    await expect(accounting.read(fixture.source.id)).resolves.toBeNull();
+    await expect(exactEvidence.bindingForArtifact("entity", "hero")).resolves.toBeNull();
+    await expect(canon.getEntity("hero")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rebuilds the whole source and opening state, retaining the prior revision", async () => {

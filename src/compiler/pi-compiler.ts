@@ -1,7 +1,12 @@
 import { PiAgentSession, type PiAgentSessionOptions } from "../agent/pi-session.js";
 import type { LlmProfile } from "../config/schema.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import { BOUNDARY_CALIBRATION_TOOL_NAMES, COMPILER_TOOL_NAMES, createCompilerProposalToolset } from "./proposal-tools.js";
+import {
+  BOUNDARY_CALIBRATION_TOOL_NAMES,
+  COMPILER_TOOL_NAMES,
+  SOURCE_ACCOUNTING_TOOL_NAMES,
+  createCompilerProposalToolset,
+} from "./proposal-tools.js";
 import { SOURCE_EVIDENCE_TOOL_NAMES } from "./source-evidence-retrieval.js";
 import { CHAPTER_SPLIT_DISCOVERY_VERSION } from "./chapter-split.js";
 
@@ -17,7 +22,7 @@ Your output is always a typed pending proposal until deterministic host validati
 export function compilerModeInstructions(includeLocalTools: boolean): string {
   return includeLocalTools
     ? `Compiler mode is enabled. Use read-only local evidence tools only when this explicit manual compiler session exposes them. Use find_source_evidence/read_source_evidence when they are present for exact text from the one active novel, find_source_annotations/read_source_annotation for prior source observations, entity/event candidate and resolution retrieval for explicit identity decisions, and find_compiler_artifacts/read_compiler_artifact for exact source-scoped prior world semantics. Then use only the typed compiler tools for proposing, withdrawing defective current-batch candidates, and finishing the batch. A source annotation is not a resolved identity; a resolution is not canonical truth; a world proposal is not committed truth. Link attributed discourse to quotation IDs and resolved speakers; link semantic knowledge acquisition to a compatible legacy claim, proposition, attribution when applicable, and explicit acquisition mode. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`
-    : `Compiler batch mode is enabled. Do not list, search, or read workspace files. When find_source_evidence/read_source_evidence are absent, the host-supplied evidence slice is the complete citable raw source text. Cite only its host-issued segment IDs in evidence_segment_ids; for material fields and relations, also submit exact copied source wording and payload JSON Pointers through evidence_selectors. The host constructs trusted offsets and hashes. An exposed peek_adjacent_evidence tool is the sole exception for one bounded context-only edge preview; it supplies no citable segment ID and cannot ground a proposal. A separately queued boundary calibration receives both full neighboring slices as its new citable boundary. When whole-source evidence tools are present, they remain bound to the active novel. You may use find_source_annotations/read_source_annotation for source-local mention/discourse continuity, entity/event candidate and resolution retrieval for explicit identity decisions, and find_compiler_artifacts/read_compiler_artifact for exact source-scoped prior world semantics. Use only the typed compiler tools for proposing, withdrawing defective current-batch candidates, requesting boundary calibration, replacing a partial adjacent draft inside that calibration, and finishing the batch. A source annotation is not a resolved identity; a resolution is not canonical truth; a world proposal is not committed truth. Link attributed discourse to quotation IDs and resolved speakers; link semantic knowledge acquisition to a compatible legacy claim, proposition, attribution when applicable, and explicit acquisition mode. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`;
+    : `Compiler batch mode is enabled. Do not list, search, or read workspace files. When find_source_evidence/read_source_evidence are absent, the host-supplied evidence slice is the complete citable raw source text. Cite only its host-issued segment IDs in evidence_segment_ids; for material fields and relations, also submit exact copied source wording and payload JSON Pointers through evidence_selectors. The host constructs trusted offsets and hashes. In an ordinary novel-scale source batch, page find_source_accounting_units and use account_source_units for every unrepresented semantic unit; represented coverage is host-derived and cannot be declared by the model. An exposed peek_adjacent_evidence tool is the sole exception for one bounded context-only edge preview; it supplies no citable segment ID and cannot ground a proposal. A separately queued boundary calibration receives both full neighboring slices as its new citable boundary. When whole-source evidence tools are present, they remain bound to the active novel. You may use find_source_annotations/read_source_annotation for source-local mention/discourse continuity, entity/event candidate and resolution retrieval for explicit identity decisions, and find_compiler_artifacts/read_compiler_artifact for exact source-scoped prior world semantics. Use only the typed compiler tools for proposing, withdrawing defective current-batch candidates, requesting boundary calibration, replacing a partial adjacent draft inside that calibration, and finishing the batch. A source annotation is not a resolved identity; a resolution is not canonical truth; a world proposal is not committed truth. Link attributed discourse to quotation IDs and resolved speakers; link semantic knowledge acquisition to a compatible legacy claim, proposition, attribution when applicable, and explicit acquisition mode. Prefer small evidence-backed proposals over broad unsupported extraction. Never use future canonical events as actor knowledge or runtime branch truth.`;
 }
 
 export type PiCompilerOptions = {
@@ -88,6 +93,11 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     options.sourceId
     && options.compilerBatchId === `structure-${options.sourceId}-v${CHAPTER_SPLIT_DISCOVERY_VERSION}`,
   );
+  const ordinarySourceReview = Boolean(
+    options.segmentIds?.length
+    && options.sourceId
+    && options.compilerBatchId?.startsWith(`batch-${options.sourceId}-`),
+  );
   const disabledProposalTools = new Set([
     ...(structureDiscovery
       ? COMPILER_TOOL_NAMES.filter((name) => !["configure_chapter_split", "finish_compiler_batch"].includes(name))
@@ -95,6 +105,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     ...(options.segmentIds ? SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS : []),
     ...(options.segmentIds ? BOUNDED_SLICE_DISABLED_TOOLS : []),
     ...(options.enableBoundaryCalibration ? [] : BOUNDARY_CALIBRATION_TOOL_NAMES),
+    ...(ordinarySourceReview ? [] : SOURCE_ACCOUNTING_TOOL_NAMES),
     ...(
       options.sourceId
       && options.compilerBatchId?.startsWith(`batch-${options.sourceId}-`)

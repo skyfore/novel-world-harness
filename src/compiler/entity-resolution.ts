@@ -273,6 +273,20 @@ export class EntityResolutionStore {
     return resolutions.sort((left, right) => left.mentionId.localeCompare(right.mentionId));
   }
 
+  /** Replace materialized mention refs exactly while preserving immutable history. */
+  async replaceCurrent(sourceIdInput: string, resolutionsInput: readonly IdentityResolution[]): Promise<void> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const resolutions = resolutionsInput.map((resolution) => identityResolutionSchema.parse(resolution));
+    if (resolutions.some((resolution) => resolution.sourceId !== sourceId)) {
+      throw new Error(`Identity-resolution snapshot contains a decision outside source ${sourceId}.`);
+    }
+    if (new Set(resolutions.map((resolution) => resolution.mentionId)).size !== resolutions.length) {
+      throw new Error(`Identity-resolution snapshot for ${sourceId} assigns a mention more than once.`);
+    }
+    await fs.rm(this.refsDirectory(sourceId), { recursive: true, force: true });
+    for (const resolution of resolutions) await this.bindResolution(sourceId, resolution);
+  }
+
   async rejectBatch(compilerBatchId: string): Promise<string[]> {
     idSchema.parse(compilerBatchId);
     const rejected: string[] = [];

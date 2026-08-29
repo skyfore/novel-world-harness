@@ -1,4 +1,4 @@
-import { auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
+import { NOVEL_SCALE_EVENT_THRESHOLD, auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
 import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatch } from "../compiler/batches.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { CanonicalModelStore, ProposalStore, type ProposalSummary } from "../world/canonical-model.js";
@@ -30,6 +30,31 @@ export type PreparationInspection = {
   repairReasons?: string[];
   next: string;
 };
+
+type NovelScalePublicationAudit = {
+  canonical: Pick<CompilerAuditReport["canonical"], "events">;
+  readiness: Pick<CompilerAuditReport["readiness"], "evidence" | "accounting" | "resolution" | "blockingIssues">;
+  observations: Pick<CompilerAuditReport["observations"], "unaccountedUnits" | "blockingUnits">;
+  resolutions: Pick<CompilerAuditReport["resolutions"], "missing" | "ambiguous" | "unresolved">;
+  eventResolutions: Pick<CompilerAuditReport["eventResolutions"], "missing" | "ambiguous" | "unresolved">;
+};
+
+/** A novel-scale branch cannot be published while core traceability is merely unknown or partial. */
+export function novelScalePublicationRepairReasons(audit: NovelScalePublicationAudit): string[] {
+  if (audit.canonical.events < NOVEL_SCALE_EVENT_THRESHOLD) return [];
+  const required = (["evidence", "accounting", "resolution"] as const)
+    .filter((dimension) => audit.readiness[dimension] !== "ready");
+  if (!required.length) return [];
+  const detail = [
+    `exact evidence=${audit.readiness.evidence}`,
+    `source accounting=${audit.readiness.accounting} (${audit.observations.unaccountedUnits} unaccounted, ${audit.observations.blockingUnits} blocking unit(s))`,
+    `identity/event resolution=${audit.readiness.resolution} (${audit.resolutions.missing + audit.eventResolutions.missing} missing, ${audit.resolutions.ambiguous + audit.resolutions.unresolved + audit.eventResolutions.ambiguous + audit.eventResolutions.unresolved} ambiguous/unresolved mention(s))`,
+  ].join("; ");
+  return [
+    `Novel-scale publication requires ready exact-evidence, source-accounting, and identity/event-resolution dimensions; ${detail}.`,
+    ...audit.readiness.blockingIssues.slice(0, 20),
+  ];
+}
 
 export async function resolvePreparationBranchId(
   workspaceRoot: string,
@@ -207,6 +232,17 @@ export async function inspectPreparation(
       audit,
       repairReasons: preparationRepairReasons(audit),
       stage: "repair",
+      next: `nwh audit --source ${source.id}`,
+    };
+  }
+
+  const novelScaleRepairReasons = novelScalePublicationRepairReasons(audit);
+  if (novelScaleRepairReasons.length) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: novelScaleRepairReasons,
       next: `nwh audit --source ${source.id}`,
     };
   }

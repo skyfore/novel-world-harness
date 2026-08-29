@@ -11,7 +11,7 @@ export type CompilerBatchOutcome = {
 };
 
 export function isCompilerProposalTool(toolName: string): boolean {
-  return toolName.startsWith("propose_");
+  return toolName.startsWith("propose_") || toolName === "account_source_units";
 }
 
 export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): CompilerBatchOutcome {

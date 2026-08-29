@@ -265,6 +265,24 @@ export class WorkspaceStore {
     return next;
   }
 
+  /** Replace prepared title metadata exactly; null restores the local ingest label. */
+  async replaceSourceTitleInference(sourceId: string, value: SourceTitleInference | null): Promise<SourceDocument> {
+    if (value) return this.restoreSourceTitleInference(sourceId, value);
+    const source = await this.getSource(sourceId);
+    if (!source) throw new Error(`Unknown source id: ${sourceId}`);
+    const { titleInference: _inference, pendingTitleProposal: _pending, ...retained } = source;
+    const fallbackTitle = source.sourcePath.startsWith("content:")
+      ? source.sourcePath.slice("content:".length)
+      : path.basename(source.sourcePath);
+    const next: SourceDocument = {
+      ...retained,
+      title: fallbackTitle || "novel.txt",
+      updatedAt: new Date().toISOString(),
+    };
+    await atomicJson(path.join(this.sourcesDir, stateFileName(sourceId)), next);
+    return next;
+  }
+
   private async registerSourceBytes(fallbackTitle: string, content: Uint8Array, sourcePath: string): Promise<SourceDocument> {
     const identity = await new SourceMaterialStore().put(content, fallbackTitle);
     const id = identity.contentSha256.slice(0, 20);

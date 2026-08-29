@@ -48,48 +48,88 @@ import {
   sourceTitleInferenceSchema,
 } from "../storage/novel-title.js";
 import { EvidenceVerifier } from "./evidence.js";
-import { EvidenceAssertionStore } from "./evidence-assertions.js";
+import {
+  EvidenceAssertionStore,
+  evidenceAssertionBindingSnapshotSchema,
+  validateEvidenceAssertionTargets,
+  type EvidenceAssertionBindingSnapshot,
+} from "./evidence-assertions.js";
+import { SourceAnnotationStore, annotationAnchors, sourceAnnotationSchema } from "./annotations.js";
+import { EntityResolutionStore, identityResolutionSchema } from "./entity-resolution.js";
+import { EventResolutionStore, eventResolutionSchema } from "./event-resolution.js";
+import { SourceStructureStore, sourceStructureManifestSchema } from "./structure.js";
+import { SourceAccountingStore, sourceAccountingManifestSchema } from "./source-accounting.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 23;
+export const COMPILER_PROMPT_VERSION = 24;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
-const preparedNovelBundleSchema = z.object({
-  version: z.literal(1),
-  source: z.object({
-    id: z.string().min(1),
-    contentMd5: md5Schema,
-    contentSha256: digestSchema,
-    titleInference: sourceTitleInferenceSchema.optional(),
-  }).strict(),
+const preparedSourceSchema = z.object({
+  id: z.string().min(1),
+  contentMd5: md5Schema,
+  contentSha256: digestSchema,
+  titleInference: sourceTitleInferenceSchema.optional(),
+}).strict();
+
+const compilerFingerprintSchema = z.object({
+  pipelineVersion: z.number().int().positive(),
+  promptVersion: z.number().int().positive(),
+  engineVersion: z.string().min(1),
+  stateSchemaHash: digestSchema,
+}).strict();
+
+const preparedCanonicalSchema = z.object({
+  entities: z.array(entitySchema),
+  propositions: z.array(propositionSchema).default([]),
+  attributions: z.array(attributionSchema).default([]),
+  claims: z.array(claimSchema),
+  events: z.array(canonicalEventSchema),
+  eventParticipations: z.array(eventParticipationSchema).default([]),
+  eventRelations: z.array(eventRelationSchema).default([]),
+  spatialRelations: z.array(spatialRelationSchema).default([]),
+  rules: z.array(worldRuleSchema),
+  initialWorld: initialWorldSchema,
+  goals: z.array(characterGoalSchema),
+  models: z.array(characterModelSchema),
+  possibilities: z.array(possibilityTemplateSchema),
+}).strict();
+
+const preparedCompilerSnapshotSchema = z.object({
+  evidenceBindings: z.array(evidenceAssertionBindingSnapshotSchema),
+  structure: sourceStructureManifestSchema,
+  annotations: z.array(sourceAnnotationSchema),
+  entityResolutions: z.array(identityResolutionSchema),
+  eventResolutions: z.array(eventResolutionSchema),
+  accounting: sourceAccountingManifestSchema.nullable(),
+}).strict();
+
+const preparedBundleCommonShape = {
+  source: preparedSourceSchema,
   segmenterVersion: z.number().int().positive(),
-  compilerFingerprint: z.object({
-    pipelineVersion: z.number().int().positive(),
-    promptVersion: z.number().int().positive(),
-    engineVersion: z.string().min(1),
-    stateSchemaHash: digestSchema,
-  }).strict().optional(),
+  compilerFingerprint: compilerFingerprintSchema.optional(),
   chapterSplitPlan: chapterSplitPlanSchema.optional(),
   batchIds: z.array(z.string().min(1)),
-  canonical: z.object({
-    entities: z.array(entitySchema),
-    propositions: z.array(propositionSchema).default([]),
-    attributions: z.array(attributionSchema).default([]),
-    claims: z.array(claimSchema),
-    events: z.array(canonicalEventSchema),
-    eventParticipations: z.array(eventParticipationSchema).default([]),
-    eventRelations: z.array(eventRelationSchema).default([]),
-    spatialRelations: z.array(spatialRelationSchema).default([]),
-    rules: z.array(worldRuleSchema),
-    initialWorld: initialWorldSchema,
-    goals: z.array(characterGoalSchema),
-    models: z.array(characterModelSchema),
-    possibilities: z.array(possibilityTemplateSchema),
-  }).strict(),
+  canonical: preparedCanonicalSchema,
+};
+
+const preparedNovelBundleV1Schema = z.object({
+  version: z.literal(1),
+  ...preparedBundleCommonShape,
 }).strict();
+
+const preparedNovelBundleV2Schema = z.object({
+  version: z.literal(2),
+  ...preparedBundleCommonShape,
+  compilerSnapshot: preparedCompilerSnapshotSchema,
+}).strict();
+
+const preparedNovelBundleSchema = z.discriminatedUnion("version", [
+  preparedNovelBundleV1Schema,
+  preparedNovelBundleV2Schema,
+]);
 
 export type PreparedNovelBundle = z.infer<typeof preparedNovelBundleSchema>;
 
@@ -106,6 +146,49 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     || bundle.chapterSplitPlan.sourceSha256 !== bundle.source.contentSha256
   )) {
     throw new Error("Prepared bundle chapter split plan does not match its source identity.");
+  }
+  if (bundle.version === 2) {
+    const snapshot = bundle.compilerSnapshot;
+    if (snapshot.structure.sourceId !== sourceId
+      || snapshot.structure.sourceSha256 !== bundle.source.contentSha256) {
+      throw new Error("Prepared compiler structure snapshot does not match its source identity.");
+    }
+    for (const annotation of snapshot.annotations) {
+      if (annotation.sourceId !== sourceId
+        || annotationAnchors(annotation).some((anchor) => anchor.sourceId !== sourceId)) {
+        throw new Error(`Prepared source annotation ${annotation.id} escapes source ${sourceId}.`);
+      }
+    }
+    for (const resolution of [...snapshot.entityResolutions, ...snapshot.eventResolutions]) {
+      if (resolution.sourceId !== sourceId) {
+        throw new Error(`Prepared resolution ${resolution.id} escapes source ${sourceId}.`);
+      }
+    }
+    if (snapshot.accounting && (
+      snapshot.accounting.sourceId !== sourceId
+      || snapshot.accounting.sourceSha256 !== bundle.source.contentSha256
+    )) {
+      throw new Error("Prepared source-accounting snapshot does not match its source identity.");
+    }
+    const bindingKeys = new Set<string>();
+    const artifactsByKey = new Map<string, { kind: string; id: string; payload: unknown }>(preparedArtifactDescriptors(bundle.canonical)
+      .map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const));
+    for (const binding of snapshot.evidenceBindings) {
+      const key = `${binding.artifactKind}/${binding.artifactId}`;
+      if (bindingKeys.has(key)) throw new Error(`Prepared compiler snapshot repeats exact-evidence binding ${key}.`);
+      bindingKeys.add(key);
+      const artifact = artifactsByKey.get(key);
+      if (!artifact || contentHash(artifact.payload) !== binding.artifactHash) {
+        throw new Error(`Prepared exact-evidence binding ${key} is missing its artifact or has a stale artifact hash.`);
+      }
+      for (const assertion of binding.assertions) {
+        if (assertion.target.artifactKind !== binding.artifactKind
+          || assertion.target.artifactId !== binding.artifactId
+          || assertion.anchors.some((anchor) => anchor.sourceId !== sourceId)) {
+          throw new Error(`Prepared exact-evidence assertion ${assertion.id} has an invalid source or artifact target.`);
+        }
+      }
+    }
   }
   const collections = [
     bundle.canonical.entities,
@@ -426,8 +509,9 @@ export class PreparedNovelCache {
     const pending = await new ProposalStore(this.workspaceRoot).list("pending", source.id);
     const registeredSource = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(source.id);
     const pendingTitle = registeredSource?.pendingTitleProposal ? 1 : 0;
-    if (pending.length || pendingTitle) {
-      throw new Error(`Cannot activate a prepared revision while ${pending.length + pendingTitle} source proposal(s) are pending.`);
+    const pendingCompilerMetadata = await pendingSourceCompilerMetadataCount(this.workspaceRoot, source.id);
+    if (pending.length || pendingTitle || pendingCompilerMetadata) {
+      throw new Error(`Cannot activate a prepared revision while ${pending.length + pendingTitle + pendingCompilerMetadata} source proposal(s) are pending.`);
     }
     const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
     if (layoutIssue && !options.allowIncompatibleRollback) throw new Error(layoutIssue);
@@ -455,6 +539,10 @@ export class PreparedNovelCache {
     const proposals = new ProposalStore(this.workspaceRoot);
     const pending = await proposals.list("pending", source.id);
     if (pending.length) throw new Error(`Cannot cache ${source.id}: ${pending.length} source proposal(s) are still pending.`);
+    const pendingCompilerMetadata = await pendingSourceCompilerMetadataCount(this.workspaceRoot, source.id);
+    if (pendingCompilerMetadata) {
+      throw new Error(`Cannot cache ${source.id}: ${pendingCompilerMetadata} source observation/resolution/accounting proposal(s) are still pending.`);
+    }
     // Refresh because the successful opening batch can replace the ingest
     // label with accepted model-derived title metadata while callers retain an
     // older SourceDocument snapshot.
@@ -501,8 +589,49 @@ export class PreparedNovelCache {
       new PossibilityTemplateStore(this.workspaceRoot).list(),
     ]);
     const chapterSplitPlan = await new ChapterSplitPlanStore(this.workspaceRoot).read(source.id);
+    const preparedCanonical = preparedCanonicalSchema.parse({
+      entities: fromSource(entities),
+      propositions: fromSource(propositions),
+      attributions: fromSource(attributions),
+      claims: fromSource(claims),
+      events: fromSource(events),
+      eventParticipations: fromSource(eventParticipations),
+      eventRelations: fromSource(eventRelations),
+      spatialRelations: fromSource(spatialRelations),
+      rules: fromSource(rules),
+      initialWorld,
+      goals: fromSource(goals),
+      models: fromSource(models),
+      possibilities: fromSource(possibilities),
+    });
+    const structure = await new SourceStructureStore(this.workspaceRoot).read(source.id);
+    if (!structure || structure.sourceSha256 !== source.contentSha256) {
+      throw new Error(`Cannot cache ${source.id}: source structure is missing or stale.`);
+    }
+    const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
+    const evidenceBindings: EvidenceAssertionBindingSnapshot[] = [];
+    for (const artifact of preparedArtifactDescriptors(preparedCanonical)) {
+      const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
+      if (!binding) continue;
+      const artifactHash = contentHash(artifact.payload);
+      if (binding.artifactHash !== artifactHash) {
+        throw new Error(`Cannot cache ${source.id}: exact-evidence binding ${artifact.kind}/${artifact.id} is stale.`);
+      }
+      evidenceBindings.push(evidenceAssertionBindingSnapshotSchema.parse({
+        artifactKind: artifact.kind,
+        artifactId: artifact.id,
+        artifactHash,
+        assertions: binding.assertions,
+      }));
+    }
+    const [annotations, entityResolutions, eventResolutions, accounting] = await Promise.all([
+      new SourceAnnotationStore(this.workspaceRoot).list(source.id),
+      new EntityResolutionStore(this.workspaceRoot).list(source.id),
+      new EventResolutionStore(this.workspaceRoot).list(source.id),
+      new SourceAccountingStore(this.workspaceRoot).read(source.id),
+    ]);
     const bundle = preparedNovelBundleSchema.parse({
-      version: 1,
+      version: 2,
       source: {
         id: source.id,
         ...identity,
@@ -519,24 +648,20 @@ export class PreparedNovelCache {
         .filter((batch) => batch.purpose !== "boundary-calibration")
         .map((batch) => batch.id)
         .sort(),
-      canonical: {
-        entities: fromSource(entities),
-        propositions: fromSource(propositions),
-        attributions: fromSource(attributions),
-        claims: fromSource(claims),
-        events: fromSource(events),
-        eventParticipations: fromSource(eventParticipations),
-        eventRelations: fromSource(eventRelations),
-        spatialRelations: fromSource(spatialRelations),
-        rules: fromSource(rules),
-        initialWorld,
-        goals: fromSource(goals),
-        models: fromSource(models),
-        possibilities: fromSource(possibilities),
+      canonical: preparedCanonical,
+      compilerSnapshot: {
+        evidenceBindings: evidenceBindings.sort((left, right) =>
+          left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
+        structure,
+        annotations,
+        entityResolutions,
+        eventResolutions,
+        accounting,
       },
     });
     await this.assertTitleInferenceEvidence(bundle);
     assertPreparedBundleSourceScope(bundle);
+    await assertPreparedCompilerSnapshotEvidence(this.workspaceRoot, bundle);
     await assertPreparedCharacterEvidence(this.workspaceRoot, bundle);
     await assertPreparedSpatialEvidence(this.workspaceRoot, bundle);
     await assertPreparedWorldRuleEvidence(this.workspaceRoot, bundle);
@@ -554,11 +679,12 @@ export class PreparedNovelCache {
       workspace.getSource(bundle.source.id),
     ]);
     const pendingTitle = source?.pendingTitleProposal ? 1 : 0;
-    if (pending.length || pendingTitle || branchIds.length) {
+    const pendingCompilerMetadata = await pendingSourceCompilerMetadataCount(this.workspaceRoot, bundle.source.id);
+    if (pending.length || pendingTitle || pendingCompilerMetadata || branchIds.length) {
       return {
         compatible: false,
         empty: false,
-        reason: `Workspace has ${pending.length + pendingTitle} pending proposal(s) and ${branchIds.length} branch(es); cached baselines are restored only before local world evolution starts.`,
+        reason: `Workspace has ${pending.length + pendingTitle + pendingCompilerMetadata} pending proposal(s) and ${branchIds.length} branch(es); cached baselines are restored only before local world evolution starts.`,
       };
     }
     const current = await currentCanonical(this.workspaceRoot);
@@ -590,13 +716,32 @@ export class PreparedNovelCache {
     if (current.initialWorld && canonicalJson(current.initialWorld) !== canonicalJson(expected.initialWorld)) {
       return { compatible: false, empty: false, reason: "Workspace initial world differs from the active prepared revision." };
     }
-    const empty = !current.initialWorld && groups.every(([, actual]) => actual.length === 0);
-    return { compatible: true, empty };
+    const canonicalEmpty = !current.initialWorld && groups.every(([, actual]) => actual.length === 0);
+    if (bundle.version === 2) {
+      const snapshot = await this.readCompilerSnapshot(bundle);
+      const compilerEmpty = snapshot.annotations.length === 0
+        && snapshot.entityResolutions.length === 0
+        && snapshot.eventResolutions.length === 0
+        && snapshot.evidenceBindings.length === 0
+        && snapshot.accounting === null;
+      if ((!canonicalEmpty || !compilerEmpty)
+        && canonicalJson(snapshot) !== canonicalJson(bundle.compilerSnapshot)) {
+        return {
+          compatible: false,
+          empty: false,
+          reason: "Workspace compiler evidence/observation state differs from the active prepared revision.",
+        };
+      }
+      return { compatible: true, empty: canonicalEmpty && compilerEmpty };
+    }
+    return { compatible: true, empty: canonicalEmpty };
   }
 
   private async freshnessIssue(bundle: PreparedNovelBundle): Promise<string | null> {
     const pending = await new ProposalStore(this.workspaceRoot).list("pending", bundle.source.id);
     if (pending.length) return `${pending.length} source proposal(s) are pending`;
+    const pendingCompilerMetadata = await pendingSourceCompilerMetadataCount(this.workspaceRoot, bundle.source.id);
+    if (pendingCompilerMetadata) return `${pendingCompilerMetadata} source observation/resolution/accounting proposal(s) are pending`;
     const source = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(bundle.source.id);
     if (source?.pendingTitleProposal) return "a novel-title proposal is pending";
     if (canonicalJson(source?.titleInference ?? null) !== canonicalJson(bundle.source.titleInference ?? null)) {
@@ -636,7 +781,17 @@ export class PreparedNovelCache {
     // Once any accepted artifact for this source is present, however, require
     // the complete source-scoped snapshot to match so newer partial revisions
     // cannot be silently ignored.
-    const hasMaterializedSource = groups.some(([, actual]) => actual.length > 0) || Boolean(currentInitialForSource);
+    const currentCompilerSnapshot = bundle.version === 2 ? await this.readCompilerSnapshot(bundle) : undefined;
+    const hasCompilerMaterialized = Boolean(currentCompilerSnapshot && (
+      currentCompilerSnapshot.annotations.length
+      || currentCompilerSnapshot.entityResolutions.length
+      || currentCompilerSnapshot.eventResolutions.length
+      || currentCompilerSnapshot.evidenceBindings.length
+      || currentCompilerSnapshot.accounting
+    ));
+    const hasMaterializedSource = groups.some(([, actual]) => actual.length > 0)
+      || Boolean(currentInitialForSource)
+      || hasCompilerMaterialized;
     if (!hasMaterializedSource) return null;
     for (const [label, actual, expected, idOf] of groups) {
       const normalize = (items: readonly unknown[]) => [...items]
@@ -647,21 +802,69 @@ export class PreparedNovelCache {
     if (!currentInitialForSource || canonicalJson(currentInitialForSource) !== canonicalJson(bundle.canonical.initialWorld)) {
       return "initial world differs";
     }
+    if (bundle.version === 2) {
+      if (canonicalJson(currentCompilerSnapshot) !== canonicalJson(bundle.compilerSnapshot)) {
+        return "source observations, identity resolutions, accounting, or exact evidence bindings differ";
+      }
+    }
     return null;
+  }
+
+  private async readCompilerSnapshot(bundle: PreparedNovelBundle): Promise<{
+    evidenceBindings: EvidenceAssertionBindingSnapshot[];
+    structure: Awaited<ReturnType<SourceStructureStore["read"]>>;
+    annotations: Awaited<ReturnType<SourceAnnotationStore["list"]>>;
+    entityResolutions: Awaited<ReturnType<EntityResolutionStore["list"]>>;
+    eventResolutions: Awaited<ReturnType<EventResolutionStore["list"]>>;
+    accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
+  }> {
+    const sourceId = bundle.source.id;
+    const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
+    const evidenceBindings: EvidenceAssertionBindingSnapshot[] = [];
+    for (const artifact of preparedArtifactDescriptors(bundle.canonical)) {
+      const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
+      if (!binding) continue;
+      evidenceBindings.push(evidenceAssertionBindingSnapshotSchema.parse({
+        artifactKind: artifact.kind,
+        artifactId: artifact.id,
+        artifactHash: binding.artifactHash,
+        assertions: binding.assertions,
+      }));
+    }
+    const [structure, annotations, entityResolutions, eventResolutions, accounting] = await Promise.all([
+      new SourceStructureStore(this.workspaceRoot).read(sourceId),
+      new SourceAnnotationStore(this.workspaceRoot).list(sourceId),
+      new EntityResolutionStore(this.workspaceRoot).list(sourceId),
+      new EventResolutionStore(this.workspaceRoot).list(sourceId),
+      new SourceAccountingStore(this.workspaceRoot).read(sourceId),
+    ]);
+    return {
+      evidenceBindings: evidenceBindings.sort((left, right) =>
+        left.artifactKind.localeCompare(right.artifactKind) || left.artifactId.localeCompare(right.artifactId)),
+      structure,
+      annotations,
+      entityResolutions,
+      eventResolutions,
+      accounting,
+    };
   }
 
   private async materialize(bundle: PreparedNovelBundle, exact: boolean): Promise<void> {
     const sourceId = bundle.source.id;
     const workspace = await WorkspaceStore.create(this.workspaceRoot);
+    await assertPreparedCompilerSnapshotEvidence(this.workspaceRoot, bundle);
     if (bundle.source.titleInference) {
       await this.assertTitleInferenceEvidence(bundle);
-      await workspace.restoreSourceTitleInference(sourceId, bundle.source.titleInference);
     }
+    await workspace.replaceSourceTitleInference(sourceId, bundle.source.titleInference ?? null);
     const canonical = new CanonicalModelStore(this.workspaceRoot);
     const actors = new ActorModelStore(this.workspaceRoot);
     const possibilities = new PossibilityTemplateStore(this.workspaceRoot);
+    const currentBefore = exact || bundle.version === 2
+      ? await currentCanonical(this.workspaceRoot)
+      : undefined;
     if (exact) {
-      const current = await currentCanonical(this.workspaceRoot);
+      const current = currentBefore!;
       const removeMissing = async <T extends { evidence: readonly { span: { sourceId: string } }[] }>(
         items: readonly T[],
         expectedIds: ReadonlySet<string>,
@@ -699,6 +902,47 @@ export class PreparedNovelCache {
     for (const goal of bundle.canonical.goals) await actors.putGoal(goal);
     for (const model of bundle.canonical.models) await actors.putModel(model);
     for (const possibility of bundle.canonical.possibilities) await possibilities.put(possibility);
+    if (bundle.version === 2) {
+      const snapshot = bundle.compilerSnapshot;
+      await new SourceStructureStore(this.workspaceRoot).write(snapshot.structure);
+      await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.annotations);
+      await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.entityResolutions);
+      await new EventResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.eventResolutions);
+      await new SourceAccountingStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.accounting);
+      const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
+      const currentDescriptors = currentBefore
+        ? preparedArtifactDescriptors(currentBefore)
+          .filter((artifact) => artifactBelongsToSource(artifact.payload, sourceId))
+        : [];
+      const bindingKeys = new Map([
+        ...currentDescriptors.map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
+        ...preparedArtifactDescriptors(bundle.canonical).map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
+      ]);
+      for (const artifact of bindingKeys.values()) {
+        await exactEvidence.removeForArtifact(artifact.kind, artifact.id);
+      }
+      await exactEvidence.restoreBindings(snapshot.evidenceBindings);
+    } else {
+      // Legacy bundles did not carry compiler observations or exact evidence.
+      // Exact activation must materialize that honest absence instead of
+      // retaining metadata from a newer, potentially failed compilation.
+      await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, []);
+      await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, []);
+      await new EventResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, []);
+      await new SourceAccountingStore(this.workspaceRoot).replaceCurrent(sourceId, null);
+      const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
+      const currentDescriptors = currentBefore
+        ? preparedArtifactDescriptors(currentBefore)
+          .filter((artifact) => artifactBelongsToSource(artifact.payload, sourceId))
+        : [];
+      const bindingKeys = new Map([
+        ...currentDescriptors.map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
+        ...preparedArtifactDescriptors(bundle.canonical).map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
+      ]);
+      for (const artifact of bindingKeys.values()) {
+        await exactEvidence.removeForArtifact(artifact.kind, artifact.id);
+      }
+    }
     const chapterSplits = new ChapterSplitPlanStore(this.workspaceRoot);
     if (bundle.chapterSplitPlan) await chapterSplits.write(bundle.chapterSplitPlan);
     else await chapterSplits.remove(sourceId);
@@ -882,6 +1126,60 @@ function belongsExclusivelyToSource(
   return item.evidence.length > 0 && item.evidence.every((reference) => reference.span.sourceId === sourceId);
 }
 
+type PreparedCanonical = z.infer<typeof preparedCanonicalSchema>;
+
+function preparedArtifactDescriptors(canonical: {
+  entities: PreparedCanonical["entities"];
+  propositions: PreparedCanonical["propositions"];
+  attributions: PreparedCanonical["attributions"];
+  claims: PreparedCanonical["claims"];
+  events: PreparedCanonical["events"];
+  eventParticipations: PreparedCanonical["eventParticipations"];
+  eventRelations: PreparedCanonical["eventRelations"];
+  spatialRelations: PreparedCanonical["spatialRelations"];
+  rules: PreparedCanonical["rules"];
+  initialWorld: PreparedCanonical["initialWorld"] | null;
+  goals: PreparedCanonical["goals"];
+  models: PreparedCanonical["models"];
+  possibilities: PreparedCanonical["possibilities"];
+}): Array<{ kind: string; id: string; payload: unknown }> {
+  return [
+    ...canonical.entities.map((payload) => ({ kind: "entity", id: payload.id, payload })),
+    ...canonical.propositions.map((payload) => ({ kind: "proposition", id: payload.id, payload })),
+    ...canonical.attributions.map((payload) => ({ kind: "attribution", id: payload.id, payload })),
+    ...canonical.claims.map((payload) => ({ kind: "claim", id: payload.id, payload })),
+    ...canonical.events.map((payload) => ({ kind: "canonical-event", id: payload.id, payload })),
+    ...canonical.eventParticipations.map((payload) => ({ kind: "event-participation", id: payload.id, payload })),
+    ...canonical.eventRelations.map((payload) => ({ kind: "event-relation", id: payload.id, payload })),
+    ...canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation", id: payload.id, payload })),
+    ...canonical.rules.map((payload) => ({ kind: "world-rule", id: payload.id, payload })),
+    ...(canonical.initialWorld ? [{ kind: "initial-world", id: "initial-world", payload: canonical.initialWorld }] : []),
+    ...canonical.goals.map((payload) => ({ kind: "character-goal", id: payload.id, payload })),
+    ...canonical.models.map((payload) => ({ kind: "character-model", id: payload.actorId, payload })),
+    ...canonical.possibilities.map((payload) => ({ kind: "possibility", id: payload.id, payload })),
+  ];
+}
+
+function artifactBelongsToSource(payload: unknown, sourceId: string): boolean {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const evidence = (payload as { evidence?: unknown }).evidence;
+  if (!Array.isArray(evidence) || evidence.length === 0) return false;
+  return evidence.every((candidate) => candidate
+    && typeof candidate === "object"
+    && !Array.isArray(candidate)
+    && (candidate as { span?: { sourceId?: unknown } }).span?.sourceId === sourceId);
+}
+
+async function pendingSourceCompilerMetadataCount(workspaceRoot: string, sourceId: string): Promise<number> {
+  const [annotations, entityResolutions, eventResolutions, accounting] = await Promise.all([
+    new SourceAnnotationStore(workspaceRoot).listProposals(sourceId, "pending"),
+    new EntityResolutionStore(workspaceRoot).listProposals(sourceId, "pending"),
+    new EventResolutionStore(workspaceRoot).listProposals(sourceId, "pending"),
+    new SourceAccountingStore(workspaceRoot).listProposals(sourceId, "pending"),
+  ]);
+  return annotations.length + entityResolutions.length + eventResolutions.length + accounting.length;
+}
+
 async function currentCanonical(workspaceRoot: string) {
   const canonical = new CanonicalModelStore(workspaceRoot);
   const actors = new ActorModelStore(workspaceRoot);
@@ -947,6 +1245,36 @@ async function assertPreparedCharacterEvidence(
     ];
     if (issues.length) {
       throw new Error(`Prepared controlled character/relationship model ${model.actorId} has invalid exact evidence: ${issues
+        .map((issue) => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)
+        .join("; ")}`);
+    }
+  }
+}
+
+async function assertPreparedCompilerSnapshotEvidence(
+  workspaceRoot: string,
+  bundle: PreparedNovelBundle,
+): Promise<void> {
+  if (bundle.version !== 2) return;
+  const artifacts = new Map(preparedArtifactDescriptors(bundle.canonical)
+    .map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const));
+  const verifier = new EvidenceVerifier(workspaceRoot);
+  for (const binding of bundle.compilerSnapshot.evidenceBindings) {
+    const artifact = artifacts.get(`${binding.artifactKind}/${binding.artifactId}`);
+    if (!artifact) {
+      throw new Error(`Prepared exact-evidence binding ${binding.artifactKind}/${binding.artifactId} has no canonical artifact.`);
+    }
+    const issues = [
+      ...validateEvidenceAssertionTargets(
+        binding.artifactKind,
+        binding.artifactId,
+        artifact.payload,
+        binding.assertions,
+      ),
+      ...(await verifier.verifyAssertions(binding.assertions)).issues,
+    ];
+    if (issues.length) {
+      throw new Error(`Prepared exact-evidence binding ${binding.artifactKind}/${binding.artifactId} is invalid: ${issues
         .map((issue) => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)
         .join("; ")}`);
     }

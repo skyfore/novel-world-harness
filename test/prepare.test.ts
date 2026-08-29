@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { prepareCommand } from "../src/commands/prepare.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
-import { inspectPreparation } from "../src/workflow/prepare.js";
+import { inspectPreparation, novelScalePublicationRepairReasons } from "../src/workflow/prepare.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { BranchStore } from "../src/world/store.js";
@@ -21,6 +21,43 @@ afterEach(async () => {
 });
 
 describe("preparation workflow inspection", () => {
+  it("requires all traceability dimensions before novel-scale publication", () => {
+    const blocked = novelScalePublicationRepairReasons({
+      canonical: { events: 20 },
+      readiness: {
+        evidence: "unknown",
+        accounting: "not-ready",
+        resolution: "ready",
+        blockingIssues: ["missing exact binding", "unaccounted sentence"],
+      },
+      observations: { unaccountedUnits: 17, blockingUnits: 2 },
+      resolutions: { missing: 1, ambiguous: 0, unresolved: 0 },
+      eventResolutions: { missing: 2, ambiguous: 1, unresolved: 0 },
+    });
+    expect(blocked).toEqual([
+      expect.stringContaining("exact evidence=unknown"),
+      "missing exact binding",
+      "unaccounted sentence",
+    ]);
+    expect(blocked[0]).toContain("source accounting=not-ready (17 unaccounted, 2 blocking unit(s))");
+    expect(blocked[0]).toContain("identity/event resolution=ready (3 missing, 1 ambiguous/unresolved mention(s))");
+
+    expect(novelScalePublicationRepairReasons({
+      canonical: { events: 19 },
+      readiness: { evidence: "unknown", accounting: "unknown", resolution: "unknown", blockingIssues: [] },
+      observations: { unaccountedUnits: 999, blockingUnits: 999 },
+      resolutions: { missing: 0, ambiguous: 0, unresolved: 0 },
+      eventResolutions: { missing: 0, ambiguous: 0, unresolved: 0 },
+    })).toEqual([]);
+    expect(novelScalePublicationRepairReasons({
+      canonical: { events: 20 },
+      readiness: { evidence: "ready", accounting: "ready", resolution: "ready", blockingIssues: [] },
+      observations: { unaccountedUnits: 0, blockingUnits: 0 },
+      resolutions: { missing: 0, ambiguous: 0, unresolved: 0 },
+      eventResolutions: { missing: 0, ambiguous: 0, unresolved: 0 },
+    })).toEqual([]);
+  });
+
   it("derives a resumable review barrier and playable readiness from authoritative stores", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-"));
     roots.push(root);

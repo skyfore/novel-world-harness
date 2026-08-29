@@ -127,9 +127,33 @@ pnpm dev audit --root /root/workplace/novel-world-harness --source a28585b1cf867
 
 正确的下一阶段是 evidence-backed whole-book semantic reparse/reconciliation，并逐条解决上述 unresolved units、major event mentions、角色发展与 entry checkpoint；不能把本次确定性迁移冒充为完整重解析。
 
+## 后续能力补齐（代码完成，整书重编译尚未执行）
+
+上述调查暴露的不只是当前数据债，也包括编译器无法可靠偿还这些数据债的能力缺口。本轮已补齐代码路径，但没有再次调用模型处理 798095-byte 小说，因此本报告上一节记录的 9683 个 unresolved units、图连通性和角色覆盖率仍是当前小说工作区的真实基线，不能因为代码已经具备能力就宣称小说已经重新解析完成。
+
+| 能力缺口 | 已实现的确定性边界 | 可复核证据 |
+|---|---|---|
+| 提案型 segment 可在大量句子未表示时完成 | `src/compiler/proposal-tools.ts` 新增只读 `find_source_accounting_units` 和提案型 `account_source_units`；`src/compiler/source-accounting.ts` 禁止模型声明 `represented`，并在长篇普通 source-review 的 finish 前要求每个未表示句子有显式 disposition。核算提案具有 pending/accepted/rejected 历史，进入 proposal safety fuse、withdraw、重试恢复和批次失败清理。 | `test/source-accounting-tools.test.ts` 构造 420 句长文本：只处理 1 句时 `finish_compiler_batch` 必须以缺 disposition 失败；处理余下句子后才成功，最终 `unaccounted=0`、`blocking=0`。同一测试还证明已接受核算提案在批次失效时移入 rejected，不能被下一次 beginBatch 误恢复。 |
+| prepared revision 只保存 canonical，回滚会混入另一轮解析的 observation/evidence | `src/compiler/prepared-cache.ts` 的 bundle v2 保存 source structure、annotations、entity/event resolutions、accounting manifest 和每个 canonical artifact 的精确证据绑定；激活前逐项验证 artifact hash、JSON Pointer 和不可变原文锚点，再精确替换 current refs。旧 v1 bundle 因无法复现这些字段，会诚实清空它们而不是保留新版本状态。标题推断也按 bundle 精确替换，缺失时恢复本地导入标签。 | `test/prepared-cache.test.ts` 在不同文件名、不同工作区之间发布/恢复 v2，使用 `canonicalJson` 逐项证明结构、注释、两类消歧、核算和 exact binding 完全相同；随后激活人工构造的 v1 revision，证明这些字段和较新的标题推断均被清空。 |
+| reparse 只删 canonical current refs，留下旧观察、消歧、核算和 exact binding | `src/commands/reparse.ts` 在全书范围清空全部 source compiler metadata；章节范围只移除选中批次的记录，对跨章节 annotation/event cluster 明确要求 `--all`；每个失效 canonical artifact 同步移除 exact-evidence current binding，历史 revision 不删除。 | `test/reparse.test.ts` 新增 whole-source 失效测试，先建立 annotation、entity resolution、accounting、canonical entity 和 exact binding，再证明一次 invalidation 后五类 current 状态均不存在；原有章节依赖测试继续证明跨章 canonical 工件不会被误删。 |
+| 合法但碎裂的事件图没有专门、证据约束的修复阶段 | `src/compiler/reconcile-world.ts` 新增持久化 `graph-adjudication` 计划，以最多 16 个 unconditional roots 为一片、最多 100 片；提示只允许原文支持的 `causes`/`enables` 及对应同轮 event relation，或原文支持的真实 precondition，并明确禁止用时间邻接、同章、共同参与者和 narrative-continuation 冒充因果。`src/commands/prepare-all.ts` 每片后重新审计，仍不可导航就停止发布。 | `test/reconcile-world.test.ts` 用 32 个根证明两片目标无重叠、每片 16 个、只标记 `unconditional-disconnected-root`，并断言防伪因果政策和 typed relation 要求实际进入模型提示。 |
+| semantic gold v2 只有 denominator，没有 evaluator | `src/eval/compiler-eval.ts` 从持久化 observations、两类 resolution、quotation、typed participation/relation、proposition/attribution、knowledge deltas、event effects、character model/goal evidence 计算 10 个语义层；使用最大二分匹配而非依赖模型自造 ID，且只把金标实际注释的层计入 macro-F1。 | `test/compiler-eval.test.ts` 的完整 fixture 同时覆盖 10 层并逐层得到 precision=1、recall=1；空持久化层对非空金标返回 evaluated/recall=0，不再伪装为 `not-implemented`。 |
+| 长篇可在 exact evidence/accounting/resolution 仍为 unknown/not-ready 时进入建分支阶段 | `src/workflow/prepare.ts` 复用 `src/compiler/audit.ts` 的 20-event novel-scale 阈值；即使其他 semantic checks 已通过，evidence、accounting、resolution 三项任一不为 `ready` 都返回 repair，并携带实际未核算、阻塞、缺失及 unresolved 数量。 | `test/prepare.test.ts` 证明 20 events 时三项 traceability 状态触发阻断，19 events 保持短篇策略，20 events 且三项全 ready 才通过这一门槛。 |
+| 新工具错误可能诱发猜 ID/重复调用 | `src/agent/tool-recovery.ts` 将 unit miss 配对到同 scope 的 `find_source_accounting_units`，要求复制确切 `unitId`、最多一次纠正重试；finish 核算缺口要求按返回的 `nextOffset` 分页，同一完整诊断再次出现就停止。 | `test/tool-recovery.test.ts` 同时断言 lookup-miss 和 finish-gap 两类 agent-visible SOP 的 finder、字段、重试上限及 stop rule。 |
+
+为防止旧 checkpoint 在新语义下被误当完成，`COMPILER_PIPELINE_VERSION` 已从 24 提升到 25；prepared compiler prompt fingerprint 已提升到 24。由此，下一次针对该小说的合法动作是显式 whole-book reparse，而不是沿用会话 01a04389 的旧 completed batch 标记。
+
 ## 验证
+
+事故数据修复阶段：
 
 - `pnpm test`：111 个测试文件、643 个测试全部通过；
 - `pnpm run check`：TypeScript 检查通过；
-- `git diff --check`：通过；
 - 最终 audit 与 recovery dry-run：无结构/证据/解析悬空错误，恢复幂等。
+
+能力补齐阶段：
+
+- `pnpm test`：112 个测试文件、649 个测试全部通过；
+- `pnpm run check`：TypeScript 检查通过；
+- `pnpm run build`：生产构建通过；
+- `git diff --check`：通过。

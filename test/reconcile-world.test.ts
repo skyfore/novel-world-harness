@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { auditCompiler, type CompilerAuditReport } from "../src/compiler/audit.js";
 import {
   buildWorldReconciliationPrompt,
+  narrativeGraphRepairIsTargetable,
+  narrativeGraphRepairIterations,
   reparseReconciliationIterations,
   semanticRepairIsIsolated,
   semanticRepairRequiresReparse,
@@ -124,6 +126,33 @@ describe("world semantic reconciliation", () => {
     expect(reparseSecond.weakCharacterCandidates).toEqual([]);
     expect(reparseFirst.weakEventCandidates.some(({ id }) =>
       reparseSecond.weakEventCandidates.some((candidate) => candidate.id === id))).toBe(false);
+
+    expect(narrativeGraphRepairIsTargetable(audit)).toBe(true);
+    expect(narrativeGraphRepairIterations(audit)).toBe(2);
+    const graphFirstPrompt = await buildWorldReconciliationPrompt(
+      root,
+      fixture.source.id,
+      audit,
+      1,
+      { mode: "graph-adjudication" },
+    );
+    const graphSecondPrompt = await buildWorldReconciliationPrompt(
+      root,
+      fixture.source.id,
+      audit,
+      2,
+      { mode: "graph-adjudication" },
+    );
+    const graphFirst = reconciliationContext(graphFirstPrompt);
+    const graphSecond = reconciliationContext(graphSecondPrompt);
+    expect(graphFirst.repairPlan).toMatchObject({ mode: "graph-adjudication", targetCount: 16 });
+    expect(graphFirst.weakEventCandidates).toHaveLength(16);
+    expect(graphSecond.weakEventCandidates).toHaveLength(16);
+    expect(graphFirst.weakEventCandidates[0]?.weaknesses).toEqual(["unconditional-disconnected-root"]);
+    expect(graphFirstPrompt).toContain("Temporal order, chapter adjacency, shared participants");
+    expect(graphFirstPrompt).toContain("A revised causalParents edge requires a same-finish supported event-relation");
+    expect(graphFirst.weakEventCandidates.some(({ id }) =>
+      graphSecond.weakEventCandidates.some((candidate) => candidate.id === id))).toBe(false);
   });
 
   it("routes catalog-wide semantic migration to reparse but permits a bounded repair", async () => {

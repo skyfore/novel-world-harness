@@ -71,6 +71,7 @@ import {
   validateEvidenceAssertionTargets,
 } from "./evidence-assertions.js";
 import { SourceAnnotationStore } from "./annotations.js";
+import { SourceAccountingStore } from "./source-accounting.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
 import { EventResolutionStore } from "./event-resolution.js";
 import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
@@ -304,6 +305,9 @@ export async function rejectPendingCompilerBatchProposals(
   rejected.push(...await new SourceAnnotationStore(workspaceRoot).rejectBatch(compilerBatchId));
   rejected.push(...await new EntityResolutionStore(workspaceRoot).rejectBatch(compilerBatchId));
   rejected.push(...await new EventResolutionStore(workspaceRoot).rejectBatch(compilerBatchId));
+  for (const source of await workspace.listSources()) {
+    rejected.push(...await new SourceAccountingStore(workspaceRoot).rejectBatchProposals(source.id, compilerBatchId));
+  }
   return rejected;
 }
 
@@ -350,6 +354,7 @@ export async function rejectPendingCompilerSourceProposals(
   rejected.push(...await new SourceAnnotationStore(workspaceRoot).rejectSource(sourceId));
   rejected.push(...await new EntityResolutionStore(workspaceRoot).rejectSource(sourceId));
   rejected.push(...await new EventResolutionStore(workspaceRoot).rejectSource(sourceId));
+  rejected.push(...await new SourceAccountingStore(workspaceRoot).rejectSourceProposals(sourceId));
   return rejected;
 }
 

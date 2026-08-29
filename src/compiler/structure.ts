@@ -68,7 +68,7 @@ export const discourseSegmentSchema = z.object({
 });
 export type DiscourseSegment = z.infer<typeof discourseSegmentSchema>;
 
-const sourceStructureManifestSchema = z.object({
+export const sourceStructureManifestSchema = z.object({
   version: z.literal(1),
   structureVersion: z.literal(STRUCTURE_VERSION),
   sourceId: idSchema,

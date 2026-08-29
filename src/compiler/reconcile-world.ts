@@ -15,7 +15,9 @@ import { COMPILER_TOOL_CALL_SAFETY_FUSE } from "./limits.js";
 
 export const MAX_RECONCILIATION_ITERATIONS = 10;
 export const MAX_REPARSE_RECONCILIATION_ITERATIONS = 100;
+export const MAX_GRAPH_ADJUDICATION_ITERATIONS = 100;
 const MAX_EVENT_REPAIR_TARGETS = 16;
+export const MAX_GRAPH_ADJUDICATION_TARGETS = 16;
 const MAX_CHARACTER_REPAIR_TARGETS = 4;
 const MAX_REPARSE_EVENT_REPAIR_TARGETS = 16;
 const MAX_REPARSE_CHARACTER_REPAIR_TARGETS = 4;
@@ -24,12 +26,12 @@ const MAX_RECONCILIATION_JSON_CHARS = 200_000;
 const ESTIMATED_CALLS_PER_TARGET = 4;
 const RECONCILIATION_RESERVED_CALLS = 7;
 
-export type WorldReconciliationMode = "bounded" | "reparse-finalization";
+export type WorldReconciliationMode = "bounded" | "reparse-finalization" | "graph-adjudication";
 
 const reconciliationPlanSchema = z.object({
   version: z.literal(2),
   sourceId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
-  mode: z.enum(["bounded", "reparse-finalization"]),
+  mode: z.enum(["bounded", "reparse-finalization", "graph-adjudication"]),
   eventIds: z.array(z.string().min(1)).max(MAX_REPARSE_EVENT_REPAIR_TARGETS * MAX_REPARSE_RECONCILIATION_ITERATIONS),
   actorIds: z.array(z.string().min(1)).max(MAX_REPARSE_CHARACTER_REPAIR_TARGETS * MAX_REPARSE_RECONCILIATION_ITERATIONS),
   includeInitialWorld: z.boolean(),
@@ -40,7 +42,11 @@ type ReconciliationPlan = z.infer<typeof reconciliationPlanSchema>;
 
 function reconciliationPlanPath(workspaceRoot: string, sourceId: string, mode: WorldReconciliationMode): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sourceId)) throw new Error(`Unsafe source id: ${sourceId}`);
-  const suffix = mode === "bounded" ? "" : ".reparse-finalization";
+  const suffix = mode === "bounded"
+    ? ""
+    : mode === "reparse-finalization"
+      ? ".reparse-finalization"
+      : ".graph-adjudication";
   return path.join(workspaceStateDir(workspaceRoot), "world", "v1", "compiler", "reconciliation", `${sourceId}${suffix}.json`);
 }
 
@@ -98,13 +104,19 @@ export async function buildWorldReconciliationPrompt(
   const mode = options.mode ?? "bounded";
   const maxIterations = mode === "bounded"
     ? MAX_RECONCILIATION_ITERATIONS
-    : MAX_REPARSE_RECONCILIATION_ITERATIONS;
+    : mode === "reparse-finalization"
+      ? MAX_REPARSE_RECONCILIATION_ITERATIONS
+      : MAX_GRAPH_ADJUDICATION_ITERATIONS;
   const eventTargetsPerIteration = mode === "bounded"
     ? MAX_EVENT_REPAIR_TARGETS
-    : MAX_REPARSE_EVENT_REPAIR_TARGETS;
+    : mode === "reparse-finalization"
+      ? MAX_REPARSE_EVENT_REPAIR_TARGETS
+      : MAX_GRAPH_ADJUDICATION_TARGETS;
   const characterTargetsPerIteration = mode === "bounded"
     ? MAX_CHARACTER_REPAIR_TARGETS
-    : MAX_REPARSE_CHARACTER_REPAIR_TARGETS;
+    : mode === "reparse-finalization"
+      ? MAX_REPARSE_CHARACTER_REPAIR_TARGETS
+      : 0;
   if (!Number.isInteger(iteration) || iteration < 1 || iteration > maxIterations) {
     throw new Error(`Reconciliation iteration must be between 1 and ${maxIterations} for ${mode}.`);
   }
@@ -203,8 +215,16 @@ export async function buildWorldReconciliationPrompt(
         : []),
     ];
   };
+  const graphRootIds = new Set(audit.consistency.unconditionalRootEvents);
   const allWeakEvents = orderedEvents
-    .map((event) => ({ event, weaknesses: eventWeaknesses(event) }))
+    .map((event) => ({
+      event,
+      weaknesses: mode === "graph-adjudication" && graphRootIds.has(event.id)
+        ? ["unconditional-disconnected-root"]
+        : mode === "graph-adjudication"
+          ? []
+          : eventWeaknesses(event),
+    }))
     .filter((candidate) => candidate.weaknesses.length > 0);
   const participation = new Map<string, number>();
   for (const event of sourceEvents) {
@@ -224,12 +244,12 @@ export async function buildWorldReconciliationPrompt(
   const requiredDevelopedActors = Math.ceil(recurringActors.length * 0.5);
   const currentlyDevelopedActors = recurringActors.filter(([actorId]) => developed.has(actorId)).length;
   const neededDevelopmentTargets = Math.max(0, requiredDevelopedActors - currentlyDevelopedActors);
-  const allWeakActors = (audit.coverage.characterDevelopmentCoverage ?? 1) < 0.5
+  const allWeakActors = mode !== "graph-adjudication" && (audit.coverage.characterDevelopmentCoverage ?? 1) < 0.5
     ? recurringActors
     .filter(([actorId, count]) => count >= 3 && !developed.has(actorId))
     .slice(0, neededDevelopmentTargets)
     : [];
-  const requireAutonomousDriver = audit.canonical.autonomousWorldDrivers === 0;
+  const requireAutonomousDriver = mode !== "graph-adjudication" && audit.canonical.autonomousWorldDrivers === 0;
   if (requireAutonomousDriver && allWeakActors.length === 0) {
     const driverActor = recurringActors[0] ?? [...participation]
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0];
@@ -239,7 +259,7 @@ export async function buildWorldReconciliationPrompt(
     throw new Error("Semantic repair needs an autonomous driver, but no evidence-backed character participates in the compiled event graph.");
   }
 
-  const initialWorldNeedsRepair = Boolean(sourceInitialWorld && (
+  const initialWorldNeedsRepair = mode !== "graph-adjudication" && Boolean(sourceInitialWorld && (
     !sourceInitialWorld.checkpoint
     || !sourceInitialWorld.readerSetup?.trim()
     || !sourceInitialWorld.participantPresence?.some((presence) => presence.mode === "physical")
@@ -274,7 +294,12 @@ export async function buildWorldReconciliationPrompt(
     .map((eventId) => {
       const event = orderedEvents.find((candidate) => candidate.id === eventId);
       if (!event) throw new Error(`Persisted reconciliation event target '${eventId}' is no longer canonical.`);
-      return { event, weaknesses: eventWeaknesses(event) };
+      return {
+        event,
+        weaknesses: mode === "graph-adjudication"
+          ? ["unconditional-disconnected-root"]
+          : eventWeaknesses(event),
+      };
     });
   const weakActorOffset = (iteration - 1) * characterTargetsPerIteration;
   const weakActors = plan.actorIds
@@ -389,6 +414,15 @@ export async function buildWorldReconciliationPrompt(
     else if (largest === context.entityCatalog) context.omittedCatalogCounts.entities += removeCount;
   }
 
+  const graphAdjudicationPolicy = mode === "graph-adjudication"
+    ? `
+- This pass adjudicates only unconditional-disconnected-root targets. For each target, read its complete canonical payload and exact evidence, then inspect only plausible earlier events/dependencies using their exact refs and source evidence.
+- Add a causal parent only when the source independently supports a causes or enables mechanism. A revised causalParents edge requires a same-finish supported event-relation record whose fromEventId, toEventId, type, and evidence exactly justify that edge.
+- A source-grounded explicit state/knowledge precondition may make a later event conditional without inventing a causal ancestor. Preserve a genuine independent opening, framing, or background root unchanged when no dependency is supported.
+- Temporal order, chapter adjacency, shared participants, thematic similarity, and narrative-continuation never prove causation. Do not use narrative-continuation, before/after, or fabricated preconditions merely to improve the graph metric.
+- Do not change effects, character development, summaries, identities, or initial-world state in this pass. Submit at most one revised canonical event per listed root plus only the event-relation records required by a supported new causes/enables edge.`
+    : "";
+
   return `<world-semantic-reconciliation source-id="${sourceId}" iteration="${iteration}" mode="${mode}">
 The local source batches have passed structural validation, but the whole-world audit still reports semantic gaps. Reconcile only the bounded targets below. This is a proposal pass: never claim that a correction is committed.
 
@@ -397,6 +431,7 @@ Rules:
 - Every listed repair candidate already has an exact ref. Call read_compiler_artifact directly with that ref and read all pages before replacing it; do not spend a find_compiler_artifacts call rediscovering a listed ref. Use find_compiler_artifacts only for an omitted or genuinely ambiguous dependency, and use kind=canonical-event for events (event is only a compatibility alias).
 - Use find_source_evidence and read_source_evidence to inspect exact text from the active novel before changing meaning. These are the only raw-source tools in this pass; never use workspace files or another source. Reuse each payload's stable logical ID; version only proposal_id (for example reconcile-${iteration}-event-id).
 - Stay inside repairPlan. Do not inspect candidates outside weakEventCandidates, weakCharacterCandidates, or initialWorld. Execution capacity is a host-owned runaway safety fuse, not a semantic budget: never omit or withdraw a valid repair merely to save calls.
+${graphAdjudicationPolicy}
 - A canonical event is one causally atomic occurrence and may carry all simultaneous typed effects. Repair a weak event only when its cited text explicitly supports the missing storyTime, timeAdvance, state effect, knowledge effect, narrativeContext, precondition, causal parent, readerSummary, participantPresence, or later-character entry checkpoint. A readerSummary may recap only facts established through that event. An entry checkpoint describes the unresolved pre-event cut, supplies only already-true state/knowledge and direct actor perception, and must not copy the event outcome. Do not invent an effect to satisfy a percentage.
 - Match field meaning exactly. Never encode illness as alive=true, closure as location.open=true, conscription as character.location, employment as artifact.owner, or work points as character.title.
 - For each recurring character target, propose exactly one evidence-backed character-model with a real developmentPhase or one phase-bounded character-goal. Preserve the baseline. Activate later phases/goals only through cited world predicates, personally experienced events, acquired knowledge, or story time. Use afterExperiencedCanonicalEventIds when an experience is personal; use afterCanonicalEventIds only for an objective social/world transition. A future phase or goal must not affect the opening self.
@@ -423,6 +458,29 @@ export function reparseReconciliationIterations(audit: CompilerAuditReport): num
   if (iterations > MAX_REPARSE_RECONCILIATION_ITERATIONS) {
     throw new Error(
       `Reparse finalization needs ${iterations} semantic shard(s), exceeding the safe limit of ${MAX_REPARSE_RECONCILIATION_ITERATIONS}.`,
+    );
+  }
+  return iterations;
+}
+
+export function narrativeGraphRepairIsTargetable(audit: CompilerAuditReport): boolean {
+  return audit.consistency.narrativeGraphNavigable === false
+    && audit.consistency.causalGraphValid === true
+    && audit.sources.changedSinceIngest.length === 0
+    && audit.evidence.invalidReferences === 0
+    && audit.consistency.unconditionalRootEvents.length > 0
+    && audit.consistency.unconditionalRootEvents.length
+      <= MAX_GRAPH_ADJUDICATION_TARGETS * MAX_GRAPH_ADJUDICATION_ITERATIONS;
+}
+
+export function narrativeGraphRepairIterations(audit: CompilerAuditReport): number {
+  if (!narrativeGraphRepairIsTargetable(audit)) return 0;
+  const iterations = Math.ceil(
+    audit.consistency.unconditionalRootEvents.length / MAX_GRAPH_ADJUDICATION_TARGETS,
+  );
+  if (iterations > MAX_GRAPH_ADJUDICATION_ITERATIONS) {
+    throw new Error(
+      `Narrative-graph adjudication needs ${iterations} shard(s), exceeding the safe limit of ${MAX_GRAPH_ADJUDICATION_ITERATIONS}.`,
     );
   }
   return iterations;

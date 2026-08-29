@@ -374,6 +374,20 @@ export class SourceAnnotationStore {
       || left.id.localeCompare(right.id));
   }
 
+  /** Replace materialized refs exactly while preserving immutable revisions and proposal history. */
+  async replaceCurrent(sourceIdInput: string, annotationsInput: readonly SourceAnnotation[]): Promise<void> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const annotations = annotationsInput.map((annotation) => sourceAnnotationSchema.parse(annotation));
+    if (annotations.some((annotation) => annotation.sourceId !== sourceId)) {
+      throw new Error(`Annotation snapshot contains an observation outside source ${sourceId}.`);
+    }
+    if (new Set(annotations.map((annotation) => annotation.id)).size !== annotations.length) {
+      throw new Error(`Annotation snapshot for ${sourceId} contains duplicate logical IDs.`);
+    }
+    await fs.rm(this.refsDirectory(sourceId), { recursive: true, force: true });
+    for (const annotation of annotations) await this.bindAnnotation(sourceId, annotation);
+  }
+
   async rejectBatch(compilerBatchId: string): Promise<string[]> {
     idSchema.parse(compilerBatchId);
     const rejected: string[] = [];

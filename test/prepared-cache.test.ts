@@ -15,6 +15,14 @@ import { createEvidenceFixture } from "./helpers/evidence.js";
 import { ChapterSplitPlanStore, evaluateChapterSplitPlan } from "../src/compiler/chapter-split.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { ActorModelStore } from "../src/world/actors.js";
+import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
+import { SourceAnnotationStore, annotationAnchors } from "../src/compiler/annotations.js";
+import { EntityResolutionStore } from "../src/compiler/entity-resolution.js";
+import { EventResolutionStore } from "../src/compiler/event-resolution.js";
+import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
+import { ensureSourceStructure } from "../src/compiler/structure.js";
+import { SegmentStore } from "../src/compiler/segments.js";
+import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
 
 const roots: string[] = [];
 
@@ -243,6 +251,229 @@ describe("versioned prepared novel cache", () => {
     });
   });
 
+  it("restores exact compiler observations, resolutions, accounting, and evidence bindings from a v2 revision", async () => {
+    const cacheRoot = await temporaryRoot("nwh-prepared-compiler-snapshot-cache-");
+    const sourceRoot = await temporaryRoot("nwh-prepared-compiler-snapshot-source-");
+    const content = "Hero enters the village.\n";
+    const fixture = await createEvidenceFixture(sourceRoot, content);
+    const bytes = Buffer.from(content, "utf8");
+    const anchor = (exact: string) => {
+      const selected = Buffer.from(exact, "utf8");
+      const startByte = bytes.indexOf(selected);
+      if (startByte < 0) throw new Error(`Missing snapshot-test quote: ${exact}`);
+      return textAnchorForByteRange(fixture.source.id, bytes, startByte, startByte + selected.byteLength);
+    };
+    const heroAnchor = anchor("Hero");
+    const entersAnchor = anchor("enters");
+    const sentenceAnchor = anchor("Hero enters the village.");
+    const annotationDerivation = {
+      runId: "snapshot-run",
+      worker: "snapshot-test",
+      ontologyVersion: "observation-v1" as const,
+    };
+    const annotations = [{
+      version: 1 as const,
+      id: "mention-hero",
+      sourceId: fixture.source.id,
+      annotationType: "entity-mention" as const,
+      anchor: heroAnchor,
+      surface: "Hero",
+      form: "proper" as const,
+      kindCandidates: ["character" as const],
+      confidence: 1,
+      derivation: annotationDerivation,
+    }, {
+      version: 1 as const,
+      id: "mention-enters",
+      sourceId: fixture.source.id,
+      annotationType: "event-mention" as const,
+      triggerAnchor: entersAnchor,
+      trigger: "enters",
+      extentAnchors: [sentenceAnchor],
+      eventTypeCandidates: ["movement" as const],
+      participantMentionIds: ["mention-hero"],
+      salience: "major" as const,
+      confidence: 1,
+      derivation: annotationDerivation,
+    }];
+    const annotationStore = new SourceAnnotationStore(sourceRoot);
+    await annotationStore.replaceCurrent(fixture.source.id, annotations);
+    const entityResolution = {
+      version: 1 as const,
+      id: "resolve-hero",
+      sourceId: fixture.source.id,
+      mentionId: "mention-hero",
+      status: "resolved" as const,
+      entityId: "hero",
+      candidates: [{
+        entityId: "hero",
+        confidence: 1,
+        basisMentionIds: ["mention-hero"],
+        evidenceAssertionIds: ["assert-hero-name"],
+        rationale: "The exact proper name identifies Hero.",
+      }],
+      rationale: "The exact proper name identifies Hero.",
+      derivation: {
+        runId: "snapshot-run",
+        worker: "snapshot-test",
+        ontologyVersion: "entity-resolution-v1" as const,
+      },
+    };
+    await new EntityResolutionStore(sourceRoot).replaceCurrent(fixture.source.id, [entityResolution]);
+    const eventResolution = {
+      version: 1 as const,
+      id: "resolve-entry",
+      sourceId: fixture.source.id,
+      eventMentionIds: ["mention-enters"],
+      status: "resolved" as const,
+      canonicalEventId: "entry",
+      relation: "coreference" as const,
+      candidates: [{
+        canonicalEventId: "entry",
+        relation: "coreference" as const,
+        confidence: 1,
+        basisEventMentionIds: ["mention-enters"],
+        evidenceAssertionIds: [],
+        rationale: "The trigger denotes the canonical entry event.",
+      }],
+      supersedesResolutionIds: [],
+      rationale: "The trigger denotes the canonical entry event.",
+      derivation: {
+        runId: "snapshot-run",
+        worker: "snapshot-test",
+        ontologyVersion: "event-resolution-v1" as const,
+      },
+    };
+    await new EventResolutionStore(sourceRoot).replaceCurrent(fixture.source.id, [eventResolution]);
+
+    const evidence = fixture.evidence("Hero enters the village.");
+    const canon = new CanonicalModelStore(sourceRoot);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+    await canon.putEvent({
+      id: "entry",
+      title: "Hero enters the village",
+      participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      storyTime: { kind: "ordinal", label: "first", orderHint: 1 },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence,
+      causalParents: [],
+      confidence: 1,
+    });
+    await new InitialWorldStore(sourceRoot).put({
+      version: 1,
+      delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+      evidence,
+    });
+    const hero = await canon.getEntity("hero");
+    const assertion = {
+      version: 1 as const,
+      id: "assert-hero-name",
+      target: { artifactKind: "entity", artifactId: "hero", jsonPointer: "/canonicalName" },
+      anchors: [heroAnchor],
+      relation: "supports" as const,
+      strength: "explicit" as const,
+      derivation: {
+        runId: "snapshot-run",
+        worker: "snapshot-test",
+        ontologyVersion: "evidence-v1" as const,
+      },
+    };
+    await new EvidenceAssertionStore(sourceRoot).replaceForArtifact(
+      "entity",
+      "hero",
+      contentHash(hero),
+      [assertion],
+    );
+    const batches = await prepareCompilerBatches(sourceRoot, fixture.source);
+    const segments = await new SegmentStore(sourceRoot).list(fixture.source.id);
+    await new SourceAccountingStore(sourceRoot).recordBatchReview({
+      source: fixture.source,
+      structure: await ensureSourceStructure(sourceRoot, fixture.source),
+      batchId: batches.find((batch) => batch.purpose === "source-review")!.id,
+      reviews: segments.map((segment) => ({
+        segment,
+        disposition: "proposed" as const,
+        summary: "The sentence is represented by exact observations and canonical artifacts.",
+      })),
+      evidenceAssertions: [assertion],
+      annotations: annotations.map((annotation) => ({
+        id: annotation.id,
+        anchors: annotationAnchors(annotation),
+      })),
+    });
+    await new CompilerBatchStore(sourceRoot).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+
+    const annotationSnapshot = await annotationStore.list(fixture.source.id);
+    const entityResolutionSnapshot = await new EntityResolutionStore(sourceRoot).list(fixture.source.id);
+    const eventResolutionSnapshot = await new EventResolutionStore(sourceRoot).list(fixture.source.id);
+    const accountingSnapshot = await new SourceAccountingStore(sourceRoot).read(fixture.source.id);
+    const structureSnapshot = await ensureSourceStructure(sourceRoot, fixture.source);
+    const bindingSnapshot = await new EvidenceAssertionStore(sourceRoot).bindingForArtifact("entity", "hero");
+    const published = await new PreparedNovelCache(sourceRoot, cacheRoot).publish(fixture.source);
+    const rawBundle = JSON.parse(await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8")) as {
+      version: number;
+      compilerSnapshot?: unknown;
+    };
+    expect(rawBundle).toMatchObject({ version: 2, compilerSnapshot: expect.any(Object) });
+
+    const restoredRoot = await temporaryRoot("nwh-prepared-compiler-snapshot-restored-");
+    const restoredFixture = await createEvidenceFixture(restoredRoot, content, "renamed-copy.md");
+    await expect(new PreparedNovelCache(restoredRoot, cacheRoot).restore(restoredFixture.source))
+      .resolves.toMatchObject({ status: "restored", bundleHash: published.bundleHash });
+    expect(canonicalJson(await new SourceAnnotationStore(restoredRoot).list(restoredFixture.source.id)))
+      .toBe(canonicalJson(annotationSnapshot));
+    expect(canonicalJson(await new EntityResolutionStore(restoredRoot).list(restoredFixture.source.id)))
+      .toBe(canonicalJson(entityResolutionSnapshot));
+    expect(canonicalJson(await new EventResolutionStore(restoredRoot).list(restoredFixture.source.id)))
+      .toBe(canonicalJson(eventResolutionSnapshot));
+    expect(canonicalJson(await new SourceAccountingStore(restoredRoot).read(restoredFixture.source.id)))
+      .toBe(canonicalJson(accountingSnapshot));
+    expect(canonicalJson(await ensureSourceStructure(restoredRoot, restoredFixture.source)))
+      .toBe(canonicalJson(structureSnapshot));
+    expect(canonicalJson(await new EvidenceAssertionStore(restoredRoot).bindingForArtifact("entity", "hero")))
+      .toBe(canonicalJson(bindingSnapshot));
+
+    // A legacy revision cannot reproduce metadata it never stored. Activating
+    // it must clear newer compiler metadata rather than silently mixing eras.
+    const legacyBundle = JSON.parse(
+      await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8"),
+    ) as Record<string, unknown>;
+    legacyBundle.version = 1;
+    delete legacyBundle.compilerSnapshot;
+    const legacyHash = contentHash(legacyBundle);
+    const legacyDirectory = path.join(path.dirname(published.cachePath), legacyHash);
+    await fs.mkdir(legacyDirectory, { recursive: true, mode: 0o700 });
+    await fs.writeFile(path.join(legacyDirectory, "bundle.json"), `${canonicalJson(legacyBundle)}\n`);
+    await fs.writeFile(path.join(legacyDirectory, "manifest.json"), `${canonicalJson({
+      version: 1,
+      contentMd5: fixture.source.contentMd5,
+      contentSha256: fixture.source.contentSha256,
+      sourceId: fixture.source.id,
+      bundleHash: legacyHash,
+      createdAt: new Date().toISOString(),
+    })}\n`);
+    await (await WorkspaceStore.create(sourceRoot)).restoreSourceTitleInference(fixture.source.id, {
+      version: 1,
+      sourceId: fixture.source.id,
+      title: "Temporary Newer Title",
+      evidence: fixture.evidence("Hero")[0]!,
+      generatedBy: { worker: "propose_novel_title", compilerBatchId: "snapshot-title-batch" },
+      inferredAt: new Date().toISOString(),
+    });
+    await expect(new PreparedNovelCache(sourceRoot, cacheRoot).activate(fixture.source, legacyHash))
+      .resolves.toMatchObject({ status: "activated", bundleHash: legacyHash });
+    await expect(annotationStore.list(fixture.source.id)).resolves.toEqual([]);
+    await expect(new EntityResolutionStore(sourceRoot).list(fixture.source.id)).resolves.toEqual([]);
+    await expect(new EventResolutionStore(sourceRoot).list(fixture.source.id)).resolves.toEqual([]);
+    await expect(new SourceAccountingStore(sourceRoot).read(fixture.source.id)).resolves.toBeNull();
+    await expect(new EvidenceAssertionStore(sourceRoot).bindingForArtifact("entity", "hero")).resolves.toBeNull();
+    const legacyRestoredSource = await (await WorkspaceStore.create(sourceRoot)).getSource(fixture.source.id);
+    expect(legacyRestoredSource).toMatchObject({ title: "novel.txt" });
+    expect(legacyRestoredSource).not.toHaveProperty("titleInference");
+  });
+
   it("stores only deterministic source batches after a transient boundary calibration", async () => {
     const cacheRoot = await temporaryRoot("nwh-prepared-boundary-cache-");
     const sourceRoot = await temporaryRoot("nwh-prepared-boundary-source-");
@@ -324,7 +555,15 @@ describe("versioned prepared novel cache", () => {
 
     const canon = new CanonicalModelStore(sourceRoot);
     const hero = await canon.getEntity("hero");
-    await canon.putEntity({ ...hero, aliases: ["The Hero"] });
+    const revisedHero = { ...hero, aliases: ["The Hero"] };
+    await canon.putEntity(revisedHero);
+    const heroBinding = await new EvidenceAssertionStore(sourceRoot).bindingForArtifact("entity", "hero");
+    await new EvidenceAssertionStore(sourceRoot).replaceForArtifact(
+      "entity",
+      "hero",
+      contentHash(revisedHero),
+      heroBinding?.assertions ?? [],
+    );
 
     await expect(cache.loadFreshActive(fixture.source)).rejects.toThrow("stale relative to accepted workspace artifacts");
     await expect(cache.loadFreshActive(fixture.source)).rejects.toThrow("entities differ");
@@ -405,7 +644,15 @@ describe("versioned prepared novel cache", () => {
     expect(await fs.readFile(cachedBundlePath, "utf8")).toBe(immutableBaseline);
 
     const originalEntity = await new CanonicalModelStore(sourceRoot).getEntity("hero");
-    await new CanonicalModelStore(sourceRoot).putEntity({ ...originalEntity, aliases: ["Hero"] });
+    const revisedEntity = { ...originalEntity, aliases: ["Hero"] };
+    await new CanonicalModelStore(sourceRoot).putEntity(revisedEntity);
+    const originalBinding = await new EvidenceAssertionStore(sourceRoot).bindingForArtifact("entity", "hero");
+    await new EvidenceAssertionStore(sourceRoot).replaceForArtifact(
+      "entity",
+      "hero",
+      contentHash(revisedEntity),
+      originalBinding?.assertions ?? [],
+    );
     const revised = await sourceCache.publish(fixture.source);
     expect(revised).toMatchObject({ status: "published", contentMd5: published.contentMd5 });
     expect(revised.bundleHash).not.toBe(published.bundleHash);

@@ -76,6 +76,11 @@ export type BatchProgress = {
   updatedAt: string;
 };
 
+export type PersistedBatchProgress = Omit<BatchProgress, "pipelineVersion"> & {
+  /** Older checkpoints may predate explicit compiler-pipeline versioning. */
+  pipelineVersion?: number;
+};
+
 export type BatchRunner = (batch: CompilerBatch, context: { totalBatches: number }) => Promise<void>;
 
 type CompilerEntityIdentity = Pick<Entity, "id" | "kind"> & {
@@ -209,19 +214,35 @@ export class CompilerBatchStore {
   }
 
   async read(sourceId: string): Promise<BatchProgress> {
+    const parsed = await this.readPersisted(sourceId);
+    if (!parsed || parsed.pipelineVersion !== COMPILER_PIPELINE_VERSION) {
+      return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };
+    }
+    return parsed as BatchProgress;
+  }
+
+  /**
+   * Read the on-disk checkpoint without treating an older semantic pipeline as
+   * current progress. Reparse uses this only to prove that a complete legacy
+   * materialization can be snapshotted as an incompatible rollback baseline.
+   */
+  async readPersisted(sourceId: string): Promise<PersistedBatchProgress | null> {
     try {
-      const parsed = JSON.parse(await fs.readFile(this.filePath(sourceId), "utf8")) as BatchProgress;
-      if (parsed.version !== 1 || parsed.sourceId !== sourceId || !Array.isArray(parsed.completedBatchIds)) {
+      const parsed = JSON.parse(await fs.readFile(this.filePath(sourceId), "utf8")) as PersistedBatchProgress;
+      if (
+        parsed.version !== 1
+        || parsed.sourceId !== sourceId
+        || !Array.isArray(parsed.completedBatchIds)
+        || parsed.completedBatchIds.some((id) => typeof id !== "string" || !id)
+        || (parsed.pipelineVersion !== undefined
+          && (!Number.isInteger(parsed.pipelineVersion) || parsed.pipelineVersion < 1))
+        || typeof parsed.updatedAt !== "string"
+      ) {
         throw new Error(`Invalid compiler batch progress for ${sourceId}`);
-      }
-      if (parsed.pipelineVersion !== COMPILER_PIPELINE_VERSION) {
-        return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };
       }
       return parsed;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };
-      }
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
     }
   }

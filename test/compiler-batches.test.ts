@@ -64,6 +64,9 @@ describe("compiler batches", () => {
       updatedAt: new Date(0).toISOString(),
     }, null, 2)}\n`);
 
+    await expect(store.readPersisted(source.id)).resolves.toMatchObject({
+      completedBatchIds: ["legacy-complete"],
+    });
     await expect(store.read(source.id)).resolves.toMatchObject({
       pipelineVersion: COMPILER_PIPELINE_VERSION,
       completedBatchIds: [],

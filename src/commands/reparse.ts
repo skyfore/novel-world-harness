@@ -3,7 +3,13 @@ import path from "node:path";
 import { stdout } from "node:process";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
-import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatch, type CompilerBatch } from "../compiler/batches.js";
+import {
+  COMPILER_PIPELINE_VERSION,
+  CompilerBatchStore,
+  prepareCompilerBatches,
+  selectOpeningCompilerBatch,
+  type CompilerBatch,
+} from "../compiler/batches.js";
 import { convergeWorldProposals, quarantineUncommittableProposals } from "../compiler/converge.js";
 import { rejectPendingCompilerBatchProposals, rejectPendingCompilerSourceProposals } from "../compiler/proposals.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
@@ -207,12 +213,37 @@ async function recoverInterruptedReparse(
   cache: PreparedNovelCache,
   report: (message: string) => void,
 ): Promise<void> {
-  const progress = await new CompilerBatchStore(root).read(source.id);
+  const batchStore = new CompilerBatchStore(root);
+  const progress = await batchStore.read(source.id);
   const completed = new Set(progress.completedBatchIds);
   const unfinished = batches.filter((batch) => !completed.has(batch.id));
   if (!unfinished.length) return;
   const selected = new Set(selectedBatchIds);
-  const outsideSelection = unfinished.filter((batch) => !selected.has(batch.id));
+  let active = await cache.lookup(source);
+  let bootstrappedLegacyBaseline = false;
+  const persisted = await batchStore.readPersisted(source.id);
+  const selectedWholeSource = batches
+    .filter((batch) => batch.purpose !== "structure-discovery")
+    .every((batch) => selected.has(batch.id));
+  if (
+    !active.bundleHash
+    && selectedWholeSource
+    && persisted?.pipelineVersion !== undefined
+    && persisted.pipelineVersion < COMPILER_PIPELINE_VERSION
+    && batches.every((batch) => persisted.completedBatchIds.includes(batch.id))
+  ) {
+    const published = await cache.publishLegacyRollbackBaseline(source, persisted);
+    if (!published.bundleHash) throw new Error("Legacy rollback baseline publication did not return a revision hash.");
+    report(
+      `Preserved the complete pipeline v${persisted.pipelineVersion} materialization as incompatible rollback revision `
+      + `${published.bundleHash} before its first whole-novel reparse.`,
+    );
+    active = await cache.lookup(source);
+    bootstrappedLegacyBaseline = true;
+  }
+  const outsideSelection = bootstrappedLegacyBaseline
+    ? []
+    : unfinished.filter((batch) => !selected.has(batch.id));
   if (outsideSelection.length) {
     if (outsideSelection.some((batch) => batch.purpose === "structure-discovery")) {
       throw new Error("Cannot start reparse before chapter structure discovery is checkpointed. Resume preparation first.");
@@ -223,21 +254,24 @@ async function recoverInterruptedReparse(
       + `(chapter(s) ${chapters.join(", ")}). Resume preparation first or include those chapters in this reparse.`,
     );
   }
-  const active = await cache.lookup(source);
   if (!active.bundleHash) {
     throw new Error(
       `Cannot recover ${unfinished.length} unfinished selected compiler batch(es): no active prepared revision is available as a rollback baseline. `
       + "Complete preparation before reparsing.",
     );
   }
-  report(
-    `Detected an interrupted reparse affecting ${unfinished.length} selected batch(es); `
-    + `restoring active revision ${active.bundleHash} before retrying.`,
-  );
+  if (!bootstrappedLegacyBaseline) {
+    report(
+      `Detected an interrupted reparse affecting ${unfinished.length} selected batch(es); `
+      + `restoring active revision ${active.bundleHash} before retrying.`,
+    );
+  }
   const rejected = await rejectPendingCompilerSourceProposals(root, source.id);
   if (rejected.length) report(`Rejected ${rejected.length} pending source proposal(s) from the interrupted reparse.`);
   await cache.activate(source, active.bundleHash, { allowIncompatibleRollback: true });
-  report("Interrupted reparse baseline restored; restarting the selected scope from a clean prepared revision.");
+  report(bootstrappedLegacyBaseline
+    ? "Legacy rollback baseline materialized; starting the whole-novel reparse from a recoverable revision."
+    : "Interrupted reparse baseline restored; restarting the selected scope from a clean prepared revision.");
 }
 
 function openingBatchId(batches: readonly CompilerBatch[]): string {

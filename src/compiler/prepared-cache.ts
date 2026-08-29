@@ -36,7 +36,12 @@ import {
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
 import { pinBranchPreparationContexts } from "../world/context.js";
-import { COMPILER_PIPELINE_VERSION, CompilerBatchStore, prepareCompilerBatches } from "./batches.js";
+import {
+  COMPILER_PIPELINE_VERSION,
+  CompilerBatchStore,
+  prepareCompilerBatches,
+  type PersistedBatchProgress,
+} from "./batches.js";
 import { SEGMENTER_VERSION } from "./segments.js";
 import { CompilerValidator, type CanonicalProposalKind, type CompilerValidationCatalog } from "./validator.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
@@ -406,6 +411,38 @@ export class PreparedNovelCache {
   async publish(source: SourceDocument, options: { allowSemanticDebtForRollback?: boolean } = {}): Promise<PreparedCacheResult> {
     const identity = await sourceIdentity(this.workspaceRoot, source);
     const bundle = await this.buildBundle(source, identity, options);
+    return this.publishBundle(source, identity, bundle);
+  }
+
+  /**
+   * Preserve a complete pre-upgrade materialization before its first reparse.
+   * The bundle deliberately omits a compiler fingerprint so it remains an
+   * incompatible rollback authority and can never masquerade as current work.
+   */
+  async publishLegacyRollbackBaseline(
+    source: SourceDocument,
+    checkpoint: PersistedBatchProgress,
+  ): Promise<PreparedCacheResult> {
+    if (
+      checkpoint.sourceId !== source.id
+      || checkpoint.pipelineVersion === undefined
+      || checkpoint.pipelineVersion >= COMPILER_PIPELINE_VERSION
+    ) {
+      throw new Error(`Cannot publish a legacy rollback baseline from the current or invalid checkpoint for ${source.id}.`);
+    }
+    const identity = await sourceIdentity(this.workspaceRoot, source);
+    const bundle = await this.buildBundle(source, identity, {
+      allowSemanticDebtForRollback: true,
+      legacyRollbackCheckpoint: checkpoint,
+    });
+    return this.publishBundle(source, identity, bundle);
+  }
+
+  private async publishBundle(
+    source: SourceDocument,
+    identity: { contentMd5: string; contentSha256: string },
+    bundle: PreparedNovelBundle,
+  ): Promise<PreparedCacheResult> {
     const bundleHash = contentHash(bundle);
     await this.ensureRevisionLayout(identity.contentMd5);
     const cachePath = this.revisionPath(identity.contentMd5, bundleHash);
@@ -534,7 +571,10 @@ export class PreparedNovelCache {
   private async buildBundle(
     source: SourceDocument,
     identity: { contentMd5: string; contentSha256: string },
-    options: { allowSemanticDebtForRollback?: boolean },
+    options: {
+      allowSemanticDebtForRollback?: boolean;
+      legacyRollbackCheckpoint?: PersistedBatchProgress;
+    },
   ): Promise<PreparedNovelBundle> {
     const proposals = new ProposalStore(this.workspaceRoot);
     const pending = await proposals.list("pending", source.id);
@@ -552,7 +592,8 @@ export class PreparedNovelCache {
       throw new Error(`Cannot cache ${source.id}: novel-title proposal ${currentSource.pendingTitleProposal.proposalId} is still pending.`);
     }
     const batches = await prepareCompilerBatches(this.workspaceRoot, source);
-    const progress = await new CompilerBatchStore(this.workspaceRoot).read(source.id);
+    const progress = options.legacyRollbackCheckpoint
+      ?? await new CompilerBatchStore(this.workspaceRoot).read(source.id);
     const completed = new Set(progress.completedBatchIds);
     const unfinished = batches.filter((batch) => !completed.has(batch.id));
     if (unfinished.length) throw new Error(`Cannot cache ${source.id}: ${unfinished.length} compiler batch(es) are unfinished.`);
@@ -638,7 +679,7 @@ export class PreparedNovelCache {
         ...(currentSource.titleInference ? { titleInference: currentSource.titleInference } : {}),
       },
       segmenterVersion: SEGMENTER_VERSION,
-      compilerFingerprint: currentCompilerFingerprint(),
+      ...(options.legacyRollbackCheckpoint ? {} : { compilerFingerprint: currentCompilerFingerprint() }),
       ...(chapterSplitPlan ? { chapterSplitPlan } : {}),
       // Boundary calibrations are transient, model-requested workflow checks.
       // Their accepted artifacts are already captured below. Structure discovery

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { COMPILER_PIPELINE_VERSION, CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
@@ -148,6 +148,93 @@ describe("explicit prepared-novel reparsing", () => {
     expect(parseOrdinalSelection("1,3-4", [1, 2, 3, 4], "--chapters")).toEqual([1, 3, 4]);
     expect(() => parseOrdinalSelection("4-2", [1, 2, 3, 4], "--chapters")).toThrow("invalid range");
     expect(() => parseOrdinalSelection("5", [1, 2, 3, 4], "--chapters")).toThrow("unavailable");
+  });
+
+  it("bootstraps an honest rollback revision from a complete legacy checkpoint before first reparse", async () => {
+    const root = await temporaryRoot("nwh-reparse-legacy-bootstrap-");
+    const cacheRoot = await temporaryRoot("nwh-reparse-legacy-bootstrap-cache-");
+    const fixture = await createEvidenceFixture(root, "# Opening\nHero waits.\n");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    const batch = batches[0]!;
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "legacy-bootstrap-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: batch.evidence },
+      generatedBy: { worker: "test", compilerBatchId: batch.id },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "legacy-bootstrap-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        evidence: batch.evidence,
+      },
+      generatedBy: { worker: "test", compilerBatchId: `opening-${batch.id}` },
+    });
+    const batchStore = new CompilerBatchStore(root);
+    await batchStore.replaceCompleted(fixture.source.id, batches.map((candidate) => candidate.id));
+    await convergeWorldProposals(root, fixture.source.id);
+    await fs.writeFile(path.join(batchStore.root, `${fixture.source.id}.json`), `${JSON.stringify({
+      version: 1,
+      pipelineVersion: COMPILER_PIPELINE_VERSION - 1,
+      sourceId: fixture.source.id,
+      completedBatchIds: batches.map((candidate) => candidate.id),
+      updatedAt: new Date(0).toISOString(),
+    }, null, 2)}\n`);
+    const progressMessages: string[] = [];
+    const cache = new PreparedNovelCache(root, cacheRoot);
+
+    await expect(reparseCommand({
+      root,
+      configPath: path.join(root, "missing.yaml"),
+      sourceId: fixture.source.id,
+      all: true,
+      cacheRoot,
+      onProgress: (message) => progressMessages.push(message),
+    }, {
+      async compileSource() {
+        throw new Error("simulated provider failure after legacy bootstrap");
+      },
+    })).rejects.toThrow("simulated provider failure after legacy bootstrap");
+
+    expect(progressMessages).toContainEqual(expect.stringContaining("Preserved the complete pipeline"));
+    expect(progressMessages).toContainEqual(expect.stringContaining("Legacy rollback baseline materialized"));
+    const revisions = await cache.listRevisions(fixture.source);
+    expect(revisions).toEqual([expect.objectContaining({ active: true })]);
+    await expect(cache.lookup(fixture.source)).resolves.toMatchObject({
+      bundleHash: revisions[0]!.bundleHash,
+      requiresReparse: true,
+    });
+    const bundle = JSON.parse(await fs.readFile(path.join(revisions[0]!.cachePath, "bundle.json"), "utf8")) as Record<string, unknown>;
+    expect(bundle).not.toHaveProperty("compilerFingerprint");
+    await expect(batchStore.read(fixture.source.id)).resolves.toMatchObject({
+      completedBatchIds: batches.map((candidate) => candidate.id),
+    });
+    await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ canonicalName: "Hero" });
+  });
+
+  it("does not bootstrap a rollback revision from an incomplete legacy checkpoint", async () => {
+    const root = await temporaryRoot("nwh-reparse-incomplete-legacy-");
+    const cacheRoot = await temporaryRoot("nwh-reparse-incomplete-legacy-cache-");
+    const fixture = await createEvidenceFixture(root, "# Opening\nHero waits.\n");
+    const batchStore = new CompilerBatchStore(root);
+    await fs.mkdir(batchStore.root, { recursive: true });
+    await fs.writeFile(path.join(batchStore.root, `${fixture.source.id}.json`), `${JSON.stringify({
+      version: 1,
+      pipelineVersion: COMPILER_PIPELINE_VERSION - 1,
+      sourceId: fixture.source.id,
+      completedBatchIds: [],
+      updatedAt: new Date(0).toISOString(),
+    }, null, 2)}\n`);
+
+    await expect(reparseCommand({
+      root,
+      configPath: path.join(root, "missing.yaml"),
+      sourceId: fixture.source.id,
+      all: true,
+      cacheRoot,
+    })).rejects.toThrow("no active prepared revision is available as a rollback baseline");
+    await expect(new PreparedNovelCache(root, cacheRoot).listRevisions(fixture.source)).resolves.toEqual([]);
   });
 
   it("invalidates chapter-local semantic dependencies backed by exact quote subspans", async () => {

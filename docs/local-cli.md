@@ -132,6 +132,11 @@ the same reparse scope. NWH restores the active immutable prepared revision,
 rejects partial proposals from those selected batches, and restarts from that
 clean rollback baseline. It will not auto-restore when unfinished batches exist
 outside the requested scope; include them explicitly or resume preparation first.
+If a workspace completed every batch under an older compiler pipeline before
+prepared revisions existed, `reparse --all` first preserves that materialized
+world as an explicitly incompatible rollback-only revision. This bootstrap is
+allowed only for a complete, versioned legacy checkpoint and a whole-novel
+scope; incomplete checkpoints still require preparation to finish first.
 
 ## Compiler capability boundary
 

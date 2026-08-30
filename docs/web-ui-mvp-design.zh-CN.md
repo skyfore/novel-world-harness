@@ -697,7 +697,7 @@ POST   /api/v1/instances
 POST   /api/v1/instances/:branchId/fork
 POST   /api/v1/play-sessions
 POST   /api/v1/play-sessions/:sessionId/moves  # text/intent/expectedHead/clientRequestId
-POST   /api/v1/play-sessions/:sessionId/retry-narration
+POST   /api/v1/play-sessions/:sessionId/retry-narration # sourceRunId/expectedHead/clientRequestId
 PATCH  /api/v1/play-sessions/:sessionId        # title/status
 POST   /api/v1/operations/:operationId/cancel
 POST   /api/v1/interactions/:interactionId/answer
@@ -755,6 +755,12 @@ interface ApiError {
 | Remove novel | 沿用 `remove all` 语义，移除 registration、analysis 和 owned branches | 不物理删除 content-addressed source bytes |
 
 危险操作先调用 preview endpoint 或在 DELETE response 前展示服务端计算的 effect manifest；确认文本使用明确的 novel/branch ID。不要提供语义不明的全局 “Clear”。
+
+`retry-narration` 只接受同一 session/branch 的原始 `player-move` run。服务端再次核对
+原 run 的 accepted `world.commit.completed`、`playerMoveId`、`finalHead` 与当前 branch
+head，并确认尚无该 move 的 rendered scene message。重试 run 使用独立
+`narration-retry` 身份，trace 明确记录 `worldMutationAllowed: false`；整个路径不调用
+player-action translator、validator 或 commit API。
 
 ## 13. Provider 与模型设置
 

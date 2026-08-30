@@ -24,6 +24,7 @@ import {
   fetchPreparation,
   forkInstance,
   removePlaySession,
+  retryNarration,
   restorePlaySession,
   startPlayerMove,
   startSceneNarration,
@@ -43,6 +44,7 @@ import {
 import { MaintenanceControl } from "./maintenance-dialog";
 import {
   operationSnapshotSchema,
+  narrationRetryResultSchema,
   ontologyViewSchema,
   playOperationResultSchema,
   sceneNarrationResultSchema,
@@ -558,6 +560,14 @@ function SessionPage() {
     }, csrfToken),
     onSuccess: acceptOperation,
   });
+  const narrationRetryMutation = useMutation({
+    mutationFn: () => retryNarration(sessionId, {
+      sourceRunId: current!.runId!,
+      expectedHead: detail.data!.headCommitId!,
+      clientRequestId: requestId("narration-retry"),
+    }, csrfToken),
+    onSuccess: acceptOperation,
+  });
   const cancelMutation = useMutation({
     mutationFn: () => cancelOperation(current!.id, csrfToken),
     onSuccess: (snapshot) => queryClient.setQueryData(operationKey(snapshot.id), snapshot),
@@ -602,10 +612,23 @@ function SessionPage() {
   const result = current?.result;
   const playResult = playOperationResultSchema.safeParse(result);
   const sceneResult = sceneNarrationResultSchema.safeParse(result);
-  const choices = playResult.success ? playResult.data.choices : sceneResult.success ? sceneResult.data.choices : [];
-  const settledNarration = playResult.success ? playResult.data.narration : sceneResult.success ? sceneResult.data.narration : undefined;
-  const mutationError = firstError(moveMutation.error, narrationMutation.error, cancelMutation.error, archiveMutation.error, restoreMutation.error, activateMutation.error, clearMutation.error, removeMutation.error);
+  const retryResult = narrationRetryResultSchema.safeParse(result);
+  const choices = playResult.success ? playResult.data.choices : sceneResult.success ? sceneResult.data.choices : retryResult.success ? retryResult.data.choices : [];
+  const settledNarration = playResult.success ? playResult.data.narration : sceneResult.success ? sceneResult.data.narration : retryResult.success ? retryResult.data.narration : undefined;
+  const mutationError = firstError(moveMutation.error, narrationMutation.error, narrationRetryMutation.error, cancelMutation.error, archiveMutation.error, restoreMutation.error, activateMutation.error, clearMutation.error, removeMutation.error);
   const writable = session.status !== "archived" && session.status !== "detached" && Boolean(data.headCommitId);
+  const canRetryNarration = Boolean(
+    current?.runId
+    && data.headCommitId
+    && current.kind === "player-move"
+    && (
+      (playResult.success
+        && playResult.data.accepted
+        && playResult.data.finalHead === data.headCommitId
+        && playResult.data.narrationStatus !== "rendered")
+      || (current.status === "interrupted" && current.commitBoundaryCrossed)
+    ),
+  );
 
   const submitMove = (event: FormEvent) => {
     event.preventDefault();
@@ -673,8 +696,10 @@ function SessionPage() {
               </dl>
               {current.progress.statusText && <div className="operation-activity"><span className={busy ? "loading-orbit" : "status-dot"} /><p>{String(current.progress.statusText)}</p></div>}
               {busy && current.cancellable && <button className="stop-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>{current.commitBoundaryCrossed ? "Stop narration" : "Cancel before commit"}</button>}
+              {canRetryNarration && <button className="primary-button" disabled={narrationRetryMutation.isPending} onClick={() => narrationRetryMutation.mutate()}>{narrationRetryMutation.isPending ? "Starting presentation…" : "Retry narration only"}</button>}
               {current.error && <div className="inline-error"><strong>{current.error.code}</strong><span>{current.error.message}</span></div>}
               {playResult.success && <OperationResult result={playResult.data} />}
+              {retryResult.success && <div className="operation-result"><span className="eyebrow">Presentation repair</span><strong>Rendered without world mutation</strong><p>Original move {shortHash(retryResult.data.playerMoveId)}</p><code>{shortHash(retryResult.data.headCommitId)}</code></div>}
             </>
           ) : <EmptyState title="No operation yet" body="Render the scene or submit an action to start a traceable operation." />}
           {operationList.data && operationList.data.length > 1 && (

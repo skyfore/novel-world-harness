@@ -166,6 +166,7 @@ export const operationStatusSchema = z.enum([
 export const operationKindSchema = z.enum([
   "player-move",
   "scene-narration",
+  "narration-retry",
   "prepare",
   "instance-create",
   "branch-fork",
@@ -643,6 +644,12 @@ export const sceneNarrationRequestSchema = z.object({
   clientRequestId: z.string().min(1).max(200),
 }).strict();
 
+export const narrationRetryRequestSchema = z.object({
+  sourceRunId: z.string().min(1),
+  expectedHead: z.string().min(1),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
 export const playMessageSummarySchema = z.object({
   id: z.string().min(1),
   branchId: z.string().min(1),
@@ -703,6 +710,19 @@ export const sceneNarrationResultSchema = z.object({
   narrationStatus: z.enum(["rendered", "failed", "skipped"]),
   narration: z.string().optional(),
   narrationError: z.string().optional(),
+  choices: z.array(playerChoiceSummarySchema),
+}).strict();
+
+export const narrationRetryResultSchema = z.object({
+  sessionId: z.string().min(1),
+  branchId: z.string().min(1),
+  actorId: z.string().min(1),
+  runId: z.string().min(1),
+  sourceRunId: z.string().min(1),
+  playerMoveId: z.string().min(1),
+  headCommitId: z.string().min(1),
+  narrationStatus: z.literal("rendered"),
+  narration: z.string().min(1),
   choices: z.array(playerChoiceSummarySchema),
 }).strict();
 
@@ -779,10 +799,12 @@ export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;
 export type UpdatePlaySessionRequest = z.infer<typeof updatePlaySessionRequestSchema>;
 export type PlayMoveRequest = z.infer<typeof playMoveRequestSchema>;
 export type SceneNarrationRequest = z.infer<typeof sceneNarrationRequestSchema>;
+export type NarrationRetryRequest = z.infer<typeof narrationRetryRequestSchema>;
 export type PlayMessageSummary = z.infer<typeof playMessageSummarySchema>;
 export type PlaySessionDetail = z.infer<typeof playSessionDetailSchema>;
 export type PlayerChoiceSummary = z.infer<typeof playerChoiceSummarySchema>;
 export type PlayOperationResult = z.infer<typeof playOperationResultSchema>;
 export type SceneNarrationResult = z.infer<typeof sceneNarrationResultSchema>;
+export type NarrationRetryResult = z.infer<typeof narrationRetryResultSchema>;
 export type RemovePlaySessionResult = z.infer<typeof removePlaySessionResultSchema>;
 export type ClearPlayConversationResult = z.infer<typeof clearPlayConversationResultSchema>;

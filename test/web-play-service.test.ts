@@ -337,6 +337,7 @@ describe("Web Play application service", () => {
       result: { accepted: true, narrationStatus: "skipped", runId: accepted.operation.runId },
     });
     expect(await engine.branches.readHead("main")).not.toBe(genesis);
+    const committedHead = await engine.branches.readHead("main");
     expect(await new PlayConversationStore(root).list("main")).toEqual([
       expect.objectContaining({ role: "player", status: "accepted", runId: accepted.operation.runId }),
     ]);
@@ -345,6 +346,54 @@ describe("Web Play application service", () => {
       previousHead: genesis,
       error: { code: "OPERATION_INTERRUPTED_AFTER_COMMIT", retryable: false },
     });
+
+    const repairService = new PlayApplicationService({
+      root,
+      events,
+      operations,
+      translator: () => moveCandidate(),
+      narrator,
+    });
+    const retry = await repairService.startNarrationRetry(session.session.id, {
+      sourceRunId: accepted.operation.runId!,
+      expectedHead: committedHead,
+      clientRequestId: "retry-narration-after-stop",
+    });
+    const repaired = await operations.wait(retry.operation.id);
+    expect(repaired).toMatchObject({
+      status: "succeeded",
+      kind: "narration-retry",
+      commitBoundaryCrossed: false,
+      result: {
+        sourceRunId: accepted.operation.runId,
+        playerMoveId: expect.any(String),
+        headCommitId: committedHead,
+        narrationStatus: "rendered",
+      },
+    });
+    expect(await engine.branches.readHead("main")).toBe(committedHead);
+    expect(await new PlayConversationStore(root).list("main")).toEqual([
+      expect.objectContaining({ role: "player", status: "accepted", runId: accepted.operation.runId }),
+      expect.objectContaining({ role: "scene", status: "rendered", runId: retry.operation.runId }),
+    ]);
+    const retryTrace = await repairService.traceStore.getRun(retry.operation.runId!);
+    expect(retryTrace).toMatchObject({
+      kind: "narration-retry",
+      status: "succeeded",
+      previousHead: committedHead,
+      finalHead: committedHead,
+    });
+    const retryEvents = await repairService.traceStore.readEvents(retry.operation.runId!);
+    expect(retryEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "validation.completed", data: expect.objectContaining({ worldMutationAllowed: false }) }),
+      expect.objectContaining({ type: "presentation.message.appended" }),
+    ]));
+    expect(retryEvents.some((event) => event.type.startsWith("world.commit."))).toBe(false);
+    await expect(repairService.startNarrationRetry(session.session.id, {
+      sourceRunId: accepted.operation.runId!,
+      expectedHead: committedHead,
+      clientRequestId: "retry-narration-again",
+    })).rejects.toMatchObject({ detail: { code: "NARRATION_ALREADY_RENDERED", retry: { kind: "none" } } });
   });
 
   it("surfaces typed application errors", async () => {
@@ -415,6 +464,18 @@ describe("Web Play application service", () => {
       expect(operation.json()).toMatchObject({ id: operationId, status: "succeeded" });
       const detail = await app.inject({ method: "GET", url: "/api/v1/play-sessions/play-main" });
       expect(detail.json()).toMatchObject({ messages: [expect.objectContaining({ role: "scene" })] });
+
+      const missingRetrySource = await app.inject({
+        method: "POST",
+        url: "/api/v1/play-sessions/play-main/retry-narration",
+        headers: { "x-nwh-csrf": csrfToken },
+        payload: { sourceRunId: "run-missing", expectedHead: genesis, clientRequestId: "http-retry-missing" },
+      });
+      expect(missingRetrySource.statusCode).toBe(404);
+      expect(missingRetrySource.json()).toMatchObject({
+        code: "TRACE_RUN_NOT_FOUND",
+        retry: { discoveryEndpoint: "/api/v1/runs?sessionId=play-main&kind=player-move", copyField: "id", maxAttempts: 1 },
+      });
 
       const cleared = await app.inject({
         method: "DELETE",

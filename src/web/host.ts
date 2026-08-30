@@ -23,6 +23,7 @@ import {
   executeRemovalRequestSchema,
   forkInstanceRequestSchema,
   healthResponseSchema,
+  narrationRetryRequestSchema,
   operationKindSchema,
   ontologyLayerSchema,
   ontologyViewSchema,
@@ -346,6 +347,11 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/narrations`, async (request, reply) => {
     const { sessionId } = sessionParamSchema.parse(request.params);
     const accepted = await play.startSceneNarration(sessionId, sceneNarrationRequestSchema.parse(request.body));
+    return reply.code(202).send(accepted);
+  });
+  app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/retry-narration`, async (request, reply) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    const accepted = await play.startNarrationRetry(sessionId, narrationRetryRequestSchema.parse(request.body));
     return reply.code(202).send(accepted);
   });
   app.get(`/api/${WEB_API_VERSION}/operations`, async (request) => {

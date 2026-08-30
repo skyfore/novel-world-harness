@@ -78,6 +78,11 @@ below the workspace state directory. A server restart retains completed runs and
 turns unfinished work into an explicit `interrupted` state; post-commit work is
 never presented as safe to replay unchanged.
 
+If a committed move is stopped before presentation completes, the Play page can
+retry narration only. The server verifies the original move trace and current
+branch head, creates a separate `narration-retry` trace, and never replays the
+world mutation.
+
 Every play and compiler run has a durable trajectory inspector. It exposes the
 ordered LLM requests and tool calls, context-part composition (system policy,
 world model, source evidence, prior messages, and tool results), exact request

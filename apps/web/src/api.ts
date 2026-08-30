@@ -10,6 +10,7 @@ import {
   forkInstanceRequestSchema,
   forkInstanceResultSchema,
   instanceDetailSchema,
+  narrationRetryRequestSchema,
   operationAcceptedSchema,
   operationSnapshotSchema,
   ontologyGraphSchema,
@@ -43,6 +44,7 @@ import {
   type ForkInstanceRequest,
   type ForkInstanceResult,
   type InstanceDetail,
+  type NarrationRetryRequest,
   type OperationAccepted,
   type OperationSnapshot,
   type OntologyGraph,
@@ -356,6 +358,16 @@ export function startSceneNarration(sessionId: string, inputValue: SceneNarratio
     `/api/v1/play-sessions/${encodeURIComponent(sessionId)}/narrations`,
     "POST",
     sceneNarrationRequestSchema.parse(inputValue),
+    operationAcceptedSchema,
+    csrfToken,
+  );
+}
+
+export function retryNarration(sessionId: string, inputValue: NarrationRetryRequest, csrfToken: string): Promise<OperationAccepted> {
+  return mutation(
+    `/api/v1/play-sessions/${encodeURIComponent(sessionId)}/retry-narration`,
+    "POST",
+    narrationRetryRequestSchema.parse(inputValue),
     operationAcceptedSchema,
     csrfToken,
   );

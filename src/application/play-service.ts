@@ -42,6 +42,8 @@ import { BranchStore } from "../world/store.js";
 import {
   clearPlayConversationResultSchema,
   createPlaySessionRequestSchema,
+  narrationRetryRequestSchema,
+  narrationRetryResultSchema,
   playableCharacterListSchema,
   playMoveRequestSchema,
   playOperationResultSchema,
@@ -52,6 +54,8 @@ import {
   updatePlaySessionRequestSchema,
   type ClearPlayConversationResult,
   type CreatePlaySessionRequest,
+  type NarrationRetryRequest,
+  type NarrationRetryResult,
   type OperationAccepted,
   type PlayableCharacterList,
   type PlayMoveRequest,
@@ -69,7 +73,7 @@ import { OperationManager, type OperationRunContext } from "../web/operation-man
 import { CatalogService } from "./catalog-service.js";
 import { TraceRecorder, newTraceId, type TraceContext } from "../trace/recorder.js";
 import { TraceStore } from "../trace/store.js";
-import type { TraceErrorSummary, TraceRunStatus } from "../trace/schema.js";
+import type { TraceErrorSummary, TraceRunManifest, TraceRunStatus } from "../trace/schema.js";
 
 export interface PlayApplicationServiceOptions {
   root: string;
@@ -352,6 +356,62 @@ export class PlayApplicationService {
     }
   }
 
+  async startNarrationRetry(sessionId: string, inputValue: NarrationRetryRequest): Promise<OperationAccepted> {
+    const input = narrationRetryRequestSchema.parse(inputValue);
+    const existing = this.options.operations.findByClientRequest("narration-retry", sessionId, input.clientRequestId);
+    if (existing) {
+      return this.options.operations.start({
+        kind: "narration-retry",
+        scopeId: sessionId,
+        clientRequestId: input.clientRequestId,
+        request: input,
+        run: async () => { throw new Error("An idempotent operation must not be executed twice."); },
+      });
+    }
+    const session = await this.requireWritableSession(sessionId);
+    await this.assertExpectedHead(session, input.expectedHead);
+    this.assertNoActiveOperation(session.id);
+    const sourceRun = await this.requireNarrationRetrySource(session, input);
+    const recorder = await TraceRecorder.start(this.traces, {
+      kind: "narration-retry",
+      sourceId: session.sourceId,
+      branchId: session.branchId,
+      playSessionId: session.id,
+      playerMoveId: sourceRun.playerMoveId,
+      actorId: session.actorId,
+      previousHead: input.expectedHead,
+      storyTimeBefore: { commitId: input.expectedHead },
+    });
+    try {
+      const accepted = this.options.operations.start({
+        kind: "narration-retry",
+        scopeId: session.id,
+        clientRequestId: input.clientRequestId,
+        request: input,
+        runId: recorder.manifest.id,
+        run: (context) => this.runWithTrace(
+          recorder,
+          session.branchId,
+          context,
+          () => this.runNarrationRetry(session.id, input, sourceRun, context, recorder),
+        ),
+      });
+      if (accepted.reused) {
+        await recorder.finish("cancelled", {}, {
+          code: "IDEMPOTENT_OPERATION_REUSED",
+          message: "A concurrent request reused an existing operation; this unused trace was closed without executing.",
+          retryable: false,
+        });
+        return accepted;
+      }
+      await recorder.link({ operationId: accepted.operation.id });
+      return accepted;
+    } catch (error) {
+      await recorder.finish("failed", {}, traceError(error, "failed")).catch(() => undefined);
+      throw error;
+    }
+  }
+
   private async runPlayerMove(
     sessionId: string,
     input: PlayMoveRequest,
@@ -564,6 +624,66 @@ export class PlayApplicationService {
     });
   }
 
+  private async runNarrationRetry(
+    sessionId: string,
+    input: NarrationRetryRequest,
+    sourceRun: TraceRunManifest,
+    context: OperationRunContext,
+    recorder: TraceRecorder,
+  ): Promise<NarrationRetryResult> {
+    const session = await this.requireWritableSession(sessionId);
+    await this.assertExpectedHead(session, input.expectedHead);
+    await this.requireNarrationRetrySource(session, input);
+    await this.sessions.activate(session.id);
+    const narrationTrace = await recorder.child(recorder.rootContext, "Retry narration only", "narration-retry");
+    await recorder.record("validation.completed", {
+      kind: "narration-retry-eligibility",
+      sourceRunId: sourceRun.id,
+      playerMoveId: sourceRun.playerMoveId,
+      committedHead: sourceRun.finalHead,
+      worldMutationAllowed: false,
+    }, narrationTrace, { storyTime: { commitId: input.expectedHead } });
+    const adapters = await this.adapters(context, narrationTrace);
+    let rendered: NarrationOutcome;
+    try {
+      rendered = await this.narrate(
+        session,
+        "turn",
+        context,
+        adapters.narrator,
+        recorder,
+        narrationTrace,
+        sourceRun.playerMoveId,
+      );
+      await recorder.finishStage(narrationTrace, {
+        status: "completed",
+        sourceRunId: sourceRun.id,
+        worldMutationPerformed: false,
+      });
+    } catch (error) {
+      await recorder.failStage(narrationTrace, error);
+      throw error;
+    }
+    await recorder.link({
+      finalHead: input.expectedHead,
+      presentationMessageIds: [rendered.message.id],
+      storyTimeAfter: { commitId: input.expectedHead },
+    });
+    this.invalidateCatalog("narration-retry-completed", session.id, context.operationId, recorder.manifest.id);
+    return narrationRetryResultSchema.parse({
+      sessionId: session.id,
+      branchId: session.branchId,
+      actorId: session.actorId,
+      runId: recorder.manifest.id,
+      sourceRunId: sourceRun.id,
+      playerMoveId: sourceRun.playerMoveId,
+      headCommitId: input.expectedHead,
+      narrationStatus: "rendered",
+      narration: rendered.narration,
+      choices: rendered.choices,
+    });
+  }
+
   private async narrate(
     session: ActivePlaySession,
     purpose: PlayScenePurpose,
@@ -760,6 +880,58 @@ export class PlayApplicationService {
       copyField: "id",
       maxAttempts: 1,
     });
+  }
+
+  private async requireNarrationRetrySource(
+    session: ActivePlaySession,
+    input: NarrationRetryRequest,
+  ): Promise<TraceRunManifest> {
+    let sourceRun: TraceRunManifest;
+    try {
+      sourceRun = await this.traces.getRun(input.sourceRunId);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Unknown trace run")) {
+        throw webError(404, "TRACE_RUN_NOT_FOUND", `Unknown source run '${input.sourceRunId}'.`, {
+          kind: "after-refresh",
+          discoveryEndpoint: `/api/v1/runs?sessionId=${encodeURIComponent(session.id)}&kind=player-move`,
+          copyField: "id",
+          maxAttempts: 1,
+        });
+      }
+      throw error;
+    }
+    if (sourceRun.kind !== "player-move" || sourceRun.playSessionId !== session.id || sourceRun.branchId !== session.branchId) {
+      throw webError(409, "NARRATION_RETRY_SOURCE_SCOPE_MISMATCH", `Run '${sourceRun.id}' is not a player move from this play session and branch.`, {
+        kind: "after-user-action",
+        discoveryEndpoint: `/api/v1/runs?sessionId=${encodeURIComponent(session.id)}&kind=player-move`,
+        copyField: "id",
+        maxAttempts: 1,
+      });
+    }
+    if (!sourceRun.playerMoveId || !sourceRun.finalHead) {
+      throw webError(409, "NARRATION_RETRY_SOURCE_INCOMPLETE", `Run '${sourceRun.id}' does not contain a committed move identity and final head. Do not retry it as narration.`, { kind: "none" });
+    }
+    if (sourceRun.finalHead !== input.expectedHead) {
+      throw webError(409, "NARRATION_RETRY_HEAD_MISMATCH", `Run '${sourceRun.id}' committed at '${sourceRun.finalHead}', but the selected branch head is '${input.expectedHead}'.`, {
+        kind: "after-refresh",
+        discoveryEndpoint: `/api/v1/play-sessions/${encodeURIComponent(session.id)}`,
+        copyField: "headCommitId",
+        maxAttempts: 1,
+      });
+    }
+    const events = await this.traces.readEvents(sourceRun.id);
+    const committed = events.some((event) => event.type === "world.commit.completed" && event.data?.accepted === true);
+    if (!committed) {
+      throw webError(409, "NARRATION_RETRY_WORLD_NOT_COMMITTED", `Run '${sourceRun.id}' has no accepted world commit. Narration retry cannot be used to replay or manufacture a move.`, { kind: "none" });
+    }
+    const existingNarration = (await this.conversations.list(session.branchId)).find((message) =>
+      message.playerMoveId === sourceRun.playerMoveId
+      && message.role === "scene"
+      && message.status === "rendered");
+    if (existingNarration) {
+      throw webError(409, "NARRATION_ALREADY_RENDERED", `Player move '${sourceRun.playerMoveId}' already has rendered presentation '${existingNarration.id}'.`, { kind: "none" });
+    }
+    return sourceRun;
   }
 
   private async readHeadOrNull(branchId: string): Promise<string | null> {

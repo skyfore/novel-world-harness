@@ -6,7 +6,7 @@ export const traceIdentifierSchema = z.string().regex(
   "Trace identifiers may contain only letters, numbers, '.', '_', ':', and '-'.",
 );
 
-export const traceRunKindSchema = z.enum(["player-move", "scene-narration", "prepare"]);
+export const traceRunKindSchema = z.enum(["player-move", "scene-narration", "narration-retry", "prepare"]);
 export const traceRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled", "interrupted"]);
 
 export const traceErrorSummarySchema = z.object({

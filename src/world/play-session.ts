@@ -5,116 +5,266 @@ import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { idSchema } from "./model.js";
 
-export const activePlaySessionSchema = z.object({
+const timestampSchema = z.string().datetime({ offset: true });
+const playSessionStatusSchema = z.enum(["active", "idle", "archived", "detached"]);
+
+export const legacyActivePlaySessionSchema = z.object({
   version: z.literal(1),
   branchId: idSchema,
   sourceId: idSchema.optional(),
   actorId: idSchema,
   lastCommitId: idSchema,
-  updatedAt: z.string().datetime({ offset: true }),
+  updatedAt: timestampSchema,
 }).strict();
+
+export const activePlaySessionSchema = z.object({
+  version: z.literal(2),
+  id: idSchema,
+  branchId: idSchema,
+  sourceId: idSchema.optional(),
+  actorId: idSchema,
+  lastCommitId: idSchema,
+  title: z.string().trim().min(1).max(200),
+  status: playSessionStatusSchema,
+  conversationId: idSchema,
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+}).strict();
+
+const storedPlaySessionSchema = z.union([legacyActivePlaySessionSchema, activePlaySessionSchema]);
+
+export type LegacyActivePlaySession = z.infer<typeof legacyActivePlaySessionSchema>;
 export type ActivePlaySession = z.infer<typeof activePlaySessionSchema>;
+export type PlaySessionStatus = z.infer<typeof playSessionStatusSchema>;
+
+export type WritePlaySessionInput = {
+  branchId: string;
+  sourceId?: string;
+  actorId: string;
+  lastCommitId: string;
+  id?: string;
+  title?: string;
+  conversationId?: string;
+};
 
 export class PlaySessionStore {
   readonly filePath: string;
   private readonly instancesDir: string;
+
   constructor(workspaceRoot: string) {
     const root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "play");
     this.filePath = path.join(root, "active.json");
     this.instancesDir = path.join(root, "instances");
   }
+
   async read(): Promise<ActivePlaySession | null> {
-    try {
-      return activePlaySessionSchema.parse(JSON.parse(await fs.readFile(this.filePath, "utf8")));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
+    const stored = await this.readPath(this.filePath);
+    if (!stored) return null;
+    const session = upgradePlaySession(stored);
+    if (session.status !== "active") {
+      throw new Error(`Active play-session pointer '${session.id}' has non-active status '${session.status}'.`);
     }
+    if (stored.version === 1) {
+      await this.atomicWrite(this.instanceFile(session.branchId), session);
+      await this.atomicWrite(this.filePath, session);
+    }
+    return session;
   }
-  async readInstance(branchId: string): Promise<ActivePlaySession | null> {
-    const parsedBranchId = idSchema.parse(branchId);
-    try {
-      const session = activePlaySessionSchema.parse(JSON.parse(await fs.readFile(path.join(this.instancesDir, `${parsedBranchId}.json`), "utf8")));
-      if (session.branchId !== parsedBranchId) throw new Error(`Play-session file '${parsedBranchId}' contains branch '${session.branchId}'.`);
+
+  async readInstance(branchIdValue: string): Promise<ActivePlaySession | null> {
+    const branchId = idSchema.parse(branchIdValue);
+    const stored = await this.readPath(this.instanceFile(branchId));
+    if (stored) {
+      if (stored.branchId !== branchId) {
+        throw new Error(`Play-session file '${branchId}' contains branch '${stored.branchId}'.`);
+      }
+      const session = upgradePlaySession(stored);
+      if (stored.version === 1) await this.atomicWrite(this.instanceFile(branchId), session);
       return session;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      const active = await this.read();
-      return active?.branchId === parsedBranchId ? active : null;
     }
+    const active = await this.read();
+    return active?.branchId === branchId ? active : null;
   }
+
+  async getById(sessionIdValue: string): Promise<ActivePlaySession | null> {
+    const sessionId = idSchema.parse(sessionIdValue);
+    return (await this.listInstances()).find((session) => session.id === sessionId) ?? null;
+  }
+
   async listInstances(): Promise<ActivePlaySession[]> {
+    const sessions = new Map<string, ActivePlaySession>();
     try {
       const names = (await fs.readdir(this.instancesDir)).filter((name) => name.endsWith(".json")).sort();
-      const sessions = await Promise.all(names.map(async (name) => {
-        const session = activePlaySessionSchema.parse(JSON.parse(await fs.readFile(path.join(this.instancesDir, name), "utf8")));
-        if (name !== `${session.branchId}.json`) throw new Error(`Play-session file '${name}' contains branch '${session.branchId}'.`);
-        return session;
-      }));
-      const active = await this.read();
-      if (active && !sessions.some((session) => session.branchId === active.branchId)) sessions.push(active);
-      return sessions.sort((left, right) => left.branchId.localeCompare(right.branchId));
+      for (const name of names) {
+        const branchId = name.slice(0, -".json".length);
+        const stored = await this.readPath(path.join(this.instancesDir, name));
+        if (!stored) continue;
+        if (name !== `${stored.branchId}.json`) {
+          throw new Error(`Play-session file '${name}' contains branch '${stored.branchId}'.`);
+        }
+        const session = upgradePlaySession(stored);
+        sessions.set(branchId, session);
+        if (stored.version === 1) await this.atomicWrite(this.instanceFile(branchId), session);
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      const active = await this.read();
-      return active ? [active] : [];
     }
+    const active = await this.read();
+    if (active) sessions.set(active.branchId, active);
+    return [...sessions.values()].sort((left, right) =>
+      Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
+      || left.branchId.localeCompare(right.branchId));
   }
-  async write(input: Omit<ActivePlaySession, "version" | "updatedAt">): Promise<ActivePlaySession> {
-    const previous = await this.read();
-    const value = activePlaySessionSchema.parse({
-      version: 1,
-      ...input,
-      updatedAt: new Date().toISOString(),
-    });
-    if (previous && previous.branchId !== value.branchId && !(await this.readInstanceFile(previous.branchId))) {
-      await this.atomicWrite(path.join(this.instancesDir, `${previous.branchId}.json`), previous);
+
+  async write(input: WritePlaySessionInput): Promise<ActivePlaySession> {
+    const branchId = idSchema.parse(input.branchId);
+    const actorId = idSchema.parse(input.actorId);
+    const lastCommitId = idSchema.parse(input.lastCommitId);
+    const sourceId = input.sourceId === undefined ? undefined : idSchema.parse(input.sourceId);
+    const previousActive = await this.read();
+    const existing = await this.readInstance(branchId);
+    const now = new Date().toISOString();
+
+    if (previousActive && previousActive.branchId !== branchId) {
+      await this.atomicWrite(this.instanceFile(previousActive.branchId), activePlaySessionSchema.parse({
+        ...previousActive,
+        status: "idle",
+        updatedAt: now,
+      }));
     }
-    await this.atomicWrite(path.join(this.instancesDir, `${value.branchId}.json`), value);
+
+    const effectiveSourceId = sourceId ?? existing?.sourceId;
+    const value = activePlaySessionSchema.parse({
+      version: 2,
+      id: input.id ?? existing?.id ?? playSessionIdForBranch(branchId),
+      branchId,
+      ...(effectiveSourceId ? { sourceId: effectiveSourceId } : {}),
+      actorId,
+      lastCommitId,
+      title: input.title ?? existing?.title ?? branchId,
+      status: "active",
+      conversationId: input.conversationId ?? existing?.conversationId ?? playConversationIdForBranch(branchId),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
+    await this.atomicWrite(this.instanceFile(branchId), value);
     await this.atomicWrite(this.filePath, value);
     return value;
   }
-  async removeInstance(branchId: string): Promise<ActivePlaySession | null> {
-    const parsedBranchId = idSchema.parse(branchId);
+
+  async activate(sessionIdValue: string): Promise<ActivePlaySession> {
+    const session = await this.requireById(sessionIdValue);
+    if (session.status === "detached") throw new Error(`Play session '${session.id}' is detached because its branch no longer exists.`);
+    if (session.status === "archived") throw new Error(`Play session '${session.id}' is archived. Restore it before continuing.`);
+    return this.write({
+      id: session.id,
+      branchId: session.branchId,
+      ...(session.sourceId ? { sourceId: session.sourceId } : {}),
+      actorId: session.actorId,
+      lastCommitId: session.lastCommitId,
+      title: session.title,
+      conversationId: session.conversationId,
+    });
+  }
+
+  async updateMetadata(
+    sessionIdValue: string,
+    patch: { title?: string; status?: Exclude<PlaySessionStatus, "active"> },
+  ): Promise<ActivePlaySession> {
+    const session = await this.requireById(sessionIdValue);
+    const updated = activePlaySessionSchema.parse({
+      ...session,
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    await this.atomicWrite(this.instanceFile(updated.branchId), updated);
     const active = await this.read();
-    await fs.rm(path.join(this.instancesDir, `${parsedBranchId}.json`), { force: true });
-    if (active?.branchId !== parsedBranchId) return active;
-    await fs.rm(this.filePath, { force: true });
-    const remaining = await this.listInstanceFiles();
-    const next = remaining.sort((left, right) =>
-      Date.parse(right.updatedAt) - Date.parse(left.updatedAt)
-      || left.branchId.localeCompare(right.branchId))[0];
-    if (!next) return null;
-    await this.atomicWrite(this.filePath, next);
-    return next;
-  }
-  private async listInstanceFiles(): Promise<ActivePlaySession[]> {
-    try {
-      const names = (await fs.readdir(this.instancesDir)).filter((name) => name.endsWith(".json")).sort();
-      return Promise.all(names.map(async (name) => {
-        const session = activePlaySessionSchema.parse(JSON.parse(await fs.readFile(path.join(this.instancesDir, name), "utf8")));
-        if (name !== `${session.branchId}.json`) throw new Error(`Play-session file '${name}' contains branch '${session.branchId}'.`);
-        return session;
-      }));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
+    if (active?.id === updated.id) {
+      if (updated.status === "active") await this.atomicWrite(this.filePath, updated);
+      else await fs.rm(this.filePath, { force: true });
     }
+    return updated;
   }
-  private async readInstanceFile(branchId: string): Promise<ActivePlaySession | null> {
+
+  async restore(sessionIdValue: string): Promise<ActivePlaySession> {
+    const session = await this.requireById(sessionIdValue);
+    if (session.status !== "archived") return session;
+    const restored = activePlaySessionSchema.parse({
+      ...session,
+      status: "idle",
+      updatedAt: new Date().toISOString(),
+    });
+    await this.atomicWrite(this.instanceFile(restored.branchId), restored);
+    return restored;
+  }
+
+  async removeSession(sessionIdValue: string): Promise<ActivePlaySession> {
+    const session = await this.requireById(sessionIdValue);
+    await fs.rm(this.instanceFile(session.branchId), { force: true });
+    const active = await this.read();
+    if (active?.id === session.id) await fs.rm(this.filePath, { force: true });
+    return session;
+  }
+
+  async removeInstance(branchIdValue: string): Promise<ActivePlaySession | null> {
+    const branchId = idSchema.parse(branchIdValue);
+    const active = await this.read();
+    await fs.rm(this.instanceFile(branchId), { force: true });
+    if (active?.branchId !== branchId) return active;
+    await fs.rm(this.filePath, { force: true });
+    const next = (await this.listInstances()).find((session) => session.status === "idle");
+    return next ? this.activate(next.id) : null;
+  }
+
+  private async requireById(sessionId: string): Promise<ActivePlaySession> {
+    const session = await this.getById(sessionId);
+    if (!session) throw new Error(`Unknown play session '${sessionId}'. Use /play-sessions to list sessions in this workspace.`);
+    return session;
+  }
+
+  private async readPath(filePath: string): Promise<z.infer<typeof storedPlaySessionSchema> | null> {
     try {
-      const session = activePlaySessionSchema.parse(JSON.parse(await fs.readFile(path.join(this.instancesDir, `${branchId}.json`), "utf8")));
-      if (session.branchId !== branchId) throw new Error(`Play-session file '${branchId}' contains branch '${session.branchId}'.`);
-      return session;
+      return storedPlaySessionSchema.parse(JSON.parse(await fs.readFile(filePath, "utf8")));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
     }
   }
+
+  private instanceFile(branchId: string): string {
+    return path.join(this.instancesDir, `${branchId}.json`);
+  }
+
   private async atomicWrite(filePath: string, value: ActivePlaySession): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
     const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
     await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     await fs.rename(temporary, filePath);
   }
+}
+
+export function playSessionIdForBranch(branchIdValue: string): string {
+  return idSchema.parse(`play-${idSchema.parse(branchIdValue)}`);
+}
+
+export function playConversationIdForBranch(branchIdValue: string): string {
+  return idSchema.parse(`conversation-${idSchema.parse(branchIdValue)}`);
+}
+
+function upgradePlaySession(session: z.infer<typeof storedPlaySessionSchema>): ActivePlaySession {
+  if (session.version === 2) return structuredClone(session);
+  return activePlaySessionSchema.parse({
+    version: 2,
+    id: playSessionIdForBranch(session.branchId),
+    branchId: session.branchId,
+    ...(session.sourceId ? { sourceId: session.sourceId } : {}),
+    actorId: session.actorId,
+    lastCommitId: session.lastCommitId,
+    title: session.branchId,
+    status: "active",
+    conversationId: playConversationIdForBranch(session.branchId),
+    createdAt: session.updatedAt,
+    updatedAt: session.updatedAt,
+  });
 }

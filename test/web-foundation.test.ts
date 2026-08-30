@@ -51,7 +51,7 @@ describe("Web application catalog", () => {
     expect(snapshot.instances).toEqual([]);
     expect(snapshot.playSessions).toEqual([]);
     expect(snapshot.activeSessionId).toBeNull();
-    expect(legacyPlaySessionId("main")).toBe("legacy-main");
+    expect(legacyPlaySessionId("main")).toBe("play-main");
   });
 });
 

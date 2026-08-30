@@ -236,7 +236,17 @@ export {
 } from "./world/canonical-adaptation.js";
 export { classifyPlayerInput, renderPlayerMetaResponse, type PlayerInputRoute } from "./world/player-input-route.js";
 export { PlayerTurnAuditStore, type PlayerTurnAudit, type PlayerTurnOrigin } from "./world/player-turn-audit.js";
-export { PlaySessionStore, activePlaySessionSchema, type ActivePlaySession } from "./world/play-session.js";
+export {
+  PlaySessionStore,
+  activePlaySessionSchema,
+  legacyActivePlaySessionSchema,
+  playConversationIdForBranch,
+  playSessionIdForBranch,
+  type ActivePlaySession,
+  type LegacyActivePlaySession,
+  type PlaySessionStatus,
+  type WritePlaySessionInput,
+} from "./world/play-session.js";
 export {
   assertPlaySceneNarration,
   buildPlayOpeningFrame,

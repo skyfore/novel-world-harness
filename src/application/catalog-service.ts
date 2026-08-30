@@ -1,5 +1,6 @@
 import path from "node:path";
 import { inspectPlayExperience } from "../world/play-experience.js";
+import { playSessionIdForBranch } from "../world/play-session.js";
 import {
   catalogSnapshotSchema,
   type CatalogSnapshot,
@@ -19,8 +20,8 @@ export class CatalogService {
     const playSessions: PlaySessionSummary[] = catalog.savedSessions.map((session) => {
       const instance = instancesByBranch.get(session.branchId);
       return {
-        id: legacyPlaySessionId(session.branchId),
-        storageVersion: 1,
+        id: session.id,
+        storageVersion: session.version,
         branchId: session.branchId,
         ...(session.sourceId ? { sourceId: session.sourceId } : {}),
         actorId: session.actorId,
@@ -28,7 +29,7 @@ export class CatalogService {
         lastCommitId: session.lastCommitId,
         active: catalog.activeSession?.branchId === session.branchId,
         atHead: instance?.headCommitId === session.lastCommitId,
-        status: catalog.activeSession?.branchId === session.branchId ? "active" : "idle",
+        status: session.status,
         updatedAt: session.updatedAt,
       };
     });
@@ -53,11 +54,11 @@ export class CatalogService {
       })),
       instances: catalog.instances,
       playSessions,
-      activeSessionId: catalog.activeSession ? legacyPlaySessionId(catalog.activeSession.branchId) : null,
+      activeSessionId: catalog.activeSession?.id ?? null,
     });
   }
 }
 
 export function legacyPlaySessionId(branchId: string): string {
-  return `legacy-${branchId}`;
+  return playSessionIdForBranch(branchId);
 }

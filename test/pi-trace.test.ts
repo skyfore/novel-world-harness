@@ -189,6 +189,7 @@ describe("Pi trace conformance", () => {
           cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
         },
         stopReason: "stop",
+        errorMessage: "Bearer canary-final-error-secret",
         timestamp: now + 20,
       },
     }, ctx);
@@ -252,6 +253,7 @@ describe("Pi trace conformance", () => {
     const responseBlob = await store.getBlob(response!.blobRef!);
     expect(JSON.stringify(responseBlob)).toContain("Door opened.");
     expect(JSON.stringify(responseBlob)).not.toContain("canary-hidden-reasoning");
+    expect(response?.data.errorMessage).toBe("[REDACTED]");
 
     const persistedTrace = await readTree(store.root);
     for (const secret of [
@@ -260,6 +262,7 @@ describe("Pi trace conformance", () => {
       "canary-provider-secret",
       "canary-cookie",
       "canary-retry-secret",
+      "canary-final-error-secret",
       "canary-tool-password",
       "canary-tool-credential",
       "canary-hidden-reasoning",

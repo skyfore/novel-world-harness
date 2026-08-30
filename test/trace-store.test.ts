@@ -18,6 +18,58 @@ async function workspace(prefix = "nwh-trace-store-"): Promise<string> {
 }
 
 describe("append-only trace storage", () => {
+  it("redacts secrets at every event, blob, and manifest persistence boundary", async () => {
+    const root = await workspace("nwh-trace-redaction-");
+    const store = new TraceStore(root);
+    const recorder = await TraceRecorder.start(store, {
+      id: "run-redaction-boundary",
+      kind: "player-move",
+      storyTimeBefore: { label: "Bearer canary-story-before" },
+    });
+    const blob = await recorder.putBlob({
+      authorization: "Bearer canary-blob-header",
+      prose: "provider returned sk-canary-blob-value",
+    });
+    await recorder.record("stage.started", {
+      label: "Bearer canary-event-value",
+      apiKey: "canary-event-key",
+    }, recorder.rootContext, {
+      storyTime: { label: "Bearer canary-event-story-time" },
+      blobRef: blob,
+    });
+    const finished = await recorder.finish("failed", {}, {
+      code: "PROVIDER_FAILURE",
+      message: "Bearer canary-manifest-error",
+      retryable: true,
+    });
+
+    expect(await store.getBlob(blob)).toEqual({
+      authorization: "[REDACTED]",
+      prose: "provider returned [REDACTED]",
+    });
+    expect(finished.storyTimeBefore).toEqual({ label: "[REDACTED]" });
+    expect(finished.error?.message).toBe("[REDACTED]");
+    const events = await store.readEvents(finished.id);
+    expect(events.find((event) => event.type === "stage.started")).toMatchObject({
+      storyTime: { label: "[REDACTED]" },
+      data: { label: "[REDACTED]", apiKey: "[REDACTED]" },
+    });
+    expect(events.at(-1)?.data.error).toMatchObject({ message: "[REDACTED]" });
+
+    const persisted = await readDirectoryTree(store.root);
+    for (const secret of [
+      "canary-story-before",
+      "canary-blob-header",
+      "canary-blob-value",
+      "canary-event-value",
+      "canary-event-key",
+      "canary-event-story-time",
+      "canary-manifest-error",
+    ]) {
+      expect(persisted).not.toContain(secret);
+    }
+  });
+
   it("persists ordered events, content-addressed blobs, counts, usage, and world links", async () => {
     const root = await workspace();
     const store = new TraceStore(root);
@@ -240,3 +292,16 @@ describe("append-only trace storage", () => {
     await expect(store.createRun({ id: "../escape", kind: "prepare" })).rejects.toThrow("Trace identifiers");
   });
 });
+
+async function readDirectoryTree(root: string): Promise<string> {
+  const contents: string[] = [];
+  async function visit(directory: string): Promise<void> {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(target);
+      else contents.push(await fs.readFile(target, "utf8"));
+    }
+  }
+  await visit(root);
+  return contents.join("\n");
+}

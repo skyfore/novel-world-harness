@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { redactTraceSecrets } from "./redaction.js";
 import {
   traceBlobRefSchema,
   traceErrorSummarySchema,
@@ -161,7 +162,7 @@ export class TraceStore {
         ...(input.operationId ? { operationId: input.operationId } : {}),
         startedAt,
         ...(input.previousHead ? { previousHead: input.previousHead } : {}),
-        ...(input.storyTimeBefore !== undefined ? { storyTimeBefore: structuredClone(input.storyTimeBefore) } : {}),
+        ...(input.storyTimeBefore !== undefined ? { storyTimeBefore: redactTraceSecrets(input.storyTimeBefore) } : {}),
         presentationMessageIds: [],
         rootSpanId,
         lastSeq: 0,
@@ -196,7 +197,8 @@ export class TraceStore {
     await this.initialize();
     return this.exclusive(async () => {
       const { manifest, relativePath } = await this.requireRun(runId);
-      const updated = traceRunManifestSchema.parse({ ...manifest, ...structuredClone(patch) });
+      const sanitizedPatch = redactTraceSecrets(structuredClone(patch)) as Partial<TraceRunLinkPatch>;
+      const updated = traceRunManifestSchema.parse({ ...manifest, ...sanitizedPatch });
       await this.writeManifestAt(relativePath, updated);
       await this.updateIndexEntry(updated, relativePath);
       return structuredClone(updated);
@@ -216,6 +218,7 @@ export class TraceStore {
       if (manifest.status !== "running" && manifest.status !== status) {
         throw new Error(`Trace run '${runId}' is already ${manifest.status}; it cannot finish as ${status}.`);
       }
+      const sanitizedPatch = redactTraceSecrets(structuredClone(patch)) as FinishTraceRunPatch;
       if (manifest.status === "running") {
         const events = await this.readEventsAt(relativePath, runId);
         const terminal = events.at(-1);
@@ -229,19 +232,19 @@ export class TraceStore {
             spanId: manifest.rootSpanId,
             data: {
               status,
-              ...(patch.finalHead ? { finalHead: patch.finalHead } : {}),
-              ...(patch.error ? { error: patch.error } : {}),
+              ...(sanitizedPatch.finalHead ? { finalHead: sanitizedPatch.finalHead } : {}),
+              ...(sanitizedPatch.error ? { error: sanitizedPatch.error } : {}),
             },
-            ...(patch.endedAt ? { observedAt: patch.endedAt } : {}),
+            ...(sanitizedPatch.endedAt ? { observedAt: sanitizedPatch.endedAt } : {}),
           });
           manifest = appended.manifest;
         }
       }
       const updated = traceRunManifestSchema.parse({
         ...manifest,
-        ...structuredClone(patch),
+        ...sanitizedPatch,
         status,
-        endedAt: patch.endedAt ?? manifest.endedAt ?? new Date().toISOString(),
+        endedAt: sanitizedPatch.endedAt ?? manifest.endedAt ?? new Date().toISOString(),
       });
       await this.writeManifestAt(relativePath, updated);
       await this.updateIndexEntry(updated, relativePath);
@@ -304,7 +307,8 @@ export class TraceStore {
 
   async putBlob(content: unknown, mediaType = "application/json"): Promise<TraceBlobRef> {
     await this.initialize();
-    const serialized = mediaType === "application/json" ? stableJson(content) : String(content);
+    const sanitized = redactTraceSecrets(content);
+    const serialized = mediaType === "application/json" ? stableJson(sanitized) : String(sanitized);
     const bytes = Buffer.from(serialized, "utf8");
     const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
     const reference = traceBlobRefSchema.parse({ sha256, byteLength: bytes.length, mediaType });
@@ -422,8 +426,8 @@ export class TraceStore {
       ...(input.parentSpanId ? { parentSpanId: input.parentSpanId } : {}),
       ...(input.callId ? { callId: input.callId } : {}),
       ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
-      ...(input.storyTime !== undefined ? { storyTime: structuredClone(input.storyTime) } : {}),
-      ...(input.data ? { data: structuredClone(input.data) } : {}),
+      ...(input.storyTime !== undefined ? { storyTime: redactTraceSecrets(input.storyTime) } : {}),
+      ...(input.data ? { data: redactTraceSecrets(input.data) } : {}),
       ...(input.blobRef ? { blobRef: input.blobRef } : {}),
     });
     await fs.appendFile(path.join(this.root, relativePath, "events.jsonl"), `${JSON.stringify(event)}\n`, "utf8");

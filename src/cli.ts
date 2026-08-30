@@ -39,6 +39,7 @@ import {
 import { choosePlayExperience } from "./world/play-choice.js";
 import { playSceneRequestForEntry } from "./world/play-opening.js";
 import { askUserQuestion } from "./util/ask-user-question.js";
+import { parseWebPort, webCommand } from "./commands/web.js";
 
 const program = new Command();
 program
@@ -149,6 +150,20 @@ program.command("progress")
   .option("--root <path>", "local novel workspace")
   .description("show committed progress for the current or named instance")
   .action(async (instance, options) => progressCommand(rootFor(options), instance));
+program.command("web")
+  .option("--root <path>", "local novel workspace")
+  .option("--host <host>", "listen host", "127.0.0.1")
+  .option("--port <port>", "listen port", parseWebPort, 3080)
+  .option("--no-open", "do not open the browser automatically")
+  .option("--allow-remote", "allow binding the unauthenticated UI beyond loopback")
+  .description("open the local Novel World Harness Web UI")
+  .action(async (options) => webCommand({
+    root: rootFor(options),
+    host: options.host,
+    port: options.port,
+    open: options.open,
+    allowRemote: Boolean(options.allowRemote),
+  }));
 program.command("resume")
   .argument("[instance]", "playable instance id")
   .option("-c, --config <path>", "configuration file")

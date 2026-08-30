@@ -49,6 +49,27 @@ pnpm link --global
 
 Node 22.19 or newer is required.
 
+## Local Web UI
+
+Build and open the local browser workbench:
+
+```bash
+pnpm run build
+nwh web
+```
+
+The server binds to `127.0.0.1:3080` by default and reuses the same `$NWH_HOME`,
+workspace stores, world branches, play-session pointers, and Pi model catalog as
+the terminal harness. Use `--no-open` when a browser should not be launched.
+Binding beyond loopback is rejected unless `--allow-remote` is explicit because
+the MVP has no product login layer.
+
+Phase 0 exposes the read-only novel, instance, play-session, and Pi model catalog
+through versioned APIs and a React workbench. Play, trace, compiler mutations,
+and ontology projections are added in the following implementation phases. For
+frontend development, run `pnpm dev:web:server` and `pnpm dev:web` in separate
+terminals; Vite proxies `/api` to the local host.
+
 ## Local terminal assistant
 
 ```bash

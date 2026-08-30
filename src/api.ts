@@ -280,3 +280,8 @@ export {
 } from "./world/time.js";
 export { BranchStore, WorldObjectStore } from "./world/store.js";
 export { openWorkspaceWorld, type WorkspaceWorld, type WorkspaceWorldOpenOptions } from "./world/workspace-runtime.js";
+export { CatalogService, legacyPlaySessionId } from "./application/catalog-service.js";
+export { PiModelCatalogService, type ModelCatalogReader } from "./application/model-catalog-service.js";
+export * from "./web/contracts.js";
+export { WebEventBroker, serializeServerSentEvent, type WebEventListener } from "./web/event-stream.js";
+export { createWebHost, isLoopbackHost, type CreateWebHostOptions, type NwhWebHost } from "./web/host.js";

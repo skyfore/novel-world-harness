@@ -56,6 +56,16 @@ code, .mono { font-family: "DM Mono", ui-monospace, monospace; }
 .topbar strong { display: block; margin-top: 4px; font-size: 14px; }
 .topbar-meta { display: flex; gap: 8px; }
 .topbar-meta span, .panel-tag { padding: 6px 9px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font: 10px/1 "DM Mono"; text-transform: uppercase; }
+.operation-tray { min-height: 54px; display: flex; align-items: center; gap: 13px; padding: 8px 38px; border-bottom: 1px solid #403b28; background: #191810; }
+.operation-tray > div { min-width: 0; display: flex; flex: 1; gap: 7px; overflow-x: auto; }
+.operation-tray article { min-width: 230px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 7px; padding: 6px 7px 6px 10px; border: 1px solid #3b392b; border-radius: 4px; background: #11120e; }
+.operation-tray article > a { min-width: 0; }
+.operation-tray article > a span { display: grid; gap: 3px; }
+.operation-tray article strong, .operation-tray article small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.operation-tray article strong { color: var(--text); font-size: 9px; text-transform: capitalize; }
+.operation-tray article small, .operation-tray > small { color: var(--faint); font: 7px/1 "DM Mono"; }
+.operation-tray article .operation-status { max-width: 96px; overflow: hidden; padding: 4px 6px; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.operation-tray button { min-height: 25px; padding: 0 7px; border: 1px solid #5e4933; border-radius: 3px; background: transparent; color: var(--amber); font: 7px/1 "DM Mono"; cursor: pointer; }
 .page { max-width: 1480px; margin: 0 auto; padding: 46px 42px 80px; }
 .page-heading { max-width: 780px; margin-bottom: 34px; }
 .eyebrow { color: var(--accent); font: 500 10px/1.2 "DM Mono"; letter-spacing: .14em; text-transform: uppercase; }
@@ -291,6 +301,11 @@ button.ontology-table-row:hover, .ontology-table-selected { background: #1d2019;
 .session-toolbar button { min-height: 34px; padding-inline: 11px; color: var(--muted); }
 .live-pill { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 11px; border: 1px solid #45502f; border-radius: 99px; color: var(--accent); font: 10px/1 "DM Mono"; text-transform: uppercase; }
 .live-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px #d6ff7288; }
+.play-status-strip { display: grid; grid-template-columns: 1.1fr 1fr 1fr .8fr 1fr; margin: -15px 0 16px; border: 1px solid var(--line); border-radius: 5px; background: #141512; overflow: hidden; }
+.play-status-strip > div { min-width: 0; display: grid; gap: 5px; padding: 10px 12px; border-right: 1px solid var(--line-soft); }
+.play-status-strip > div:last-child { border-right: 0; }
+.play-status-strip span { color: var(--faint); font: 7px/1 "DM Mono"; letter-spacing: .1em; text-transform: uppercase; }
+.play-status-strip strong, .play-status-strip code { overflow: hidden; color: #bfc2b8; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .play-layout { display: grid; grid-template-columns: minmax(520px, 1fr) 350px; align-items: start; gap: 16px; }
 .transcript-panel, .operation-panel { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); overflow: hidden; }
 .transcript-panel { display: grid; grid-template-rows: 58px minmax(420px, calc(100vh - 370px)) auto; }
@@ -303,7 +318,11 @@ button.ontology-table-row:hover, .ontology-table-selected { background: #1d2019;
 .message > header span { color: var(--accent); font: 600 10px/1 "DM Mono"; text-transform: uppercase; }
 .message-player > header span { color: var(--amber); }
 .message > header small { color: var(--faint); font-size: 9px; }
-.run-badge { margin-left: auto; padding: 4px 7px; border: 1px solid #4b5535; border-radius: 99px; color: var(--accent); font: 8px/1 "DM Mono"; text-transform: uppercase; }
+.run-badge { margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid #4b5535; border-radius: 99px; color: var(--accent); font: 8px/1 "DM Mono"; text-transform: uppercase; }
+.run-badge strong { color: inherit; font-size: 7px; font-weight: 600; }
+.run-badge small { color: #858b7b !important; font-size: 7px !important; text-transform: none; }
+.run-badge span { color: inherit !important; font-size: 8px !important; }
+.run-badge-failed, .run-badge-cancelled, .run-badge-interrupted { border-color: #633e38; color: var(--danger); }
 .run-badge:hover, .inline-trace-link:hover { border-color: var(--accent); color: #e5ff9e; }
 .message p { margin: 0; white-space: pre-wrap; color: #d5d6cf; font: 15px/1.9 "Playfair Display", Georgia, serif; }
 .message-player { margin-left: auto; max-width: 78%; padding: 14px 16px; border: 1px solid #403c2c; border-radius: 6px; background: #201e17; }
@@ -418,6 +437,11 @@ button.ontology-table-row:hover, .ontology-table-selected { background: #1d2019;
 .fork-form > p { margin: 0 0 3px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .fork-commit-field select { width: 100%; height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 4px; outline: 0; background: #11120f; color: var(--text); font: 9px/1.4 "DM Mono"; }
 .fork-commit-field select:focus { border-color: #69764a; box-shadow: 0 0 0 1px #69764a33; }
+.fork-session-option { display: flex; align-items: flex-start; gap: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 4px; background: #12130f; cursor: pointer; }
+.fork-session-option input { width: 15px; height: 15px; margin: 1px 0 0; accent-color: var(--accent); }
+.fork-session-option span { display: grid; gap: 4px; }
+.fork-session-option strong { color: var(--text); font-size: 9px; }
+.fork-session-option small { color: var(--muted); font-size: 8px; line-height: 1.5; }
 .fork-truth-note { display: grid; gap: 6px; padding: 11px; border: 1px solid #413d2b; border-radius: 4px; background: #1c1a14; }
 .fork-truth-note span { color: var(--amber); font: 8px/1 "DM Mono"; text-transform: uppercase; }
 .fork-truth-note small { color: #aaa184; font-size: 8px; line-height: 1.55; }

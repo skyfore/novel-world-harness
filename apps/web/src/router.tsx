@@ -22,6 +22,7 @@ import {
   fetchOperations,
   fetchPlaySession,
   fetchPreparation,
+  fetchTraceRuns,
   forkInstance,
   removePlaySession,
   retryNarration,
@@ -103,6 +104,11 @@ function RootLayout() {
   const query = useBootstrap();
   const queryClient = useQueryClient();
   const [connection, setConnection] = useState<"connecting" | "online" | "offline">("connecting");
+  const operations = useQuery({
+    queryKey: ["operations"],
+    queryFn: ({ signal }) => fetchOperations(undefined, signal),
+    refetchInterval: 2_000,
+  });
 
   useEffect(() => {
     const source = new EventSource("/api/v1/events");
@@ -115,6 +121,7 @@ function RootLayout() {
       const operation = operationSnapshotSchema.safeParse(event.data.operation);
       if (!operation.success) return;
       queryClient.setQueryData(operationKey(operation.data.id), operation.data);
+      void queryClient.invalidateQueries({ queryKey: ["operations"], exact: true });
       void queryClient.invalidateQueries({ queryKey: operationsKey(operation.data.scopeId) });
       if (operation.data.runId) {
         void queryClient.invalidateQueries({ queryKey: traceRunsQueryKey });
@@ -157,6 +164,7 @@ function RootLayout() {
   }, [queryClient]);
 
   const data = query.data;
+  const activeOperations = operations.data?.filter((operation) => !isTerminal(operation.status)) ?? [];
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -201,12 +209,32 @@ function RootLayout() {
           <div><span className="eyebrow">Local workspace</span><strong>{data?.workspace.displayName ?? "Loading…"}</strong></div>
           <div className="topbar-meta"><span>API {data?.apiVersion ?? "v1"}</span><span>Pi-backed</span><span>No app login</span></div>
         </header>
+        {activeOperations.length > 0 && <OperationTray operations={activeOperations} csrfToken={data?.csrfToken ?? ""} />}
         <section className="page">
           {query.isPending ? <LoadingState /> : query.isError ? <ErrorState error={query.error} retry={() => void query.refetch()} /> : <Outlet />}
         </section>
       </main>
     </div>
   );
+}
+
+function OperationTray({ operations, csrfToken }: { operations: OperationSnapshot[]; csrfToken: string }) {
+  const queryClient = useQueryClient();
+  const cancel = useMutation({
+    mutationFn: (operationId: string) => cancelOperation(operationId, csrfToken),
+    onSuccess: (operation) => {
+      queryClient.setQueryData(operationKey(operation.id), operation);
+      void queryClient.invalidateQueries({ queryKey: ["operations"], exact: true });
+    },
+  });
+  return <section className="operation-tray" aria-label="Active operations"><span className="eyebrow">Active</span><div>{operations.slice(0, 4).map((operation) => <article key={operation.id}><OperationJump operation={operation} /><span className={`operation-status operation-${operation.status}`}>{operation.phase}</span>{operation.cancellable && <button type="button" disabled={!csrfToken || cancel.isPending} onClick={() => cancel.mutate(operation.id)}>{operation.commitBoundaryCrossed ? "Stop" : "Cancel"}</button>}</article>)}</div>{operations.length > 4 && <small>+{operations.length - 4} more</small>}</section>;
+}
+
+function OperationJump({ operation }: { operation: OperationSnapshot }) {
+  const label = <span><strong>{operation.kind.replaceAll("-", " ")}</strong><small>{shortHash(operation.id)}</small></span>;
+  if (operation.kind === "prepare") return <Link to="/novels/$sourceId/compile" params={{ sourceId: operation.scopeId }}>{label}</Link>;
+  if (operation.kind === "player-move" || operation.kind === "scene-narration" || operation.kind === "narration-retry") return <Link to="/play/$sessionId" params={{ sessionId: operation.scopeId }}>{label}</Link>;
+  return <Link to="/">{label}</Link>;
 }
 
 function NavSection({ label, count, children }: { label: string; count?: number; children: ReactNode }) {
@@ -379,6 +407,7 @@ function InstancePage() {
   const [forkBranchId, setForkBranchId] = useState("");
   const [forkName, setForkName] = useState("");
   const [forkCommitId, setForkCommitId] = useState("");
+  const [openForkSession, setOpenForkSession] = useState(true);
   useEffect(() => {
     if (actorId) return;
     setActorId(existingSession?.actorId ?? characters.data?.characters[0]?.id ?? "");
@@ -400,16 +429,28 @@ function InstancePage() {
     },
   });
   const forkMutation = useMutation({
-    mutationFn: () => forkInstance(branchId, {
-      newBranchId: forkBranchId.trim(),
-      ...(forkName.trim() ? { name: forkName.trim() } : {}),
-      ...(forkCommitId ? { fromCommit: forkCommitId } : {}),
-      clientRequestId: requestId("fork-instance"),
-    }, data!.csrfToken),
+    mutationFn: async () => {
+      const forked = await forkInstance(branchId, {
+        newBranchId: forkBranchId.trim(),
+        ...(forkName.trim() ? { name: forkName.trim() } : {}),
+        ...(forkCommitId ? { fromCommit: forkCommitId } : {}),
+        clientRequestId: requestId("fork-instance"),
+      }, data!.csrfToken);
+      if (!openForkSession) return { forked };
+      const playSession = await createPlaySession({
+        branchId: forked.instance.branchId,
+        actorId,
+        ...(forked.instance.sourceId ? { sourceId: forked.instance.sourceId } : {}),
+        clientRequestId: requestId("create-fork-session"),
+      }, data!.csrfToken);
+      return { forked, playSession };
+    },
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
-      queryClient.setQueryData(["instance", result.instance.branchId], undefined);
-      await navigate({ to: "/instances/$branchId", params: { branchId: result.instance.branchId } });
+      queryClient.setQueryData(["instance", result.forked.instance.branchId], undefined);
+      await navigate(result.playSession
+        ? { to: "/play/$sessionId", params: { sessionId: result.playSession.session.id } }
+        : { to: "/instances/$branchId", params: { branchId: result.forked.instance.branchId } });
     },
   });
   if (detail.isPending && !instance) return <LoadingState label="Reading committed branch history…" />;
@@ -480,7 +521,7 @@ function InstancePage() {
             </div>
           ) : <EmptyState title="No ancestry available" body="The instance exists, but its commit history could not be projected." />}
         </Panel>
-        <Panel title="Fork a timeline" action={<span className="panel-tag">counterfactual</span>}>
+        <Panel title="New session / fork timeline" action={<span className="panel-tag">counterfactual</span>}>
           <form className="fork-form" onSubmit={(event) => { event.preventDefault(); if (!forkMutation.isPending && forkBranchId.trim()) forkMutation.mutate(); }}>
             <p>Create an independent branch from any committed ancestor. Future canon remains outside active branch truth.</p>
             <label className="field-label"><span>New branch ID</span><input value={forkBranchId} onChange={(event) => setForkBranchId(event.target.value)} placeholder={`${branchId}-fork`} /></label>
@@ -488,8 +529,9 @@ function InstancePage() {
             <label className="field-label fork-commit-field"><span>Fork from commit</span><select value={forkCommitId} onChange={(event) => setForkCommitId(event.target.value)}>
               {history.map((commit) => <option key={commit.id} value={commit.id}>step {commit.logicalStep} · {shortHash(commit.id)}{commit.id === instance.headCommitId ? " · HEAD" : ""}</option>)}
             </select></label>
+            <label className="fork-session-option"><input type="checkbox" checked={openForkSession} onChange={(event) => setOpenForkSession(event.target.checked)} /><span><strong>Open a new play session after forking</strong><small>Enabled by default. The new session writes only to the child branch and creates no story event until you submit an action.</small></span></label>
             <div className="fork-truth-note"><span>Truth boundary</span><small>The child receives only ancestry through the selected commit. Trace data and future source events are not copied into world truth.</small></div>
-            <button className="primary-button" type="submit" disabled={!data?.csrfToken || !forkBranchId.trim() || !forkCommitId || forkBranchId.trim() === branchId || forkMutation.isPending}>{forkMutation.isPending ? "Forking…" : "Create timeline fork"}</button>
+            <button className="primary-button" type="submit" disabled={!data?.csrfToken || !forkBranchId.trim() || !forkCommitId || forkBranchId.trim() === branchId || (openForkSession && !actorId) || forkMutation.isPending}>{forkMutation.isPending ? (openForkSession ? "Forking and opening…" : "Forking…") : (openForkSession ? "Create new session" : "Create timeline fork")}</button>
             {forkMutation.error && <InlineError error={forkMutation.error} />}
           </form>
         </Panel>
@@ -505,6 +547,11 @@ function SessionPage() {
   const navigate = useNavigate();
   const detail = useQuery({ queryKey: playSessionKey(sessionId), queryFn: ({ signal }) => fetchPlaySession(sessionId, signal) });
   const operationList = useQuery({ queryKey: operationsKey(sessionId), queryFn: ({ signal }) => fetchOperations(sessionId, signal), refetchInterval: 2_000 });
+  const traceRuns = useQuery({
+    queryKey: [...traceRunsQueryKey, { sessionId, limit: 500 }],
+    queryFn: ({ signal }) => fetchTraceRuns({ sessionId, limit: 500 }, signal),
+    refetchInterval: (query) => query.state.data?.some((run) => run.status === "running") ? 1_500 : false,
+  });
   const [selectedOperationId, setSelectedOperationId] = useState<string>();
   const effectiveOperationId = selectedOperationId
     ?? operationList.data?.find((operation) => !isTerminal(operation.status))?.id
@@ -609,6 +656,8 @@ function SessionPage() {
   if (detail.isError) return <ErrorState error={detail.error} retry={() => void detail.refetch()} />;
   const data = detail.data;
   const session = data.session;
+  const instance = bootstrap.data?.catalog.instances.find((candidate) => candidate.branchId === session.branchId);
+  const runsById = new Map((traceRuns.data ?? []).map((run) => [run.id, run]));
   const result = current?.result;
   const playResult = playOperationResultSchema.safeParse(result);
   const sceneResult = sceneNarrationResultSchema.safeParse(result);
@@ -646,6 +695,7 @@ function SessionPage() {
           <button className="danger-button" disabled={busy} onClick={() => window.confirm("Remove this play session and its presentation transcript? The world branch will be preserved.") && removeMutation.mutate()}>Remove</button>
         </div>
       </div>
+      <section className="play-status-strip" aria-label="Play status"><div><span>Actor</span><strong>{session.actorName ?? session.actorId}</strong></div><div><span>Branch</span><code>{session.branchId}</code></div><div><span>Head</span><code>{data.headCommitId ? shortHash(data.headCommitId) : "detached"}</code></div><div><span>Story time</span><strong>{instance ? `step ${instance.logicalStep}` : "unknown"}</strong></div><div><span>Run stage</span><strong>{current?.phase ?? "idle"}</strong></div></section>
       <div className="play-layout">
         <section className="transcript-panel" aria-label="Play transcript">
           <header>
@@ -656,7 +706,7 @@ function SessionPage() {
             {!data.messages.length && !busy && <EmptyState title="The scene has not been rendered" body="Render the opening from the actor-safe committed frame. This does not advance world truth." />}
             {data.messages.map((message) => (
               <article key={message.id} className={`message message-${message.role}`}>
-                <header><span>{message.role === "player" ? "You" : "Narrator"}</span><small>{message.status} · {formatDateTime(message.createdAt)}</small>{message.runId && <Link className="run-badge" to="/play/$sessionId/trace/$runId" params={{ sessionId, runId: message.runId }}>Trace ↗</Link>}</header>
+                <header><span>{message.role === "player" ? "You" : "Narrator"}</span><small>{message.status} · {formatDateTime(message.createdAt)}</small>{message.runId && <RunBadge sessionId={sessionId} runId={message.runId} messageStatus={message.status} run={runsById.get(message.runId)} />}</header>
                 <p>{message.text}</p>
                 <code>{shortHash(message.atCommit)}</code>
               </article>
@@ -729,6 +779,12 @@ function SessionTraceRoutePage() {
 
 function ChoiceButton({ choice, onChoose }: { choice: PlayerChoiceSummary; onChoose: (choice: PlayerChoiceSummary) => void }) {
   return <button type="button" onClick={() => onChoose(choice)}><span>{choice.action}</span>{choice.affordanceId && <small>preflighted</small>}</button>;
+}
+
+function RunBadge({ sessionId, runId, messageStatus, run }: { sessionId: string; runId: string; messageStatus: string; run?: Awaited<ReturnType<typeof fetchTraceRuns>>[number] }) {
+  const status = run?.status === "succeeded" ? messageStatus : run?.status ?? "loading";
+  const duration = run?.endedAt ? formatElapsed(run.startedAt, run.endedAt) : run ? "live" : "…";
+  return <Link className={`run-badge run-badge-${run?.status ?? "loading"}`} to="/play/$sessionId/trace/$runId" params={{ sessionId, runId }} title="Open the complete LLM, tool, context, timing, and world-effect trajectory"><strong>{status}</strong><small>{run ? `${run.counts.llmRequests}L · ${run.counts.toolCalls}T · ${run.eventHash ? "commit" : "no commit"} · ${duration}` : "trace loading"}</small><span>↗</span></Link>;
 }
 
 function OperationResult({ result }: { result: ReturnType<typeof playOperationResultSchema.parse> }) {
@@ -831,4 +887,5 @@ function formatBytes(bytes: number): string { return bytes < 1_024 ? `${bytes} B
 function formatDate(value: string): string { return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(value)); }
 function formatDateTime(value: string): string { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
 function formatTime(value: string): string { return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }
+function formatElapsed(startedAt: string, endedAt: string): string { const milliseconds = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)); return milliseconds < 1_000 ? `${milliseconds}ms` : milliseconds < 60_000 ? `${(milliseconds / 1_000).toFixed(1)}s` : `${Math.floor(milliseconds / 60_000)}m ${Math.round((milliseconds % 60_000) / 1_000)}s`; }
 function formatNumber(value: number): string { return new Intl.NumberFormat(undefined, { notation: "compact" }).format(value); }

@@ -83,6 +83,12 @@ retry narration only. The server verifies the original move trace and current
 branch head, creates a separate `narration-retry` trace, and never replays the
 world mutation.
 
+Creating a new session from an instance defaults to forking the selected commit
+and opening the chosen character on the child branch. The Play status strip and
+message badges expose actor, branch/head, story step, run stage, LLM/tool counts,
+commit presence, and wall duration; active operations remain controllable from
+the global tray while navigating between pages.
+
 Every play and compiler run has a durable trajectory inspector. It exposes the
 ordered LLM requests and tool calls, context-part composition (system policy,
 world model, source evidence, prior messages, and tool results), exact request

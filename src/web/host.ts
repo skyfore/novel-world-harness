@@ -3,19 +3,25 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 import { CatalogService } from "../application/catalog-service.js";
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
+import { PlayApplicationService } from "../application/play-service.js";
 import {
   WEB_API_VERSION,
   apiErrorSchema,
   bootstrapResponseSchema,
+  createPlaySessionRequestSchema,
   healthResponseSchema,
+  playMoveRequestSchema,
+  sceneNarrationRequestSchema,
+  updatePlaySessionRequestSchema,
   type ApiError,
   type BootstrapResponse,
 } from "./contracts.js";
 import { serializeServerSentEvent, WebEventBroker } from "./event-stream.js";
 import { WebApplicationError } from "./errors.js";
+import { OperationManager } from "./operation-manager.js";
 
 const SERVER_VERSION = "0.1.0";
 const DEFAULT_STATIC_ROOT = path.resolve(import.meta.dirname, "../../dist/web-ui");
@@ -28,6 +34,10 @@ export interface CreateWebHostOptions {
   catalogService?: CatalogService;
   modelCatalogService?: ModelCatalogReader;
   eventBroker?: WebEventBroker;
+  operationManager?: OperationManager;
+  playService?: PlayApplicationService;
+  configPath?: string;
+  model?: string;
   startedAt?: string;
   csrfToken?: string;
 }
@@ -38,6 +48,8 @@ declare module "fastify" {
       events: WebEventBroker;
       startedAt: string;
       csrfToken: string;
+      operations: OperationManager;
+      play: PlayApplicationService;
     };
   }
 }
@@ -52,8 +64,16 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const events = options.eventBroker ?? new WebEventBroker();
   const catalogService = options.catalogService ?? new CatalogService(root);
   const modelCatalogService = options.modelCatalogService ?? new PiModelCatalogService();
+  const operations = options.operationManager ?? new OperationManager(events);
+  const play = options.playService ?? new PlayApplicationService({
+    root,
+    operations,
+    events,
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+    ...(options.model ? { model: options.model } : {}),
+  });
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 1_048_576 });
-  app.decorate("nwh", { events, startedAt, csrfToken });
+  app.decorate("nwh", { events, startedAt, csrfToken, operations, play });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isAllowedHost(request, configuredHost)) {
@@ -135,7 +155,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
       features: [
         { id: "library", status: "available", phase: 0 },
         { id: "model-settings", status: "foundation", phase: 0 },
-        { id: "play", status: "planned", phase: 1 },
+        { id: "play", status: "available", phase: 1 },
         { id: "trace", status: "planned", phase: 1 },
         { id: "compiler", status: "planned", phase: 2 },
         { id: "ontology", status: "planned", phase: 2 },
@@ -147,6 +167,64 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   app.get(`/api/${WEB_API_VERSION}/novels`, async () => (await catalogService.read()).novels);
   app.get(`/api/${WEB_API_VERSION}/instances`, async () => (await catalogService.read()).instances);
   app.get(`/api/${WEB_API_VERSION}/play-sessions`, async () => (await catalogService.read()).playSessions);
+  app.get(`/api/${WEB_API_VERSION}/instances/:branchId/characters`, async (request) => {
+    const { branchId } = branchParamSchema.parse(request.params);
+    const { sourceId } = sourceQuerySchema.parse(request.query);
+    return play.listCharacters(branchId, sourceId);
+  });
+  app.post(`/api/${WEB_API_VERSION}/play-sessions`, async (request, reply) => {
+    const input = createPlaySessionRequestSchema.parse(request.body);
+    return reply.code(201).send(await play.createSession(input));
+  });
+  app.get(`/api/${WEB_API_VERSION}/play-sessions/:sessionId`, async (request) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    return play.getSession(sessionId);
+  });
+  app.patch(`/api/${WEB_API_VERSION}/play-sessions/:sessionId`, async (request) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    return play.updateSession(sessionId, updatePlaySessionRequestSchema.parse(request.body));
+  });
+  app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/activate`, async (request) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    return play.activateSession(sessionId);
+  });
+  app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/restore`, async (request) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    return play.restoreSession(sessionId);
+  });
+  app.delete(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/messages`, async (request) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    return play.clearConversation(sessionId);
+  });
+  app.delete(`/api/${WEB_API_VERSION}/play-sessions/:sessionId`, async (request) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    return play.removeSession(sessionId);
+  });
+  app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/moves`, async (request, reply) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    const accepted = await play.startPlayerMove(sessionId, playMoveRequestSchema.parse(request.body));
+    return reply.code(202).send(accepted);
+  });
+  app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/narrations`, async (request, reply) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    const accepted = await play.startSceneNarration(sessionId, sceneNarrationRequestSchema.parse(request.body));
+    return reply.code(202).send(accepted);
+  });
+  app.get(`/api/${WEB_API_VERSION}/operations`, async (request) => {
+    const query = operationQuerySchema.parse(request.query);
+    return operations.list().filter((operation) =>
+      (!query.scopeId || operation.scopeId === query.scopeId)
+      && (!query.kind || operation.kind === query.kind)
+      && (!query.status || operation.status === query.status));
+  });
+  app.get(`/api/${WEB_API_VERSION}/operations/:operationId`, async (request) => {
+    const { operationId } = operationParamSchema.parse(request.params);
+    return operations.get(operationId);
+  });
+  app.post(`/api/${WEB_API_VERSION}/operations/:operationId/cancel`, async (request) => {
+    const { operationId } = operationParamSchema.parse(request.params);
+    return operations.cancel(operationId);
+  });
   app.get(`/api/${WEB_API_VERSION}/models/providers`, async () => (await modelCatalogService.read()).providers);
   app.get(`/api/${WEB_API_VERSION}/models`, async () => (await modelCatalogService.read()).models);
   app.get(`/api/${WEB_API_VERSION}/events`, (request, reply) => {
@@ -259,3 +337,13 @@ export function isLoopbackHost(host: string): boolean {
   const normalized = host.trim().toLowerCase().replace(/^\[|\]$/g, "");
   return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
 }
+
+const branchParamSchema = z.object({ branchId: z.string().min(1) }).strict();
+const sessionParamSchema = z.object({ sessionId: z.string().min(1) }).strict();
+const operationParamSchema = z.object({ operationId: z.string().min(1) }).strict();
+const sourceQuerySchema = z.object({ sourceId: z.string().min(1).optional() }).strict();
+const operationQuerySchema = z.object({
+  scopeId: z.string().min(1).optional(),
+  kind: z.enum(["player-move", "scene-narration", "prepare"]).optional(),
+  status: z.enum(["queued", "running", "succeeded", "failed", "cancelled", "interrupted"]).optional(),
+}).strict();

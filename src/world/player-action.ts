@@ -1388,6 +1388,7 @@ export class PlayerTurnService {
         relatedMessages,
       }));
     } catch (error) {
+      if (isAbortError(error)) throw error;
       return this.rejected(input, previousHead, contextBefore, "translation", [
         issue("PLAYER_ACTION_TRANSLATION_FAILED", error instanceof Error ? error.message : String(error)),
       ]);

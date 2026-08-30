@@ -9,7 +9,7 @@ import type { NpcReactionEmotion, NpcReactionEvent, NpcResponseKind } from "./np
 import type { CanonicalAttachmentResolution } from "./canonical-adaptation.js";
 import type { CanonicalRecoveryTrace } from "./runtime.js";
 
-export type PlayerTurnOrigin = "freeform" | "scene-choice" | "host-safe-choice" | "cli";
+export type PlayerTurnOrigin = "freeform" | "scene-choice" | "host-safe-choice" | "cli" | "web";
 
 export type PlayerTurnAudit = {
   version: 1;

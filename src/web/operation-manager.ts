@@ -114,6 +114,15 @@ export class OperationManager {
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
   }
 
+  findByClientRequest(
+    kind: OperationKind,
+    scopeId: string,
+    clientRequestId: string,
+  ): OperationSnapshot | undefined {
+    const operationId = this.idempotency.get(`${kind}:${scopeId}:${clientRequestId}`);
+    return operationId ? this.get(operationId) : undefined;
+  }
+
   cancel(operationId: string): OperationSnapshot {
     const record = this.records.get(operationId);
     if (!record) return this.get(operationId);

@@ -14,6 +14,7 @@ import {
   playConversationAtCommit,
   PlayConversationStore,
   recentPlayConversation,
+  type PlayConversationMessage,
 } from "./play-conversation.js";
 import {
   respondToNpcInteractions,
@@ -113,6 +114,7 @@ export type PlayTurnOutcome = {
   npcResponseError?: string;
   backgroundError?: string;
   conversationError?: string;
+  playerMessage?: PlayConversationMessage;
   auditId?: string;
   auditError?: string;
 };
@@ -294,6 +296,7 @@ export async function performPlayTurn(options: {
   affordanceId?: string;
   advanceActors?: number;
   beforeCommit?: () => void;
+  expectedHead?: string;
 }): Promise<PlayTurnOutcome> {
   const startedAt = new Date();
   const advanceBackground = options.advanceBackground ?? 0;
@@ -306,6 +309,9 @@ export async function performPlayTurn(options: {
   }
   const { engine, runtime } = await openWorkspaceWorld(options.root);
   const previousHead = await engine.branches.readHead(options.branchId);
+  if (options.expectedHead && previousHead !== options.expectedHead) {
+    throw new Error(`Player turn expected branch head '${options.expectedHead}', but '${options.branchId}' is at '${previousHead}'.`);
+  }
   const [branch, context] = await Promise.all([
     engine.branches.read(options.branchId),
     engine.contextForCommit(previousHead),
@@ -366,9 +372,10 @@ export async function performPlayTurn(options: {
       : {}),
   });
   let conversationError: string | undefined;
+  let playerMessage: PlayConversationMessage | undefined;
   try {
     const playerEvent = result.eventHash ? await engine.objects.getEvent(result.eventHash) : undefined;
-    await new PlayConversationStore(options.root).append({
+    playerMessage = await new PlayConversationStore(options.root).append({
       branchId: options.branchId,
       actorId: options.actorId,
       atCommit: result.newHead,
@@ -616,6 +623,7 @@ export async function performPlayTurn(options: {
     reactionEvents,
     ...(backgroundError ? { backgroundError } : {}),
     ...(conversationError ? { conversationError } : {}),
+    ...(playerMessage ? { playerMessage } : {}),
     ...(auditId ? { auditId } : {}),
     ...(auditError ? { auditError } : {}),
   };

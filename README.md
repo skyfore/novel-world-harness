@@ -64,11 +64,21 @@ the terminal harness. Use `--no-open` when a browser should not be launched.
 Binding beyond loopback is rejected unless `--allow-remote` is explicit because
 the MVP has no product login layer.
 
-Phase 0 exposes the read-only novel, instance, play-session, and Pi model catalog
-through versioned APIs and a React workbench. Play, trace, compiler mutations,
-and ontology projections are added in the following implementation phases. For
-frontend development, run `pnpm dev:web:server` and `pnpm dev:web` in separate
-terminals; Vite proxies `/api` to the local host.
+The current Web MVP exposes the novel, instance, play-session, and Pi model
+catalog plus the first complete browser play loop. Open an instance, select a
+compiled character, render the actor-safe opening, submit actions through the
+same Pi translation/adjudication pipeline as the terminal harness, and continue
+the durable transcript. The operation side panel shows live phase/status data,
+the optimistic branch head, whether the deterministic commit boundary has been
+crossed, and safe Stop behavior. Session archive, restore, transcript clear, and
+presentation-session removal preserve committed branch truth.
+
+Every mutating request uses the per-process CSRF token returned by bootstrap;
+long-running play and narration calls return an idempotent operation and stream
+updates over SSE. Full nested LLM/tool/context trajectories are the next Phase
+1B increment; compiler mutations and ontology projections follow in Phase 2.
+For frontend development, run `pnpm dev:web:server` and `pnpm dev:web` in
+separate terminals; Vite proxies `/api` to the local host.
 
 ## Local terminal assistant
 

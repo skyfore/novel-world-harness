@@ -8,6 +8,8 @@ export interface WebCommandOptions {
   port?: number;
   open?: boolean;
   allowRemote?: boolean;
+  configPath?: string;
+  model?: string;
 }
 
 export async function webCommand(options: WebCommandOptions): Promise<void> {
@@ -21,7 +23,12 @@ export async function webCommand(options: WebCommandOptions): Promise<void> {
     stderr.write("Warning: the unauthenticated Novel World Harness Web UI is exposed beyond this machine.\n");
   }
 
-  const app = await createWebHost({ root: options.root, host });
+  const app = await createWebHost({
+    root: options.root,
+    host,
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+    ...(options.model ? { model: options.model } : {}),
+  });
   try {
     const address = await app.listen({ host, port });
     stdout.write(`Novel World Harness Web UI: ${address}\n`);

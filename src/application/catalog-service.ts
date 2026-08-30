@@ -23,6 +23,7 @@ export class CatalogService {
         id: session.id,
         storageVersion: session.version,
         branchId: session.branchId,
+        title: session.title,
         ...(session.sourceId ? { sourceId: session.sourceId } : {}),
         actorId: session.actorId,
         ...(instance?.actorName ? { actorName: instance.actorName } : {}),

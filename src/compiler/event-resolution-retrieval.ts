@@ -86,7 +86,7 @@ export function createEventResolutionRetrievalTools(
     promptGuidelines: [
       "Candidate signals are retrieval aids, not proof of event coreference or occurrence.",
       "Distinguish a repeated description of the same event from a subevent, summary, recollection, hypothetical, or merely similar event.",
-      "An empty result is valid and may require new-event or unresolved status.",
+      "An empty result is valid and may require new-event, unresolved, or exact-context non-referential status.",
     ],
     executionMode: "sequential" as const,
     parameters: candidateParameters,
@@ -115,7 +115,7 @@ export function createEventResolutionRetrievalTools(
         candidates: result.candidates,
         message: result.candidates.length
           ? "Candidate signals are deterministic retrieval features only; preserve coreference/subevent uncertainty explicitly."
-          : "No candidate signal matched. Propose a new event only when the source supports a canonical occurrence; otherwise preserve unresolved status.",
+          : "No candidate signal matched. Propose a new event only when the source supports a canonical occurrence; preserve unresolved uncertainty, or use non-referential only for a proven diffuse/false-positive event phrase.",
       }));
     },
   });
@@ -128,6 +128,7 @@ export function createEventResolutionRetrievalTools(
       Type.Literal("new-event"),
       Type.Literal("ambiguous"),
       Type.Literal("unresolved"),
+      Type.Literal("non-referential"),
     ])),
     relation: Type.Optional(Type.Union([Type.Literal("coreference"), Type.Literal("subevent")])),
     offset: Type.Optional(Type.Integer({ minimum: 0, maximum: MAX_RESOLUTION_RECORDS })),
@@ -136,7 +137,7 @@ export function createEventResolutionRetrievalTools(
   const find = defineTool({
     name: "find_event_resolutions",
     label: "Find event resolutions",
-    description: "Search current and pending source-scoped event clusters, including ambiguous and unresolved queues.",
+    description: "Search current and pending source-scoped event clusters, including ambiguous, unresolved, and non-referential adjudications.",
     promptSnippet: "Find current event identity decisions before merging, splitting, or revising clusters",
     promptGuidelines: ["Read the exact payload before superseding a cluster."],
     executionMode: "sequential" as const,

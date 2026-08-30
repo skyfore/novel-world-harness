@@ -516,6 +516,7 @@ type SourceAccountingProposalRecordedDetails = {
   proposalId: string;
   kind: "source-accounting";
   unitIds: string[];
+  pageToken?: string;
 };
 
 type CompilerProposalDetails =
@@ -711,8 +712,11 @@ const identityResolutionParameters = Type.Object({
     Type.Literal("ambiguous"),
     Type.Literal("new-entity"),
     Type.Literal("unresolved"),
+    Type.Literal("non-referential"),
+    Type.Literal("misidentified"),
   ]),
   entity_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
+  intended_entity_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
   candidates: Type.Array(identityResolutionCandidateParameters, { maxItems: 32 }),
   alias_type: Type.Optional(Type.Union([
     Type.Literal("name"), Type.Literal("title"), Type.Literal("office"),
@@ -757,6 +761,7 @@ const eventResolutionParameters = Type.Object({
     Type.Literal("new-event"),
     Type.Literal("ambiguous"),
     Type.Literal("unresolved"),
+    Type.Literal("non-referential"),
   ]),
   canonical_event_id: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" })),
   relation: Type.Optional(eventResolutionRelationParameters),
@@ -791,9 +796,37 @@ const sourceAccountingDecisionParameters = Type.Object({
   reason: Type.String({ minLength: 1, maxLength: 1_000 }),
 }, { additionalProperties: false });
 
+const sourceAccountingDispositionParameters = Type.Object({
+  status: Type.Union([
+    Type.Literal("background-only"),
+    Type.Literal("paratext"),
+    Type.Literal("duplicate-description"),
+    Type.Literal("unresolved"),
+    Type.Literal("intentionally-deferred"),
+  ]),
+  reason: Type.String({ minLength: 1, maxLength: 1_000 }),
+}, { additionalProperties: false });
+
+const sourceAccountingPageOverrideParameters = Type.Object({
+  unit_index: Type.Integer({ minimum: 1, maximum: 200 }),
+  status: Type.Union([
+    Type.Literal("background-only"),
+    Type.Literal("paratext"),
+    Type.Literal("duplicate-description"),
+    Type.Literal("unresolved"),
+    Type.Literal("intentionally-deferred"),
+  ]),
+  reason: Type.String({ minLength: 1, maxLength: 1_000 }),
+}, { additionalProperties: false });
+
 const sourceAccountingParameters = Type.Object({
   proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
-  decisions: Type.Array(sourceAccountingDecisionParameters, { minItems: 1, maxItems: 512 }),
+  decisions: Type.Optional(Type.Array(sourceAccountingDecisionParameters, { minItems: 1, maxItems: 512 })),
+  page_token: Type.Optional(Type.String({ pattern: "^acctpg-[a-f0-9]{16}$" })),
+  page_default: Type.Optional(sourceAccountingDispositionParameters),
+  page_overrides: Type.Optional(Type.Array(sourceAccountingPageOverrideParameters, {
+    maxItems: 200,
+  })),
 }, { additionalProperties: false });
 
 function safeTextSuffix(text: string, maxChars: number): string {
@@ -822,6 +855,11 @@ export function createCompilerProposalToolset(
   const successfulEntityResolutionProposalIds = new Set<string>();
   const successfulEventResolutionProposalIds = new Set<string>();
   const successfulAccountingProposalIds = new Set<string>();
+  const issuedAccountingPages = new Map<string, {
+    sourceId: string;
+    compilerBatchId: string;
+    unitIds: string[];
+  }>();
   const peekedDirections = new Set<"previous" | "next">();
   let expectedSegmentIds: string[] = [];
   let boundedSliceSegments: SourceSegment[] = [];
@@ -1495,9 +1533,13 @@ export function createCompilerProposalToolset(
     description: "Page through deterministic sentence-level source units in the active bounded batch, including exact text and their current or pending accounting status. This is read-only.",
     promptSnippet: "Inspect every unrepresented source unit before finishing a novel-scale batch",
     promptGuidelines: [
-      "Page until nextOffset is null; never guess a unit ID.",
+      "For read-only inspection, page only through exact returned nextOffset values until null; never estimate an offset.",
       "Units marked represented are host-derived from exact evidence or annotations and must not be dispositioned by the model.",
-      "Classify every remaining unit in a proposal-bearing segment with account_source_units; use unresolved or intentionally-deferred honestly when semantics remain open.",
+      "A prior field reports the materialized parent/current manifest only as review context; it never satisfies this active batch's fresh accounting requirement.",
+      "A non-empty status=unresolved result returns a pageToken and one-based unit indexes. Review every unit, then pass that token to account_source_units with one page_default plus only genuinely different page_overrides.",
+      "After a successful page accounting proposal, the unresolved result set shrinks: refetch status=unresolved at offset=0 instead of following the old nextOffset. Repeat until the returned units are empty.",
+      "A page token is bound to this active batch and exact returned page. Refetch after new semantic proposals change represented coverage; never guess or reuse a stale token.",
+      "Classify every remaining unit in a proposal-bearing segment; use unresolved or intentionally-deferred honestly when semantics remain open.",
     ],
     executionMode: "sequential",
     parameters: sourceAccountingFindParameters,
@@ -1545,7 +1587,7 @@ export function createCompilerProposalToolset(
             ? "background-only"
             : represented
               ? "represented"
-              : pending?.status ?? current?.status ?? "unresolved";
+              : pending?.status ?? "unresolved";
           return {
             unitId: unit.id,
             kind: unit.kind,
@@ -1553,7 +1595,12 @@ export function createCompilerProposalToolset(
             bytes: [unit.anchor.startByte, unit.anchor.endByte],
             status,
             ...(pending ? { pending } : {}),
-            ...(current?.reason && !pending ? { reason: current.reason } : {}),
+            ...(current ? {
+              prior: {
+                status: current.status,
+                ...(current.reason ? { reason: current.reason } : {}),
+              },
+            } : {}),
             text: bytes.subarray(unit.anchor.startByte, unit.anchor.endByte).toString("utf8"),
           };
         })
@@ -1563,6 +1610,16 @@ export function createCompilerProposalToolset(
       const maxResults = input.max_results ?? 100;
       const page = candidates.slice(offset, offset + maxResults);
       const nextOffset = offset + page.length < candidates.length ? offset + page.length : null;
+      const pageToken = statusFilter === "unresolved" && page.length
+        ? `acctpg-${crypto.randomBytes(8).toString("hex")}`
+        : undefined;
+      if (pageToken) {
+        issuedAccountingPages.set(pageToken, {
+          sourceId: source.id,
+          compilerBatchId: compilerBatchId!,
+          unitIds: page.map((unit) => unit.unitId),
+        });
+      }
       return {
         content: [{ type: "text" as const, text: promptJson({
           type: "source-accounting-units",
@@ -1571,10 +1628,16 @@ export function createCompilerProposalToolset(
           total: candidates.length,
           offset,
           nextOffset,
-          units: page,
-          policy: "represented is host-derived; non-scene is deterministic; copy unitId into account_source_units only for other statuses",
+          ...(pageToken ? { pageToken, indexBase: 1 } : {}),
+          units: page.map((unit, index) => ({ unitIndex: index + 1, ...unit })),
+          policy: "represented is host-derived and non-scene is deterministic. prior is materialized parent/current context only and never satisfies this active batch. For a status=unresolved page, review each unit and use pageToken + page_default + page_overrides; the host expands indexes to exact unit IDs. After recording it, refetch unresolved at offset 0 because the result set shrinks.",
         }) }],
-        details: { proposalId: `accounting-page-${offset}`, kind: "source-accounting", unitIds: page.map((unit) => unit.unitId) },
+        details: {
+          proposalId: `accounting-page-${offset}`,
+          kind: "source-accounting",
+          unitIds: page.map((unit) => unit.unitId),
+          ...(pageToken ? { pageToken } : {}),
+        },
       };
     },
   });
@@ -1585,7 +1648,9 @@ export function createCompilerProposalToolset(
     description: "Stage typed review dispositions for exact deterministic source-unit IDs. It cannot assert represented coverage and does not create world truth.",
     promptSnippet: "Disposition every unrepresented semantic unit in a proposal-bearing source segment",
     promptGuidelines: [
-      "Use only unit IDs returned by find_source_accounting_units in this active batch.",
+      "Prefer page_token + page_default for one freshly returned status=unresolved page; use page_overrides only for indexes whose honest status/reason differs.",
+      "page_default expands to a separate typed decision for every unit in that exact page; review every unit before choosing it. It is never permission to blanket-label an unread segment.",
+      "Alternatively use decisions with exact unit IDs returned by find_source_accounting_units; never mix the two input modes.",
       "Do not classify a represented or deterministic non-scene unit.",
       "Use background-only only for non-material narration; use duplicate-description only when semantics are already represented elsewhere; unresolved and intentionally-deferred remain preparation blockers.",
     ],
@@ -1621,11 +1686,50 @@ export function createCompilerProposalToolset(
         decision.unitId,
         proposal.id,
       ] as const)));
-      const decisions = input.decisions.map((decision) => sourceUnitAccountingDecisionSchema.omit({ proposalId: true }).parse({
-        unitId: decision.unit_id,
-        status: decision.status,
-        reason: decision.reason,
-      }));
+      const exactMode = Boolean(input.decisions?.length);
+      const pageMode = Boolean(input.page_token || input.page_default || input.page_overrides?.length);
+      if (exactMode === pageMode) {
+        throw new Error(
+          "account_source_units requires exactly one input mode: decisions with exact unit IDs, or page_token + page_default with optional page_overrides.",
+        );
+      }
+      let decisionInputs: Array<{ unitId: string; status: string; reason: string }>;
+      if (exactMode) {
+        decisionInputs = input.decisions!.map((decision) => ({
+          unitId: decision.unit_id,
+          status: decision.status,
+          reason: decision.reason,
+        }));
+      } else {
+        if (!input.page_token || !input.page_default) {
+          throw new Error(
+            "Page accounting requires both page_token and page_default. Call find_source_accounting_units with status=unresolved and copy its exact pageToken; do not guess.",
+          );
+        }
+        const issued = issuedAccountingPages.get(input.page_token);
+        if (!issued || issued.sourceId !== source.id || issued.compilerBatchId !== compilerBatchId) {
+          throw new Error(
+            `Unknown or stale accounting page token ${input.page_token}. Call find_source_accounting_units with status=unresolved in this same active batch, copy the exact returned pageToken, and retry once; do not guess or reuse an earlier token.`,
+          );
+        }
+        const overrides = new Map<number, { status: string; reason: string }>();
+        for (const override of input.page_overrides ?? []) {
+          if (override.unit_index > issued.unitIds.length) {
+            throw new Error(
+              `Accounting page index ${override.unit_index} is outside page token ${input.page_token} (1-${issued.unitIds.length}). Refetch the page and retry once with an exact returned unitIndex; do not guess.`,
+            );
+          }
+          if (overrides.has(override.unit_index)) {
+            throw new Error(`Accounting page index ${override.unit_index} has more than one override.`);
+          }
+          overrides.set(override.unit_index, { status: override.status, reason: override.reason });
+        }
+        decisionInputs = issued.unitIds.map((unitId, index) => ({
+          unitId,
+          ...(overrides.get(index + 1) ?? input.page_default!),
+        }));
+      }
+      const decisions = decisionInputs.map((decision) => sourceUnitAccountingDecisionSchema.omit({ proposalId: true }).parse(decision));
       if (new Set(decisions.map((decision) => decision.unitId)).size !== decisions.length) {
         throw new Error("account_source_units decisions must use unique unit IDs.");
       }
@@ -1662,6 +1766,7 @@ export function createCompilerProposalToolset(
       };
       await accountingStore.stageProposal(proposal);
       successfulAccountingProposalIds.add(proposal.id);
+      if (input.page_token) issuedAccountingPages.delete(input.page_token);
       recordProposalProgress();
       return proposalResult(
         `Pending source-accounting proposal ${proposal.id} recorded for ${decisions.length} unit(s). These review dispositions do not create world truth.`,
@@ -1929,12 +2034,14 @@ export function createCompilerProposalToolset(
   const identityResolutionTool = defineTool<typeof identityResolutionParameters, CompilerProposalDetails>({
     name: "propose_entity_resolution",
     label: "Propose entity resolution",
-    description: "Stage an explicit resolved, new-entity, ambiguous, or unresolved decision for one entity mention. This never creates canonical identity by itself.",
+    description: "Stage an explicit resolved, new-entity, ambiguous, unresolved, non-referential, or misidentified decision for one entity mention. This never creates canonical identity by itself.",
     promptSnippet: "Resolve or deliberately leave open one source mention after deterministic candidate lookup",
     promptGuidelines: [
       "Call find_entity_resolution_candidates first unless the mention is an explicit new identity or has no lexical surface.",
       "Use the candidate's resolutionMode: resolved may reuse a canonical entity or an active entity proposal from a previously checkpointed source batch; new-entity requires a same-finish propose_entity candidate.",
       "Ambiguous and unresolved are valid outcomes. Never select a candidate merely to eliminate an uncertainty count.",
+      "Use non-referential only when exact context proves the retained annotation is not an independent entity reference, such as a false-positive subspan inside a compound name. It requires no entity_id, alias_type, or candidates and must not hide uncertainty.",
+      "Use misidentified only when the source determinately distinguishes the actual referent from the speaker's mistaken intended identity. entity_id is the actual referent, intended_entity_id is the mistaken intended identity, both must be existing candidates, and the wrong surface never becomes an alias.",
       "Every candidate basis must include the primary mention ID. evidence_assertion_ids may be empty when the exact mention anchors are the complete basis.",
       "To revise a current decision, use a new resolution_id and set supersedes_resolution_id to the exact current resolution ID.",
     ],
@@ -1963,6 +2070,7 @@ export function createCompilerProposalToolset(
         mentionId: input.mention_id,
         status: input.status,
         ...(input.entity_id ? { entityId: input.entity_id } : {}),
+        ...(input.intended_entity_id ? { intendedEntityId: input.intended_entity_id } : {}),
         candidates: input.candidates.map((candidate) => ({
           entityId: candidate.entity_id,
           confidence: candidate.confidence,
@@ -2010,13 +2118,14 @@ export function createCompilerProposalToolset(
   const eventResolutionTool = defineTool<typeof eventResolutionParameters, CompilerProposalDetails>({
     name: "propose_event_resolution",
     label: "Propose event resolution",
-    description: "Stage an explicit event-mention cluster as resolved, new-event, ambiguous, or unresolved, with coreference/subevent semantics. This never commits occurrence or world effects by itself.",
+    description: "Stage an explicit event-mention cluster as resolved, new-event, ambiguous, unresolved, or non-referential, with coreference/subevent semantics. This never commits occurrence or world effects by itself.",
     promptSnippet: "Resolve, cluster, or deliberately leave open source event mentions after deterministic candidate lookup",
     promptGuidelines: [
       "Call find_event_resolution_candidates for each cluster member before selecting an event.",
       "Use resolved only for an existing canonical event and new-event only for a same-finish propose_canonical_event candidate.",
       "Coreference means the mention describes the canonical event itself; subevent means it describes a proper component and cannot alone ground that canonical event.",
       "Ambiguous and unresolved are valid outcomes. Narrative adjacency, evidence overlap, or a shared participant never proves coreference.",
+      "Use non-referential only when exact discourse context proves the annotation is a diffuse summary or false-positive event phrase with no single occurrence referent. It requires no canonical_event_id, relation, or candidates and must not hide uncertainty.",
       "Every candidate basis must include every event_mention_id in the proposed cluster.",
       "A merge or split uses a new resolution_id and supersedes_resolution_ids naming the exact current cluster revisions it replaces.",
     ],
@@ -2568,6 +2677,7 @@ export function createCompilerProposalToolset(
       successfulEntityResolutionProposalIds.clear();
       successfulEventResolutionProposalIds.clear();
       successfulAccountingProposalIds.clear();
+      issuedAccountingPages.clear();
       peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];

@@ -138,6 +138,31 @@ world as an explicitly incompatible rollback-only revision. This bootstrap is
 allowed only for a complete, versioned legacy checkpoint and a whole-novel
 scope; incomplete checkpoints still require preparation to finish first.
 
+When the older materialization is mostly correct, `nwh repair-existing --source
+<id> --from-revision <bundle-hash>` forks that immutable history entry as a
+reusable working baseline instead of deleting its canonical artifacts. Before
+writing, it checks the active revision, exact materialization, pending world and
+compiler-metadata proposals, batch checkpoint, and transient boundary requests.
+Any difference is reported as a conflict and leaves state unchanged. The
+operator may then repeat the exact command with `--replace-staging`; displaced
+pending drafts move to rejected history with a repair-fork diagnostic, existing
+branches remain pinned, and the requested revision becomes the current working
+materialization.
+
+The current compiler then revisits every source-review batch against the original
+evidence, but the historical catalog remains available: correct artifacts are
+reused, and only missing or corrected proposals are requested under stable
+logical IDs. A durable repair journal records the parent, proposal namespace,
+batch set, and finalization phase. Provider failure or process interruption does
+not roll completed work back; rerunning the command resumes it. Publication occurs
+only after deterministic convergence and whole-world semantic conflict checks,
+creating a new active revision while retaining the immutable parent. The child
+bundle records `operation=repair`, its exact parent bundle hash, and the durable
+repair run ID; `nwh prepared-cache list --source <id>` displays that ancestry.
+Use
+`reparse --all` instead when the source/segment layout itself no longer matches
+the historical revision.
+
 ## Compiler capability boundary
 
 Compiler mode now adds narrow typed `propose_*` tools. They can create pending candidate artifacts, but cannot accept them, move a branch head, execute a shell, or write arbitrary files. Deterministic code verifies structure and source evidence before explicit acceptance:

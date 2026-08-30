@@ -363,6 +363,105 @@ describe("entity mention resolution", () => {
     });
   });
 
+  it("completes a false-positive mention as non-referential without inventing an identity", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-non-referential-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Norton Hall opened.\n");
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-non-referential`, fixture.source.id);
+    await toolset.tools.find((tool) => tool.name === "propose_entity_mention")!.execute("mention", {
+      proposal_id: "proposal-mention-norton-fragment",
+      annotation_id: "mention-norton-fragment",
+      selector: { segment_id: fixture.segmentId, exact: "Norton" },
+      surface: "Norton",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 0.7,
+      interpretation: "Legacy extraction treated the leading substring of the place name as a character mention.",
+    } as never, undefined, undefined, context);
+    await toolset.tools.find((tool) => tool.name === "propose_entity_resolution")!.execute("resolution", {
+      proposal_id: "proposal-resolution-norton-fragment",
+      resolution_id: "resolution-norton-fragment",
+      mention_id: "mention-norton-fragment",
+      status: "non-referential",
+      candidates: [],
+      rationale: "Exact context proves the substring is not an independent entity reference, so selecting a character would be false.",
+    } as never, undefined, undefined, context);
+    await finishOnly(toolset, fixture.segmentId, "Adjudicated the false-positive subspan without selecting an entity.");
+
+    await expect(auditCompiler(root, { sourceId: fixture.source.id })).resolves.toMatchObject({
+      resolutions: {
+        entityMentions: 1,
+        nonReferential: 1,
+        ambiguous: 0,
+        unresolved: 0,
+        missing: 0,
+      },
+      coverage: { entityResolution: 1 },
+      readiness: { resolution: "ready" },
+    });
+  });
+
+  it("preserves determinate actual and intended identities for a misidentification", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-misidentified-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "The witness addressed Bob: Goodbye, Alice. Later the witness corrected the mistake.\n");
+    const canonical = new CanonicalModelStore(root);
+    for (const [id, name] of [["alice", "Alice"], ["bob", "Bob"]] as const) {
+      await canonical.putEntity({
+        id,
+        kind: "character",
+        canonicalName: name,
+        aliases: [],
+        evidence: fixture.evidence(name),
+      });
+    }
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-misidentified`, fixture.source.id);
+    await toolset.tools.find((tool) => tool.name === "propose_entity_mention")!.execute("mention", {
+      proposal_id: "proposal-mention-mistaken-alice",
+      annotation_id: "mention-mistaken-alice",
+      selector: { segment_id: fixture.segmentId, exact: "Alice" },
+      surface: "Alice",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 1,
+      interpretation: "The witness uses Alice's name while addressing Bob.",
+    } as never, undefined, undefined, context);
+    await toolset.tools.find((tool) => tool.name === "propose_entity_resolution")!.execute("resolution", {
+      proposal_id: "proposal-resolution-mistaken-alice",
+      resolution_id: "resolution-mistaken-alice",
+      mention_id: "mention-mistaken-alice",
+      status: "misidentified",
+      entity_id: "bob",
+      intended_entity_id: "alice",
+      candidates: [
+        candidate("bob", "mention-mistaken-alice", 1),
+        candidate("alice", "mention-mistaken-alice", 1),
+      ],
+      rationale: "The correction makes the actual addressee Bob and the mistaken intended identity Alice determinate.",
+    } as never, undefined, undefined, context);
+    await finishOnly(toolset, fixture.segmentId, "Preserved the corrected referent without turning the wrong name into an alias.");
+
+    await expect(new EntityResolutionStore(root).currentForMention(fixture.source.id, "mention-mistaken-alice"))
+      .resolves.toMatchObject({
+        status: "misidentified",
+        entityId: "bob",
+        intendedEntityId: "alice",
+      });
+    await expect(auditCompiler(root, { sourceId: fixture.source.id })).resolves.toMatchObject({
+      resolutions: {
+        entityMentions: 1,
+        misidentified: 1,
+        ambiguous: 0,
+        unresolved: 0,
+        missing: 0,
+      },
+      coverage: { entityResolution: 1 },
+      readiness: { resolution: "ready" },
+    });
+  });
+
   it("requires immutable superseding revisions and restores the prior ambiguous decision on rollback", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-revision-"));
     roots.push(root);

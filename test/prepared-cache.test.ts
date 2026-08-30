@@ -653,14 +653,37 @@ describe("versioned prepared novel cache", () => {
       contentHash(revisedEntity),
       originalBinding?.assertions ?? [],
     );
-    const revised = await sourceCache.publish(fixture.source);
+    const revised = await sourceCache.publish(fixture.source, {
+      lineage: {
+        operation: "repair",
+        parentBundleHash: published.bundleHash!,
+        runId: "repair-history-test",
+      },
+    });
     expect(revised).toMatchObject({ status: "published", contentMd5: published.contentMd5 });
     expect(revised.bundleHash).not.toBe(published.bundleHash);
     expect(await fs.readFile(cachedBundlePath, "utf8")).toBe(immutableBaseline);
     await expect(sourceCache.listRevisions(fixture.source)).resolves.toEqual([
       expect.objectContaining({ bundleHash: published.bundleHash, active: false }),
-      expect.objectContaining({ bundleHash: revised.bundleHash, active: true }),
+      expect.objectContaining({
+        bundleHash: revised.bundleHash,
+        active: true,
+        lineage: {
+          operation: "repair",
+          parentBundleHash: published.bundleHash,
+          runId: "repair-history-test",
+        },
+      }),
     ]);
+    await expect(sourceCache.loadRevision(fixture.source, revised.bundleHash!)).resolves.toMatchObject({
+      bundle: {
+        lineage: {
+          operation: "repair",
+          parentBundleHash: published.bundleHash,
+          runId: "repair-history-test",
+        },
+      },
+    });
 
     await new PreparedNovelCache(reusedRoot, cacheRoot).activate(reusedFixture.source, revised.bundleHash!);
     const reopened = await openWorkspaceWorld(reusedRoot);

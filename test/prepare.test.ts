@@ -170,6 +170,45 @@ describe("preparation workflow inspection", () => {
     });
   });
 
+  it("keeps a playable first-chapter checkpoint when a non-actionable prologue precedes it", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-prologue-opening-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, [
+      "# Prologue",
+      "A dream passes in darkness.",
+      "",
+      "# Chapter 1",
+      "Hero wakes at home and decides to leave.",
+    ].join("\n"));
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    const firstChapter = batches.find((batch) => batch.startLine === 4)!;
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: firstChapter.evidence,
+    });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      delta: {
+        version: 1,
+        operations: [
+          { op: "set", entityId: "hero", field: "character.alive", value: true },
+          { op: "set", entityId: "hero", field: "character.location", value: "home" },
+        ],
+      },
+      checkpoint: { mode: "chronological", narrativeLayerId: "main", rationale: "First actionable scene." },
+      evidence: firstChapter.evidence,
+    });
+
+    await expect(inspectPreparation(root, { sourceId: fixture.source.id })).resolves.not.toMatchObject({
+      stage: "needs-initial-world",
+    });
+  });
+
   it("detects a legacy genesis whose pinned snapshot contains no playable source character", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-legacy-branch-"));
     roots.push(root);

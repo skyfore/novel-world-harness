@@ -11,7 +11,10 @@ export async function listPreparedCacheRevisionsCommand(root: string, sourceId?:
     return;
   }
   for (const revision of revisions) {
-    stdout.write(`${revision.active ? "active" : "stored"}\t${revision.bundleHash}\t${revision.createdAt}\t${revision.cachePath}\n`);
+    const lineage = revision.lineage
+      ? `\t${revision.lineage.operation}\tparent=${revision.lineage.parentBundleHash}\trun=${revision.lineage.runId}`
+      : "";
+    stdout.write(`${revision.active ? "active" : "stored"}\t${revision.bundleHash}\t${revision.createdAt}\t${revision.cachePath}${lineage}\n`);
   }
 }
 

@@ -537,7 +537,7 @@ async function resolvedQuotationSpeakerEntityId(
       const quotation = await annotations.read(sourceId, quotationId);
       if (quotation.annotationType !== "quotation" || !quotation.speakerMentionId) return undefined;
       const resolution = await resolutions.currentForMention(sourceId, quotation.speakerMentionId);
-      const entityId = resolution?.status === "resolved" || resolution?.status === "new-entity"
+      const entityId = resolution?.status === "resolved" || resolution?.status === "new-entity" || resolution?.status === "misidentified"
         ? resolution.entityId
         : undefined;
       if (!entityId || catalog.entities.get(entityId)?.kind !== "character") return undefined;

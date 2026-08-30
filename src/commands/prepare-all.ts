@@ -287,6 +287,9 @@ export async function prepareAllCommand(
     if (decision === "pause") return pausePreparation(inspection, report);
     report("No accepted initial world exists; compiling an opening-state proposal.");
     const openingBatch = await prepareOpeningWorldCompilerBatch(root, inspection.source!);
+    const repairNamespace = options.reparseRunId
+      ? ` Every proposal envelope ID in this pass must end with -${options.reparseRunId}.`
+      : "";
     try {
       await dependencies.compileInitialWorld({
         root,
@@ -294,7 +297,7 @@ export async function prepareAllCommand(
         allowMissingConfig: true,
         ...(options.model ? { model: options.model } : {}),
         saveSession: false,
-        prompt: `${INITIAL_WORLD_PROMPT}\n\n${openingBatch.prompt}`,
+        prompt: `${INITIAL_WORLD_PROMPT}${repairNamespace}\n\n${openingBatch.prompt}`,
         segmentIds: openingBatch.segmentIds,
         compilerBatchId: openingBatch.id,
         sourceId,
@@ -338,7 +341,9 @@ export async function prepareAllCommand(
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
     if (inspection.stage === "needs-initial-world") {
-      const fallbackId = await proposeMinimalOpeningWorld(root, inspection.source!);
+      const fallbackId = await proposeMinimalOpeningWorld(root, inspection.source!, {
+        ...(options.reparseRunId ? { proposalIdSuffix: options.reparseRunId } : {}),
+      });
       report(`No valid model opening state remained; created the restricted single-character opening fallback ${fallbackId}.`);
       await convergeForPreparation(root, sourceId, dependencies.converge, report);
       inspection = await inspectPreparation(root, { sourceId, branchId });
@@ -446,7 +451,7 @@ export async function prepareAllCommand(
   }
 
   if (inspection.stage === "create-branch") {
-    const cached = await preparedCache.publish(inspection.source!);
+    const cached = await preparedCache.publish(inspection.source!, preparedRevisionPublishOptions(options));
     cacheVerified = true;
     report(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`);
     if (options.createBranch === false) {
@@ -470,11 +475,22 @@ export async function prepareAllCommand(
 
   if (inspection.stage !== "ready") throw preparationFailure(inspection);
   if (!cacheVerified) {
-    const cached = await preparedCache.publish(inspection.source!);
+    const cached = await preparedCache.publish(inspection.source!, preparedRevisionPublishOptions(options));
     report(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`);
   }
   report(`Preparation complete. Next: ${inspection.next}`);
   return inspection;
+}
+
+function preparedRevisionPublishOptions(options: PrepareAllCommandOptions) {
+  if (!options.reparseBaselineBundleHash || !options.reparseRunId) return {};
+  return {
+    lineage: {
+      operation: options.reparseRunId.startsWith("repair-") ? "repair" as const : "reparse" as const,
+      parentBundleHash: options.reparseBaselineBundleHash,
+      runId: options.reparseRunId,
+    },
+  };
 }
 
 async function runWorldReconciliationPass(input: {

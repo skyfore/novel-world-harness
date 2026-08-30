@@ -10,6 +10,7 @@ import {
   prepareCompilerBatches,
   prepareOpeningWorldCompilerBatch,
   runCompilerBatches,
+  selectOpeningCompilerBatches,
 } from "../src/compiler/batches.js";
 import {
   compilerBatchFailure,
@@ -387,6 +388,55 @@ describe("compiler batches", () => {
     expect(opening.startLine).toBe(7);
     expect(opening.prompt).toContain("The traveler reaches the village at dawn.");
     expect(opening.prompt).not.toContain("The author discusses writing the novel.");
+  });
+
+  it("does not let a scene-mislabeled title blurb override the first narrative chapter", async () => {
+    const { root, source } = await fixtureWithContent([
+      "# novel.txt",
+      "The jacket copy says a letter changes the hero's life.",
+      "",
+      "# Chapter 1",
+      "The hero waits beside the village gate.",
+    ].join("\n"));
+    const canon = new CanonicalModelStore(root);
+    await canon.putEvent({
+      id: "blurb-letter",
+      title: "The hero receives a letter",
+      readerSummary: "The publication blurb previews a letter.",
+      participants: [],
+      storyTime: { kind: "unknown" },
+      narrativeContext: { layerId: "main", discourseOrder: 0, mode: "scene" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: [{
+        span: { sourceId: source.id, startLine: 2, endLine: 2, quoteHash: "blurb-letter" },
+        strength: "explicit",
+      }],
+      causalParents: [],
+      confidence: 1,
+    });
+
+    const opening = await prepareOpeningWorldCompilerBatch(root, source);
+
+    expect(opening.startLine).toBe(4);
+    expect(opening.prompt).toContain("The hero waits beside the village gate.");
+    expect(opening.prompt).not.toContain("jacket copy");
+  });
+
+  it("accepts the first numbered chapter alongside a prologue as the bounded opening region", async () => {
+    const { root, source } = await fixtureWithContent([
+      "# Prologue",
+      "A dream passes in darkness.",
+      "",
+      "# Chapter 1",
+      "The hero wakes and chooses where to go.",
+      "",
+      "# Chapter 2",
+      "The journey continues.",
+    ].join("\n"));
+    const batches = await prepareCompilerBatches(root, source);
+
+    expect(selectOpeningCompilerBatches(batches).map((batch) => batch.startLine)).toEqual([1, 4]);
   });
 
   it("uses an evidence-grounded narrative event when a preface itself is the lived prologue", async () => {

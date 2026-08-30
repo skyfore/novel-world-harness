@@ -140,7 +140,12 @@ describe("prepare-all command", () => {
     const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
     let compileCalls = 0;
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
+    const result = await prepareAllCommand({
+      root,
+      sourceId: fixture.source.id,
+      yes: true,
+      cacheRoot: path.join(root, "prepared-cache"),
+    }, {
       compileSource: async (options) => {
         compileCalls += 1;
         expect(options.maxBatches).toBeUndefined();
@@ -207,7 +212,12 @@ describe("prepare-all command", () => {
       generatedBy: { worker: "test" },
     });
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
+    const result = await prepareAllCommand({
+      root,
+      sourceId: fixture.source.id,
+      yes: true,
+      cacheRoot: path.join(root, "prepared-cache"),
+    }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },
       compileInitialWorld: async () => { throw new Error("compileInitialWorld should not run"); },
       converge: convergeWorldProposals,
@@ -369,7 +379,13 @@ describe("prepare-all command", () => {
     });
     let initialCompilerCalls = 0;
 
-    const result = await prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
+    const result = await prepareAllCommand({
+      root,
+      sourceId: fixture.source.id,
+      yes: true,
+      cacheRoot: path.join(root, "prepared-cache"),
+      reparseRunId: "repair-test-run",
+    }, {
       compileSource: async () => { throw new Error("compileSource should not run"); },
       compileInitialWorld: async (options) => {
         initialCompilerCalls += 1;
@@ -382,8 +398,9 @@ describe("prepare-all command", () => {
         expect(options.prompt).toContain("one explicit world-time cut");
         expect(options.prompt).toContain("Later discourse may establish a pre-checkpoint fact");
         expect(options.prompt).toContain("never counterpart character IDs");
+        expect(options.prompt).toContain("Every proposal envelope ID in this pass must end with -repair-test-run");
         await new CompilerProposalService(root).submit("initial-world", {
-          proposalId: "generated-initial-world",
+          proposalId: "generated-initial-world-repair-test-run",
           payload: {
             version: 1,
             delta: { version: 1, operations: [] },

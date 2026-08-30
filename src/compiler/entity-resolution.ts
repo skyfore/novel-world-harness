@@ -40,8 +40,9 @@ export const identityResolutionSchema = z.object({
   id: idSchema,
   sourceId: idSchema,
   mentionId: idSchema,
-  status: z.enum(["resolved", "ambiguous", "new-entity", "unresolved"]),
+  status: z.enum(["resolved", "ambiguous", "new-entity", "unresolved", "non-referential", "misidentified"]),
   entityId: idSchema.optional(),
+  intendedEntityId: idSchema.optional(),
   candidates: z.array(identityResolutionCandidateSchema).max(32),
   aliasType: z.enum(["name", "title", "office", "kinship", "nickname", "other"]).optional(),
   validStoryTime: storyTimeSchema.optional(),
@@ -61,7 +62,7 @@ export const identityResolutionSchema = z.object({
   if (new Set(candidateIds).size !== candidateIds.length) {
     ctx.addIssue({ code: "custom", path: ["candidates"], message: "Resolution candidates must have unique entity IDs" });
   }
-  if (value.status === "resolved" || value.status === "new-entity") {
+  if (value.status === "resolved" || value.status === "new-entity" || value.status === "misidentified") {
     if (!value.entityId) {
       ctx.addIssue({ code: "custom", path: ["entityId"], message: `${value.status} resolution requires entityId` });
     } else if (!candidateIds.includes(value.entityId)) {
@@ -76,7 +77,24 @@ export const identityResolutionSchema = z.object({
   if (value.status === "new-entity" && value.candidates.length !== 1) {
     ctx.addIssue({ code: "custom", path: ["candidates"], message: "A new-entity resolution must identify exactly one proposed entity" });
   }
-  if ((value.status === "ambiguous" || value.status === "unresolved") && value.aliasType) {
+  if (value.status === "non-referential" && value.candidates.length !== 0) {
+    ctx.addIssue({ code: "custom", path: ["candidates"], message: "A non-referential mention cannot retain entity candidates" });
+  }
+  if (value.status === "misidentified") {
+    if (!value.intendedEntityId) {
+      ctx.addIssue({ code: "custom", path: ["intendedEntityId"], message: "A misidentified mention requires the speaker's intended entity" });
+    } else if (value.intendedEntityId === value.entityId) {
+      ctx.addIssue({ code: "custom", path: ["intendedEntityId"], message: "Misidentified actual and intended entities must differ" });
+    } else if (!candidateIds.includes(value.intendedEntityId)) {
+      ctx.addIssue({ code: "custom", path: ["candidates"], message: "The intendedEntityId must appear in candidates" });
+    }
+    if (value.candidates.length < 2) {
+      ctx.addIssue({ code: "custom", path: ["candidates"], message: "A misidentified mention requires actual and intended candidates" });
+    }
+  } else if (value.intendedEntityId) {
+    ctx.addIssue({ code: "custom", path: ["intendedEntityId"], message: "Only a misidentified mention may name an intended entity" });
+  }
+  if ((value.status === "ambiguous" || value.status === "unresolved" || value.status === "non-referential" || value.status === "misidentified") && value.aliasType) {
     ctx.addIssue({ code: "custom", path: ["aliasType"], message: "Only selected identities may classify an alias" });
   }
 });
@@ -568,6 +586,15 @@ export async function validateIdentityResolutionClosure(
       && !entityCatalog.checkpointedPending.has(resolution.entityId)) {
       issues.add(`${proposal.id}: resolved identity '${resolution.entityId}' must be canonical or an active entity proposal from a previously checkpointed source batch; use new-entity only for a same-finish entity proposal`);
     }
+    if (resolution.status === "misidentified") {
+      for (const entityId of [resolution.entityId, resolution.intendedEntityId]) {
+        if (entityId
+          && !entityCatalog.canonical.has(entityId)
+          && !entityCatalog.checkpointedPending.has(entityId)) {
+          issues.add(`${proposal.id}: misidentified identity '${entityId}' must be canonical or an active entity proposal from a previously checkpointed source batch`);
+        }
+      }
+    }
     if (resolution.status === "new-entity" && resolution.entityId && !entityCatalog.selectedPending.has(resolution.entityId)) {
       issues.add(entityCatalog.checkpointedPending.has(resolution.entityId)
         ? `${proposal.id}: new-entity identity '${resolution.entityId}' was proposed by a previously checkpointed source batch; reuse it with status resolved instead of proposing it again`
@@ -632,6 +659,8 @@ export type EntityResolutionCoverage = {
   newEntities: number;
   ambiguous: number;
   unresolved: number;
+  nonReferential: number;
+  misidentified: number;
   missing: number;
   pending: number;
   missingMentionIds: string[];
@@ -692,6 +721,8 @@ export async function inspectEntityResolutionCoverage(
     newEntities: resolutions.filter((resolution) => resolution.status === "new-entity").length,
     ambiguous: resolutions.filter((resolution) => resolution.status === "ambiguous").length,
     unresolved: resolutions.filter((resolution) => resolution.status === "unresolved").length,
+    nonReferential: resolutions.filter((resolution) => resolution.status === "non-referential").length,
+    misidentified: resolutions.filter((resolution) => resolution.status === "misidentified").length,
     missing: missingMentionIds.length,
     pending: pending.length,
     missingMentionIds,

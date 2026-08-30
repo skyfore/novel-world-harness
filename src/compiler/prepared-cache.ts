@@ -86,6 +86,13 @@ const compilerFingerprintSchema = z.object({
   stateSchemaHash: digestSchema,
 }).strict();
 
+const preparedRevisionLineageSchema = z.object({
+  operation: z.enum(["repair", "reparse"]),
+  parentBundleHash: digestSchema,
+  runId: z.string().trim().min(1).max(300),
+}).strict();
+export type PreparedRevisionLineage = z.infer<typeof preparedRevisionLineageSchema>;
+
 const preparedCanonicalSchema = z.object({
   entities: z.array(entitySchema),
   propositions: z.array(propositionSchema).default([]),
@@ -128,6 +135,7 @@ const preparedNovelBundleV1Schema = z.object({
 const preparedNovelBundleV2Schema = z.object({
   version: z.literal(2),
   ...preparedBundleCommonShape,
+  lineage: preparedRevisionLineageSchema.optional(),
   compilerSnapshot: preparedCompilerSnapshotSchema,
 }).strict();
 
@@ -276,6 +284,7 @@ export type PreparedCacheRevision = {
   createdAt: string;
   active: boolean;
   cachePath: string;
+  lineage?: PreparedRevisionLineage;
 };
 
 export type ActivePreparedNovel = {
@@ -334,7 +343,11 @@ export class PreparedNovelCache {
   }
 
   /** Load an immutable branch-pinned revision without consulting the active ref. */
-  async loadRevision(source: SourceDocument, bundleHash: string): Promise<ActivePreparedNovel | null> {
+  async loadRevision(
+    source: SourceDocument,
+    bundleHash: string,
+    options: { allowIncompatible?: boolean } = {},
+  ): Promise<ActivePreparedNovel | null> {
     if (!/^[a-f0-9]{64}$/.test(bundleHash)) throw new Error(`Invalid prepared revision hash: ${bundleHash}`);
     const identity = await sourceIdentity(this.workspaceRoot, source);
     const cached = await this.readCached(identity.contentMd5, bundleHash);
@@ -342,12 +355,22 @@ export class PreparedNovelCache {
     assertSourceIdentity(cached.bundle, identity);
     await this.assertTitleInferenceEvidence(cached.bundle);
     const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
-    if (layoutIssue) throw new Error(layoutIssue);
+    if (layoutIssue && !options.allowIncompatible) throw new Error(layoutIssue);
     return {
       bundleHash: cached.manifest.bundleHash,
       bundle: cached.bundle,
       cachePath: cached.cachePath,
     };
+  }
+
+  /** Compare the materialized source workspace with one immutable revision. */
+  async workspaceDifferenceFromRevision(source: SourceDocument, bundleHash: string): Promise<string | null> {
+    if (!/^[a-f0-9]{64}$/.test(bundleHash)) throw new Error(`Invalid prepared revision hash: ${bundleHash}`);
+    const identity = await sourceIdentity(this.workspaceRoot, source);
+    const cached = await this.readCached(identity.contentMd5, bundleHash);
+    if (!cached) throw new Error(`Prepared cache revision not found: ${identity.contentMd5}@${bundleHash}`);
+    assertSourceIdentity(cached.bundle, identity);
+    return this.freshnessIssue(cached.bundle);
   }
 
   /**
@@ -408,7 +431,15 @@ export class PreparedNovelCache {
     };
   }
 
-  async publish(source: SourceDocument, options: { allowSemanticDebtForRollback?: boolean } = {}): Promise<PreparedCacheResult> {
+  async publish(
+    source: SourceDocument,
+    options: { allowSemanticDebtForRollback?: boolean; lineage?: PreparedRevisionLineage } = {},
+  ): Promise<PreparedCacheResult> {
+    if (options.lineage && !await this.loadRevision(source, options.lineage.parentBundleHash, { allowIncompatible: true })) {
+      throw new Error(
+        `Cannot publish ${options.lineage.operation} lineage: parent prepared revision ${options.lineage.parentBundleHash} was not found.`,
+      );
+    }
     const identity = await sourceIdentity(this.workspaceRoot, source);
     const bundle = await this.buildBundle(source, identity, options);
     return this.publishBundle(source, identity, bundle);
@@ -444,6 +475,9 @@ export class PreparedNovelCache {
     bundle: PreparedNovelBundle,
   ): Promise<PreparedCacheResult> {
     const bundleHash = contentHash(bundle);
+    if (bundle.version === 2 && bundle.lineage?.parentBundleHash === bundleHash) {
+      throw new Error(`Prepared revision ${bundleHash} cannot name itself as its lineage parent.`);
+    }
     await this.ensureRevisionLayout(identity.contentMd5);
     const cachePath = this.revisionPath(identity.contentMd5, bundleHash);
     const existing = await this.readCached(identity.contentMd5, bundleHash);
@@ -518,6 +552,7 @@ export class PreparedNovelCache {
         createdAt: cached.manifest.createdAt,
         active: active?.bundleHash === bundleHash,
         cachePath: cached.cachePath,
+        ...(cached.bundle.version === 2 && cached.bundle.lineage ? { lineage: cached.bundle.lineage } : {}),
       });
     }
     return revisions.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.bundleHash.localeCompare(right.bundleHash));
@@ -574,6 +609,7 @@ export class PreparedNovelCache {
     options: {
       allowSemanticDebtForRollback?: boolean;
       legacyRollbackCheckpoint?: PersistedBatchProgress;
+      lineage?: PreparedRevisionLineage;
     },
   ): Promise<PreparedNovelBundle> {
     const proposals = new ProposalStore(this.workspaceRoot);
@@ -680,6 +716,7 @@ export class PreparedNovelCache {
       },
       segmenterVersion: SEGMENTER_VERSION,
       ...(options.legacyRollbackCheckpoint ? {} : { compilerFingerprint: currentCompilerFingerprint() }),
+      ...(options.lineage ? { lineage: options.lineage } : {}),
       ...(chapterSplitPlan ? { chapterSplitPlan } : {}),
       // Boundary calibrations are transient, model-requested workflow checks.
       // Their accepted artifacts are already captured below. Structure discovery

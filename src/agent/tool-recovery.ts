@@ -41,7 +41,7 @@ type NwhToolResultRecovery = {
 type LookupRecovery = {
   finder: string;
   arguments: Record<string, unknown>;
-  resultField: "path" | "ref" | "unitId";
+  resultField: "path" | "ref" | "unitId" | "pageToken";
 };
 
 const LOOKUP_RECOVERY: Readonly<Record<string, LookupRecovery>> = Object.freeze({
@@ -87,8 +87,8 @@ const LOOKUP_RECOVERY: Readonly<Record<string, LookupRecovery>> = Object.freeze(
   },
   account_source_units: {
     finder: "find_source_accounting_units",
-    arguments: { status: "all", offset: 0, max_results: 200 },
-    resultField: "unitId",
+    arguments: { status: "unresolved", offset: 0, max_results: 200 },
+    resultField: "pageToken",
   },
 });
 
@@ -414,8 +414,9 @@ export function buildNwhToolRecoveryAdvice(
       retryable: true,
       retryCondition: "Retry once only after every reported source unit has exact semantic coverage or a successful typed accounting proposal.",
       steps: [
-        "Call find_source_accounting_units with status=unresolved in the same active batch and page only through each exact returned nextOffset until it is null.",
-        "Copy each exact unitId into account_source_units; never guess an ID or label represented/non-scene units yourself.",
+        "Call find_source_accounting_units with status=unresolved, offset=0, and max_results=200 in the same active batch.",
+        "Review every returned unit, then copy its exact pageToken into account_source_units with one page_default and only genuinely different page_overrides by exact returned unitIndex; never guess a token/index or label represented/non-scene units yourself.",
+        "After each successful accounting proposal, refetch status=unresolved at offset=0 because the result set shrinks; repeat until units is empty instead of following a stale nextOffset.",
         "Keep unresolved or intentionally-deferred when the source cannot be decided honestly; those statuses remain publication blockers.",
         `Retry ${toolName} once after concrete accounting progress. If the same full diagnostic repeats, stop instead of looping.`,
       ],

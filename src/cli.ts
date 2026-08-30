@@ -16,6 +16,7 @@ import { compileSourceCommand } from "./commands/compile-source.js";
 import { prepareCommand } from "./commands/prepare.js";
 import { prepareAllCommand } from "./commands/prepare-all.js";
 import { reparseCommand } from "./commands/reparse.js";
+import { repairExistingCommand } from "./commands/repair-existing.js";
 import { activatePreparedCacheRevisionCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
 import { playWorldCommand } from "./commands/play-world.js";
 import { acceptAllValidProposalsCommand, acceptProposalCommand, listProposalsCommand, rejectProposalCommand, showProposalCommand } from "./commands/proposals.js";
@@ -264,6 +265,27 @@ program
       sourceId: options.source,
       all: Boolean(options.all),
       chapters: options.chapters,
+      model: options.model ?? globalOptions.model,
+    });
+  });
+
+program
+  .command("repair-existing")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id; required when more than one source exists")
+  .option("--from-revision <bundle-hash>", "immutable prepared revision to fork; defaults to the active revision")
+  .option("--replace-staging", "replace conflicting compiler staging after preserving pending drafts in rejected history")
+  .option("--model <model>", "override compiler model")
+  .description("fork a prepared revision, repair it in place with reusable artifacts, and publish a new current revision")
+  .action(async (options) => {
+    const globalOptions = program.opts();
+    await repairExistingCommand({
+      root: rootFor(options),
+      configPath: configFor(options),
+      sourceId: options.source,
+      fromRevision: options.fromRevision,
+      replaceStaging: Boolean(options.replaceStaging),
       model: options.model ?? globalOptions.model,
     });
   });

@@ -103,6 +103,8 @@ export type CompilerAuditReport = {
     newEntities: number;
     ambiguous: number;
     unresolved: number;
+    nonReferential: number;
+    misidentified: number;
     missing: number;
     pending: number;
     invalid: number;
@@ -116,9 +118,11 @@ export type CompilerAuditReport = {
     newEvents: number;
     ambiguous: number;
     unresolved: number;
+    nonReferential: number;
     missing: number;
     pending: number;
     majorResolved: number;
+    majorNonReferential: number;
     majorIncomplete: number;
     invalid: number;
     missingMentionIds: string[];
@@ -371,6 +375,8 @@ export async function auditCompiler(
   let newEntityMentions = 0;
   let ambiguousMentions = 0;
   let unresolvedMentions = 0;
+  let nonReferentialMentions = 0;
+  let misidentifiedMentions = 0;
   let missingResolutions = 0;
   let pendingResolutions = 0;
   const missingResolutionMentionIds: string[] = [];
@@ -380,10 +386,12 @@ export async function auditCompiler(
   let newEventMentions = 0;
   let ambiguousEventMentions = 0;
   let unresolvedEventMentions = 0;
+  let nonReferentialEventMentions = 0;
   let missingEventResolutions = 0;
   let pendingEventResolutions = 0;
   let majorEventMentions = 0;
   let majorResolvedEventMentions = 0;
+  let majorNonReferentialEventMentions = 0;
   let majorIncompleteEventMentions = 0;
   const missingEventResolutionMentionIds: string[] = [];
   const invalidEventResolutionIds = new Set<string>();
@@ -413,6 +421,8 @@ export async function auditCompiler(
     newEntityMentions += resolutionCoverage.newEntities;
     ambiguousMentions += resolutionCoverage.ambiguous;
     unresolvedMentions += resolutionCoverage.unresolved;
+    nonReferentialMentions += resolutionCoverage.nonReferential;
+    misidentifiedMentions += resolutionCoverage.misidentified;
     missingResolutions += resolutionCoverage.missing;
     pendingResolutions += resolutionCoverage.pending;
     missingResolutionMentionIds.push(...resolutionCoverage.missingMentionIds);
@@ -422,10 +432,12 @@ export async function auditCompiler(
     newEventMentions += eventResolutionCoverage.newEvents;
     ambiguousEventMentions += eventResolutionCoverage.ambiguous;
     unresolvedEventMentions += eventResolutionCoverage.unresolved;
+    nonReferentialEventMentions += eventResolutionCoverage.nonReferential;
     missingEventResolutions += eventResolutionCoverage.missing;
     pendingEventResolutions += eventResolutionCoverage.pending;
     majorEventMentions += eventResolutionCoverage.majorEventMentions;
     majorResolvedEventMentions += eventResolutionCoverage.majorResolved;
+    majorNonReferentialEventMentions += eventResolutionCoverage.majorNonReferential;
     majorIncompleteEventMentions += eventResolutionCoverage.majorIncomplete;
     missingEventResolutionMentionIds.push(...eventResolutionCoverage.missingMentionIds);
     for (const resolutionId of eventResolutionCoverage.invalidResolutionIds) invalidEventResolutionIds.add(resolutionId);
@@ -1132,8 +1144,8 @@ export async function auditCompiler(
       || pendingEventResolutions || missingEventResolutions || ambiguousEventMentions || unresolvedEventMentions
       || eventResolutionErrors.length
       ? "not-ready"
-      : resolvedMentions + newEntityMentions === entityMentions
-        && resolvedEventMentions + newEventMentions === eventMentions
+      : resolvedMentions + newEntityMentions + nonReferentialMentions + misidentifiedMentions === entityMentions
+        && resolvedEventMentions + newEventMentions + nonReferentialEventMentions === eventMentions
         ? "ready"
         : "not-ready";
   const readinessStates = {
@@ -1210,6 +1222,8 @@ export async function auditCompiler(
       newEntities: newEntityMentions,
       ambiguous: ambiguousMentions,
       unresolved: unresolvedMentions,
+      nonReferential: nonReferentialMentions,
+      misidentified: misidentifiedMentions,
       missing: missingResolutions,
       pending: pendingResolutions,
       invalid: invalidResolutionIds.size,
@@ -1223,9 +1237,11 @@ export async function auditCompiler(
       newEvents: newEventMentions,
       ambiguous: ambiguousEventMentions,
       unresolved: unresolvedEventMentions,
+      nonReferential: nonReferentialEventMentions,
       missing: missingEventResolutions,
       pending: pendingEventResolutions,
       majorResolved: majorResolvedEventMentions,
+      majorNonReferential: majorNonReferentialEventMentions,
       majorIncomplete: majorIncompleteEventMentions,
       invalid: invalidEventResolutionIds.size,
       missingMentionIds: [...new Set(missingEventResolutionMentionIds)].sort(),
@@ -1402,10 +1418,10 @@ export async function auditCompiler(
       stateDeltaExplicitness: events.length ? eventsWithExplicitDelta / events.length : null,
       causalityConsistency: events.length ? (graph.cycles.length || graph.missing.length || narrativeGraphNavigable === false ? 0 : 1) : null,
       entityResolution: entityMentions
-        ? Math.min(1, (resolvedMentions + newEntityMentions) / entityMentions)
+        ? Math.min(1, (resolvedMentions + newEntityMentions + nonReferentialMentions + misidentifiedMentions) / entityMentions)
         : null,
       majorEventResolution: majorEventMentions
-        ? Math.min(1, majorResolvedEventMentions / majorEventMentions)
+        ? Math.min(1, (majorResolvedEventMentions + majorNonReferentialEventMentions) / majorEventMentions)
         : null,
       epistemicCoverage: propositions.length
         ? new Set(attributions.map((attribution) => attribution.propositionId)).size / propositions.length

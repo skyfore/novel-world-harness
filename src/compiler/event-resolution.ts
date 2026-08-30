@@ -49,7 +49,7 @@ export const eventResolutionSchema = z.object({
   sourceId: idSchema,
   eventMentionIds: z.array(idSchema).min(1).max(64)
     .refine((values) => new Set(values).size === values.length, "eventMentionIds must be unique"),
-  status: z.enum(["resolved", "new-event", "ambiguous", "unresolved"]),
+  status: z.enum(["resolved", "new-event", "ambiguous", "unresolved", "non-referential"]),
   canonicalEventId: idSchema.optional(),
   relation: eventResolutionRelationSchema.optional(),
   candidates: z.array(eventResolutionCandidateSchema).max(64),
@@ -90,6 +90,9 @@ export const eventResolutionSchema = z.object({
     if (value.relation !== "coreference") {
       ctx.addIssue({ code: "custom", path: ["relation"], message: "A new canonical event must be grounded by a coreference resolution" });
     }
+  }
+  if (value.status === "non-referential" && value.candidates.length !== 0) {
+    ctx.addIssue({ code: "custom", path: ["candidates"], message: "A non-referential event mention cannot retain canonical-event candidates" });
   }
 });
 export type EventResolution = z.infer<typeof eventResolutionSchema>;
@@ -711,9 +714,11 @@ export type EventResolutionCoverage = {
   newEvents: number;
   ambiguous: number;
   unresolved: number;
+  nonReferential: number;
   missing: number;
   pending: number;
   majorResolved: number;
+  majorNonReferential: number;
   majorIncomplete: number;
   missingMentionIds: string[];
   invalidResolutionIds: string[];
@@ -764,6 +769,8 @@ export async function inspectEventResolutionCoverage(
     const resolution = byMention.get(mention.id);
     return resolution?.status === "resolved" || resolution?.status === "new-event";
   }).length;
+  const majorNonReferential = majorMentions.filter((mention) =>
+    byMention.get(mention.id)?.status === "non-referential").length;
   return {
     sourceId,
     eventMentions: mentionValues.length,
@@ -772,10 +779,12 @@ export async function inspectEventResolutionCoverage(
     newEvents: statusCount("new-event"),
     ambiguous: statusCount("ambiguous"),
     unresolved: statusCount("unresolved"),
+    nonReferential: statusCount("non-referential"),
     missing: missingMentionIds.length,
     pending: pending.length,
     majorResolved,
-    majorIncomplete: majorMentions.length - majorResolved,
+    majorNonReferential,
+    majorIncomplete: majorMentions.length - majorResolved - majorNonReferential,
     missingMentionIds,
     invalidResolutionIds: [...invalidResolutionIds].sort(),
     errors: errors.sort(),
@@ -811,7 +820,7 @@ function eventTraceIssues(
         if (!mention) continue;
         for (const participantMentionId of mention.participantMentionIds) {
           const identity = identities.get(participantMentionId);
-          if ((identity?.status === "resolved" || identity?.status === "new-entity") && identity.entityId) {
+          if ((identity?.status === "resolved" || identity?.status === "new-entity" || identity?.status === "misidentified") && identity.entityId) {
             participantIds.add(identity.entityId);
           }
         }
@@ -836,7 +845,7 @@ function validateResolvedEventParticipants(
   for (const mention of mentions) {
     for (const participantMentionId of mention.participantMentionIds) {
       const identity = identities.get(participantMentionId);
-      if (!identity || (identity.status !== "resolved" && identity.status !== "new-entity") || !identity.entityId) {
+      if (!identity || (identity.status !== "resolved" && identity.status !== "new-entity" && identity.status !== "misidentified") || !identity.entityId) {
         issues.add(`${proposalId}: participant mention ${participantMentionId} must have a selected entity identity before resolving the event`);
       } else if (!event.participants.includes(identity.entityId)) {
         issues.add(`${proposalId}: resolved participant ${identity.entityId} is absent from canonical event ${event.id}`);
@@ -1077,7 +1086,7 @@ function resolvedParticipantEntityIds(
 ): string[] {
   return [...new Set(mention.participantMentionIds.flatMap((mentionId) => {
     const resolution = identities.get(mentionId);
-    return resolution && (resolution.status === "resolved" || resolution.status === "new-entity") && resolution.entityId
+    return resolution && (resolution.status === "resolved" || resolution.status === "new-entity" || resolution.status === "misidentified") && resolution.entityId
       ? [resolution.entityId]
       : [];
   }))].sort();

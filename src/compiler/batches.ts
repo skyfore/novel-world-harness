@@ -464,6 +464,7 @@ async function compilerEvidencePieces(
 export async function proposeMinimalOpeningWorld(
   workspaceRoot: string,
   source: SourceDocument,
+  options: { proposalIdSuffix?: string } = {},
 ): Promise<string> {
   const opening = await prepareOpeningWorldCompilerBatch(workspaceRoot, source);
   const proposals = new CompilerProposalService(workspaceRoot);
@@ -472,7 +473,7 @@ export async function proposeMinimalOpeningWorld(
     ...(await proposals.store.list("accepted")).map((item) => item.id),
     ...(await proposals.store.list("rejected")).map((item) => item.id),
   ]);
-  const base = `fallback-initial-${source.id}`;
+  const base = `fallback-initial-${source.id}${options.proposalIdSuffix ? `-${options.proposalIdSuffix}` : ""}`;
   let proposalId = base;
   for (let revision = 2; used.has(proposalId); revision += 1) proposalId = `${base}-v${revision}`;
   const canonical = new CanonicalModelStore(workspaceRoot);
@@ -526,7 +527,7 @@ export async function prepareOpeningWorldCompilerBatch(
   source: SourceDocument,
 ): Promise<CompilerBatch> {
   const batches = await prepareCompilerBatches(workspaceRoot, source);
-  const opening = await selectEvidenceGroundedOpeningBatch(workspaceRoot, source.id, batches)
+  const opening = await selectEvidenceGroundedOpeningBatch(workspaceRoot, source, batches)
     ?? selectOpeningCompilerBatch(batches);
   if (!opening) throw new Error(`Source ${source.id} has no opening evidence segment.`);
   const hydrated = await hydrateCompilerBatch(workspaceRoot, opening);
@@ -552,18 +553,37 @@ export async function prepareOpeningWorldCompilerBatch(
 }
 
 export function selectOpeningCompilerBatch(batches: readonly CompilerBatch[]): CompilerBatch | undefined {
+  return selectOpeningCompilerBatches(batches)[0];
+}
+
+/**
+ * Return the bounded narrative-opening region accepted for a genesis cut.
+ *
+ * A prologue can be a dream, frame, or otherwise non-actionable scene even
+ * though it is genuinely narrative. In that case the immediately following
+ * first chapter is also a valid opening cut. This keeps jacket copy and other
+ * publication front matter excluded without forcing a playable main-story
+ * checkpoint back into a non-embodied prologue.
+ */
+export function selectOpeningCompilerBatches(batches: readonly CompilerBatch[]): CompilerBatch[] {
   const sourceBatches = batches.filter((batch) => batch.purpose === "source-review");
-  return sourceBatches.find((batch) => batch.authorChapterHeading || isNarrativeOpeningHeading(batch.chapterTitle))
-    ?? sourceBatches[0];
+  const openingIndex = sourceBatches.findIndex((batch) =>
+    batch.authorChapterHeading || isNarrativeOpeningHeading(batch.chapterTitle));
+  if (openingIndex < 0) return sourceBatches[0] ? [sourceBatches[0]] : [];
+  const opening = sourceBatches[openingIndex]!;
+  if (!isPrologueHeading(opening.chapterTitle)) return [opening];
+  const firstChapter = sourceBatches.slice(openingIndex + 1)
+    .find((batch) => batch.authorChapterHeading || isNarrativeOpeningHeading(batch.chapterTitle));
+  return firstChapter ? [opening, firstChapter] : [opening];
 }
 
 async function selectEvidenceGroundedOpeningBatch(
   workspaceRoot: string,
-  sourceId: string,
+  source: SourceDocument,
   batches: readonly CompilerBatch[],
 ): Promise<CompilerBatch | undefined> {
   const events = (await new CanonicalModelStore(workspaceRoot).listEvents())
-    .filter((event) => event.evidence.some((reference) => reference.span.sourceId === sourceId))
+    .filter((event) => event.evidence.some((reference) => reference.span.sourceId === source.id))
     .sort((left, right) =>
       earliestEventEvidenceLine(left) - earliestEventEvidenceLine(right)
       || (left.narrativeContext?.discourseOrder ?? 0) - (right.narrativeContext?.discourseOrder ?? 0)
@@ -571,17 +591,22 @@ async function selectEvidenceGroundedOpeningBatch(
   // Front matter and jacket-style summaries may precede the first lived
   // narrative scene. Ground the opening pass in that scene's evidence when
   // the compiled event index can identify one.
-  const first = events.find((event) => event.narrativeContext?.mode === "scene") ?? events[0];
-  if (!first) return undefined;
-  const lines = first.evidence
-    .filter((reference) => reference.span.sourceId === sourceId)
-    .map((reference) => reference.span.startLine);
-  return batches.find((batch) =>
-    batch.purpose === "source-review"
-    && lines.some((line) => batch.evidence.some((reference) =>
-      reference.span.sourceId === sourceId
-      && reference.span.startLine <= line
-      && reference.span.endLine >= line)));
+  const candidates = events.filter((event) => event.narrativeContext?.mode === "scene");
+  if (!candidates.length && events[0]) candidates.push(events[0]);
+  for (const event of candidates) {
+    const lines = event.evidence
+      .filter((reference) => reference.span.sourceId === source.id)
+      .map((reference) => reference.span.startLine);
+    const matching = batches.find((batch) =>
+      batch.purpose === "source-review"
+      && !isPublicationFrontMatterBatch(batch, source)
+      && lines.some((line) => batch.evidence.some((reference) =>
+        reference.span.sourceId === source.id
+        && reference.span.startLine <= line
+        && reference.span.endLine >= line)));
+    if (matching) return matching;
+  }
+  return undefined;
 }
 
 function earliestEventEvidenceLine(event: CanonicalEvent): number {
@@ -594,6 +619,19 @@ function isNarrativeOpeningHeading(title: string | undefined): boolean {
   return /^第[零〇一二三四五六七八九十百千万两\d]+[章节卷回部篇幕](?:\s|$|[：:])/u.test(normalized)
     || /^(?:chapter|book|part|volume)\s+[\divxlcdm]+\b/i.test(normalized)
     || /^(?:prologue|序章|序幕|楔子|引子)(?:\s|$|[：:])/iu.test(normalized);
+}
+
+function isPrologueHeading(title: string | undefined): boolean {
+  if (!title) return false;
+  const normalized = title.trim().replace(/^#{1,6}\s+/, "");
+  return /^(?:prologue|序章|序幕|楔子|引子)(?:\s|$|[：:])/iu.test(normalized);
+}
+
+function isPublicationFrontMatterBatch(batch: CompilerBatch, source: SourceDocument): boolean {
+  const normalized = batch.chapterTitle?.trim().replace(/^#{1,6}\s+/, "") ?? "";
+  const sourceTitle = source.titleInference?.title?.trim() || source.title.trim();
+  return normalized === sourceTitle
+    || /^(?:contents?|table of contents|copyright|title page|内容简介|作品简介|出版说明)$/iu.test(normalized);
 }
 
 export async function hydrateCompilerBatch(workspaceRoot: string, batch: CompilerBatch): Promise<CompilerBatch> {
@@ -725,7 +763,7 @@ function buildBatchPrompt(
   return `You are processing compiler batch ${batchId} for immutable source ${source.id}. The ingest filename is intentionally withheld because it is not novel metadata.\n\n` +
     `Analyze only the supplied citable evidence slices: do not call list_files, search_files, or read_file. <boundary-review-policy>${boundaryPolicy}</boundary-review-policy> Produce small typed pending proposals with the available propose_* tools. Aim for comprehensive coverage of every material semantic unit across the enabled layers. Execution capacity is a host-owned runaway safety fuse, never a semantic prioritization budget. Do not omit, downgrade, or withdraw an evidence-backed proposal merely to conserve tool calls, active slots, time, or tokens. Withdraw only a genuinely defective, duplicate, out-of-scope, or explicitly replaced draft. Prioritize stable identities and executable state/knowledge transitions without sacrificing other material supported units. ` +
     `<novel-title-policy>${titlePolicy} A novel-title proposal is workflow/display metadata, not world truth, and becomes active only after the batch finish handshake succeeds.</novel-title-policy> ` +
-    `Do not commit truth. Reuse stable entity IDs when the evidence clearly refers to the same identity. Use propose_entity_mention for identity-bearing proper names, descriptions, pronouns, titles, kinship terms, collectives, and high-impact omitted arguments when retaining the occurrence matters to later resolution. A mention records source wording plus kind candidates only: it never creates a canonical entity, alias, or identity link. For each recorded entity mention, call find_entity_resolution_candidates, then propose_entity_resolution as resolved, new-entity, ambiguous, or unresolved. Lexical equality proposes candidates but does not prove identity. Follow the returned resolutionMode exactly: resolved reuses a canonical entity or an active entity proposal from a previously checkpointed source batch, while new-entity requires a same-finish propose_entity candidate. Never re-propose a checkpointed pending identity merely because it is not canonical yet. Preserve uncertainty explicitly rather than selecting a low-confidence candidate. A canonical entity proposal's canonicalName must match a resolved/new-entity mention surface; each proposed alias must have its own alias-classified resolved mention. Use propose_event_mention to retain a source event trigger, its possibly discontinuous extent, participant mention IDs, discourse context, type candidates, and salience before proposing a canonical event. An event mention is textual presentation only: a recalled, dreamed, hypothetical, denied, summarized, or narrated event is not thereby committed as having occurred. For each retained event mention or deliberate coreference cluster, call find_event_resolution_candidates and propose_event_resolution as resolved, new-event, ambiguous, or unresolved. Distinguish coreference from subevent; evidence overlap, narrative adjacency, title similarity, and shared participants are candidate signals, never proof. A new canonical event requires a same-finish coreferential new-event resolution, and every canonical participant must trace through a resolved participant mention in that event cluster. For every proposed canonical event, propose a complete event-participation inventory in the same finish: assign each legacy participant at least one explicit semantic role, keep presence separate from role, and make the typed entity/presence projection exactly equal the event's participants and participantPresence compatibility fields. Never infer agency merely from physical presence. Use mention IDs—not canonical character IDs—for event mention participants, quotation speaker/addressee attribution, and discourse viewpoint. Record direct/indirect/free-indirect speech with propose_quotation when attribution or knowledge transmission matters, and record scenes, summaries, temporal displacement, frames, recollections, hypotheticals, dreams, embedded documents, and narrator commentary with propose_discourse_segment when narrative order must remain separate from world chronology. Overlapping discourse spans are valid. Search prior source annotations, identity resolutions, event resolutions, and event-participation records before duplicating them. Prefer resolution-relevant observations over exhaustive low-value mention enumeration. ` +
+    `Do not commit truth. Reuse stable entity IDs when the evidence clearly refers to the same identity. Use propose_entity_mention for identity-bearing proper names, descriptions, pronouns, titles, kinship terms, collectives, and high-impact omitted arguments when retaining the occurrence matters to later resolution. A mention records source wording plus kind candidates only: it never creates a canonical entity, alias, or identity link. For each recorded entity mention, call find_entity_resolution_candidates, then propose_entity_resolution as resolved, new-entity, ambiguous, unresolved, non-referential, or misidentified. Lexical equality proposes candidates but does not prove identity. Follow the returned resolutionMode exactly: resolved reuses a canonical entity or an active entity proposal from a previously checkpointed source batch, while new-entity requires a same-finish propose_entity candidate. Never re-propose a checkpointed pending identity merely because it is not canonical yet. Preserve uncertainty explicitly rather than selecting a low-confidence candidate. Use non-referential only after exact context proves a retained annotation is a false-positive subspan with no independent entity referent; it takes no target or candidates and must never hide ambiguity. Use misidentified only when exact context determinately separates the actual referent from the speaker's mistaken intended identity; retain both as existing candidates, select the actual entity, and never register the wrong wording as its alias. A canonical entity proposal's canonicalName must match a resolved/new-entity mention surface; each proposed alias must have its own alias-classified resolved mention. Use propose_event_mention to retain a source event trigger, its possibly discontinuous extent, participant mention IDs, discourse context, type candidates, and salience before proposing a canonical event. An event mention is textual presentation only: a recalled, dreamed, hypothetical, denied, summarized, or narrated event is not thereby committed as having occurred. For each retained event mention or deliberate coreference cluster, call find_event_resolution_candidates and propose_event_resolution as resolved, new-event, ambiguous, unresolved, or non-referential. Use event non-referential only when exact discourse context proves the annotation is a diffuse summary or false-positive phrase without one occurrence referent; it takes no target or candidates and must never hide uncertainty. Distinguish coreference from subevent; evidence overlap, narrative adjacency, title similarity, and shared participants are candidate signals, never proof. A new canonical event requires a same-finish coreferential new-event resolution, and every canonical participant must trace through a selected actual participant identity in that event cluster. For every proposed canonical event, propose a complete event-participation inventory in the same finish: assign each legacy participant at least one explicit semantic role, keep presence separate from role, and make the typed entity/presence projection exactly equal to the event's participants and participantPresence compatibility fields. Never infer agency merely from physical presence. Use mention IDs—not canonical character IDs—for event mention participants, quotation speaker/addressee attribution, and discourse viewpoint. Record direct/indirect/free-indirect speech with propose_quotation when attribution or knowledge transmission matters, and record scenes, summaries, temporal displacement, frames, recollections, hypotheticals, dreams, embedded documents, and narrator commentary with propose_discourse_segment when narrative order must remain separate from world chronology. Overlapping discourse spans are valid. Search prior source annotations, identity resolutions, event resolutions, and event-participation records before duplicating them. Prefer resolution-relevant observations over exhaustive low-value mention enumeration. ` +
     `Every logical ID must use only ASCII letters, digits, dot, underscore, and hyphen, and must start with a letter or digit. ` +
     `Every entity canonicalName and alias must occur in that entity's supplied evidence; empty aliases are valid, and you must not expand censored, abbreviated, translated, or externally remembered names beyond the evidence. ` +
     `Every canonical proposal must cite at least one host-issued source segment ID through the top-level evidence_segment_ids array. Omit payload.evidence, nested evidence fields, and top-level evidence: the host deterministically injects immutable compatibility EvidenceRefs. Never invent or edit an evidence handle. For every material source-backed field or relation, also add an evidence_selectors entry containing the exact copied source wording, the cited segment_id, the field's RFC 6901 target_path, supports/contradicts/contextualizes relation, and an independently judged strength. Use prefix/suffix or one-based occurrence only to disambiguate repeated wording. Inferences require a concise interpretation. The host alone resolves trusted byte/line ranges and hashes; never invent or submit offsets or hashes. ` +
@@ -745,7 +783,7 @@ function buildBatchPrompt(
     `Pending proposals are immutable while active. A failed propose_* tool call never enters the active set and must never be withdrawn. Only a tool result that says the pending proposal was recorded is active. If a successfully recorded world proposal needs correction, first submit the corrected candidate under a new envelope proposal_id such as -v2, then call withdraw_compiler_proposal for the defective current-batch candidate so it moves to rejected history; never pretend that reusing the old proposal_id overwrote it. Novel-title metadata is a singleton: withdraw a defective title candidate first, then submit its correction under a new proposal_id. Preserve the payload's stable logical id when correcting the same entity, claim, event, goal, rule, or possibility; change that logical id only when the original identity itself was the defect. A new envelope revision must not force causalParents or other logical references to change. ` +
     `Never install later canon in the initial world, leak it into opening character knowledge, or treat it as already committed branch history. Do not infer developments absent from the source. If evidence is insufficient, make fewer proposals rather than inventing facts. ` +
     `This is the only compiler pass guaranteed to contain these citable evidence segments: ${segmentIds.join(", ")}. Review every supplied section thoroughly across all enabled semantic layers and retain every material evidence-backed unit. Complete the canonical event, participation inventory, identity/event resolution, relation, and other closure records required by each retained unit. Never drop a lower-priority but material supported unit or withdraw its valid resolution to save calls. Do not estimate, announce, or optimize around remaining execution capacity; semantic completeness and deterministic closure determine what to keep. ` +
-    `${boundaryCalibration ? "" : `For a novel-scale source, exact assertions and source annotations make overlapping deterministic units represented automatically. Before finish, page find_source_accounting_units until nextOffset is null, then submit account_source_units decisions for every remaining unit inside each proposal-bearing segment. Never declare represented yourself and never blanket-label a proposal-bearing segment as no-artifacts. Use background-only for genuinely non-material narration, paratext for edition/title apparatus, duplicate-description only when the same semantics are already represented elsewhere, and unresolved or intentionally-deferred when review is honestly incomplete; those last two statuses remain preparation blockers. `}` +
+    `${boundaryCalibration ? "" : `For a novel-scale source, exact assertions and source annotations make overlapping deterministic units represented automatically. Before finish, call find_source_accounting_units with status=unresolved, offset=0, and max_results up to 200. Review every returned unit, then submit one account_source_units page_token proposal using page_default plus only genuinely different page_overrides; the host expands that exact page into per-unit typed decisions. After each successful proposal, refetch unresolved at offset=0 because the result set shrinks, and repeat until units is empty. The exact-ID decisions mode remains available for a small targeted correction. Never guess or copy opaque unit IDs, reuse a stale page token, declare represented yourself, or blanket-label an unread/proposal-bearing segment as no-artifacts. Use background-only for genuinely non-material narration, paratext for edition/title apparatus, duplicate-description only when the same semantics are already represented elsewhere, and unresolved or intentionally-deferred when review is honestly incomplete; those last two statuses remain preparation blockers. `}` +
     `After all proposal work and any required withdrawals, call finish_compiler_batch with one reviewed_segments entry for each of those exact segment IDs. The host automatically includes all active proposals created by this batch, including proposals recovered from an earlier failed attempt, so omit proposal_ids. Each reviewed_segments summary must be at most 500 characters and briefly state what was proposed or why it supports no artifact. Use no-artifacts only when every slice supports no active proposal. If finish reports an error, correct that specific issue before retrying and never repeat an identical failing call. Without one successful explicit finish, the batch remains retryable.\n\n` +
     pieces.join("\n\n");
 }

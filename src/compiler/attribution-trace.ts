@@ -272,7 +272,7 @@ async function readActiveResolutionProposal(
 }
 
 function selectedEntityId(resolution: IdentityResolution | undefined): string | undefined {
-  return resolution && (resolution.status === "resolved" || resolution.status === "new-entity")
+  return resolution && (resolution.status === "resolved" || resolution.status === "new-entity" || resolution.status === "misidentified")
     ? resolution.entityId
     : undefined;
 }

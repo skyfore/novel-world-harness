@@ -82,10 +82,10 @@ describe("agent tool recovery", () => {
       retryable: true,
       suggestedCall: {
         tool: "find_source_accounting_units",
-        arguments: { status: "all", offset: 0, max_results: 200 },
+        arguments: { status: "unresolved", offset: 0, max_results: 200 },
       },
     });
-    expect(lookup.steps.join(" ")).toContain("Copy the exact unitId");
+    expect(lookup.steps.join(" ")).toContain("Copy the exact pageToken");
     expect(lookup.steps.join(" ")).toContain("do not guess");
     expect(lookup.steps.join(" ")).toContain("Retry account_source_units once");
 
@@ -101,7 +101,8 @@ describe("agent tool recovery", () => {
         arguments: { status: "unresolved", offset: 0, max_results: 200 },
       },
     });
-    expect(finish.steps.join(" ")).toContain("exact returned nextOffset");
+    expect(finish.steps.join(" ")).toContain("exact pageToken");
+    expect(finish.steps.join(" ")).toContain("refetch status=unresolved at offset=0");
     expect(finish.steps.join(" ")).toContain("same full diagnostic repeats");
   });
 

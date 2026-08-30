@@ -1,5 +1,5 @@
 import { NOVEL_SCALE_EVENT_THRESHOLD, auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
-import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatch } from "../compiler/batches.js";
+import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatches } from "../compiler/batches.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { CanonicalModelStore, ProposalStore, type ProposalSummary } from "../world/canonical-model.js";
 import { InitialWorldStore, type InitialWorld } from "../world/initial.js";
@@ -179,15 +179,16 @@ export async function inspectPreparation(
     };
   }
   assertEvidenceExclusiveToSource(initialWorld.evidence, source.id, "Prepared opening world");
-  const openingBatch = selectOpeningCompilerBatch(batches);
-  if (openingBatch && !initialWorld.evidence.some((reference) =>
-    openingBatch.evidence.some((opening) => evidenceSpansOverlap(reference, opening)))) {
+  const openingBatches = selectOpeningCompilerBatches(batches);
+  if (openingBatches.length && !initialWorld.evidence.some((reference) =>
+    openingBatches.some((batch) => batch.evidence.some((opening) => evidenceSpansOverlap(reference, opening))))) {
+    const openingRanges = openingBatches.map((batch) => `${batch.startLine}-${batch.endLine}`).join(" or ");
     return {
       ...shared,
       audit,
       stage: "needs-initial-world",
       repairReasons: [
-        `The accepted initial world for source ${source.id} is grounded outside the selected narrative opening (lines ${openingBatch.startLine}-${openingBatch.endLine}); replace it before creating another branch.`,
+        `The accepted initial world for source ${source.id} is grounded outside the selected narrative opening (lines ${openingRanges}); replace it before creating another branch.`,
       ],
       next: "nwh compile \"Propose an evidence-backed replacement initial world for the opening state\"",
     };

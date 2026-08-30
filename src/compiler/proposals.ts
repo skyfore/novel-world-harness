@@ -324,6 +324,10 @@ export async function rejectPendingCompilerBatchProposals(
 export async function rejectPendingCompilerSourceProposals(
   workspaceRoot: string,
   sourceId: string,
+  diagnostic: { code: string; message: string } = {
+    code: "SOURCE_REPARSE_INVALIDATION",
+    message: `Pending proposal was invalidated while reparsing source ${sourceId}.`,
+  },
 ): Promise<string[]> {
   idSchema.parse(sourceId);
   const store = new ProposalStore(workspaceRoot);
@@ -339,10 +343,7 @@ export async function rejectPendingCompilerSourceProposals(
       !sourceEvidenceIds.has(summary.id)
       && !(typeof compilerBatchId === "string" && compilerBatchBelongsToSource(compilerBatchId, sourceId))
     ) continue;
-    await store.reject(summary.id, [{
-      code: "SOURCE_REPARSE_INVALIDATION",
-      message: `Pending proposal was invalidated while reparsing source ${sourceId}.`,
-    }]);
+    await store.reject(summary.id, [diagnostic]);
     rejected.push(summary.id);
   }
   const workspace = await WorkspaceStore.create(workspaceRoot);

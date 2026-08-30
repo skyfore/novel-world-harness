@@ -84,7 +84,7 @@ export function createEntityResolutionRetrievalTools(
     description: "Generate deterministic source-scoped lexical identity candidates from canonical entities, this batch's entity drafts, and active entity proposals from previously checkpointed batches.",
     promptSnippet: "Generate host-ranked lexical candidates before proposing an identity decision",
     promptGuidelines: [
-      "An empty result is valid and may require new-entity or unresolved status.",
+      "An empty result is valid and may require new-entity, unresolved, or exact-context non-referential status.",
       "Lexical equality is candidate generation, not proof of identity; use source context and preserve ambiguity.",
       "Copy each candidate's resolutionMode: resolved reuses canonical/checkpointed identity, while new-entity requires the current-batch entity proposal.",
     ],
@@ -113,7 +113,7 @@ export function createEntityResolutionRetrievalTools(
         candidates: result.candidates,
         message: result.candidates.length
           ? "Candidates are deterministic lexical matches only; the identity decision remains a proposal. Use each candidate's resolutionMode instead of guessing from pending status."
-          : "No compatible lexical candidate matched. Preserve unresolved ambiguity or propose a new entity only when source context supports it.",
+          : "No compatible lexical candidate matched. Preserve unresolved ambiguity, use non-referential only for a proven false-positive mention, or propose a new entity only when source context supports it.",
       }));
     },
   });
@@ -126,6 +126,8 @@ export function createEntityResolutionRetrievalTools(
       Type.Literal("ambiguous"),
       Type.Literal("new-entity"),
       Type.Literal("unresolved"),
+      Type.Literal("non-referential"),
+      Type.Literal("misidentified"),
     ])),
     offset: Type.Optional(Type.Integer({ minimum: 0, maximum: MAX_RESOLUTION_RECORDS })),
     max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_FIND_RESULTS })),
@@ -133,7 +135,7 @@ export function createEntityResolutionRetrievalTools(
   const find = defineTool({
     name: "find_identity_resolutions",
     label: "Find identity resolutions",
-    description: "Search current and pending source-scoped mention-to-entity decisions, including ambiguous and unresolved queues.",
+    description: "Search current and pending source-scoped mention-to-entity decisions, including ambiguous, unresolved, and non-referential adjudications.",
     promptSnippet: "Find current identity decisions before merging, splitting, or revising mentions",
     promptGuidelines: ["Read an exact resolution payload before superseding it."],
     executionMode: "sequential" as const,
@@ -158,6 +160,7 @@ export function createEntityResolutionRetrievalTools(
         mentionId: record.mentionId,
         resolutionStatus: record.resolutionStatus,
         entityId: record.payload.entityId,
+        intendedEntityId: record.payload.intendedEntityId,
         candidateEntityIds: record.payload.candidates.map((candidate) => candidate.entityId),
         ...(record.proposalId ? { proposalId: record.proposalId } : {}),
         semanticHash: contentHash(record.payload),

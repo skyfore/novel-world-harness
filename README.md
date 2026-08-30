@@ -255,9 +255,24 @@ creates a new prepared revision for the same source bytes:
 ```bash
 nwh reparse --all --source <source-id>
 nwh reparse --chapters 3,7-9 --source <source-id>
+nwh repair-existing --source <source-id> --from-revision <bundle-hash>
 nwh prepared-cache list --source <source-id>
 nwh prepared-cache activate <bundle-hash> --source <source-id>
 ```
+
+Use `repair-existing` when a historical prepared revision contains valuable
+compiler material that should be corrected under the current pipeline instead
+of invalidated and rebuilt. It first compares the active revision, materialized
+workspace, pending proposals, batch checkpoint, and transient boundary work with
+the requested parent. A conflict is read-only by default. After inspection,
+repeat with `--replace-staging` to move displaced pending drafts into rejected
+history, materialize the historical parent exactly, and review every source batch
+while retaining correct existing artifacts. The repair journal survives process
+interruption, so the same command resumes completed batches. Only successful
+semantic conflict checks publish and activate the repaired child; the parent and
+all existing branch snapshots stay immutable. The child bundle itself records
+the repair operation, exact parent bundle hash, and durable run ID; `prepared-cache
+list` shows that ancestry alongside the revision.
 
 The same lifecycle is available without leaving the TUI. Omit flags to select
 the novel, scope, chapters, or revision through the native question UI:

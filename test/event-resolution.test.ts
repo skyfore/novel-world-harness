@@ -314,6 +314,48 @@ describe("event mention resolution", () => {
     });
   });
 
+  it("completes a diffuse summary as non-referential without inventing an occurrence", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-resolution-non-referential-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Many challenges followed.\n");
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-non-referential-event`, fixture.source.id);
+    await proposeEventMention(toolset, fixture.segmentId, {
+      proposalId: "proposal-mention-challenges",
+      mentionId: "mention-challenges",
+      trigger: "challenges followed",
+      extent: "Many challenges followed.",
+      types: ["other"],
+      salience: "major",
+      interpretation: "A diffuse summary covering no single narrated occurrence.",
+    });
+    await toolset.tools.find((tool) => tool.name === "propose_event_resolution")!.execute("resolution", {
+      proposal_id: "proposal-resolution-challenges",
+      resolution_id: "resolution-challenges",
+      event_mention_ids: ["mention-challenges"],
+      status: "non-referential",
+      candidates: [],
+      supersedes_resolution_ids: [],
+      rationale: "The exact summary phrase intentionally ranges over multiple developments and has no single canonical-event referent.",
+    } as never, undefined, undefined, context);
+    await finishOnly(toolset, fixture.segmentId, "Adjudicated the diffuse summary without creating an occurrence.");
+
+    await expect(auditCompiler(root, { sourceId: fixture.source.id })).resolves.toMatchObject({
+      eventResolutions: {
+        eventMentions: 1,
+        majorEventMentions: 1,
+        nonReferential: 1,
+        majorNonReferential: 1,
+        majorIncomplete: 0,
+        ambiguous: 0,
+        unresolved: 0,
+        missing: 0,
+      },
+      coverage: { majorEventResolution: 1 },
+      readiness: { resolution: "ready" },
+    });
+  });
+
   it("splits and rolls back immutable event clusters while exposing paged retrieval", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-resolution-split-"));
     roots.push(root);

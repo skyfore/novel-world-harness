@@ -44,8 +44,13 @@ import {
 } from "../web/contracts.js";
 import { WebApplicationError, webError } from "../web/errors.js";
 
-const DEFAULT_LIMIT = 2_000;
+const DEFAULT_LIMIT = 180;
+const MAX_PAGE_LIMIT = 500;
+const DEFAULT_RELATION_LIMIT = 100;
+const MAX_RELATION_LIMIT = 500;
 const MAX_DETAIL_EXCERPT_BYTES = 1_200;
+const PAGE_CACHE_TTL_MS = 60_000;
+const MAX_CACHED_PROJECTIONS = 3;
 
 export type OntologyProjectionInput = {
   sourceId: string;
@@ -55,6 +60,26 @@ export type OntologyProjectionInput = {
   includeCanonicalFuture?: boolean;
   layers?: OntologyLayer[];
   limit?: number;
+  cursor?: string;
+  search?: string;
+  kind?: string;
+  status?: OntologyStatus;
+  relationLimit?: number;
+};
+
+type ValidatedOntologyProjectionInput = {
+  sourceId: string;
+  view: OntologyView;
+  branchId?: string;
+  atCommit?: string;
+  includeCanonicalFuture: boolean;
+  layers: OntologyLayer[];
+  limit: number;
+  cursor?: string;
+  search?: string;
+  kind?: string;
+  status?: OntologyStatus;
+  relationLimit: number;
 };
 
 type ArtifactSet = {
@@ -86,12 +111,23 @@ type ProjectionFrame = {
 
 type InternalProjection = {
   graph: OntologyGraph;
+  allNodes: OntologyNode[];
+  allEdges: OntologyEdge[];
   payloads: Map<string, unknown>;
   evidence: Map<string, EvidenceRef[]>;
 };
 
+type CachedProjection = {
+  signature: string;
+  expiresAt: number;
+  graph: OntologyGraph;
+  allNodes: OntologyNode[];
+  allEdges: OntologyEdge[];
+};
+
 export class OntologyProjectionService {
   readonly root: string;
+  private readonly pageCache = new Map<string, CachedProjection>();
 
   constructor(root: string) {
     this.root = path.resolve(root);
@@ -99,13 +135,27 @@ export class OntologyProjectionService {
 
   async project(inputValue: OntologyProjectionInput): Promise<OntologyGraph> {
     const input = validateInput(inputValue);
-    return (await this.build(input)).graph;
+    const endpoint = ontologyEndpoint(input);
+    const cursor = input.cursor ? readGraphCursor(input.cursor, endpoint) : undefined;
+    const cached = cursor ? this.pageCache.get(cursor.snapshotId) : undefined;
+    if (cursor && cached && cached.expiresAt > Date.now() && cached.signature === projectionSignature(input)) {
+      return graphPageFromCache(cached, input, cursor.offset);
+    }
+    const projection = await this.build(input);
+    this.rememberProjection(projection, input);
+    return projection.graph;
   }
 
   async getNode(inputValue: OntologyProjectionInput, nodeId: string): Promise<OntologyNodeDetail> {
-    const input = validateInput({ ...inputValue, limit: Math.max(inputValue.limit ?? DEFAULT_LIMIT, 20_000) });
-    const projection = await this.build(input);
-    const node = projection.graph.nodes.find((candidate) => candidate.id === nodeId);
+    const input = validateInput({
+      ...inputValue,
+      cursor: undefined,
+      search: undefined,
+      kind: undefined,
+      status: undefined,
+    });
+    const projection = await this.build(input, nodeId);
+    const node = projection.allNodes.find((candidate) => candidate.id === nodeId);
     if (!node) {
       throw webError(404, "ONTOLOGY_NODE_NOT_FOUND", `Node '${nodeId}' is not present in the selected ${input.view} projection.`, {
         kind: "after-refresh",
@@ -118,29 +168,58 @@ export class OntologyProjectionService {
       (projection.evidence.get(node.id) ?? []).filter((item) => item.span.sourceId === input.sourceId),
       (await WorkspaceStore.create(this.root)).getSource(input.sourceId),
     );
+    const allIncoming = projection.allEdges.filter((edge) => edge.target === node.id);
+    const allOutgoing = projection.allEdges.filter((edge) => edge.source === node.id);
     return ontologyNodeDetailSchema.parse({
       version: 1,
       scope: projection.graph.scope,
       node,
       payload: sanitizePayload(projection.payloads.get(node.id), input.sourceId),
       evidence,
-      incoming: projection.graph.edges.filter((edge) => edge.target === node.id),
-      outgoing: projection.graph.edges.filter((edge) => edge.source === node.id),
+      incoming: allIncoming.slice(0, input.relationLimit),
+      outgoing: allOutgoing.slice(0, input.relationLimit),
+      relationPage: {
+        limitPerDirection: input.relationLimit,
+        incomingTotal: allIncoming.length,
+        outgoingTotal: allOutgoing.length,
+        truncated: allIncoming.length > input.relationLimit || allOutgoing.length > input.relationLimit,
+      },
     });
   }
 
-  private async build(input: Required<Pick<OntologyProjectionInput, "sourceId" | "view" | "includeCanonicalFuture" | "layers" | "limit">> & Pick<OntologyProjectionInput, "branchId" | "atCommit">): Promise<InternalProjection> {
+  private async build(input: ValidatedOntologyProjectionInput, detailNodeId?: string): Promise<InternalProjection> {
     const frame = await this.frame(input);
-    const builder = new GraphBuilder(frame.scope, input.limit);
+    const builder = new GraphBuilder(frame.scope, detailNodeId);
     if (input.view === "model") this.buildModel(builder, frame);
     if (input.view === "events") this.buildEvents(builder, frame);
     if (input.view === "places") this.buildPlaces(builder, frame);
     if (input.view === "rules") this.buildRules(builder, frame);
     if (input.view === "provenance") await this.buildProvenance(builder, frame);
-    return builder.finish();
+    return builder.finish(input);
   }
 
-  private async frame(input: Required<Pick<OntologyProjectionInput, "sourceId" | "view" | "includeCanonicalFuture" | "layers" | "limit">> & Pick<OntologyProjectionInput, "branchId" | "atCommit">): Promise<ProjectionFrame> {
+  private rememberProjection(projection: InternalProjection, input: ValidatedOntologyProjectionInput): void {
+    const now = Date.now();
+    for (const [snapshotId, cached] of this.pageCache) {
+      if (cached.expiresAt <= now) this.pageCache.delete(snapshotId);
+    }
+    const snapshotId = projection.graph.page.snapshotId;
+    this.pageCache.delete(snapshotId);
+    this.pageCache.set(snapshotId, {
+      signature: projectionSignature(input),
+      expiresAt: now + PAGE_CACHE_TTL_MS,
+      graph: projection.graph,
+      allNodes: projection.allNodes,
+      allEdges: projection.allEdges,
+    });
+    while (this.pageCache.size > MAX_CACHED_PROJECTIONS) {
+      const oldest = this.pageCache.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.pageCache.delete(oldest);
+    }
+  }
+
+  private async frame(input: ValidatedOntologyProjectionInput): Promise<ProjectionFrame> {
     const workspace = await WorkspaceStore.create(this.root);
     const source = await workspace.getSource(input.sourceId);
     if (!source) throw this.sourceNotFound(input.sourceId);
@@ -592,7 +671,7 @@ class GraphBuilder {
   private readonly edges = new Map<string, OntologyEdge>();
   private readonly diagnostics: string[] = [];
 
-  constructor(private readonly scope: OntologyScope, private readonly limit: number) {}
+  constructor(private readonly scope: OntologyScope, private readonly detailNodeId?: string) {}
 
   hasNode(id: string): boolean { return this.nodes.has(id); }
 
@@ -603,45 +682,57 @@ class GraphBuilder {
       return;
     }
     this.nodes.set(value.node.id, value.node);
-    this.payloads.set(value.node.id, structuredClone(value.payload));
-    this.evidence.set(value.node.id, structuredClone(value.evidence));
+    if (value.node.id === this.detailNodeId) {
+      this.payloads.set(value.node.id, structuredClone(value.payload));
+      this.evidence.set(value.node.id, structuredClone(value.evidence));
+    }
   }
 
   edge(value: OntologyEdge): void {
     if (!this.edges.has(value.id)) this.edges.set(value.id, value);
   }
 
-  finish(): InternalProjection {
+  finish(input: ValidatedOntologyProjectionInput): InternalProjection {
     const layerSet = new Set(this.scope.layers);
     const layerNodes = [...this.nodes.values()].filter((node) => layerSet.has(node.layer)).sort(compareNode);
     const layerIds = new Set(layerNodes.map((node) => node.id));
     const layerEdges = [...this.edges.values()]
       .filter((edge) => layerSet.has(edge.layer) && layerIds.has(edge.source) && layerIds.has(edge.target))
       .sort(compareEdge);
-    const totalNodes = layerNodes.length;
-    const totalEdges = layerEdges.length;
-    const nodes = layerNodes.slice(0, this.limit);
-    const visibleIds = new Set(nodes.map((node) => node.id));
-    const edges = layerEdges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target)).slice(0, this.limit);
-    const truncated = nodes.length < totalNodes || edges.length < totalEdges;
-    if (truncated) this.diagnostics.push(`Projection truncated at ${this.limit} nodes/edges; narrow the view, branch, commit, or layers.`);
-    const graph = ontologyGraphSchema.parse({
-      version: 1,
-      scope: this.scope,
-      nodes,
-      edges,
-      legend: legend(nodes),
-      facets: {
-        kinds: counts(nodes.map((node) => node.kind)),
-        statuses: counts(nodes.map((node) => node.status)),
-        layers: counts(nodes.map((node) => node.layer)),
-      },
-      totalNodes,
-      totalEdges,
-      truncated,
-      diagnostics: [...new Set(this.diagnostics)],
+    const filteredNodes = filterNodes(layerNodes, input);
+    const filteredIds = new Set(filteredNodes.map((node) => node.id));
+    const filteredEdges = layerEdges.filter((edge) => filteredIds.has(edge.source) && filteredIds.has(edge.target));
+    const allNodes = topologyOrder(filteredNodes, filteredEdges);
+    const nodeIndex = new Map(allNodes.map((node, index) => [node.id, index]));
+    const allEdges = [...filteredEdges].sort((left, right) => {
+      const leftIndex = Math.max(nodeIndex.get(left.source) ?? 0, nodeIndex.get(left.target) ?? 0);
+      const rightIndex = Math.max(nodeIndex.get(right.source) ?? 0, nodeIndex.get(right.target) ?? 0);
+      return leftIndex - rightIndex || compareEdge(left, right);
     });
-    return { graph, payloads: this.payloads, evidence: this.evidence };
+    const snapshotId = contentHash({
+      scope: this.scope,
+      search: input.search ?? null,
+      kind: input.kind ?? null,
+      status: input.status ?? null,
+      nodes: allNodes.map((node) => [node.id, node.revisionHash ?? null, node.status]),
+      edges: allEdges.map((edge) => [edge.id, edge.source, edge.target, edge.status]),
+    });
+    const endpoint = ontologyEndpoint(input);
+    const offset = input.cursor ? decodeGraphCursor(input.cursor, snapshotId, endpoint) : 0;
+    const graph = buildGraphPage({
+      scope: this.scope,
+      allNodes,
+      allEdges,
+      legend: legend(allNodes),
+      facets: {
+        kinds: counts(layerNodes.map((node) => node.kind)),
+        statuses: counts(layerNodes.map((node) => node.status)),
+        layers: counts(layerNodes.map((node) => node.layer)),
+      },
+      diagnostics: [...new Set(this.diagnostics)],
+      snapshotId,
+    }, input, offset);
+    return { graph, allNodes, allEdges, payloads: this.payloads, evidence: this.evidence };
   }
 }
 
@@ -649,7 +740,9 @@ function validateInput(input: OntologyProjectionInput) {
   const view = ontologyViewSchema.parse(input.view);
   const layers = input.layers?.length ? [...new Set(input.layers)] : defaultLayers(view);
   const limit = input.limit ?? DEFAULT_LIMIT;
-  if (!Number.isInteger(limit) || limit < 1 || limit > 20_000) throw webError(400, "ONTOLOGY_LIMIT_INVALID", "Ontology limit must be an integer between 1 and 20000.", { kind: "after-user-action" });
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT) throw webError(400, "ONTOLOGY_LIMIT_INVALID", `Ontology page limit must be an integer between 1 and ${MAX_PAGE_LIMIT}.`, { kind: "after-user-action" });
+  const relationLimit = input.relationLimit ?? DEFAULT_RELATION_LIMIT;
+  if (!Number.isInteger(relationLimit) || relationLimit < 1 || relationLimit > MAX_RELATION_LIMIT) throw webError(400, "ONTOLOGY_RELATION_LIMIT_INVALID", `Ontology relation limit must be an integer between 1 and ${MAX_RELATION_LIMIT}.`, { kind: "after-user-action" });
   return {
     sourceId: input.sourceId,
     view,
@@ -658,7 +751,196 @@ function validateInput(input: OntologyProjectionInput) {
     includeCanonicalFuture: input.includeCanonicalFuture ?? false,
     layers,
     limit,
+    ...(input.cursor ? { cursor: input.cursor } : {}),
+    ...(input.search?.trim() ? { search: input.search.trim() } : {}),
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.status ? { status: input.status } : {}),
+    relationLimit,
   };
+}
+
+function filterNodes(nodes: readonly OntologyNode[], input: ValidatedOntologyProjectionInput): OntologyNode[] {
+  const needle = input.search?.toLocaleLowerCase();
+  return nodes.filter((node) => {
+    if (input.kind && node.kind !== input.kind) return false;
+    if (input.status && node.status !== input.status) return false;
+    return !needle || `${node.label} ${node.id} ${node.artifactId} ${node.kind} ${node.status} ${node.layer}`
+      .toLocaleLowerCase()
+      .includes(needle);
+  });
+}
+
+function topologyOrder(nodes: readonly OntologyNode[], edges: readonly OntologyEdge[]): OntologyNode[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const adjacency = new Map(nodes.map((node) => [node.id, new Set<string>()]));
+  for (const edge of edges) {
+    adjacency.get(edge.source)?.add(edge.target);
+    adjacency.get(edge.target)?.add(edge.source);
+  }
+  const ranked = [...nodes].sort((left, right) =>
+    (adjacency.get(right.id)?.size ?? 0) - (adjacency.get(left.id)?.size ?? 0) || compareNode(left, right));
+  const unseen = new Set(ranked.map((node) => node.id));
+  const ordered: OntologyNode[] = [];
+  for (const root of ranked) {
+    if (!unseen.delete(root.id)) continue;
+    const queue = [root.id];
+    for (let index = 0; index < queue.length; index += 1) {
+      const id = queue[index]!;
+      const node = byId.get(id);
+      if (node) ordered.push(node);
+      const neighbors = [...(adjacency.get(id) ?? [])]
+        .filter((candidate) => unseen.has(candidate))
+        .sort((left, right) => {
+          const leftNode = byId.get(left)!;
+          const rightNode = byId.get(right)!;
+          return (adjacency.get(right)?.size ?? 0) - (adjacency.get(left)?.size ?? 0)
+            || compareNode(leftNode, rightNode);
+        });
+      for (const neighbor of neighbors) {
+        if (!unseen.delete(neighbor)) continue;
+        queue.push(neighbor);
+      }
+    }
+  }
+  return ordered;
+}
+
+type GraphCursor = { version: 1; snapshotId: string; offset: number };
+
+function encodeGraphCursor(cursor: GraphCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeGraphCursor(value: string, snapshotId: string, endpoint: string): number {
+  const cursor = readGraphCursor(value, endpoint);
+  if (cursor.snapshotId !== snapshotId) throw staleGraphCursor(endpoint);
+  return cursor.offset;
+}
+
+function readGraphCursor(value: string, endpoint: string): GraphCursor {
+  let cursor: GraphCursor;
+  try {
+    cursor = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as GraphCursor;
+  } catch {
+    throw invalidGraphCursor(endpoint);
+  }
+  if (cursor.version !== 1 || typeof cursor.snapshotId !== "string" || !/^[a-f0-9]{64}$/.test(cursor.snapshotId)
+    || !Number.isInteger(cursor.offset) || cursor.offset < 0) {
+    throw invalidGraphCursor(endpoint);
+  }
+  return cursor;
+}
+
+function projectionSignature(input: ValidatedOntologyProjectionInput): string {
+  return contentHash({
+    sourceId: input.sourceId,
+    view: input.view,
+    branchId: input.branchId ?? null,
+    atCommit: input.atCommit ?? null,
+    includeCanonicalFuture: input.includeCanonicalFuture,
+    layers: [...input.layers].sort(),
+    search: input.search ?? null,
+    kind: input.kind ?? null,
+    status: input.status ?? null,
+  });
+}
+
+function graphPageFromCache(
+  cached: CachedProjection,
+  input: ValidatedOntologyProjectionInput,
+  offset: number,
+): OntologyGraph {
+  return buildGraphPage({
+    scope: cached.graph.scope,
+    allNodes: cached.allNodes,
+    allEdges: cached.allEdges,
+    legend: cached.graph.legend,
+    facets: cached.graph.facets,
+    diagnostics: cached.graph.diagnostics.filter((message) => !message.startsWith("Loaded ")),
+    snapshotId: cached.graph.page.snapshotId,
+  }, input, offset);
+}
+
+type GraphPageSource = {
+  scope: OntologyScope;
+  allNodes: OntologyNode[];
+  allEdges: OntologyEdge[];
+  legend: OntologyGraph["legend"];
+  facets: OntologyGraph["facets"];
+  diagnostics: string[];
+  snapshotId: string;
+};
+
+function buildGraphPage(source: GraphPageSource, input: ValidatedOntologyProjectionInput, offset: number): OntologyGraph {
+  const endpoint = ontologyEndpoint(input);
+  if (offset > source.allNodes.length) throw staleGraphCursor(endpoint);
+  const nodeIndex = new Map(source.allNodes.map((node, index) => [node.id, index]));
+  const end = Math.min(source.allNodes.length, offset + input.limit);
+  const nodes = source.allNodes.slice(offset, end);
+
+  // Each edge belongs to exactly one page: the page that introduces its later
+  // endpoint. Merging sequential pages therefore produces a complete induced
+  // graph for the loaded node prefix without repeating earlier edges.
+  const edges: OntologyEdge[] = [];
+  let loadedEdges = 0;
+  for (const edge of source.allEdges) {
+    const sourceIndex = nodeIndex.get(edge.source);
+    const targetIndex = nodeIndex.get(edge.target);
+    if (sourceIndex === undefined || targetIndex === undefined) continue;
+    const introducedAt = Math.max(sourceIndex, targetIndex);
+    if (introducedAt >= end) break;
+    loadedEdges += 1;
+    if (introducedAt >= offset) edges.push(edge);
+  }
+  const requiredNodeIds = [...new Set(edges.flatMap((edge) => [edge.source, edge.target])
+    .filter((nodeId) => (nodeIndex.get(nodeId) ?? end) < offset))].sort();
+  const nextCursor = end < source.allNodes.length
+    ? encodeGraphCursor({ version: 1, snapshotId: source.snapshotId, offset: end })
+    : null;
+  const diagnostics = [...source.diagnostics];
+  if (nextCursor) diagnostics.push(`Loaded ${end} of ${source.allNodes.length} nodes; relationships within the loaded prefix are complete and ${source.allEdges.length - loadedEdges} relation(s) remain deferred.`);
+  return ontologyGraphSchema.parse({
+    version: 1,
+    scope: source.scope,
+    nodes,
+    edges,
+    legend: source.legend,
+    facets: source.facets,
+    totalNodes: source.allNodes.length,
+    totalEdges: source.allEdges.length,
+    truncated: nextCursor !== null,
+    page: {
+      snapshotId: source.snapshotId,
+      offset,
+      limit: input.limit,
+      newNodes: nodes.length,
+      loadedNodes: end,
+      loadedEdges,
+      remainingEdges: Math.max(0, source.allEdges.length - loadedEdges),
+      nextCursor,
+      relationshipMode: "prefix-complete",
+      requiredNodeIds,
+    },
+    diagnostics,
+  });
+}
+
+function invalidGraphCursor(endpoint: string) {
+  return webError(400, "ONTOLOGY_PAGE_CURSOR_INVALID", "The ontology page cursor is invalid for this projection. Read the first page, copy page.nextCursor exactly, and retry at most once; do not guess or retry unchanged.", {
+    kind: "after-refresh",
+    discoveryEndpoint: endpoint,
+    copyField: "page.nextCursor",
+    maxAttempts: 1,
+  });
+}
+
+function staleGraphCursor(endpoint: string) {
+  return webError(409, "ONTOLOGY_PAGE_CURSOR_STALE", "The ontology projection changed while pages were being read. Refresh the first page, copy page.nextCursor exactly, and retry at most once; do not reuse the stale cursor.", {
+    kind: "after-refresh",
+    discoveryEndpoint: endpoint,
+    copyField: "page.nextCursor",
+    maxAttempts: 1,
+  });
 }
 
 function defaultLayers(view: OntologyView): OntologyLayer[] {
@@ -1005,5 +1287,10 @@ function ontologyEndpoint(input: OntologyProjectionInput): string {
   if (input.branchId) query.set("branchId", input.branchId);
   if (input.atCommit) query.set("atCommit", input.atCommit);
   if (input.includeCanonicalFuture) query.set("includeCanonicalFuture", "true");
+  if (input.layers?.length) query.set("layers", input.layers.join(","));
+  if (input.limit !== undefined) query.set("limit", String(input.limit));
+  if (input.search) query.set("search", input.search);
+  if (input.kind) query.set("kind", input.kind);
+  if (input.status) query.set("status", input.status);
   return `/api/v1/novels/${encodeURIComponent(input.sourceId)}/ontology?${query.toString()}`;
 }

@@ -94,7 +94,7 @@ flowchart LR
 
 [W3C PROV-O](https://www.w3.org/TR/prov-o/) 用 Entity、Activity、Agent 和 derivation 表达 provenance。这里将其作为“source evidence → proposal → validation → committed artifact”的关系设计参考，不在 MVP 中引入 RDF/OWL 存储。
 
-[Cytoscape.js](https://js.cytoscape.org/) 支持浏览器内 typed graph、compound node、交互与可扩展 layout，适合作为 ontology 图谱渲染层。图中数据仍来自服务端 projection，而不是由浏览器推断世界语义。
+[Apache ECharts](https://echarts.apache.org/) 提供 Canvas 图渲染、渐进绘制、缩放与邻接高亮，适合作为 ontology 图谱的受控展示层。服务端仍负责 typed projection、分页顺序与关系闭包；浏览器不推断世界语义。大图只在画布中抽样高连接拓扑，完整已加载节点由虚拟表格承载。
 
 [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) 可作为未来 exporter 的兼容目标；MVP 的本地 schema 必须先表达 Novel Harness 特有的 branch、commit、story time、evidence 和 context-part，不能被通用 span schema 反向限制。
 
@@ -185,7 +185,7 @@ MVP 建议锁定以下组合，版本由实现时的 lockfile 固定：
 - **前端**：React + TypeScript + Vite；TanStack Router 管理可复制的 source/branch/session/run 路由，TanStack Query 管理低频 HTTP snapshot。
 - **实时状态**：自研轻量 `EventProjectionStore`，通过 `useSyncExternalStore` 接入 React；不让 Query cache 或组件 local state 承担 token/tool event folding。
 - **长列表**：TanStack Virtual；Trace ledger、context messages 和 event history 必须虚拟化。
-- **图谱**：Cytoscape.js；详情与无障碍 fallback 同时提供可搜索的表格视图，关键能力不能只靠拖拽画布。
+- **图谱**：Apache ECharts Canvas；详情与无障碍 fallback 同时提供虚拟化、可搜索的表格视图，关键能力不能只靠拖拽画布。
 - **服务端**：Fastify，负责静态资源、multipart upload、versioned JSON API、SSE 和统一 error handling；领域对象仍由 application services 产生。
 - **契约**：Zod schema 是 runtime boundary，客户端类型从 schema 推导或构建时生成，不能手写同名 DTO。
 - **样式**：CSS variables + CSS Modules，先建立颜色、间距、字体、状态和 graph legend tokens；MVP 不引入一整套与领域无关的组件平台。
@@ -554,9 +554,10 @@ canonical store 中的 artifact 可能有多个 source 的 evidence，因此 sou
 
 ### 9.4 性能与交互
 
-- 使用 Cytoscape.js 渲染；layout、缩放、选中状态属于客户端 UI state。
+- 使用 ECharts Canvas 渲染；layout、缩放、选中状态属于客户端 UI state。节点超过画布预算时按连接度和当前选中邻域抽样，完整数据继续保留在虚拟表格中。
 - 服务端负责 scope、权限/知识隔离、图层和邻域查询，浏览器不自行拼接真相。
-- 默认返回摘要图和 facets，不一次加载整本小说。建议默认上限 2,000 nodes/edges，支持 `neighborhood(nodeId, depth, edgeKinds)`、分页和按类型过滤。
+- 默认返回 180 个节点的首个拓扑分片和全局 facets，不一次加载整本小说。游标绑定投影快照；每个后续分片只引入新节点及刚刚闭合的边，使合并后的已加载前缀拥有完整内部关系，并显式报告 deferred relationship 数量。支持逐页加载、一次操作加载全量、服务端搜索/类型/状态过滤和虚拟表格。
+- 摘要投影阶段不克隆所有节点 payload/evidence；只有用户选择具体节点时才捕获该节点的详情，同时入边和出边各自采用有明确总数的有界预览。
 - 大图先返回节点/边，再异步计算 layout；切换筛选不重复下载未变化详情。
 - 点击元素打开右侧 inspector：ID、类型、status、revision、story time、关联边、证据摘录、source span、branch effect。
 - 后续可增加 derived cache；cache 必须可删除重建，并用 source/current-ref/head hash 作为 key。
@@ -672,8 +673,9 @@ GET  /api/v1/bootstrap
 GET  /api/v1/novels
 GET  /api/v1/novels/:sourceId
 GET  /api/v1/novels/:sourceId/preparation
-GET  /api/v1/novels/:sourceId/ontology?view=&branchId=&atCommit=&layers=&cursor=
-GET  /api/v1/ontology/nodes/:nodeId?sourceId=&branchId=&atCommit=
+GET  /api/v1/novels/:sourceId/proposals?status=&kind=&limit=&cursor=
+GET  /api/v1/novels/:sourceId/ontology?view=&branchId=&atCommit=&layers=&search=&kind=&status=&limit=&cursor=
+GET  /api/v1/ontology/nodes/:nodeId?sourceId=&branchId=&atCommit=&relationLimit=
 GET  /api/v1/instances
 GET  /api/v1/instances/:branchId
 GET  /api/v1/play-sessions
@@ -848,7 +850,7 @@ prompt 的一次性 seed，服务端只持久化请求 fingerprint。角色 prof
 
 ### Phase 3：硬化与扩展
 
-- 大图 neighborhood/pagination/cache 与 trace retention 管理。
+- 大图 neighborhood 扩展与 trace retention 管理；稳定游标分页、60 秒短期 projection/list snapshot cache、分片全量加载和虚拟渲染已完成。
 - trace export、可选 OpenTelemetry exporter、性能指标。
 - branch/commit/context diff，高级搜索，移动端只读适配。
 - 在真实长篇小说上的 compiler/ontology 质量迭代；这属于模型与领域质量工作，不与 UI 完成度混为一谈。

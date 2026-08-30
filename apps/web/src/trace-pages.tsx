@@ -44,6 +44,13 @@ type TraceListPageProps = {
 type TraceDetailPageProps = {
   runId: string;
   sessionId?: string;
+  embedded?: boolean;
+};
+
+type TraceDrawerProps = {
+  runId: string;
+  sessionId: string;
+  onClose: () => void;
 };
 
 type InspectorTab = "context" | "messages" | "tools" | "payload" | "response" | "usage" | "effects";
@@ -129,7 +136,50 @@ function TraceRunRow({ run, sessionName }: { run: TraceRunManifest; sessionName?
   );
 }
 
-export function TraceDetailPage({ runId, sessionId }: TraceDetailPageProps) {
+export function TraceDrawer({ runId, sessionId, onClose }: TraceDrawerProps) {
+  const { t } = useI18n();
+  const closeButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButton.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
+
+  return (
+    <div className="trace-drawer-layer">
+      <button className="trace-drawer-backdrop" type="button" aria-label={t("Close trace details")} onClick={onClose} />
+      <aside className="trace-drawer" role="dialog" aria-modal="true" aria-labelledby="trace-drawer-title">
+        <header>
+          <div>
+            <span className="eyebrow">{t("Trace details")}</span>
+            <strong id="trace-drawer-title">{t("Message-linked execution trajectory")}</strong>
+            <code>{runId}</code>
+          </div>
+          <div className="trace-drawer-actions">
+            <Link to="/play/$sessionId/trace/$runId" params={{ sessionId, runId }}>{t("Open full trajectory")} ↗</Link>
+            <button ref={closeButton} type="button" aria-label={t("Close trace details")} onClick={onClose}>×</button>
+          </div>
+        </header>
+        <div className="trace-drawer-scroll">
+          <TraceDetailPage runId={runId} sessionId={sessionId} embedded />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+export function TraceDetailPage({ runId, sessionId, embedded = false }: TraceDetailPageProps) {
   const { t, localeTag } = useI18n();
   const runQuery = useQuery({
     queryKey: traceRunKey(runId),
@@ -180,7 +230,7 @@ export function TraceDetailPage({ runId, sessionId }: TraceDetailPageProps) {
     }
   };
   return (
-    <>
+    <div className={embedded ? "trace-detail trace-detail-embedded" : "trace-detail"}>
       <header className="trace-heading">
         <div>
           <span className="eyebrow">{t("Player Move → Run → Span → LLM Call")}</span>
@@ -188,7 +238,7 @@ export function TraceDetailPage({ runId, sessionId }: TraceDetailPageProps) {
           <p><code>{manifest.id}</code></p>
         </div>
         <div className="trace-heading-actions">
-          {sessionId ? <Link to="/play/$sessionId" params={{ sessionId }}>{t("Back to play")}</Link> : <Link to="/traces">{t("All traces")}</Link>}
+          {!embedded && (sessionId ? <Link to="/play/$sessionId" params={{ sessionId }}>{t("Back to play")}</Link> : <Link to="/traces">{t("All traces")}</Link>)}
           <span className={`trace-status trace-status-${manifest.status}`}>{t(manifest.status)}</span>
         </div>
       </header>
@@ -232,7 +282,7 @@ export function TraceDetailPage({ runId, sessionId }: TraceDetailPageProps) {
           </div>
         </section>
       </div>
-    </>
+    </div>
   );
 }
 

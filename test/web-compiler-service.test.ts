@@ -105,7 +105,6 @@ describe("Web preparation operations", () => {
       result: {
         stage: "review",
         proposalCounts: { pending: 1 },
-        pending: [expect.objectContaining({ id: "hero-web", status: "pending" })],
       },
     });
     expect(completed.runId).toBeTruthy();
@@ -124,6 +123,37 @@ describe("Web preparation operations", () => {
 });
 
 describe("Web proposal review", () => {
+  it("bounds large inbox responses and resumes them from an opaque snapshot cursor", async () => {
+    const root = await workspace("nwh-web-proposal-pages-");
+    const fixture = await createEvidenceFixture(root, "A witness waits.\n");
+    const compiler = new CompilerProposalService(root);
+    for (let index = 0; index < 85; index += 1) {
+      const suffix = String(index).padStart(3, "0");
+      await compiler.submit("entity", {
+        proposalId: `entity-witness-${suffix}`,
+        payload: {
+          id: `witness-${suffix}`,
+          kind: "character",
+          canonicalName: `Witness ${suffix}`,
+          aliases: [],
+          evidence: fixture.evidence("witness"),
+        },
+        generatedBy: { worker: "pagination-test" },
+      });
+    }
+    const service = new ProposalApplicationService({ root, events: new WebEventBroker() });
+    const first = await service.listPage(fixture.source.id);
+    expect(first.items).toHaveLength(75);
+    expect(first.page).toMatchObject({ offset: 0, loaded: 75, total: 85 });
+    expect(first.page.nextCursor).toBeTruthy();
+    const second = await service.listPage(fixture.source.id, { cursor: first.page.nextCursor! });
+    expect(second.items).toHaveLength(10);
+    expect(second.page).toMatchObject({ offset: 75, loaded: 85, total: 85, nextCursor: null });
+    expect(new Set([...first.items, ...second.items].map((item) => item.id)).size).toBe(85);
+    await expect(service.listPage(fixture.source.id, { cursor: "not-a-cursor" }))
+      .rejects.toMatchObject({ detail: { code: "PROPOSAL_PAGE_CURSOR_INVALID", retry: { copyField: "page.nextCursor", maxAttempts: 1 } } });
+  });
+
   it("shows complete envelopes and preserves validation-backed accept/reject history", async () => {
     const root = await workspace("nwh-web-proposals-");
     const fixture = await createEvidenceFixture(root, "林岐来到前厅。阿宁留在门外。\n");
@@ -156,6 +186,16 @@ describe("Web proposal review", () => {
       expect.objectContaining({ id: "entity-aning-web", status: "pending" }),
       expect.objectContaining({ id: "entity-linqi-web", status: "pending" }),
     ]);
+    const firstPage = await service.listPage(fixture.source.id, { limit: 1 });
+    expect(firstPage).toMatchObject({
+      items: [expect.objectContaining({ id: "entity-aning-web" })],
+      page: { offset: 0, loaded: 1, total: 2 },
+    });
+    expect(firstPage.page.nextCursor).toBeTruthy();
+    await expect(service.listPage(fixture.source.id, { limit: 1, cursor: firstPage.page.nextCursor! })).resolves.toMatchObject({
+      items: [expect.objectContaining({ id: "entity-linqi-web" })],
+      page: { offset: 1, loaded: 2, total: 2, nextCursor: null },
+    });
     await expect(service.get("entity-linqi-web")).resolves.toMatchObject({
       summary: { kind: "entity", status: "pending" },
       envelope: { payload: { canonicalName: "林岐" } },
@@ -165,6 +205,11 @@ describe("Web proposal review", () => {
     const acceptRequest = { clientRequestId: "accept-1" };
     const accepted = await service.accept("entity-linqi-web", acceptRequest);
     expect(accepted).toMatchObject({ accepted: true, status: "accepted", reused: false });
+    await expect(service.listPage(fixture.source.id, { limit: 1, cursor: firstPage.page.nextCursor! }))
+      .resolves.toMatchObject({ page: { snapshotId: firstPage.page.snapshotId } });
+    const freshListingService = new ProposalApplicationService({ root, events: new WebEventBroker() });
+    await expect(freshListingService.listPage(fixture.source.id, { limit: 1, cursor: firstPage.page.nextCursor! }))
+      .rejects.toMatchObject({ detail: { code: "PROPOSAL_PAGE_CURSOR_STALE" } });
     await expect(service.accept("entity-linqi-web", acceptRequest))
       .resolves.toMatchObject({ accepted: true, reused: true });
 

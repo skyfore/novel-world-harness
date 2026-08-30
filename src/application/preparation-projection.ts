@@ -62,7 +62,6 @@ export async function readPreparationSnapshot(
       accepted: accepted.length,
       rejected: rejected.length,
     },
-    pending: inspection.pending.map((proposal) => ({ ...proposal, status: "pending" as const })),
     repairReasons: inspection.repairReasons ?? [],
     ...(inspection.audit ? { audit: projectAudit(inspection.audit) } : {}),
     updatedAt: new Date().toISOString(),

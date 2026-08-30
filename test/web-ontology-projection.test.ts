@@ -242,6 +242,81 @@ describe("Web ontology projection", () => {
     expect(pinnedProvenance.nodes).not.toContainEqual(expect.objectContaining({ id: "entity:witness", layer: "canonical" }));
   });
 
+  it("pages a topology as a stable prefix with complete closed relationships", async () => {
+    const { root, service, first } = await ontologyFixture();
+    const compiler = new CompilerProposalService(root);
+    for (let index = 0; index < 60; index += 1) {
+      const suffix = String(index).padStart(3, "0");
+      await compiler.submit("entity", {
+        proposalId: `paged-witness-${suffix}`,
+        payload: {
+          id: `paged-witness-${suffix}`,
+          kind: "character",
+          canonicalName: `Paged witness ${suffix}`,
+          aliases: [],
+          evidence: first.evidence("Witness"),
+        },
+        generatedBy: { worker: "ontology-page-test" },
+      });
+    }
+    const bounded = await service.project({ sourceId: first.source.id, view: "provenance" });
+    expect(bounded.totalNodes).toBeGreaterThan(180);
+    expect(bounded.nodes).toHaveLength(180);
+    expect(bounded.page.remainingEdges).toBeGreaterThan(0);
+    await expect(service.project({ sourceId: first.source.id, view: "provenance", cursor: "not-a-cursor" }))
+      .rejects.toMatchObject({ detail: { code: "ONTOLOGY_PAGE_CURSOR_INVALID", retry: { copyField: "page.nextCursor", maxAttempts: 1 } } });
+
+    const loadedNodes = new Set<string>();
+    const loadedEdges = new Map<string, { source: string; target: string }>();
+    let cursor: string | undefined;
+    let snapshotId: string | undefined;
+    let totalNodes = 0;
+    let totalEdges = 0;
+    for (let pageNumber = 0; pageNumber < 20; pageNumber += 1) {
+      const page = await service.project({ sourceId: first.source.id, view: "provenance", limit: 25, ...(cursor ? { cursor } : {}) });
+      snapshotId ??= page.page.snapshotId;
+      expect(page.page.snapshotId).toBe(snapshotId);
+      for (const node of page.nodes) loadedNodes.add(node.id);
+      expect(page.page.requiredNodeIds.every((nodeId) => loadedNodes.has(nodeId))).toBe(true);
+      for (const edge of page.edges) loadedEdges.set(edge.id, edge);
+      for (const edge of loadedEdges.values()) {
+        expect(loadedNodes.has(edge.source), `missing paged source ${edge.source}`).toBe(true);
+        expect(loadedNodes.has(edge.target), `missing paged target ${edge.target}`).toBe(true);
+      }
+      expect(page.page.loadedNodes).toBe(loadedNodes.size);
+      expect(page.page.loadedEdges).toBe(loadedEdges.size);
+      totalNodes = page.totalNodes;
+      totalEdges = page.totalEdges;
+      cursor = page.page.nextCursor ?? undefined;
+      if (!cursor) break;
+    }
+    expect(loadedNodes.size).toBe(totalNodes);
+    expect(loadedEdges.size).toBe(totalEdges);
+
+    const firstPage = await service.project({ sourceId: first.source.id, view: "model", limit: 1 });
+    expect(firstPage.page.nextCursor).toBeTruthy();
+    await new CanonicalModelStore(root).putEntity({
+      id: "late-arrival",
+      kind: "character",
+      canonicalName: "Late arrival",
+      aliases: [],
+      evidence: first.evidence("Witness"),
+    });
+    await expect(service.project({
+      sourceId: first.source.id,
+      view: "model",
+      limit: 1,
+      cursor: firstPage.page.nextCursor!,
+    })).resolves.toMatchObject({ page: { snapshotId: firstPage.page.snapshotId } });
+    const restartedService = new OntologyProjectionService(root);
+    await expect(restartedService.project({
+      sourceId: first.source.id,
+      view: "model",
+      limit: 1,
+      cursor: firstPage.page.nextCursor!,
+    })).rejects.toMatchObject({ detail: { code: "ONTOLOGY_PAGE_CURSOR_STALE" } });
+  });
+
   it("serves strict graph and node-detail HTTP contracts", async () => {
     const { root, first } = await ontologyFixture();
     const app = await createWebHost({

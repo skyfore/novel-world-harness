@@ -11,6 +11,7 @@ import {
   healthResponseSchema,
   modelCatalogSchema,
   preparationSnapshotSchema,
+  proposalPageSchema,
   removalExecutionResultSchema,
   removalPreviewSchema,
   sourceRegistrationResultSchema,
@@ -160,7 +161,10 @@ describe("local Web host", () => {
       url: `/api/v1/novels/${result.source.id}/proposals?status=pending`,
     });
     expect(proposals.statusCode).toBe(200);
-    expect(proposals.json()).toEqual([]);
+    expect(proposalPageSchema.parse(proposals.json())).toMatchObject({
+      items: [],
+      page: { loaded: 0, total: 0, nextCursor: null },
+    });
   });
 
   it("requires a fresh effect hash and exact source confirmation for maintenance routes", async () => {

@@ -33,6 +33,7 @@ import {
   providerLoginRequestSchema,
   operationKindSchema,
   ontologyLayerSchema,
+  ontologyStatusSchema,
   ontologyViewSchema,
   prepareNovelRequestSchema,
   playMessageSummarySchema,
@@ -288,8 +289,8 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   });
   app.get(`/api/${WEB_API_VERSION}/novels/:sourceId/proposals`, async (request) => {
     const { sourceId } = sourceParamSchema.parse(request.params);
-    const { status, kind } = proposalListQuerySchema.parse(request.query);
-    return proposals.list(sourceId, status, kind);
+    const query = proposalListQuerySchema.parse(request.query);
+    return proposals.listPage(sourceId, query);
   });
   app.post(`/api/${WEB_API_VERSION}/novels/:sourceId/proposals/converge`, async (request) => {
     const { sourceId } = sourceParamSchema.parse(request.params);
@@ -401,7 +402,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     return operations.list().filter((operation) =>
       (!query.scopeId || operation.scopeId === query.scopeId)
       && (!query.kind || operation.kind === query.kind)
-      && (!query.status || operation.status === query.status));
+      && (!query.status || operation.status === query.status)).slice(0, query.limit);
   });
   app.get(`/api/${WEB_API_VERSION}/operations/:operationId`, async (request) => {
     const { operationId } = operationParamSchema.parse(request.params);
@@ -594,6 +595,8 @@ const preparationQuerySchema = z.object({ branchId: z.string().min(1).optional()
 const proposalListQuerySchema = z.object({
   status: z.enum(["pending", "accepted", "rejected"]).default("pending"),
   kind: z.string().min(1).optional(),
+  cursor: z.string().min(1).max(2_000).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
 }).strict();
 const proposalDetailQuerySchema = z.object({
   status: z.enum(["pending", "accepted", "rejected"]).optional(),
@@ -612,10 +615,15 @@ const ontologyQuerySchema = z.object({
   atCommit: z.string().min(1).optional(),
   includeCanonicalFuture: ontologyBooleanQuerySchema.default(false),
   layers: ontologyLayersQuerySchema,
-  limit: z.coerce.number().int().min(1).max(2_000).optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  cursor: z.string().min(1).max(2_000).optional(),
+  search: z.string().trim().min(1).max(200).optional(),
+  kind: z.string().min(1).max(200).optional(),
+  status: ontologyStatusSchema.optional(),
 }).strict();
 const ontologyNodeQuerySchema = ontologyQuerySchema.extend({
   sourceId: z.string().min(1),
+  relationLimit: z.coerce.number().int().min(1).max(500).optional(),
 }).strict();
 const ontologyNodeParamSchema = z.object({ nodeId: z.string().min(1) }).strict();
 const removalPreviewQuerySchema = z.object({
@@ -625,6 +633,7 @@ const operationQuerySchema = z.object({
   scopeId: z.string().min(1).optional(),
   kind: operationKindSchema.optional(),
   status: z.enum(["queued", "running", "succeeded", "failed", "cancelled", "interrupted"]).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
 }).strict();
 const traceRunParamSchema = z.object({ runId: traceIdentifierSchema }).strict();
 const traceCallParamSchema = z.object({ callId: traceIdentifierSchema }).strict();

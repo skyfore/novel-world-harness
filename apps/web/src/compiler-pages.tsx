@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type FormEvent } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   acceptProposal,
   cancelOperation,
@@ -22,6 +23,7 @@ import {
   type ModelSummary,
   type OperationSnapshot,
   type PreparationSnapshot,
+  type ProposalSummary,
   type ProposalStatus,
   type SourceRegistrationResult,
 } from "../../../src/web/contracts";
@@ -147,10 +149,25 @@ export function CompilerWorkbenchPage({
     queryFn: ({ signal }) => fetchPreparation(sourceId, undefined, signal),
   });
   const [proposalStatus, setProposalStatus] = useState<ProposalStatus>("pending");
-  const proposals = useQuery({
+  const proposals = useInfiniteQuery({
     queryKey: proposalsKey(sourceId, proposalStatus),
-    queryFn: ({ signal }) => fetchProposals(sourceId, proposalStatus, undefined, signal),
+    queryFn: ({ signal, pageParam }) => fetchProposals(
+      sourceId,
+      proposalStatus,
+      undefined,
+      { ...(pageParam ? { cursor: pageParam } : {}), limit: 75 },
+      signal,
+    ),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
   });
+  const proposalItems = useMemo(
+    () => proposals.data?.pages.flatMap((page) => page.items) ?? [],
+    [proposals.data?.pages],
+  );
+  const proposalTotal = proposals.data?.pages[0]?.page.total ?? preparation.data?.proposalCounts[proposalStatus] ?? 0;
+  const [loadingAllProposals, setLoadingAllProposals] = useState(false);
+  const stopProposalLoad = useRef(false);
   const operations = useQuery({
     queryKey: operationsKey(sourceId),
     queryFn: ({ signal }) => fetchOperations(sourceId, signal),
@@ -167,9 +184,9 @@ export function CompilerWorkbenchPage({
     refetchInterval: (query) => isTerminal(query.state.data?.status) ? false : 750,
   });
   const [selectedProposalId, setSelectedProposalId] = useState<string>();
-  const effectiveProposalId = proposals.data?.some((proposal) => proposal.id === selectedProposalId)
+  const effectiveProposalId = proposalItems.some((proposal) => proposal.id === selectedProposalId)
     ? selectedProposalId
-    : proposals.data?.[0]?.id;
+    : proposalItems[0]?.id;
   const proposal = useQuery({
     queryKey: proposalKey(effectiveProposalId ?? "none", proposalStatus),
     queryFn: ({ signal }) => fetchProposal(effectiveProposalId!, proposalStatus, signal),
@@ -185,8 +202,26 @@ export function CompilerWorkbenchPage({
   useEffect(() => {
     const current = operation.data;
     if (!current || !isTerminal(current.status)) return;
+    stopProposalLoad.current = true;
+    setLoadingAllProposals(false);
     void invalidateCompiler(queryClient, sourceId);
   }, [operation.data?.id, operation.data?.status, queryClient, sourceId]);
+  useEffect(() => () => { stopProposalLoad.current = true; }, []);
+
+  const loadAllProposals = async () => {
+    stopProposalLoad.current = false;
+    setLoadingAllProposals(true);
+    try {
+      let nextCursor = proposals.data?.pages.at(-1)?.page.nextCursor;
+      while (nextCursor && !stopProposalLoad.current) {
+        const result = await proposals.fetchNextPage();
+        nextCursor = result.data?.pages.at(-1)?.page.nextCursor;
+        await yieldToBrowser();
+      }
+    } finally {
+      setLoadingAllProposals(false);
+    }
+  };
 
   const prepareMutation = useMutation({
     mutationFn: (mode: "next" | "all") => startPreparation(sourceId, {
@@ -207,6 +242,8 @@ export function CompilerWorkbenchPage({
   const acceptMutation = useMutation({
     mutationFn: () => acceptProposal(effectiveProposalId!, { clientRequestId: requestId("accept-proposal") }, csrfToken),
     onSuccess: async () => {
+      stopProposalLoad.current = true;
+      setLoadingAllProposals(false);
       setSelectedProposalId(undefined);
       await invalidateCompiler(queryClient, sourceId);
     },
@@ -217,6 +254,8 @@ export function CompilerWorkbenchPage({
       clientRequestId: requestId("reject-proposal"),
     }, csrfToken),
     onSuccess: async () => {
+      stopProposalLoad.current = true;
+      setLoadingAllProposals(false);
       setRejectionReason("");
       setSelectedProposalId(undefined);
       await invalidateCompiler(queryClient, sourceId);
@@ -224,7 +263,11 @@ export function CompilerWorkbenchPage({
   });
   const convergeMutation = useMutation({
     mutationFn: () => convergeProposals(sourceId, { clientRequestId: requestId("converge-proposals") }, csrfToken),
-    onSuccess: async () => invalidateCompiler(queryClient, sourceId),
+    onSuccess: async () => {
+      stopProposalLoad.current = true;
+      setLoadingAllProposals(false);
+      return invalidateCompiler(queryClient, sourceId);
+    },
   });
   const instanceMutation = useMutation({
     mutationFn: () => createInstance({
@@ -315,18 +358,33 @@ export function CompilerWorkbenchPage({
 
         <section className="proposal-workbench">
           <header>
-            <div><span className="eyebrow">{t("Proposal inbox")}</span><strong>{t(`{count} ${proposalStatus}`, { count: proposals.data?.length ?? 0 })}</strong></div>
-            <div className="proposal-status-tabs">{(["pending", "accepted", "rejected"] as const).map((status) => <button className={proposalStatus === status ? "selected" : ""} key={status} onClick={() => { setProposalStatus(status); setSelectedProposalId(undefined); }}>{t(status)}</button>)}</div>
+            <div><span className="eyebrow">{t("Proposal inbox")}</span><strong>{t(`{count} ${proposalStatus}`, { count: proposalTotal })}</strong></div>
+            <div className="proposal-status-tabs">{(["pending", "accepted", "rejected"] as const).map((status) => <button className={proposalStatus === status ? "selected" : ""} key={status} onClick={() => { stopProposalLoad.current = true; setLoadingAllProposals(false); setProposalStatus(status); setSelectedProposalId(undefined); }}>{t(status)}</button>)}</div>
           </header>
           <div className="proposal-split">
-            <div className="proposal-list">
-              {proposals.isPending ? <LoadingState label={t("Reading proposal inbox…")} compact /> : proposals.isError ? <InlineError error={proposals.error} /> : proposals.data.length ? proposals.data.map((item) => (
-                <button key={item.id} className={item.id === effectiveProposalId ? "selected" : ""} onClick={() => setSelectedProposalId(item.id)}>
-                  <span className={`proposal-kind proposal-kind-${item.kind}`}>{item.kind}</span>
-                  <strong>{item.id}</strong>
-                  <small>{item.worker} · {formatTime(item.createdAt, localeTag)}</small>
-                </button>
-              )) : <div className="empty-state compact"><span>◇</span><div><strong>{t(`No ${proposalStatus} proposals`)}</strong><p>{t("The inbox is clear for this status.")}</p></div></div>}
+            <div className="proposal-list-column">
+              {proposals.isPending ? <LoadingState label={t("Reading proposal inbox…")} compact /> : proposals.isError ? <InlineError error={proposals.error} /> : proposalItems.length ? <>
+                <ProposalVirtualList
+                  items={proposalItems}
+                  selectedId={effectiveProposalId}
+                  localeTag={localeTag}
+                  onSelect={setSelectedProposalId}
+                  onNearEnd={() => {
+                    if (proposals.hasNextPage && !proposals.isFetchingNextPage && !loadingAllProposals) void proposals.fetchNextPage();
+                  }}
+                />
+                <div className="paged-load-controls">
+                  <div>
+                    <strong>{t("{loaded} of {total} loaded", { loaded: proposalItems.length, total: proposalTotal })}</strong>
+                    <div className="paged-load-track"><i style={{ width: `${percentage(proposalItems.length, proposalTotal)}%` }} /></div>
+                  </div>
+                  {proposals.hasNextPage && !loadingAllProposals && <>
+                    <button type="button" onClick={() => void proposals.fetchNextPage()} disabled={proposals.isFetchingNextPage}>{proposals.isFetchingNextPage ? t("Loading next page…") : t("Load next page")}</button>
+                    <button type="button" onClick={() => void loadAllProposals()} disabled={proposals.isFetchingNextPage}>{t("Load all")}</button>
+                  </>}
+                  {loadingAllProposals && <button type="button" onClick={() => { stopProposalLoad.current = true; }}>{t("Stop loading")}</button>}
+                </div>
+              </> : <div className="empty-state compact"><span>◇</span><div><strong>{t(`No ${proposalStatus} proposals`)}</strong><p>{t("The inbox is clear for this status.")}</p></div></div>}
             </div>
             <div className="proposal-inspector">
               {proposal.isPending && effectiveProposalId ? <LoadingState label={t("Reading full proposal envelope…")} compact /> : proposal.isError ? <InlineError error={proposal.error} /> : proposal.data ? <>
@@ -334,7 +392,7 @@ export function CompilerWorkbenchPage({
                   <span><small>{proposal.data.summary.kind}</small><strong>{proposal.data.summary.id}</strong></span>
                   <span className={`operation-status operation-${proposal.data.summary.status === "accepted" ? "succeeded" : proposal.data.summary.status === "rejected" ? "failed" : "queued"}`}>{proposal.data.summary.status}</span>
                 </div>
-                <details open className="proposal-json"><summary>{t("Complete typed envelope")}</summary><pre>{safeJson(proposal.data.envelope)}</pre></details>
+                <DeferredJsonDetails className="proposal-json" summary={t("Complete typed envelope")} value={proposal.data.envelope} />
                 {proposal.data.rejection && <div className="proposal-validation-errors">{proposal.data.rejection.errors.map((issue) => <p key={`${issue.code}:${issue.path ?? ""}`}><strong>{issue.code}</strong>{issue.message}{issue.path && <code>{issue.path}</code>}</p>)}</div>}
                 {proposalStatus === "pending" && <div className="proposal-decision">
                   <button className="primary-button" disabled={acceptMutation.isPending || rejectMutation.isPending} onClick={() => acceptMutation.mutate()}>{t("Validate and accept")}</button>
@@ -349,12 +407,72 @@ export function CompilerWorkbenchPage({
 
       {convergeMutation.data && <section className="convergence-result">
         <strong>{t("Convergence complete")}</strong>
-        <span>{t("{accepted} accepted · {blocked} blocked · {staging} staging", { accepted: convergeMutation.data.accepted.length, blocked: convergeMutation.data.blocked.length, staging: convergeMutation.data.staging.length })}</span>
-        {convergeMutation.data.blocked.slice(0, 8).map((item) => <p key={item.id}><code>{item.id}</code>{item.errors[0]?.message ?? t("Blocked by deterministic validation.")}</p>)}
+        <span>{t("{accepted} accepted · {blocked} blocked · {staging} staging", convergeMutation.data.counts)}</span>
+        {convergeMutation.data.blockedPreview.slice(0, 8).map((item) => <p key={item.id}><code>{item.id}</code>{item.errors[0]?.message ?? t("Blocked by deterministic validation.")}</p>)}
+        {convergeMutation.data.truncated && <small>{t("Result details are bounded; use the paged accepted and rejected inboxes for the complete set.")}</small>}
       </section>}
       {decisionError && <div className="floating-error"><InlineError error={decisionError} /></div>}
     </>
   );
+}
+
+function ProposalVirtualList({
+  items,
+  selectedId,
+  localeTag,
+  onSelect,
+  onNearEnd,
+}: {
+  items: ProposalSummary[];
+  selectedId?: string;
+  localeTag?: string;
+  onSelect: (id: string) => void;
+  onNearEnd: () => void;
+}) {
+  const parent = useRef<HTMLDivElement>(null);
+  const virtual = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parent.current,
+    estimateSize: () => 72,
+    overscan: 8,
+  });
+  return (
+    <div
+      ref={parent}
+      className="proposal-list"
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        if (element.scrollHeight - element.scrollTop - element.clientHeight < 220) onNearEnd();
+      }}
+    >
+      <div className="proposal-virtual-space" style={{ height: virtual.getTotalSize() }}>
+        {virtual.getVirtualItems().map((row) => {
+          const item = items[row.index]!;
+          return (
+            <button
+              ref={virtual.measureElement}
+              data-index={row.index}
+              type="button"
+              key={item.id}
+              className={item.id === selectedId ? "selected" : ""}
+              style={{ transform: `translateY(${row.start}px)` }}
+              onClick={() => onSelect(item.id)}
+            >
+              <span className={`proposal-kind proposal-kind-${item.kind}`}>{item.kind}</span>
+              <strong>{item.id}</strong>
+              <small>{item.worker} · {formatTime(item.createdAt, localeTag)}</small>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DeferredJsonDetails({ className, summary, value }: { className: string; summary: string; value: unknown }) {
+  const [open, setOpen] = useState(false);
+  const formatted = useMemo(() => open ? safeJson(value) : "", [open, value]);
+  return <details className={className} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}><summary>{summary}</summary>{open && <pre>{formatted}</pre>}</details>;
 }
 
 function PreparationHeader({ snapshot }: { snapshot: PreparationSnapshot }) {
@@ -444,6 +562,8 @@ function requestId(prefix: string): string { return `${prefix}-${crypto.randomUU
 function formatCount(value: number, locale?: string): string { return new Intl.NumberFormat(locale, { notation: value > 9_999 ? "compact" : "standard" }).format(value); }
 function formatTime(value: string, locale?: string): string { return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }
 function safeJson(value: unknown): string { return JSON.stringify(value, null, 2); }
+function percentage(loaded: number, total: number): number { return total === 0 ? 100 : Math.min(100, Math.round(loaded / total * 100)); }
+function yieldToBrowser(): Promise<void> { return new Promise((resolve) => requestAnimationFrame(() => resolve())); }
 function firstError(...errors: Array<Error | null | undefined>): Error | undefined { return errors.find((error): error is Error => error instanceof Error); }
 
 function LoadingState({ label, compact = false }: { label: string; compact?: boolean }) {

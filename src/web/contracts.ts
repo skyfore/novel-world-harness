@@ -326,6 +326,22 @@ export const proposalSummarySchema = z.object({
   status: proposalStatusSchema,
 }).strict();
 
+export const proposalPageSchema = z.object({
+  version: z.literal(1),
+  items: z.array(proposalSummarySchema),
+  page: z.object({
+    snapshotId: z.string().regex(/^[a-f0-9]{64}$/),
+    offset: z.number().int().nonnegative(),
+    limit: z.number().int().positive(),
+    loaded: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+    nextCursor: z.string().min(1).nullable(),
+  }).strict(),
+  facets: z.object({
+    kinds: z.record(z.string(), z.number().int().nonnegative()),
+  }).strict(),
+}).strict();
+
 export const compilerReadinessSchema = z.object({
   structural: z.enum(["ready", "not-ready", "unknown"]),
   evidence: z.enum(["ready", "not-ready", "unknown"]),
@@ -398,7 +414,6 @@ export const preparationSnapshotSchema = z.object({
     accepted: z.number().int().nonnegative(),
     rejected: z.number().int().nonnegative(),
   }).strict(),
-  pending: z.array(proposalSummarySchema),
   repairReasons: z.array(z.string()),
   audit: compilerAuditSummarySchema.optional(),
   updatedAt: z.string().datetime({ offset: true }),
@@ -468,8 +483,13 @@ export const proposalConvergeRequestSchema = z.object({
 
 export const proposalConvergenceResultSchema = z.object({
   sourceId: z.string().min(1),
-  accepted: z.array(z.object({ id: z.string().min(1), kind: z.string().min(1) }).strict()),
-  blocked: z.array(z.object({
+  counts: z.object({
+    accepted: z.number().int().nonnegative(),
+    blocked: z.number().int().nonnegative(),
+    staging: z.number().int().nonnegative(),
+  }).strict(),
+  acceptedPreview: z.array(z.object({ id: z.string().min(1), kind: z.string().min(1) }).strict()).max(50),
+  blockedPreview: z.array(z.object({
     id: z.string().min(1),
     kind: z.string().min(1),
     errors: z.array(z.object({
@@ -477,8 +497,9 @@ export const proposalConvergenceResultSchema = z.object({
       message: z.string().min(1),
       path: z.string().optional(),
     }).strict()),
-  }).strict()),
-  staging: z.array(z.object({ id: z.string().min(1), kind: z.string().min(1) }).strict()),
+  }).strict()).max(50),
+  stagingPreview: z.array(z.object({ id: z.string().min(1), kind: z.string().min(1) }).strict()).max(50),
+  truncated: z.boolean(),
   reused: z.boolean(),
 }).strict();
 
@@ -670,6 +691,18 @@ export const ontologyGraphSchema = z.object({
   totalNodes: z.number().int().nonnegative(),
   totalEdges: z.number().int().nonnegative(),
   truncated: z.boolean(),
+  page: z.object({
+    snapshotId: z.string().regex(/^[a-f0-9]{64}$/),
+    offset: z.number().int().nonnegative(),
+    limit: z.number().int().positive(),
+    newNodes: z.number().int().nonnegative(),
+    loadedNodes: z.number().int().nonnegative(),
+    loadedEdges: z.number().int().nonnegative(),
+    remainingEdges: z.number().int().nonnegative(),
+    nextCursor: z.string().min(1).nullable(),
+    relationshipMode: z.literal("prefix-complete"),
+    requiredNodeIds: z.array(z.string()),
+  }).strict(),
   diagnostics: z.array(z.string()),
 }).strict();
 
@@ -681,6 +714,12 @@ export const ontologyNodeDetailSchema = z.object({
   evidence: z.array(ontologyEvidenceSchema),
   incoming: z.array(ontologyEdgeSchema),
   outgoing: z.array(ontologyEdgeSchema),
+  relationPage: z.object({
+    limitPerDirection: z.number().int().positive(),
+    incomingTotal: z.number().int().nonnegative(),
+    outgoingTotal: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+  }).strict(),
 }).strict();
 
 export const createPlaySessionRequestSchema = z.object({
@@ -862,6 +901,7 @@ export type PreparationStage = z.infer<typeof preparationStageSchema>;
 export type PreparationNextAction = z.infer<typeof preparationNextActionSchema>;
 export type ProposalStatus = z.infer<typeof proposalStatusSchema>;
 export type ProposalSummary = z.infer<typeof proposalSummarySchema>;
+export type ProposalPage = z.infer<typeof proposalPageSchema>;
 export type CompilerAuditSummary = z.infer<typeof compilerAuditSummarySchema>;
 export type PreparationSnapshot = z.infer<typeof preparationSnapshotSchema>;
 export type SourceRegistrationResult = z.infer<typeof sourceRegistrationResultSchema>;

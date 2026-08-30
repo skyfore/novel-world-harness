@@ -35,8 +35,8 @@ import {
   proposalConvergeRequestSchema,
   proposalDecisionResultSchema,
   proposalDetailSchema,
+  proposalPageSchema,
   proposalRejectRequestSchema,
-  proposalSummarySchema,
   sceneNarrationRequestSchema,
   sourceRegistrationRequestSchema,
   sourceRegistrationResultSchema,
@@ -65,6 +65,7 @@ import {
   type OntologyGraph,
   type OntologyLayer,
   type OntologyNodeDetail,
+  type OntologyStatus,
   type OntologyView,
   type PrepareNovelRequest,
   type PreparationSnapshot,
@@ -80,9 +81,9 @@ import {
   type ProposalConvergeRequest,
   type ProposalDecisionResult,
   type ProposalDetail,
+  type ProposalPage,
   type ProposalRejectRequest,
   type ProposalStatus,
-  type ProposalSummary,
   type SceneNarrationRequest,
   type SourceRegistrationRequest,
   type SourceRegistrationResult,
@@ -107,7 +108,6 @@ import {
 } from "../../../src/trace/schema";
 
 const operationListSchema = z.array(operationSnapshotSchema);
-const proposalListSchema = z.array(proposalSummarySchema);
 const traceRunListSchema = z.array(traceRunManifestSchema);
 const traceEventListSchema = z.array(traceEventSchema);
 
@@ -129,6 +129,11 @@ export type OntologyFilters = {
   includeCanonicalFuture?: boolean;
   layers?: OntologyLayer[];
   limit?: number;
+  cursor?: string;
+  search?: string;
+  kind?: string;
+  status?: OntologyStatus;
+  relationLimit?: number;
 };
 
 export function fetchBootstrap(signal?: AbortSignal): Promise<BootstrapResponse> {
@@ -153,11 +158,14 @@ export function fetchProposals(
   sourceId: string,
   status: ProposalStatus = "pending",
   kind?: string,
+  options: { cursor?: string; limit?: number } = {},
   signal?: AbortSignal,
-): Promise<ProposalSummary[]> {
+): Promise<ProposalPage> {
   const query = new URLSearchParams({ status });
   if (kind) query.set("kind", kind);
-  return request(`/api/v1/novels/${encodeURIComponent(sourceId)}/proposals?${query.toString()}`, proposalListSchema, { signal });
+  if (options.cursor) query.set("cursor", options.cursor);
+  if (options.limit !== undefined) query.set("limit", String(options.limit));
+  return request(`/api/v1/novels/${encodeURIComponent(sourceId)}/proposals?${query.toString()}`, proposalPageSchema, { signal });
 }
 
 export function fetchProposal(proposalId: string, status?: ProposalStatus, signal?: AbortSignal): Promise<ProposalDetail> {
@@ -208,8 +216,9 @@ export function fetchModelProfiles(signal?: AbortSignal): Promise<ModelProfileLi
 }
 
 export function fetchOperations(scopeId?: string, signal?: AbortSignal): Promise<OperationSnapshot[]> {
-  const query = scopeId ? `?scopeId=${encodeURIComponent(scopeId)}` : "";
-  return request(`/api/v1/operations${query}`, operationListSchema, { signal });
+  const query = new URLSearchParams({ limit: "30" });
+  if (scopeId) query.set("scopeId", scopeId);
+  return request(`/api/v1/operations?${query.toString()}`, operationListSchema, { signal });
 }
 
 export function fetchTraceRuns(filters: TraceRunFilters = {}, signal?: AbortSignal): Promise<TraceRunManifest[]> {
@@ -480,5 +489,10 @@ function ontologyQuery(view: OntologyView, filters: OntologyFilters): URLSearchP
   if (filters.includeCanonicalFuture) query.set("includeCanonicalFuture", "true");
   if (filters.layers?.length) query.set("layers", filters.layers.join(","));
   if (filters.limit !== undefined) query.set("limit", String(filters.limit));
+  if (filters.cursor) query.set("cursor", filters.cursor);
+  if (filters.search) query.set("search", filters.search);
+  if (filters.kind) query.set("kind", filters.kind);
+  if (filters.status) query.set("status", filters.status);
+  if (filters.relationLimit !== undefined) query.set("relationLimit", String(filters.relationLimit));
   return query;
 }

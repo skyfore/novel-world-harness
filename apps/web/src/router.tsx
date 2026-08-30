@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   Link,
@@ -43,6 +43,7 @@ import {
 } from "./compiler-pages";
 import {
   TraceDetailPage,
+  TraceDrawer,
   TraceListPage,
   traceRunKey,
   traceRunsQueryKey,
@@ -604,9 +605,24 @@ function SessionPage() {
   const streamed = useNarrationStream(effectiveOperationId);
   const [draft, setDraft] = useState("");
   const [affordanceId, setAffordanceId] = useState<string>();
+  const [selectedTraceRunId, setSelectedTraceRunId] = useState<string>();
+  const [edgePanelOpen, setEdgePanelOpen] = useState(false);
+  const transcriptElement = useRef<HTMLDivElement>(null);
+  const composerInput = useRef<HTMLTextAreaElement>(null);
+  const closeTraceDrawer = useCallback(() => setSelectedTraceRunId(undefined), []);
   const csrfToken = bootstrap.data?.csrfToken ?? "";
   const current = operation.data;
   const busy = Boolean(current && !isTerminal(current.status));
+
+  useEffect(() => {
+    document.body.classList.add("play-immersive-active");
+    return () => document.body.classList.remove("play-immersive-active");
+  }, []);
+
+  useEffect(() => {
+    const element = transcriptElement.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [detail.data?.messages.length, streamed]);
 
   useEffect(() => {
     if (!current || !isTerminal(current.status)) return;
@@ -693,6 +709,8 @@ function SessionPage() {
   const session = data.session;
   const instance = bootstrap.data?.catalog.instances.find((candidate) => candidate.branchId === session.branchId);
   const runsById = new Map((traceRuns.data ?? []).map((run) => [run.id, run]));
+  const runsByMessageId = new Map((traceRuns.data ?? []).flatMap((run) =>
+    run.presentationMessageIds.map((messageId) => [messageId, run] as const)));
   const result = current?.result;
   const playResult = playOperationResultSchema.safeParse(result);
   const sceneResult = sceneNarrationResultSchema.safeParse(result);
@@ -720,81 +738,136 @@ function SessionPage() {
     if (!draft.trim() || busy || !writable) return;
     moveMutation.mutate();
   };
+  const chooseAction = (selected: PlayerChoiceSummary) => {
+    setDraft(selected.action);
+    setAffordanceId(selected.affordanceId);
+    window.requestAnimationFrame(() => composerInput.current?.focus());
+  };
   return (
-    <>
-      <div className="session-heading">
-        <PageHeading eyebrow={t("Live executable world")} title={session.title} description={`${session.actorName ?? session.actorId} · ${session.branchId}`} />
-        <div className="session-toolbar">
-          {session.status === "detached" ? <span className="detached-pill">{t("Detached world")}</span> : session.status === "archived" ? <button onClick={() => restoreMutation.mutate()}>{t("Restore")}</button> : session.status === "idle" ? <button onClick={() => activateMutation.mutate()}>{t("Make active")}</button> : <span className="live-pill"><i />{t("Active writer")}</span>}
-          <button disabled={busy || !data.messages.length} onClick={() => window.confirm(t("Clear presentation transcript? Committed world history will be preserved.")) && clearMutation.mutate()}>{t("Clear transcript")}</button>
-          {session.status !== "archived" && session.status !== "detached" && <button disabled={busy} onClick={() => archiveMutation.mutate()}>{t("Archive")}</button>}
-          <button className="danger-button" disabled={busy} onClick={() => window.confirm(t("Remove this play session and its presentation transcript? The world branch will be preserved.")) && removeMutation.mutate()}>{t("Remove")}</button>
-        </div>
-      </div>
-      <section className="play-status-strip" aria-label={t("Play status")}><div><span>{t("Actor")}</span><strong>{session.actorName ?? session.actorId}</strong></div><div><span>{t("Branch")}</span><code>{session.branchId}</code></div><div><span>{t("Head")}</span><code>{data.headCommitId ? shortHash(data.headCommitId) : t("detached")}</code></div><div><span>{t("Story time")}</span><strong>{instance ? `${t("step")} ${instance.logicalStep}` : t("unknown")}</strong></div><div><span>{t("Run stage")}</span><strong>{current?.phase ?? t("idle")}</strong></div></section>
-      <div className="play-layout">
-        <section className="transcript-panel" aria-label={t("Transcript")}>
-          <header>
-            <div><span className="eyebrow">{t("Transcript")}</span><strong>{t("{count} messages", { count: data.messages.length })}</strong></div>
-            <code>{data.headCommitId ? shortHash(data.headCommitId) : t("detached")}</code>
-          </header>
-          <div className="transcript">
-            {!data.messages.length && !busy && <EmptyState title={t("The scene has not been rendered")} body={t("Render the opening from the actor-safe committed frame. This does not advance world truth.")} />}
-            {data.messages.map((message) => (
+    <div className={`immersive-play${edgePanelOpen ? " play-edge-open" : ""}`}>
+      <section className="transcript-panel play-story-panel" aria-label={t("Transcript")}>
+        <header className="play-story-bar">
+          <span className={busy ? "play-presence play-presence-busy" : "play-presence"} aria-hidden="true" />
+          <small>{busy ? (current?.progress.statusText ? String(current.progress.statusText) : current?.phase) : t("The world waits for your move")}</small>
+          <span>{t("{count} messages", { count: data.messages.length })}</span>
+          <button className="play-edge-toggle" type="button" aria-label={t("Open session controls")} aria-expanded={edgePanelOpen} onClick={() => setEdgePanelOpen(true)}>•••</button>
+        </header>
+        <div ref={transcriptElement} className="transcript">
+          {!data.messages.length && !busy && <EmptyState title={t("The scene has not been rendered")} body={t("Render the opening from the actor-safe committed frame. This does not advance world truth.")} />}
+          {data.messages.map((message) => {
+            const run = message.role === "scene"
+              ? (message.runId ? runsById.get(message.runId) : undefined) ?? runsByMessageId.get(message.id)
+              : undefined;
+            const runId = message.role === "scene" ? message.runId ?? run?.id : undefined;
+            return (
               <article key={message.id} className={`message message-${message.role}`}>
-                <header><span>{message.role === "player" ? t("You") : t("Narrator")}</span><small>{t(message.status)} · {formatDateTime(message.createdAt, localeTag)}</small>{message.runId && <RunBadge sessionId={sessionId} runId={message.runId} messageStatus={message.status} run={runsById.get(message.runId)} />}</header>
+                <header><span>{message.role === "player" ? t("You") : t("Narrator")}</span><small>{t(message.status)} · {formatDateTime(message.createdAt, localeTag)}</small></header>
                 <p>{message.text}</p>
                 <code>{shortHash(message.atCommit)}</code>
+                {runId && <MessageTraceTrigger runId={runId} run={run} onOpen={setSelectedTraceRunId} />}
               </article>
-            ))}
-            {busy && (streamed || current?.phase.includes("narrat")) && (
-              <article className="message message-scene message-streaming">
-                <header><span>{t("Narrator")} · {t("live")}</span><small>{current?.phase}</small></header>
-                <p>{streamed || t("The scene is being composed…")}</p>
-              </article>
-            )}
-            {!busy && settledNarration && !data.messages.some((message) => message.text === settledNarration) && (
-              <article className="message message-scene"><header><span>{t("Narrator")}</span><small>{t("settled")}</small></header><p>{settledNarration}</p></article>
-            )}
-          </div>
-          <footer className="composer-area">
-            {choices.length > 0 && <div className="choice-strip">{choices.map((choice) => <ChoiceButton key={`${choice.affordanceId ?? "free"}:${choice.action}`} choice={choice} onChoose={(selected) => { setDraft(selected.action); setAffordanceId(selected.affordanceId); }} />)}</div>}
-            <form className="composer" onSubmit={submitMove}>
-              <textarea value={draft} disabled={!writable || busy} onChange={(event) => { setDraft(event.target.value); setAffordanceId(undefined); }} placeholder={session.status === "detached" ? t("This historical session has no writable world instance") : session.status === "archived" ? t("Restore this session to continue") : t("Describe one immediate action, observation, thought, or wait…")} rows={3} />
-              <div>
-                <button type="button" className="text-button" disabled={!draft} onClick={() => { setDraft(""); setAffordanceId(undefined); }}>{t("Clear")}</button>
-                {!data.messages.length && <button type="button" className="secondary-button" disabled={!writable || busy || narrationMutation.isPending} onClick={() => narrationMutation.mutate()}>{t("Render opening")}</button>}
-                <button type="submit" className="primary-button" disabled={!draft.trim() || !writable || busy || moveMutation.isPending}>{t("Commit action")}</button>
-              </div>
-            </form>
-          </footer>
-        </section>
-        <aside className="operation-panel">
-          <header><span className="eyebrow">{t("Current operation")}</span>{current && <span className={`operation-status operation-${current.status}`}>{t(current.status)}</span>}</header>
-          {current ? (
-            <>
-              <dl className="operation-detail">
-                <Detail label={t("Kind")} value={t(current.kind)} />
-                <Detail label={t("Phase")} value={current.phase} />
-                <Detail label={t("Operation")} value={current.id} mono />
-                {current.runId && <div><dt>{t("Trace")}</dt><dd><Link className="inline-trace-link" to="/play/$sessionId/trace/$runId" params={{ sessionId, runId: current.runId }}>{t("Open full trajectory")} ↗</Link></dd></div>}
-                <Detail label={t("Commit boundary")} value={current.commitBoundaryCrossed ? t("crossed — world may be committed") : t("not crossed")} />
-              </dl>
-              {current.progress.statusText && <div className="operation-activity"><span className={busy ? "loading-orbit" : "status-dot"} /><p>{String(current.progress.statusText)}</p></div>}
-              {busy && current.cancellable && <button className="stop-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>{current.commitBoundaryCrossed ? t("Stop narration") : t("Cancel before commit")}</button>}
-              {canRetryNarration && <button className="primary-button" disabled={narrationRetryMutation.isPending} onClick={() => narrationRetryMutation.mutate()}>{narrationRetryMutation.isPending ? t("Starting presentation…") : t("Retry narration only")}</button>}
-              {current.error && <div className="inline-error"><strong>{current.error.code}</strong><span>{current.error.message}</span><small>{recoveryInstruction(current.error)}</small></div>}
-              {playResult.success && <OperationResult result={playResult.data} />}
-              {retryResult.success && <div className="operation-result"><span className="eyebrow">{t("Presentation repair")}</span><strong>{t("Rendered without world mutation")}</strong><p>{t("Original move {move}", { move: shortHash(retryResult.data.playerMoveId) })}</p><code>{shortHash(retryResult.data.headCommitId)}</code></div>}
-            </>
-          ) : <EmptyState title={t("No operation yet")} body={t("Render the scene or submit an action to start a traceable operation.")} />}
-          {operationList.data && operationList.data.length > 1 && (
-            <div className="operation-history"><span className="eyebrow">{t("Recent")}</span>{operationList.data.slice(0, 8).map((item) => <button key={item.id} className={item.id === effectiveOperationId ? "selected" : ""} onClick={() => setSelectedOperationId(item.id)}><span>{t(item.kind)}</span><small>{t(item.status)} · {formatTime(item.createdAt, localeTag)}</small></button>)}</div>
+            );
+          })}
+          {busy && (streamed || current?.phase.includes("narrat")) && (
+            <article className="message message-scene message-streaming">
+              <header><span>{t("Narrator")} · {t("live")}</span><small>{current?.phase}</small></header>
+              <p>{streamed || t("The scene is being composed…")}</p>
+              {current?.runId && <MessageTraceTrigger runId={current.runId} run={runsById.get(current.runId)} onOpen={setSelectedTraceRunId} />}
+            </article>
           )}
-        </aside>
-      </div>
+          {!busy && settledNarration && !data.messages.some((message) => message.text === settledNarration) && (
+            <article className="message message-scene"><header><span>{t("Narrator")}</span><small>{t("settled")}</small></header><p>{settledNarration}</p>{current?.runId && <MessageTraceTrigger runId={current.runId} run={runsById.get(current.runId)} onOpen={setSelectedTraceRunId} />}</article>
+          )}
+        </div>
+        <footer className="composer-area">
+          {choices.length > 0 && (
+            <section className="choice-deck" aria-label={t("Suggested actions")}>
+              <header><span>{t("Suggested actions")}</span><small>{t("Choose a direction or write your own.")}</small></header>
+              <div className="choice-strip">{choices.map((choice, index) => <ChoiceButton key={`${choice.affordanceId ?? "free"}:${choice.action}`} choice={choice} index={index} selected={draft === choice.action && affordanceId === choice.affordanceId} onChoose={chooseAction} />)}</div>
+            </section>
+          )}
+          <form className="composer" onSubmit={submitMove}>
+            <div className="composer-prompt"><span>{t("Your next move")}</span><small>{t("Ctrl/⌘ + Enter to submit")}</small></div>
+            <textarea
+              ref={composerInput}
+              value={draft}
+              disabled={!writable || busy}
+              onChange={(event) => { setDraft(event.target.value); setAffordanceId(undefined); }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder={session.status === "detached" ? t("This historical session has no writable world instance") : session.status === "archived" ? t("Restore this session to continue") : t("Describe one immediate action, observation, thought, or wait…")}
+              rows={2}
+            />
+            <div className="composer-actions">
+              <button type="button" className="text-button" disabled={!draft} onClick={() => { setDraft(""); setAffordanceId(undefined); }}>{t("Clear")}</button>
+              {!data.messages.length && <button type="button" className="secondary-button" disabled={!writable || busy || narrationMutation.isPending} onClick={() => narrationMutation.mutate()}>{t("Render opening")}</button>}
+              <button type="submit" className="primary-button" disabled={!draft.trim() || !writable || busy || moveMutation.isPending}>{t("Commit action")} <span aria-hidden="true">↵</span></button>
+            </div>
+          </form>
+        </footer>
+      </section>
+
+      <button className="play-edge-backdrop" type="button" aria-label={t("Close session controls")} onClick={() => setEdgePanelOpen(false)} />
+      <aside className="operation-panel play-edge-panel">
+        <header>
+          <div><span className="eyebrow">{t("Actor")}</span><strong>{session.actorName ?? session.actorId}</strong></div>
+          {session.status === "detached" ? <span className="detached-pill">{t("Detached world")}</span> : session.status === "active" ? <span className="live-pill"><i />{t("Active writer")}</span> : <span className={`operation-status operation-${session.status}`}>{t(session.status)}</span>}
+          <button className="play-edge-close" type="button" aria-label={t("Close session controls")} onClick={() => setEdgePanelOpen(false)}>×</button>
+        </header>
+        <div className="play-edge-scroll">
+          <section className="play-edge-meta" aria-label={t("Play status")}>
+            <div><span>{t("Story time")}</span><strong>{instance ? `${t("step")} ${instance.logicalStep}` : t("unknown")}</strong></div>
+            <div><span>{t("Branch")}</span><code>{session.branchId}</code></div>
+            <div><span>{t("Head")}</span><code>{data.headCommitId ? shortHash(data.headCommitId) : t("detached")}</code></div>
+            <div><span>{t("Run stage")}</span><strong>{current?.phase ?? t("idle")}</strong></div>
+          </section>
+
+          <section className="play-edge-actions" aria-label={t("Session controls")}>
+            {session.status === "archived" ? <button onClick={() => restoreMutation.mutate()}>{t("Restore")}</button> : session.status === "idle" ? <button onClick={() => activateMutation.mutate()}>{t("Make active")}</button> : null}
+            <button disabled={busy || !data.messages.length} onClick={() => window.confirm(t("Clear presentation transcript? Committed world history will be preserved.")) && clearMutation.mutate()}>{t("Clear transcript")}</button>
+            {session.status !== "archived" && session.status !== "detached" && <button disabled={busy} onClick={() => archiveMutation.mutate()}>{t("Archive")}</button>}
+            <button className="danger-button" disabled={busy} onClick={() => window.confirm(t("Remove this play session and its presentation transcript? The world branch will be preserved.")) && removeMutation.mutate()}>{t("Remove")}</button>
+          </section>
+
+          <section className="play-edge-operation">
+            <header><span className="eyebrow">{t("Current operation")}</span>{current && <span className={`operation-status operation-${current.status}`}>{t(current.status)}</span>}</header>
+            {current ? (
+              <>
+                {busy && current.progress.statusText && <div className="operation-activity"><span className="loading-orbit" /><p>{String(current.progress.statusText)}</p></div>}
+                {busy && current.cancellable && <button className="stop-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>{current.commitBoundaryCrossed ? t("Stop narration") : t("Cancel before commit")}</button>}
+                {canRetryNarration && <button className="primary-button" disabled={narrationRetryMutation.isPending} onClick={() => narrationRetryMutation.mutate()}>{narrationRetryMutation.isPending ? t("Starting presentation…") : t("Retry narration only")}</button>}
+                {current.error && <div className="inline-error"><strong>{current.error.code}</strong><span>{current.error.message}</span><small>{recoveryInstruction(current.error)}</small></div>}
+                <details className="play-edge-details">
+                  <summary>{t("Operation details")}</summary>
+                  <dl className="operation-detail">
+                    <Detail label={t("Kind")} value={t(current.kind)} />
+                    <Detail label={t("Phase")} value={current.phase} />
+                    <Detail label={t("Operation")} value={current.id} mono />
+                    {current.runId && <div><dt>{t("Trace")}</dt><dd><Link className="inline-trace-link" to="/play/$sessionId/trace/$runId" params={{ sessionId, runId: current.runId }}>{t("Open full trajectory")} ↗</Link></dd></div>}
+                    <Detail label={t("Commit boundary")} value={current.commitBoundaryCrossed ? t("crossed — world may be committed") : t("not crossed")} />
+                  </dl>
+                  {playResult.success && <OperationResult result={playResult.data} />}
+                  {retryResult.success && <div className="operation-result"><span className="eyebrow">{t("Presentation repair")}</span><strong>{t("Rendered without world mutation")}</strong><p>{t("Original move {move}", { move: shortHash(retryResult.data.playerMoveId) })}</p><code>{shortHash(retryResult.data.headCommitId)}</code></div>}
+                </details>
+              </>
+            ) : <p className="play-edge-empty">{t("The world is waiting for your first move.")}</p>}
+          </section>
+
+          {operationList.data && operationList.data.length > 1 && (
+            <details className="play-edge-details play-edge-history">
+              <summary>{t("Recent operations")}</summary>
+              <div className="operation-history">{operationList.data.slice(0, 8).map((item) => <button key={item.id} className={item.id === effectiveOperationId ? "selected" : ""} onClick={() => setSelectedOperationId(item.id)}><span>{t(item.kind)}</span><small>{t(item.status)} · {formatTime(item.createdAt, localeTag)}</small></button>)}</div>
+            </details>
+          )}
+        </div>
+      </aside>
+      {selectedTraceRunId && <TraceDrawer runId={selectedTraceRunId} sessionId={sessionId} onClose={closeTraceDrawer} />}
       {mutationError && <div className="floating-error"><InlineError error={mutationError} /></div>}
-    </>
+    </div>
   );
 }
 
@@ -813,16 +886,36 @@ function SessionTraceRoutePage() {
   return <TraceDetailPage runId={runId} sessionId={sessionId} />;
 }
 
-function ChoiceButton({ choice, onChoose }: { choice: PlayerChoiceSummary; onChoose: (choice: PlayerChoiceSummary) => void }) {
+function ChoiceButton({ choice, index, selected, onChoose }: { choice: PlayerChoiceSummary; index: number; selected: boolean; onChoose: (choice: PlayerChoiceSummary) => void }) {
   const { t } = useI18n();
-  return <button type="button" onClick={() => onChoose(choice)}><span>{choice.action}</span>{choice.affordanceId && <small>{t("preflighted")}</small>}</button>;
+  return <button type="button" className={selected ? "selected" : ""} aria-pressed={selected} onClick={() => onChoose(choice)}><kbd>{index + 1}</kbd><span>{choice.action}</span><small>{choice.affordanceId ? t("preflighted") : t("free choice")}</small></button>;
 }
 
-function RunBadge({ sessionId, runId, messageStatus, run }: { sessionId: string; runId: string; messageStatus: string; run?: Awaited<ReturnType<typeof fetchTraceRuns>>[number] }) {
+function MessageTraceTrigger({ runId, run, onOpen }: { runId: string; run?: Awaited<ReturnType<typeof fetchTraceRuns>>[number]; onOpen: (runId: string) => void }) {
   const { t } = useI18n();
-  const status = run?.status === "succeeded" ? messageStatus : run?.status ?? "loading";
-  const duration = run?.endedAt ? formatElapsed(run.startedAt, run.endedAt) : run ? t("live") : "…";
-  return <Link className={`run-badge run-badge-${run?.status ?? "loading"}`} to="/play/$sessionId/trace/$runId" params={{ sessionId, runId }} title={t("Open the complete LLM, tool, context, timing, and world-effect trajectory")}><strong>{t(status)}</strong><small>{run ? `${run.counts.llmRequests}L · ${run.counts.toolCalls}T · ${run.eventHash ? t("commit") : t("no commit")} · ${duration}` : t("trace loading")}</small><span>↗</span></Link>;
+  const detail = run
+    ? t("{llm} LLM · {tools} tools · {status}", { llm: run.counts.llmRequests, tools: run.counts.toolCalls, status: t(run.status) })
+    : t("trace loading");
+  return (
+    <footer className="message-trace-footer">
+      <button
+        type="button"
+        className={`message-trace-trigger trace-trigger-${run?.status ?? "loading"}`}
+        aria-label={t("Open trace details for this message")}
+        title={t("Open the complete LLM, tool, context, timing, and world-effect trajectory")}
+        onClick={() => onOpen(runId)}
+      >
+        <svg className="message-trace-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none">
+          <circle cx="5" cy="6" r="2" />
+          <circle cx="19" cy="6" r="2" />
+          <circle cx="12" cy="18" r="2" />
+          <path d="M7 6h5a3 3 0 0 1 3 3v1M17.5 7.5 13.5 16M6.5 7.5 10.5 16" />
+        </svg>
+        <span><strong>{t("Trace")}</strong><small>{detail}</small></span>
+        <b aria-hidden="true">›</b>
+      </button>
+    </footer>
+  );
 }
 
 function OperationResult({ result }: { result: ReturnType<typeof playOperationResultSchema.parse> }) {
@@ -1033,7 +1126,6 @@ function formatBytes(bytes: number): string { return bytes < 1_024 ? `${bytes} B
 function formatDate(value: string, locale?: string): string { return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", year: "numeric" }).format(new Date(value)); }
 function formatDateTime(value: string, locale?: string): string { return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
 function formatTime(value: string, locale?: string): string { return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }
-function formatElapsed(startedAt: string, endedAt: string): string { const milliseconds = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)); return milliseconds < 1_000 ? `${milliseconds}ms` : milliseconds < 60_000 ? `${(milliseconds / 1_000).toFixed(1)}s` : `${Math.floor(milliseconds / 60_000)}m ${Math.round((milliseconds % 60_000) / 1_000)}s`; }
 function formatNumber(value: number): string { return new Intl.NumberFormat(undefined, { notation: "compact" }).format(value); }
 function modelOptionKey(providerId: string, modelId: string): string { return JSON.stringify([providerId, modelId]); }
 function safeExternalUrl(value: string): string | undefined { try { const url = new URL(value); return url.protocol === "https:" || url.protocol === "http:" ? url.href : undefined; } catch { return undefined; } }

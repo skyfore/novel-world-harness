@@ -160,9 +160,19 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await submitMove(page, "我再等片刻，确认大厅里的动静。", 2);
   await expect(page.locator(".transcript-panel > header")).toContainText("5 messages");
 
-  await page.getByRole("link", { name: /Open full trajectory/ }).click();
-  await expect(page.getByRole("heading", { name: "player-move trajectory" })).toBeVisible();
-  const runId = runIdFrom(page);
+  const messageTraceTriggers = page.getByRole("button", { name: "Open trace details for this message" });
+  await expect(messageTraceTriggers).toHaveCount(3);
+  await expect(page.locator(".message-player").getByRole("button", { name: "Open trace details for this message" })).toHaveCount(0);
+  const playUrl = page.url();
+  await messageTraceTriggers.last().click();
+  const traceDrawer = page.getByRole("dialog", { name: "Message-linked execution trajectory" });
+  await expect(traceDrawer).toBeVisible();
+  await expect(page).toHaveURL(playUrl);
+  await expect(traceDrawer.getByRole("heading", { name: "player-move trajectory" })).toBeVisible();
+  const fullTraceLink = traceDrawer.getByRole("link", { name: /Open full trajectory/ });
+  const traceHref = await fullTraceLink.getAttribute("href");
+  const runId = traceHref?.split("/").at(-1);
+  expect(runId).toBeTruthy();
   await expect(traceMetric(page, "LLM requests")).toContainText("2");
   await expect(traceMetric(page, "Tool calls")).toContainText("1");
   await expect(page.locator(".trace-truth-strip")).toContainText("step 1");
@@ -171,26 +181,33 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await expect(page.locator(".context-part-scroll")).toContainText("Committed actor state");
   await expect(page.locator(".context-part-scroll")).toContainText("Exact source evidence");
 
-  await page.getByRole("tab", { name: "Messages" }).click();
+  await traceDrawer.getByRole("tab", { name: "Messages" }).click();
   await expect(page.locator(".trace-inspector-body")).toContainText("我再等片刻");
-  await page.getByRole("tab", { name: "Provider Payload" }).click();
+  await traceDrawer.getByRole("tab", { name: "Provider Payload" }).click();
   await expect(page.locator(".trace-inspector-body")).toContainText("[REDACTED]");
   await expect(page.locator("body")).not.toContainText(TRACE_CANARY);
-  await page.getByRole("tab", { name: "Tools" }).click();
+  await traceDrawer.getByRole("tab", { name: "Tools" }).click();
   await expect(page.locator(".trace-inspector-body")).toContainText("propose_player_action");
-  await page.getByRole("tab", { name: "Response" }).click();
+  await traceDrawer.getByRole("tab", { name: "Response" }).click();
   await expect(page.locator(".trace-inspector-body")).toContainText("Synthetic player-action response");
-  await page.getByRole("tab", { name: "World Effects" }).click();
+  await traceDrawer.getByRole("tab", { name: "World Effects" }).click();
   await expect(page.locator(".trace-inspector-body")).toContainText("world.commit.completed");
 
   const apiTrace = await page.evaluate(async (selectedRunId) => {
     const run = await fetch(`/api/v1/runs/${encodeURIComponent(selectedRunId)}`).then((response) => response.json());
     const call = await fetch(`/api/v1/calls/${encodeURIComponent(run.callIds[0])}/context?runId=${encodeURIComponent(selectedRunId)}`).then((response) => response.json());
     return JSON.stringify({ run, call });
-  }, runId);
+  }, runId!);
   expect(apiTrace).not.toContain(TRACE_CANARY);
   expect(apiTrace).toContain("[REDACTED]");
 
+  await page.keyboard.press("Escape");
+  await expect(traceDrawer).toBeHidden();
+  await expect(page).toHaveURL(playUrl);
+  await messageTraceTriggers.last().click();
+  await page.getByRole("dialog", { name: "Message-linked execution trajectory" }).getByRole("link", { name: /Open full trajectory/ }).click();
+  await expect(page.getByRole("heading", { name: "player-move trajectory" })).toBeVisible();
+  expect(runIdFrom(page)).toBe(runId);
   await page.getByRole("link", { name: "Back to play" }).click();
   await page.getByRole("button", { name: "Archive" }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
@@ -224,6 +241,74 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   const persisted = await readDirectoryTree(traceStore.root);
   expect(persisted).not.toContain(TRACE_CANARY);
   expect(sourceId).toMatch(/^[a-f0-9]{20}$/);
+});
+
+test("opens LLM response traces in a side drawer", async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("novel-world-harness.locale", "en"));
+  await page.goto(`${origin}/novels/new`);
+  await page.getByPlaceholder("novel.txt").fill("trace-drawer-fixture.txt");
+  await page.getByPlaceholder("Paste the complete novel text here…").fill(`${SOURCE_TEXT}\nThis source exists to verify message-scoped trace inspection.`);
+  await page.getByRole("button", { name: "Register and inspect" }).click();
+  await expect(page).toHaveURL(/\/novels\/[a-f0-9]{20}\/compile$/);
+  await page.getByRole("button", { name: "Compile all remaining" }).click();
+  await expect(page.getByText("Review proposals", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Validate and accept" }).click();
+  await expect(page.getByText("Ready to publish", { exact: true })).toBeVisible();
+
+  await page.getByLabel("New instance branch ID").fill("trace-drawer");
+  await page.getByRole("button", { name: "Create world instance" }).click();
+  await expect(page).toHaveURL(/\/instances\/trace-drawer$/);
+  await page.getByRole("button", { name: "Start play session" }).click();
+  await expect(page).toHaveURL(/\/play\/play-trace-drawer$/);
+
+  await page.getByRole("button", { name: "Render opening" }).click();
+  await expect(page.locator(".message-scene").last()).toContainText("斑驳的窗影");
+  await submitMove(page, "我继续听雨。", 1);
+  await expect(page.locator(".transcript-panel > header")).toContainText("3 messages");
+  await expect(page.getByText("Live executable world", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".choice-deck")).toBeVisible();
+  const immersiveLayout = await page.evaluate(() => {
+    const pageElement = document.querySelector<HTMLElement>(".page")!;
+    const story = document.querySelector<HTMLElement>(".play-story-panel")!;
+    const composer = document.querySelector<HTMLElement>(".composer-area")!;
+    return {
+      bodyOverflow: getComputedStyle(document.body).overflowY,
+      pageOverflow: getComputedStyle(pageElement).overflowY,
+      bottomGap: Math.abs(story.getBoundingClientRect().bottom - composer.getBoundingClientRect().bottom),
+    };
+  });
+  expect(immersiveLayout.bodyOverflow).toBe("hidden");
+  expect(immersiveLayout.pageOverflow).toBe("hidden");
+  expect(immersiveLayout.bottomGap).toBeLessThanOrEqual(2);
+
+  const triggers = page.getByRole("button", { name: "Open trace details for this message" });
+  await expect(triggers).toHaveCount(2);
+  await expect(page.locator(".message-player").getByRole("button", { name: "Open trace details for this message" })).toHaveCount(0);
+  const playUrl = page.url();
+  await triggers.last().click();
+
+  const drawer = page.getByRole("dialog", { name: "Message-linked execution trajectory" });
+  await expect(drawer).toBeVisible();
+  await expect(page).toHaveURL(playUrl);
+  await expect(drawer.getByRole("heading", { name: "player-move trajectory" })).toBeVisible();
+  await expect(drawer.locator(".trace-ledger-panel")).toContainText("Trajectory ledger");
+  await expect(drawer.getByRole("tab")).toHaveCount(7);
+  await drawer.getByRole("tab", { name: "Tools" }).click();
+  await expect(drawer.locator(".trace-inspector-body")).toContainText("propose_player_action");
+  await drawer.getByRole("tab", { name: "World Effects" }).click();
+  await expect(drawer.locator(".trace-inspector-body")).toContainText("world.commit.completed");
+
+  await drawer.getByRole("button", { name: "Close trace details" }).click();
+  await expect(drawer).toBeHidden();
+  await expect(page).toHaveURL(playUrl);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const openSessionControls = page.getByRole("button", { name: "Open session controls" });
+  await expect(openSessionControls).toBeVisible();
+  await openSessionControls.click();
+  await expect(page.locator(".play-edge-panel")).toBeInViewport();
+  await page.getByRole("button", { name: "Close session controls" }).last().click();
+  await expect(openSessionControls).toHaveAttribute("aria-expanded", "false");
 });
 
 async function submitMove(page: Page, text: string, expectedStep: number): Promise<void> {

@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { fetchInstance, fetchOntology, fetchOntologyNode, type OntologyFilters } from "./api";
 import { canRetrySameRequest, recoveryInstruction, webErrorDetail } from "./recovery";
+import { useI18n } from "./i18n";
 import type {
   InstanceSummary,
   NovelSummary,
@@ -68,6 +69,7 @@ export function OntologyPage({
   initialIncludeCanonicalFuture?: boolean;
   onScopeChange?: (scope: { branchId?: string; atCommit?: string; includeCanonicalFuture?: boolean }) => void;
 }) {
+  const { t } = useI18n();
   const meta = views.find((candidate) => candidate.id === view)!;
   const sourceInstances = instances.filter((instance) => instance.sourceId === sourceId);
   const [branchId, setBranchId] = useState(initialBranchId ?? "");
@@ -149,7 +151,7 @@ export function OntologyPage({
   const selectedNode = graph.data?.nodes.find((node) => node.id === selectedNodeId);
 
   if (!novel) {
-    return <PageState title="Unknown novel" body={`No registered source matches ${sourceId}.`} />;
+    return <PageState title={t("Unknown novel")} body={t("No registered source matches {sourceId}.", { sourceId })} />;
   }
 
   return (
@@ -157,17 +159,17 @@ export function OntologyPage({
       <div className="ontology-heading">
         <div>
           <Link className="ontology-back-link" to="/novels/$sourceId" params={{ sourceId }}>← {novel.title}</Link>
-          <span className="eyebrow">Ontology workbench</span>
-          <h1>{meta.label}</h1>
-          <p>{meta.description}</p>
+          <span className="eyebrow">{t("Ontology workbench")}</span>
+          <h1>{t(meta.label)}</h1>
+          <p>{t(meta.description)}</p>
         </div>
         <div className="ontology-heading-actions">
-          <span className={branchId ? "truth-badge truth-badge-branch" : "truth-badge"}>{branchId ? "Committed branch scope" : "Compiled source scope"}</span>
+          <span className={branchId ? "truth-badge truth-badge-branch" : "truth-badge"}>{branchId ? t("Committed branch scope") : t("Compiled source scope")}</span>
           {effectiveCommit && <code>{shortHash(effectiveCommit)}</code>}
         </div>
       </div>
 
-      <nav className="ontology-tabs" aria-label="Ontology projection">
+      <nav className="ontology-tabs" aria-label={t("Ontology projection")}>
         {views.map((candidate) => (
           <Link
             key={candidate.id}
@@ -180,26 +182,26 @@ export function OntologyPage({
             }}
             className={candidate.id === view ? "ontology-tab ontology-tab-active" : "ontology-tab"}
           >
-            {candidate.label}
+            {t(candidate.label)}
           </Link>
         ))}
       </nav>
 
-      <section className="ontology-scope" aria-label="Projection scope">
+      <section className="ontology-scope" aria-label={t("Projection scope")}>
         <label>
-          <span>Truth scope</span>
+          <span>{t("Truth scope")}</span>
           <select value={branchId} onChange={(event) => {
             const nextBranchId = event.target.value;
             setBranchId(nextBranchId);
             setCommitId("");
             onScopeChangeRef.current?.(nextBranchId ? { branchId: nextBranchId } : {});
           }}>
-            <option value="">Current compiled source</option>
-            {sourceInstances.map((candidate) => <option key={candidate.branchId} value={candidate.branchId}>{candidate.name} · step {candidate.logicalStep}</option>)}
+            <option value="">{t("Current compiled source")}</option>
+            {sourceInstances.map((candidate) => <option key={candidate.branchId} value={candidate.branchId}>{candidate.name} · {t("step")} {candidate.logicalStep}</option>)}
           </select>
         </label>
         <label>
-          <span>Committed time</span>
+          <span>{t("Committed time")}</span>
           <select
             value={effectiveCommit ?? ""}
             disabled={!branchId || instance.isPending || !instance.data}
@@ -208,10 +210,10 @@ export function OntologyPage({
               onScopeChangeRef.current?.({ branchId, atCommit: event.target.value, ...(includeCanonicalFuture ? { includeCanonicalFuture: true } : {}) });
             }}
           >
-            {!branchId && <option value="">Not branch-scoped</option>}
-            {branchId && instance.isPending && <option value="">Resolving ancestry…</option>}
+            {!branchId && <option value="">{t("Not branch-scoped")}</option>}
+            {branchId && instance.isPending && <option value="">{t("Resolving ancestry…")}</option>}
             {instance.data?.history.map((commit) => (
-              <option key={commit.id} value={commit.id}>step {commit.logicalStep} · {shortHash(commit.id)}{commit.id === instance.data.instance.headCommitId ? " · HEAD" : ""}</option>
+              <option key={commit.id} value={commit.id}>{t("step")} {commit.logicalStep} · {shortHash(commit.id)}{commit.id === instance.data.instance.headCommitId ? ` · ${t("HEAD")}` : ""}</option>
             ))}
           </select>
         </label>
@@ -221,24 +223,24 @@ export function OntologyPage({
               setIncludeCanonicalFuture(event.target.checked);
               onScopeChangeRef.current?.({ branchId, ...(effectiveCommit ? { atCommit: effectiveCommit } : {}), ...(event.target.checked ? { includeCanonicalFuture: true } : {}) });
             }} />
-            <span><strong>Show future canon as possibility</strong><small>Never promotes it into branch truth.</small></span>
+            <span><strong>{t("Show future canon as possibility")}</strong><small>{t("Never promotes it into branch truth.")}</small></span>
           </label>
-        ) : <div className="ontology-scope-note"><strong>Truth boundary</strong><span>{branchId ? "State and validity derive from the selected commit." : "Shows current accepted compiler artifacts, not a runtime state."}</span></div>}
+        ) : <div className="ontology-scope-note"><strong>{t("Truth boundary")}</strong><span>{branchId ? t("State and validity derive from the selected commit.") : t("Shows current accepted compiler artifacts, not a runtime state.")}</span></div>}
       </section>
 
-      <section className="ontology-toolbar" aria-label="Graph filters">
-        <label className="ontology-search"><span>Search</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Label, ID, kind, status…" /></label>
-        <label><span>Kind</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option value="">All kinds</option>{Object.keys(graph.data?.facets.kinds ?? {}).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-        <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{Object.keys(graph.data?.facets.statuses ?? {}).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+      <section className="ontology-toolbar" aria-label={t("Graph filters")}>
+        <label className="ontology-search"><span>{t("Search")}</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Label, ID, kind, status…")} /></label>
+        <label><span>{t("Kind")}</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option value="">{t("All kinds")}</option>{Object.keys(graph.data?.facets.kinds ?? {}).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+        <label><span>{t("Status")}</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">{t("All statuses")}</option>{Object.keys(graph.data?.facets.statuses ?? {}).map((value) => <option key={value} value={value}>{t(value)}</option>)}</select></label>
         <div className="ontology-graph-actions">
-          <button type="button" onClick={() => graphRef.current?.fit()} disabled={!visible?.nodes.length}>Fit</button>
-          <button type="button" onClick={() => graphRef.current?.relayout()} disabled={!visible?.nodes.length}>Re-layout</button>
-          <button type="button" onClick={() => void graph.refetch()} disabled={graph.isFetching}>{graph.isFetching ? "Refreshing…" : "Refresh"}</button>
+          <button type="button" onClick={() => graphRef.current?.fit()} disabled={!visible?.nodes.length}>{t("Fit")}</button>
+          <button type="button" onClick={() => graphRef.current?.relayout()} disabled={!visible?.nodes.length}>{t("Re-layout")}</button>
+          <button type="button" onClick={() => void graph.refetch()} disabled={graph.isFetching}>{graph.isFetching ? t("Refreshing…") : t("Refresh")}</button>
         </div>
       </section>
 
-      <section className="ontology-layer-bar" aria-label="Projection layers">
-        <span>Layers</span>
+      <section className="ontology-layer-bar" aria-label={t("Projection layers")}>
+        <span>{t("Layers")}</span>
         {allLayers.map((layer) => (
           <label key={layer.id} className={layers.includes(layer.id) ? "layer-chip layer-chip-active" : "layer-chip"}>
             <input
@@ -248,21 +250,21 @@ export function OntologyPage({
                 ? current.length === 1 ? current : current.filter((item) => item !== layer.id)
                 : [...current, layer.id])}
             />
-            {layer.label}
+            {t(layer.label)}
           </label>
         ))}
-        <span className="ontology-count">{visible?.nodes.length ?? 0} nodes · {visible?.edges.length ?? 0} edges</span>
+        <span className="ontology-count">{t("{nodes} nodes · {edges} edges", { nodes: visible?.nodes.length ?? 0, edges: visible?.edges.length ?? 0 })}</span>
       </section>
 
       {instance.isError && <InlineError error={instance.error} />}
-      {graph.isPending ? <PageState loading title="Projecting the ontology" body="Resolving source-scoped artifacts and temporal validity…" /> : graph.isError ? <OntologyErrorState error={graph.error} retry={() => void graph.refetch()} /> : graph.data && visible ? (
+      {graph.isPending ? <PageState loading title={t("Projecting the ontology")} body={t("Resolving source-scoped artifacts and temporal validity…")} /> : graph.isError ? <OntologyErrorState error={graph.error} retry={() => void graph.refetch()} /> : graph.data && visible ? (
         <>
           {graph.data.diagnostics.length > 0 && <div className="ontology-diagnostics">{graph.data.diagnostics.map((message) => <p key={message}>{message}</p>)}</div>}
           <div className="ontology-workbench">
             <section className="ontology-canvas-panel">
               <header>
-                <div><span className="eyebrow">Graph</span><strong>{graph.data.truncated ? `Showing a bounded projection of ${graph.data.totalNodes} nodes` : "Complete selected projection"}</strong></div>
-                <div className="ontology-legend">{graph.data.legend.map((item) => <span key={item.id}><i style={{ background: item.color }} />{item.label}<small>{item.count}</small></span>)}</div>
+                <div><span className="eyebrow">{t("Graph")}</span><strong>{graph.data.truncated ? t("Showing a bounded projection of {count} nodes", { count: graph.data.totalNodes }) : t("Complete selected projection")}</strong></div>
+                <div className="ontology-legend">{graph.data.legend.map((item) => <span key={item.id}><i style={{ background: item.color }} />{t(item.label)}<small>{item.count}</small></span>)}</div>
               </header>
               {visible.nodes.length ? <GraphCanvas ref={graphRef} graph={visible} view={view} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} /> : <EmptyGraph />}
             </section>
@@ -283,6 +285,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, {
   selectedNodeId?: string;
   onSelect: (nodeId: string) => void;
 }>(function GraphCanvas({ graph, view, selectedNodeId, onSelect }, ref) {
+  const { t } = useI18n();
   const container = useRef<HTMLDivElement>(null);
   const core = useRef<cytoscape.Core | null>(null);
   const onSelectRef = useRef(onSelect);
@@ -341,7 +344,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, {
     if (selectedNodeId) core.current.getElementById(selectedNodeId).addClass("selected").select();
   }, [selectedNodeId]);
 
-  return <div ref={container} className="ontology-canvas" role="img" aria-label={`${view} ontology graph with ${graph.nodes.length} nodes and ${graph.edges.length} edges`} />;
+  return <div ref={container} className="ontology-canvas" role="img" aria-label={t("{view} ontology graph with {nodes} nodes and {edges} edges", { view: t(view), nodes: graph.nodes.length, edges: graph.edges.length })} />;
 });
 
 const graphStyles = [
@@ -400,40 +403,41 @@ function NodeInspector({
   detail: ReturnType<typeof useQuery<Awaited<ReturnType<typeof fetchOntologyNode>>, Error>>;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <aside className="ontology-inspector">
       <header>
-        <div><span className="eyebrow">Inspector</span><strong>{node?.label ?? "Select a node"}</strong></div>
-        {node && <button type="button" aria-label="Close inspector" onClick={onClose}>×</button>}
+        <div><span className="eyebrow">{t("Inspector")}</span><strong>{node?.label ?? t("Select a node")}</strong></div>
+        {node && <button type="button" aria-label={t("Close inspector")} onClick={onClose}>×</button>}
       </header>
-      {!node ? <div className="ontology-inspector-empty"><span>◇</span><p>Click a graph node or table row to inspect its exact payload, evidence, and relationships.</p></div> : (
+      {!node ? <div className="ontology-inspector-empty"><span>◇</span><p>{t("Click a graph node or table row to inspect its exact payload, evidence, and relationships.")}</p></div> : (
         <div className="ontology-inspector-scroll">
           <div className="node-identity">
             <span style={{ background: statusColors[node.status] }} />
             <div><strong>{node.kind}</strong><small>{node.status} · {node.layer}</small></div>
           </div>
           <dl className="ontology-node-meta">
-            <div><dt>Artifact</dt><dd>{node.artifactId}</dd></div>
-            <div><dt>Node ID</dt><dd>{node.id}</dd></div>
-            <div><dt>Revision</dt><dd>{node.revisionHash ?? "derived"}</dd></div>
-            <div><dt>Evidence</dt><dd>{node.evidenceCount}{node.shared ? " · shared artifact, locally filtered" : ""}</dd></div>
-            {node.storyTime !== undefined && <div><dt>Story time</dt><dd>{compactJson(node.storyTime)}</dd></div>}
+            <div><dt>{t("Artifact")}</dt><dd>{node.artifactId}</dd></div>
+            <div><dt>{t("Node ID")}</dt><dd>{node.id}</dd></div>
+            <div><dt>{t("Revision")}</dt><dd>{node.revisionHash ?? t("derived")}</dd></div>
+            <div><dt>{t("Evidence")}</dt><dd>{node.evidenceCount}{node.shared ? ` · ${t("shared artifact, locally filtered")}` : ""}</dd></div>
+            {node.storyTime !== undefined && <div><dt>{t("Story time")}</dt><dd>{compactJson(node.storyTime)}</dd></div>}
           </dl>
           {detail.isPending ? <InlineLoading /> : detail.isError ? <InlineError error={detail.error} /> : detail.data ? (
             <>
-              <InspectorSection title="Summary"><JsonRecord value={node.summary} /></InspectorSection>
-              <InspectorSection title={`Evidence · ${detail.data.evidence.length}`}>
+              <InspectorSection title={t("Summary")}><JsonRecord value={node.summary} /></InspectorSection>
+              <InspectorSection title={`${t("Evidence")} · ${detail.data.evidence.length}`}>
                 {detail.data.evidence.length ? <div className="evidence-list">{detail.data.evidence.map((evidence, index) => (
                   <article key={`${evidence.quoteHash}:${index}`}>
-                    <header><span>lines {evidence.startLine}–{evidence.endLine}</span><small>{evidence.strength}</small></header>
-                    {evidence.excerpt !== undefined ? <blockquote>{evidence.excerpt}{evidence.excerptTruncated ? "…" : ""}</blockquote> : <p>Exact byte excerpt is unavailable for this legacy reference.</p>}
+                    <header><span>{t("lines {start}–{end}", { start: evidence.startLine, end: evidence.endLine })}</span><small>{t(evidence.strength)}</small></header>
+                    {evidence.excerpt !== undefined ? <blockquote>{evidence.excerpt}{evidence.excerptTruncated ? "…" : ""}</blockquote> : <p>{t("Exact byte excerpt is unavailable for this legacy reference.")}</p>}
                     <code>{shortHash(evidence.quoteHash)}</code>
                   </article>
-                ))}</div> : <p className="inspector-muted">No source-local evidence span is attached.</p>}
+                ))}</div> : <p className="inspector-muted">{t("No source-local evidence span is attached.")}</p>}
               </InspectorSection>
-              <InspectorSection title={`Incoming · ${detail.data.incoming.length}`}><EdgeList edges={detail.data.incoming} direction="incoming" /></InspectorSection>
-              <InspectorSection title={`Outgoing · ${detail.data.outgoing.length}`}><EdgeList edges={detail.data.outgoing} direction="outgoing" /></InspectorSection>
-              <details className="payload-json"><summary>Exact stored / derived payload</summary><pre>{JSON.stringify(detail.data.payload, null, 2) ?? "null"}</pre></details>
+              <InspectorSection title={t("Incoming · {count}", { count: detail.data.incoming.length })}><EdgeList edges={detail.data.incoming} direction="incoming" /></InspectorSection>
+              <InspectorSection title={t("Outgoing · {count}", { count: detail.data.outgoing.length })}><EdgeList edges={detail.data.outgoing} direction="outgoing" /></InspectorSection>
+              <details className="payload-json"><summary>{t("Exact stored / derived payload")}</summary><pre>{JSON.stringify(detail.data.payload, null, 2) ?? "null"}</pre></details>
             </>
           ) : null}
         </div>
@@ -447,27 +451,30 @@ function InspectorSection({ title, children }: { title: string; children: React.
 }
 
 function JsonRecord({ value }: { value: Record<string, unknown> }) {
+  const { t } = useI18n();
   const entries = Object.entries(value);
-  return entries.length ? <dl className="summary-record">{entries.map(([key, item]) => <div key={key}><dt>{key}</dt><dd>{formatValue(item)}</dd></div>)}</dl> : <p className="inspector-muted">No summary fields.</p>;
+  return entries.length ? <dl className="summary-record">{entries.map(([key, item]) => <div key={key}><dt>{key}</dt><dd>{formatValue(item)}</dd></div>)}</dl> : <p className="inspector-muted">{t("No summary fields.")}</p>;
 }
 
 function EdgeList({ edges, direction }: { edges: OntologyEdge[]; direction: "incoming" | "outgoing" }) {
-  return edges.length ? <div className="inspector-edge-list">{edges.map((edge) => <div key={edge.id}><span>{edge.label}</span><code>{direction === "incoming" ? edge.source : edge.target}</code></div>)}</div> : <p className="inspector-muted">No {direction} relationships in this projection.</p>;
+  const { t } = useI18n();
+  return edges.length ? <div className="inspector-edge-list">{edges.map((edge) => <div key={edge.id}><span>{edge.label}</span><code>{direction === "incoming" ? edge.source : edge.target}</code></div>)}</div> : <p className="inspector-muted">{t(direction === "incoming" ? "No incoming relationships in this projection." : "No outgoing relationships in this projection.")}</p>;
 }
 
 function OntologyTable({ graph, selectedNodeId, onSelect }: { graph: OntologyGraph; selectedNodeId?: string; onSelect: (nodeId: string) => void }) {
+  const { t } = useI18n();
   return (
     <section className="ontology-table-panel">
-      <header><div><span className="eyebrow">Accessible table</span><strong>Searchable projection fallback</strong></div><span className="panel-tag">{graph.nodes.length} rows</span></header>
-      <div className="ontology-table" role="table" aria-label="Ontology nodes">
-        <div className="ontology-table-row ontology-table-head" role="row"><span>Node</span><span>Kind</span><span>Status</span><span>Layer</span><span>Evidence</span></div>
+      <header><div><span className="eyebrow">{t("Accessible table")}</span><strong>{t("Searchable projection fallback")}</strong></div><span className="panel-tag">{t("{count} rows", { count: graph.nodes.length })}</span></header>
+      <div className="ontology-table" role="table" aria-label={t("Ontology nodes")}>
+        <div className="ontology-table-row ontology-table-head" role="row"><span>{t("Node")}</span><span>{t("Kind")}</span><span>{t("Status")}</span><span>{t("Layer")}</span><span>{t("Evidence")}</span></div>
         {graph.nodes.slice(0, 500).map((node) => (
           <button key={node.id} type="button" role="row" className={node.id === selectedNodeId ? "ontology-table-row ontology-table-selected" : "ontology-table-row"} onClick={() => onSelect(node.id)}>
-            <span><strong>{node.label}</strong><small>{node.artifactId}</small></span><code>{node.kind}</code><span><i style={{ background: statusColors[node.status] }} />{node.status}</span><span>{node.layer}</span><span>{node.evidenceCount}</span>
+            <span><strong>{node.label}</strong><small>{node.artifactId}</small></span><code>{node.kind}</code><span><i style={{ background: statusColors[node.status] }} />{t(node.status)}</span><span>{t(node.layer)}</span><span>{node.evidenceCount}</span>
           </button>
         ))}
       </div>
-      {graph.nodes.length > 500 && <p className="ontology-table-limit">Table is capped at 500 rows; narrow the search or facet filters to inspect the remainder.</p>}
+      {graph.nodes.length > 500 && <p className="ontology-table-limit">{t("Table is capped at 500 rows; narrow the search or facet filters to inspect the remainder.")}</p>}
     </section>
   );
 }
@@ -505,19 +512,21 @@ function shapeFor(node: OntologyNode): string {
 }
 
 function EmptyGraph() {
-  return <div className="ontology-empty"><span>◇</span><strong>No nodes match this projection</strong><p>Adjust the search, facets, layers, branch, or commit.</p></div>;
+  const { t } = useI18n();
+  return <div className="ontology-empty"><span>◇</span><strong>{t("No nodes match this projection")}</strong><p>{t("Adjust the search, facets, layers, branch, or commit.")}</p></div>;
 }
 
 function PageState({ loading = false, title, body, action }: { loading?: boolean; title: string; body: string; action?: React.ReactNode }) {
   return <div className="ontology-page-state">{loading ? <span className="loading-orbit" /> : <span className="ontology-state-mark">◇</span>}<strong>{title}</strong><p>{body}</p>{action}</div>;
 }
 
-function InlineLoading() { return <div className="ontology-inline-state"><span className="loading-orbit" />Loading exact node detail…</div>; }
+function InlineLoading() { const { t } = useI18n(); return <div className="ontology-inline-state"><span className="loading-orbit" />{t("Loading exact node detail…")}</div>; }
 function OntologyErrorState({ error, retry }: { error: Error; retry: () => void }) {
+  const { t } = useI18n();
   const detail = webErrorDetail(error);
-  return <PageState title={detail?.code ?? "Projection failed"} body={error.message} action={<>{detail && <small>{recoveryInstruction(detail)}</small>}{canRetrySameRequest(error) && <button onClick={retry}>Retry once</button>}</>} />;
+  return <PageState title={detail?.code ?? t("Projection failed")} body={error.message} action={<>{detail && <small>{recoveryInstruction(detail, t)}</small>}{canRetrySameRequest(error) && <button onClick={retry}>{t("Retry once")}</button>}</>} />;
 }
-function InlineError({ error }: { error: Error }) { const detail = webErrorDetail(error); return <div className="ontology-inline-error"><strong>{detail?.code ?? error.name}</strong><span>{error.message}</span>{detail && <small>{recoveryInstruction(detail)}</small>}</div>; }
+function InlineError({ error }: { error: Error }) { const { t } = useI18n(); const detail = webErrorDetail(error); return <div className="ontology-inline-error"><strong>{detail?.code ?? error.name}</strong><span>{error.message}</span>{detail && <small>{recoveryInstruction(detail, t)}</small>}</div>; }
 function compactJson(value: unknown): string { return JSON.stringify(value); }
 function formatValue(value: unknown): string { return typeof value === "string" ? value : JSON.stringify(value); }
 function shortHash(value: string): string { return value.length > 16 ? `${value.slice(0, 9)}…${value.slice(-5)}` : value; }

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./router";
+import { I18nProvider } from "./i18n";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -20,8 +21,10 @@ if (!container) throw new Error("Missing #root element.");
 
 createRoot(container).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} context={{ queryClient }} />
-    </QueryClientProvider>
+    <I18nProvider>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} context={{ queryClient }} />
+      </QueryClientProvider>
+    </I18nProvider>
   </StrictMode>,
 );

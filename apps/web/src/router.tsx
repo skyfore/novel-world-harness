@@ -48,6 +48,7 @@ import {
   traceRunsQueryKey,
 } from "./trace-pages";
 import { MaintenanceControl } from "./maintenance-dialog";
+import { LanguageSwitcher, useI18n } from "./i18n";
 import { narrationStreamStore, useNarrationStream } from "./narration-stream-store";
 import { canRetrySameRequest, recoveryInstruction, webErrorDetail } from "./recovery";
 import {
@@ -112,10 +113,12 @@ declare module "@tanstack/react-router" {
 }
 
 function RootLayout() {
+  const { t } = useI18n();
   const query = useBootstrap();
   const queryClient = useQueryClient();
   const [connection, setConnection] = useState<"connecting" | "online" | "offline">("connecting");
   const [showArchivedSessions, setShowArchivedSessions] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const operations = useQuery({
     queryKey: ["operations"],
     queryFn: ({ signal }) => fetchOperations(undefined, signal),
@@ -191,48 +194,53 @@ function RootLayout() {
   const archivedSessionCount = data?.catalog.playSessions.filter((session) => session.status === "archived").length ?? 0;
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <a className="skip-link" href="#main-content">{t("Skip to content")}</a>
+      <button className={navigationOpen ? "sidebar-backdrop sidebar-backdrop-visible" : "sidebar-backdrop"} type="button" aria-label={t("Close navigation")} onClick={() => setNavigationOpen(false)} />
+      <aside className={navigationOpen ? "sidebar sidebar-open" : "sidebar"}>
         <Link to="/" className="brand" activeOptions={{ exact: true }}>
           <span className="brand-mark">NW</span>
           <span><strong>Novel World</strong><small>Harness</small></span>
         </Link>
-        <nav aria-label="主导航" className="primary-nav">
-          <NavSection label="Workspace"><Link to="/" activeOptions={{ exact: true }} className="nav-link">Overview</Link></NavSection>
-          <NavSection label="Novels" count={data?.catalog.novels.length}>
-            <Link to="/novels/new" className="nav-link nav-link-new"><span>＋ Register novel</span></Link>
+        <nav aria-label={t("Workspace")} className="primary-nav" onClick={(event) => { if ((event.target as HTMLElement).closest("a")) setNavigationOpen(false); }}>
+          <NavSection label={t("Workspace")}><Link to="/" activeOptions={{ exact: true }} className="nav-link">{t("Overview")}</Link></NavSection>
+          <NavSection label={t("Novels")} count={data?.catalog.novels.length}>
+            <Link to="/novels/new" className="nav-link nav-link-new"><span>＋ {t("Register novel")}</span></Link>
             {data?.catalog.novels.map((novel) => (
               <Link key={novel.id} to="/novels/$sourceId" params={{ sourceId: novel.id }} className="nav-link nav-link-item">
                 <span>{novel.title}</span><small>{formatBytes(novel.bytes)}</small>
               </Link>
             ))}
-            {!data?.catalog.novels.length && <span className="nav-empty">No registered novels</span>}
+            {!data?.catalog.novels.length && <span className="nav-empty">{t("No registered novels")}</span>}
           </NavSection>
-          <NavSection label="Instances" count={data?.catalog.instances.length}>
+          <NavSection label={t("Instances")} count={data?.catalog.instances.length}>
             {data?.catalog.instances.map((instance) => (
               <Link key={instance.branchId} to="/instances/$branchId" params={{ branchId: instance.branchId }} className="nav-link nav-link-item">
-                <span>{instance.name}</span><small>step {instance.logicalStep}</small>
+                <span>{instance.name}</span><small>{t("step")} {instance.logicalStep}</small>
               </Link>
             ))}
           </NavSection>
-          <NavSection label="Play sessions" count={visibleSessions.length}>
+          <NavSection label={t("Play sessions")} count={visibleSessions.length}>
             {visibleSessions.map((session) => (
               <Link key={session.id} to="/play/$sessionId" params={{ sessionId: session.id }} className="nav-link nav-link-item">
-                <span>{session.title}</span><small>{session.status}</small>
+                <span>{session.title}</span><small>{t(session.status)}</small>
               </Link>
             ))}
-            {archivedSessionCount > 0 && <button type="button" className="nav-archive-toggle" onClick={() => setShowArchivedSessions((value) => !value)}>{showArchivedSessions ? "Hide archived" : `Show archived (${archivedSessionCount})`}</button>}
+            {archivedSessionCount > 0 && <button type="button" className="nav-archive-toggle" onClick={() => setShowArchivedSessions((value) => !value)}>{showArchivedSessions ? t("Hide archived") : t("Show archived ({count})", { count: archivedSessionCount })}</button>}
           </NavSection>
         </nav>
         <div className="sidebar-footer">
-          <Link to="/traces" className="nav-link">Trace ledger</Link>
-          <Link to="/settings/models" className="nav-link">Model catalog</Link>
-          <div className={`connection connection-${connection}`}><span />{connection}</div>
+          <Link to="/traces" className="nav-link">{t("Trace ledger")}</Link>
+          <Link to="/settings/models" className="nav-link">{t("Model catalog")}</Link>
+          <div className={`connection connection-${connection}`}><span />{t(connection)}</div>
         </div>
       </aside>
-      <main className="workspace">
+      <main className="workspace" id="main-content" tabIndex={-1}>
         <header className="topbar">
-          <div><span className="eyebrow">Local workspace</span><strong>{data?.workspace.displayName ?? "Loading…"}</strong></div>
-          <div className="topbar-meta"><span>API {data?.apiVersion ?? "v1"}</span><span>Pi-backed</span><span>No app login</span></div>
+          <div className="topbar-leading">
+            <button className="mobile-nav-trigger" type="button" aria-label={t("Open navigation")} aria-expanded={navigationOpen} onClick={() => setNavigationOpen(true)}><span /><span /><span /></button>
+            <div><span className="eyebrow">{t("Local workspace")}</span><strong>{data?.workspace.displayName ?? "Loading…"}</strong></div>
+          </div>
+          <div className="topbar-actions"><div className="topbar-meta"><span>API {data?.apiVersion ?? "v1"}</span><span>Pi-backed</span><span>{t("No app login")}</span></div><LanguageSwitcher /></div>
         </header>
         {activeOperations.length > 0 && <OperationTray operations={activeOperations} csrfToken={data?.csrfToken ?? ""} />}
         <section className="page">
@@ -244,6 +252,7 @@ function RootLayout() {
 }
 
 function OperationTray({ operations, csrfToken }: { operations: OperationSnapshot[]; csrfToken: string }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const cancel = useMutation({
     mutationFn: (operationId: string) => cancelOperation(operationId, csrfToken),
@@ -252,7 +261,7 @@ function OperationTray({ operations, csrfToken }: { operations: OperationSnapsho
       void queryClient.invalidateQueries({ queryKey: ["operations"], exact: true });
     },
   });
-  return <section className="operation-tray" aria-label="Active operations"><span className="eyebrow">Active</span><div>{operations.slice(0, 4).map((operation) => <article key={operation.id}><OperationJump operation={operation} /><span className={`operation-status operation-${operation.status}`}>{operation.phase}</span>{operation.cancellable && <button type="button" disabled={!csrfToken || cancel.isPending} onClick={() => cancel.mutate(operation.id)}>{operation.commitBoundaryCrossed ? "Stop" : "Cancel"}</button>}</article>)}</div>{operations.length > 4 && <small>+{operations.length - 4} more</small>}</section>;
+  return <section className="operation-tray" aria-label={t("Active operations")}><span className="eyebrow">{t("Active")}</span><div>{operations.slice(0, 4).map((operation) => <article key={operation.id}><OperationJump operation={operation} /><span className={`operation-status operation-${operation.status}`}>{operation.phase}</span>{operation.cancellable && <button type="button" disabled={!csrfToken || cancel.isPending} onClick={() => cancel.mutate(operation.id)}>{operation.commitBoundaryCrossed ? t("Stop") : t("Cancel")}</button>}</article>)}</div>{operations.length > 4 && <small>+{t("{count} more", { count: operations.length - 4 })}</small>}</section>;
 }
 
 function OperationJump({ operation }: { operation: OperationSnapshot }) {
@@ -268,36 +277,37 @@ function NavSection({ label, count, children }: { label: string; count?: number;
 }
 
 function DashboardPage() {
+  const { t } = useI18n();
   const { data } = useBootstrap();
   if (!data) return null;
   const configuredProviders = data.modelCatalog.providers.filter((provider) => provider.configured).length;
   return (
     <>
-      <PageHeading eyebrow="Executable novel workspace" title="World control room" description="Inspect compiled worlds, enter a character, and follow every Pi-backed play operation from one local interface." />
+      <PageHeading eyebrow={t("Executable novel workspace")} title={t("World control room")} description={t("Inspect compiled worlds, enter a character, and follow every Pi-backed play operation from one local interface.")} />
       <div className="metric-grid">
-        <Metric label="Novels" value={data.catalog.novels.length} note="registered sources" />
-        <Metric label="Instances" value={data.catalog.instances.length} note="committed branches" />
-        <Metric label="Play sessions" value={data.catalog.playSessions.length} note="recoverable contexts" />
-        <Metric label="Providers" value={configuredProviders} note={`${data.modelCatalog.models.length} known models`} />
+        <Metric label={t("Novels")} value={data.catalog.novels.length} note={t("registered sources")} />
+        <Metric label={t("Instances")} value={data.catalog.instances.length} note={t("committed branches")} />
+        <Metric label={t("Play sessions")} value={data.catalog.playSessions.length} note={t("recoverable contexts")} />
+        <Metric label={t("Providers")} value={configuredProviders} note={t("{count} known models", { count: data.modelCatalog.models.length })} />
       </div>
       <div className="content-grid">
-        <Panel title="Recent instances" action={<span className="panel-tag">world truth</span>}>
-          {data.catalog.instances.length ? data.catalog.instances.slice(0, 5).map((instance) => <InstanceRow key={instance.branchId} instance={instance} />) : <EmptyState title="No playable world yet" body="Prepare a registered novel to create its first committed branch." />}
+        <Panel title={t("Recent instances")} action={<span className="panel-tag">{t("world truth")}</span>}>
+          {data.catalog.instances.length ? data.catalog.instances.slice(0, 5).map((instance) => <InstanceRow key={instance.branchId} instance={instance} />) : <EmptyState title={t("No playable world yet")} body={t("Prepare a registered novel to create its first committed branch.")} />}
         </Panel>
-        <Panel title="Delivery map" action={<span className="panel-tag">MVP</span>}>
+        <Panel title={t("Delivery map")} action={<span className="panel-tag">MVP</span>}>
           <div className="feature-list">
             {data.features.map((feature) => (
               <div className="feature-row" key={feature.id}>
-                <span className={`status-dot status-${feature.status}`} /><strong>{feature.id.replace("-", " ")}</strong><span>Phase {feature.phase}</span><small>{feature.status}</small>
+                <span className={`status-dot status-${feature.status}`} /><strong>{feature.id.replace("-", " ")}</strong><span>{t("Phase {phase}", { phase: feature.phase })}</span><small>{t(feature.status)}</small>
               </div>
             ))}
           </div>
         </Panel>
       </div>
-      <Panel title="Registered novels" action={<span className="panel-tag">source evidence</span>}>
+      <Panel title={t("Registered novels")} action={<span className="panel-tag">{t("source evidence")}</span>}>
         <div className="card-grid">
           {data.catalog.novels.map((novel) => <NovelCard key={novel.id} novel={novel} />)}
-          {!data.catalog.novels.length && <Link to="/novels/new" className="empty-action-card"><span>＋</span><strong>Register the first novel</strong><p>Upload UTF-8 text or paste source evidence directly in the browser.</p></Link>}
+          {!data.catalog.novels.length && <Link to="/novels/new" className="empty-action-card"><span>＋</span><strong>{t("Register the first novel")}</strong><p>{t("Upload UTF-8 text or paste source evidence directly in the browser.")}</p></Link>}
         </div>
       </Panel>
     </>
@@ -305,6 +315,7 @@ function DashboardPage() {
 }
 
 function NovelPage() {
+  const { t, localeTag } = useI18n();
   const { sourceId } = useParams({ from: novelRoute.id });
   const { data } = useBootstrap();
   const queryClient = useQueryClient();
@@ -321,52 +332,52 @@ function NovelPage() {
   return (
     <>
       <div className="session-heading">
-        <PageHeading eyebrow="Source evidence" title={novel.title} description={novel.sourcePath} />
-        <div className="session-toolbar"><Link className="primary-button" to="/novels/$sourceId/compile" params={{ sourceId }}>Open compiler workbench</Link></div>
+        <PageHeading eyebrow={t("Source evidence")} title={novel.title} description={novel.sourcePath} />
+        <div className="session-toolbar"><Link className="primary-button" to="/novels/$sourceId/compile" params={{ sourceId }}>{t("Open compiler workbench")}</Link></div>
       </div>
       <div className="metric-grid">
-        <Metric label="Size" value={formatBytes(novel.bytes)} note="immutable source" />
-        <Metric label="Instances" value={novel.instanceCount} note="owned branches" />
-        <Metric label="Preparation" value={snapshot?.stage ?? "…"} note={snapshot ? `${snapshot.progress.completedBatches}/${snapshot.progress.totalBatches} batches` : "reading checkpoint"} />
-        <Metric label="Updated" value={formatDate(novel.updatedAt)} note={novel.id} />
+        <Metric label={t("Size")} value={formatBytes(novel.bytes)} note={t("immutable source")} />
+        <Metric label={t("Instances")} value={novel.instanceCount} note={t("owned branches")} />
+        <Metric label={t("Preparation")} value={snapshot ? t(snapshot.stage) : "…"} note={snapshot ? t("{done}/{total} batches", { done: snapshot.progress.completedBatches, total: snapshot.progress.totalBatches }) : t("reading checkpoint")} />
+        <Metric label={t("Updated")} value={formatDate(novel.updatedAt, localeTag)} note={novel.id} />
       </div>
-      <Panel title="Preparation checkpoint" action={snapshot ? <span className={`operation-status operation-${snapshot.stage === "ready" ? "succeeded" : snapshot.stage === "repair" ? "failed" : "running"}`}>{snapshot.stage}</span> : <span className="panel-tag">loading</span>}>
-        {preparation.isPending ? <InlineLoading label="Reading compiler checkpoints…" /> : preparation.isError ? <InlineError error={preparation.error} /> : snapshot ? <div className="novel-preparation-summary">
-          <div className="novel-progress"><span><strong>{Math.round(snapshot.progress.ratio * 100)}%</strong><small>evidence batches checkpointed</small></span><div><i style={{ width: `${Math.round(snapshot.progress.ratio * 100)}%` }} /></div></div>
+      <Panel title={t("Preparation checkpoint")} action={snapshot ? <span className={`operation-status operation-${snapshot.stage === "ready" ? "succeeded" : snapshot.stage === "repair" ? "failed" : "running"}`}>{t(snapshot.stage)}</span> : <span className="panel-tag">{t("loading")}</span>}>
+        {preparation.isPending ? <InlineLoading label={t("Reading compiler checkpoints…")} /> : preparation.isError ? <InlineError error={preparation.error} /> : snapshot ? <div className="novel-preparation-summary">
+          <div className="novel-progress"><span><strong>{Math.round(snapshot.progress.ratio * 100)}%</strong><small>{t("{percent}% evidence batches checkpointed", { percent: Math.round(snapshot.progress.ratio * 100) })}</small></span><div><i style={{ width: `${Math.round(snapshot.progress.ratio * 100)}%` }} /></div></div>
           <dl className="detail-list">
-            <Detail label="Next action" value={snapshot.nextAction.replaceAll("-", " ")} />
-            <Detail label="Pending proposals" value={String(snapshot.proposalCounts.pending)} />
-            <Detail label="Suggested branch" value={snapshot.branchId} mono />
-            <Detail label="Publication readiness" value={snapshot.audit?.readiness.publication ?? "unknown"} />
+            <Detail label={t("Next action")} value={t(snapshot.nextAction.replaceAll("-", " "))} />
+            <Detail label={t("Pending proposals")} value={String(snapshot.proposalCounts.pending)} />
+            <Detail label={t("Suggested branch")} value={snapshot.branchId} mono />
+            <Detail label={t("Publication readiness")} value={t(snapshot.audit?.readiness.publication ?? "unknown")} />
           </dl>
           {snapshot.repairReasons.length > 0 && <div className="proposal-validation-errors">{snapshot.repairReasons.slice(0, 4).map((reason) => <p key={reason}>{reason}</p>)}</div>}
-          <Link className="secondary-button" to="/novels/$sourceId/compile" params={{ sourceId }}>{snapshot.stage === "review" ? "Review proposal inbox" : snapshot.stage === "create-branch" ? "Create world instance" : "Continue preparation"}</Link>
+          <Link className="secondary-button" to="/novels/$sourceId/compile" params={{ sourceId }}>{snapshot.stage === "review" ? t("Review proposal inbox") : snapshot.stage === "create-branch" ? t("Create world instance") : t("Continue preparation")}</Link>
         </div> : null}
       </Panel>
-      <Panel title="World instances" action={<span className="panel-tag">committed</span>}>
-        {instances.length ? instances.map((instance) => <InstanceRow key={instance.branchId} instance={instance} />) : <EmptyState title="No committed instance" body="This source is registered but does not yet own a playable branch." />}
+      <Panel title={t("World instances")} action={<span className="panel-tag">{t("committed")}</span>}>
+        {instances.length ? instances.map((instance) => <InstanceRow key={instance.branchId} instance={instance} />) : <EmptyState title={t("No committed instance")} body={t("This source is registered but does not yet own a playable branch.")} />}
       </Panel>
-      <Panel title="Ontology workbench" action={<span className="panel-tag">five projections</span>}>
+      <Panel title={t("Ontology workbench")} action={<span className="panel-tag">{t("five projections")}</span>}>
         <div className="ontology-launch-grid">
           {[
-            ["model", "World model", "Entities, claims, goals, and character semantics"],
-            ["events", "Events", "Canon, committed history, causality, and possibilities"],
-            ["places", "Places", "Spatial topology and validity at committed time"],
-            ["rules", "Rules", "Effective rules, authority, and jurisdiction"],
-            ["provenance", "Provenance", "Evidence → proposal → validation → artifact → history"],
+            ["model", t("World model"), t("Entities, claims, goals, and character semantics")],
+            ["events", t("Events"), t("Canon, committed history, causality, and possibilities")],
+            ["places", t("Places"), t("Spatial topology and validity at committed time")],
+            ["rules", t("Rules"), t("Effective rules, authority, and jurisdiction")],
+            ["provenance", t("Provenance"), t("Evidence → proposal → validation → artifact → history")],
           ].map(([view, label, body]) => <Link key={view} to="/novels/$sourceId/ontology/$view" params={{ sourceId, view }} className="ontology-launch-card"><span>↗</span><strong>{label}</strong><p>{body}</p></Link>)}
         </div>
       </Panel>
-      <Panel title="Maintenance" action={<span className="panel-tag">exact preview required</span>}>
+      <Panel title={t("Maintenance")} action={<span className="panel-tag">{t("exact preview required")}</span>}>
         <div className="maintenance-zone">
-          <div><strong>Reset derived analysis</strong><p>Keep the registration, immutable source bytes, committed branches, sessions, pinned prepared revisions, and traces. Remove source-scoped compiler material so the novel can be parsed again.</p></div>
-          <MaintenanceControl action="reset-analysis" targetId={sourceId} csrfToken={data.csrfToken} triggerLabel="Preview analysis reset" onCompleted={() => {
+          <div><strong>{t("Reset derived analysis")}</strong><p>{t("Keep the registration, immutable source bytes, committed branches, sessions, pinned prepared revisions, and traces. Remove source-scoped compiler material so the novel can be parsed again.")}</p></div>
+          <MaintenanceControl action="reset-analysis" targetId={sourceId} csrfToken={data.csrfToken} triggerLabel={t("Preview analysis reset")} onCompleted={() => {
             void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
             void queryClient.invalidateQueries({ queryKey: preparationKey(sourceId) });
             void navigate({ to: "/novels/$sourceId/compile", params: { sourceId } });
           }} />
-          <div><strong>Remove novel</strong><p>Remove its registration, analysis, and owned branches. Sessions, conversations, archived content-addressed source bytes, and traces remain as detached history.</p></div>
-          <MaintenanceControl action="remove-novel" targetId={sourceId} csrfToken={data.csrfToken} triggerLabel="Preview novel removal" onCompleted={() => {
+          <div><strong>{t("Remove novel")}</strong><p>{t("Remove its registration, analysis, and owned branches. Sessions, conversations, archived content-addressed source bytes, and traces remain as detached history.")}</p></div>
+          <MaintenanceControl action="remove-novel" targetId={sourceId} csrfToken={data.csrfToken} triggerLabel={t("Preview novel removal")} onCompleted={() => {
             void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
             void navigate({ to: "/" });
           }} />
@@ -414,6 +425,7 @@ function OntologyRoutePage() {
 }
 
 function InstancePage() {
+  const { t, localeTag } = useI18n();
   const { branchId } = useParams({ from: instanceRoute.id });
   const { data } = useBootstrap();
   const queryClient = useQueryClient();
@@ -479,85 +491,85 @@ function InstancePage() {
         : { to: "/instances/$branchId", params: { branchId: result.forked.instance.branchId } });
     },
   });
-  if (detail.isPending && !instance) return <LoadingState label="Reading committed branch history…" />;
+  if (detail.isPending && !instance) return <LoadingState label={t("Reading committed branch history…")} />;
   if (detail.isError && !instance) return <ErrorState error={detail.error} retry={() => void detail.refetch()} />;
   if (!instance) return <MissingState kind="instance" id={branchId} />;
   const history = detail.data?.history ?? [];
   return (
     <>
       <div className="session-heading">
-        <PageHeading eyebrow="Committed branch" title={instance.name} description={instance.sourceTitle ?? "Unscoped legacy world"} />
-        <div className="session-toolbar">{instance.sourceId && <Link className="secondary-button" to="/novels/$sourceId/ontology/$view" params={{ sourceId: instance.sourceId, view: "events" }} search={{ branchId }}>Inspect ontology</Link>}<MaintenanceControl action="remove-instance" targetId={branchId} csrfToken={data?.csrfToken ?? ""} triggerLabel="Preview instance removal" onCompleted={() => {
+        <PageHeading eyebrow={t("Committed branch")} title={instance.name} description={instance.sourceTitle ?? t("Unscoped legacy world")} />
+        <div className="session-toolbar">{instance.sourceId && <Link className="secondary-button" to="/novels/$sourceId/ontology/$view" params={{ sourceId: instance.sourceId, view: "events" }} search={{ branchId }}>{t("Inspect ontology")}</Link>}<MaintenanceControl action="remove-instance" targetId={branchId} csrfToken={data?.csrfToken ?? ""} triggerLabel={t("Preview instance removal")} onCompleted={() => {
           void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
           void navigate(instance.sourceId ? { to: "/novels/$sourceId", params: { sourceId: instance.sourceId } } : { to: "/" });
         }} /></div>
       </div>
       <div className="metric-grid">
-        <Metric label="Story step" value={instance.logicalStep} note="derived world time" />
-        <Metric label="Commits" value={instance.commitCount} note="authoritative history" />
-        <Metric label="Events" value={instance.eventCount} note={instance.lastEventTitle ?? "no event title"} />
-        <Metric label="Actor" value={instance.actorName ?? "—"} note={instance.sessionAtHead ? "session at head" : "select below"} />
+        <Metric label={t("Story step")} value={instance.logicalStep} note={t("derived world time")} />
+        <Metric label={t("Commits")} value={instance.commitCount} note={t("authoritative history")} />
+        <Metric label={t("Events")} value={instance.eventCount} note={instance.lastEventTitle ?? t("no event title")} />
+        <Metric label={t("Actor")} value={instance.actorName ?? "—"} note={instance.sessionAtHead ? t("session at head") : t("select below")} />
       </div>
       <div className="content-grid">
-        <Panel title="Enter this world" action={<span className="panel-tag">Pi play</span>}>
-          {characters.isPending ? <InlineLoading label="Reading playable characters…" /> : characters.isError ? <InlineError error={characters.error} /> : characters.data?.characters.length ? (
+        <Panel title={t("Enter this world")} action={<span className="panel-tag">{t("Pi play")}</span>}>
+          {characters.isPending ? <InlineLoading label={t("Reading playable characters…")} /> : characters.isError ? <InlineError error={characters.error} /> : characters.data?.characters.length ? (
             <div className="character-picker">
               {characters.data.characters.map((character) => (
                 <label key={character.id} className={actorId === character.id ? "character-option character-option-selected" : "character-option"}>
                   <input type="radio" name="actor" value={character.id} checked={actorId === character.id} onChange={() => setActorId(character.id)} />
-                  <span><strong>{character.canonicalName}</strong><small>{character.locationName ?? character.locationId ?? "location unknown"}</small></span>
+                  <span><strong>{character.canonicalName}</strong><small>{character.locationName ?? character.locationId ?? t("location unknown")}</small></span>
                   <code>{character.id}</code>
                 </label>
               ))}
               <div className="action-row">
-                <button className="primary-button" disabled={!actorId || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? "Opening…" : existingSession ? "Switch / continue" : "Start play session"}</button>
-                {existingSession && <Link className="secondary-button" to="/play/$sessionId" params={{ sessionId: existingSession.id }}>Open saved session</Link>}
+                <button className="primary-button" disabled={!actorId || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? t("Opening…") : existingSession ? t("Switch / continue") : t("Start play session")}</button>
+                {existingSession && <Link className="secondary-button" to="/play/$sessionId" params={{ sessionId: existingSession.id }}>{t("Open saved session")}</Link>}
               </div>
               {createMutation.error && <InlineError error={createMutation.error} />}
             </div>
-          ) : <EmptyState title="No playable character at this head" body="The branch needs at least one living, embodied compiled character before play can begin." />}
+          ) : <EmptyState title={t("No playable character at this head")} body={t("The branch needs at least one living, embodied compiled character before play can begin.")} />}
         </Panel>
-        <Panel title="Branch identity" action={<span className="panel-tag">world truth</span>}>
+        <Panel title={t("Branch identity")} action={<span className="panel-tag">{t("world truth")}</span>}>
           <dl className="detail-list">
-            <Detail label="Branch ID" value={instance.branchId} mono />
-            <Detail label="Head commit" value={instance.headCommitId} mono />
-            <Detail label="Parent" value={instance.parentBranchId ?? "genesis"} mono />
-            <Detail label="Prepared revision" value={instance.preparedRevisionHash ?? "legacy / unpinned"} mono />
-            <Detail label="Updated" value={formatDateTime(instance.updatedAt)} />
+            <Detail label={t("Branch ID")} value={instance.branchId} mono />
+            <Detail label={t("Head commit")} value={instance.headCommitId} mono />
+            <Detail label={t("Parent")} value={instance.parentBranchId ?? t("genesis")} mono />
+            <Detail label={t("Prepared revision")} value={instance.preparedRevisionHash ?? t("legacy / unpinned")} mono />
+            <Detail label={t("Updated")} value={formatDateTime(instance.updatedAt, localeTag)} />
           </dl>
         </Panel>
       </div>
       <div className="branch-workbench">
-        <Panel title="Authoritative commit history" action={<span className="panel-tag">{history.length} commits</span>}>
-          {detail.isPending ? <InlineLoading label="Resolving ancestry…" /> : detail.isError ? <InlineError error={detail.error} /> : history.length ? (
+        <Panel title={t("Authoritative commit history")} action={<span className="panel-tag">{t("{count} commits", { count: history.length })}</span>}>
+          {detail.isPending ? <InlineLoading label={t("Resolving ancestry…")} /> : detail.isError ? <InlineError error={detail.error} /> : history.length ? (
             <div className="branch-timeline">
               {[...history].reverse().map((commit, index) => (
                 <article key={commit.id} className={commit.id === instance.headCommitId ? "branch-commit branch-commit-head" : "branch-commit"}>
                   <div className="branch-rail"><i /><span /></div>
                   <div className="branch-commit-body">
                     <header>
-                      <span><strong>{commit.id === instance.headCommitId ? "HEAD" : `STEP ${commit.logicalStep}`}</strong><small>{commit.eventCount} event{commit.eventCount === 1 ? "" : "s"}</small></span>
+                      <span><strong>{commit.id === instance.headCommitId ? t("HEAD") : t("STEP {step}", { step: commit.logicalStep })}</strong><small>{t(commit.eventCount === 1 ? "{count} event" : "{count} events", { count: commit.eventCount })}</small></span>
                       <code>{commit.id}</code>
                     </header>
-                    {commit.events.length ? <div className="branch-events">{commit.events.map((event) => <div key={event.hash}><span>◆</span><strong>{event.title}</strong><code>{event.eventId}</code>{event.possibilityId && <small>possibility {event.possibilityId}</small>}</div>)}</div> : <p className="branch-genesis-note">Genesis checkpoint — no event payload.</p>}
-                    {index === 0 && <small className="branch-current-note">Current derived world state projects from this ancestry.</small>}
+                    {commit.events.length ? <div className="branch-events">{commit.events.map((event) => <div key={event.hash}><span>◆</span><strong>{event.title}</strong><code>{event.eventId}</code>{event.possibilityId && <small>{t("possibility")} {event.possibilityId}</small>}</div>)}</div> : <p className="branch-genesis-note">{t("Genesis checkpoint — no event payload.")}</p>}
+                    {index === 0 && <small className="branch-current-note">{t("Current derived world state projects from this ancestry.")}</small>}
                   </div>
                 </article>
               ))}
             </div>
-          ) : <EmptyState title="No ancestry available" body="The instance exists, but its commit history could not be projected." />}
+          ) : <EmptyState title={t("No ancestry available")} body={t("The instance exists, but its commit history could not be projected.")} />}
         </Panel>
-        <Panel title="New session / fork timeline" action={<span className="panel-tag">counterfactual</span>}>
+        <Panel title={t("New session / fork timeline")} action={<span className="panel-tag">{t("counterfactual")}</span>}>
           <form className="fork-form" onSubmit={(event) => { event.preventDefault(); if (!forkMutation.isPending && forkBranchId.trim()) forkMutation.mutate(); }}>
-            <p>Create an independent branch from any committed ancestor. Future canon remains outside active branch truth.</p>
-            <label className="field-label"><span>New branch ID</span><input value={forkBranchId} onChange={(event) => setForkBranchId(event.target.value)} placeholder={`${branchId}-fork`} /></label>
-            <label className="field-label"><span>Display name <small>optional</small></span><input value={forkName} onChange={(event) => setForkName(event.target.value)} placeholder="Alternative timeline" /></label>
-            <label className="field-label fork-commit-field"><span>Fork from commit</span><select value={forkCommitId} onChange={(event) => setForkCommitId(event.target.value)}>
-              {history.map((commit) => <option key={commit.id} value={commit.id}>step {commit.logicalStep} · {shortHash(commit.id)}{commit.id === instance.headCommitId ? " · HEAD" : ""}</option>)}
+            <p>{t("Create an independent branch from any committed ancestor. Future canon remains outside active branch truth.")}</p>
+            <label className="field-label"><span>{t("New branch ID")}</span><input value={forkBranchId} onChange={(event) => setForkBranchId(event.target.value)} placeholder={`${branchId}-fork`} /></label>
+            <label className="field-label"><span>{t("Display name")} <small>{t("optional")}</small></span><input value={forkName} onChange={(event) => setForkName(event.target.value)} placeholder={t("Alternative timeline")} /></label>
+            <label className="field-label fork-commit-field"><span>{t("Fork from commit")}</span><select value={forkCommitId} onChange={(event) => setForkCommitId(event.target.value)}>
+              {history.map((commit) => <option key={commit.id} value={commit.id}>{t("step")} {commit.logicalStep} · {shortHash(commit.id)}{commit.id === instance.headCommitId ? ` · ${t("HEAD")}` : ""}</option>)}
             </select></label>
-            <label className="fork-session-option"><input type="checkbox" checked={openForkSession} onChange={(event) => setOpenForkSession(event.target.checked)} /><span><strong>Open a new play session after forking</strong><small>Enabled by default. The new session writes only to the child branch and creates no story event until you submit an action.</small></span></label>
-            <div className="fork-truth-note"><span>Truth boundary</span><small>The child receives only ancestry through the selected commit. Trace data and future source events are not copied into world truth.</small></div>
-            <button className="primary-button" type="submit" disabled={!data?.csrfToken || !forkBranchId.trim() || !forkCommitId || forkBranchId.trim() === branchId || (openForkSession && !actorId) || forkMutation.isPending}>{forkMutation.isPending ? (openForkSession ? "Forking and opening…" : "Forking…") : (openForkSession ? "Create new session" : "Create timeline fork")}</button>
+            <label className="fork-session-option"><input type="checkbox" checked={openForkSession} onChange={(event) => setOpenForkSession(event.target.checked)} /><span><strong>{t("Open a new play session after forking")}</strong><small>{t("Enabled by default. The new session writes only to the child branch and creates no story event until you submit an action.")}</small></span></label>
+            <div className="fork-truth-note"><span>{t("Truth boundary")}</span><small>{t("The child receives only ancestry through the selected commit. Trace data and future source events are not copied into world truth.")}</small></div>
+            <button className="primary-button" type="submit" disabled={!data?.csrfToken || !forkBranchId.trim() || !forkCommitId || forkBranchId.trim() === branchId || (openForkSession && !actorId) || forkMutation.isPending}>{forkMutation.isPending ? (openForkSession ? t("Forking and opening…") : t("Forking…")) : (openForkSession ? t("Create new session") : t("Create timeline fork"))}</button>
             {forkMutation.error && <InlineError error={forkMutation.error} />}
           </form>
         </Panel>
@@ -567,6 +579,7 @@ function InstancePage() {
 }
 
 function SessionPage() {
+  const { t, localeTag } = useI18n();
   const { sessionId } = useParams({ from: sessionRoute.id });
   const bootstrap = useBootstrap();
   const queryClient = useQueryClient();
@@ -710,73 +723,73 @@ function SessionPage() {
   return (
     <>
       <div className="session-heading">
-        <PageHeading eyebrow="Live executable world" title={session.title} description={`${session.actorName ?? session.actorId} · ${session.branchId}`} />
+        <PageHeading eyebrow={t("Live executable world")} title={session.title} description={`${session.actorName ?? session.actorId} · ${session.branchId}`} />
         <div className="session-toolbar">
-          {session.status === "detached" ? <span className="detached-pill">Detached world</span> : session.status === "archived" ? <button onClick={() => restoreMutation.mutate()}>Restore</button> : session.status === "idle" ? <button onClick={() => activateMutation.mutate()}>Make active</button> : <span className="live-pill"><i />Active writer</span>}
-          <button disabled={busy || !data.messages.length} onClick={() => window.confirm("Clear presentation transcript? Committed world history will be preserved.") && clearMutation.mutate()}>Clear transcript</button>
-          {session.status !== "archived" && session.status !== "detached" && <button disabled={busy} onClick={() => archiveMutation.mutate()}>Archive</button>}
-          <button className="danger-button" disabled={busy} onClick={() => window.confirm("Remove this play session and its presentation transcript? The world branch will be preserved.") && removeMutation.mutate()}>Remove</button>
+          {session.status === "detached" ? <span className="detached-pill">{t("Detached world")}</span> : session.status === "archived" ? <button onClick={() => restoreMutation.mutate()}>{t("Restore")}</button> : session.status === "idle" ? <button onClick={() => activateMutation.mutate()}>{t("Make active")}</button> : <span className="live-pill"><i />{t("Active writer")}</span>}
+          <button disabled={busy || !data.messages.length} onClick={() => window.confirm(t("Clear presentation transcript? Committed world history will be preserved.")) && clearMutation.mutate()}>{t("Clear transcript")}</button>
+          {session.status !== "archived" && session.status !== "detached" && <button disabled={busy} onClick={() => archiveMutation.mutate()}>{t("Archive")}</button>}
+          <button className="danger-button" disabled={busy} onClick={() => window.confirm(t("Remove this play session and its presentation transcript? The world branch will be preserved.")) && removeMutation.mutate()}>{t("Remove")}</button>
         </div>
       </div>
-      <section className="play-status-strip" aria-label="Play status"><div><span>Actor</span><strong>{session.actorName ?? session.actorId}</strong></div><div><span>Branch</span><code>{session.branchId}</code></div><div><span>Head</span><code>{data.headCommitId ? shortHash(data.headCommitId) : "detached"}</code></div><div><span>Story time</span><strong>{instance ? `step ${instance.logicalStep}` : "unknown"}</strong></div><div><span>Run stage</span><strong>{current?.phase ?? "idle"}</strong></div></section>
+      <section className="play-status-strip" aria-label={t("Play status")}><div><span>{t("Actor")}</span><strong>{session.actorName ?? session.actorId}</strong></div><div><span>{t("Branch")}</span><code>{session.branchId}</code></div><div><span>{t("Head")}</span><code>{data.headCommitId ? shortHash(data.headCommitId) : t("detached")}</code></div><div><span>{t("Story time")}</span><strong>{instance ? `${t("step")} ${instance.logicalStep}` : t("unknown")}</strong></div><div><span>{t("Run stage")}</span><strong>{current?.phase ?? t("idle")}</strong></div></section>
       <div className="play-layout">
-        <section className="transcript-panel" aria-label="Play transcript">
+        <section className="transcript-panel" aria-label={t("Transcript")}>
           <header>
-            <div><span className="eyebrow">Transcript</span><strong>{data.messages.length} messages</strong></div>
-            <code>{data.headCommitId ? shortHash(data.headCommitId) : "detached"}</code>
+            <div><span className="eyebrow">{t("Transcript")}</span><strong>{t("{count} messages", { count: data.messages.length })}</strong></div>
+            <code>{data.headCommitId ? shortHash(data.headCommitId) : t("detached")}</code>
           </header>
           <div className="transcript">
-            {!data.messages.length && !busy && <EmptyState title="The scene has not been rendered" body="Render the opening from the actor-safe committed frame. This does not advance world truth." />}
+            {!data.messages.length && !busy && <EmptyState title={t("The scene has not been rendered")} body={t("Render the opening from the actor-safe committed frame. This does not advance world truth.")} />}
             {data.messages.map((message) => (
               <article key={message.id} className={`message message-${message.role}`}>
-                <header><span>{message.role === "player" ? "You" : "Narrator"}</span><small>{message.status} · {formatDateTime(message.createdAt)}</small>{message.runId && <RunBadge sessionId={sessionId} runId={message.runId} messageStatus={message.status} run={runsById.get(message.runId)} />}</header>
+                <header><span>{message.role === "player" ? t("You") : t("Narrator")}</span><small>{t(message.status)} · {formatDateTime(message.createdAt, localeTag)}</small>{message.runId && <RunBadge sessionId={sessionId} runId={message.runId} messageStatus={message.status} run={runsById.get(message.runId)} />}</header>
                 <p>{message.text}</p>
                 <code>{shortHash(message.atCommit)}</code>
               </article>
             ))}
             {busy && (streamed || current?.phase.includes("narrat")) && (
               <article className="message message-scene message-streaming">
-                <header><span>Narrator · live</span><small>{current?.phase}</small></header>
-                <p>{streamed || "The scene is being composed…"}</p>
+                <header><span>{t("Narrator")} · {t("live")}</span><small>{current?.phase}</small></header>
+                <p>{streamed || t("The scene is being composed…")}</p>
               </article>
             )}
             {!busy && settledNarration && !data.messages.some((message) => message.text === settledNarration) && (
-              <article className="message message-scene"><header><span>Narrator</span><small>settled</small></header><p>{settledNarration}</p></article>
+              <article className="message message-scene"><header><span>{t("Narrator")}</span><small>{t("settled")}</small></header><p>{settledNarration}</p></article>
             )}
           </div>
           <footer className="composer-area">
             {choices.length > 0 && <div className="choice-strip">{choices.map((choice) => <ChoiceButton key={`${choice.affordanceId ?? "free"}:${choice.action}`} choice={choice} onChoose={(selected) => { setDraft(selected.action); setAffordanceId(selected.affordanceId); }} />)}</div>}
             <form className="composer" onSubmit={submitMove}>
-              <textarea value={draft} disabled={!writable || busy} onChange={(event) => { setDraft(event.target.value); setAffordanceId(undefined); }} placeholder={session.status === "detached" ? "This historical session has no writable world instance" : session.status === "archived" ? "Restore this session to continue" : "Describe one immediate action, observation, thought, or wait…"} rows={3} />
+              <textarea value={draft} disabled={!writable || busy} onChange={(event) => { setDraft(event.target.value); setAffordanceId(undefined); }} placeholder={session.status === "detached" ? t("This historical session has no writable world instance") : session.status === "archived" ? t("Restore this session to continue") : t("Describe one immediate action, observation, thought, or wait…")} rows={3} />
               <div>
-                <button type="button" className="text-button" disabled={!draft} onClick={() => { setDraft(""); setAffordanceId(undefined); }}>Clear</button>
-                {!data.messages.length && <button type="button" className="secondary-button" disabled={!writable || busy || narrationMutation.isPending} onClick={() => narrationMutation.mutate()}>Render opening</button>}
-                <button type="submit" className="primary-button" disabled={!draft.trim() || !writable || busy || moveMutation.isPending}>Commit action</button>
+                <button type="button" className="text-button" disabled={!draft} onClick={() => { setDraft(""); setAffordanceId(undefined); }}>{t("Clear")}</button>
+                {!data.messages.length && <button type="button" className="secondary-button" disabled={!writable || busy || narrationMutation.isPending} onClick={() => narrationMutation.mutate()}>{t("Render opening")}</button>}
+                <button type="submit" className="primary-button" disabled={!draft.trim() || !writable || busy || moveMutation.isPending}>{t("Commit action")}</button>
               </div>
             </form>
           </footer>
         </section>
         <aside className="operation-panel">
-          <header><span className="eyebrow">Current operation</span>{current && <span className={`operation-status operation-${current.status}`}>{current.status}</span>}</header>
+          <header><span className="eyebrow">{t("Current operation")}</span>{current && <span className={`operation-status operation-${current.status}`}>{t(current.status)}</span>}</header>
           {current ? (
             <>
               <dl className="operation-detail">
-                <Detail label="Kind" value={current.kind} />
-                <Detail label="Phase" value={current.phase} />
-                <Detail label="Operation" value={current.id} mono />
-                {current.runId && <div><dt>Trace</dt><dd><Link className="inline-trace-link" to="/play/$sessionId/trace/$runId" params={{ sessionId, runId: current.runId }}>Open full trajectory ↗</Link></dd></div>}
-                <Detail label="Commit boundary" value={current.commitBoundaryCrossed ? "crossed — world may be committed" : "not crossed"} />
+                <Detail label={t("Kind")} value={t(current.kind)} />
+                <Detail label={t("Phase")} value={current.phase} />
+                <Detail label={t("Operation")} value={current.id} mono />
+                {current.runId && <div><dt>{t("Trace")}</dt><dd><Link className="inline-trace-link" to="/play/$sessionId/trace/$runId" params={{ sessionId, runId: current.runId }}>{t("Open full trajectory")} ↗</Link></dd></div>}
+                <Detail label={t("Commit boundary")} value={current.commitBoundaryCrossed ? t("crossed — world may be committed") : t("not crossed")} />
               </dl>
               {current.progress.statusText && <div className="operation-activity"><span className={busy ? "loading-orbit" : "status-dot"} /><p>{String(current.progress.statusText)}</p></div>}
-              {busy && current.cancellable && <button className="stop-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>{current.commitBoundaryCrossed ? "Stop narration" : "Cancel before commit"}</button>}
-              {canRetryNarration && <button className="primary-button" disabled={narrationRetryMutation.isPending} onClick={() => narrationRetryMutation.mutate()}>{narrationRetryMutation.isPending ? "Starting presentation…" : "Retry narration only"}</button>}
+              {busy && current.cancellable && <button className="stop-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>{current.commitBoundaryCrossed ? t("Stop narration") : t("Cancel before commit")}</button>}
+              {canRetryNarration && <button className="primary-button" disabled={narrationRetryMutation.isPending} onClick={() => narrationRetryMutation.mutate()}>{narrationRetryMutation.isPending ? t("Starting presentation…") : t("Retry narration only")}</button>}
               {current.error && <div className="inline-error"><strong>{current.error.code}</strong><span>{current.error.message}</span><small>{recoveryInstruction(current.error)}</small></div>}
               {playResult.success && <OperationResult result={playResult.data} />}
-              {retryResult.success && <div className="operation-result"><span className="eyebrow">Presentation repair</span><strong>Rendered without world mutation</strong><p>Original move {shortHash(retryResult.data.playerMoveId)}</p><code>{shortHash(retryResult.data.headCommitId)}</code></div>}
+              {retryResult.success && <div className="operation-result"><span className="eyebrow">{t("Presentation repair")}</span><strong>{t("Rendered without world mutation")}</strong><p>{t("Original move {move}", { move: shortHash(retryResult.data.playerMoveId) })}</p><code>{shortHash(retryResult.data.headCommitId)}</code></div>}
             </>
-          ) : <EmptyState title="No operation yet" body="Render the scene or submit an action to start a traceable operation." />}
+          ) : <EmptyState title={t("No operation yet")} body={t("Render the scene or submit an action to start a traceable operation.")} />}
           {operationList.data && operationList.data.length > 1 && (
-            <div className="operation-history"><span className="eyebrow">Recent</span>{operationList.data.slice(0, 8).map((item) => <button key={item.id} className={item.id === effectiveOperationId ? "selected" : ""} onClick={() => setSelectedOperationId(item.id)}><span>{item.kind}</span><small>{item.status} · {formatTime(item.createdAt)}</small></button>)}</div>
+            <div className="operation-history"><span className="eyebrow">{t("Recent")}</span>{operationList.data.slice(0, 8).map((item) => <button key={item.id} className={item.id === effectiveOperationId ? "selected" : ""} onClick={() => setSelectedOperationId(item.id)}><span>{t(item.kind)}</span><small>{t(item.status)} · {formatTime(item.createdAt, localeTag)}</small></button>)}</div>
           )}
         </aside>
       </div>
@@ -801,21 +814,24 @@ function SessionTraceRoutePage() {
 }
 
 function ChoiceButton({ choice, onChoose }: { choice: PlayerChoiceSummary; onChoose: (choice: PlayerChoiceSummary) => void }) {
-  return <button type="button" onClick={() => onChoose(choice)}><span>{choice.action}</span>{choice.affordanceId && <small>preflighted</small>}</button>;
+  const { t } = useI18n();
+  return <button type="button" onClick={() => onChoose(choice)}><span>{choice.action}</span>{choice.affordanceId && <small>{t("preflighted")}</small>}</button>;
 }
 
 function RunBadge({ sessionId, runId, messageStatus, run }: { sessionId: string; runId: string; messageStatus: string; run?: Awaited<ReturnType<typeof fetchTraceRuns>>[number] }) {
+  const { t } = useI18n();
   const status = run?.status === "succeeded" ? messageStatus : run?.status ?? "loading";
-  const duration = run?.endedAt ? formatElapsed(run.startedAt, run.endedAt) : run ? "live" : "…";
-  return <Link className={`run-badge run-badge-${run?.status ?? "loading"}`} to="/play/$sessionId/trace/$runId" params={{ sessionId, runId }} title="Open the complete LLM, tool, context, timing, and world-effect trajectory"><strong>{status}</strong><small>{run ? `${run.counts.llmRequests}L · ${run.counts.toolCalls}T · ${run.eventHash ? "commit" : "no commit"} · ${duration}` : "trace loading"}</small><span>↗</span></Link>;
+  const duration = run?.endedAt ? formatElapsed(run.startedAt, run.endedAt) : run ? t("live") : "…";
+  return <Link className={`run-badge run-badge-${run?.status ?? "loading"}`} to="/play/$sessionId/trace/$runId" params={{ sessionId, runId }} title={t("Open the complete LLM, tool, context, timing, and world-effect trajectory")}><strong>{t(status)}</strong><small>{run ? `${run.counts.llmRequests}L · ${run.counts.toolCalls}T · ${run.eventHash ? t("commit") : t("no commit")} · ${duration}` : t("trace loading")}</small><span>↗</span></Link>;
 }
 
 function OperationResult({ result }: { result: ReturnType<typeof playOperationResultSchema.parse> }) {
+  const { t } = useI18n();
   return (
     <div className="operation-result">
-      <span className="eyebrow">World result</span>
-      <strong>{result.accepted ? "Committed" : `Not committed · ${result.stage}`}</strong>
-      <p>Step {result.logicalStep} · narration {result.narrationStatus}</p>
+      <span className="eyebrow">{t("World result")}</span>
+      <strong>{result.accepted ? t("Committed") : t("Not committed · {stage}", { stage: result.stage })}</strong>
+      <p>{t("Step {step} · narration {status}", { step: result.logicalStep, status: result.narrationStatus })}</p>
       <code>{shortHash(result.finalHead)}</code>
       {result.issues.length > 0 && <ul>{result.issues.slice(0, 4).map((issue, index) => <li key={`${issue.code}:${index}`}><strong>{issue.code}</strong>{issue.message}</li>)}</ul>}
       {result.narrationError && <small>{result.narrationError}</small>}
@@ -824,6 +840,7 @@ function OperationResult({ result }: { result: ReturnType<typeof playOperationRe
 }
 
 function ModelsPage() {
+  const { t } = useI18n();
   const { data } = useBootstrap();
   const queryClient = useQueryClient();
   const profiles = useQuery({ queryKey: ["model-profiles"], queryFn: ({ signal }) => fetchModelProfiles(signal) });
@@ -832,9 +849,9 @@ function ModelsPage() {
   const loginOperations = (operations.data ?? []).filter((operation) => operation.kind === "provider-login");
   return (
     <>
-      <PageHeading eyebrow="Pi runtime" title="Models & credentials" description="Provider login stays inside Pi. API keys are write-only; this page receives status metadata, prompts, and redacted progress only." />
-      {data.modelCatalog.diagnostic && <div className="alert"><strong>Catalog diagnostic</strong><span>{data.modelCatalog.diagnostic}</span></div>}
-      <Panel title="Providers" action={<span className="panel-tag">Pi credential store</span>}>
+      <PageHeading eyebrow={t("Pi runtime")} title={t("Models & credentials")} description={t("Provider login stays inside Pi. API keys are write-only; this page receives status metadata, prompts, and redacted progress only.")} />
+      {data.modelCatalog.diagnostic && <div className="alert"><strong>{t("Catalog diagnostic")}</strong><span>{data.modelCatalog.diagnostic}</span></div>}
+      <Panel title={t("Providers")} action={<span className="panel-tag">{t("Pi credential store")}</span>}>
         <div className="provider-grid">
           {data.modelCatalog.providers.map((provider) => (
             <ProviderCredentialCard key={provider.id} provider={provider} csrfToken={data.csrfToken} operations={loginOperations.filter((operation) => operation.scopeId === provider.id)} onChanged={() => {
@@ -844,14 +861,14 @@ function ModelsPage() {
           ))}
         </div>
       </Panel>
-      <Panel title="Role profiles" action={<span className="panel-tag">shared YAML config</span>}>
-        {profiles.isPending ? <InlineLoading label="Reading model routes…" /> : profiles.isError ? <InlineError error={profiles.error} /> : <><div className="profile-config-path"><span>Configuration</span><code>{profiles.data.configPath}</code></div><div className="model-profile-grid">{profiles.data.roles.map((profile) => <ModelProfileEditor key={profile.role} profile={profile} models={data.modelCatalog.models} csrfToken={data.csrfToken} onSaved={(next) => queryClient.setQueryData(["model-profiles"], next)} />)}</div></>}
+      <Panel title={t("Role profiles")} action={<span className="panel-tag">{t("shared YAML config")}</span>}>
+        {profiles.isPending ? <InlineLoading label={t("Reading model routes…")} /> : profiles.isError ? <InlineError error={profiles.error} /> : <><div className="profile-config-path"><span>{t("Configuration")}</span><code>{profiles.data.configPath}</code></div><div className="model-profile-grid">{profiles.data.roles.map((profile) => <ModelProfileEditor key={profile.role} profile={profile} models={data.modelCatalog.models} csrfToken={data.csrfToken} onSaved={(next) => queryClient.setQueryData(["model-profiles"], next)} />)}</div></>}
       </Panel>
-      <Panel title="Known models" action={<span className="panel-tag">{data.modelCatalog.models.length}</span>}>
-        <div className="model-table" role="table" aria-label="Known Pi models">
+      <Panel title={t("Known models")} action={<span className="panel-tag">{data.modelCatalog.models.length}</span>}>
+        <div className="model-table" role="table" aria-label={t("Known Pi models")}>
           {data.modelCatalog.models.slice(0, 100).map((model) => (
             <div className="model-row" role="row" key={`${model.providerId}/${model.id}`}>
-              <span><strong>{model.name}</strong><small>{model.providerId}/{model.id}</small></span><span>{model.api}</span><span>{formatNumber(model.contextWindow)} ctx</span><span>{model.reasoning ? "reasoning" : "standard"}</span>
+              <span><strong>{model.name}</strong><small>{model.providerId}/{model.id}</small></span><span>{model.api}</span><span>{formatNumber(model.contextWindow)} {t("ctx")}</span><span>{model.reasoning ? t("reasoning") : t("standard")}</span>
             </div>
           ))}
         </div>
@@ -861,6 +878,7 @@ function ModelsPage() {
 }
 
 function ProviderCredentialCard({ provider, csrfToken, operations, onChanged }: { provider: ProviderSummary; csrfToken: string; operations: OperationSnapshot[]; onChanged: () => void }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [apiKey, setApiKey] = useState("");
   const [answer, setAnswer] = useState("");
@@ -904,7 +922,7 @@ function ProviderCredentialCard({ provider, csrfToken, operations, onChanged }: 
     }
   };
   const remove = async () => {
-    if (!window.confirm(`Remove the stored Pi credential for ${provider.name}? Environment credentials are not changed.`)) return;
+    if (!window.confirm(t("Remove the stored Pi credential for {provider}? Environment credentials are not changed.", { provider: provider.name }))) return;
     setBusy(true);
     setError(undefined);
     try { await logoutProvider(provider.id, { clientRequestId: requestId("provider-logout") }, csrfToken); onChanged(); }
@@ -913,27 +931,30 @@ function ProviderCredentialCard({ provider, csrfToken, operations, onChanged }: 
   };
   return <article className="provider-card">
     <header><div><span className={`status-dot ${provider.configured ? "status-available" : "status-planned"}`} /><strong>{provider.name}</strong></div><code>{provider.id}</code></header>
-    <p>{provider.configured ? provider.authLabel ?? provider.authSource ?? "Configured" : "Not configured"}</p><small>{provider.modelCount} models{provider.credentialType ? ` · ${provider.credentialType}` : ""}</small>
-    {provider.authTypes.includes("api_key") && <form className="provider-key-form" onSubmit={(event) => { event.preventDefault(); if (apiKey && !busy) void begin("api_key"); }}><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Write-only API key" /><button type="submit" disabled={!apiKey || busy}>Save key</button></form>}
-    <div className="provider-actions">{provider.authTypes.includes("oauth") && <button disabled={busy || Boolean(operation && !isTerminal(operation.status))} onClick={() => void begin("oauth")}>Start OAuth</button>}{provider.configured && <button className="danger-button" disabled={busy} onClick={() => void remove()}>Remove credential</button>}</div>
-    {operation && <div className="provider-login-state"><span className={`operation-status operation-${operation.status}`}>{operation.phase}</span><small>{operation.error?.message ?? String(authEvent?.message ?? "Pi authentication is running")}</small>{authEvent && <AuthEventView event={authEvent} />}</div>}
+    <p>{provider.configured ? provider.authLabel ?? provider.authSource ?? t("Configured") : t("Not configured")}</p><small>{provider.modelCount} {t("models")}{provider.credentialType ? ` · ${provider.credentialType}` : ""}</small>
+    {provider.authTypes.includes("api_key") && <form className="provider-key-form" onSubmit={(event) => { event.preventDefault(); if (apiKey && !busy) void begin("api_key"); }}><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={t("Write-only API key")} /><button type="submit" disabled={!apiKey || busy}>{t("Save key")}</button></form>}
+    <div className="provider-actions">{provider.authTypes.includes("oauth") && <button disabled={busy || Boolean(operation && !isTerminal(operation.status))} onClick={() => void begin("oauth")}>{t("Start OAuth")}</button>}{provider.configured && <button className="danger-button" disabled={busy} onClick={() => void remove()}>{t("Remove credential")}</button>}</div>
+    {operation && <div className="provider-login-state"><span className={`operation-status operation-${operation.status}`}>{operation.phase}</span><small>{operation.error?.message ?? String(authEvent?.message ?? t("Pi authentication is running"))}</small>{authEvent && <AuthEventView event={authEvent} />}</div>}
     {interaction.success && interaction.data.status === "pending" && <AuthPromptForm interaction={interaction.data} answer={answer} setAnswer={setAnswer} busy={busy} onSubmit={() => void submitAnswer()} />}
     {error && <InlineError error={error} />}
   </article>;
 }
 
 function AuthPromptForm({ interaction, answer, setAnswer, busy, onSubmit }: { interaction: ReturnType<typeof authInteractionSnapshotSchema.parse>; answer: string; setAnswer: (value: string) => void; busy: boolean; onSubmit: () => void }) {
+  const { t } = useI18n();
   const prompt = interaction.prompt;
-  return <form className="auth-prompt" onSubmit={(event) => { event.preventDefault(); if (!busy) onSubmit(); }}><strong>{prompt.message}</strong>{prompt.type === "select" ? <select value={answer} onChange={(event) => setAnswer(event.target.value)}><option value="">Choose…</option>{prompt.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select> : <input type={prompt.type === "secret" ? "password" : "text"} autoComplete="off" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={prompt.placeholder} />}<button disabled={busy || !answer}>Answer once</button><small>Answer values are never echoed into operation progress or SSE.</small></form>;
+  return <form className="auth-prompt" onSubmit={(event) => { event.preventDefault(); if (!busy) onSubmit(); }}><strong>{prompt.message}</strong>{prompt.type === "select" ? <select value={answer} onChange={(event) => setAnswer(event.target.value)}><option value="">{t("Choose…")}</option>{prompt.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select> : <input type={prompt.type === "secret" ? "password" : "text"} autoComplete="off" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={prompt.placeholder} />}<button disabled={busy || !answer}>{t("Answer once")}</button><small>{t("Answer values are never echoed into operation progress or SSE.")}</small></form>;
 }
 
 function AuthEventView({ event }: { event: Record<string, unknown> }) {
+  const { t } = useI18n();
   const url = typeof event.url === "string" ? safeExternalUrl(event.url) : undefined;
   const verification = typeof event.verificationUri === "string" ? safeExternalUrl(event.verificationUri) : undefined;
-  return <div className="auth-event">{url && <a href={url} target="_blank" rel="noreferrer">Open provider authorization ↗</a>}{verification && <a href={verification} target="_blank" rel="noreferrer">Open verification page ↗</a>}{typeof event.userCode === "string" && <code>{event.userCode}</code>}{typeof event.instructions === "string" && <p>{event.instructions}</p>}</div>;
+  return <div className="auth-event">{url && <a href={url} target="_blank" rel="noreferrer">{t("Open provider authorization")} ↗</a>}{verification && <a href={verification} target="_blank" rel="noreferrer">{t("Open verification page")} ↗</a>}{typeof event.userCode === "string" && <code>{event.userCode}</code>}{typeof event.instructions === "string" && <p>{event.instructions}</p>}</div>;
 }
 
 function ModelProfileEditor({ profile, models, csrfToken, onSaved }: { profile: ModelProfileSummary; models: ModelSummary[]; csrfToken: string; onSaved: (profiles: Awaited<ReturnType<typeof fetchModelProfiles>>) => void }) {
+  const { t } = useI18n();
   const initialKey = profile.providerId && profile.modelId ? modelOptionKey(profile.providerId, profile.modelId) : "";
   const [selected, setSelected] = useState(initialKey);
   const [thinking, setThinking] = useState(profile.thinkingLevel ?? "medium");
@@ -946,7 +967,7 @@ function ModelProfileEditor({ profile, models, csrfToken, onSaved }: { profile: 
     },
     onSuccess: onSaved,
   });
-  return <article className="model-profile-card"><header><strong>{profile.role.replaceAll("-", " ")}</strong><small>{profile.inheritedDefault ? `inherits ${profile.profileId ?? "none"}` : profile.profileId ?? "unconfigured"}</small></header><select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Choose model…</option>{models.map((model) => <option key={modelOptionKey(model.providerId, model.id)} value={modelOptionKey(model.providerId, model.id)}>{model.providerId} / {model.name}{model.available ? "" : " · unavailable"}</option>)}</select><select value={thinking} onChange={(event) => setThinking(event.target.value as typeof thinking)}><option value="off">thinking off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select><button disabled={!selected || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? "Saving…" : "Save route"}</button>{mutation.error && <InlineError error={mutation.error} />}</article>;
+  return <article className="model-profile-card"><header><strong>{t(profile.role.replaceAll("-", " "))}</strong><small>{profile.inheritedDefault ? `${t("inherits")} ${profile.profileId ?? t("none")}` : profile.profileId ?? t("unconfigured")}</small></header><select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">{t("Choose model…")}</option>{models.map((model) => <option key={modelOptionKey(model.providerId, model.id)} value={modelOptionKey(model.providerId, model.id)}>{model.providerId} / {model.name}{model.available ? "" : ` · ${t("unavailable")}`}</option>)}</select><select value={thinking} onChange={(event) => setThinking(event.target.value as typeof thinking)}><option value="off">{t("thinking off")}</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select><button disabled={!selected || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? t("Saving…") : t("Save route")}</button>{mutation.error && <InlineError error={mutation.error} />}</article>;
 }
 
 function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
@@ -959,10 +980,12 @@ function Panel({ title, action, children }: { title: string; action?: ReactNode;
   return <section className="panel"><header><h2>{title}</h2>{action}</header><div className="panel-body">{children}</div></section>;
 }
 function NovelCard({ novel }: { novel: NovelSummary }) {
-  return <Link to="/novels/$sourceId" params={{ sourceId: novel.id }} className="novel-card"><span className="book-spine" /><div><span className="eyebrow">{novel.instanceCount} instances</span><h3>{novel.title}</h3><p>{novel.sourcePath}</p><small>{formatBytes(novel.bytes)} · {formatDate(novel.updatedAt)}</small></div></Link>;
+  const { t, localeTag } = useI18n();
+  return <Link to="/novels/$sourceId" params={{ sourceId: novel.id }} className="novel-card"><span className="book-spine" /><div><span className="eyebrow">{t("{count} instances", { count: novel.instanceCount })}</span><h3>{novel.title}</h3><p>{novel.sourcePath}</p><small>{formatBytes(novel.bytes)} · {formatDate(novel.updatedAt, localeTag)}</small></div></Link>;
 }
 function InstanceRow({ instance }: { instance: InstanceSummary }) {
-  return <Link to="/instances/$branchId" params={{ branchId: instance.branchId }} className="instance-row"><span className={`branch-marker ${instance.active ? "branch-marker-active" : ""}`} /><span><strong>{instance.name}</strong><small>{instance.sourceTitle ?? instance.sourceId ?? "unscoped"}</small></span><span><strong>Step {instance.logicalStep}</strong><small>{instance.eventCount} events</small></span><code>{shortHash(instance.headCommitId)}</code></Link>;
+  const { t } = useI18n();
+  return <Link to="/instances/$branchId" params={{ branchId: instance.branchId }} className="instance-row"><span className={`branch-marker ${instance.active ? "branch-marker-active" : ""}`} /><span><strong>{instance.name}</strong><small>{instance.sourceTitle ?? instance.sourceId ?? t("unscoped")}</small></span><span><strong>{t("Step")} {instance.logicalStep}</strong><small>{t("{count} events", { count: instance.eventCount })}</small></span><code>{shortHash(instance.headCommitId)}</code></Link>;
 }
 function Detail({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return <div><dt>{label}</dt><dd className={mono ? "mono" : undefined}>{value}</dd></div>;
@@ -971,17 +994,20 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   return <div className="empty-state"><span>◇</span><div><strong>{title}</strong><p>{body}</p></div></div>;
 }
 function MissingState({ kind, id }: { kind: string; id: string }) {
-  return <div className="center-state"><span className="eyebrow">Not found</span><h1>Unknown {kind}</h1><p>No item with ID <code>{id}</code> exists in the current workspace.</p><Link to="/">Return to overview</Link></div>;
+  const { t } = useI18n();
+  return <div className="center-state"><span className="eyebrow">{t("Not found")}</span><h1>{t("Unknown {kind}", { kind: t(kind) })}</h1><p>{t("No item with ID {id} exists in the current workspace.", { id })}</p><Link to="/">{t("Return to overview")}</Link></div>;
 }
 function LoadingState({ label = "Reading local catalog and Pi metadata…" }: { label?: string }) {
-  return <div className="center-state"><span className="loading-orbit" /><h1>Opening the world model</h1><p>{label}</p></div>;
+  const { t } = useI18n();
+  return <div className="center-state"><span className="loading-orbit" /><h1>{t("Opening the world model")}</h1><p>{t(label)}</p></div>;
 }
 function ErrorState({ error, retry }: { error: Error; retry: () => void }) {
+  const { t } = useI18n();
   const detail = webErrorDetail(error);
-  return <div className="center-state center-error"><span className="eyebrow">{detail?.code ?? "Request failed"}</span><h1>The local workspace could not be read</h1><p>{error.message}</p>{detail && <small>{recoveryInstruction(detail)}</small>}{canRetrySameRequest(error) && <button onClick={retry}>Retry once</button>}</div>;
+  return <div className="center-state center-error"><span className="eyebrow">{detail?.code ?? t("Request failed")}</span><h1>{t("The local workspace could not be read")}</h1><p>{error.message}</p>{detail && <small>{recoveryInstruction(detail, t)}</small>}{canRetrySameRequest(error) && <button onClick={retry}>{t("Retry once")}</button>}</div>;
 }
 function InlineLoading({ label }: { label: string }) { return <div className="inline-loading"><span className="loading-orbit" />{label}</div>; }
-function InlineError({ error }: { error: Error }) { const detail = webErrorDetail(error); return <div className="inline-error"><strong>{detail?.code ?? error.name}</strong><span>{error.message}</span>{detail && <small>{recoveryInstruction(detail)}</small>}</div>; }
+function InlineError({ error }: { error: Error }) { const { t } = useI18n(); const detail = webErrorDetail(error); return <div className="inline-error"><strong>{detail?.code ?? error.name}</strong><span>{error.message}</span>{detail && <small>{recoveryInstruction(detail, t)}</small>}</div>; }
 
 function parseServerEvent(raw: Event) {
   if (!(raw instanceof MessageEvent)) return undefined;
@@ -1004,9 +1030,9 @@ function firstError(...errors: Array<Error | null | undefined>): Error | undefin
 function requestId(prefix: string): string { return `${prefix}-${crypto.randomUUID()}`; }
 function shortHash(value: string): string { return value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-5)}` : value; }
 function formatBytes(bytes: number): string { return bytes < 1_024 ? `${bytes} B` : bytes < 1_048_576 ? `${(bytes / 1_024).toFixed(1)} KB` : `${(bytes / 1_048_576).toFixed(1)} MB`; }
-function formatDate(value: string): string { return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(value)); }
-function formatDateTime(value: string): string { return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
-function formatTime(value: string): string { return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }
+function formatDate(value: string, locale?: string): string { return new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", year: "numeric" }).format(new Date(value)); }
+function formatDateTime(value: string, locale?: string): string { return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
+function formatTime(value: string, locale?: string): string { return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }
 function formatElapsed(startedAt: string, endedAt: string): string { const milliseconds = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)); return milliseconds < 1_000 ? `${milliseconds}ms` : milliseconds < 60_000 ? `${(milliseconds / 1_000).toFixed(1)}s` : `${Math.floor(milliseconds / 60_000)}m ${Math.round((milliseconds % 60_000) / 1_000)}s`; }
 function formatNumber(value: number): string { return new Intl.NumberFormat(undefined, { notation: "compact" }).format(value); }
 function modelOptionKey(providerId: string, modelId: string): string { return JSON.stringify([providerId, modelId]); }

@@ -91,8 +91,20 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   page.on("console", (message) => browserDiagnostics.push(message.text()));
   page.on("pageerror", (error) => browserDiagnostics.push(error.message));
 
+  await page.addInitScript(() => window.localStorage.setItem("novel-world-harness.locale", "en"));
   await page.goto(origin);
   await expect(page.getByRole("heading", { name: "World control room" })).toBeVisible();
+  await page.getByRole("button", { name: "中文" }).click();
+  await expect(page.getByRole("heading", { name: "世界控制台" })).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await page.getByRole("button", { name: "EN" }).click();
+  await expect(page.getByRole("heading", { name: "World control room" })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(page.locator(".sidebar")).toHaveClass(/sidebar-open/);
+  await page.getByRole("button", { name: "Close navigation" }).click();
+  await expect(page.locator(".sidebar")).not.toHaveClass(/sidebar-open/);
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   await page.getByRole("link", { name: /Register novel/ }).first().click();
   await page.getByPlaceholder("novel.txt").fill("browser-mvp.txt");

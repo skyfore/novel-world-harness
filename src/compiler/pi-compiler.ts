@@ -37,6 +37,7 @@ export type PiCompilerOptions = {
   onToolResult?: (name: string, result: unknown, isError: boolean) => void;
   onEvent?: PiAgentSessionOptions["onEvent"];
   onRetry?: PiAgentSessionOptions["onRetry"];
+  trace?: PiAgentSessionOptions["trace"];
   segmentIds?: readonly string[];
   compilerBatchId?: string;
   sourceId?: string;
@@ -126,6 +127,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     ...(options.onToolResult ? { onToolResult: options.onToolResult } : {}),
     ...(options.onEvent ? { onEvent: options.onEvent } : {}),
     ...(options.onRetry ? { onRetry: options.onRetry } : {}),
+    ...(options.trace ? { trace: options.trace } : {}),
     interactionMode: "compiler",
     includeNwhExtension: lifecycle.includeNwhExtension,
     // Compiler facts must come only from the explicitly supplied evidence

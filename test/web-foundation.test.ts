@@ -10,6 +10,8 @@ import {
   bootstrapResponseSchema,
   healthResponseSchema,
   modelCatalogSchema,
+  preparationSnapshotSchema,
+  sourceRegistrationResultSchema,
   type ModelCatalog,
 } from "../src/web/contracts.js";
 import { parseWebPort } from "../src/commands/web.js";
@@ -84,6 +86,51 @@ describe("Web event stream", () => {
 });
 
 describe("local Web host", () => {
+  it("registers browser source content and exposes its preparation checkpoint", async () => {
+    const root = await workspace("nwh-web-source-route-");
+    const app = await createWebHost({
+      root,
+      serveStatic: false,
+      modelCatalogService: { read: async () => emptyModels },
+      csrfToken: "source-route-csrf-token-that-is-long-enough",
+    });
+    apps.push(app);
+
+    const registered = await app.inject({
+      method: "POST",
+      url: "/api/v1/sources",
+      headers: { "x-nwh-csrf": "source-route-csrf-token-that-is-long-enough" },
+      payload: {
+        title: "browser-story.txt",
+        content: "The browser opens a world.\n",
+        clientRequestId: "source-route-1",
+      },
+    });
+    expect(registered.statusCode).toBe(201);
+    const result = sourceRegistrationResultSchema.parse(registered.json());
+    expect(result).toMatchObject({
+      source: { title: "browser-story.txt" },
+      preparation: { stage: "compile" },
+    });
+
+    const preparation = await app.inject({
+      method: "GET",
+      url: `/api/v1/novels/${result.source.id}/preparation`,
+    });
+    expect(preparation.statusCode).toBe(200);
+    expect(preparationSnapshotSchema.parse(preparation.json())).toMatchObject({
+      source: { id: result.source.id },
+      nextAction: "compile",
+    });
+
+    const proposals = await app.inject({
+      method: "GET",
+      url: `/api/v1/novels/${result.source.id}/proposals?status=pending`,
+    });
+    expect(proposals.statusCode).toBe(200);
+    expect(proposals.json()).toEqual([]);
+  });
+
   it("serves versioned catalog APIs with strict local headers", async () => {
     const root = await workspace("nwh-web-host-");
     const store = await WorkspaceStore.create(root);

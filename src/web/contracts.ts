@@ -167,6 +167,11 @@ export const operationKindSchema = z.enum([
   "player-move",
   "scene-narration",
   "prepare",
+  "instance-create",
+  "branch-fork",
+  "instance-remove",
+  "analysis-reset",
+  "novel-remove",
 ]);
 
 export const operationSnapshotSchema = z.object({
@@ -191,6 +196,203 @@ export const operationSnapshotSchema = z.object({
 
 export const operationAcceptedSchema = z.object({
   operation: operationSnapshotSchema,
+  reused: z.boolean(),
+}).strict();
+
+export const sourceRegistrationRequestSchema = z.object({
+  title: z.string().trim().min(1).max(200).refine((value) => !/[\r\n]/u.test(value), {
+    message: "Source title must fit on one line.",
+  }),
+  content: z.string().min(1).max(25_000_000),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const preparationStageSchema = z.enum([
+  "needs-source",
+  "choose-source",
+  "compile",
+  "review",
+  "repair",
+  "needs-initial-world",
+  "create-branch",
+  "ready",
+]);
+
+export const preparationNextActionSchema = z.enum([
+  "register-source",
+  "choose-source",
+  "compile",
+  "review-proposals",
+  "repair-analysis",
+  "generate-initial-world",
+  "create-instance",
+  "play",
+]);
+
+export const proposalStatusSchema = z.enum(["pending", "accepted", "rejected"]);
+
+export const proposalSummarySchema = z.object({
+  id: z.string().min(1),
+  kind: z.string().min(1),
+  schemaVersion: z.number().int().positive(),
+  createdAt: z.string().datetime({ offset: true }),
+  worker: z.string().min(1),
+  status: proposalStatusSchema,
+}).strict();
+
+export const compilerReadinessSchema = z.object({
+  structural: z.enum(["ready", "not-ready", "unknown"]),
+  evidence: z.enum(["ready", "not-ready", "unknown"]),
+  accounting: z.enum(["ready", "not-ready", "unknown"]),
+  resolution: z.enum(["ready", "not-ready", "unknown"]),
+  semantic: z.enum(["ready", "not-ready", "unknown"]),
+  runtime: z.enum(["ready", "not-ready", "unknown"]),
+  publication: z.enum(["ready", "not-ready", "unknown"]),
+  unknownDimensions: z.array(z.string()),
+  blockingIssues: z.array(z.string()),
+}).strict();
+
+export const compilerAuditSummarySchema = z.object({
+  canonical: z.object({
+    entities: z.number().int().nonnegative(),
+    propositions: z.number().int().nonnegative(),
+    attributions: z.number().int().nonnegative(),
+    claims: z.number().int().nonnegative(),
+    events: z.number().int().nonnegative(),
+    eventParticipations: z.number().int().nonnegative(),
+    eventRelations: z.number().int().nonnegative(),
+    spatialRelations: z.number().int().nonnegative(),
+    rules: z.number().int().nonnegative(),
+    initialWorld: z.boolean(),
+    characterGoals: z.number().int().nonnegative(),
+    characterModels: z.number().int().nonnegative(),
+    possibilities: z.number().int().nonnegative(),
+  }).strict(),
+  evidence: z.object({
+    artifactsChecked: z.number().int().nonnegative(),
+    referencesChecked: z.number().int().nonnegative(),
+    invalidReferences: z.number().int().nonnegative(),
+    assertionsChecked: z.number().int().nonnegative(),
+    invalidAssertions: z.number().int().nonnegative(),
+    exactBindingRatio: z.number().min(0).max(1).nullable(),
+  }).strict(),
+  observations: z.object({
+    structuralUnits: z.number().int().nonnegative(),
+    accountedUnits: z.number().int().nonnegative(),
+    unaccountedUnits: z.number().int().nonnegative(),
+    blockingUnits: z.number().int().nonnegative(),
+    unitCoverage: z.number().min(0).max(1).nullable(),
+    byteCoverage: z.number().min(0).max(1).nullable(),
+  }).strict(),
+  consistency: z.object({
+    causalGraphValid: z.boolean().nullable(),
+    narrativeGraphNavigable: z.boolean().nullable(),
+    semanticReady: z.boolean().nullable(),
+    causalComponents: z.number().int().nonnegative(),
+    semanticIssues: z.array(z.string()),
+  }).strict(),
+  readiness: compilerReadinessSchema,
+  notes: z.array(z.string()),
+}).strict();
+
+export const preparationSnapshotSchema = z.object({
+  version: z.literal(1),
+  source: novelSummarySchema,
+  branchId: z.string().min(1),
+  stage: preparationStageSchema,
+  nextAction: preparationNextActionSchema,
+  progress: z.object({
+    completedBatches: z.number().int().nonnegative(),
+    totalBatches: z.number().int().nonnegative(),
+    remainingBatches: z.number().int().nonnegative(),
+    ratio: z.number().min(0).max(1),
+  }).strict(),
+  proposalCounts: z.object({
+    pending: z.number().int().nonnegative(),
+    accepted: z.number().int().nonnegative(),
+    rejected: z.number().int().nonnegative(),
+  }).strict(),
+  pending: z.array(proposalSummarySchema),
+  repairReasons: z.array(z.string()),
+  audit: compilerAuditSummarySchema.optional(),
+  updatedAt: z.string().datetime({ offset: true }),
+}).strict();
+
+export const sourceRegistrationResultSchema = z.object({
+  source: novelSummarySchema,
+  segmentCount: z.number().int().nonnegative(),
+  structuralUnitCount: z.number().int().nonnegative(),
+  reused: z.boolean(),
+  preparation: preparationSnapshotSchema,
+}).strict();
+
+export const prepareNovelRequestSchema = z.object({
+  mode: z.enum(["next", "all"]),
+  branchId: z.string().trim().min(1).max(200).optional(),
+  model: z.string().trim().min(1).max(300).optional(),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const proposalDetailSchema = z.object({
+  summary: proposalSummarySchema,
+  envelope: z.record(z.string(), z.unknown()),
+  rejection: z.object({
+    version: z.literal(1),
+    proposalId: z.string().min(1),
+    kind: z.string().min(1),
+    rejectedAt: z.string().datetime({ offset: true }),
+    errors: z.array(z.object({
+      code: z.string().min(1),
+      message: z.string().min(1),
+      path: z.string().optional(),
+    }).strict()).min(1),
+  }).strict().nullable(),
+}).strict();
+
+export const proposalAcceptRequestSchema = z.object({
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const proposalRejectRequestSchema = z.object({
+  reason: z.string().trim().min(1).max(2_000),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const proposalDecisionResultSchema = z.object({
+  proposalId: z.string().min(1),
+  kind: z.string().min(1),
+  status: proposalStatusSchema,
+  accepted: z.boolean(),
+  reused: z.boolean(),
+  errors: z.array(z.object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+    path: z.string().optional(),
+  }).strict()),
+  warnings: z.array(z.object({
+    code: z.string().min(1),
+    message: z.string().min(1),
+    path: z.string().optional(),
+  }).strict()),
+}).strict();
+
+export const proposalConvergeRequestSchema = z.object({
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const proposalConvergenceResultSchema = z.object({
+  sourceId: z.string().min(1),
+  accepted: z.array(z.object({ id: z.string().min(1), kind: z.string().min(1) }).strict()),
+  blocked: z.array(z.object({
+    id: z.string().min(1),
+    kind: z.string().min(1),
+    errors: z.array(z.object({
+      code: z.string().min(1),
+      message: z.string().min(1),
+      path: z.string().optional(),
+    }).strict()),
+  }).strict()),
+  staging: z.array(z.object({ id: z.string().min(1), kind: z.string().min(1) }).strict()),
   reused: z.boolean(),
 }).strict();
 
@@ -334,6 +536,21 @@ export type OperationStatus = z.infer<typeof operationStatusSchema>;
 export type OperationKind = z.infer<typeof operationKindSchema>;
 export type OperationSnapshot = z.infer<typeof operationSnapshotSchema>;
 export type OperationAccepted = z.infer<typeof operationAcceptedSchema>;
+export type SourceRegistrationRequest = z.infer<typeof sourceRegistrationRequestSchema>;
+export type PreparationStage = z.infer<typeof preparationStageSchema>;
+export type PreparationNextAction = z.infer<typeof preparationNextActionSchema>;
+export type ProposalStatus = z.infer<typeof proposalStatusSchema>;
+export type ProposalSummary = z.infer<typeof proposalSummarySchema>;
+export type CompilerAuditSummary = z.infer<typeof compilerAuditSummarySchema>;
+export type PreparationSnapshot = z.infer<typeof preparationSnapshotSchema>;
+export type SourceRegistrationResult = z.infer<typeof sourceRegistrationResultSchema>;
+export type PrepareNovelRequest = z.infer<typeof prepareNovelRequestSchema>;
+export type ProposalDetail = z.infer<typeof proposalDetailSchema>;
+export type ProposalAcceptRequest = z.infer<typeof proposalAcceptRequestSchema>;
+export type ProposalRejectRequest = z.infer<typeof proposalRejectRequestSchema>;
+export type ProposalDecisionResult = z.infer<typeof proposalDecisionResultSchema>;
+export type ProposalConvergeRequest = z.infer<typeof proposalConvergeRequestSchema>;
+export type ProposalConvergenceResult = z.infer<typeof proposalConvergenceResultSchema>;
 export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSchema>;
 export type PlayableCharacter = z.infer<typeof playableCharacterSchema>;
 export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;

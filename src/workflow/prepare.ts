@@ -137,7 +137,7 @@ export async function inspectPreparation(
   const progress = await new CompilerBatchStore(workspaceRoot).read(source.id);
   const batchIds = new Set(batches.map((batch) => batch.id));
   const completedBatches = progress.completedBatchIds.filter((id) => batchIds.has(id)).length;
-  const shared = { branchId, sources, source, pending, completedBatches, totalBatches: batches.length };
+  const shared = { branchId, sources, source, pending, completedBatches, totalBatches: batches.length, audit: earlyAudit };
   if (completedBatches < batches.length) {
     return {
       ...shared,

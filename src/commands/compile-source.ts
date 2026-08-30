@@ -11,6 +11,8 @@ import { loadConfig, profileForRole } from "../config/load.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { startElapsedStatus } from "../util/elapsed-status.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import type { PiTraceInvocationInput } from "../trace/pi-trace.js";
+import type { TraceContext } from "../trace/recorder.js";
 
 export type CompileSourceOptions = {
   root: string;
@@ -32,6 +34,8 @@ export type CompileSourceOptions = {
   onModelToolCall?: (name: string, input: unknown) => void;
   onModelToolResult?: (name: string, result: unknown, isError: boolean) => void;
   onModelEvent?: (event: AgentSessionEvent) => void;
+  /** Observation-only parent run for isolated compiler invocations. */
+  traceParent?: TraceContext;
 };
 
 const MAX_COMPILER_BATCH_RECOVERY_RETRIES = 1;
@@ -162,6 +166,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
             options.onModelToolResult?.(name, result, isError);
           },
           onEvent: options.onModelEvent,
+          ...(options.traceParent ? { trace: compilerBatchTraceInvocation(options.traceParent, activeBatch, attempt) } : {}),
         });
         const abortSession = () => { void session.abort(); };
         options.signal?.addEventListener("abort", abortSession, { once: true });
@@ -242,4 +247,40 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
   const summary = `Compiler batches: total=${result.total} completed=${result.completed} skipped=${result.skipped} remaining=${result.remaining}`;
   if (options.onProgress) options.onProgress(summary);
   else stdout.write(`${summary}\n`);
+}
+
+export function compilerBatchTraceInvocation(
+  parent: TraceContext,
+  batch: CompilerBatch,
+  attempt: number,
+): PiTraceInvocationInput {
+  return {
+    parent,
+    invocationName: `${batch.purpose} · batch ${batch.ordinal + 1}`,
+    attempt,
+    metadata: {
+      sourceId: batch.sourceId,
+      compilerBatchId: batch.id,
+      purpose: batch.purpose,
+      ordinal: batch.ordinal,
+      chapterOrdinal: batch.chapterOrdinal,
+      startLine: batch.startLine,
+      endLine: batch.endLine,
+      segmentIds: batch.segmentIds,
+    },
+    parts: [{
+      id: `compiler.batch.${batch.id}.prompt.attempt-${attempt + 1}`,
+      label: `${batch.purpose} evidence batch ${batch.ordinal + 1}`,
+      kind: "compiler.batch",
+      role: "user",
+      authority: "untrusted-source",
+      content: batch.prompt,
+      sourceRefs: batch.evidence.map((reference) => ({
+        sourceId: reference.span.sourceId,
+        ...(reference.span.startByte !== undefined ? { startByte: reference.span.startByte } : {}),
+        ...(reference.span.endByte !== undefined ? { endByte: reference.span.endByte } : {}),
+        label: `lines ${reference.span.startLine}-${reference.span.endLine} · ${reference.strength}`,
+      })),
+    }],
+  };
 }

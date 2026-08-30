@@ -7,6 +7,9 @@ import { z, ZodError } from "zod";
 import { CatalogService } from "../application/catalog-service.js";
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
 import { PlayApplicationService } from "../application/play-service.js";
+import { PreparationApplicationService } from "../application/preparation-service.js";
+import { ProposalApplicationService } from "../application/proposal-service.js";
+import { SourceApplicationService } from "../application/source-service.js";
 import { TraceApplicationService, type TraceRunSearchFilter } from "../application/trace-service.js";
 import {
   WEB_API_VERSION,
@@ -14,8 +17,14 @@ import {
   bootstrapResponseSchema,
   createPlaySessionRequestSchema,
   healthResponseSchema,
+  operationKindSchema,
+  prepareNovelRequestSchema,
   playMoveRequestSchema,
+  proposalAcceptRequestSchema,
+  proposalConvergeRequestSchema,
+  proposalRejectRequestSchema,
   sceneNarrationRequestSchema,
+  sourceRegistrationRequestSchema,
   updatePlaySessionRequestSchema,
   type ApiError,
   type BootstrapResponse,
@@ -39,6 +48,9 @@ export interface CreateWebHostOptions {
   eventBroker?: WebEventBroker;
   operationManager?: OperationManager;
   playService?: PlayApplicationService;
+  sourceService?: SourceApplicationService;
+  preparationService?: PreparationApplicationService;
+  proposalService?: ProposalApplicationService;
   traceStore?: TraceStore;
   configPath?: string;
   model?: string;
@@ -54,6 +66,9 @@ declare module "fastify" {
       csrfToken: string;
       operations: OperationManager;
       play: PlayApplicationService;
+      sources: SourceApplicationService;
+      preparation: PreparationApplicationService;
+      proposals: ProposalApplicationService;
       traces: TraceStore;
       traceQueries: TraceApplicationService;
     };
@@ -82,8 +97,22 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     ...(options.configPath ? { configPath: options.configPath } : {}),
     ...(options.model ? { model: options.model } : {}),
   });
-  const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 1_048_576 });
-  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, traces, traceQueries });
+  const sources = options.sourceService ?? new SourceApplicationService({
+    root,
+    events,
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+  });
+  const preparation = options.preparationService ?? new PreparationApplicationService({
+    root,
+    operations,
+    events,
+    traceStore: traces,
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+    ...(options.model ? { model: options.model } : {}),
+  });
+  const proposals = options.proposalService ?? new ProposalApplicationService({ root, events });
+  const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 26_214_400 });
+  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, traces, traceQueries });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isAllowedHost(request, configuredHost)) {
@@ -167,7 +196,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
         { id: "model-settings", status: "foundation", phase: 0 },
         { id: "play", status: "available", phase: 1 },
         { id: "trace", status: "available", phase: 1 },
-        { id: "compiler", status: "planned", phase: 2 },
+        { id: "compiler", status: "foundation", phase: 2 },
         { id: "ontology", status: "planned", phase: 2 },
       ],
     });
@@ -175,6 +204,47 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
 
   app.get(`/api/${WEB_API_VERSION}/bootstrap`, readBootstrap);
   app.get(`/api/${WEB_API_VERSION}/novels`, async () => (await catalogService.read()).novels);
+  app.post(`/api/${WEB_API_VERSION}/sources`, async (request, reply) => {
+    const result = await sources.register(sourceRegistrationRequestSchema.parse(request.body));
+    return reply.code(result.reused ? 200 : 201).send(result);
+  });
+  app.get(`/api/${WEB_API_VERSION}/novels/:sourceId`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    const { branchId } = preparationQuerySchema.parse(request.query);
+    return preparation.inspect(sourceId, branchId);
+  });
+  app.get(`/api/${WEB_API_VERSION}/novels/:sourceId/preparation`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    const { branchId } = preparationQuerySchema.parse(request.query);
+    return preparation.inspect(sourceId, branchId);
+  });
+  app.post(`/api/${WEB_API_VERSION}/novels/:sourceId/prepare`, async (request, reply) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    const accepted = await preparation.start(sourceId, prepareNovelRequestSchema.parse(request.body));
+    return reply.code(202).send(accepted);
+  });
+  app.get(`/api/${WEB_API_VERSION}/novels/:sourceId/proposals`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    const { status, kind } = proposalListQuerySchema.parse(request.query);
+    return proposals.list(sourceId, status, kind);
+  });
+  app.post(`/api/${WEB_API_VERSION}/novels/:sourceId/proposals/converge`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    return proposals.converge(sourceId, proposalConvergeRequestSchema.parse(request.body));
+  });
+  app.get(`/api/${WEB_API_VERSION}/proposals/:proposalId`, async (request) => {
+    const { proposalId } = proposalParamSchema.parse(request.params);
+    const { status } = proposalDetailQuerySchema.parse(request.query);
+    return proposals.get(proposalId, status);
+  });
+  app.post(`/api/${WEB_API_VERSION}/proposals/:proposalId/accept`, async (request) => {
+    const { proposalId } = proposalParamSchema.parse(request.params);
+    return proposals.accept(proposalId, proposalAcceptRequestSchema.parse(request.body));
+  });
+  app.post(`/api/${WEB_API_VERSION}/proposals/:proposalId/reject`, async (request) => {
+    const { proposalId } = proposalParamSchema.parse(request.params);
+    return proposals.reject(proposalId, proposalRejectRequestSchema.parse(request.body));
+  });
   app.get(`/api/${WEB_API_VERSION}/instances`, async () => (await catalogService.read()).instances);
   app.get(`/api/${WEB_API_VERSION}/play-sessions`, async () => (await catalogService.read()).playSessions);
   app.get(`/api/${WEB_API_VERSION}/instances/:branchId/characters`, async (request) => {
@@ -384,12 +454,22 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 const branchParamSchema = z.object({ branchId: z.string().min(1) }).strict();
+const sourceParamSchema = z.object({ sourceId: z.string().min(1) }).strict();
+const proposalParamSchema = z.object({ proposalId: z.string().min(1) }).strict();
 const sessionParamSchema = z.object({ sessionId: z.string().min(1) }).strict();
 const operationParamSchema = z.object({ operationId: z.string().min(1) }).strict();
 const sourceQuerySchema = z.object({ sourceId: z.string().min(1).optional() }).strict();
+const preparationQuerySchema = z.object({ branchId: z.string().min(1).optional() }).strict();
+const proposalListQuerySchema = z.object({
+  status: z.enum(["pending", "accepted", "rejected"]).default("pending"),
+  kind: z.string().min(1).optional(),
+}).strict();
+const proposalDetailQuerySchema = z.object({
+  status: z.enum(["pending", "accepted", "rejected"]).optional(),
+}).strict();
 const operationQuerySchema = z.object({
   scopeId: z.string().min(1).optional(),
-  kind: z.enum(["player-move", "scene-narration", "prepare"]).optional(),
+  kind: operationKindSchema.optional(),
   status: z.enum(["queued", "running", "succeeded", "failed", "cancelled", "interrupted"]).optional(),
 }).strict();
 const traceRunParamSchema = z.object({ runId: traceIdentifierSchema }).strict();

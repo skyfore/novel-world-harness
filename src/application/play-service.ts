@@ -67,6 +67,9 @@ import { WebEventBroker } from "../web/event-stream.js";
 import { webError } from "../web/errors.js";
 import { OperationManager, type OperationRunContext } from "../web/operation-manager.js";
 import { CatalogService } from "./catalog-service.js";
+import { TraceRecorder, newTraceId, type TraceContext } from "../trace/recorder.js";
+import { TraceStore } from "../trace/store.js";
+import type { TraceErrorSummary, TraceRunStatus } from "../trace/schema.js";
 
 export interface PlayApplicationServiceOptions {
   root: string;
@@ -81,6 +84,7 @@ export interface PlayApplicationServiceOptions {
   npcResponseReasoner?: NpcReactionReasoner;
   narrator?: PlayerOpeningNarrator;
   advanceBackground?: number;
+  traceStore?: TraceStore;
 }
 
 type NarrationOutcome = {
@@ -95,6 +99,7 @@ export class PlayApplicationService {
   private readonly conversations: PlayConversationStore;
   private readonly branches: BranchStore;
   private readonly catalog: CatalogService;
+  private readonly traces: TraceStore;
   private readonly sessionRequests = new Map<string, { fingerprint: string; sessionId: string }>();
   private profilePromise?: Promise<LlmProfile | undefined>;
 
@@ -104,6 +109,11 @@ export class PlayApplicationService {
     this.conversations = new PlayConversationStore(this.root);
     this.branches = new BranchStore(this.root);
     this.catalog = new CatalogService(this.root);
+    this.traces = options.traceStore ?? new TraceStore(this.root);
+  }
+
+  get traceStore(): TraceStore {
+    return this.traces;
   }
 
   async listCharacters(branchId: string, sourceId?: string): Promise<PlayableCharacterList> {
@@ -247,13 +257,45 @@ export class PlayApplicationService {
     const session = await this.requireWritableSession(sessionId);
     await this.assertExpectedHead(session, input.expectedHead);
     this.assertNoActiveOperation(session.id);
-    return this.options.operations.start({
+    const playerMoveId = newTraceId("move");
+    const recorder = await TraceRecorder.start(this.traces, {
       kind: "player-move",
-      scopeId: session.id,
-      clientRequestId: input.clientRequestId,
-      request: input,
-      run: (context) => this.runPlayerMove(session.id, input, context),
+      sourceId: session.sourceId,
+      branchId: session.branchId,
+      playSessionId: session.id,
+      playerMoveId,
+      actorId: session.actorId,
+      previousHead: input.expectedHead,
+      storyTimeBefore: { commitId: input.expectedHead },
     });
+    try {
+      const accepted = this.options.operations.start({
+        kind: "player-move",
+        scopeId: session.id,
+        clientRequestId: input.clientRequestId,
+        request: input,
+        runId: recorder.manifest.id,
+        run: (context) => this.runWithTrace(
+          recorder,
+          session.branchId,
+          context,
+          () => this.runPlayerMove(session.id, input, context, recorder, playerMoveId),
+        ),
+      });
+      if (accepted.reused) {
+        await recorder.finish("cancelled", {}, {
+          code: "IDEMPOTENT_OPERATION_REUSED",
+          message: "A concurrent request reused an existing operation; this unused trace was closed without executing.",
+          retryable: false,
+        });
+        return accepted;
+      }
+      await recorder.link({ operationId: accepted.operation.id });
+      return accepted;
+    } catch (error) {
+      await recorder.finish("failed", {}, traceError(error, "failed")).catch(() => undefined);
+      throw error;
+    }
   }
 
   async startSceneNarration(sessionId: string, inputValue: SceneNarrationRequest): Promise<OperationAccepted> {
@@ -271,123 +313,249 @@ export class PlayApplicationService {
     const session = await this.requireWritableSession(sessionId);
     await this.assertExpectedHead(session, input.expectedHead);
     this.assertNoActiveOperation(session.id);
-    return this.options.operations.start({
+    const recorder = await TraceRecorder.start(this.traces, {
       kind: "scene-narration",
-      scopeId: session.id,
-      clientRequestId: input.clientRequestId,
-      request: input,
-      run: (context) => this.runSceneNarration(session.id, input, context),
+      sourceId: session.sourceId,
+      branchId: session.branchId,
+      playSessionId: session.id,
+      actorId: session.actorId,
+      previousHead: input.expectedHead,
+      storyTimeBefore: { commitId: input.expectedHead },
     });
+    try {
+      const accepted = this.options.operations.start({
+        kind: "scene-narration",
+        scopeId: session.id,
+        clientRequestId: input.clientRequestId,
+        request: input,
+        runId: recorder.manifest.id,
+        run: (context) => this.runWithTrace(
+          recorder,
+          session.branchId,
+          context,
+          () => this.runSceneNarration(session.id, input, context, recorder),
+        ),
+      });
+      if (accepted.reused) {
+        await recorder.finish("cancelled", {}, {
+          code: "IDEMPOTENT_OPERATION_REUSED",
+          message: "A concurrent request reused an existing operation; this unused trace was closed without executing.",
+          retryable: false,
+        });
+        return accepted;
+      }
+      await recorder.link({ operationId: accepted.operation.id });
+      return accepted;
+    } catch (error) {
+      await recorder.finish("failed", {}, traceError(error, "failed")).catch(() => undefined);
+      throw error;
+    }
   }
 
   private async runPlayerMove(
     sessionId: string,
     input: PlayMoveRequest,
     context: OperationRunContext,
+    recorder: TraceRecorder,
+    playerMoveId: string,
   ): Promise<PlayOperationResult> {
     const session = await this.requireWritableSession(sessionId);
     await this.assertExpectedHead(session, input.expectedHead);
     await this.sessions.activate(session.id);
-    const adapters = await this.adapters(context);
-    let commitBoundaryCrossed = false;
-    context.update("translating", { statusText: "正在理解你的行动…" });
-    const outcome = await performPlayTurn({
-      root: this.root,
-      branchId: session.branchId,
-      actorId: session.actorId,
-      utterance: input.text,
-      expectedHead: input.expectedHead,
-      translator: adapters.translator,
-      ...(adapters.adjudicator ? { adjudicator: adapters.adjudicator } : {}),
-      ...(adapters.worldResponseResolver ? { worldResponseResolver: adapters.worldResponseResolver } : {}),
-      ...(adapters.canonicalAttachmentResolver ? { canonicalAttachmentResolver: adapters.canonicalAttachmentResolver } : {}),
-      ...(adapters.npcResponseReasoner ? { npcResponseReasoner: adapters.npcResponseReasoner } : {}),
-      advanceBackground: this.options.advanceBackground ?? 0,
-      origin: "web",
-      ...(input.intent ? { intent: input.intent } : {}),
-      ...(input.affordanceId ? { affordanceId: input.affordanceId } : {}),
-      beforeCommit: () => {
-        context.signal.throwIfAborted();
-        commitBoundaryCrossed = true;
-        context.markCommitBoundary({ previousHead: input.expectedHead });
-      },
-    });
-    if (outcome.playerMessage) this.publishMessage(session.id, outcome.playerMessage, context.operationId);
-    context.update("world-resolved", {
-      accepted: outcome.result.accepted,
-      finalHead: outcome.finalHead,
-      logicalStep: outcome.logicalStep,
-    });
-
-    let narrationStatus: PlayOperationResult["narrationStatus"] = "skipped";
-    let narration: string | undefined;
-    let narrationError: string | undefined;
-    let choices: PlayerChoiceSummary[] = [];
-    if (!context.signal.aborted) {
-      const purpose: PlayScenePurpose = outcome.result.accepted ? "turn" : "recovery";
-      const turnResolution: PlayerTurnResolution | undefined = outcome.result.accepted ? undefined : {
-        kind: "unresolved",
-        utterance: input.text,
-        actorVisibleSummary: "这项请求没有成为世界事件；角色没有执行它，当前世界仍处于请求之前的已提交时刻。",
-      };
+    const turnTrace = await recorder.child(recorder.rootContext, "Resolve player move", "player-move-orchestration");
+    let turnTraceFinished = false;
+    try {
+      const adapters = await this.adapters(context, turnTrace);
+      let commitBoundaryCrossed = false;
+      context.update("translating", { statusText: "正在理解你的行动…" });
+      let outcome: PlayTurnOutcome;
       try {
-        const rendered = await this.narrate(session, purpose, context, adapters.narrator, turnResolution);
-        narrationStatus = "rendered";
-        narration = rendered.narration;
-        choices = rendered.choices;
+        outcome = await performPlayTurn({
+          root: this.root,
+          branchId: session.branchId,
+          actorId: session.actorId,
+          utterance: input.text,
+          expectedHead: input.expectedHead,
+          translator: adapters.translator,
+          ...(adapters.adjudicator ? { adjudicator: adapters.adjudicator } : {}),
+          ...(adapters.worldResponseResolver ? { worldResponseResolver: adapters.worldResponseResolver } : {}),
+          ...(adapters.canonicalAttachmentResolver ? { canonicalAttachmentResolver: adapters.canonicalAttachmentResolver } : {}),
+          ...(adapters.npcResponseReasoner ? { npcResponseReasoner: adapters.npcResponseReasoner } : {}),
+          advanceBackground: this.options.advanceBackground ?? 0,
+          origin: "web",
+          runId: recorder.manifest.id,
+          playerMoveId,
+          ...(input.intent ? { intent: input.intent } : {}),
+          ...(input.affordanceId ? { affordanceId: input.affordanceId } : {}),
+          beforeCommit: async () => {
+            context.signal.throwIfAborted();
+            await recorder.record("world.commit.started", {
+              kind: "player-action",
+              previousHead: input.expectedHead,
+            }, turnTrace, { storyTime: { commitId: input.expectedHead } });
+            context.signal.throwIfAborted();
+            commitBoundaryCrossed = true;
+            context.markCommitBoundary({ previousHead: input.expectedHead });
+          },
+        });
       } catch (error) {
-        if (context.signal.aborted && commitBoundaryCrossed) {
-          narrationStatus = "skipped";
-          narrationError = "Narration was stopped after the world commit; committed world truth was preserved.";
-        } else if (context.signal.aborted) {
-          throw error;
-        } else {
-          narrationStatus = "failed";
-          narrationError = errorMessage(error);
+        if (commitBoundaryCrossed) {
+          await recorder.record("world.commit.failed", {
+            kind: "player-action",
+            previousHead: input.expectedHead,
+            error: errorMessage(error),
+          }, turnTrace).catch(() => undefined);
         }
+        await recorder.failStage(turnTrace, error);
+        turnTraceFinished = true;
+        throw error;
       }
-    } else if (commitBoundaryCrossed) {
-      narrationError = "Narration was skipped after the world commit because Stop was requested.";
-    }
+      const validationRef = await recorder.putBlob({
+        accepted: outcome.result.accepted,
+        stage: outcome.result.stage,
+        issues: outcome.result.issues,
+        intendedCandidate: outcome.result.intendedCandidate,
+        candidate: outcome.result.candidate,
+        adjudication: outcome.result.adjudication,
+        proposal: outcome.result.proposal,
+        validation: outcome.result.validation,
+      });
+      await recorder.record("validation.completed", {
+        accepted: outcome.result.accepted,
+        stage: outcome.result.stage,
+        issueCount: outcome.result.issues.length,
+      }, turnTrace, { blobRef: validationRef });
+      if (commitBoundaryCrossed) {
+        await recorder.record(outcome.result.accepted ? "world.commit.completed" : "world.commit.failed", {
+          kind: "player-action",
+          accepted: outcome.result.accepted,
+          previousHead: outcome.result.previousHead,
+          finalHead: outcome.finalHead,
+          eventHash: outcome.result.eventHash,
+          relatedEventHashes: [
+            ...outcome.reactionEvents.map((event) => event.eventHash),
+            ...outcome.worldResponseEvents.map((event) => event.eventHash),
+            ...outcome.canonicalRecoveryEvents.map((event) => event.eventHash),
+            ...outcome.backgroundEvents.map((event) => event.eventHash),
+          ],
+        }, turnTrace, { storyTime: { commitId: outcome.finalHead, logicalStep: outcome.logicalStep } });
+      }
+      if (outcome.playerMessage) this.publishMessage(session.id, outcome.playerMessage, context.operationId, recorder.manifest.id);
+      context.update("world-resolved", {
+        accepted: outcome.result.accepted,
+        finalHead: outcome.finalHead,
+        logicalStep: outcome.logicalStep,
+      });
 
-    this.invalidateCatalog("player-move-completed", session.id, context.operationId);
-    return playOperationResultSchema.parse({
-      sessionId: session.id,
-      branchId: session.branchId,
-      actorId: session.actorId,
-      accepted: outcome.result.accepted,
-      stage: outcome.result.stage,
-      previousHead: outcome.result.previousHead,
-      finalHead: outcome.finalHead,
-      logicalStep: outcome.logicalStep,
-      narrationStatus,
-      ...(narration ? { narration } : {}),
-      ...(narrationError ? { narrationError } : {}),
-      warnings: playWarnings(outcome),
-      choices,
-      issues: outcome.result.issues,
-      ...(outcome.auditId ? { auditId: outcome.auditId } : {}),
-      worldResponseEvents: outcome.worldResponseEvents,
-      reactionEvents: outcome.reactionEvents,
-      backgroundEvents: outcome.backgroundEvents,
-    });
+      let narrationStatus: PlayOperationResult["narrationStatus"] = "skipped";
+      let narration: string | undefined;
+      let narrationError: string | undefined;
+      let choices: PlayerChoiceSummary[] = [];
+      let narrationMessage: PlayConversationMessage | undefined;
+      if (!context.signal.aborted) {
+        const purpose: PlayScenePurpose = outcome.result.accepted ? "turn" : "recovery";
+        const turnResolution: PlayerTurnResolution | undefined = outcome.result.accepted ? undefined : {
+          kind: "unresolved",
+          utterance: input.text,
+          actorVisibleSummary: "这项请求没有成为世界事件；角色没有执行它，当前世界仍处于请求之前的已提交时刻。",
+        };
+        try {
+          const rendered = await this.narrate(session, purpose, context, adapters.narrator, recorder, turnTrace, playerMoveId, turnResolution);
+          narrationStatus = "rendered";
+          narration = rendered.narration;
+          narrationMessage = rendered.message;
+          choices = rendered.choices;
+        } catch (error) {
+          if (context.signal.aborted && commitBoundaryCrossed) {
+            narrationStatus = "skipped";
+            narrationError = "Narration was stopped after the world commit; committed world truth was preserved.";
+          } else if (context.signal.aborted) {
+            throw error;
+          } else {
+            narrationStatus = "failed";
+            narrationError = errorMessage(error);
+          }
+        }
+      } else if (commitBoundaryCrossed) {
+        narrationError = "Narration was skipped after the world commit because Stop was requested.";
+      }
+
+      const presentationMessageIds = [outcome.playerMessage?.id, narrationMessage?.id]
+        .filter((id): id is string => Boolean(id));
+      await recorder.link({
+        finalHead: outcome.finalHead,
+        ...(outcome.result.eventHash ? { eventHash: outcome.result.eventHash } : {}),
+        ...(outcome.auditId ? { auditId: outcome.auditId } : {}),
+        presentationMessageIds,
+        storyTimeAfter: { commitId: outcome.finalHead, logicalStep: outcome.logicalStep },
+      });
+      await recorder.finishStage(turnTrace, {
+        status: context.signal.aborted && commitBoundaryCrossed ? "narration-interrupted" : "completed",
+        accepted: outcome.result.accepted,
+        narrationStatus,
+      });
+      turnTraceFinished = true;
+      this.invalidateCatalog("player-move-completed", session.id, context.operationId, recorder.manifest.id);
+      const result = playOperationResultSchema.parse({
+        sessionId: session.id,
+        branchId: session.branchId,
+        actorId: session.actorId,
+        runId: recorder.manifest.id,
+        playerMoveId,
+        accepted: outcome.result.accepted,
+        stage: outcome.result.stage,
+        previousHead: outcome.result.previousHead,
+        finalHead: outcome.finalHead,
+        logicalStep: outcome.logicalStep,
+        narrationStatus,
+        ...(narration ? { narration } : {}),
+        ...(narrationError ? { narrationError } : {}),
+        warnings: playWarnings(outcome),
+        choices,
+        issues: outcome.result.issues,
+        ...(outcome.auditId ? { auditId: outcome.auditId } : {}),
+        ...(outcome.result.eventHash ? { eventHash: outcome.result.eventHash } : {}),
+        worldResponseEvents: outcome.worldResponseEvents,
+        reactionEvents: outcome.reactionEvents,
+        backgroundEvents: outcome.backgroundEvents,
+      });
+      return result;
+    } catch (error) {
+      if (!turnTraceFinished) await recorder.failStage(turnTrace, error);
+      throw error;
+    }
   }
 
   private async runSceneNarration(
     sessionId: string,
     input: SceneNarrationRequest,
     context: OperationRunContext,
+    recorder: TraceRecorder,
   ): Promise<SceneNarrationResult> {
     const session = await this.requireWritableSession(sessionId);
     await this.assertExpectedHead(session, input.expectedHead);
     await this.sessions.activate(session.id);
-    const adapters = await this.adapters(context);
-    const rendered = await this.narrate(session, input.purpose, context, adapters.narrator);
-    this.invalidateCatalog("scene-narration-completed", session.id, context.operationId);
+    const narrationTrace = await recorder.child(recorder.rootContext, "Render scene narration", "narration-orchestration");
+    const adapters = await this.adapters(context, narrationTrace);
+    let rendered: NarrationOutcome;
+    try {
+      rendered = await this.narrate(session, input.purpose, context, adapters.narrator, recorder, narrationTrace);
+      await recorder.finishStage(narrationTrace, { status: "completed", purpose: input.purpose });
+    } catch (error) {
+      await recorder.failStage(narrationTrace, error);
+      throw error;
+    }
+    await recorder.link({
+      finalHead: input.expectedHead,
+      presentationMessageIds: [rendered.message.id],
+      storyTimeAfter: { commitId: input.expectedHead },
+    });
+    this.invalidateCatalog("scene-narration-completed", session.id, context.operationId, recorder.manifest.id);
     return sceneNarrationResultSchema.parse({
       sessionId: session.id,
       branchId: session.branchId,
       actorId: session.actorId,
+      runId: recorder.manifest.id,
       headCommitId: input.expectedHead,
       purpose: input.purpose,
       narrationStatus: "rendered",
@@ -401,6 +569,9 @@ export class PlayApplicationService {
     purpose: PlayScenePurpose,
     context: OperationRunContext,
     narrator: PlayerOpeningNarrator,
+    recorder: TraceRecorder,
+    traceContext: TraceContext,
+    playerMoveId?: string,
     turnResolution?: PlayerTurnResolution,
   ): Promise<NarrationOutcome> {
     context.signal.throwIfAborted();
@@ -425,7 +596,7 @@ export class PlayApplicationService {
             sessionId: session.id,
             branchId: session.branchId,
             delta,
-          }, { operationId: context.operationId }),
+          }, { operationId: context.operationId, runId: recorder.manifest.id }),
         },
         modelPlayConversation(frame.messageHistory),
       );
@@ -449,8 +620,18 @@ export class PlayApplicationService {
         role: "scene",
         status: "rendered",
         text: narration,
+        runId: recorder.manifest.id,
+        ...(playerMoveId ? { playerMoveId } : {}),
       });
-      this.publishMessage(session.id, message, context.operationId);
+      const { version: _version, ...messageSummary } = message;
+      const messageRef = await recorder.putBlob(messageSummary);
+      await recorder.record("presentation.message.appended", {
+        messageId: message.id,
+        role: message.role,
+        status: message.status,
+        atCommit: message.atCommit,
+      }, traceContext, { blobRef: messageRef });
+      this.publishMessage(session.id, message, context.operationId, recorder.manifest.id);
       this.options.events.publish("play.narration.completed", {
         sessionId: session.id,
         branchId: session.branchId,
@@ -458,7 +639,7 @@ export class PlayApplicationService {
         purpose,
         narration,
         choices,
-      }, { operationId: context.operationId });
+      }, { operationId: context.operationId, runId: recorder.manifest.id });
       return { narration, choices, message };
     } catch (error) {
       this.options.events.publish("play.narration.completed", {
@@ -467,12 +648,12 @@ export class PlayApplicationService {
         purpose,
         status: context.signal.aborted ? "skipped" : "failed",
         error: errorMessage(error),
-      }, { operationId: context.operationId });
+      }, { operationId: context.operationId, runId: recorder.manifest.id });
       throw error;
     }
   }
 
-  private async adapters(context: OperationRunContext): Promise<{
+  private async adapters(context: OperationRunContext, trace: TraceContext): Promise<{
     translator: PlayerActionTranslator;
     adjudicator?: PlayerWorldAdjudicator;
     worldResponseResolver?: PlayerWorldResponseResolver;
@@ -488,6 +669,7 @@ export class PlayApplicationService {
       ...(this.options.model ? { model: this.options.model } : {}),
       signal: context.signal,
       onStatus,
+      trace,
     };
     const usePiTurnAdapters = !this.options.translator;
     return {
@@ -508,6 +690,7 @@ export class PlayApplicationService {
         root: this.root,
         ...(profile ? { profile } : {}),
         ...(this.options.model ? { model: this.options.model } : {}),
+        trace,
       }),
     };
   }
@@ -588,15 +771,58 @@ export class PlayApplicationService {
     }
   }
 
-  private publishMessage(sessionId: string, message: PlayConversationMessage, operationId: string): void {
+  private publishMessage(sessionId: string, message: PlayConversationMessage, operationId: string, runId?: string): void {
     const { version: _version, ...data } = message;
-    this.options.events.publish("play.message.appended", { sessionId, message: data }, { operationId });
+    this.options.events.publish("play.message.appended", { sessionId, message: data }, {
+      operationId,
+      ...(runId ? { runId } : {}),
+    });
   }
 
-  private invalidateCatalog(reason: string, sessionId: string, operationId?: string): void {
+  private invalidateCatalog(reason: string, sessionId: string, operationId?: string, runId?: string): void {
     this.options.events.publish("catalog.invalidated", { reason, sessionId }, {
       ...(operationId ? { operationId } : {}),
+      ...(runId ? { runId } : {}),
     });
+  }
+
+  private async runWithTrace<T>(
+    recorder: TraceRecorder,
+    branchId: string,
+    context: OperationRunContext,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      const result = await run();
+      const status: Exclude<TraceRunStatus, "running"> = context.signal.aborted
+        ? context.commitBoundaryCrossed ? "interrupted" : "cancelled"
+        : "succeeded";
+      const finalHead = await this.readHeadOrNull(branchId);
+      if (finalHead) await recorder.link({ finalHead });
+      await recorder.finish(
+        status,
+        {},
+        status === "succeeded" ? undefined : traceError(
+          new Error(context.commitBoundaryCrossed
+            ? "Stop was requested after the world commit boundary; committed truth was preserved."
+            : "The operation was cancelled before its commit boundary."),
+          status,
+        ),
+      );
+      return result;
+    } catch (error) {
+      const status: Exclude<TraceRunStatus, "running"> = context.signal.aborted
+        ? context.commitBoundaryCrossed ? "interrupted" : "cancelled"
+        : "failed";
+      try {
+        const finalHead = await this.readHeadOrNull(branchId);
+        if (finalHead) await recorder.link({ finalHead });
+        await recorder.finish(status, {}, traceError(error, status));
+      } catch (traceFailure) {
+        throw new AggregateError([error, traceFailure], "The operation failed and its trace could not be finalized.");
+      }
+      throw error;
+    }
   }
 }
 
@@ -637,4 +863,16 @@ function playWarnings(outcome: PlayTurnOutcome): string[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function traceError(error: unknown, status: Exclude<TraceRunStatus, "running">): TraceErrorSummary {
+  return {
+    code: status === "cancelled"
+      ? "OPERATION_CANCELLED_BEFORE_COMMIT"
+      : status === "interrupted"
+        ? "OPERATION_INTERRUPTED_AFTER_COMMIT"
+        : "OPERATION_FAILED",
+    message: errorMessage(error),
+    retryable: status === "cancelled",
+  };
 }

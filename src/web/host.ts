@@ -22,6 +22,7 @@ import {
 import { serializeServerSentEvent, WebEventBroker } from "./event-stream.js";
 import { WebApplicationError } from "./errors.js";
 import { OperationManager } from "./operation-manager.js";
+import { TraceStore } from "../trace/store.js";
 
 const SERVER_VERSION = "0.1.0";
 const DEFAULT_STATIC_ROOT = path.resolve(import.meta.dirname, "../../dist/web-ui");
@@ -36,6 +37,7 @@ export interface CreateWebHostOptions {
   eventBroker?: WebEventBroker;
   operationManager?: OperationManager;
   playService?: PlayApplicationService;
+  traceStore?: TraceStore;
   configPath?: string;
   model?: string;
   startedAt?: string;
@@ -50,6 +52,7 @@ declare module "fastify" {
       csrfToken: string;
       operations: OperationManager;
       play: PlayApplicationService;
+      traces: TraceStore;
     };
   }
 }
@@ -65,15 +68,18 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const catalogService = options.catalogService ?? new CatalogService(root);
   const modelCatalogService = options.modelCatalogService ?? new PiModelCatalogService();
   const operations = options.operationManager ?? new OperationManager(events);
+  const traces = options.traceStore ?? options.playService?.traceStore ?? new TraceStore(root);
+  await traces.initialize();
   const play = options.playService ?? new PlayApplicationService({
     root,
     operations,
     events,
+    traceStore: traces,
     ...(options.configPath ? { configPath: options.configPath } : {}),
     ...(options.model ? { model: options.model } : {}),
   });
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 1_048_576 });
-  app.decorate("nwh", { events, startedAt, csrfToken, operations, play });
+  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, traces });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isAllowedHost(request, configuredHost)) {
@@ -156,7 +162,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
         { id: "library", status: "available", phase: 0 },
         { id: "model-settings", status: "foundation", phase: 0 },
         { id: "play", status: "available", phase: 1 },
-        { id: "trace", status: "planned", phase: 1 },
+        { id: "trace", status: "foundation", phase: 1 },
         { id: "compiler", status: "planned", phase: 2 },
         { id: "ontology", status: "planned", phase: 2 },
       ],

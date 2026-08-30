@@ -21,6 +21,8 @@ export type PlayerTurnAudit = {
   actorId: string;
   utterance: string;
   origin: PlayerTurnOrigin;
+  runId?: string;
+  playerMoveId?: string;
   intent?: "act" | "observe" | "reflect" | "wait";
   affordanceId?: string;
   previousHead: string;

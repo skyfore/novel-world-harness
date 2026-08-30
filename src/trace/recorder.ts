@@ -98,7 +98,6 @@ export class TraceRecorder {
   }
 
   async link(patch: Parameters<TraceStore["updateRun"]>[1]): Promise<TraceRunManifest> {
-    if (this.terminal) return this.manifest;
     this.manifestValue = await this.store.updateRun(this.manifestValue.id, patch);
     return this.manifest;
   }

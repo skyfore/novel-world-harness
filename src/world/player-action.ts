@@ -1356,7 +1356,7 @@ export class PlayerTurnService {
     private readonly translator: PlayerActionTranslator,
     render?: PlayerTurnRender,
     private readonly resolveCanon?: PlayerCanonResolver,
-    private readonly beforeCommit?: () => void,
+    private readonly beforeCommit?: () => Promise<void> | void,
     private readonly adjudicator?: PlayerWorldAdjudicator,
   ) {
     if (render) this.render = render;
@@ -1623,7 +1623,7 @@ export class PlayerTurnService {
       proposal: eventProposalSchema.parse({ ...action.proposal, progress: progress.value }),
     };
 
-    this.beforeCommit?.();
+    await this.beforeCommit?.();
     const committed = await commitKnowledgeAwareAction(this.engine, action);
     if (!committed.gate.accepted) {
       return this.rejected(

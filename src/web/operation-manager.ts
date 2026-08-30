@@ -12,7 +12,9 @@ import { webError } from "./errors.js";
 
 export interface OperationRunContext {
   readonly operationId: string;
+  readonly runId?: string;
   readonly signal: AbortSignal;
+  readonly commitBoundaryCrossed: boolean;
   update(phase: string, progress?: Record<string, unknown>): void;
   markCommitBoundary(progress?: Record<string, unknown>): void;
 }
@@ -22,6 +24,7 @@ export interface StartOperationInput<T> {
   scopeId: string;
   clientRequestId: string;
   request: unknown;
+  runId?: string;
   run(context: OperationRunContext): Promise<T>;
 }
 
@@ -80,6 +83,7 @@ export class OperationManager {
         scopeId: input.scopeId,
         clientRequestId: input.clientRequestId,
         requestFingerprint,
+        ...(input.runId ? { runId: input.runId } : {}),
         status: "queued",
         cancellable: true,
         commitBoundaryCrossed: false,
@@ -161,7 +165,9 @@ export class OperationManager {
     this.publish(record);
     const context: OperationRunContext = {
       operationId: record.snapshot.id,
+      ...(record.snapshot.runId ? { runId: record.snapshot.runId } : {}),
       signal: record.controller.signal,
+      get commitBoundaryCrossed() { return record.snapshot.commitBoundaryCrossed; },
       update: (phase, progress = {}) => {
         if (isTerminal(record.snapshot.status)) return;
         record.snapshot = operationSnapshotSchema.parse({
@@ -215,6 +221,7 @@ export class OperationManager {
   private publish(record: OperationRecord): void {
     this.events.publish("operation.changed", { operation: structuredClone(record.snapshot) }, {
       operationId: record.snapshot.id,
+      ...(record.snapshot.runId ? { runId: record.snapshot.runId } : {}),
     });
   }
 

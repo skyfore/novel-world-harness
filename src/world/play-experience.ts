@@ -295,8 +295,10 @@ export async function performPlayTurn(options: {
   intent?: "act" | "observe" | "reflect" | "wait";
   affordanceId?: string;
   advanceActors?: number;
-  beforeCommit?: () => void;
+  beforeCommit?: () => Promise<void> | void;
   expectedHead?: string;
+  runId?: string;
+  playerMoveId?: string;
 }): Promise<PlayTurnOutcome> {
   const startedAt = new Date();
   const advanceBackground = options.advanceBackground ?? 0;
@@ -380,6 +382,8 @@ export async function performPlayTurn(options: {
       actorId: options.actorId,
       atCommit: result.newHead,
       ...(playerEvent ? { eventId: playerEvent.eventId } : {}),
+      ...(options.runId ? { runId: options.runId } : {}),
+      ...(options.playerMoveId ? { playerMoveId: options.playerMoveId } : {}),
       role: "player",
       status: result.accepted ? "accepted" : "rejected",
       text: options.utterance,
@@ -572,6 +576,8 @@ export async function performPlayTurn(options: {
       actorId: options.actorId,
       utterance: options.utterance,
       origin: options.origin ?? "cli",
+      ...(options.runId ? { runId: options.runId } : {}),
+      ...(options.playerMoveId ? { playerMoveId: options.playerMoveId } : {}),
       ...(options.intent ? { intent: options.intent } : {}),
       ...(options.affordanceId ? { affordanceId: options.affordanceId } : {}),
       previousHead: result.previousHead,

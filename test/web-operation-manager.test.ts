@@ -12,9 +12,13 @@ describe("Web operation manager", () => {
       scopeId: "play-main",
       clientRequestId: "request-1",
       request: { expectedHead: "commit-1", text: "Open the door." },
+      runId: "run-operation-1",
       run: async (context) => {
+        expect(context.runId).toBe("run-operation-1");
+        expect(context.commitBoundaryCrossed).toBe(false);
         context.update("translating", { turn: 1 });
         context.markCommitBoundary({ candidateId: "candidate-1" });
+        expect(context.commitBoundaryCrossed).toBe(true);
         context.update("narrating", { turn: 2 });
         return { finalHead: "commit-2" };
       },
@@ -26,6 +30,7 @@ describe("Web operation manager", () => {
 
     expect(completed).toMatchObject({
       status: "succeeded",
+      runId: "run-operation-1",
       phase: "completed",
       cancellable: false,
       commitBoundaryCrossed: true,
@@ -39,6 +44,7 @@ describe("Web operation manager", () => {
       expect.objectContaining({ status: "running", phase: "narrating" }),
       expect.objectContaining({ status: "succeeded", phase: "completed" }),
     ]);
+    expect(events.replayAfter().every((event) => event.runId === "run-operation-1")).toBe(true);
   });
 
   it("reuses an idempotent request and rejects changed input for the same key", async () => {

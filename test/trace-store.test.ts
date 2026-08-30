@@ -103,6 +103,10 @@ describe("append-only trace storage", () => {
     await expect(recorder.record("stage.started", { label: "late" })).rejects.toThrow("terminal");
     await expect(store.appendEvent(completed.id, { type: "stage.started", spanId: completed.rootSpanId }))
       .rejects.toThrow("already succeeded");
+    await expect(recorder.link({ auditId: "audit-linked-after-terminal" })).resolves.toMatchObject({
+      status: "succeeded",
+      auditId: "audit-linked-after-terminal",
+    });
     await expect(store.listRuns({ playSessionId: "play-main" })).resolves.toEqual([expect.objectContaining({ id: completed.id })]);
   });
 

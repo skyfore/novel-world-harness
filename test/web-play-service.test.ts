@@ -11,6 +11,7 @@ import { WebEventBroker } from "../src/web/event-stream.js";
 import { WebApplicationError } from "../src/web/errors.js";
 import { createWebHost } from "../src/web/host.js";
 import { OperationManager } from "../src/web/operation-manager.js";
+import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 
 const roots: string[] = [];
 
@@ -116,8 +117,17 @@ describe("Web Play application service", () => {
     const openingDone = await operations.wait(opening.operation.id);
     expect(openingDone).toMatchObject({
       status: "succeeded",
-      result: { narrationStatus: "rendered", headCommitId: genesis },
+      runId: opening.operation.runId,
+      result: { narrationStatus: "rendered", headCommitId: genesis, runId: opening.operation.runId },
     });
+    const openingTrace = await service.traceStore.getRun(opening.operation.runId!);
+    expect(openingTrace).toMatchObject({
+      kind: "scene-narration",
+      status: "succeeded",
+      operationId: opening.operation.id,
+      finalHead: genesis,
+    });
+    expect(openingTrace.presentationMessageIds).toHaveLength(1);
 
     const accepted = await service.startPlayerMove(created.session.id, {
       text: "我离开前厅，去营地。",
@@ -127,15 +137,23 @@ describe("Web Play application service", () => {
     const completed = await operations.wait(accepted.operation.id);
     expect(completed).toMatchObject({
       status: "succeeded",
+      runId: accepted.operation.runId,
       commitBoundaryCrossed: true,
       result: {
         accepted: true,
         previousHead: genesis,
         narrationStatus: "rendered",
         logicalStep: 1,
+        runId: accepted.operation.runId,
       },
     });
-    const result = completed.result as { finalHead: string };
+    const result = completed.result as {
+      finalHead: string;
+      runId: string;
+      playerMoveId: string;
+      auditId: string;
+      eventHash: string;
+    };
     expect(result.finalHead).not.toBe(genesis);
     expect((await engine.projector.project(result.finalHead)).values.hero?.["character.location"]).toBe("camp");
 
@@ -146,6 +164,45 @@ describe("Web Play application service", () => {
       ["player", "accepted"],
       ["scene", "rendered"],
     ]);
+    expect(detail.messages.map((message) => message.runId)).toEqual([
+      opening.operation.runId,
+      accepted.operation.runId,
+      accepted.operation.runId,
+    ]);
+    expect(detail.messages.slice(1).map((message) => message.playerMoveId)).toEqual([
+      result.playerMoveId,
+      result.playerMoveId,
+    ]);
+    const moveTrace = await service.traceStore.getRun(result.runId);
+    expect(moveTrace).toMatchObject({
+      kind: "player-move",
+      status: "succeeded",
+      operationId: accepted.operation.id,
+      playerMoveId: result.playerMoveId,
+      previousHead: genesis,
+      finalHead: result.finalHead,
+      eventHash: result.eventHash,
+      auditId: result.auditId,
+    });
+    expect(moveTrace.presentationMessageIds).toHaveLength(2);
+    const auditFiles = await fs.readdir(path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main"));
+    const audit = JSON.parse(await fs.readFile(
+      path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main", auditFiles[0]!),
+      "utf8",
+    )) as Record<string, unknown>;
+    expect(audit).toMatchObject({
+      id: result.auditId,
+      runId: result.runId,
+      playerMoveId: result.playerMoveId,
+      eventHash: result.eventHash,
+    });
+    expect((await service.traceStore.readEvents(result.runId)).map((event) => event.type)).toEqual(expect.arrayContaining([
+      "validation.completed",
+      "world.commit.started",
+      "world.commit.completed",
+      "presentation.message.appended",
+      "run.succeeded",
+    ]));
     expect(events.replayAfter().map((event) => event.type)).toEqual(expect.arrayContaining([
       "play.narration.delta",
       "play.narration.completed",
@@ -190,6 +247,7 @@ describe("Web Play application service", () => {
     expect(await engine.branches.readHead("main")).toBe(result.finalHead);
     expect((await engine.projector.project(result.finalHead)).values.hero?.["character.location"]).toBe("camp");
     expect(await new PlayConversationStore(root).list("main")).toEqual([]);
+    await expect(service.traceStore.listRuns({ playSessionId: created.session.id })).resolves.toHaveLength(2);
   });
 
   it("cancels before commit without writing world truth or presentation messages", async () => {
@@ -220,9 +278,73 @@ describe("Web Play application service", () => {
     operations.cancel(accepted.operation.id);
     release();
     const cancelled = await operations.wait(accepted.operation.id);
-    expect(cancelled).toMatchObject({ status: "cancelled", commitBoundaryCrossed: false });
+    expect(cancelled).toMatchObject({
+      status: "cancelled",
+      runId: accepted.operation.runId,
+      commitBoundaryCrossed: false,
+    });
+    await expect(service.traceStore.getRun(accepted.operation.runId!)).resolves.toMatchObject({
+      status: "cancelled",
+      previousHead: genesis,
+      finalHead: genesis,
+      error: { code: "OPERATION_CANCELLED_BEFORE_COMMIT", retryable: true },
+    });
+    expect((await service.traceStore.readEvents(accepted.operation.runId!)).some((event) => event.type === "world.commit.started")).toBe(false);
     expect(await engine.branches.readHead("main")).toBe(genesis);
     expect(await new PlayConversationStore(root).list("main")).toEqual([]);
+  });
+
+  it("preserves a committed move and marks its run interrupted when Stop arrives during narration", async () => {
+    const { root, engine, genesis, events, operations } = await fixture();
+    let narrationStarted!: () => void;
+    let releaseNarration!: () => void;
+    const started = new Promise<void>((resolve) => { narrationStarted = resolve; });
+    const gate = new Promise<void>((resolve) => { releaseNarration = resolve; });
+    const blockingNarrator: PlayerOpeningNarrator = async (_frame, _purpose, observer) => {
+      narrationStarted();
+      await gate;
+      observer?.signal?.throwIfAborted();
+      return "This narration should never be committed after Stop.";
+    };
+    const service = new PlayApplicationService({
+      root,
+      events,
+      operations,
+      translator: () => moveCandidate(),
+      narrator: blockingNarrator,
+    });
+    const session = await service.createSession({
+      branchId: "main",
+      actorId: "hero",
+      clientRequestId: "create-stop-after-commit",
+    });
+    const accepted = await service.startPlayerMove(session.session.id, {
+      text: "我离开前厅，去营地。",
+      expectedHead: genesis,
+      clientRequestId: "move-stop-after-commit",
+    });
+
+    await started;
+    expect(operations.get(accepted.operation.id).commitBoundaryCrossed).toBe(true);
+    operations.cancel(accepted.operation.id);
+    releaseNarration();
+    const completed = await operations.wait(accepted.operation.id);
+
+    expect(completed).toMatchObject({
+      status: "succeeded",
+      phase: "completed-after-stop",
+      commitBoundaryCrossed: true,
+      result: { accepted: true, narrationStatus: "skipped", runId: accepted.operation.runId },
+    });
+    expect(await engine.branches.readHead("main")).not.toBe(genesis);
+    expect(await new PlayConversationStore(root).list("main")).toEqual([
+      expect.objectContaining({ role: "player", status: "accepted", runId: accepted.operation.runId }),
+    ]);
+    await expect(service.traceStore.getRun(accepted.operation.runId!)).resolves.toMatchObject({
+      status: "interrupted",
+      previousHead: genesis,
+      error: { code: "OPERATION_INTERRUPTED_AFTER_COMMIT", retryable: false },
+    });
   });
 
   it("surfaces typed application errors", async () => {

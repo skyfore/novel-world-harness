@@ -22,6 +22,8 @@ export const playConversationMessageSchema = z.object({
   actorId: idSchema,
   atCommit: idSchema,
   eventId: idSchema.optional(),
+  runId: idSchema.optional(),
+  playerMoveId: idSchema.optional(),
   role: z.enum(["player", "scene"]),
   status: z.enum(["accepted", "rejected", "rendered"]),
   text: nonBlankTextSchema,
@@ -78,6 +80,8 @@ export class PlayConversationStore {
     actorId: string;
     atCommit: string;
     eventId?: string;
+    runId?: string;
+    playerMoveId?: string;
     role: PlayConversationMessage["role"];
     status: PlayConversationMessage["status"];
     text: string;

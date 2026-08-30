@@ -73,6 +73,11 @@ whether the deterministic commit boundary has been crossed, and safe Stop
 behavior. Session archive, restore, transcript clear, and presentation-session
 removal preserve committed branch truth.
 
+Web operation snapshots and their idempotency keys are atomically persisted
+below the workspace state directory. A server restart retains completed runs and
+turns unfinished work into an explicit `interrupted` state; post-commit work is
+never presented as safe to replay unchanged.
+
 Every play and compiler run has a durable trajectory inspector. It exposes the
 ordered LLM requests and tool calls, context-part composition (system policy,
 world model, source evidence, prior messages, and tool results), exact request

@@ -99,7 +99,8 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const events = options.eventBroker ?? new WebEventBroker();
   const catalogService = options.catalogService ?? new CatalogService(root);
   const modelCatalogService = options.modelCatalogService ?? new PiModelCatalogService();
-  const operations = options.operationManager ?? new OperationManager(events);
+  const operations = options.operationManager ?? new OperationManager(events, { workspaceRoot: root });
+  await operations.initialize();
   const traces = options.traceStore ?? options.playService?.traceStore ?? new TraceStore(root);
   await traces.initialize();
   const traceQueries = new TraceApplicationService(traces);
@@ -130,6 +131,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const ontology = options.ontologyService ?? new OntologyProjectionService(root);
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 26_214_400 });
   app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, instances, maintenance, ontology, traces, traceQueries });
+  app.addHook("onClose", async () => { operations.shutdown(); });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isAllowedHost(request, configuredHost)) {

@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { WebEventBroker } from "../src/web/event-stream.js";
 import { OperationManager } from "../src/web/operation-manager.js";
@@ -130,6 +133,103 @@ describe("Web operation manager", () => {
       phase: "completed-after-stop",
       commitBoundaryCrossed: true,
       result: { finalHead: "commit-2", narrationStatus: "skipped" },
+    });
+  });
+
+  it("atomically restores operation identity and marks pre-commit work interrupted after restart", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-web-operation-restart-"));
+    const first = new OperationManager(new WebEventBroker(), { workspaceRoot: root });
+    await first.initialize();
+    const accepted = first.start({
+      kind: "prepare",
+      scopeId: "source-1",
+      clientRequestId: "durable-request-1",
+      request: { mode: "all" },
+      run: async () => new Promise<never>(() => undefined),
+    });
+    await Promise.resolve();
+
+    const recoveredEvents = new WebEventBroker();
+    const recovered = new OperationManager(recoveredEvents, { workspaceRoot: root });
+    await recovered.initialize();
+
+    expect(recovered.get(accepted.operation.id)).toMatchObject({
+      status: "interrupted",
+      phase: "interrupted-after-restart",
+      commitBoundaryCrossed: false,
+      error: {
+        code: "HOST_RESTART_INTERRUPTED_OPERATION",
+        retry: { kind: "after-user-action" },
+      },
+    });
+    expect(recoveredEvents.replayAfter().at(-1)?.data.operation).toMatchObject({
+      id: accepted.operation.id,
+      status: "interrupted",
+    });
+    const replay = recovered.start({
+      kind: "prepare",
+      scopeId: "source-1",
+      clientRequestId: "durable-request-1",
+      request: { mode: "all" },
+      run: async () => ({ shouldNotRun: true }),
+    });
+    expect(replay).toMatchObject({ reused: true, operation: { id: accepted.operation.id, status: "interrupted" } });
+    expect(() => recovered.start({
+      kind: "prepare",
+      scopeId: "source-1",
+      clientRequestId: "durable-request-1",
+      request: { mode: "different" },
+      run: async () => ({ shouldNotRun: true }),
+    })).toThrow("already used with different input");
+  });
+
+  it("recovers post-commit interruption without authorizing an unchanged replay", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-web-operation-post-commit-"));
+    const first = new OperationManager(new WebEventBroker(), { workspaceRoot: root });
+    await first.initialize();
+    let crossed!: () => void;
+    const atBoundary = new Promise<void>((resolve) => { crossed = resolve; });
+    const accepted = first.start({
+      kind: "player-move",
+      scopeId: "session-1",
+      clientRequestId: "durable-request-2",
+      request: { expectedHead: "commit-before", text: "Proceed." },
+      run: async (context) => {
+        context.markCommitBoundary({ finalHead: "commit-after" });
+        crossed();
+        return new Promise<never>(() => undefined);
+      },
+    });
+    await atBoundary;
+
+    const recovered = new OperationManager(new WebEventBroker(), { workspaceRoot: root });
+    await recovered.initialize();
+    expect(recovered.get(accepted.operation.id)).toMatchObject({
+      status: "interrupted",
+      commitBoundaryCrossed: true,
+      error: {
+        code: "OPERATION_INTERRUPTED_AFTER_COMMIT_BOUNDARY",
+        retry: { kind: "none" },
+      },
+    });
+  });
+
+  it("flushes a shutdown interruption before returning", async () => {
+    const manager = new OperationManager(new WebEventBroker());
+    const accepted = manager.start({
+      kind: "scene-narration",
+      scopeId: "session-2",
+      clientRequestId: "shutdown-request",
+      request: { purpose: "orientation" },
+      run: async () => new Promise<never>(() => undefined),
+    });
+    await Promise.resolve();
+    manager.shutdown();
+
+    await expect(manager.wait(accepted.operation.id)).resolves.toMatchObject({
+      status: "interrupted",
+      phase: "interrupted-on-shutdown",
+      error: { code: "HOST_SHUTDOWN_INTERRUPTED_OPERATION" },
     });
   });
 });

@@ -785,6 +785,10 @@ interface ApiError {
 - 每个 branch mutation 获取 branch lock，并校验 `expectedHead`。
 - `clientRequestId` 在限定时间内幂等；相同 ID/相同 body 返回原 operation，相同 ID/不同 body 返回 conflict。
 - operation manifest 在启动任务前原子写入；结束状态原子更新。
+- MVP 实现把 operation snapshot 持久化在
+  `$NWH_HOME/workspaces/v1/<workspace-id>/web/v1/operations/`。Host 启动时重建
+  `clientRequestId` 幂等索引；遗留的 `queued/running` 记录转为
+  `interrupted`，并根据是否越过 commit boundary 给出不同的恢复约束。
 - SSE 丢失不是业务失败；浏览器通过 snapshot + cursor 恢复。
 - presentation persist 失败不能撤销已提交世界；UI 显示 committed-but-unrendered，并允许安全的 narration/presentation repair。
 - 后台 operation 默认只在 server 进程生命周期内运行；关闭进程时先 abort 可取消阶段、flush trace，再退出。MVP 不做 daemon queue。

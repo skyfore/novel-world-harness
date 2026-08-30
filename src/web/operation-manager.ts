@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
+import path from "node:path";
+import { workspaceStateDir } from "../agent/runtime-paths.js";
 import {
   operationAcceptedSchema,
   operationSnapshotSchema,
@@ -35,20 +39,41 @@ type OperationRecord = {
   resolve: (snapshot: OperationSnapshot) => void;
 };
 
+export interface OperationManagerOptions {
+  maxOperations?: number;
+  workspaceRoot?: string;
+}
+
 export class OperationManager {
   private readonly records = new Map<string, OperationRecord>();
   private readonly idempotency = new Map<string, string>();
+  private readonly maxOperations: number;
+  private readonly storageRoot?: string;
+  private initialization?: Promise<void>;
+  private initialized: boolean;
 
   constructor(
     readonly events: WebEventBroker,
-    private readonly maxOperations = 1_000,
+    options: number | OperationManagerOptions = {},
   ) {
-    if (!Number.isInteger(maxOperations) || maxOperations < 10) {
+    const normalized = typeof options === "number" ? { maxOperations: options } : options;
+    this.maxOperations = normalized.maxOperations ?? 1_000;
+    this.storageRoot = normalized.workspaceRoot
+      ? path.join(workspaceStateDir(normalized.workspaceRoot), "web", "v1", "operations")
+      : undefined;
+    this.initialized = !this.storageRoot;
+    if (!Number.isInteger(this.maxOperations) || this.maxOperations < 10) {
       throw new Error("Operation retention must be an integer of at least 10.");
     }
   }
 
+  initialize(): Promise<void> {
+    this.initialization ??= this.loadPersistedOperations();
+    return this.initialization;
+  }
+
   start<T>(input: StartOperationInput<T>): OperationAccepted {
+    this.assertInitialized();
     const requestFingerprint = stableFingerprint(input.request);
     const idempotencyKey = `${input.kind}:${input.scopeId}:${input.clientRequestId}`;
     const previousId = this.idempotency.get(idempotencyKey);
@@ -94,12 +119,19 @@ export class OperationManager {
     };
     this.records.set(id, record);
     this.idempotency.set(idempotencyKey, id);
-    this.publish(record);
+    try {
+      this.publish(record);
+    } catch (error) {
+      this.records.delete(id);
+      this.idempotency.delete(idempotencyKey);
+      throw error;
+    }
     queueMicrotask(() => { void this.execute(record, input.run); });
     return operationAcceptedSchema.parse({ operation: record.snapshot, reused: false });
   }
 
   get(operationId: string): OperationSnapshot {
+    this.assertInitialized();
     const record = this.records.get(operationId);
     if (!record) {
       throw webError(404, "OPERATION_NOT_FOUND", `Unknown operation '${operationId}'.`, {
@@ -113,6 +145,7 @@ export class OperationManager {
   }
 
   list(): OperationSnapshot[] {
+    this.assertInitialized();
     return [...this.records.values()]
       .map((record) => structuredClone(record.snapshot))
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
@@ -123,11 +156,13 @@ export class OperationManager {
     scopeId: string,
     clientRequestId: string,
   ): OperationSnapshot | undefined {
+    this.assertInitialized();
     const operationId = this.idempotency.get(`${kind}:${scopeId}:${clientRequestId}`);
     return operationId ? this.get(operationId) : undefined;
   }
 
   cancel(operationId: string): OperationSnapshot {
+    this.assertInitialized();
     const record = this.records.get(operationId);
     if (!record) return this.get(operationId);
     if (isTerminal(record.snapshot.status)) return structuredClone(record.snapshot);
@@ -150,12 +185,31 @@ export class OperationManager {
   }
 
   async wait(operationId: string): Promise<OperationSnapshot> {
+    this.assertInitialized();
     const record = this.records.get(operationId);
     if (!record) return this.get(operationId);
     return structuredClone(await record.promise);
   }
 
+  /**
+   * Web operations are process-bound. A graceful host close aborts active work
+   * and records an explicit terminal state before the process exits. The
+   * underlying task may still unwind asynchronously, but can no longer replace
+   * the persisted interruption snapshot.
+   */
+  shutdown(): void {
+    this.assertInitialized();
+    for (const record of this.records.values()) {
+      if (isTerminal(record.snapshot.status)) continue;
+      record.controller.abort();
+      record.snapshot = interruptedSnapshot(record.snapshot, "HOST_SHUTDOWN_INTERRUPTED_OPERATION");
+      this.publish(record);
+      record.resolve(structuredClone(record.snapshot));
+    }
+  }
+
   private async execute<T>(record: OperationRecord, run: StartOperationInput<T>["run"]): Promise<void> {
+    if (isTerminal(record.snapshot.status)) return;
     record.snapshot = operationSnapshotSchema.parse({
       ...record.snapshot,
       status: "running",
@@ -190,6 +244,7 @@ export class OperationManager {
     };
     try {
       const result = await run(context);
+      if (isTerminal(record.snapshot.status)) return;
       const cancelledBeforeCommit = record.controller.signal.aborted && !record.snapshot.commitBoundaryCrossed;
       record.snapshot = operationSnapshotSchema.parse({
         ...record.snapshot,
@@ -204,6 +259,7 @@ export class OperationManager {
           : { result }),
       });
     } catch (error) {
+      if (isTerminal(record.snapshot.status)) return;
       const cancelled = record.controller.signal.aborted && !record.snapshot.commitBoundaryCrossed;
       record.snapshot = operationSnapshotSchema.parse({
         ...record.snapshot,
@@ -219,6 +275,7 @@ export class OperationManager {
   }
 
   private publish(record: OperationRecord): void {
+    this.persist(record.snapshot);
     this.events.publish("operation.changed", { operation: structuredClone(record.snapshot) }, {
       operationId: record.snapshot.id,
       ...(record.snapshot.runId ? { runId: record.snapshot.runId } : {}),
@@ -234,6 +291,7 @@ export class OperationManager {
       const [id, record] = completed.shift()!;
       this.records.delete(id);
       this.idempotency.delete(`${record.snapshot.kind}:${record.snapshot.scopeId}:${record.snapshot.clientRequestId}`);
+      this.removePersisted(id);
     }
     if (this.records.size >= this.maxOperations) {
       throw webError(503, "OPERATION_CAPACITY_REACHED", "All retained operations are still active; wait for one to finish before starting another.", {
@@ -243,6 +301,92 @@ export class OperationManager {
         maxAttempts: 1,
       });
     }
+  }
+
+  private async loadPersistedOperations(): Promise<void> {
+    if (!this.storageRoot) {
+      this.initialized = true;
+      return;
+    }
+    await fsPromises.mkdir(this.storageRoot, { recursive: true, mode: 0o700 });
+    const names = (await fsPromises.readdir(this.storageRoot))
+      .filter((name) => name.endsWith(".json"))
+      .sort();
+    const recovered: OperationRecord[] = [];
+    for (const name of names) {
+      const filePath = path.join(this.storageRoot, name);
+      const snapshot = operationSnapshotSchema.parse(JSON.parse(await fsPromises.readFile(filePath, "utf8")));
+      const expectedName = this.persistedName(snapshot.id);
+      if (name !== expectedName) {
+        throw new Error(`Operation manifest '${name}' does not match operation '${snapshot.id}'.`);
+      }
+      const terminal = isTerminal(snapshot.status)
+        ? snapshot
+        : interruptedSnapshot(snapshot, "HOST_RESTART_INTERRUPTED_OPERATION");
+      recovered.push(this.restoredRecord(terminal));
+      if (terminal !== snapshot) this.persist(terminal);
+    }
+    recovered
+      .sort((left, right) => Date.parse(left.snapshot.createdAt) - Date.parse(right.snapshot.createdAt) || left.snapshot.id.localeCompare(right.snapshot.id))
+      .forEach((record) => {
+        const key = `${record.snapshot.kind}:${record.snapshot.scopeId}:${record.snapshot.clientRequestId}`;
+        const priorId = this.idempotency.get(key);
+        if (priorId) {
+          throw new Error(`Persisted operations '${priorId}' and '${record.snapshot.id}' share one idempotency key.`);
+        }
+        this.records.set(record.snapshot.id, record);
+        this.idempotency.set(key, record.snapshot.id);
+      });
+    this.initialized = true;
+    for (const record of recovered) {
+      if (record.snapshot.phase === "interrupted-after-restart") this.publish(record);
+    }
+    while (this.records.size > this.maxOperations) this.evictCompleted();
+  }
+
+  private restoredRecord(snapshot: OperationSnapshot): OperationRecord {
+    const controller = new AbortController();
+    if (isTerminal(snapshot.status)) controller.abort();
+    let resolve!: (value: OperationSnapshot) => void;
+    const promise = new Promise<OperationSnapshot>((done) => { resolve = done; });
+    const record = { snapshot, controller, promise, resolve };
+    if (isTerminal(snapshot.status)) resolve(structuredClone(snapshot));
+    return record;
+  }
+
+  private assertInitialized(): void {
+    if (!this.initialized) {
+      throw new Error("Persistent operation manager is not initialized. Call and await initialize() before serving requests.");
+    }
+  }
+
+  private persist(snapshot: OperationSnapshot): void {
+    if (!this.storageRoot) return;
+    fs.mkdirSync(this.storageRoot, { recursive: true, mode: 0o700 });
+    const target = path.join(this.storageRoot, this.persistedName(snapshot.id));
+    const temporary = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+      fs.renameSync(temporary, target);
+    } catch (error) {
+      try { fs.unlinkSync(temporary); } catch (cleanupError) {
+        if ((cleanupError as NodeJS.ErrnoException).code !== "ENOENT") throw cleanupError;
+      }
+      throw error;
+    }
+  }
+
+  private removePersisted(operationId: string): void {
+    if (!this.storageRoot) return;
+    try {
+      fs.unlinkSync(path.join(this.storageRoot, this.persistedName(operationId)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+
+  private persistedName(operationId: string): string {
+    return `${crypto.createHash("sha256").update(operationId).digest("hex")}.json`;
   }
 }
 
@@ -285,4 +429,30 @@ function operationError(error: unknown, cancelled: boolean, commitBoundaryCrosse
     message: error instanceof Error ? error.message : String(error),
     retry: { kind: "none" },
   };
+}
+
+function interruptedSnapshot(
+  snapshot: OperationSnapshot,
+  code: "HOST_RESTART_INTERRUPTED_OPERATION" | "HOST_SHUTDOWN_INTERRUPTED_OPERATION",
+): OperationSnapshot {
+  const afterCommit = snapshot.commitBoundaryCrossed;
+  return operationSnapshotSchema.parse({
+    ...snapshot,
+    status: "interrupted",
+    cancellable: false,
+    phase: code === "HOST_RESTART_INTERRUPTED_OPERATION" ? "interrupted-after-restart" : "interrupted-on-shutdown",
+    finishedAt: new Date().toISOString(),
+    progress: {
+      ...snapshot.progress,
+      interruptedAt: new Date().toISOString(),
+      interruption: code === "HOST_RESTART_INTERRUPTED_OPERATION" ? "host-restart" : "host-shutdown",
+    },
+    error: {
+      code: afterCommit ? "OPERATION_INTERRUPTED_AFTER_COMMIT_BOUNDARY" : code,
+      message: afterCommit
+        ? "The host stopped after the operation crossed its commit boundary. Reconcile the branch head and trace; do not replay the world mutation unchanged."
+        : "The host stopped before the operation crossed its commit boundary. Review the trace and current snapshot before starting one new request.",
+      retry: afterCommit ? { kind: "none" } : { kind: "after-user-action" },
+    },
+  });
 }

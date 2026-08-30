@@ -105,6 +105,7 @@ describe("local Web host", () => {
       startedAt: "2026-08-30T00:00:00.000Z",
     });
     expect(health.headers["content-security-policy"]).toContain("default-src 'self'");
+    expect(health.headers["content-security-policy"]).toContain("style-src-attr 'unsafe-inline'");
     expect(health.headers["cache-control"]).toBe("no-store");
 
     const response = await app.inject({ method: "GET", url: "/api/v1/bootstrap" });
@@ -175,6 +176,12 @@ describe("local Web host", () => {
     const nestedPage = await app.inject({ method: "GET", url: "/instances/main", headers: { accept: "text/html" } });
     expect(nestedPage.statusCode).toBe(200);
     expect(nestedPage.body).toContain("NWH test shell");
+    const traceListPage = await app.inject({ method: "GET", url: "/traces", headers: { accept: "text/html" } });
+    expect(traceListPage.statusCode).toBe(200);
+    expect(traceListPage.body).toContain("NWH test shell");
+    const traceDetailPage = await app.inject({ method: "GET", url: "/play/play-main/trace/run-1", headers: { accept: "text/html" } });
+    expect(traceDetailPage.statusCode).toBe(200);
+    expect(traceDetailPage.body).toContain("NWH test shell");
   });
 });
 

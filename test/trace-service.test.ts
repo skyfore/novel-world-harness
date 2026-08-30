@@ -206,6 +206,13 @@ describe("TraceApplicationService", () => {
         finalHead: "commit-after",
       }),
     ]);
+    await expect(service.listRuns({
+      modelId: "fake-model",
+      stage: "interpret-player-action",
+      startedAfter: "2026-08-29T00:00:00.000Z",
+      startedBefore: "2026-08-31T00:00:00.000Z",
+    })).resolves.toHaveLength(1);
+    await expect(service.listRuns({ modelId: "missing-model" })).resolves.toEqual([]);
     const run = await service.getRun("run-inspect-1");
     expect(run.callIds).toEqual(["call-1"]);
     expect(run.manifest).toMatchObject({
@@ -306,7 +313,7 @@ describe("Trace Web API", () => {
     });
     const runs = await app.inject({
       method: "GET",
-      url: "/api/v1/runs?sessionId=play-1&kind=player-move&status=succeeded&limit=10",
+      url: "/api/v1/runs?sessionId=play-1&kind=player-move&status=succeeded&modelId=fake-model&stage=interpret-player-action&startedAfter=2026-08-29T00%3A00%3A00.000Z&startedBefore=2026-08-31T00%3A00%3A00.000Z&limit=10",
     });
     expect(runs.statusCode).toBe(200);
     expect(runs.json()).toEqual([expect.objectContaining({ id: "run-inspect-1" })]);

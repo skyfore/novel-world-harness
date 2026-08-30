@@ -25,8 +25,38 @@ import {
   type SceneNarrationRequest,
   type UpdatePlaySessionRequest,
 } from "../../../src/web/contracts";
+import {
+  traceEventPayloadSchema,
+  traceCallDetailSchema,
+  traceRunDetailViewSchema,
+  type TraceCallDetail,
+  type TraceEventPayload,
+  type TraceRunDetailView,
+} from "../../../src/trace/projection";
+import {
+  traceEventSchema,
+  traceRunManifestSchema,
+  type TraceEvent,
+  type TraceRunKind,
+  type TraceRunManifest,
+  type TraceRunStatus,
+} from "../../../src/trace/schema";
 
 const operationListSchema = z.array(operationSnapshotSchema);
+const traceRunListSchema = z.array(traceRunManifestSchema);
+const traceEventListSchema = z.array(traceEventSchema);
+
+export type TraceRunFilters = {
+  sessionId?: string;
+  branchId?: string;
+  kind?: TraceRunKind;
+  status?: TraceRunStatus;
+  modelId?: string;
+  stage?: string;
+  startedAfter?: string;
+  startedBefore?: string;
+  limit?: number;
+};
 
 export function fetchBootstrap(signal?: AbortSignal): Promise<BootstrapResponse> {
   return request("/api/v1/bootstrap", bootstrapResponseSchema, { signal });
@@ -48,6 +78,40 @@ export function fetchOperation(operationId: string, signal?: AbortSignal): Promi
 export function fetchOperations(scopeId?: string, signal?: AbortSignal): Promise<OperationSnapshot[]> {
   const query = scopeId ? `?scopeId=${encodeURIComponent(scopeId)}` : "";
   return request(`/api/v1/operations${query}`, operationListSchema, { signal });
+}
+
+export function fetchTraceRuns(filters: TraceRunFilters = {}, signal?: AbortSignal): Promise<TraceRunManifest[]> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") query.set(key, String(value));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
+  return request(`/api/v1/runs${suffix}`, traceRunListSchema, { signal });
+}
+
+export function fetchTraceRun(runId: string, signal?: AbortSignal): Promise<TraceRunDetailView> {
+  return request(`/api/v1/runs/${encodeURIComponent(runId)}`, traceRunDetailViewSchema, { signal });
+}
+
+export function fetchTraceEvents(runId: string, afterSeq = 0, signal?: AbortSignal): Promise<TraceEvent[]> {
+  return request(
+    `/api/v1/runs/${encodeURIComponent(runId)}/events?afterSeq=${encodeURIComponent(String(afterSeq))}`,
+    traceEventListSchema,
+    { signal },
+  );
+}
+
+export function fetchTraceEventPayload(runId: string, seq: number, signal?: AbortSignal): Promise<TraceEventPayload> {
+  return request(
+    `/api/v1/runs/${encodeURIComponent(runId)}/events/${encodeURIComponent(String(seq))}/payload`,
+    traceEventPayloadSchema,
+    { signal },
+  );
+}
+
+export function fetchTraceCall(callId: string, runId?: string, signal?: AbortSignal): Promise<TraceCallDetail> {
+  const suffix = runId ? `?runId=${encodeURIComponent(runId)}` : "";
+  return request(`/api/v1/calls/${encodeURIComponent(callId)}/context${suffix}`, traceCallDetailSchema, { signal });
 }
 
 export function createPlaySession(inputValue: CreatePlaySessionRequest, csrfToken: string): Promise<PlaySessionDetail> {

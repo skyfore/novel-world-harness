@@ -362,7 +362,7 @@ export { openWorkspaceWorld, type WorkspaceWorld, type WorkspaceWorldOpenOptions
 export { CatalogService, legacyPlaySessionId } from "./application/catalog-service.js";
 export { PiModelCatalogService, type ModelCatalogReader } from "./application/model-catalog-service.js";
 export { PlayApplicationService, type PlayApplicationServiceOptions } from "./application/play-service.js";
-export { TraceApplicationService } from "./application/trace-service.js";
+export { TraceApplicationService, type TraceRunSearchFilter } from "./application/trace-service.js";
 export { createPiPlayerOpeningNarrator, finalizePlayerSceneChoices, type PiPlayerOpeningNarratorOptions, type PlayerOpeningNarrator, type PlayerSceneNarrationObserver, type PlayerSceneNarrationResult } from "./agent/pi-player-opening.js";
 export * from "./web/contracts.js";
 export { WebEventBroker, serializeServerSentEvent, type WebEventListener } from "./web/event-stream.js";

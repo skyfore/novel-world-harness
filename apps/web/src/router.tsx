@@ -26,6 +26,12 @@ import {
   updatePlaySession,
 } from "./api";
 import {
+  TraceDetailPage,
+  TraceListPage,
+  traceRunKey,
+  traceRunsQueryKey,
+} from "./trace-pages";
+import {
   operationSnapshotSchema,
   playOperationResultSchema,
   sceneNarrationResultSchema,
@@ -57,8 +63,11 @@ const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", com
 const novelRoute = createRoute({ getParentRoute: () => rootRoute, path: "/novels/$sourceId", component: NovelPage });
 const instanceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/instances/$branchId", component: InstancePage });
 const sessionRoute = createRoute({ getParentRoute: () => rootRoute, path: "/play/$sessionId", component: SessionPage });
+const sessionTraceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/play/$sessionId/trace/$runId", component: SessionTraceRoutePage });
+const tracesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/traces", component: TracesRoutePage });
+const traceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/traces/$runId", component: TraceRoutePage });
 const modelsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/models", component: ModelsPage });
-const routeTree = rootRoute.addChildren([indexRoute, novelRoute, instanceRoute, sessionRoute, modelsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, novelRoute, instanceRoute, sessionRoute, sessionTraceRoute, tracesRoute, traceRoute, modelsRoute]);
 
 export const router = createRouter({ routeTree, context: { queryClient: undefined! } });
 
@@ -85,6 +94,11 @@ function RootLayout() {
       if (!operation.success) return;
       queryClient.setQueryData(operationKey(operation.data.id), operation.data);
       void queryClient.invalidateQueries({ queryKey: operationsKey(operation.data.scopeId) });
+      if (operation.data.runId) {
+        void queryClient.invalidateQueries({ queryKey: traceRunsQueryKey });
+        void queryClient.invalidateQueries({ queryKey: traceRunKey(operation.data.runId) });
+        void queryClient.invalidateQueries({ queryKey: ["trace-call", operation.data.runId] });
+      }
       if (isTerminal(operation.data.status)) {
         void queryClient.invalidateQueries({ queryKey: playSessionKey(operation.data.scopeId) });
         void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
@@ -150,6 +164,7 @@ function RootLayout() {
           </NavSection>
         </nav>
         <div className="sidebar-footer">
+          <Link to="/traces" className="nav-link">Trace ledger</Link>
           <Link to="/settings/models" className="nav-link">Model catalog</Link>
           <div className={`connection connection-${connection}`}><span />{connection}</div>
         </div>
@@ -440,7 +455,7 @@ function SessionPage() {
             {!data.messages.length && !busy && <EmptyState title="The scene has not been rendered" body="Render the opening from the actor-safe committed frame. This does not advance world truth." />}
             {data.messages.map((message) => (
               <article key={message.id} className={`message message-${message.role}`}>
-                <header><span>{message.role === "player" ? "You" : "Narrator"}</span><small>{message.status} · {formatDateTime(message.createdAt)}</small></header>
+                <header><span>{message.role === "player" ? "You" : "Narrator"}</span><small>{message.status} · {formatDateTime(message.createdAt)}</small>{message.runId && <Link className="run-badge" to="/play/$sessionId/trace/$runId" params={{ sessionId, runId: message.runId }}>Trace ↗</Link>}</header>
                 <p>{message.text}</p>
                 <code>{shortHash(message.atCommit)}</code>
               </article>
@@ -475,6 +490,7 @@ function SessionPage() {
                 <Detail label="Kind" value={current.kind} />
                 <Detail label="Phase" value={current.phase} />
                 <Detail label="Operation" value={current.id} mono />
+                {current.runId && <div><dt>Trace</dt><dd><Link className="inline-trace-link" to="/play/$sessionId/trace/$runId" params={{ sessionId, runId: current.runId }}>Open full trajectory ↗</Link></dd></div>}
                 <Detail label="Commit boundary" value={current.commitBoundaryCrossed ? "crossed — world may be committed" : "not crossed"} />
               </dl>
               {current.progress.statusText && <div className="operation-activity"><span className={busy ? "loading-orbit" : "status-dot"} /><p>{String(current.progress.statusText)}</p></div>}
@@ -486,12 +502,26 @@ function SessionPage() {
           {operationList.data && operationList.data.length > 1 && (
             <div className="operation-history"><span className="eyebrow">Recent</span>{operationList.data.slice(0, 8).map((item) => <button key={item.id} className={item.id === effectiveOperationId ? "selected" : ""} onClick={() => setSelectedOperationId(item.id)}><span>{item.kind}</span><small>{item.status} · {formatTime(item.createdAt)}</small></button>)}</div>
           )}
-          <PlannedCallout title="Full LLM trajectory" phase="Phase 1B" body="The next increment expands this operation into every nested request, tool call, context part, token count, response, and event-time linkage." />
         </aside>
       </div>
       {mutationError && <div className="floating-error"><InlineError error={mutationError} /></div>}
     </>
   );
+}
+
+function TracesRoutePage() {
+  const { data } = useBootstrap();
+  return <TraceListPage sessions={data?.catalog.playSessions ?? []} />;
+}
+
+function TraceRoutePage() {
+  const { runId } = useParams({ from: traceRoute.id });
+  return <TraceDetailPage runId={runId} />;
+}
+
+function SessionTraceRoutePage() {
+  const { sessionId, runId } = useParams({ from: sessionTraceRoute.id });
+  return <TraceDetailPage runId={runId} sessionId={sessionId} />;
 }
 
 function ChoiceButton({ choice, onChoose }: { choice: PlayerChoiceSummary; onChoose: (choice: PlayerChoiceSummary) => void }) {

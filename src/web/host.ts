@@ -7,7 +7,7 @@ import { z, ZodError } from "zod";
 import { CatalogService } from "../application/catalog-service.js";
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
 import { PlayApplicationService } from "../application/play-service.js";
-import { TraceApplicationService } from "../application/trace-service.js";
+import { TraceApplicationService, type TraceRunSearchFilter } from "../application/trace-service.js";
 import {
   WEB_API_VERSION,
   apiErrorSchema,
@@ -24,7 +24,7 @@ import { serializeServerSentEvent, WebEventBroker } from "./event-stream.js";
 import { WebApplicationError } from "./errors.js";
 import { OperationManager } from "./operation-manager.js";
 import { traceIdentifierSchema, traceRunKindSchema, traceRunStatusSchema } from "../trace/schema.js";
-import { TraceStore, type TraceRunFilter } from "../trace/store.js";
+import { TraceStore } from "../trace/store.js";
 
 const SERVER_VERSION = "0.1.0";
 const DEFAULT_STATIC_ROOT = path.resolve(import.meta.dirname, "../../dist/web-ui");
@@ -108,7 +108,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
     reply.header(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; style-src-elem 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
     );
     if (request.url.startsWith(`/api/${WEB_API_VERSION}/`)) reply.header("Cache-Control", "no-store");
     return payload;
@@ -237,13 +237,17 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   });
   app.get(`/api/${WEB_API_VERSION}/runs`, async (request) => {
     const query = traceRunQuerySchema.parse(request.query);
-    const filter: TraceRunFilter = {
+    const filter: TraceRunSearchFilter = {
       ...(query.sessionId ?? query.playSessionId
         ? { playSessionId: query.sessionId ?? query.playSessionId }
         : {}),
       ...(query.branchId ? { branchId: query.branchId } : {}),
       ...(query.kind ? { kind: query.kind } : {}),
       ...(query.status ? { status: query.status } : {}),
+      ...(query.modelId ? { modelId: query.modelId } : {}),
+      ...(query.stage ? { stage: query.stage } : {}),
+      ...(query.startedAfter ? { startedAfter: query.startedAfter } : {}),
+      ...(query.startedBefore ? { startedBefore: query.startedBefore } : {}),
       ...(query.limit !== undefined ? { limit: query.limit } : {}),
     };
     return traceQueries.listRuns(filter);
@@ -400,6 +404,10 @@ const traceRunQuerySchema = z.object({
   branchId: z.string().min(1).optional(),
   kind: traceRunKindSchema.optional(),
   status: traceRunStatusSchema.optional(),
+  modelId: z.string().min(1).optional(),
+  stage: z.string().min(1).optional(),
+  startedAfter: z.string().datetime({ offset: true }).optional(),
+  startedBefore: z.string().datetime({ offset: true }).optional(),
   limit: z.coerce.number().int().min(1).max(1_000).optional(),
 }).strict().refine(
   (query) => !query.sessionId || !query.playSessionId || query.sessionId === query.playSessionId,

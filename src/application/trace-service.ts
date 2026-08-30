@@ -22,11 +22,44 @@ const EMPTY_USAGE = {
   cost: 0,
 };
 
+export type TraceRunSearchFilter = TraceRunFilter & {
+  modelId?: string;
+  stage?: string;
+  startedAfter?: string;
+  startedBefore?: string;
+};
+
 export class TraceApplicationService {
   constructor(readonly store: TraceStore) {}
 
-  listRuns(filter: TraceRunFilter = {}): Promise<TraceRunManifest[]> {
-    return this.store.listRuns(filter);
+  async listRuns(filter: TraceRunSearchFilter = {}): Promise<TraceRunManifest[]> {
+    const { modelId, stage, startedAfter, startedBefore, limit = 200, ...storeFilter } = filter;
+    const requestedLimit = traceRunLimitSchema.parse(limit);
+    const afterTime = startedAfter ? parseFilterTime(startedAfter, "startedAfter") : undefined;
+    const beforeTime = startedBefore ? parseFilterTime(startedBefore, "startedBefore") : undefined;
+    if (!modelId && !stage && !startedAfter && !startedBefore) {
+      return this.store.listRuns({ ...storeFilter, limit: requestedLimit });
+    }
+    const candidates = await this.store.listRuns({ ...storeFilter, limit: 1_000 });
+    const selected: TraceRunManifest[] = [];
+    for (const manifest of candidates) {
+      const startedTime = Date.parse(manifest.startedAt);
+      if (afterTime !== undefined && startedTime < afterTime) continue;
+      if (beforeTime !== undefined && startedTime >= beforeTime) continue;
+      if (modelId || stage) {
+        const events = await this.store.readEvents(manifest.id);
+        if (modelId && !events.some((event) =>
+          stringData(event, "modelId") === modelId
+          || stringData(event, "responseModelId") === modelId)) continue;
+        if (stage && !events.some((event) =>
+          stringData(event, "kind") === stage
+          || stringData(event, "label") === stage
+          || stringData(event, "invocationName") === stage)) continue;
+      }
+      selected.push(manifest);
+      if (selected.length === requestedLimit) break;
+    }
+    return selected;
   }
 
   async getRun(runIdValue: string): Promise<TraceRunDetailView> {
@@ -242,6 +275,13 @@ export class TraceApplicationService {
 
 // Event sequence zero is reserved for a cursor; payload lookup always targets an event.
 const traceEventSequenceSchema = traceUsageSchema.shape.input.positive();
+const traceRunLimitSchema = traceUsageSchema.shape.input.positive().max(1_000);
+
+function parseFilterTime(value: string, label: string): number {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) throw new Error(`Trace run ${label} must be an ISO 8601 timestamp.`);
+  return parsed;
+}
 
 function elapsedMs(startedAt: string, endedAt: string): number {
   return Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));

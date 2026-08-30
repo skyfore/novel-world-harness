@@ -49,11 +49,16 @@ llm:
     narrator: main
 ```
 
-The current terminal harness consumes three role routes:
+The harness consumes these role routes (an unconfigured route inherits
+`defaultProfile`):
 
 - `controller`: guided `nwh compile` sessions;
 - `extractor`: bounded `compile-source` batches;
 - `narrator`: ordinary `nwh` / `nwh play` sessions and the restricted `play-world` action translator.
+- `player-action`: Web player-action translation.
+- `adjudicator`: Web world adjudication.
+- `npc`: Web NPC reaction reasoning.
+- `specialist`: Web world-response and canonical-attachment specialist calls.
 
 Unknown routes are allowed for future adapters, but they have no effect until code asks for that role.
 

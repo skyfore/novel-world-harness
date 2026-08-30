@@ -105,7 +105,6 @@ export class PlayApplicationService {
   private readonly catalog: CatalogService;
   private readonly traces: TraceStore;
   private readonly sessionRequests = new Map<string, { fingerprint: string; sessionId: string }>();
-  private profilePromise?: Promise<LlmProfile | undefined>;
 
   constructor(private readonly options: PlayApplicationServiceOptions) {
     this.root = path.resolve(options.root);
@@ -781,46 +780,43 @@ export class PlayApplicationService {
     npcResponseReasoner?: NpcReactionReasoner;
     narrator: PlayerOpeningNarrator;
   }> {
-    const profile = await this.profile();
+    const profiles = await this.profiles(["player-action", "adjudicator", "specialist", "npc", "narrator"]);
     const onStatus = (statusText: string) => context.update("model-working", { statusText });
-    const common = {
+    const common = (profile: LlmProfile | undefined) => ({
       root: this.root,
       ...(profile ? { profile } : {}),
       ...(this.options.model ? { model: this.options.model } : {}),
       signal: context.signal,
       onStatus,
       trace,
-    };
+    });
     const usePiTurnAdapters = !this.options.translator;
     return {
-      translator: this.options.translator ?? createPiPlayerActionTranslator(common),
+      translator: this.options.translator ?? createPiPlayerActionTranslator(common(profiles.get("player-action"))),
       ...(this.options.adjudicator
         ? { adjudicator: this.options.adjudicator }
-        : usePiTurnAdapters ? { adjudicator: createPiPlayerWorldAdjudicator(common) } : {}),
+        : usePiTurnAdapters ? { adjudicator: createPiPlayerWorldAdjudicator(common(profiles.get("adjudicator"))) } : {}),
       ...(this.options.worldResponseResolver
         ? { worldResponseResolver: this.options.worldResponseResolver }
-        : usePiTurnAdapters ? { worldResponseResolver: createPiPlayerWorldResponseResolver(common) } : {}),
+        : usePiTurnAdapters ? { worldResponseResolver: createPiPlayerWorldResponseResolver(common(profiles.get("specialist"))) } : {}),
       ...(this.options.canonicalAttachmentResolver
         ? { canonicalAttachmentResolver: this.options.canonicalAttachmentResolver }
-        : usePiTurnAdapters ? { canonicalAttachmentResolver: createPiCanonicalAttachmentResolver(common) } : {}),
+        : usePiTurnAdapters ? { canonicalAttachmentResolver: createPiCanonicalAttachmentResolver(common(profiles.get("specialist"))) } : {}),
       ...(this.options.npcResponseReasoner
         ? { npcResponseReasoner: this.options.npcResponseReasoner }
-        : usePiTurnAdapters ? { npcResponseReasoner: createPiNpcReactionReasoner(common) } : {}),
+        : usePiTurnAdapters ? { npcResponseReasoner: createPiNpcReactionReasoner(common(profiles.get("npc"))) } : {}),
       narrator: this.options.narrator ?? createPiPlayerOpeningNarrator({
         root: this.root,
-        ...(profile ? { profile } : {}),
+        ...(profiles.get("narrator") ? { profile: profiles.get("narrator") } : {}),
         ...(this.options.model ? { model: this.options.model } : {}),
         trace,
       }),
     };
   }
 
-  private profile(): Promise<LlmProfile | undefined> {
-    this.profilePromise ??= (async () => {
-      const config = await loadOptionalConfig(this.options.configPath ?? path.join(this.root, "novel-harness.yaml"));
-      return config ? profileForRole(config, "narrator").profile : undefined;
-    })();
-    return this.profilePromise;
+  private async profiles(roles: string[]): Promise<Map<string, LlmProfile | undefined>> {
+    const config = await loadOptionalConfig(this.options.configPath ?? path.join(this.root, "novel-harness.yaml"));
+    return new Map(roles.map((role) => [role, config ? profileForRole(config, role).profile : undefined]));
   }
 
   private async requireSession(sessionId: string): Promise<ActivePlaySession> {

@@ -772,6 +772,14 @@ player-action translator、validator 或 commit API。
 - model profile 按用途配置，例如 compiler、player-action、adjudicator、npc、narrator、specialist；底层仍解析为 Pi model/provider。
 - trace 记录 provider/model/profile ID 和非敏感参数，但删除 Authorization header、API key、cookie 及 provider secret。
 
+MVP 的 provider login 作为持久化 `provider-login` operation 运行，直接调用 Pi
+`ModelRuntime.login/logout`。Pi 发出的 URL、device code、select/text/secret prompt 经
+`AuthInteractionManager` 投影到 operation progress；`POST /interactions/:id/answer`
+单次消费答案，答案本身不写 operation、SSE 或响应。API key 只作为第一个 Pi login
+prompt 的一次性 seed，服务端只持久化请求 fingerprint。角色 profile 使用
+`web-<role>` 路由原子更新同一 `novel-harness.yaml`，保留注释和未展开的 `${…}`
+占位符，因此 CLI 与 Web 继续共享配置且不会把环境值写回文件。
+
 ## 14. 安全与隐私
 
 即使没有账号系统，也应具备以下本地 Web 防护：

@@ -89,6 +89,12 @@ message badges expose actor, branch/head, story step, run stage, LLM/tool counts
 commit presence, and wall duration; active operations remain controllable from
 the global tray while navigating between pages.
 
+The model settings page uses Pi's own provider catalog and credential runtime.
+It supports write-only API-key login, OAuth/device/manual-code prompts through
+single-use browser interactions, credential removal, and per-role model routes
+stored in the shared `novel-harness.yaml`. Secrets are never returned in API,
+operation, or SSE payloads.
+
 Every play and compiler run has a durable trajectory inspector. It exposes the
 ordered LLM requests and tool calls, context-part composition (system policy,
 world model, source evidence, prior messages, and tool results), exact request

@@ -71,6 +71,8 @@ export const providerSummarySchema = z.object({
   configured: z.boolean(),
   authSource: z.enum(["stored", "runtime", "environment", "fallback", "models_json_key", "models_json_command"]).optional(),
   authLabel: z.string().optional(),
+  credentialType: z.enum(["api_key", "oauth"]).optional(),
+  authTypes: z.array(z.enum(["api_key", "oauth"])),
   modelCount: z.number().int().nonnegative(),
 }).strict();
 
@@ -90,6 +92,80 @@ export const modelCatalogSchema = z.object({
   providers: z.array(providerSummarySchema),
   models: z.array(modelSummarySchema),
   diagnostic: z.string().optional(),
+}).strict();
+
+export const modelRoleSchema = z.enum([
+  "controller",
+  "extractor",
+  "narrator",
+  "player-action",
+  "adjudicator",
+  "npc",
+  "specialist",
+]);
+
+export const modelProfileSummarySchema = z.object({
+  role: modelRoleSchema,
+  profileId: z.string().min(1).optional(),
+  providerId: z.string().min(1).optional(),
+  modelId: z.string().min(1).optional(),
+  thinkingLevel: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+  inheritedDefault: z.boolean(),
+}).strict();
+
+export const modelProfileListSchema = z.object({
+  version: z.literal(1),
+  configPath: z.string().min(1),
+  defaultProfileId: z.string().min(1).optional(),
+  roles: z.array(modelProfileSummarySchema),
+}).strict();
+
+export const updateModelProfileRequestSchema = z.object({
+  providerId: z.string().min(1),
+  modelId: z.string().min(1),
+  thinkingLevel: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).default("medium"),
+}).strict();
+
+export const providerLoginRequestSchema = z.object({
+  authType: z.enum(["api_key", "oauth"]),
+  apiKey: z.string().min(1).max(100_000).optional(),
+  clientRequestId: z.string().min(1).max(200),
+}).strict().superRefine((value, ctx) => {
+  if (value.authType === "api_key" && !value.apiKey) ctx.addIssue({ code: "custom", path: ["apiKey"], message: "An API key is required for api_key login." });
+  if (value.authType === "oauth" && value.apiKey !== undefined) ctx.addIssue({ code: "custom", path: ["apiKey"], message: "OAuth login must not include an API key." });
+});
+
+export const authInteractionPromptSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), message: z.string().min(1), placeholder: z.string().optional() }).strict(),
+  z.object({ type: z.literal("secret"), message: z.string().min(1), placeholder: z.string().optional() }).strict(),
+  z.object({ type: z.literal("manual_code"), message: z.string().min(1), placeholder: z.string().optional() }).strict(),
+  z.object({
+    type: z.literal("select"),
+    message: z.string().min(1),
+    options: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().optional() }).strict()).min(1),
+  }).strict(),
+]);
+
+export const authInteractionSnapshotSchema = z.object({
+  version: z.literal(1),
+  id: z.string().min(1),
+  operationId: z.string().min(1),
+  providerId: z.string().min(1),
+  status: z.enum(["pending", "answered", "cancelled", "expired"]),
+  prompt: authInteractionPromptSchema,
+  createdAt: z.string().datetime({ offset: true }),
+  expiresAt: z.string().datetime({ offset: true }),
+  resolvedAt: z.string().datetime({ offset: true }).optional(),
+}).strict();
+
+export const answerAuthInteractionRequestSchema = z.object({ answer: z.string().max(100_000) }).strict();
+
+export const providerCredentialResultSchema = z.object({
+  providerId: z.string().min(1),
+  configured: z.boolean(),
+  authType: z.enum(["api_key", "oauth"]).optional(),
+  authSource: providerSummarySchema.shape.authSource,
+  authLabel: z.string().optional(),
 }).strict();
 
 export const featureSummarySchema = z.object({
@@ -142,6 +218,9 @@ export const webEventTypeSchema = z.enum([
   "play.narration.delta",
   "play.narration.completed",
   "play.message.appended",
+  "interaction.requested",
+  "interaction.resolved",
+  "model.catalog.changed",
 ]);
 
 export const webEventSchema = z.object({
@@ -167,6 +246,7 @@ export const operationKindSchema = z.enum([
   "player-move",
   "scene-narration",
   "narration-retry",
+  "provider-login",
   "prepare",
   "instance-create",
   "branch-fork",
@@ -748,6 +828,15 @@ export type CatalogSnapshot = z.infer<typeof catalogSnapshotSchema>;
 export type ProviderSummary = z.infer<typeof providerSummarySchema>;
 export type ModelSummary = z.infer<typeof modelSummarySchema>;
 export type ModelCatalog = z.infer<typeof modelCatalogSchema>;
+export type ModelRole = z.infer<typeof modelRoleSchema>;
+export type ModelProfileSummary = z.infer<typeof modelProfileSummarySchema>;
+export type ModelProfileList = z.infer<typeof modelProfileListSchema>;
+export type UpdateModelProfileRequest = z.infer<typeof updateModelProfileRequestSchema>;
+export type ProviderLoginRequest = z.infer<typeof providerLoginRequestSchema>;
+export type AuthInteractionPrompt = z.infer<typeof authInteractionPromptSchema>;
+export type AuthInteractionSnapshot = z.infer<typeof authInteractionSnapshotSchema>;
+export type AnswerAuthInteractionRequest = z.infer<typeof answerAuthInteractionRequestSchema>;
+export type ProviderCredentialResult = z.infer<typeof providerCredentialResultSchema>;
 export type BootstrapResponse = z.infer<typeof bootstrapResponseSchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;

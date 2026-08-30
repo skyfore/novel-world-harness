@@ -10,7 +10,12 @@ import {
   forkInstanceRequestSchema,
   forkInstanceResultSchema,
   instanceDetailSchema,
+  authInteractionSnapshotSchema,
+  answerAuthInteractionRequestSchema,
+  modelProfileListSchema,
   narrationRetryRequestSchema,
+  providerCredentialResultSchema,
+  providerLoginRequestSchema,
   operationAcceptedSchema,
   operationSnapshotSchema,
   ontologyGraphSchema,
@@ -34,6 +39,7 @@ import {
   sourceRegistrationRequestSchema,
   sourceRegistrationResultSchema,
   updatePlaySessionRequestSchema,
+  updateModelProfileRequestSchema,
   type ApiError,
   type BootstrapResponse,
   type ClearPlayConversationResult,
@@ -44,7 +50,13 @@ import {
   type ForkInstanceRequest,
   type ForkInstanceResult,
   type InstanceDetail,
+  type AnswerAuthInteractionRequest,
+  type AuthInteractionSnapshot,
+  type ModelProfileList,
+  type ModelRole,
   type NarrationRetryRequest,
+  type ProviderCredentialResult,
+  type ProviderLoginRequest,
   type OperationAccepted,
   type OperationSnapshot,
   type OntologyGraph,
@@ -71,6 +83,7 @@ import {
   type SourceRegistrationRequest,
   type SourceRegistrationResult,
   type UpdatePlaySessionRequest,
+  type UpdateModelProfileRequest,
 } from "../../../src/web/contracts";
 import {
   traceEventPayloadSchema,
@@ -184,6 +197,10 @@ export function fetchNovelRemovalPreview(sourceId: string, mode: "analysis" | "n
 
 export function fetchOperation(operationId: string, signal?: AbortSignal): Promise<OperationSnapshot> {
   return request(`/api/v1/operations/${encodeURIComponent(operationId)}`, operationSnapshotSchema, { signal });
+}
+
+export function fetchModelProfiles(signal?: AbortSignal): Promise<ModelProfileList> {
+  return request("/api/v1/model-profiles", modelProfileListSchema, { signal });
 }
 
 export function fetchOperations(scopeId?: string, signal?: AbortSignal): Promise<OperationSnapshot[]> {
@@ -369,6 +386,46 @@ export function retryNarration(sessionId: string, inputValue: NarrationRetryRequ
     "POST",
     narrationRetryRequestSchema.parse(inputValue),
     operationAcceptedSchema,
+    csrfToken,
+  );
+}
+
+export function updateModelProfile(role: ModelRole, inputValue: UpdateModelProfileRequest, csrfToken: string): Promise<ModelProfileList> {
+  return mutation(
+    `/api/v1/model-profiles/${encodeURIComponent(role)}`,
+    "PATCH",
+    updateModelProfileRequestSchema.parse(inputValue),
+    modelProfileListSchema,
+    csrfToken,
+  );
+}
+
+export function loginProvider(providerId: string, inputValue: ProviderLoginRequest, csrfToken: string): Promise<OperationAccepted> {
+  return mutation(
+    `/api/v1/models/providers/${encodeURIComponent(providerId)}/login`,
+    "POST",
+    providerLoginRequestSchema.parse(inputValue),
+    operationAcceptedSchema,
+    csrfToken,
+  );
+}
+
+export function logoutProvider(providerId: string, csrfToken: string): Promise<ProviderCredentialResult> {
+  return mutation(
+    `/api/v1/models/providers/${encodeURIComponent(providerId)}/credential`,
+    "DELETE",
+    undefined,
+    providerCredentialResultSchema,
+    csrfToken,
+  );
+}
+
+export function answerAuthInteraction(interactionId: string, inputValue: AnswerAuthInteractionRequest, csrfToken: string): Promise<AuthInteractionSnapshot> {
+  return mutation(
+    `/api/v1/interactions/${encodeURIComponent(interactionId)}/answer`,
+    "POST",
+    answerAuthInteractionRequestSchema.parse(inputValue),
+    authInteractionSnapshotSchema,
     csrfToken,
   );
 }

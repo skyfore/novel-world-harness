@@ -1,12 +1,23 @@
 import path from "node:path";
 import { getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { modelCatalogSchema, type ModelCatalog } from "../web/contracts.js";
+import type { AuthInteraction, AuthType } from "@earendil-works/pi-ai";
+import {
+  modelCatalogSchema,
+  providerCredentialResultSchema,
+  type ModelCatalog,
+  type ProviderCredentialResult,
+} from "../web/contracts.js";
 
 export interface ModelCatalogReader {
   read(): Promise<ModelCatalog>;
 }
 
-export class PiModelCatalogService implements ModelCatalogReader {
+export interface ModelCredentialRuntime extends ModelCatalogReader {
+  login(providerId: string, authType: AuthType, interaction: AuthInteraction): Promise<ProviderCredentialResult>;
+  logout(providerId: string): Promise<ProviderCredentialResult>;
+}
+
+export class PiModelCatalogService implements ModelCredentialRuntime {
   private runtimePromise?: Promise<ModelRuntime>;
 
   constructor(private readonly piAgentDir = getAgentDir()) {}
@@ -14,6 +25,7 @@ export class PiModelCatalogService implements ModelCatalogReader {
   async read(): Promise<ModelCatalog> {
     try {
       const runtime = await this.runtime();
+      const credentials = new Map((await runtime.listCredentials()).map((credential) => [credential.providerId, credential.type]));
       const available = new Set(runtime.getAvailableSnapshot().map((model) => `${model.provider}/${model.id}`));
       const models = runtime.getModels().map((model) => ({
         id: model.id,
@@ -30,12 +42,17 @@ export class PiModelCatalogService implements ModelCatalogReader {
       for (const model of models) modelCounts.set(model.providerId, (modelCounts.get(model.providerId) ?? 0) + 1);
       const providers = runtime.getProviders().map((provider) => {
         const auth = runtime.getProviderAuthStatus(provider.id);
+        const authTypes: AuthType[] = [];
+        if (provider.auth.apiKey?.login) authTypes.push("api_key");
+        if (provider.auth.oauth) authTypes.push("oauth");
         return {
           id: provider.id,
           name: provider.name,
           configured: auth.configured,
           ...(auth.source ? { authSource: auth.source } : {}),
           ...(auth.label ? { authLabel: auth.label } : {}),
+          ...(credentials.get(provider.id) ? { credentialType: credentials.get(provider.id) } : {}),
+          authTypes,
           modelCount: modelCounts.get(provider.id) ?? 0,
         };
       }).sort((left, right) => left.name.localeCompare(right.name));
@@ -49,6 +66,23 @@ export class PiModelCatalogService implements ModelCatalogReader {
     }
   }
 
+  async login(providerId: string, authType: AuthType, interaction: AuthInteraction): Promise<ProviderCredentialResult> {
+    const runtime = await this.runtime();
+    const provider = runtime.getProvider(providerId);
+    if (!provider) throw new Error(`Unknown Pi provider '${providerId}'. Use /api/v1/models/providers and copy an exact id.`);
+    const supported = authType === "api_key" ? Boolean(provider.auth.apiKey?.login) : Boolean(provider.auth.oauth);
+    if (!supported) throw new Error(`Pi provider '${providerId}' does not support interactive ${authType} login.`);
+    await runtime.login(providerId, authType, interaction);
+    return this.credentialResult(runtime, providerId, authType);
+  }
+
+  async logout(providerId: string): Promise<ProviderCredentialResult> {
+    const runtime = await this.runtime();
+    if (!runtime.getProvider(providerId)) throw new Error(`Unknown Pi provider '${providerId}'. Use /api/v1/models/providers and copy an exact id.`);
+    await runtime.logout(providerId);
+    return this.credentialResult(runtime, providerId);
+  }
+
   private runtime(): Promise<ModelRuntime> {
     this.runtimePromise ??= ModelRuntime.create({
       authPath: path.join(this.piAgentDir, "auth.json"),
@@ -57,5 +91,16 @@ export class PiModelCatalogService implements ModelCatalogReader {
       refreshOnCreate: false,
     });
     return this.runtimePromise;
+  }
+
+  private credentialResult(runtime: ModelRuntime, providerId: string, authType?: AuthType): ProviderCredentialResult {
+    const status = runtime.getProviderAuthStatus(providerId);
+    return providerCredentialResultSchema.parse({
+      providerId,
+      configured: status.configured,
+      ...(authType ? { authType } : {}),
+      ...(status.source ? { authSource: status.source } : {}),
+      ...(status.label ? { authLabel: status.label } : {}),
+    });
   }
 }

@@ -12,24 +12,29 @@ import {
 } from "@tanstack/react-router";
 import {
   activatePlaySession,
+  answerAuthInteraction,
   cancelOperation,
   clearPlayConversation,
   createPlaySession,
   fetchBootstrap,
   fetchCharacters,
   fetchInstance,
+  fetchModelProfiles,
   fetchOperation,
   fetchOperations,
   fetchPlaySession,
   fetchPreparation,
   fetchTraceRuns,
   forkInstance,
+  loginProvider,
+  logoutProvider,
   removePlaySession,
   retryNarration,
   restorePlaySession,
   startPlayerMove,
   startSceneNarration,
   updatePlaySession,
+  updateModelProfile,
 } from "./api";
 import {
   CompilerWorkbenchPage,
@@ -45,6 +50,7 @@ import {
 import { MaintenanceControl } from "./maintenance-dialog";
 import {
   operationSnapshotSchema,
+  authInteractionSnapshotSchema,
   narrationRetryResultSchema,
   ontologyViewSchema,
   playOperationResultSchema,
@@ -54,6 +60,10 @@ import {
   type InstanceSummary,
   type NovelSummary,
   type OperationSnapshot,
+  type ModelProfileSummary,
+  type ModelRole,
+  type ModelSummary,
+  type ProviderSummary,
   type PlaySessionSummary,
   type PlayerChoiceSummary,
 } from "../../../src/web/contracts";
@@ -153,12 +163,14 @@ function RootLayout() {
     source.addEventListener("play.narration.delta", onNarrationDelta);
     source.addEventListener("play.narration.completed", onPlayChanged);
     source.addEventListener("play.message.appended", onPlayChanged);
+    source.addEventListener("model.catalog.changed", onCatalog);
     return () => {
       source.removeEventListener("catalog.invalidated", onCatalog);
       source.removeEventListener("operation.changed", onOperation);
       source.removeEventListener("play.narration.delta", onNarrationDelta);
       source.removeEventListener("play.narration.completed", onPlayChanged);
       source.removeEventListener("play.message.appended", onPlayChanged);
+      source.removeEventListener("model.catalog.changed", onCatalog);
       source.close();
     };
   }, [queryClient]);
@@ -234,6 +246,7 @@ function OperationJump({ operation }: { operation: OperationSnapshot }) {
   const label = <span><strong>{operation.kind.replaceAll("-", " ")}</strong><small>{shortHash(operation.id)}</small></span>;
   if (operation.kind === "prepare") return <Link to="/novels/$sourceId/compile" params={{ sourceId: operation.scopeId }}>{label}</Link>;
   if (operation.kind === "player-move" || operation.kind === "scene-narration" || operation.kind === "narration-retry") return <Link to="/play/$sessionId" params={{ sessionId: operation.scopeId }}>{label}</Link>;
+  if (operation.kind === "provider-login") return <Link to="/settings/models">{label}</Link>;
   return <Link to="/">{label}</Link>;
 }
 
@@ -802,20 +815,27 @@ function OperationResult({ result }: { result: ReturnType<typeof playOperationRe
 
 function ModelsPage() {
   const { data } = useBootstrap();
+  const queryClient = useQueryClient();
+  const profiles = useQuery({ queryKey: ["model-profiles"], queryFn: ({ signal }) => fetchModelProfiles(signal) });
+  const operations = useQuery({ queryKey: ["operations"], queryFn: ({ signal }) => fetchOperations(undefined, signal), refetchInterval: 1_000 });
   if (!data) return null;
+  const loginOperations = (operations.data ?? []).filter((operation) => operation.kind === "provider-login");
   return (
     <>
-      <PageHeading eyebrow="Pi runtime" title="Model catalog" description="Credential values stay in Pi storage. This page receives status metadata only." />
+      <PageHeading eyebrow="Pi runtime" title="Models & credentials" description="Provider login stays inside Pi. API keys are write-only; this page receives status metadata, prompts, and redacted progress only." />
       {data.modelCatalog.diagnostic && <div className="alert"><strong>Catalog diagnostic</strong><span>{data.modelCatalog.diagnostic}</span></div>}
-      <Panel title="Providers" action={<span className="panel-tag">read only</span>}>
+      <Panel title="Providers" action={<span className="panel-tag">Pi credential store</span>}>
         <div className="provider-grid">
           {data.modelCatalog.providers.map((provider) => (
-            <article className="provider-card" key={provider.id}>
-              <div><span className={`status-dot ${provider.configured ? "status-available" : "status-planned"}`} /><strong>{provider.name}</strong></div>
-              <code>{provider.id}</code><p>{provider.configured ? provider.authLabel ?? provider.authSource ?? "Configured" : "Not configured"}</p><small>{provider.modelCount} models</small>
-            </article>
+            <ProviderCredentialCard key={provider.id} provider={provider} csrfToken={data.csrfToken} operations={loginOperations.filter((operation) => operation.scopeId === provider.id)} onChanged={() => {
+              void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
+              void queryClient.invalidateQueries({ queryKey: ["operations"], exact: true });
+            }} />
           ))}
         </div>
+      </Panel>
+      <Panel title="Role profiles" action={<span className="panel-tag">shared YAML config</span>}>
+        {profiles.isPending ? <InlineLoading label="Reading model routes…" /> : profiles.isError ? <InlineError error={profiles.error} /> : <><div className="profile-config-path"><span>Configuration</span><code>{profiles.data.configPath}</code></div><div className="model-profile-grid">{profiles.data.roles.map((profile) => <ModelProfileEditor key={profile.role} profile={profile} models={data.modelCatalog.models} csrfToken={data.csrfToken} onSaved={(next) => queryClient.setQueryData(["model-profiles"], next)} />)}</div></>}
       </Panel>
       <Panel title="Known models" action={<span className="panel-tag">{data.modelCatalog.models.length}</span>}>
         <div className="model-table" role="table" aria-label="Known Pi models">
@@ -828,6 +848,95 @@ function ModelsPage() {
       </Panel>
     </>
   );
+}
+
+function ProviderCredentialCard({ provider, csrfToken, operations, onChanged }: { provider: ProviderSummary; csrfToken: string; operations: OperationSnapshot[]; onChanged: () => void }) {
+  const queryClient = useQueryClient();
+  const [apiKey, setApiKey] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error>();
+  const operation = operations.find((candidate) => !isTerminal(candidate.status)) ?? operations[0];
+  const interaction = authInteractionSnapshotSchema.safeParse(operation?.progress.interaction);
+  const authEvent = operation?.progress.authEvent && typeof operation.progress.authEvent === "object" ? operation.progress.authEvent as Record<string, unknown> : undefined;
+  const begin = async (authType: "api_key" | "oauth") => {
+    const secret = apiKey;
+    setApiKey("");
+    setBusy(true);
+    setError(undefined);
+    try {
+      const accepted = await loginProvider(provider.id, {
+        authType,
+        ...(authType === "api_key" ? { apiKey: secret } : {}),
+        clientRequestId: requestId(`provider-${authType}`),
+      }, csrfToken);
+      queryClient.setQueryData(operationKey(accepted.operation.id), accepted.operation);
+      void queryClient.invalidateQueries({ queryKey: ["operations"], exact: true });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause : new Error(String(cause)));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const submitAnswer = async () => {
+    if (!interaction.success) return;
+    const oneTimeAnswer = answer;
+    setAnswer("");
+    setBusy(true);
+    setError(undefined);
+    try {
+      await answerAuthInteraction(interaction.data.id, { answer: oneTimeAnswer }, csrfToken);
+      void queryClient.invalidateQueries({ queryKey: ["operations"], exact: true });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause : new Error(String(cause)));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!window.confirm(`Remove the stored Pi credential for ${provider.name}? Environment credentials are not changed.`)) return;
+    setBusy(true);
+    setError(undefined);
+    try { await logoutProvider(provider.id, csrfToken); onChanged(); }
+    catch (cause) { setError(cause instanceof Error ? cause : new Error(String(cause))); }
+    finally { setBusy(false); }
+  };
+  return <article className="provider-card">
+    <header><div><span className={`status-dot ${provider.configured ? "status-available" : "status-planned"}`} /><strong>{provider.name}</strong></div><code>{provider.id}</code></header>
+    <p>{provider.configured ? provider.authLabel ?? provider.authSource ?? "Configured" : "Not configured"}</p><small>{provider.modelCount} models{provider.credentialType ? ` · ${provider.credentialType}` : ""}</small>
+    {provider.authTypes.includes("api_key") && <form className="provider-key-form" onSubmit={(event) => { event.preventDefault(); if (apiKey && !busy) void begin("api_key"); }}><input type="password" autoComplete="off" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="Write-only API key" /><button type="submit" disabled={!apiKey || busy}>Save key</button></form>}
+    <div className="provider-actions">{provider.authTypes.includes("oauth") && <button disabled={busy || Boolean(operation && !isTerminal(operation.status))} onClick={() => void begin("oauth")}>Start OAuth</button>}{provider.configured && <button className="danger-button" disabled={busy} onClick={() => void remove()}>Remove credential</button>}</div>
+    {operation && <div className="provider-login-state"><span className={`operation-status operation-${operation.status}`}>{operation.phase}</span><small>{operation.error?.message ?? String(authEvent?.message ?? "Pi authentication is running")}</small>{authEvent && <AuthEventView event={authEvent} />}</div>}
+    {interaction.success && interaction.data.status === "pending" && <AuthPromptForm interaction={interaction.data} answer={answer} setAnswer={setAnswer} busy={busy} onSubmit={() => void submitAnswer()} />}
+    {error && <InlineError error={error} />}
+  </article>;
+}
+
+function AuthPromptForm({ interaction, answer, setAnswer, busy, onSubmit }: { interaction: ReturnType<typeof authInteractionSnapshotSchema.parse>; answer: string; setAnswer: (value: string) => void; busy: boolean; onSubmit: () => void }) {
+  const prompt = interaction.prompt;
+  return <form className="auth-prompt" onSubmit={(event) => { event.preventDefault(); if (!busy) onSubmit(); }}><strong>{prompt.message}</strong>{prompt.type === "select" ? <select value={answer} onChange={(event) => setAnswer(event.target.value)}><option value="">Choose…</option>{prompt.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select> : <input type={prompt.type === "secret" ? "password" : "text"} autoComplete="off" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={prompt.placeholder} />}<button disabled={busy || !answer}>Answer once</button><small>Answer values are never echoed into operation progress or SSE.</small></form>;
+}
+
+function AuthEventView({ event }: { event: Record<string, unknown> }) {
+  const url = typeof event.url === "string" ? safeExternalUrl(event.url) : undefined;
+  const verification = typeof event.verificationUri === "string" ? safeExternalUrl(event.verificationUri) : undefined;
+  return <div className="auth-event">{url && <a href={url} target="_blank" rel="noreferrer">Open provider authorization ↗</a>}{verification && <a href={verification} target="_blank" rel="noreferrer">Open verification page ↗</a>}{typeof event.userCode === "string" && <code>{event.userCode}</code>}{typeof event.instructions === "string" && <p>{event.instructions}</p>}</div>;
+}
+
+function ModelProfileEditor({ profile, models, csrfToken, onSaved }: { profile: ModelProfileSummary; models: ModelSummary[]; csrfToken: string; onSaved: (profiles: Awaited<ReturnType<typeof fetchModelProfiles>>) => void }) {
+  const initialKey = profile.providerId && profile.modelId ? modelOptionKey(profile.providerId, profile.modelId) : "";
+  const [selected, setSelected] = useState(initialKey);
+  const [thinking, setThinking] = useState(profile.thinkingLevel ?? "medium");
+  useEffect(() => { setSelected(initialKey); setThinking(profile.thinkingLevel ?? "medium"); }, [initialKey, profile.thinkingLevel]);
+  const mutation = useMutation({
+    mutationFn: () => {
+      const model = models.find((candidate) => modelOptionKey(candidate.providerId, candidate.id) === selected);
+      if (!model) throw new Error("Select one exact Pi model.");
+      return updateModelProfile(profile.role as ModelRole, { providerId: model.providerId, modelId: model.id, thinkingLevel: thinking }, csrfToken);
+    },
+    onSuccess: onSaved,
+  });
+  return <article className="model-profile-card"><header><strong>{profile.role.replaceAll("-", " ")}</strong><small>{profile.inheritedDefault ? `inherits ${profile.profileId ?? "none"}` : profile.profileId ?? "unconfigured"}</small></header><select value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Choose model…</option>{models.map((model) => <option key={modelOptionKey(model.providerId, model.id)} value={modelOptionKey(model.providerId, model.id)}>{model.providerId} / {model.name}{model.available ? "" : " · unavailable"}</option>)}</select><select value={thinking} onChange={(event) => setThinking(event.target.value as typeof thinking)}><option value="off">thinking off</option><option value="minimal">minimal</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select><button disabled={!selected || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? "Saving…" : "Save route"}</button>{mutation.error && <InlineError error={mutation.error} />}</article>;
 }
 
 function PageHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
@@ -889,3 +998,5 @@ function formatDateTime(value: string): string { return new Intl.DateTimeFormat(
 function formatTime(value: string): string { return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(value)); }
 function formatElapsed(startedAt: string, endedAt: string): string { const milliseconds = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)); return milliseconds < 1_000 ? `${milliseconds}ms` : milliseconds < 60_000 ? `${(milliseconds / 1_000).toFixed(1)}s` : `${Math.floor(milliseconds / 60_000)}m ${Math.round((milliseconds % 60_000) / 1_000)}s`; }
 function formatNumber(value: number): string { return new Intl.NumberFormat(undefined, { notation: "compact" }).format(value); }
+function modelOptionKey(providerId: string, modelId: string): string { return JSON.stringify([providerId, modelId]); }
+function safeExternalUrl(value: string): string | undefined { try { const url = new URL(value); return url.protocol === "https:" || url.protocol === "http:" ? url.href : undefined; } catch { return undefined; } }

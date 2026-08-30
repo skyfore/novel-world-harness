@@ -9,6 +9,7 @@ import { InstanceApplicationService } from "../application/instance-service.js";
 import { MaintenanceApplicationService } from "../application/maintenance-service.js";
 import { OntologyProjectionService } from "../application/ontology-projection-service.js";
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
+import { ModelSettingsApplicationService } from "../application/model-settings-service.js";
 import { PlayApplicationService } from "../application/play-service.js";
 import { PreparationApplicationService } from "../application/preparation-service.js";
 import { ProposalApplicationService } from "../application/proposal-service.js";
@@ -23,7 +24,10 @@ import {
   executeRemovalRequestSchema,
   forkInstanceRequestSchema,
   healthResponseSchema,
+  answerAuthInteractionRequestSchema,
+  modelRoleSchema,
   narrationRetryRequestSchema,
+  providerLoginRequestSchema,
   operationKindSchema,
   ontologyLayerSchema,
   ontologyViewSchema,
@@ -35,12 +39,14 @@ import {
   sceneNarrationRequestSchema,
   sourceRegistrationRequestSchema,
   updatePlaySessionRequestSchema,
+  updateModelProfileRequestSchema,
   type ApiError,
   type BootstrapResponse,
 } from "./contracts.js";
 import { serializeServerSentEvent, WebEventBroker } from "./event-stream.js";
 import { WebApplicationError } from "./errors.js";
 import { OperationManager } from "./operation-manager.js";
+import { AuthInteractionManager } from "./auth-interaction-manager.js";
 import { traceIdentifierSchema, traceRunKindSchema, traceRunStatusSchema } from "../trace/schema.js";
 import { TraceStore } from "../trace/store.js";
 
@@ -54,6 +60,8 @@ export interface CreateWebHostOptions {
   serveStatic?: boolean;
   catalogService?: CatalogService;
   modelCatalogService?: ModelCatalogReader;
+  modelSettingsService?: ModelSettingsApplicationService;
+  authInteractionManager?: AuthInteractionManager;
   eventBroker?: WebEventBroker;
   operationManager?: OperationManager;
   playService?: PlayApplicationService;
@@ -86,6 +94,8 @@ declare module "fastify" {
       ontology: OntologyProjectionService;
       traces: TraceStore;
       traceQueries: TraceApplicationService;
+      modelSettings: ModelSettingsApplicationService;
+      interactions: AuthInteractionManager;
     };
   }
 }
@@ -99,12 +109,23 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const csrfToken = options.csrfToken ?? crypto.randomBytes(32).toString("base64url");
   const events = options.eventBroker ?? new WebEventBroker();
   const catalogService = options.catalogService ?? new CatalogService(root);
-  const modelCatalogService = options.modelCatalogService ?? new PiModelCatalogService();
+  const defaultModelCatalog = options.modelCatalogService ? undefined : new PiModelCatalogService();
+  const modelCatalogService = options.modelCatalogService ?? defaultModelCatalog!;
   const operations = options.operationManager ?? new OperationManager(events, { workspaceRoot: root });
   await operations.initialize();
   const traces = options.traceStore ?? options.playService?.traceStore ?? new TraceStore(root);
   await traces.initialize();
   const traceQueries = new TraceApplicationService(traces);
+  const interactions = options.authInteractionManager ?? new AuthInteractionManager(events);
+  const modelSettings = options.modelSettingsService ?? new ModelSettingsApplicationService({
+    root,
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+    catalog: modelCatalogService,
+    ...(defaultModelCatalog ? { credentials: defaultModelCatalog } : {}),
+    operations,
+    interactions,
+    events,
+  });
   const play = options.playService ?? new PlayApplicationService({
     root,
     operations,
@@ -131,7 +152,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const maintenance = options.maintenanceService ?? new MaintenanceApplicationService({ root, events, operations, traceStore: traces });
   const ontology = options.ontologyService ?? new OntologyProjectionService(root);
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 26_214_400 });
-  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, instances, maintenance, ontology, traces, traceQueries });
+  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, instances, maintenance, ontology, traces, traceQueries, modelSettings, interactions });
   app.addHook("onClose", async () => { operations.shutdown(); });
 
   app.addHook("onRequest", async (request, reply) => {
@@ -213,7 +234,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
       modelCatalog,
       features: [
         { id: "library", status: "available", phase: 0 },
-        { id: "model-settings", status: "foundation", phase: 0 },
+        { id: "model-settings", status: "available", phase: 0 },
         { id: "play", status: "available", phase: 1 },
         { id: "trace", status: "available", phase: 1 },
         { id: "compiler", status: "available", phase: 2 },
@@ -411,6 +432,23 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   });
   app.get(`/api/${WEB_API_VERSION}/models/providers`, async () => (await modelCatalogService.read()).providers);
   app.get(`/api/${WEB_API_VERSION}/models`, async () => (await modelCatalogService.read()).models);
+  app.get(`/api/${WEB_API_VERSION}/model-profiles`, async () => modelSettings.listProfiles());
+  app.patch(`/api/${WEB_API_VERSION}/model-profiles/:role`, async (request) => {
+    const { role } = modelRoleParamSchema.parse(request.params);
+    return modelSettings.updateProfile(role, updateModelProfileRequestSchema.parse(request.body));
+  });
+  app.post(`/api/${WEB_API_VERSION}/models/providers/:providerId/login`, async (request, reply) => {
+    const { providerId } = providerParamSchema.parse(request.params);
+    return reply.code(202).send(await modelSettings.startLogin(providerId, providerLoginRequestSchema.parse(request.body)));
+  });
+  app.delete(`/api/${WEB_API_VERSION}/models/providers/:providerId/credential`, async (request) => {
+    const { providerId } = providerParamSchema.parse(request.params);
+    return modelSettings.logout(providerId);
+  });
+  app.post(`/api/${WEB_API_VERSION}/interactions/:interactionId/answer`, async (request) => {
+    const { interactionId } = interactionParamSchema.parse(request.params);
+    return interactions.answer(interactionId, answerAuthInteractionRequestSchema.parse(request.body));
+  });
   app.get(`/api/${WEB_API_VERSION}/events`, (request, reply) => {
     const raw = reply.raw;
     reply.hijack();
@@ -527,6 +565,9 @@ const sourceParamSchema = z.object({ sourceId: z.string().min(1) }).strict();
 const proposalParamSchema = z.object({ proposalId: z.string().min(1) }).strict();
 const sessionParamSchema = z.object({ sessionId: z.string().min(1) }).strict();
 const operationParamSchema = z.object({ operationId: z.string().min(1) }).strict();
+const providerParamSchema = z.object({ providerId: z.string().min(1) }).strict();
+const modelRoleParamSchema = z.object({ role: modelRoleSchema }).strict();
+const interactionParamSchema = z.object({ interactionId: z.string().min(1) }).strict();
 const sourceQuerySchema = z.object({ sourceId: z.string().min(1).optional() }).strict();
 const preparationQuerySchema = z.object({ branchId: z.string().min(1).optional() }).strict();
 const proposalListQuerySchema = z.object({

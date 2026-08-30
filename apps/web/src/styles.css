@@ -131,13 +131,37 @@ code, .mono { font-family: "DM Mono", ui-monospace, monospace; }
 
 .alert { display: flex; gap: 16px; margin-bottom: 16px; padding: 15px 17px; border: 1px solid #6b493f; border-radius: 5px; background: #271b17; font-size: 12px; }
 .alert span { color: #c6a79e; }
-.provider-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.provider-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .provider-card { min-height: 145px; padding: 16px; border: 1px solid var(--line-soft); border-radius: 5px; background: #151613; }
-.provider-card > div { display: flex; align-items: center; gap: 8px; }
+.provider-card > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.provider-card > header > div { display: flex; align-items: center; gap: 8px; }
 .provider-card strong { font-size: 12px; }
-.provider-card code { display: block; margin-top: 13px; color: var(--muted); font-size: 10px; }
+.provider-card code { display: block; color: var(--muted); font-size: 9px; }
 .provider-card p { min-height: 30px; margin: 8px 0; color: var(--faint); font-size: 10px; }
 .provider-card small { color: var(--accent); font: 10px/1 "DM Mono"; }
+.provider-key-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin-top: 13px; }
+.provider-key-form input, .auth-prompt input, .auth-prompt select, .model-profile-card select { min-width: 0; height: 34px; padding: 0 9px; border: 1px solid var(--line); border-radius: 3px; outline: 0; background: #10110f; color: var(--text); font: 8px/1.3 "DM Mono"; }
+.provider-key-form input:focus, .auth-prompt input:focus, .auth-prompt select:focus, .model-profile-card select:focus { border-color: #657044; }
+.provider-key-form button, .provider-actions button, .auth-prompt button, .model-profile-card > button { min-height: 34px; padding: 0 10px; border: 1px solid #4d5938; border-radius: 3px; background: #1a2114; color: var(--accent); font: 8px/1 "DM Mono"; cursor: pointer; }
+.provider-actions { display: flex; gap: 6px; margin-top: 7px; }
+.provider-login-state { display: grid; gap: 7px; margin-top: 11px; padding: 9px; border: 1px solid #3c3a2c; border-radius: 3px; background: #11120e; }
+.provider-login-state > small { color: var(--muted); font: 8px/1.45 "Manrope"; }
+.auth-event { display: grid; gap: 6px; }
+.auth-event a { color: var(--accent); font-size: 8px; }
+.auth-event code { padding: 7px; border: 1px dashed #5b563d; color: var(--amber); font-size: 11px; letter-spacing: .1em; text-align: center; }
+.auth-event p { min-height: 0; margin: 0; }
+.auth-prompt { display: grid; gap: 7px; margin-top: 10px; padding: 10px; border: 1px solid #5b563d; border-radius: 3px; background: #1b1911; }
+.auth-prompt > strong { color: var(--amber); font-size: 9px; line-height: 1.45; }
+.auth-prompt > small { color: var(--faint); font: 7px/1.4 "Manrope"; }
+.provider-card > .inline-error { margin-top: 9px; }
+.profile-config-path { display: flex; align-items: center; gap: 10px; padding: 9px; color: var(--faint); font-size: 9px; }
+.profile-config-path code { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.model-profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 0 9px 9px; }
+.model-profile-card { display: grid; grid-template-columns: minmax(180px, 1.5fr) minmax(105px, .6fr) auto; gap: 7px; padding: 11px; border: 1px solid var(--line-soft); border-radius: 4px; background: #151613; }
+.model-profile-card > header { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 9px; }
+.model-profile-card > header strong { font-size: 10px; text-transform: capitalize; }
+.model-profile-card > header small { color: var(--faint); font: 7px/1 "DM Mono"; }
+.model-profile-card > .inline-error { grid-column: 1 / -1; }
 .model-table { max-height: 620px; overflow: auto; }
 .model-row { display: grid; grid-template-columns: minmax(260px, 1.5fr) minmax(150px, 1fr) 100px 90px; align-items: center; gap: 10px; min-height: 54px; padding: 7px 10px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font: 10px/1.3 "DM Mono"; }
 .model-row strong, .model-row small { display: block; }

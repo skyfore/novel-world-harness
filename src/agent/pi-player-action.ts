@@ -9,6 +9,7 @@ import { createPlayerActionCaptureTool } from "./player-action-tool.js";
 import { promptJson } from "../util/prompt-data.js";
 import { createActorContextAccess } from "./actor-context-retrieval.js";
 import { createRelatedMessageAccess } from "./related-message-retrieval.js";
+import type { TraceContext } from "../trace/recorder.js";
 
 export type PiPlayerActionTranslatorOptions = {
   root: string;
@@ -17,6 +18,7 @@ export type PiPlayerActionTranslatorOptions = {
   onStatus?: (message: string) => void;
   signal?: AbortSignal;
   promptTimeoutMs?: number;
+  trace?: TraceContext;
 };
 
 const PLAYER_ACTION_TIMEOUT_MS = 90_000;
@@ -102,6 +104,55 @@ export function createPiPlayerActionTranslator(options: PiPlayerActionTranslator
       includeNwhExtension: false,
       systemPromptOverride: PLAYER_ACTION_SYSTEM_PROMPT,
       additionalTools: [...actorAccess.tools, ...messageAccess.tools, capture.tool],
+      ...(options.trace ? { trace: {
+        parent: options.trace,
+        invocationName: "interpret-player-action",
+        parts: [
+          {
+            id: "player-action.system-role",
+            label: "Player action translator role",
+            kind: "system.role" as const,
+            role: "system" as const,
+            authority: "trusted-system" as const,
+            content: PLAYER_ACTION_SYSTEM_PROMPT,
+          },
+          {
+            id: "player-action.utterance",
+            label: "Untrusted player utterance",
+            kind: "player.utterance" as const,
+            role: "user" as const,
+            authority: "untrusted-player" as const,
+            content: input.utterance,
+          },
+          {
+            id: "player-action.actor-context",
+            label: "Bounded actor-visible context sent to the model",
+            kind: "actor.state" as const,
+            role: "user" as const,
+            authority: "actor-visible" as const,
+            content: actorAccess.modelContext,
+          },
+          {
+            id: "player-action.recent-presentation",
+            label: "Recent presentation-only messages",
+            kind: "play.recent-history" as const,
+            role: "user" as const,
+            authority: "presentation-only" as const,
+            content: input.recentMessages,
+          },
+          {
+            id: "player-action.capabilities",
+            label: "Deterministic actor write capability",
+            kind: "capability.contract" as const,
+            role: "user" as const,
+            authority: "engine-invariant" as const,
+            content: {
+              writableEntityIds: input.context.writableEntityIds,
+              writableStateFields: input.context.writableStateFields,
+            },
+          },
+        ],
+      } } : {}),
       onRetry(event) {
         options.onStatus?.(formatRetryNotice(event));
       },

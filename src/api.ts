@@ -177,6 +177,13 @@ export {
 } from "./trace/schema.js";
 export { TraceRecorder, newTraceId, type TraceContext } from "./trace/recorder.js";
 export {
+  PiTraceInvocation,
+  createPiTraceExtension,
+  redactTraceSecrets,
+  type PiTraceContextPartInput,
+  type PiTraceInvocationInput,
+} from "./trace/pi-trace.js";
+export {
   TraceStore,
   type AppendTraceEventInput,
   type CreateTraceRunInput,

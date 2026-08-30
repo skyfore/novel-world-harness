@@ -37,6 +37,11 @@ import {
   NWH_TOOL_RECOVERY_VERSION,
   withNwhToolRecovery,
 } from "./tool-recovery.js";
+import {
+  PiTraceInvocation,
+  createPiTraceExtension,
+  type PiTraceInvocationInput,
+} from "../trace/pi-trace.js";
 
 export { expandFileMentions } from "./file-mentions.js";
 
@@ -67,6 +72,8 @@ export type PiAgentSessionOptions = {
   trackLastOpenedSession?: boolean;
   runtimeDir?: string;
   piAgentDir?: string;
+  /** Observation-only trace for one isolated Pi invocation. */
+  trace?: PiTraceInvocationInput;
 };
 
 export type PiInteractiveOptions = {
@@ -585,11 +592,13 @@ export class PiAgentSession {
   private activeText = "";
   private lastAssistantStopReason?: string;
   private unsubscribe?: () => void;
+  private traceFinished = false;
 
   private constructor(
     private readonly options: PiAgentSessionOptions,
     runtime: ModelRuntime,
     model: NonNullable<ReturnType<ModelRuntime["getModel"]>> | undefined,
+    private readonly trace?: PiTraceInvocation,
   ) {
     this.profile = options.profile;
     this.stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
@@ -610,9 +619,15 @@ export class PiAgentSession {
     const stateDir = path.resolve(options.runtimeDir ?? nwhRuntimeDir());
     await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
     const { runtime, model } = await createModelRuntime(profile, options.piAgentDir);
-    const wrapper = new PiAgentSession({ ...options, ...(profile ? { profile } : {}) }, runtime, model);
-    await wrapper.initialize(Boolean(options.continueSession));
-    return wrapper;
+    const trace = options.trace ? await PiTraceInvocation.start(options.trace) : undefined;
+    const wrapper = new PiAgentSession({ ...options, ...(profile ? { profile } : {}) }, runtime, model, trace);
+    try {
+      await wrapper.initialize(Boolean(options.continueSession));
+      return wrapper;
+    } catch (error) {
+      if (trace) await trace.fail(error).catch(() => undefined);
+      throw error;
+    }
   }
   private get session(): AgentSession { return this.runtimeHost.session; }
   get id(): string { return this.session.sessionId; }
@@ -630,26 +645,42 @@ export class PiAgentSession {
     return (await this.promptWithReport(input)).text;
   }
   async promptWithReport(input: string, options: PiPromptOptions = {}): Promise<PiPromptReport> {
+    if (this.traceFinished) throw new Error("A traced Pi invocation accepts exactly one prompt.");
     this.activeText = "";
     this.lastAssistantStopReason = undefined;
     const messageCountBeforePrompt = this.session.messages.length;
-    await runPromptWithTimeout(
-      () => this.session.prompt(input, { source: "interactive" }),
-      () => this.session.abort(),
-      options.timeoutMs,
-    );
-    const promptMessages = this.session.messages.slice(messageCountBeforePrompt);
-    const latest = [...promptMessages].reverse().find((message) => message.role === "assistant");
-    if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) throw new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
-    const text = this.activeText || (latest?.role === "assistant"
-      ? latest.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("")
-      : "");
-    const outcome = compilerBatchOutcomeFromMessages(promptMessages);
-    return {
-      text,
-      ...outcome,
-      ...(outcome.assistantStopReason ? {} : this.lastAssistantStopReason ? { assistantStopReason: this.lastAssistantStopReason } : {}),
-    };
+    try {
+      await runPromptWithTimeout(
+        () => this.session.prompt(input, { source: "interactive" }),
+        () => this.session.abort(),
+        options.timeoutMs,
+      );
+      await this.trace?.flush();
+      const promptMessages = this.session.messages.slice(messageCountBeforePrompt);
+      const latest = [...promptMessages].reverse().find((message) => message.role === "assistant");
+      if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) throw new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
+      const text = this.activeText || (latest?.role === "assistant"
+        ? latest.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("")
+        : "");
+      const outcome = compilerBatchOutcomeFromMessages(promptMessages);
+      await this.trace?.complete();
+      this.traceFinished = Boolean(this.trace);
+      return {
+        text,
+        ...outcome,
+        ...(outcome.assistantStopReason ? {} : this.lastAssistantStopReason ? { assistantStopReason: this.lastAssistantStopReason } : {}),
+      };
+    } catch (error) {
+      if (this.trace && !this.traceFinished) {
+        try {
+          await this.trace.fail(error);
+          this.traceFinished = true;
+        } catch (traceError) {
+          throw new AggregateError([error, traceError], "Pi invocation failed and its trace could not be finalized.");
+        }
+      }
+      throw error;
+    }
   }
   async runInteractive(options: PiInteractiveOptions = {}): Promise<void> {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -687,6 +718,10 @@ export class PiAgentSession {
     await this.session.abort();
   }
   async dispose(): Promise<void> {
+    if (this.trace && !this.traceFinished) {
+      await this.trace.fail(new Error("Pi invocation disposed before its prompt settled."));
+      this.traceFinished = true;
+    }
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     const settingsManager = this.runtimeHost.services.settingsManager;
@@ -794,6 +829,11 @@ export class PiAgentSession {
               hidden: true,
               factory: createNwhPromptPrivacyExtension(this.options.workspace.root),
             },
+            ...(this.trace ? [{
+              name: "nwh-trace",
+              hidden: true,
+              factory: createPiTraceExtension(this.trace),
+            }] : []),
           ],
         },
       });
@@ -842,6 +882,7 @@ export class PiAgentSession {
         this.activeText += rendered;
         this.onText?.(rendered);
       } else if (event.type === "auto_retry_start") {
+        this.trace?.recordRetry(event);
         this.options.onRetry?.(event);
       } else if (event.type === "tool_execution_start") this.onTool?.(event.toolName, event.args);
       else if (event.type === "tool_execution_end") this.onToolResult?.(event.toolName, event.result, event.isError);

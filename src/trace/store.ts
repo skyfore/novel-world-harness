@@ -426,7 +426,7 @@ function applyEventToManifest(manifest: TraceRunManifest, event: TraceEvent): Tr
   if (event.type === "llm.request.started") counts.llmRequests += 1;
   if (event.type === "tool.call.started") counts.toolCalls += 1;
   if (event.type === "llm.retry") counts.retries += 1;
-  if (event.type === "llm.response.completed" && event.data?.usage) {
+  if ((event.type === "llm.response.completed" || event.type === "llm.response.failed") && event.data?.usage) {
     const candidate = traceUsageSchemaLike(event.data.usage);
     if (candidate) {
       usage.input += candidate.input;

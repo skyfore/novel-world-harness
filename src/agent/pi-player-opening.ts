@@ -25,6 +25,8 @@ import {
 import { createActorContextAccess } from "./actor-context-retrieval.js";
 import { createRelatedMessageAccess } from "./related-message-retrieval.js";
 import type { ModelPlayConversationMessage } from "../world/play-conversation.js";
+import type { TraceContext } from "../trace/recorder.js";
+import type { PiTraceContextPartInput } from "../trace/pi-trace.js";
 
 export type PlayerSceneNarrationResult = {
   narration: string;
@@ -51,6 +53,7 @@ export type PiPlayerOpeningNarratorOptions = {
   profile?: LlmProfile;
   model?: string;
   promptTimeoutMs?: number;
+  trace?: TraceContext;
 };
 
 const PLAYER_SCENE_TIMEOUT_MS = 90_000;
@@ -92,6 +95,9 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       tools: ToolDefinition[];
       timeoutMs: number;
       playerFacing?: boolean;
+      invocationName: string;
+      attempt?: number;
+      traceParts: PiTraceContextPartInput[];
     }): Promise<string> => {
       observer?.signal?.throwIfAborted();
       const session = await PiAgentSession.create({
@@ -104,6 +110,22 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
         includeNwhExtension: false,
         systemPromptOverride: input.systemPrompt,
         additionalTools: input.tools,
+        ...(options.trace ? { trace: {
+          parent: options.trace,
+          invocationName: input.invocationName,
+          ...(input.attempt !== undefined ? { attempt: input.attempt } : {}),
+          parts: [
+            {
+              id: `${input.invocationName}.system-role`,
+              label: "Invocation-specific system role",
+              kind: "system.role" as const,
+              role: "system" as const,
+              authority: "trusted-system" as const,
+              content: input.systemPrompt,
+            },
+            ...input.traceParts,
+          ],
+        } } : {}),
         ...(input.playerFacing
           ? {
               onEvent(event: AgentSessionEvent) {
@@ -207,6 +229,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       })));
       const capture = createPlayerSceneChoiceCaptureTool();
       await runSession({
+        invocationName: "narration-choice-expert",
         systemPrompt: PLAYER_CHOICE_EXPERT_SYSTEM_PROMPT,
         prompt: playSceneChoicePrompt(
           actorAccess.modelContext as unknown as PlayerSceneNarratorFrame,
@@ -214,6 +237,7 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
         ),
         tools: [...actorAccess.tools, ...messageAccess.tools, capture.tool],
         timeoutMs: expertTimeoutMs,
+        traceParts: semanticNarratorFrameParts("narration-choice", actorAccess.modelContext),
       });
       const parsed = capture.getExecutionAttempts() === 1
         ? playerSceneChoicesSchema.safeParse({ choices: capture.getChoices() })
@@ -224,10 +248,30 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
     const runStyleExpert = async (): Promise<PlayerLiteraryStyleAnalysis | undefined> => {
       const capture = createPlayerLiteraryStyleAnalysisCaptureTool();
       await runSession({
+        invocationName: "narration-style-expert",
         systemPrompt: PLAYER_STYLE_EXPERT_SYSTEM_PROMPT,
         prompt: playerStyleAnalysisPrompt(frame, purpose),
         tools: [capture.tool],
         timeoutMs: expertTimeoutMs,
+        traceParts: [
+          ...sourceExcerptTraceParts("narration-style", frame.sourceReferences ?? []),
+          {
+            id: "narration-style.play-continuity",
+            label: "Presentation-only prose continuity",
+            kind: "presentation.context",
+            role: "user",
+            authority: "presentation-only",
+            content: frame.playContinuity ?? [],
+          },
+          ...(frame.resolvedAct?.rawUtterance ? [{
+            id: "narration-style.player-utterance",
+            label: "Untrusted player wording",
+            kind: "player.utterance" as const,
+            role: "user" as const,
+            authority: "untrusted-player" as const,
+            content: frame.resolvedAct.rawUtterance,
+          }] : []),
+        ],
       });
       return capture.getExecutionAttempts() === 1 ? capture.getAnalysis() : undefined;
     };
@@ -267,10 +311,12 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       });
       const capture = createPlayerSceneDramaturgyAnalysisCaptureTool();
       await runSession({
+        invocationName: "narration-dramaturgy-expert",
         systemPrompt: PLAYER_DRAMATURGY_EXPERT_SYSTEM_PROMPT,
         prompt: playerDramaturgyAnalysisPrompt(actorAccess.modelContext, purpose),
         tools: [...actorAccess.tools, capture.tool],
         timeoutMs: expertTimeoutMs,
+        traceParts: semanticNarratorFrameParts("narration-dramaturgy", actorAccess.modelContext),
       });
       return capture.getExecutionAttempts() === 1 ? capture.getAnalysis() : undefined;
     };
@@ -318,11 +364,24 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
         ? basePrompt
         : `${basePrompt}\n\n<host-retry-requirement>This is a fresh independent literary rendering. Write a fully developed scene of at least 80 characters, preserve every required locked utterance verbatim, realize only one immediate committed beat, end on a concrete present signal without a choice menu or agency handoff, and stop. No prior draft is part of this request.</host-retry-requirement>`;
       return runSession({
+        invocationName: `narration-final-attempt-${attempt}`,
+        attempt,
         systemPrompt: PLAYER_LITERARY_NARRATOR_SYSTEM_PROMPT,
         prompt,
         tools: [...actorAccess.tools, ...messageAccess.tools],
         timeoutMs: options.promptTimeoutMs ?? PLAYER_SCENE_TIMEOUT_MS,
         playerFacing: true,
+        traceParts: [
+          ...semanticNarratorFrameParts(`narration-final-${attempt}`, actorAccess.modelContext),
+          {
+            id: `narration-final-${attempt}.specialist-advice`,
+            label: "Non-authoritative specialist advice",
+            kind: "proposal.candidate",
+            role: "user",
+            authority: "proposal-only",
+            content: advisory,
+          },
+        ],
       });
     };
 
@@ -341,6 +400,79 @@ export function createPiPlayerOpeningNarrator(options: PiPlayerOpeningNarratorOp
       return settle(await runNarrationAttempt(2));
     }
   };
+}
+
+function semanticNarratorFrameParts(
+  prefix: string,
+  rawFrame: Readonly<Record<string, unknown>>,
+): PiTraceContextPartInput[] {
+  const frame = structuredClone(rawFrame) as Record<string, unknown>;
+  const sourceReferences = Array.isArray(frame.sourceReferences) ? frame.sourceReferences : [];
+  const playContinuity = frame.playContinuity;
+  const recentMessages = frame.recentMessages;
+  const behavioralContext = frame.behavioralContext;
+  const resolvedAct = frame.resolvedAct;
+  delete frame.sourceReferences;
+  delete frame.playContinuity;
+  delete frame.recentMessages;
+  delete frame.behavioralContext;
+  delete frame.resolvedAct;
+  return [
+    {
+      id: `${prefix}.actor-visible-frame`,
+      label: "Actor-visible committed frame",
+      kind: "actor.state",
+      role: "user",
+      authority: "actor-visible",
+      content: frame,
+    },
+    ...(behavioralContext === undefined ? [] : [{
+      id: `${prefix}.character-model`,
+      label: "Non-factual character behavior prior",
+      kind: "actor.model" as const,
+      role: "user" as const,
+      authority: "proposal-only" as const,
+      content: behavioralContext,
+    }]),
+    ...(resolvedAct === undefined ? [] : [{
+      id: `${prefix}.resolved-act`,
+      label: "Resolved player act packet",
+      kind: "proposal.candidate" as const,
+      role: "user" as const,
+      authority: "proposal-only" as const,
+      content: resolvedAct,
+    }]),
+    ...(playContinuity === undefined && recentMessages === undefined ? [] : [{
+      id: `${prefix}.presentation-continuity`,
+      label: "Presentation-only recent prose and messages",
+      kind: "play.recent-history" as const,
+      role: "user" as const,
+      authority: "presentation-only" as const,
+      content: { playContinuity, recentMessages },
+    }]),
+    ...sourceExcerptTraceParts(prefix, sourceReferences),
+  ];
+}
+
+function sourceExcerptTraceParts(
+  prefix: string,
+  references: readonly unknown[],
+): PiTraceContextPartInput[] {
+  return references.map((reference, index) => {
+    const value = reference && typeof reference === "object"
+      ? reference as Record<string, unknown>
+      : { text: reference };
+    const ref = typeof value.ref === "string" && value.ref.length > 0 ? value.ref : undefined;
+    return {
+      id: `${prefix}.source-excerpt.${index + 1}`,
+      label: `Source style excerpt ${index + 1}`,
+      kind: "source.excerpt",
+      role: "user",
+      authority: "untrusted-source",
+      content: value,
+      ...(ref ? { sourceRefs: [{ sourceId: ref, label: `Style excerpt ${index + 1}` }] } : {}),
+    };
+  });
 }
 
 function literaryActorQuery(frame: Readonly<PlayerSceneNarratorFrame>): string {

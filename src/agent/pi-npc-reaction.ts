@@ -15,6 +15,7 @@ import { createActorContextAccess } from "./actor-context-retrieval.js";
 import { createRelatedMessageAccess } from "./related-message-retrieval.js";
 import { createNpcReactionCaptureTool } from "./npc-reaction-tool.js";
 import { formatRetryNotice, PiAgentSession } from "./pi-session.js";
+import type { TraceContext } from "../trace/recorder.js";
 
 export type PiNpcReactionReasonerOptions = {
   root: string;
@@ -23,6 +24,7 @@ export type PiNpcReactionReasonerOptions = {
   onStatus?: (message: string) => void;
   signal?: AbortSignal;
   promptTimeoutMs?: number;
+  trace?: TraceContext;
 };
 
 const NPC_REACTION_TIMEOUT_MS = 90_000;
@@ -143,6 +145,76 @@ export function createPiNpcReactionReasoner(options: PiNpcReactionReasonerOption
         includeNwhExtension: false,
         systemPromptOverride: NPC_REACTION_SYSTEM_PROMPT,
         additionalTools: [...actorAccess.tools, ...messageAccess.tools, capture.tool],
+        ...(options.trace ? { trace: {
+          parent: options.trace,
+          invocationName: `npc-reaction-attempt-${attempt}`,
+          attempt,
+          metadata: { npcName: input.npc.name },
+          parts: [
+            {
+              id: `npc-reaction.${attempt}.system-role`,
+              label: "NPC reaction reasoner role",
+              kind: "system.role" as const,
+              role: "system" as const,
+              authority: "trusted-system" as const,
+              content: NPC_REACTION_SYSTEM_PROMPT,
+            },
+            {
+              id: `npc-reaction.${attempt}.trigger`,
+              label: "Committed interaction perceived by this NPC",
+              kind: "world.committed-state" as const,
+              role: "user" as const,
+              authority: "actor-visible" as const,
+              content: modelRecord.trigger,
+            },
+            {
+              id: `npc-reaction.${attempt}.actor-context`,
+              label: "Bounded NPC-visible context sent to the model",
+              kind: "actor.state" as const,
+              role: "user" as const,
+              authority: "actor-visible" as const,
+              content: actorAccess.modelContext,
+            },
+            {
+              id: `npc-reaction.${attempt}.character-model`,
+              label: "Effective character model and active goals",
+              kind: "actor.model" as const,
+              role: "user" as const,
+              authority: "proposal-only" as const,
+              content: {
+                development: input.development,
+                activeGoals: input.activeGoals,
+              },
+            },
+            {
+              id: `npc-reaction.${attempt}.world-rules`,
+              label: "Applicable committed world rules",
+              kind: "world.committed-state" as const,
+              role: "user" as const,
+              authority: "committed-world" as const,
+              content: input.activeWorldRules,
+            },
+            {
+              id: `npc-reaction.${attempt}.perceived-history`,
+              label: "Recent NPC-perceived committed events",
+              kind: "actor.knowledge" as const,
+              role: "user" as const,
+              authority: "actor-visible" as const,
+              content: input.recentPerceivedMessages,
+            },
+            {
+              id: `npc-reaction.${attempt}.capabilities`,
+              label: "Deterministic NPC write capability",
+              kind: "capability.contract" as const,
+              role: "user" as const,
+              authority: "engine-invariant" as const,
+              content: {
+                writableEntityIds: input.actorContext.writableEntityIds,
+                writableStateFields: input.actorContext.writableStateFields,
+              },
+            },
+          ],
+        } } : {}),
         onRetry(event) {
           options.onStatus?.(formatRetryNotice(event));
         },

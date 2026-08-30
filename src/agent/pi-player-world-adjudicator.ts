@@ -10,6 +10,7 @@ import { promptJson } from "../util/prompt-data.js";
 import { formatRetryNotice, PiAgentSession } from "./pi-session.js";
 import { createPlayerWorldResolutionCaptureTool } from "./player-world-outcome-tool.js";
 import { createRelatedMessageAccess } from "./related-message-retrieval.js";
+import type { TraceContext } from "../trace/recorder.js";
 
 export type PiPlayerWorldAdjudicatorOptions = {
   root: string;
@@ -18,6 +19,7 @@ export type PiPlayerWorldAdjudicatorOptions = {
   onStatus?: (message: string) => void;
   signal?: AbortSignal;
   promptTimeoutMs?: number;
+  trace?: TraceContext;
 };
 
 const PLAYER_WORLD_ADJUDICATION_TIMEOUT_MS = 90_000;
@@ -115,6 +117,61 @@ export function createPiPlayerWorldAdjudicator(
         includeNwhExtension: false,
         systemPromptOverride: PLAYER_WORLD_ADJUDICATION_SYSTEM_PROMPT,
         additionalTools: [...messageAccess.tools, capture.tool],
+        ...(options.trace ? { trace: {
+          parent: options.trace,
+          invocationName: `adjudicate-player-world-attempt-${attempt}`,
+          attempt,
+          parts: [
+            {
+              id: `player-world-adjudication.${attempt}.system-role`,
+              label: "Player world adjudicator role",
+              kind: "system.role" as const,
+              role: "system" as const,
+              authority: "trusted-system" as const,
+              content: PLAYER_WORLD_ADJUDICATION_SYSTEM_PROMPT,
+            },
+            {
+              id: `player-world-adjudication.${attempt}.utterance`,
+              label: "Untrusted player utterance",
+              kind: "player.utterance" as const,
+              role: "user" as const,
+              authority: "untrusted-player" as const,
+              content: input.utterance,
+            },
+            {
+              id: `player-world-adjudication.${attempt}.candidate`,
+              label: "Uncommitted player action candidate",
+              kind: "proposal.candidate" as const,
+              role: "user" as const,
+              authority: "proposal-only" as const,
+              content: promptData.intendedCandidate,
+            },
+            {
+              id: `player-world-adjudication.${attempt}.capabilities`,
+              label: "Deterministic actor capability boundary",
+              kind: "capability.contract" as const,
+              role: "user" as const,
+              authority: "engine-invariant" as const,
+              content: actorCapabilities,
+            },
+            {
+              id: `player-world-adjudication.${attempt}.world`,
+              label: "Relevant committed world state and active rules",
+              kind: "world.committed-state" as const,
+              role: "user" as const,
+              authority: "committed-world" as const,
+              content: currentWorld,
+            },
+            {
+              id: `player-world-adjudication.${attempt}.recent-presentation`,
+              label: "Recent presentation-only messages",
+              kind: "play.recent-history" as const,
+              role: "user" as const,
+              authority: "presentation-only" as const,
+              content: input.recentMessages ?? [],
+            },
+          ],
+        } } : {}),
         onRetry(event) {
           options.onStatus?.(formatRetryNotice(event));
         },

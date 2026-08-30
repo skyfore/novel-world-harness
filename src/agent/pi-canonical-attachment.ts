@@ -8,6 +8,7 @@ import { promptJson } from "../util/prompt-data.js";
 import { createCanonicalAttachmentCaptureTool } from "./canonical-attachment-tool.js";
 import { formatRetryNotice, PiAgentSession } from "./pi-session.js";
 import { buildNwhToolRecoveryAdvice, type NwhToolRecoveryAdvice } from "./tool-recovery.js";
+import type { TraceContext } from "../trace/recorder.js";
 
 export type PiCanonicalAttachmentResolverOptions = {
   root: string;
@@ -16,6 +17,7 @@ export type PiCanonicalAttachmentResolverOptions = {
   onStatus?: (message: string) => void;
   signal?: AbortSignal;
   promptTimeoutMs?: number;
+  trace?: TraceContext;
 };
 
 const CANONICAL_ATTACHMENT_TIMEOUT_MS = 90_000;
@@ -63,6 +65,48 @@ export function createPiCanonicalAttachmentResolver(
         includeNwhExtension: false,
         systemPromptOverride: CANONICAL_ATTACHMENT_SYSTEM_PROMPT,
         additionalTools: [capture.tool],
+        ...(options.trace ? { trace: {
+          parent: options.trace,
+          invocationName: `attach-canonical-scaffold-attempt-${attempt}`,
+          attempt,
+          parts: [
+            {
+              id: `canonical-attachment.${attempt}.system-role`,
+              label: "Canonical scaffold adapter role",
+              kind: "system.role" as const,
+              role: "system" as const,
+              authority: "trusted-system" as const,
+              content: CANONICAL_ATTACHMENT_SYSTEM_PROMPT,
+            },
+            {
+              id: `canonical-attachment.${attempt}.reference`,
+              label: "Inactive canonical event reference and scaffold",
+              kind: "canonical.reference" as const,
+              role: "user" as const,
+              authority: "proposal-only" as const,
+              content: {
+                canonicalEvent: promptData.canonicalEvent,
+                scaffold: promptData.scaffold,
+              },
+            },
+            {
+              id: `canonical-attachment.${attempt}.bindings`,
+              label: "Host-validated binding options",
+              kind: "proposal.candidate" as const,
+              role: "user" as const,
+              authority: "proposal-only" as const,
+              content: promptData.bindingOptions,
+            },
+            {
+              id: `canonical-attachment.${attempt}.recent-events`,
+              label: "Recent committed branch events",
+              kind: "world.committed-state" as const,
+              role: "user" as const,
+              authority: "committed-world" as const,
+              content: promptData.recentCommittedEvents,
+            },
+          ],
+        } } : {}),
         onRetry(event) {
           options.onStatus?.(formatRetryNotice(event));
         },

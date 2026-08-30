@@ -9,6 +9,7 @@ import { formatRetryNotice, PiAgentSession } from "./pi-session.js";
 import { createPlayerWorldResponseCaptureTool } from "./player-world-response-tool.js";
 import { createRelatedMessageAccess } from "./related-message-retrieval.js";
 import { buildNwhToolRecoveryAdvice, type NwhToolRecoveryAdvice } from "./tool-recovery.js";
+import type { TraceContext } from "../trace/recorder.js";
 
 export type PiPlayerWorldResponseResolverOptions = {
   root: string;
@@ -17,6 +18,7 @@ export type PiPlayerWorldResponseResolverOptions = {
   onStatus?: (message: string) => void;
   signal?: AbortSignal;
   promptTimeoutMs?: number;
+  trace?: TraceContext;
 };
 
 const PLAYER_WORLD_RESPONSE_TIMEOUT_MS = 90_000;
@@ -122,6 +124,61 @@ export function createPiPlayerWorldResponseResolver(
         includeNwhExtension: false,
         systemPromptOverride: PLAYER_WORLD_RESPONSE_SYSTEM_PROMPT,
         additionalTools: [...messageAccess.tools, capture.tool],
+        ...(options.trace ? { trace: {
+          parent: options.trace,
+          invocationName: `select-player-world-response-attempt-${attempt}`,
+          attempt,
+          parts: [
+            {
+              id: `player-world-response.${attempt}.system-role`,
+              label: "Immediate world response resolver role",
+              kind: "system.role" as const,
+              role: "system" as const,
+              authority: "trusted-system" as const,
+              content: PLAYER_WORLD_RESPONSE_SYSTEM_PROMPT,
+            },
+            {
+              id: `player-world-response.${attempt}.utterance`,
+              label: "Untrusted player utterance",
+              kind: "player.utterance" as const,
+              role: "user" as const,
+              authority: "untrusted-player" as const,
+              content: input.utterance,
+            },
+            {
+              id: `player-world-response.${attempt}.committed-action`,
+              label: "Committed player action",
+              kind: "world.committed-state" as const,
+              role: "user" as const,
+              authority: "committed-world" as const,
+              content: promptData.committedPlayerAction,
+            },
+            {
+              id: `player-world-response.${attempt}.scene`,
+              label: "Current committed scene",
+              kind: "scene.current" as const,
+              role: "user" as const,
+              authority: "committed-world" as const,
+              content: promptData.scene,
+            },
+            {
+              id: `player-world-response.${attempt}.eligible`,
+              label: "Eligible response proposals offered by the host",
+              kind: "proposal.candidate" as const,
+              role: "user" as const,
+              authority: "proposal-only" as const,
+              content: promptData.eligibleResponses,
+            },
+            {
+              id: `player-world-response.${attempt}.recent-presentation`,
+              label: "Recent presentation-only messages",
+              kind: "play.recent-history" as const,
+              role: "user" as const,
+              authority: "presentation-only" as const,
+              content: input.recentMessages ?? [],
+            },
+          ],
+        } } : {}),
         onRetry(event) {
           options.onStatus?.(formatRetryNotice(event));
         },

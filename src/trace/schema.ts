@@ -77,6 +77,7 @@ export const traceEventTypeSchema = z.enum([
   "context.finalized",
   "llm.request.started",
   "llm.request.payload",
+  "llm.response.started",
   "llm.response.delta",
   "llm.response.completed",
   "llm.response.failed",

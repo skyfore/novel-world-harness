@@ -61,6 +61,17 @@ pnpm run build
 nwh web
 ```
 
+After the Web assets have been built once, quickly restart the workbench from
+the current server source without rebuilding:
+
+```bash
+pnpm web
+```
+
+Re-run `pnpm run build:web` only when the browser application changes. CLI
+options can be forwarded directly, for example `pnpm web --no-open --port
+3090`.
+
 The server binds to `127.0.0.1:3080` by default and reuses the same `$NWH_HOME`,
 workspace stores, world branches, play-session pointers, and Pi model catalog as
 the terminal harness. Use `--no-open` when a browser should not be launched.

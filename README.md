@@ -38,6 +38,9 @@ proposal -> validate -> commit -> render
 
 See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [ADR 0004](docs/adr/0004-model-first-player-intent-and-world-adjudication.md) for model-first player intent and world consequences, [ADR 0006](docs/adr/0006-reader-context-character-entry-and-progress.md) for reader context, role entry, presence, and material progression, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, [the cited semantic-compilation research and technical plan](docs/novel-semantic-compilation-plan.zh-CN.md) for the ontology audit and phased roadmap, [the Web UI MVP design](docs/web-ui-mvp-design.zh-CN.md) for the browser, play-trace, and ontology workbench proposal, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
 
+The browser MVP's requirement-to-code-to-test release gate is recorded in the
+[Web UI MVP acceptance matrix](docs/web-ui-mvp-acceptance.zh-CN.md).
+
 ## Install
 
 ```bash

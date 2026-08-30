@@ -3,7 +3,9 @@ import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { redactTraceSecrets } from "../trace/redaction.js";
 import {
+  apiErrorSchema,
   operationAcceptedSchema,
   operationSnapshotSchema,
   type ApiError,
@@ -12,7 +14,7 @@ import {
   type OperationSnapshot,
 } from "./contracts.js";
 import { WebEventBroker } from "./event-stream.js";
-import { webError } from "./errors.js";
+import { WebApplicationError, webError } from "./errors.js";
 
 export interface OperationRunContext {
   readonly operationId: string;
@@ -275,6 +277,10 @@ export class OperationManager {
   }
 
   private publish(record: OperationRecord): void {
+    // Operation progress and results cross both the durable storage and SSE
+    // boundaries. Keep a final guard here so callers cannot accidentally
+    // publish provider credentials through a newly added progress field.
+    record.snapshot = sanitizeOperationSnapshot(record.snapshot);
     this.persist(record.snapshot);
     this.events.publish("operation.changed", { operation: structuredClone(record.snapshot) }, {
       operationId: record.snapshot.id,
@@ -315,11 +321,13 @@ export class OperationManager {
     const recovered: OperationRecord[] = [];
     for (const name of names) {
       const filePath = path.join(this.storageRoot, name);
-      const snapshot = operationSnapshotSchema.parse(JSON.parse(await fsPromises.readFile(filePath, "utf8")));
+      const loaded = operationSnapshotSchema.parse(JSON.parse(await fsPromises.readFile(filePath, "utf8")));
+      const snapshot = sanitizeOperationSnapshot(loaded);
       const expectedName = this.persistedName(snapshot.id);
       if (name !== expectedName) {
         throw new Error(`Operation manifest '${name}' does not match operation '${snapshot.id}'.`);
       }
+      if (JSON.stringify(snapshot) !== JSON.stringify(loaded)) this.persist(snapshot);
       const terminal = isTerminal(snapshot.status)
         ? snapshot
         : interruptedSnapshot(snapshot, "HOST_RESTART_INTERRUPTED_OPERATION");
@@ -417,18 +425,38 @@ function operationError(error: unknown, cancelled: boolean, commitBoundaryCrosse
       retry: { kind: "after-user-action" },
     };
   }
+  const cause = error instanceof WebApplicationError
+    ? sanitizeApiError(error.detail)
+    : apiErrorSchema.parse(redactTraceSecrets({
+      code: "OPERATION_FAILED",
+      message: operationErrorMessage(error),
+      retry: { kind: "after-user-action" },
+    }));
   if (commitBoundaryCrossed) {
-    return {
+    return apiErrorSchema.parse(redactTraceSecrets({
       code: "OPERATION_INTERRUPTED_AFTER_COMMIT_BOUNDARY",
-      message: error instanceof Error ? error.message : String(error),
+      message: `The operation failed after crossing its commit boundary: ${cause.message} Reconcile the current snapshot and trace; do not replay the mutation unchanged.`,
+      details: {
+        causeCode: cause.code,
+        ...(cause.details !== undefined ? { causeDetails: cause.details } : {}),
+      },
       retry: { kind: "none" },
-    };
+    }));
   }
-  return {
-    code: "OPERATION_FAILED",
-    message: error instanceof Error ? error.message : String(error),
-    retry: { kind: "none" },
-  };
+  return cause;
+}
+
+function sanitizeApiError(error: ApiError): ApiError {
+  return apiErrorSchema.parse(redactTraceSecrets(error));
+}
+
+function operationErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.trim() || "The operation failed without an error message.";
+}
+
+function sanitizeOperationSnapshot(snapshot: OperationSnapshot): OperationSnapshot {
+  return operationSnapshotSchema.parse(redactTraceSecrets(snapshot));
 }
 
 function interruptedSnapshot(

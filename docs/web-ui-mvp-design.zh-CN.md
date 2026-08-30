@@ -6,7 +6,7 @@
 
 范围：本地单用户、无产品登录鉴权、继续使用 Pi 作为模型运行时；先交付 Play 与 Trace，再补齐浏览器中的完整编译与世界检查工作流。
 
-实现说明：当前代码已交付本设计的浏览器闭环，包括 source register、prepare、proposal review/convergence、instance create/fork/remove、play/resume/clear/archive、追加式 trace/context/trajectory 以及 model/events/places/rules/provenance 五类 ontology 投影。启动恢复会用 content-verified player-turn audit、immutable commit ancestry、branch head 与 presentation message 对账中断的 player move，只追加 recovery diagnostic/修复 observation links，不回写或重放世界事件。核心实现位于 `src/application/*-service.ts`、`src/trace/`、`src/web/` 与 `apps/web/src/`；世界真相和 Pi 边界未改变。
+实现说明：当前代码已交付本设计的浏览器闭环，包括 source register、prepare、proposal review/convergence、instance create/fork/remove、play/resume/clear/archive、追加式 trace/context/trajectory 以及 model/events/places/rules/provenance 五类 ontology 投影。高频 narration delta 在 React 外按 animation frame 合并；operation/SSE/HTTP error 具有最终脱敏边界和可显示的有界 recovery contract。启动恢复会用 content-verified player-turn audit、immutable commit ancestry、branch head 与 presentation message 对账中断的 player move，只追加 recovery diagnostic/修复 observation links，不回写或重放世界事件。核心实现位于 `src/application/*-service.ts`、`src/trace/`、`src/web/` 与 `apps/web/src/`；世界真相和 Pi 边界未改变。
 
 ## 1. 结论
 

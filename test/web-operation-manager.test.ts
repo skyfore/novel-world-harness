@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { WebEventBroker } from "../src/web/event-stream.js";
+import { webError } from "../src/web/errors.js";
 import { OperationManager } from "../src/web/operation-manager.js";
 
 describe("Web operation manager", () => {
@@ -232,9 +233,99 @@ describe("Web operation manager", () => {
       error: { code: "HOST_SHUTDOWN_INTERRUPTED_OPERATION" },
     });
   });
+
+  it("redacts progress and results before persistence, API projection, and SSE", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-web-operation-redaction-"));
+    const events = new WebEventBroker();
+    const manager = new OperationManager(events, { workspaceRoot: root });
+    await manager.initialize();
+    const accepted = manager.start({
+      kind: "prepare",
+      scopeId: "source-redaction",
+      clientRequestId: "redaction-request",
+      request: { apiKey: "raw-request-secret-canary", mode: "all" },
+      run: async (context) => {
+        context.update("model-working", {
+          authorization: "Bearer operation-progress-canary",
+          nested: { apiKey: "plain-progress-secret-canary" },
+        });
+        return {
+          credentials: "plain-result-secret-canary",
+          safe: "completed",
+        };
+      },
+    });
+
+    const completed = await manager.wait(accepted.operation.id);
+    expect(completed).toMatchObject({
+      progress: {
+        authorization: "[REDACTED]",
+        nested: { apiKey: "[REDACTED]" },
+      },
+      result: { credentials: "[REDACTED]", safe: "completed" },
+    });
+    const observable = JSON.stringify({ completed, events: events.replayAfter() });
+    const persisted = await readTree(root);
+    for (const secret of [
+      "raw-request-secret-canary",
+      "operation-progress-canary",
+      "plain-progress-secret-canary",
+      "plain-result-secret-canary",
+    ]) {
+      expect(observable).not.toContain(secret);
+      expect(persisted).not.toContain(secret);
+    }
+  });
+
+  it("preserves bounded domain recovery instructions on asynchronous failures", async () => {
+    const manager = new OperationManager(new WebEventBroker());
+    const accepted = manager.start({
+      kind: "player-move",
+      scopeId: "session-recovery",
+      clientRequestId: "recovery-request",
+      request: { expectedHead: "commit-old", text: "Proceed." },
+      run: async () => {
+        throw webError(409, "BRANCH_HEAD_MOVED", "The branch head changed. Bearer operation-error-canary", {
+          kind: "after-refresh",
+          discoveryEndpoint: "/api/v1/instances/main",
+          copyField: "headCommitId",
+          maxAttempts: 1,
+        }, { apiKey: "plain-error-secret-canary" });
+      },
+    });
+
+    const completed = await manager.wait(accepted.operation.id);
+    expect(completed).toMatchObject({
+      status: "failed",
+      error: {
+        code: "BRANCH_HEAD_MOVED",
+        message: "The branch head changed. [REDACTED]",
+        details: { apiKey: "[REDACTED]" },
+        retry: {
+          kind: "after-refresh",
+          discoveryEndpoint: "/api/v1/instances/main",
+          copyField: "headCommitId",
+          maxAttempts: 1,
+        },
+      },
+    });
+  });
 });
 
 function abortPromise(signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+}
+
+async function readTree(root: string): Promise<string> {
+  const values: string[] = [];
+  async function visit(directory: string): Promise<void> {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(target);
+      else values.push(await fs.readFile(target, "utf8"));
+    }
+  }
+  await visit(root);
+  return values.join("\n");
 }

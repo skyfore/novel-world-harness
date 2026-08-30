@@ -10,6 +10,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { fetchInstance, fetchOntology, fetchOntologyNode, type OntologyFilters } from "./api";
+import { canRetrySameRequest, recoveryInstruction, webErrorDetail } from "./recovery";
 import type {
   InstanceSummary,
   NovelSummary,
@@ -254,7 +255,7 @@ export function OntologyPage({
       </section>
 
       {instance.isError && <InlineError error={instance.error} />}
-      {graph.isPending ? <PageState loading title="Projecting the ontology" body="Resolving source-scoped artifacts and temporal validity…" /> : graph.isError ? <PageState title="Projection failed" body={graph.error.message} action={<button onClick={() => void graph.refetch()}>Try again</button>} /> : graph.data && visible ? (
+      {graph.isPending ? <PageState loading title="Projecting the ontology" body="Resolving source-scoped artifacts and temporal validity…" /> : graph.isError ? <OntologyErrorState error={graph.error} retry={() => void graph.refetch()} /> : graph.data && visible ? (
         <>
           {graph.data.diagnostics.length > 0 && <div className="ontology-diagnostics">{graph.data.diagnostics.map((message) => <p key={message}>{message}</p>)}</div>}
           <div className="ontology-workbench">
@@ -512,7 +513,11 @@ function PageState({ loading = false, title, body, action }: { loading?: boolean
 }
 
 function InlineLoading() { return <div className="ontology-inline-state"><span className="loading-orbit" />Loading exact node detail…</div>; }
-function InlineError({ error }: { error: Error }) { return <div className="ontology-inline-error"><strong>{error.name}</strong><span>{error.message}</span></div>; }
+function OntologyErrorState({ error, retry }: { error: Error; retry: () => void }) {
+  const detail = webErrorDetail(error);
+  return <PageState title={detail?.code ?? "Projection failed"} body={error.message} action={<>{detail && <small>{recoveryInstruction(detail)}</small>}{canRetrySameRequest(error) && <button onClick={retry}>Retry once</button>}</>} />;
+}
+function InlineError({ error }: { error: Error }) { const detail = webErrorDetail(error); return <div className="ontology-inline-error"><strong>{detail?.code ?? error.name}</strong><span>{error.message}</span>{detail && <small>{recoveryInstruction(detail)}</small>}</div>; }
 function compactJson(value: unknown): string { return JSON.stringify(value); }
 function formatValue(value: unknown): string { return typeof value === "string" ? value : JSON.stringify(value); }
 function shortHash(value: string): string { return value.length > 16 ? `${value.slice(0, 9)}…${value.slice(-5)}` : value; }

@@ -1,3 +1,4 @@
+import { redactTraceSecrets } from "../trace/redaction.js";
 import { webEventSchema, type WebEvent, type WebEventType } from "./contracts.js";
 
 export type WebEventListener = (event: WebEvent) => void;
@@ -23,11 +24,23 @@ export class WebEventBroker {
       occurredAt: new Date().toISOString(),
       type,
       ...links,
-      data,
+      // SSE is externally observable even on loopback. Redact at this final
+      // boundary rather than relying on every publisher to know which nested
+      // provider fields may contain credentials.
+      data: redactTraceSecrets(data),
     });
     this.history.push(event);
     if (this.history.length > this.historyLimit) this.history.splice(0, this.history.length - this.historyLimit);
-    for (const listener of this.listeners) listener(event);
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch {
+        // A disconnected or faulty SSE consumer is an observation failure,
+        // never a business-operation failure. Drop that listener and let the
+        // browser recover from authoritative snapshots plus a new cursor.
+        this.listeners.delete(listener);
+      }
+    }
     return event;
   }
 
@@ -40,7 +53,12 @@ export class WebEventBroker {
   }
 
   subscribe(listener: WebEventListener, afterEventId?: string): () => void {
-    for (const event of this.replayAfter(afterEventId)) listener(event);
+    const replay = this.replayAfter(afterEventId);
+    try {
+      for (const event of replay) listener(event);
+    } catch {
+      return () => undefined;
+    }
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }

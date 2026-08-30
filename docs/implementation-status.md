@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 
-Verified baseline: `pnpm run check`; `pnpm test` (128 test files, 725 tests
+Verified baseline: `pnpm run check`; `pnpm test` (130 test files, 734 tests
 passing); `pnpm test:e2e` (production Fastify host + Chromium journey passing).
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.

@@ -35,6 +35,7 @@ import {
   ontologyLayerSchema,
   ontologyViewSchema,
   prepareNovelRequestSchema,
+  playMessageSummarySchema,
   playMoveRequestSchema,
   proposalAcceptRequestSchema,
   proposalConvergeRequestSchema,
@@ -51,6 +52,7 @@ import { WebApplicationError } from "./errors.js";
 import { OperationManager } from "./operation-manager.js";
 import { AuthInteractionManager } from "./auth-interaction-manager.js";
 import { WebMutationJournal } from "./mutation-journal.js";
+import { redactTraceSecrets } from "../trace/redaction.js";
 import { traceIdentifierSchema, traceRunKindSchema, traceRunStatusSchema } from "../trace/schema.js";
 import { TraceStore } from "../trace/store.js";
 
@@ -198,7 +200,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof WebApplicationError) {
-      void reply.code(error.statusCode).send(error.detail);
+      void reply.code(error.statusCode).send(apiErrorSchema.parse(redactTraceSecrets(error.detail)));
       return;
     }
     if (error instanceof ZodError) {
@@ -208,13 +210,16 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     const validation = typeof error === "object" && error !== null && "validation" in error
       ? error.validation
       : undefined;
-    const message = error instanceof Error ? error.message : String(error);
     if (validation) {
+      const message = error instanceof Error ? error.message : String(error);
       void reply.code(400).send(apiError("INVALID_REQUEST", message, validation));
       return;
     }
     app.log.error(error);
-    void reply.code(500).send(apiError("INTERNAL_ERROR", message));
+    void reply.code(500).send(apiError(
+      "INTERNAL_ERROR",
+      "The local Web Host could not complete this request. Its internal detail was withheld from the browser; inspect authoritative workspace state and do not retry unchanged.",
+    ));
   });
 
   app.get(`/api/${WEB_API_VERSION}/health`, async () => healthResponseSchema.parse({
@@ -351,6 +356,10 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   app.get(`/api/${WEB_API_VERSION}/play-sessions/:sessionId`, async (request) => {
     const { sessionId } = sessionParamSchema.parse(request.params);
     return play.getSession(sessionId);
+  });
+  app.get(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/messages`, async (request) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    return z.array(playMessageSummarySchema).parse((await play.getSession(sessionId)).messages);
   });
   app.patch(`/api/${WEB_API_VERSION}/play-sessions/:sessionId`, async (request) => {
     const { sessionId } = sessionParamSchema.parse(request.params);
@@ -505,12 +514,12 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
 
   app.setNotFoundHandler(async (request, reply) => {
     if (request.url.startsWith(`/api/${WEB_API_VERSION}/`)) {
-      return reply.code(404).send(apiError("NOT_FOUND", `No API route matches ${request.method} ${request.url}.`, {
+      return reply.code(404).send(apiError("NOT_FOUND", `No API route matches this ${request.method} request.`, {
         discoveryEndpoint: `/api/${WEB_API_VERSION}/bootstrap`,
       }));
     }
     if (serveStatic && request.method === "GET" && acceptsHtml(request)) return reply.sendFile("index.html");
-    return reply.code(404).send(apiError("NOT_FOUND", `No route matches ${request.method} ${request.url}.`));
+    return reply.code(404).send(apiError("NOT_FOUND", `No route matches this ${request.method} request.`));
   });
 
   events.publish("server.ready", { apiVersion: WEB_API_VERSION, startedAt });
@@ -518,12 +527,12 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
 }
 
 function apiError(code: string, message: string, details?: unknown): ApiError {
-  return apiErrorSchema.parse({
+  return apiErrorSchema.parse(redactTraceSecrets({
     code,
     message,
     ...(details !== undefined ? { details } : {}),
     retry: { kind: "none" },
-  });
+  }));
 }
 
 function isAllowedHost(request: FastifyRequest, configuredHost: string): boolean {

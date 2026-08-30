@@ -913,7 +913,7 @@ export class PlayApplicationService {
   private async assertExpectedHead(session: ActivePlaySession, expectedHead: string): Promise<void> {
     const actualHead = await this.branches.readHead(session.branchId);
     if (actualHead !== expectedHead) {
-      throw webError(409, "STALE_BRANCH_HEAD", `Play session '${session.id}' expected head '${expectedHead}', but the world is at '${actualHead}'.`, {
+      throw webError(409, "BRANCH_HEAD_MOVED", `Play session '${session.id}' expected head '${expectedHead}', but the world is at '${actualHead}'.`, {
         kind: "after-refresh",
         discoveryEndpoint: `/api/v1/play-sessions/${encodeURIComponent(session.id)}`,
         copyField: "headCommitId",

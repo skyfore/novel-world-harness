@@ -15,6 +15,7 @@ import {
   rejectProposal,
   startPreparation,
 } from "./api";
+import { canRetrySameRequest, recoveryInstruction, webErrorDetail } from "./recovery";
 import {
   preparationSnapshotSchema,
   type ModelSummary,
@@ -94,7 +95,7 @@ export function NewNovelPage({
       <form className="import-workbench" onSubmit={submit}>
         <section className="import-source-panel">
           <label className="file-drop" onDragOver={(event) => event.preventDefault()} onDrop={onDrop}>
-            <input type="file" accept=".txt,.md,.text,.json,text/plain,text/markdown,application/json" onChange={onFile} />
+            <input type="file" accept=".txt,.text,.novel,.md,.markdown,text/plain,text/markdown" onChange={onFile} />
             <span className="file-drop-mark">＋</span>
             <strong>{fileName ?? "Drop a text novel here"}</strong>
             <small>or click to choose · UTF-8 · up to 24 MB</small>
@@ -303,7 +304,7 @@ export function CompilerWorkbenchPage({
               {logs.length ? logs.map((line, index) => <p key={`${index}:${line}`}><span>{String(index + 1).padStart(2, "0")}</span>{line}</p>) : <p><span>—</span>Waiting for the first compiler checkpoint…</p>}
             </div>
             {busy && current.cancellable && <button className="stop-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>{current.commitBoundaryCrossed ? "Stop after current mutation" : "Cancel preparation"}</button>}
-            {current.error && <InlineError error={`${current.error.code}: ${current.error.message}`} />}
+            {current.error && <div className="inline-error"><strong>{current.error.code}</strong><span>{current.error.message}</span><small>{recoveryInstruction(current.error)}</small></div>}
             {operationResult.success && <div className="compiler-result"><strong>Checkpoint refreshed</strong><span>{operationResult.data.stage} · {operationResult.data.proposalCounts.pending} pending proposal(s)</span></div>}
           </> : <div className="empty-state compact"><span>◇</span><div><strong>Compiler idle</strong><p>Choose the next batch or compile all remaining evidence.</p></div></div>}
           {operations.data && operations.data.length > 1 && <div className="compiler-operation-history">{operations.data.filter((item) => item.kind === "prepare").slice(0, 8).map((item) => <button key={item.id} className={item.id === effectiveOperationId ? "selected" : ""} onClick={() => setSelectedOperationId(item.id)}><span>{item.status}</span><small>{formatTime(item.createdAt)}</small></button>)}</div>}
@@ -446,10 +447,12 @@ function LoadingState({ label, compact = false }: { label: string; compact?: boo
 }
 
 function PageError({ error, retry }: { error: Error; retry: () => void }) {
-  return <div className="center-state center-error"><span className="eyebrow">Request failed</span><h1>Compiler state could not be read</h1><p>{error.message}</p><button onClick={retry}>Try again</button></div>;
+  const detail = webErrorDetail(error);
+  return <div className="center-state center-error"><span className="eyebrow">{detail?.code ?? "Request failed"}</span><h1>Compiler state could not be read</h1><p>{error.message}</p>{detail && <small>{recoveryInstruction(detail)}</small>}{canRetrySameRequest(error) && <button onClick={retry}>Retry once</button>}</div>;
 }
 
 function InlineError({ error }: { error: Error | string }) {
   const message = typeof error === "string" ? error : error.message;
-  return <div className="inline-error"><strong>Request failed</strong><span>{message}</span></div>;
+  const detail = typeof error === "string" ? undefined : webErrorDetail(error);
+  return <div className="inline-error"><strong>{detail?.code ?? "Request failed"}</strong><span>{message}</span>{detail && <small>{recoveryInstruction(detail)}</small>}</div>;
 }

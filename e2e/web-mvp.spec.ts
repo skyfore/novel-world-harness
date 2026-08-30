@@ -136,10 +136,15 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await expect(page.locator(".message-scene").last()).toContainText("斑驳的窗影");
   await expect(page.locator(".operation-panel")).toContainText("succeeded");
 
-  await submitMove(page, "我停下来听雨，并整理下一步。", 1);
+  const suggestedChoice = page.locator(".choice-strip button").first();
+  await expect(suggestedChoice).toBeVisible();
+  const suggestedAction = (await suggestedChoice.locator("span").innerText()).trim();
+  await suggestedChoice.click();
+  await expect(page.getByPlaceholder("Describe one immediate action, observation, thought, or wait…")).toHaveValue(suggestedAction);
+  await submitMove(page, suggestedAction, 1);
   await page.reload();
   await expect(page.locator(".transcript-panel > header")).toContainText("3 messages");
-  await expect(page.getByText("我停下来听雨，并整理下一步。", { exact: true })).toBeVisible();
+  await expect(page.getByText(suggestedAction, { exact: true })).toBeVisible();
   await submitMove(page, "我再等片刻，确认大厅里的动静。", 2);
   await expect(page.locator(".transcript-panel > header")).toContainText("5 messages");
 

@@ -48,6 +48,8 @@ import {
   traceRunsQueryKey,
 } from "./trace-pages";
 import { MaintenanceControl } from "./maintenance-dialog";
+import { narrationStreamStore, useNarrationStream } from "./narration-stream-store";
+import { canRetrySameRequest, recoveryInstruction, webErrorDetail } from "./recovery";
 import {
   operationSnapshotSchema,
   authInteractionSnapshotSchema,
@@ -76,7 +78,6 @@ const bootstrapQueryKey = ["bootstrap"] as const;
 const playSessionKey = (sessionId: string) => ["play-session", sessionId] as const;
 const operationsKey = (sessionId: string) => ["operations", sessionId] as const;
 const operationKey = (operationId: string) => ["operation", operationId] as const;
-const narrationStreamKey = (operationId: string) => ["narration-stream", operationId] as const;
 const LazyOntologyPage = lazy(() => import("./ontology-page").then((module) => ({ default: module.OntologyPage })));
 
 function useBootstrap() {
@@ -123,7 +124,14 @@ function RootLayout() {
 
   useEffect(() => {
     const source = new EventSource("/api/v1/events");
-    source.onopen = () => setConnection("online");
+    source.onopen = () => {
+      setConnection("online");
+      // The SSE cursor is process-local while operations, traces, sessions,
+      // and world truth are durable. Every initial connection/reconnection
+      // therefore refreshes active authoritative snapshots before relying on
+      // the live tail; this also closes cursor gaps after a host restart.
+      void queryClient.invalidateQueries({ refetchType: "active" });
+    };
     source.onerror = () => setConnection("offline");
     const onCatalog = () => void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
     const onOperation = (raw: Event) => {
@@ -140,6 +148,7 @@ function RootLayout() {
         void queryClient.invalidateQueries({ queryKey: ["trace-call", operation.data.runId] });
       }
       if (isTerminal(operation.data.status)) {
+        narrationStreamStore.complete(operation.data.id);
         void queryClient.invalidateQueries({ queryKey: playSessionKey(operation.data.scopeId) });
         if (operation.data.kind === "prepare") {
           void queryClient.invalidateQueries({ queryKey: preparationKey(operation.data.scopeId) });
@@ -151,7 +160,7 @@ function RootLayout() {
     const onNarrationDelta = (raw: Event) => {
       const event = parseServerEvent(raw);
       if (!event?.operationId || typeof event.data.delta !== "string") return;
-      queryClient.setQueryData<string>(narrationStreamKey(event.operationId), (current = "") => current + event.data.delta);
+      narrationStreamStore.append(event.operationId, event.data.delta);
     };
     const onPlayChanged = (raw: Event) => {
       const event = parseServerEvent(raw);
@@ -579,12 +588,7 @@ function SessionPage() {
     enabled: Boolean(effectiveOperationId),
     refetchInterval: (query) => isTerminal(query.state.data?.status) ? false : 750,
   });
-  const streamed = useQuery({
-    queryKey: narrationStreamKey(effectiveOperationId ?? "none"),
-    queryFn: async () => "",
-    enabled: false,
-    initialData: "",
-  });
+  const streamed = useNarrationStream(effectiveOperationId);
   const [draft, setDraft] = useState("");
   const [affordanceId, setAffordanceId] = useState<string>();
   const csrfToken = bootstrap.data?.csrfToken ?? "";
@@ -593,6 +597,7 @@ function SessionPage() {
 
   useEffect(() => {
     if (!current || !isTerminal(current.status)) return;
+    narrationStreamStore.complete(current.id);
     void queryClient.invalidateQueries({ queryKey: playSessionKey(sessionId) });
     void queryClient.invalidateQueries({ queryKey: operationsKey(sessionId) });
     void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
@@ -601,7 +606,7 @@ function SessionPage() {
   const acceptOperation = (accepted: { operation: OperationSnapshot }) => {
     setSelectedOperationId(accepted.operation.id);
     queryClient.setQueryData(operationKey(accepted.operation.id), accepted.operation);
-    queryClient.setQueryData(narrationStreamKey(accepted.operation.id), "");
+    narrationStreamStore.reset(accepted.operation.id);
   };
   const moveMutation = useMutation({
     mutationFn: () => startPlayerMove(sessionId, {
@@ -729,10 +734,10 @@ function SessionPage() {
                 <code>{shortHash(message.atCommit)}</code>
               </article>
             ))}
-            {busy && (streamed.data || current?.phase.includes("narrat")) && (
+            {busy && (streamed || current?.phase.includes("narrat")) && (
               <article className="message message-scene message-streaming">
                 <header><span>Narrator · live</span><small>{current?.phase}</small></header>
-                <p>{streamed.data || "The scene is being composed…"}</p>
+                <p>{streamed || "The scene is being composed…"}</p>
               </article>
             )}
             {!busy && settledNarration && !data.messages.some((message) => message.text === settledNarration) && (
@@ -765,7 +770,7 @@ function SessionPage() {
               {current.progress.statusText && <div className="operation-activity"><span className={busy ? "loading-orbit" : "status-dot"} /><p>{String(current.progress.statusText)}</p></div>}
               {busy && current.cancellable && <button className="stop-button" disabled={cancelMutation.isPending} onClick={() => cancelMutation.mutate()}>{current.commitBoundaryCrossed ? "Stop narration" : "Cancel before commit"}</button>}
               {canRetryNarration && <button className="primary-button" disabled={narrationRetryMutation.isPending} onClick={() => narrationRetryMutation.mutate()}>{narrationRetryMutation.isPending ? "Starting presentation…" : "Retry narration only"}</button>}
-              {current.error && <div className="inline-error"><strong>{current.error.code}</strong><span>{current.error.message}</span></div>}
+              {current.error && <div className="inline-error"><strong>{current.error.code}</strong><span>{current.error.message}</span><small>{recoveryInstruction(current.error)}</small></div>}
               {playResult.success && <OperationResult result={playResult.data} />}
               {retryResult.success && <div className="operation-result"><span className="eyebrow">Presentation repair</span><strong>Rendered without world mutation</strong><p>Original move {shortHash(retryResult.data.playerMoveId)}</p><code>{shortHash(retryResult.data.headCommitId)}</code></div>}
             </>
@@ -972,10 +977,11 @@ function LoadingState({ label = "Reading local catalog and Pi metadata…" }: { 
   return <div className="center-state"><span className="loading-orbit" /><h1>Opening the world model</h1><p>{label}</p></div>;
 }
 function ErrorState({ error, retry }: { error: Error; retry: () => void }) {
-  return <div className="center-state center-error"><span className="eyebrow">Request failed</span><h1>The local workspace could not be read</h1><p>{error.message}</p><button onClick={retry}>Try again</button></div>;
+  const detail = webErrorDetail(error);
+  return <div className="center-state center-error"><span className="eyebrow">{detail?.code ?? "Request failed"}</span><h1>The local workspace could not be read</h1><p>{error.message}</p>{detail && <small>{recoveryInstruction(detail)}</small>}{canRetrySameRequest(error) && <button onClick={retry}>Retry once</button>}</div>;
 }
 function InlineLoading({ label }: { label: string }) { return <div className="inline-loading"><span className="loading-orbit" />{label}</div>; }
-function InlineError({ error }: { error: Error }) { return <div className="inline-error"><strong>{error.name}</strong><span>{error.message}</span></div>; }
+function InlineError({ error }: { error: Error }) { const detail = webErrorDetail(error); return <div className="inline-error"><strong>{detail?.code ?? error.name}</strong><span>{error.message}</span>{detail && <small>{recoveryInstruction(detail)}</small>}</div>; }
 
 function parseServerEvent(raw: Event) {
   if (!(raw instanceof MessageEvent)) return undefined;

@@ -7,6 +7,7 @@ import {
   fetchInstanceRemovalPreview,
   fetchNovelRemovalPreview,
 } from "./api";
+import { recoveryInstruction, webErrorDetail } from "./recovery";
 import type { MaintenanceAction, RemovalExecutionResult } from "../../../src/web/contracts";
 
 export function MaintenanceControl({
@@ -51,6 +52,7 @@ export function MaintenanceControl({
     setConfirmation("");
     execute.reset();
   };
+  const executionError = execute.error ? webErrorDetail(execute.error) : undefined;
 
   return (
     <>
@@ -75,9 +77,9 @@ export function MaintenanceControl({
             </div>
             <footer className="maintenance-confirmation">
               <div className="maintenance-hash"><small>Effect hash</small><code>{preview.data.effectHash}</code></div>
-              <label className="field-label"><span>Type <code>{preview.data.target.confirmation}</code> to confirm</span><input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
-              {execute.error && <div className="inline-error"><strong>{execute.error.name}</strong><span>{execute.error.message}</span></div>}
-              <div><button type="button" className="secondary-button" disabled={execute.isPending} onClick={close}>Cancel</button><button type="button" className="danger-button" disabled={!preview.data.executable || confirmation !== preview.data.target.confirmation || execute.isPending} onClick={() => execute.mutate()}>{execute.isPending ? "Applying exact effect…" : actionButton(action)}</button></div>
+              <label className="field-label"><span>Type <code>{preview.data.target.confirmation}</code> to confirm</span><input autoFocus value={confirmation} onChange={(event) => { setConfirmation(event.target.value); if (executionError?.retry.kind === "after-user-action") execute.reset(); }} /></label>
+              {execute.error && <MaintenanceError error={execute.error} onRefresh={executionError?.retry.kind === "after-refresh" ? () => { setConfirmation(""); execute.reset(); void preview.refetch(); } : undefined} />}
+              <div><button type="button" className="secondary-button" disabled={execute.isPending} onClick={close}>Cancel</button><button type="button" className="danger-button" disabled={!preview.data.executable || confirmation !== preview.data.target.confirmation || execute.isPending || Boolean(execute.error)} onClick={() => execute.mutate()}>{execute.isPending ? "Applying exact effect…" : actionButton(action)}</button></div>
             </footer>
           </> : null}
         </section>
@@ -103,5 +105,11 @@ function DialogLoading() {
 }
 
 function DialogError({ error, retry }: { error: Error; retry: () => void }) {
-  return <div className="maintenance-dialog-state maintenance-dialog-error"><strong>{error.name}</strong><p>{error.message}</p><button className="secondary-button" onClick={retry}>Refresh preview</button></div>;
+  const detail = webErrorDetail(error);
+  return <div className="maintenance-dialog-state maintenance-dialog-error"><strong>{detail?.code ?? error.name}</strong><p>{error.message}</p>{detail && <small>{recoveryInstruction(detail)}</small>}<button className="secondary-button" onClick={retry}>Refresh preview</button></div>;
+}
+
+function MaintenanceError({ error, onRefresh }: { error: Error; onRefresh?: () => void }) {
+  const detail = webErrorDetail(error);
+  return <div className="inline-error"><strong>{detail?.code ?? error.name}</strong><span>{error.message}</span>{detail && <small>{recoveryInstruction(detail)}</small>}{onRefresh && <button type="button" className="secondary-button" onClick={onRefresh}>Refresh effect manifest</button>}</div>;
 }

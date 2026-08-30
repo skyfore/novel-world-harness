@@ -239,7 +239,7 @@ describe("Web Play application service", () => {
       text: "继续前进",
       expectedHead: genesis,
       clientRequestId: "move-stale",
-    })).rejects.toMatchObject({ detail: { code: "STALE_BRANCH_HEAD" } });
+    })).rejects.toMatchObject({ detail: { code: "BRANCH_HEAD_MOVED" } });
 
     await service.updateSession(created.session.id, { status: "archived", clientRequestId: "archive-1" });
     await expect(service.startSceneNarration(created.session.id, {
@@ -480,6 +480,9 @@ describe("Web Play application service", () => {
       expect(operation.json()).toMatchObject({ id: operationId, status: "succeeded" });
       const detail = await app.inject({ method: "GET", url: "/api/v1/play-sessions/play-main" });
       expect(detail.json()).toMatchObject({ messages: [expect.objectContaining({ role: "scene" })] });
+      const messages = await app.inject({ method: "GET", url: "/api/v1/play-sessions/play-main/messages" });
+      expect(messages.statusCode).toBe(200);
+      expect(messages.json()).toEqual([expect.objectContaining({ role: "scene", status: "rendered" })]);
 
       const missingRetrySource = await app.inject({
         method: "POST",

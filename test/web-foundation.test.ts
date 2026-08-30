@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { CatalogService, legacyPlaySessionId } from "../src/application/catalog-service.js";
 import { createWebHost, isLoopbackHost, type NwhWebHost } from "../src/web/host.js";
@@ -84,6 +84,36 @@ describe("Web event stream", () => {
     unsubscribe();
     broker.publish("catalog.invalidated");
     expect(seen).toEqual(["1", "2"]);
+  });
+
+  it("redacts secrets before replay, listener delivery, or serialization", () => {
+    const broker = new WebEventBroker();
+    const seen: unknown[] = [];
+    broker.subscribe((event) => seen.push(event));
+    const event = broker.publish("operation.changed", {
+      authorization: "Bearer event-stream-canary",
+      nested: { apiKey: "plain-event-secret-canary", safe: "visible" },
+    });
+
+    expect(event.data).toEqual({
+      authorization: "[REDACTED]",
+      nested: { apiKey: "[REDACTED]", safe: "visible" },
+    });
+    const observable = JSON.stringify({ event, replay: broker.replayAfter(), seen, wire: serializeServerSentEvent(event) });
+    expect(observable).not.toContain("event-stream-canary");
+    expect(observable).not.toContain("plain-event-secret-canary");
+  });
+
+  it("isolates a failed event consumer from business event publication", () => {
+    const broker = new WebEventBroker();
+    const healthy = vi.fn();
+    broker.subscribe(() => { throw new Error("disconnected SSE socket"); });
+    broker.subscribe(healthy);
+
+    expect(() => broker.publish("catalog.invalidated", { reason: "test" })).not.toThrow();
+    expect(healthy).toHaveBeenCalledOnce();
+    broker.publish("catalog.invalidated", { reason: "second" });
+    expect(healthy).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -248,6 +278,36 @@ describe("local Web host", () => {
     });
     expect(host.statusCode).toBe(403);
     expect(host.json()).toMatchObject({ code: "HOST_NOT_ALLOWED" });
+  });
+
+  it("does not expose unexpected server errors or secret-bearing domain identifiers", async () => {
+    const root = await workspace("nwh-web-error-boundary-");
+    const catalog = new CatalogService(root);
+    vi.spyOn(catalog, "read").mockRejectedValue(new Error("Bearer generic-host-error-canary"));
+    const app = await createWebHost({
+      root,
+      serveStatic: false,
+      catalogService: catalog,
+      modelCatalogService: { read: async () => emptyModels },
+    });
+    apps.push(app);
+
+    const unexpected = await app.inject({ method: "GET", url: "/api/v1/bootstrap" });
+    expect(unexpected.statusCode).toBe(500);
+    expect(unexpected.json()).toMatchObject({
+      code: "INTERNAL_ERROR",
+      retry: { kind: "none" },
+    });
+    expect(unexpected.body).not.toContain("generic-host-error-canary");
+
+    const missing = await app.inject({ method: "GET", url: "/api/v1/operations/sk-domain-identifier-canary" });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.json()).toMatchObject({ code: "OPERATION_NOT_FOUND", message: "Unknown operation '[REDACTED]'." });
+    expect(missing.body).not.toContain("domain-identifier-canary");
+
+    const unknownRoute = await app.inject({ method: "GET", url: "/api/v1/missing?opaque=plain-url-secret-canary" });
+    expect(unknownRoute.statusCode).toBe(404);
+    expect(unknownRoute.body).not.toContain("plain-url-secret-canary");
   });
 
   it("serves the built SPA shell for browser routes", async () => {

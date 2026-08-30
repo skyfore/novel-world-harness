@@ -191,6 +191,24 @@ export {
   type TraceRunFilter,
   type TraceRunLinkPatch,
 } from "./trace/store.js";
+export {
+  expandedContextPartSchema,
+  expandedTraceToolDescriptorSchema,
+  traceCallDetailSchema,
+  traceContextSnapshotViewSchema,
+  traceEventPayloadSchema,
+  traceResponseViewSchema,
+  traceRunDetailViewSchema,
+  traceToolCallViewSchema,
+  type ExpandedContextPart,
+  type ExpandedTraceToolDescriptor,
+  type TraceCallDetail,
+  type TraceContextSnapshotView,
+  type TraceEventPayload,
+  type TraceResponseView,
+  type TraceRunDetailView,
+  type TraceToolCallView,
+} from "./trace/projection.js";
 
 export { ActorModelStore, characterDevelopmentPhaseSchema, deterministicActorProposalSource, evaluateCharacterGoal, resolveCharacterModel, type CharacterDevelopmentPhase, type CharacterGoal, type CharacterModel, type EffectiveCharacterModel } from "./world/actors.js";
 export { APPRAISAL_EMOTION_IDS, CHARACTER_CONTEXT_IDS, CHARACTER_DIMENSIONS, CHARACTER_DIMENSION_IDS, CHARACTER_ONTOLOGY_VERSION, appraisalEpisodeSchema, characterContextIdSchema, characterDimensionIdSchema, characterDispositionSchema, characterOntologyEvidence, developmentEpisodeSchema, legacyCharacterDimensionValues, modelVisibleCharacterOntology, resolveCharacterOntology, validateCharacterOntologyEvidenceAssertions, validateCharacterOntologyReferences, type AppraisalEpisode, type CharacterContextId, type CharacterDimensionDefinition, type CharacterDimensionId, type CharacterDisposition, type DevelopmentEpisode, type EffectiveCharacterAppraisal, type EffectiveCharacterDisposition, type EffectiveCharacterOntology, type EffectiveDevelopmentEpisode, type ModelVisibleCharacterOntology } from "./world/character-ontology.js";
@@ -344,6 +362,7 @@ export { openWorkspaceWorld, type WorkspaceWorld, type WorkspaceWorldOpenOptions
 export { CatalogService, legacyPlaySessionId } from "./application/catalog-service.js";
 export { PiModelCatalogService, type ModelCatalogReader } from "./application/model-catalog-service.js";
 export { PlayApplicationService, type PlayApplicationServiceOptions } from "./application/play-service.js";
+export { TraceApplicationService } from "./application/trace-service.js";
 export { createPiPlayerOpeningNarrator, finalizePlayerSceneChoices, type PiPlayerOpeningNarratorOptions, type PlayerOpeningNarrator, type PlayerSceneNarrationObserver, type PlayerSceneNarrationResult } from "./agent/pi-player-opening.js";
 export * from "./web/contracts.js";
 export { WebEventBroker, serializeServerSentEvent, type WebEventListener } from "./web/event-stream.js";

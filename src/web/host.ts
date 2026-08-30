@@ -7,6 +7,7 @@ import { z, ZodError } from "zod";
 import { CatalogService } from "../application/catalog-service.js";
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
 import { PlayApplicationService } from "../application/play-service.js";
+import { TraceApplicationService } from "../application/trace-service.js";
 import {
   WEB_API_VERSION,
   apiErrorSchema,
@@ -22,7 +23,8 @@ import {
 import { serializeServerSentEvent, WebEventBroker } from "./event-stream.js";
 import { WebApplicationError } from "./errors.js";
 import { OperationManager } from "./operation-manager.js";
-import { TraceStore } from "../trace/store.js";
+import { traceIdentifierSchema, traceRunKindSchema, traceRunStatusSchema } from "../trace/schema.js";
+import { TraceStore, type TraceRunFilter } from "../trace/store.js";
 
 const SERVER_VERSION = "0.1.0";
 const DEFAULT_STATIC_ROOT = path.resolve(import.meta.dirname, "../../dist/web-ui");
@@ -53,6 +55,7 @@ declare module "fastify" {
       operations: OperationManager;
       play: PlayApplicationService;
       traces: TraceStore;
+      traceQueries: TraceApplicationService;
     };
   }
 }
@@ -70,6 +73,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const operations = options.operationManager ?? new OperationManager(events);
   const traces = options.traceStore ?? options.playService?.traceStore ?? new TraceStore(root);
   await traces.initialize();
+  const traceQueries = new TraceApplicationService(traces);
   const play = options.playService ?? new PlayApplicationService({
     root,
     operations,
@@ -79,7 +83,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     ...(options.model ? { model: options.model } : {}),
   });
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 1_048_576 });
-  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, traces });
+  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, traces, traceQueries });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isAllowedHost(request, configuredHost)) {
@@ -162,7 +166,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
         { id: "library", status: "available", phase: 0 },
         { id: "model-settings", status: "foundation", phase: 0 },
         { id: "play", status: "available", phase: 1 },
-        { id: "trace", status: "foundation", phase: 1 },
+        { id: "trace", status: "available", phase: 1 },
         { id: "compiler", status: "planned", phase: 2 },
         { id: "ontology", status: "planned", phase: 2 },
       ],
@@ -230,6 +234,37 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   app.post(`/api/${WEB_API_VERSION}/operations/:operationId/cancel`, async (request) => {
     const { operationId } = operationParamSchema.parse(request.params);
     return operations.cancel(operationId);
+  });
+  app.get(`/api/${WEB_API_VERSION}/runs`, async (request) => {
+    const query = traceRunQuerySchema.parse(request.query);
+    const filter: TraceRunFilter = {
+      ...(query.sessionId ?? query.playSessionId
+        ? { playSessionId: query.sessionId ?? query.playSessionId }
+        : {}),
+      ...(query.branchId ? { branchId: query.branchId } : {}),
+      ...(query.kind ? { kind: query.kind } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.limit !== undefined ? { limit: query.limit } : {}),
+    };
+    return traceQueries.listRuns(filter);
+  });
+  app.get(`/api/${WEB_API_VERSION}/runs/:runId`, async (request) => {
+    const { runId } = traceRunParamSchema.parse(request.params);
+    return traceQueries.getRun(runId);
+  });
+  app.get(`/api/${WEB_API_VERSION}/runs/:runId/events`, async (request) => {
+    const { runId } = traceRunParamSchema.parse(request.params);
+    const { afterSeq } = traceEventsQuerySchema.parse(request.query);
+    return traceQueries.getEvents(runId, afterSeq);
+  });
+  app.get(`/api/${WEB_API_VERSION}/runs/:runId/events/:seq/payload`, async (request) => {
+    const { runId, seq } = traceEventParamSchema.parse(request.params);
+    return traceQueries.getEventPayload(runId, seq);
+  });
+  app.get(`/api/${WEB_API_VERSION}/calls/:callId/context`, async (request) => {
+    const { callId } = traceCallParamSchema.parse(request.params);
+    const { runId } = traceCallQuerySchema.parse(request.query);
+    return traceQueries.getCall(callId, runId);
   });
   app.get(`/api/${WEB_API_VERSION}/models/providers`, async () => (await modelCatalogService.read()).providers);
   app.get(`/api/${WEB_API_VERSION}/models`, async () => (await modelCatalogService.read()).models);
@@ -352,4 +387,27 @@ const operationQuerySchema = z.object({
   scopeId: z.string().min(1).optional(),
   kind: z.enum(["player-move", "scene-narration", "prepare"]).optional(),
   status: z.enum(["queued", "running", "succeeded", "failed", "cancelled", "interrupted"]).optional(),
+}).strict();
+const traceRunParamSchema = z.object({ runId: traceIdentifierSchema }).strict();
+const traceCallParamSchema = z.object({ callId: traceIdentifierSchema }).strict();
+const traceEventParamSchema = z.object({
+  runId: traceIdentifierSchema,
+  seq: z.coerce.number().int().positive(),
+}).strict();
+const traceRunQuerySchema = z.object({
+  sessionId: z.string().min(1).optional(),
+  playSessionId: z.string().min(1).optional(),
+  branchId: z.string().min(1).optional(),
+  kind: traceRunKindSchema.optional(),
+  status: traceRunStatusSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(1_000).optional(),
+}).strict().refine(
+  (query) => !query.sessionId || !query.playSessionId || query.sessionId === query.playSessionId,
+  { message: "sessionId and playSessionId must match when both are provided." },
+);
+const traceEventsQuerySchema = z.object({
+  afterSeq: z.coerce.number().int().nonnegative().default(0),
+}).strict();
+const traceCallQuerySchema = z.object({
+  runId: traceIdentifierSchema.optional(),
 }).strict();

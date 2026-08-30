@@ -6,6 +6,7 @@ import fastifyStatic from "@fastify/static";
 import { z, ZodError } from "zod";
 import { CatalogService } from "../application/catalog-service.js";
 import { InstanceApplicationService } from "../application/instance-service.js";
+import { MaintenanceApplicationService } from "../application/maintenance-service.js";
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
 import { PlayApplicationService } from "../application/play-service.js";
 import { PreparationApplicationService } from "../application/preparation-service.js";
@@ -18,6 +19,7 @@ import {
   bootstrapResponseSchema,
   createInstanceRequestSchema,
   createPlaySessionRequestSchema,
+  executeRemovalRequestSchema,
   forkInstanceRequestSchema,
   healthResponseSchema,
   operationKindSchema,
@@ -55,6 +57,7 @@ export interface CreateWebHostOptions {
   preparationService?: PreparationApplicationService;
   proposalService?: ProposalApplicationService;
   instanceService?: InstanceApplicationService;
+  maintenanceService?: MaintenanceApplicationService;
   traceStore?: TraceStore;
   configPath?: string;
   model?: string;
@@ -74,6 +77,7 @@ declare module "fastify" {
       preparation: PreparationApplicationService;
       proposals: ProposalApplicationService;
       instances: InstanceApplicationService;
+      maintenance: MaintenanceApplicationService;
       traces: TraceStore;
       traceQueries: TraceApplicationService;
     };
@@ -117,8 +121,9 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   });
   const proposals = options.proposalService ?? new ProposalApplicationService({ root, events });
   const instances = options.instanceService ?? new InstanceApplicationService({ root, events });
+  const maintenance = options.maintenanceService ?? new MaintenanceApplicationService({ root, events, operations, traceStore: traces });
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 26_214_400 });
-  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, instances, traces, traceQueries });
+  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, instances, maintenance, traces, traceQueries });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isAllowedHost(request, configuredHost)) {
@@ -264,6 +269,27 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     const { branchId } = branchParamSchema.parse(request.params);
     const result = await instances.fork(branchId, forkInstanceRequestSchema.parse(request.body));
     return reply.code(result.created ? 201 : 200).send(result);
+  });
+  app.get(`/api/${WEB_API_VERSION}/instances/:branchId/removal-preview`, async (request) => {
+    const { branchId } = branchParamSchema.parse(request.params);
+    return maintenance.previewInstance(branchId);
+  });
+  app.delete(`/api/${WEB_API_VERSION}/instances/:branchId`, async (request) => {
+    const { branchId } = branchParamSchema.parse(request.params);
+    return maintenance.removeInstance(branchId, executeRemovalRequestSchema.parse(request.body));
+  });
+  app.get(`/api/${WEB_API_VERSION}/novels/:sourceId/removal-preview`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    const { mode } = removalPreviewQuerySchema.parse(request.query);
+    return mode === "analysis" ? maintenance.previewAnalysis(sourceId) : maintenance.previewNovel(sourceId);
+  });
+  app.post(`/api/${WEB_API_VERSION}/novels/:sourceId/reset-analysis`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    return maintenance.resetAnalysis(sourceId, executeRemovalRequestSchema.parse(request.body));
+  });
+  app.delete(`/api/${WEB_API_VERSION}/novels/:sourceId`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    return maintenance.removeNovel(sourceId, executeRemovalRequestSchema.parse(request.body));
   });
   app.get(`/api/${WEB_API_VERSION}/play-sessions`, async () => (await catalogService.read()).playSessions);
   app.get(`/api/${WEB_API_VERSION}/instances/:branchId/characters`, async (request) => {
@@ -485,6 +511,9 @@ const proposalListQuerySchema = z.object({
 }).strict();
 const proposalDetailQuerySchema = z.object({
   status: z.enum(["pending", "accepted", "rejected"]).optional(),
+}).strict();
+const removalPreviewQuerySchema = z.object({
+  mode: z.enum(["analysis", "novel"]),
 }).strict();
 const operationQuerySchema = z.object({
   scopeId: z.string().min(1).optional(),

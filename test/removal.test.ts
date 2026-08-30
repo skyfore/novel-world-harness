@@ -4,6 +4,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { convergeWorldProposals } from "../src/compiler/converge.js";
+import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
 import { SourceMaterialStore } from "../src/storage/source-material-store.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { ActorModelStore } from "../src/world/actors.js";
@@ -14,6 +16,7 @@ import { PlayConversationStore } from "../src/world/play-conversation.js";
 import { inspectPlayExperience, listPlayableCharacters } from "../src/world/play-experience.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../src/world/removal.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
+import { createWorldBranch } from "../src/world/instance.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { SourceStructureStore } from "../src/compiler/structure.js";
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
@@ -121,6 +124,43 @@ describe("novel-world removal", () => {
     await expect(fs.stat(cachePath)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(new SourceStructureStore(root).read(first.source.id)).resolves.toBeNull();
     await expect(new SourceAccountingStore(root).read(first.source.id)).resolves.toBeNull();
+  });
+
+  it("retains an immutable prepared revision pinned by a live branch while clearing its active cache pointer", async () => {
+    const root = await rootFixture("nwh-remove-pinned-analysis-");
+    const fixture = await createEvidenceFixture(root, "Hero waits at the opening.\n", "pinned.txt");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "pinned-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: fixture.evidence("Hero") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "pinned-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        evidence: fixture.evidence("Hero waits at the opening."),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await convergeWorldProposals(root, fixture.source.id);
+    const cacheRoot = path.join(root, "prepared-cache");
+    const cache = new PreparedNovelCache(root, cacheRoot);
+    const published = await cache.publish(fixture.source);
+    await createWorldBranch(root, "main", undefined, fixture.source.id, cacheRoot);
+
+    const result = await removeNovelAnalysis(root, fixture.source, { cacheRoot });
+
+    expect(result.preservedPreparedRevisions).toEqual([published.bundleHash]);
+    await expect(cache.loadActive(fixture.source)).resolves.toBeNull();
+    await expect(cache.loadRevision(fixture.source, published.bundleHash!)).resolves.toMatchObject({ bundleHash: published.bundleHash });
+    await expect(listPlayableCharacters(root, { branchId: "main", source: fixture.source.id })).resolves.toMatchObject({
+      characters: [expect.objectContaining({ id: "hero" })],
+    });
   });
 
   it("removes a novel, all of its instances, and active parsed state without deleting archived evidence", async () => {

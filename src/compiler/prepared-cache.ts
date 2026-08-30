@@ -287,6 +287,12 @@ export type PreparedCacheRevision = {
   lineage?: PreparedRevisionLineage;
 };
 
+export type PreparedCachePruneResult = {
+  existed: boolean;
+  removedRevisions: number;
+  retainedRevisions: string[];
+};
+
 export type ActivePreparedNovel = {
   bundleHash: string;
   bundle: PreparedNovelBundle;
@@ -568,6 +574,49 @@ export class PreparedNovelCache {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
       throw error;
     }
+  }
+
+  /**
+   * Reset the mutable active cache while retaining immutable revisions pinned
+   * by live branches. Retained revisions deliberately have no active pointer,
+   * so a later compiler run cannot silently rematerialize them as current
+   * analysis; branch-scoped runtime loads may still address them by hash.
+   */
+  async prune(source: SourceDocument, retainRevisionHashes: ReadonlySet<string>): Promise<PreparedCachePruneResult> {
+    for (const hash of retainRevisionHashes) digestSchema.parse(hash);
+    if (retainRevisionHashes.size === 0) {
+      const revisions = await this.listRevisions(source);
+      const existed = await this.remove(source);
+      return { existed, removedRevisions: revisions.length, retainedRevisions: [] };
+    }
+    const revisions = await this.listRevisions(source);
+    const contentMd5 = source.contentMd5 ?? (await sourceIdentity(this.workspaceRoot, source)).contentMd5;
+    const container = this.cachePath(contentMd5);
+    if (revisions.length === 0) {
+      const existed = await this.remove(source);
+      return { existed, removedRevisions: 0, retainedRevisions: [] };
+    }
+    await fs.chmod(container, 0o700);
+    const retained: string[] = [];
+    let removedRevisions = 0;
+    for (const revision of revisions) {
+      if (retainRevisionHashes.has(revision.bundleHash)) {
+        retained.push(revision.bundleHash);
+        continue;
+      }
+      await fs.chmod(revision.cachePath, 0o700);
+      await fs.rm(revision.cachePath, { recursive: true, force: true });
+      removedRevisions += 1;
+    }
+    await fs.rm(path.join(container, "active.json"), { force: true });
+    await fs.rm(path.join(container, "manifest.json"), { force: true });
+    await fs.rm(path.join(container, "bundle.json"), { force: true });
+    if (retained.length === 0) await fs.rm(container, { recursive: true, force: true });
+    return {
+      existed: true,
+      removedRevisions,
+      retainedRevisions: retained.sort(),
+    };
   }
 
   async activate(source: SourceDocument, bundleHash: string, options: { allowIncompatibleRollback?: boolean } = {}): Promise<PreparedCacheResult> {

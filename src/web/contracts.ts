@@ -451,6 +451,57 @@ export const instanceDetailSchema = z.object({
   history: z.array(instanceHistoryCommitSchema),
 }).strict();
 
+export const maintenanceActionSchema = z.enum(["remove-instance", "reset-analysis", "remove-novel"]);
+
+export const removalEffectSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  disposition: z.enum(["remove", "modify", "preserve"]),
+  count: z.number().int().nonnegative(),
+  itemIds: z.array(z.string()).default([]),
+  detail: z.string().min(1),
+}).strict();
+
+export const removalPreviewSchema = z.object({
+  version: z.literal(1),
+  action: maintenanceActionSchema,
+  target: z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    confirmation: z.string().min(1),
+  }).strict(),
+  effectHash: z.string().regex(/^[a-f0-9]{64}$/),
+  executable: z.boolean(),
+  blockers: z.array(z.string()),
+  effects: z.array(removalEffectSchema).min(1),
+}).strict();
+
+export const executeRemovalRequestSchema = z.object({
+  effectHash: z.string().regex(/^[a-f0-9]{64}$/),
+  confirmation: z.string().min(1),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const removalExecutionResultSchema = z.object({
+  version: z.literal(1),
+  action: maintenanceActionSchema,
+  targetId: z.string().min(1),
+  effectHash: z.string().regex(/^[a-f0-9]{64}$/),
+  completed: z.literal(true),
+  removed: z.object({
+    branches: z.number().int().nonnegative(),
+    sessions: z.number().int().nonnegative(),
+    conversationMessages: z.number().int().nonnegative(),
+    canonicalArtifacts: z.number().int().nonnegative(),
+    actorArtifacts: z.number().int().nonnegative(),
+    possibilities: z.number().int().nonnegative(),
+    proposals: z.number().int().nonnegative(),
+    sourceRegistrations: z.number().int().nonnegative(),
+  }).strict(),
+  immutableSourcePreserved: z.literal(true),
+  tracesPreserved: z.literal(true),
+}).strict();
+
 export const createPlaySessionRequestSchema = z.object({
   branchId: z.string().min(1),
   actorId: z.string().min(1),
@@ -613,6 +664,11 @@ export type ForkInstanceResult = z.infer<typeof forkInstanceResultSchema>;
 export type InstanceHistoryEvent = z.infer<typeof instanceHistoryEventSchema>;
 export type InstanceHistoryCommit = z.infer<typeof instanceHistoryCommitSchema>;
 export type InstanceDetail = z.infer<typeof instanceDetailSchema>;
+export type MaintenanceAction = z.infer<typeof maintenanceActionSchema>;
+export type RemovalEffect = z.infer<typeof removalEffectSchema>;
+export type RemovalPreview = z.infer<typeof removalPreviewSchema>;
+export type ExecuteRemovalRequest = z.infer<typeof executeRemovalRequestSchema>;
+export type RemovalExecutionResult = z.infer<typeof removalExecutionResultSchema>;
 export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSchema>;
 export type PlayableCharacter = z.infer<typeof playableCharacterSchema>;
 export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;

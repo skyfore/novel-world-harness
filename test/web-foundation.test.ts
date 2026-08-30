@@ -11,6 +11,8 @@ import {
   healthResponseSchema,
   modelCatalogSchema,
   preparationSnapshotSchema,
+  removalExecutionResultSchema,
+  removalPreviewSchema,
   sourceRegistrationResultSchema,
   type ModelCatalog,
 } from "../src/web/contracts.js";
@@ -129,6 +131,48 @@ describe("local Web host", () => {
     });
     expect(proposals.statusCode).toBe(200);
     expect(proposals.json()).toEqual([]);
+  });
+
+  it("requires a fresh effect hash and exact source confirmation for maintenance routes", async () => {
+    const root = await workspace("nwh-web-maintenance-route-");
+    const store = await WorkspaceStore.create(root);
+    const source = await store.registerSourceContent("maintenance.txt", "Nothing has been compiled yet.\n");
+    const csrfToken = "maintenance-route-csrf-token-is-long-enough";
+    const app = await createWebHost({
+      root,
+      serveStatic: false,
+      modelCatalogService: { read: async () => emptyModels },
+      csrfToken,
+    });
+    apps.push(app);
+
+    const previewResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/novels/${source.id}/removal-preview?mode=analysis`,
+    });
+    expect(previewResponse.statusCode).toBe(200);
+    const preview = removalPreviewSchema.parse(previewResponse.json());
+    expect(preview).toMatchObject({ action: "reset-analysis", executable: true, target: { confirmation: source.id } });
+
+    const resetResponse = await app.inject({
+      method: "POST",
+      url: `/api/v1/novels/${source.id}/reset-analysis`,
+      headers: { "x-nwh-csrf": csrfToken },
+      payload: { effectHash: preview.effectHash, confirmation: source.id, clientRequestId: "maintenance-route-reset" },
+    });
+    expect(resetResponse.statusCode).toBe(200);
+    expect(removalExecutionResultSchema.parse(resetResponse.json())).toMatchObject({ action: "reset-analysis", immutableSourcePreserved: true });
+
+    const novelPreviewResponse = await app.inject({ method: "GET", url: `/api/v1/novels/${source.id}/removal-preview?mode=novel` });
+    const novelPreview = removalPreviewSchema.parse(novelPreviewResponse.json());
+    const removeResponse = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/novels/${source.id}`,
+      headers: { "x-nwh-csrf": csrfToken },
+      payload: { effectHash: novelPreview.effectHash, confirmation: source.id, clientRequestId: "maintenance-route-remove" },
+    });
+    expect(removeResponse.statusCode).toBe(200);
+    expect(removalExecutionResultSchema.parse(removeResponse.json())).toMatchObject({ action: "remove-novel", removed: { sourceRegistrations: 1 } });
   });
 
   it("serves versioned catalog APIs with strict local headers", async () => {

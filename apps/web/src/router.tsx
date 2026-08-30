@@ -39,6 +39,7 @@ import {
   traceRunKey,
   traceRunsQueryKey,
 } from "./trace-pages";
+import { MaintenanceControl } from "./maintenance-dialog";
 import {
   operationSnapshotSchema,
   playOperationResultSchema,
@@ -241,6 +242,8 @@ function DashboardPage() {
 function NovelPage() {
   const { sourceId } = useParams({ from: novelRoute.id });
   const { data } = useBootstrap();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const novel = data?.catalog.novels.find((candidate) => candidate.id === sourceId);
   const preparation = useQuery({
     queryKey: preparationKey(sourceId),
@@ -277,6 +280,21 @@ function NovelPage() {
       </Panel>
       <Panel title="World instances" action={<span className="panel-tag">committed</span>}>
         {instances.length ? instances.map((instance) => <InstanceRow key={instance.branchId} instance={instance} />) : <EmptyState title="No committed instance" body="This source is registered but does not yet own a playable branch." />}
+      </Panel>
+      <Panel title="Maintenance" action={<span className="panel-tag">exact preview required</span>}>
+        <div className="maintenance-zone">
+          <div><strong>Reset derived analysis</strong><p>Keep the registration, immutable source bytes, committed branches, sessions, pinned prepared revisions, and traces. Remove source-scoped compiler material so the novel can be parsed again.</p></div>
+          <MaintenanceControl action="reset-analysis" targetId={sourceId} csrfToken={data.csrfToken} triggerLabel="Preview analysis reset" onCompleted={() => {
+            void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
+            void queryClient.invalidateQueries({ queryKey: preparationKey(sourceId) });
+            void navigate({ to: "/novels/$sourceId/compile", params: { sourceId } });
+          }} />
+          <div><strong>Remove novel</strong><p>Remove its registration, analysis, owned branches, sessions, and conversations. Archived content-addressed source bytes and traces remain preserved.</p></div>
+          <MaintenanceControl action="remove-novel" targetId={sourceId} csrfToken={data.csrfToken} triggerLabel="Preview novel removal" onCompleted={() => {
+            void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
+            void navigate({ to: "/" });
+          }} />
+        </div>
       </Panel>
       <PlannedCallout title="Ontology workbench" phase="Next Phase 2 slice" body="Model, event, place, rule, and provenance projections will join this source checkpoint without creating a second truth store." />
     </>
@@ -360,7 +378,13 @@ function InstancePage() {
   const history = detail.data?.history ?? [];
   return (
     <>
-      <PageHeading eyebrow="Committed branch" title={instance.name} description={instance.sourceTitle ?? "Unscoped legacy world"} />
+      <div className="session-heading">
+        <PageHeading eyebrow="Committed branch" title={instance.name} description={instance.sourceTitle ?? "Unscoped legacy world"} />
+        <div className="session-toolbar"><MaintenanceControl action="remove-instance" targetId={branchId} csrfToken={data?.csrfToken ?? ""} triggerLabel="Preview instance removal" onCompleted={() => {
+          void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
+          void navigate(instance.sourceId ? { to: "/novels/$sourceId", params: { sourceId: instance.sourceId } } : { to: "/" });
+        }} /></div>
+      </div>
       <div className="metric-grid">
         <Metric label="Story step" value={instance.logicalStep} note="derived world time" />
         <Metric label="Commits" value={instance.commitCount} note="authoritative history" />

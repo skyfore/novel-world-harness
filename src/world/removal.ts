@@ -39,6 +39,7 @@ export type NovelAnalysisRemovalResult = {
   sourceObservations: boolean;
   compilerProgress: boolean;
   preparedCache: boolean;
+  preservedPreparedRevisions: string[];
 };
 
 export type NovelRemovalResult = {
@@ -70,7 +71,7 @@ export async function removeWorldInstance(root: string, branchId: string): Promi
 export async function removeNovelAnalysis(
   root: string,
   sourceInput: string | SourceDocument,
-  options: { cacheRoot?: string } = {},
+  options: { cacheRoot?: string; preservePreparedRevisionHashes?: readonly string[] } = {},
 ): Promise<NovelAnalysisRemovalResult> {
   const workspace = await WorkspaceStore.create(root);
   const source = typeof sourceInput === "string"
@@ -249,7 +250,10 @@ export async function removeNovelAnalysis(
     await workspace.withdrawSourceTitleProposal(sourceId, currentSource.pendingTitleProposal.proposalId);
     proposals += 1;
   }
-  const preparedCache = await new PreparedNovelCache(root, options.cacheRoot).remove(source);
+  const preservedHashes = options.preservePreparedRevisionHashes === undefined
+    ? await pinnedPreparedRevisions(root, sourceId)
+    : [...new Set(options.preservePreparedRevisionHashes)].sort();
+  const cachePrune = await new PreparedNovelCache(root, options.cacheRoot).prune(source, new Set(preservedHashes));
 
   return {
     source,
@@ -261,7 +265,8 @@ export async function removeNovelAnalysis(
     evidenceIndex,
     sourceObservations,
     compilerProgress,
-    preparedCache,
+    preparedCache: cachePrune.existed,
+    preservedPreparedRevisions: cachePrune.retainedRevisions,
   };
 }
 
@@ -289,10 +294,23 @@ export async function removeNovel(
       .map((instance) => ({ id: instance.branchId, parentId: instance.parentBranchId })),
   );
 
-  const analysis = await removeNovelAnalysis(root, source, options);
+  const analysis = await removeNovelAnalysis(root, source, {
+    ...options,
+    preservePreparedRevisionHashes: [],
+  });
   for (const branchId of removalOrder) await removeWorldInstance(root, branchId);
   const sourceUnregistered = await workspace.unregisterSource(source.id);
   return { source, removedBranchIds: removalOrder, analysis, sourceUnregistered };
+}
+
+async function pinnedPreparedRevisions(root: string, sourceId: string): Promise<string[]> {
+  const branches = new BranchStore(root);
+  const hashes = new Set<string>();
+  for (const branchId of await branches.listIds()) {
+    const branch = await branches.read(branchId);
+    if (branch.sourceId === sourceId && branch.preparedRevisionHash) hashes.add(branch.preparedRevisionHash);
+  }
+  return [...hashes].sort();
 }
 
 function containsSourceEvidence(

@@ -6,6 +6,7 @@ import {
   createInstanceRequestSchema,
   createInstanceResultSchema,
   createPlaySessionRequestSchema,
+  executeRemovalRequestSchema,
   forkInstanceRequestSchema,
   forkInstanceResultSchema,
   instanceDetailSchema,
@@ -17,6 +18,8 @@ import {
   playMoveRequestSchema,
   playSessionDetailSchema,
   removePlaySessionResultSchema,
+  removalExecutionResultSchema,
+  removalPreviewSchema,
   proposalAcceptRequestSchema,
   proposalConvergenceResultSchema,
   proposalConvergeRequestSchema,
@@ -34,6 +37,7 @@ import {
   type CreateInstanceRequest,
   type CreateInstanceResult,
   type CreatePlaySessionRequest,
+  type ExecuteRemovalRequest,
   type ForkInstanceRequest,
   type ForkInstanceResult,
   type InstanceDetail,
@@ -45,6 +49,8 @@ import {
   type PlayMoveRequest,
   type PlaySessionDetail,
   type RemovePlaySessionResult,
+  type RemovalExecutionResult,
+  type RemovalPreview,
   type ProposalAcceptRequest,
   type ProposalConvergenceResult,
   type ProposalConvergeRequest,
@@ -128,6 +134,14 @@ export function fetchProposal(proposalId: string, status?: ProposalStatus, signa
 
 export function fetchInstance(branchId: string, signal?: AbortSignal): Promise<InstanceDetail> {
   return request(`/api/v1/instances/${encodeURIComponent(branchId)}`, instanceDetailSchema, { signal });
+}
+
+export function fetchInstanceRemovalPreview(branchId: string, signal?: AbortSignal): Promise<RemovalPreview> {
+  return request(`/api/v1/instances/${encodeURIComponent(branchId)}/removal-preview`, removalPreviewSchema, { signal });
+}
+
+export function fetchNovelRemovalPreview(sourceId: string, mode: "analysis" | "novel", signal?: AbortSignal): Promise<RemovalPreview> {
+  return request(`/api/v1/novels/${encodeURIComponent(sourceId)}/removal-preview?mode=${mode}`, removalPreviewSchema, { signal });
 }
 
 export function fetchOperation(operationId: string, signal?: AbortSignal): Promise<OperationSnapshot> {
@@ -231,6 +245,36 @@ export function forkInstance(parentBranchId: string, inputValue: ForkInstanceReq
     "POST",
     forkInstanceRequestSchema.parse(inputValue),
     forkInstanceResultSchema,
+    csrfToken,
+  );
+}
+
+export function executeInstanceRemoval(branchId: string, inputValue: ExecuteRemovalRequest, csrfToken: string): Promise<RemovalExecutionResult> {
+  return mutation(
+    `/api/v1/instances/${encodeURIComponent(branchId)}`,
+    "DELETE",
+    executeRemovalRequestSchema.parse(inputValue),
+    removalExecutionResultSchema,
+    csrfToken,
+  );
+}
+
+export function executeAnalysisReset(sourceId: string, inputValue: ExecuteRemovalRequest, csrfToken: string): Promise<RemovalExecutionResult> {
+  return mutation(
+    `/api/v1/novels/${encodeURIComponent(sourceId)}/reset-analysis`,
+    "POST",
+    executeRemovalRequestSchema.parse(inputValue),
+    removalExecutionResultSchema,
+    csrfToken,
+  );
+}
+
+export function executeNovelRemoval(sourceId: string, inputValue: ExecuteRemovalRequest, csrfToken: string): Promise<RemovalExecutionResult> {
+  return mutation(
+    `/api/v1/novels/${encodeURIComponent(sourceId)}`,
+    "DELETE",
+    executeRemovalRequestSchema.parse(inputValue),
+    removalExecutionResultSchema,
     csrfToken,
   );
 }

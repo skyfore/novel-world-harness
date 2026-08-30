@@ -25,6 +25,7 @@ const runIndexEntrySchema = z.object({
   startedAt: z.string().datetime({ offset: true }),
   kind: traceRunKindSchema,
   status: traceRunStatusSchema,
+  sourceId: z.string().optional(),
   playSessionId: z.string().optional(),
   branchId: z.string().optional(),
 }).strict();
@@ -65,6 +66,7 @@ export type AppendTraceEventInput = {
 };
 
 export type TraceRunFilter = {
+  sourceId?: string;
   playSessionId?: string;
   branchId?: string;
   kind?: TraceRunKind;
@@ -258,6 +260,7 @@ export class TraceStore {
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) throw new Error("Trace run limit must be an integer between 1 and 1000.");
     const index = await this.readIndex();
     const selected = index.runs
+      .filter((entry) => !filter.sourceId || entry.sourceId === filter.sourceId)
       .filter((entry) => !filter.playSessionId || entry.playSessionId === filter.playSessionId)
       .filter((entry) => !filter.branchId || entry.branchId === filter.branchId)
       .filter((entry) => !filter.kind || entry.kind === filter.kind)
@@ -265,6 +268,31 @@ export class TraceStore {
       .sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt) || right.id.localeCompare(left.id))
       .slice(0, limit);
     return Promise.all(selected.map(async (entry) => structuredClone(await this.readManifestAt(entry.relativePath))));
+  }
+
+  async countRuns(filter: Omit<TraceRunFilter, "limit"> = {}): Promise<number> {
+    await this.initialize();
+    const index = await this.readIndex();
+    return index.runs
+      .filter((entry) => !filter.sourceId || entry.sourceId === filter.sourceId)
+      .filter((entry) => !filter.playSessionId || entry.playSessionId === filter.playSessionId)
+      .filter((entry) => !filter.branchId || entry.branchId === filter.branchId)
+      .filter((entry) => !filter.kind || entry.kind === filter.kind)
+      .filter((entry) => !filter.status || entry.status === filter.status)
+      .length;
+  }
+
+  async listRunIds(filter: Omit<TraceRunFilter, "limit"> = {}): Promise<string[]> {
+    await this.initialize();
+    const index = await this.readIndex();
+    return index.runs
+      .filter((entry) => !filter.sourceId || entry.sourceId === filter.sourceId)
+      .filter((entry) => !filter.playSessionId || entry.playSessionId === filter.playSessionId)
+      .filter((entry) => !filter.branchId || entry.branchId === filter.branchId)
+      .filter((entry) => !filter.kind || entry.kind === filter.kind)
+      .filter((entry) => !filter.status || entry.status === filter.status)
+      .map((entry) => entry.id)
+      .sort();
   }
 
   async readEvents(runId: string, afterSeq = 0): Promise<TraceEvent[]> {
@@ -502,6 +530,7 @@ function indexEntry(manifest: TraceRunManifest, relativePath: string): z.infer<t
     startedAt: manifest.startedAt,
     kind: manifest.kind,
     status: manifest.status,
+    ...(manifest.sourceId ? { sourceId: manifest.sourceId } : {}),
     ...(manifest.playSessionId ? { playSessionId: manifest.playSessionId } : {}),
     ...(manifest.branchId ? { branchId: manifest.branchId } : {}),
   });

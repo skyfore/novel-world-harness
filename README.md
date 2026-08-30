@@ -65,11 +65,11 @@ After the Web assets have been built once, quickly restart the workbench from
 the current server source without rebuilding:
 
 ```bash
-pnpm web
+pnpm dev web
 ```
 
 Re-run `pnpm run build:web` only when the browser application changes. CLI
-options can be forwarded directly, for example `pnpm web --no-open --port
+options can be forwarded directly, for example `pnpm dev web --no-open --port
 3090`.
 
 The server binds to `127.0.0.1:3080` by default and reuses the same `$NWH_HOME`,

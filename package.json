@@ -18,18 +18,16 @@
     "nwh": "./dist/cli.js"
   },
   "scripts": {
-    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "pnpm run clean && pnpm run build:server && pnpm run build:web",
     "build:server": "tsc -p tsconfig.json",
     "build:web": "vite build --config apps/web/vite.config.ts",
-    "dev": "node --import tsx src/cli.ts",
-    "web": "node --import tsx src/cli.ts web",
-    "dev:web": "vite --config apps/web/vite.config.ts",
-    "dev:web:server": "pnpm run build:web && node --import tsx src/cli.ts web --no-open",
     "check": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit && tsc -p e2e/tsconfig.json --noEmit",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "dev": "node --import tsx src/cli.ts",
+    "dev:web": "vite --config apps/web/vite.config.ts",
+    "dev:web:server": "pnpm run build:web && pnpm dev web --no-open",
     "test": "vitest run",
-    "test:e2e": "pnpm run build && playwright test",
-    "start": "node dist/cli.js"
+    "test:e2e": "pnpm run build && playwright test"
   },
   "engines": {
     "node": ">=22.19.0"

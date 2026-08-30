@@ -116,6 +116,20 @@ and stream updates over SSE. For frontend development, run
 `pnpm dev:web:server` and `pnpm dev:web` in separate terminals; Vite proxies
 `/api` to the local host.
 
+Run the deterministic test suite and the real-browser MVP acceptance journey
+with:
+
+```bash
+pnpm test
+pnpm test:e2e
+```
+
+The browser suite launches the production Fastify host on loopback and drives
+Chromium through source registration, compilation review, ontology inspection,
+play/resume, trace inspection, and destructive-action confirmations. If the
+Playwright browser cache is empty, install Chromium once with
+`pnpm exec playwright install chromium`.
+
 ## Local terminal assistant
 
 ```bash

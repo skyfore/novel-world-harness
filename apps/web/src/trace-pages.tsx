@@ -197,7 +197,7 @@ export function TraceDetailPage({ runId, sessionId }: TraceDetailPageProps) {
       </div>
       <section className="trace-truth-strip">
         <div><span>World head</span><code>{shortId(manifest.previousHead ?? "unknown")} → {shortId(manifest.finalHead ?? "not committed")}</code></div>
-        <div><span>Story time</span><code>{compactJson(manifest.storyTimeBefore)} → {compactJson(manifest.storyTimeAfter)}</code></div>
+        <div><span>Story time</span><code>{storyTimeSummary(manifest.storyTimeBefore)} → {storyTimeSummary(manifest.storyTimeAfter)}</code></div>
         <div><span>Links</span><code>{manifest.eventHash ? `event ${shortId(manifest.eventHash)}` : "no event"}{manifest.auditId ? ` · audit ${shortId(manifest.auditId)}` : ""}</code></div>
       </section>
       {manifest.error && <section className="trace-run-error"><span>{manifest.error.code}</span><strong>{manifest.error.message}</strong><small>{manifest.error.retryable ? "Marked retryable" : "Do not replay unchanged"}</small></section>}
@@ -487,6 +487,28 @@ function compactJson(value: unknown): string {
   if (value === undefined) return "unknown";
   const serialized = safeStringify(value).replace(/\s+/g, " ");
   return serialized.length > 90 ? `${serialized.slice(0, 87)}…` : serialized;
+}
+
+function storyTimeSummary(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return compactJson(value);
+  const record = value as Record<string, unknown>;
+  const logicalTime = record.logicalTime && typeof record.logicalTime === "object" && !Array.isArray(record.logicalTime)
+    ? record.logicalTime as Record<string, unknown>
+    : record;
+  const step = typeof logicalTime.step === "number"
+    ? logicalTime.step
+    : typeof record.logicalStep === "number" ? record.logicalStep : undefined;
+  const storyTime = logicalTime.storyTime && typeof logicalTime.storyTime === "object" && !Array.isArray(logicalTime.storyTime)
+    ? logicalTime.storyTime as Record<string, unknown>
+    : undefined;
+  const label = typeof storyTime?.label === "string" ? storyTime.label : undefined;
+  const commitId = typeof record.commitId === "string" ? record.commitId : undefined;
+  if (step === undefined && !label && !commitId) return compactJson(value);
+  return [
+    step === undefined ? undefined : `step ${step}`,
+    label,
+    commitId ? `commit ${shortId(commitId)}` : undefined,
+  ].filter((part): part is string => Boolean(part)).join(" · ");
 }
 
 function elapsed(startedAt: string, endedAt: string): string {

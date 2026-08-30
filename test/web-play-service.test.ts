@@ -126,6 +126,8 @@ describe("Web Play application service", () => {
       status: "succeeded",
       operationId: opening.operation.id,
       finalHead: genesis,
+      storyTimeBefore: { commitId: genesis, logicalTime: { step: 0 } },
+      storyTimeAfter: { commitId: genesis, logicalTime: { step: 0 } },
     });
     expect(openingTrace.presentationMessageIds).toHaveLength(1);
 
@@ -183,8 +185,19 @@ describe("Web Play application service", () => {
       finalHead: result.finalHead,
       eventHash: result.eventHash,
       auditId: result.auditId,
+      storyTimeBefore: { commitId: genesis, logicalTime: { step: 0 } },
+      storyTimeAfter: { commitId: result.finalHead, logicalTime: { step: 1 } },
     });
     expect(moveTrace.presentationMessageIds).toHaveLength(2);
+    const moveTraceEvents = await service.traceStore.readEvents(result.runId);
+    expect(moveTraceEvents.find((event) => event.type === "world.commit.started")?.storyTime).toMatchObject({
+      commitId: genesis,
+      logicalTime: { step: 0 },
+    });
+    expect(moveTraceEvents.find((event) => event.type === "world.commit.completed")?.storyTime).toMatchObject({
+      commitId: result.finalHead,
+      logicalTime: { step: 1 },
+    });
     const auditFiles = await fs.readdir(path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main"));
     const audit = JSON.parse(await fs.readFile(
       path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main", auditFiles[0]!),
@@ -196,7 +209,7 @@ describe("Web Play application service", () => {
       playerMoveId: result.playerMoveId,
       eventHash: result.eventHash,
     });
-    expect((await service.traceStore.readEvents(result.runId)).map((event) => event.type)).toEqual(expect.arrayContaining([
+    expect(moveTraceEvents.map((event) => event.type)).toEqual(expect.arrayContaining([
       "validation.completed",
       "world.commit.started",
       "world.commit.completed",

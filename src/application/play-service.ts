@@ -39,6 +39,7 @@ import {
 import { PlaySessionStore, type ActivePlaySession } from "../world/play-session.js";
 import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import { BranchStore } from "../world/store.js";
+import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import {
   clearPlayConversationResultSchema,
   createPlaySessionRequestSchema,
@@ -260,6 +261,7 @@ export class PlayApplicationService {
     const session = await this.requireWritableSession(sessionId);
     await this.assertExpectedHead(session, input.expectedHead);
     this.assertNoActiveOperation(session.id);
+    const storyTimeBefore = await this.storyTimeAt(input.expectedHead);
     const playerMoveId = newTraceId("move");
     const recorder = await TraceRecorder.start(this.traces, {
       kind: "player-move",
@@ -269,7 +271,7 @@ export class PlayApplicationService {
       playerMoveId,
       actorId: session.actorId,
       previousHead: input.expectedHead,
-      storyTimeBefore: { commitId: input.expectedHead },
+      storyTimeBefore,
     });
     try {
       const accepted = this.options.operations.start({
@@ -316,6 +318,7 @@ export class PlayApplicationService {
     const session = await this.requireWritableSession(sessionId);
     await this.assertExpectedHead(session, input.expectedHead);
     this.assertNoActiveOperation(session.id);
+    const storyTimeBefore = await this.storyTimeAt(input.expectedHead);
     const recorder = await TraceRecorder.start(this.traces, {
       kind: "scene-narration",
       sourceId: session.sourceId,
@@ -323,7 +326,7 @@ export class PlayApplicationService {
       playSessionId: session.id,
       actorId: session.actorId,
       previousHead: input.expectedHead,
-      storyTimeBefore: { commitId: input.expectedHead },
+      storyTimeBefore,
     });
     try {
       const accepted = this.options.operations.start({
@@ -371,6 +374,7 @@ export class PlayApplicationService {
     await this.assertExpectedHead(session, input.expectedHead);
     this.assertNoActiveOperation(session.id);
     const sourceRun = await this.requireNarrationRetrySource(session, input);
+    const storyTimeBefore = await this.storyTimeAt(input.expectedHead);
     const recorder = await TraceRecorder.start(this.traces, {
       kind: "narration-retry",
       sourceId: session.sourceId,
@@ -379,7 +383,7 @@ export class PlayApplicationService {
       playerMoveId: sourceRun.playerMoveId,
       actorId: session.actorId,
       previousHead: input.expectedHead,
-      storyTimeBefore: { commitId: input.expectedHead },
+      storyTimeBefore,
     });
     try {
       const accepted = this.options.operations.start({
@@ -451,7 +455,7 @@ export class PlayApplicationService {
             await recorder.record("world.commit.started", {
               kind: "player-action",
               previousHead: input.expectedHead,
-            }, turnTrace, { storyTime: { commitId: input.expectedHead } });
+            }, turnTrace, { storyTime: recorder.manifest.storyTimeBefore });
             context.signal.throwIfAborted();
             commitBoundaryCrossed = true;
             context.markCommitBoundary({ previousHead: input.expectedHead });
@@ -484,6 +488,7 @@ export class PlayApplicationService {
         stage: outcome.result.stage,
         issueCount: outcome.result.issues.length,
       }, turnTrace, { blobRef: validationRef });
+      const storyTimeAfter = await this.storyTimeAt(outcome.finalHead);
       if (commitBoundaryCrossed) {
         await recorder.record(outcome.result.accepted ? "world.commit.completed" : "world.commit.failed", {
           kind: "player-action",
@@ -497,7 +502,7 @@ export class PlayApplicationService {
             ...outcome.canonicalRecoveryEvents.map((event) => event.eventHash),
             ...outcome.backgroundEvents.map((event) => event.eventHash),
           ],
-        }, turnTrace, { storyTime: { commitId: outcome.finalHead, logicalStep: outcome.logicalStep } });
+        }, turnTrace, { storyTime: storyTimeAfter });
       }
       if (outcome.playerMessage) this.publishMessage(session.id, outcome.playerMessage, context.operationId, recorder.manifest.id);
       context.update("world-resolved", {
@@ -546,7 +551,7 @@ export class PlayApplicationService {
         ...(outcome.result.eventHash ? { eventHash: outcome.result.eventHash } : {}),
         ...(outcome.auditId ? { auditId: outcome.auditId } : {}),
         presentationMessageIds,
-        storyTimeAfter: { commitId: outcome.finalHead, logicalStep: outcome.logicalStep },
+        storyTimeAfter,
       });
       await recorder.finishStage(turnTrace, {
         status: context.signal.aborted && commitBoundaryCrossed ? "narration-interrupted" : "completed",
@@ -607,7 +612,7 @@ export class PlayApplicationService {
     await recorder.link({
       finalHead: input.expectedHead,
       presentationMessageIds: [rendered.message.id],
-      storyTimeAfter: { commitId: input.expectedHead },
+      storyTimeAfter: await this.storyTimeAt(input.expectedHead),
     });
     this.invalidateCatalog("scene-narration-completed", session.id, context.operationId, recorder.manifest.id);
     return sceneNarrationResultSchema.parse({
@@ -641,7 +646,7 @@ export class PlayApplicationService {
       playerMoveId: sourceRun.playerMoveId,
       committedHead: sourceRun.finalHead,
       worldMutationAllowed: false,
-    }, narrationTrace, { storyTime: { commitId: input.expectedHead } });
+    }, narrationTrace, { storyTime: recorder.manifest.storyTimeBefore });
     const adapters = await this.adapters(context, narrationTrace);
     let rendered: NarrationOutcome;
     try {
@@ -666,7 +671,7 @@ export class PlayApplicationService {
     await recorder.link({
       finalHead: input.expectedHead,
       presentationMessageIds: [rendered.message.id],
-      storyTimeAfter: { commitId: input.expectedHead },
+      storyTimeAfter: await this.storyTimeAt(input.expectedHead),
     });
     this.invalidateCatalog("narration-retry-completed", session.id, context.operationId, recorder.manifest.id);
     return narrationRetryResultSchema.parse({
@@ -817,6 +822,12 @@ export class PlayApplicationService {
   private async profiles(roles: string[]): Promise<Map<string, LlmProfile | undefined>> {
     const config = await loadOptionalConfig(this.options.configPath ?? path.join(this.root, "novel-harness.yaml"));
     return new Map(roles.map((role) => [role, config ? profileForRole(config, role).profile : undefined]));
+  }
+
+  private async storyTimeAt(commitId: string): Promise<{ commitId: string; logicalTime: unknown }> {
+    const { engine } = await openWorkspaceWorld(this.root);
+    const commit = await engine.objects.getCommit(commitId);
+    return { commitId, logicalTime: structuredClone(commit.logicalTime) };
   }
 
   private async requireSession(sessionId: string): Promise<ActivePlaySession> {

@@ -3,26 +3,59 @@ import {
   apiErrorSchema,
   bootstrapResponseSchema,
   clearPlayConversationResultSchema,
+  createInstanceRequestSchema,
+  createInstanceResultSchema,
   createPlaySessionRequestSchema,
+  forkInstanceRequestSchema,
+  forkInstanceResultSchema,
+  instanceDetailSchema,
   operationAcceptedSchema,
   operationSnapshotSchema,
+  prepareNovelRequestSchema,
+  preparationSnapshotSchema,
   playableCharacterListSchema,
   playMoveRequestSchema,
   playSessionDetailSchema,
   removePlaySessionResultSchema,
+  proposalAcceptRequestSchema,
+  proposalConvergenceResultSchema,
+  proposalConvergeRequestSchema,
+  proposalDecisionResultSchema,
+  proposalDetailSchema,
+  proposalRejectRequestSchema,
+  proposalSummarySchema,
   sceneNarrationRequestSchema,
+  sourceRegistrationRequestSchema,
+  sourceRegistrationResultSchema,
   updatePlaySessionRequestSchema,
   type ApiError,
   type BootstrapResponse,
   type ClearPlayConversationResult,
+  type CreateInstanceRequest,
+  type CreateInstanceResult,
   type CreatePlaySessionRequest,
+  type ForkInstanceRequest,
+  type ForkInstanceResult,
+  type InstanceDetail,
   type OperationAccepted,
   type OperationSnapshot,
+  type PrepareNovelRequest,
+  type PreparationSnapshot,
   type PlayableCharacterList,
   type PlayMoveRequest,
   type PlaySessionDetail,
   type RemovePlaySessionResult,
+  type ProposalAcceptRequest,
+  type ProposalConvergenceResult,
+  type ProposalConvergeRequest,
+  type ProposalDecisionResult,
+  type ProposalDetail,
+  type ProposalRejectRequest,
+  type ProposalStatus,
+  type ProposalSummary,
   type SceneNarrationRequest,
+  type SourceRegistrationRequest,
+  type SourceRegistrationResult,
   type UpdatePlaySessionRequest,
 } from "../../../src/web/contracts";
 import {
@@ -43,6 +76,7 @@ import {
 } from "../../../src/trace/schema";
 
 const operationListSchema = z.array(operationSnapshotSchema);
+const proposalListSchema = z.array(proposalSummarySchema);
 const traceRunListSchema = z.array(traceRunManifestSchema);
 const traceEventListSchema = z.array(traceEventSchema);
 
@@ -69,6 +103,31 @@ export function fetchCharacters(branchId: string, sourceId?: string, signal?: Ab
 
 export function fetchPlaySession(sessionId: string, signal?: AbortSignal): Promise<PlaySessionDetail> {
   return request(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}`, playSessionDetailSchema, { signal });
+}
+
+export function fetchPreparation(sourceId: string, branchId?: string, signal?: AbortSignal): Promise<PreparationSnapshot> {
+  const suffix = branchId ? `?branchId=${encodeURIComponent(branchId)}` : "";
+  return request(`/api/v1/novels/${encodeURIComponent(sourceId)}/preparation${suffix}`, preparationSnapshotSchema, { signal });
+}
+
+export function fetchProposals(
+  sourceId: string,
+  status: ProposalStatus = "pending",
+  kind?: string,
+  signal?: AbortSignal,
+): Promise<ProposalSummary[]> {
+  const query = new URLSearchParams({ status });
+  if (kind) query.set("kind", kind);
+  return request(`/api/v1/novels/${encodeURIComponent(sourceId)}/proposals?${query.toString()}`, proposalListSchema, { signal });
+}
+
+export function fetchProposal(proposalId: string, status?: ProposalStatus, signal?: AbortSignal): Promise<ProposalDetail> {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request(`/api/v1/proposals/${encodeURIComponent(proposalId)}${suffix}`, proposalDetailSchema, { signal });
+}
+
+export function fetchInstance(branchId: string, signal?: AbortSignal): Promise<InstanceDetail> {
+  return request(`/api/v1/instances/${encodeURIComponent(branchId)}`, instanceDetailSchema, { signal });
 }
 
 export function fetchOperation(operationId: string, signal?: AbortSignal): Promise<OperationSnapshot> {
@@ -116,6 +175,64 @@ export function fetchTraceCall(callId: string, runId?: string, signal?: AbortSig
 
 export function createPlaySession(inputValue: CreatePlaySessionRequest, csrfToken: string): Promise<PlaySessionDetail> {
   return mutation("/api/v1/play-sessions", "POST", createPlaySessionRequestSchema.parse(inputValue), playSessionDetailSchema, csrfToken);
+}
+
+export function registerSource(inputValue: SourceRegistrationRequest, csrfToken: string): Promise<SourceRegistrationResult> {
+  return mutation("/api/v1/sources", "POST", sourceRegistrationRequestSchema.parse(inputValue), sourceRegistrationResultSchema, csrfToken);
+}
+
+export function startPreparation(sourceId: string, inputValue: PrepareNovelRequest, csrfToken: string): Promise<OperationAccepted> {
+  return mutation(
+    `/api/v1/novels/${encodeURIComponent(sourceId)}/prepare`,
+    "POST",
+    prepareNovelRequestSchema.parse(inputValue),
+    operationAcceptedSchema,
+    csrfToken,
+  );
+}
+
+export function acceptProposal(proposalId: string, inputValue: ProposalAcceptRequest, csrfToken: string): Promise<ProposalDecisionResult> {
+  return mutation(
+    `/api/v1/proposals/${encodeURIComponent(proposalId)}/accept`,
+    "POST",
+    proposalAcceptRequestSchema.parse(inputValue),
+    proposalDecisionResultSchema,
+    csrfToken,
+  );
+}
+
+export function rejectProposal(proposalId: string, inputValue: ProposalRejectRequest, csrfToken: string): Promise<ProposalDecisionResult> {
+  return mutation(
+    `/api/v1/proposals/${encodeURIComponent(proposalId)}/reject`,
+    "POST",
+    proposalRejectRequestSchema.parse(inputValue),
+    proposalDecisionResultSchema,
+    csrfToken,
+  );
+}
+
+export function convergeProposals(sourceId: string, inputValue: ProposalConvergeRequest, csrfToken: string): Promise<ProposalConvergenceResult> {
+  return mutation(
+    `/api/v1/novels/${encodeURIComponent(sourceId)}/proposals/converge`,
+    "POST",
+    proposalConvergeRequestSchema.parse(inputValue),
+    proposalConvergenceResultSchema,
+    csrfToken,
+  );
+}
+
+export function createInstance(inputValue: CreateInstanceRequest, csrfToken: string): Promise<CreateInstanceResult> {
+  return mutation("/api/v1/instances", "POST", createInstanceRequestSchema.parse(inputValue), createInstanceResultSchema, csrfToken);
+}
+
+export function forkInstance(parentBranchId: string, inputValue: ForkInstanceRequest, csrfToken: string): Promise<ForkInstanceResult> {
+  return mutation(
+    `/api/v1/instances/${encodeURIComponent(parentBranchId)}/fork`,
+    "POST",
+    forkInstanceRequestSchema.parse(inputValue),
+    forkInstanceResultSchema,
+    csrfToken,
+  );
 }
 
 export function updatePlaySession(sessionId: string, inputValue: UpdatePlaySessionRequest, csrfToken: string): Promise<PlaySessionDetail> {

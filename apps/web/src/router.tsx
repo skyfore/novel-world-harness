@@ -16,15 +16,23 @@ import {
   createPlaySession,
   fetchBootstrap,
   fetchCharacters,
+  fetchInstance,
   fetchOperation,
   fetchOperations,
   fetchPlaySession,
+  fetchPreparation,
+  forkInstance,
   removePlaySession,
   restorePlaySession,
   startPlayerMove,
   startSceneNarration,
   updatePlaySession,
 } from "./api";
+import {
+  CompilerWorkbenchPage,
+  NewNovelPage,
+  preparationKey,
+} from "./compiler-pages";
 import {
   TraceDetailPage,
   TraceListPage,
@@ -60,14 +68,16 @@ function useBootstrap() {
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({ component: RootLayout });
 const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: DashboardPage });
+const newNovelRoute = createRoute({ getParentRoute: () => rootRoute, path: "/novels/new", component: NewNovelRoutePage });
 const novelRoute = createRoute({ getParentRoute: () => rootRoute, path: "/novels/$sourceId", component: NovelPage });
+const compileRoute = createRoute({ getParentRoute: () => rootRoute, path: "/novels/$sourceId/compile", component: CompilerRoutePage });
 const instanceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/instances/$branchId", component: InstancePage });
 const sessionRoute = createRoute({ getParentRoute: () => rootRoute, path: "/play/$sessionId", component: SessionPage });
 const sessionTraceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/play/$sessionId/trace/$runId", component: SessionTraceRoutePage });
 const tracesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/traces", component: TracesRoutePage });
 const traceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/traces/$runId", component: TraceRoutePage });
 const modelsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/models", component: ModelsPage });
-const routeTree = rootRoute.addChildren([indexRoute, novelRoute, instanceRoute, sessionRoute, sessionTraceRoute, tracesRoute, traceRoute, modelsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, newNovelRoute, novelRoute, compileRoute, instanceRoute, sessionRoute, sessionTraceRoute, tracesRoute, traceRoute, modelsRoute]);
 
 export const router = createRouter({ routeTree, context: { queryClient: undefined! } });
 
@@ -101,6 +111,10 @@ function RootLayout() {
       }
       if (isTerminal(operation.data.status)) {
         void queryClient.invalidateQueries({ queryKey: playSessionKey(operation.data.scopeId) });
+        if (operation.data.kind === "prepare") {
+          void queryClient.invalidateQueries({ queryKey: preparationKey(operation.data.scopeId) });
+          void queryClient.invalidateQueries({ queryKey: ["proposals", operation.data.scopeId] });
+        }
         void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
       }
     };
@@ -141,6 +155,7 @@ function RootLayout() {
         <nav aria-label="主导航" className="primary-nav">
           <NavSection label="Workspace"><Link to="/" activeOptions={{ exact: true }} className="nav-link">Overview</Link></NavSection>
           <NavSection label="Novels" count={data?.catalog.novels.length}>
+            <Link to="/novels/new" className="nav-link nav-link-new"><span>＋ Register novel</span></Link>
             {data?.catalog.novels.map((novel) => (
               <Link key={novel.id} to="/novels/$sourceId" params={{ sourceId: novel.id }} className="nav-link nav-link-item">
                 <span>{novel.title}</span><small>{formatBytes(novel.bytes)}</small>
@@ -216,7 +231,7 @@ function DashboardPage() {
       <Panel title="Registered novels" action={<span className="panel-tag">source evidence</span>}>
         <div className="card-grid">
           {data.catalog.novels.map((novel) => <NovelCard key={novel.id} novel={novel} />)}
-          {!data.catalog.novels.length && <EmptyState title="The library is empty" body="Existing CLI-ingested novels appear here; browser ingest and compilation arrive in Phase 2." />}
+          {!data.catalog.novels.length && <Link to="/novels/new" className="empty-action-card"><span>＋</span><strong>Register the first novel</strong><p>Upload UTF-8 text or paste source evidence directly in the browser.</p></Link>}
         </div>
       </Panel>
     </>
@@ -227,22 +242,63 @@ function NovelPage() {
   const { sourceId } = useParams({ from: novelRoute.id });
   const { data } = useBootstrap();
   const novel = data?.catalog.novels.find((candidate) => candidate.id === sourceId);
+  const preparation = useQuery({
+    queryKey: preparationKey(sourceId),
+    queryFn: ({ signal }) => fetchPreparation(sourceId, undefined, signal),
+    enabled: Boolean(novel),
+  });
   if (!data || !novel) return <MissingState kind="novel" id={sourceId} />;
   const instances = data.catalog.instances.filter((instance) => instance.sourceId === novel.id);
+  const snapshot = preparation.data;
   return (
     <>
-      <PageHeading eyebrow="Source evidence" title={novel.title} description={novel.sourcePath} />
-      <div className="metric-grid metric-grid-three">
+      <div className="session-heading">
+        <PageHeading eyebrow="Source evidence" title={novel.title} description={novel.sourcePath} />
+        <div className="session-toolbar"><Link className="primary-button" to="/novels/$sourceId/compile" params={{ sourceId }}>Open compiler workbench</Link></div>
+      </div>
+      <div className="metric-grid">
         <Metric label="Size" value={formatBytes(novel.bytes)} note="immutable source" />
         <Metric label="Instances" value={novel.instanceCount} note="owned branches" />
+        <Metric label="Preparation" value={snapshot?.stage ?? "…"} note={snapshot ? `${snapshot.progress.completedBatches}/${snapshot.progress.totalBatches} batches` : "reading checkpoint"} />
         <Metric label="Updated" value={formatDate(novel.updatedAt)} note={novel.id} />
       </div>
+      <Panel title="Preparation checkpoint" action={snapshot ? <span className={`operation-status operation-${snapshot.stage === "ready" ? "succeeded" : snapshot.stage === "repair" ? "failed" : "running"}`}>{snapshot.stage}</span> : <span className="panel-tag">loading</span>}>
+        {preparation.isPending ? <InlineLoading label="Reading compiler checkpoints…" /> : preparation.isError ? <InlineError error={preparation.error} /> : snapshot ? <div className="novel-preparation-summary">
+          <div className="novel-progress"><span><strong>{Math.round(snapshot.progress.ratio * 100)}%</strong><small>evidence batches checkpointed</small></span><div><i style={{ width: `${Math.round(snapshot.progress.ratio * 100)}%` }} /></div></div>
+          <dl className="detail-list">
+            <Detail label="Next action" value={snapshot.nextAction.replaceAll("-", " ")} />
+            <Detail label="Pending proposals" value={String(snapshot.proposalCounts.pending)} />
+            <Detail label="Suggested branch" value={snapshot.branchId} mono />
+            <Detail label="Publication readiness" value={snapshot.audit?.readiness.publication ?? "unknown"} />
+          </dl>
+          {snapshot.repairReasons.length > 0 && <div className="proposal-validation-errors">{snapshot.repairReasons.slice(0, 4).map((reason) => <p key={reason}>{reason}</p>)}</div>}
+          <Link className="secondary-button" to="/novels/$sourceId/compile" params={{ sourceId }}>{snapshot.stage === "review" ? "Review proposal inbox" : snapshot.stage === "create-branch" ? "Create world instance" : "Continue preparation"}</Link>
+        </div> : null}
+      </Panel>
       <Panel title="World instances" action={<span className="panel-tag">committed</span>}>
         {instances.length ? instances.map((instance) => <InstanceRow key={instance.branchId} instance={instance} />) : <EmptyState title="No committed instance" body="This source is registered but does not yet own a playable branch." />}
       </Panel>
-      <PlannedCallout title="Compiler and ontology workbench" phase="Phase 2" body="Batch progress, proposal review, model/event/place/rule graphs, and evidence provenance will live on this novel page." />
+      <PlannedCallout title="Ontology workbench" phase="Next Phase 2 slice" body="Model, event, place, rule, and provenance projections will join this source checkpoint without creating a second truth store." />
     </>
   );
+}
+
+function NewNovelRoutePage() {
+  const { data } = useBootstrap();
+  const navigate = useNavigate();
+  return <NewNovelPage csrfToken={data?.csrfToken ?? ""} onRegistered={(result) => void navigate({ to: "/novels/$sourceId/compile", params: { sourceId: result.source.id } })} />;
+}
+
+function CompilerRoutePage() {
+  const { sourceId } = useParams({ from: compileRoute.id });
+  const { data } = useBootstrap();
+  const navigate = useNavigate();
+  return <CompilerWorkbenchPage
+    sourceId={sourceId}
+    csrfToken={data?.csrfToken ?? ""}
+    models={data?.modelCatalog.models ?? []}
+    onInstanceCreated={(branchId) => void navigate({ to: "/instances/$branchId", params: { branchId } })}
+  />;
 }
 
 function InstancePage() {
@@ -250,7 +306,11 @@ function InstancePage() {
   const { data } = useBootstrap();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const instance = data?.catalog.instances.find((candidate) => candidate.branchId === branchId);
+  const detail = useQuery({
+    queryKey: ["instance", branchId],
+    queryFn: ({ signal }) => fetchInstance(branchId, signal),
+  });
+  const instance = detail.data?.instance ?? data?.catalog.instances.find((candidate) => candidate.branchId === branchId);
   const existingSession = data?.catalog.playSessions.find((session) => session.branchId === branchId);
   const characters = useQuery({
     queryKey: ["characters", branchId, instance?.sourceId],
@@ -258,10 +318,17 @@ function InstancePage() {
     enabled: Boolean(instance),
   });
   const [actorId, setActorId] = useState("");
+  const [forkBranchId, setForkBranchId] = useState("");
+  const [forkName, setForkName] = useState("");
+  const [forkCommitId, setForkCommitId] = useState("");
   useEffect(() => {
     if (actorId) return;
     setActorId(existingSession?.actorId ?? characters.data?.characters[0]?.id ?? "");
   }, [actorId, characters.data, existingSession?.actorId]);
+  useEffect(() => {
+    if (!forkBranchId) setForkBranchId(`${branchId}-fork`);
+    if (!forkCommitId && detail.data?.instance.headCommitId) setForkCommitId(detail.data.instance.headCommitId);
+  }, [branchId, detail.data?.instance.headCommitId, forkBranchId, forkCommitId]);
   const createMutation = useMutation({
     mutationFn: () => createPlaySession({
       branchId,
@@ -274,7 +341,23 @@ function InstancePage() {
       await navigate({ to: "/play/$sessionId", params: { sessionId: detail.session.id } });
     },
   });
+  const forkMutation = useMutation({
+    mutationFn: () => forkInstance(branchId, {
+      newBranchId: forkBranchId.trim(),
+      ...(forkName.trim() ? { name: forkName.trim() } : {}),
+      ...(forkCommitId ? { fromCommit: forkCommitId } : {}),
+      clientRequestId: requestId("fork-instance"),
+    }, data!.csrfToken),
+    onSuccess: async (result) => {
+      await queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
+      queryClient.setQueryData(["instance", result.instance.branchId], undefined);
+      await navigate({ to: "/instances/$branchId", params: { branchId: result.instance.branchId } });
+    },
+  });
+  if (detail.isPending && !instance) return <LoadingState label="Reading committed branch history…" />;
+  if (detail.isError && !instance) return <ErrorState error={detail.error} retry={() => void detail.refetch()} />;
   if (!instance) return <MissingState kind="instance" id={branchId} />;
+  const history = detail.data?.history ?? [];
   return (
     <>
       <PageHeading eyebrow="Committed branch" title={instance.name} description={instance.sourceTitle ?? "Unscoped legacy world"} />
@@ -313,7 +396,40 @@ function InstancePage() {
           </dl>
         </Panel>
       </div>
-      <PlannedCallout title="Branch history and graph overlay" phase="Phase 2" body="Commit history, state diff, fork controls, and branch-scoped ontology will be added here." />
+      <div className="branch-workbench">
+        <Panel title="Authoritative commit history" action={<span className="panel-tag">{history.length} commits</span>}>
+          {detail.isPending ? <InlineLoading label="Resolving ancestry…" /> : detail.isError ? <InlineError error={detail.error} /> : history.length ? (
+            <div className="branch-timeline">
+              {[...history].reverse().map((commit, index) => (
+                <article key={commit.id} className={commit.id === instance.headCommitId ? "branch-commit branch-commit-head" : "branch-commit"}>
+                  <div className="branch-rail"><i /><span /></div>
+                  <div className="branch-commit-body">
+                    <header>
+                      <span><strong>{commit.id === instance.headCommitId ? "HEAD" : `STEP ${commit.logicalStep}`}</strong><small>{commit.eventCount} event{commit.eventCount === 1 ? "" : "s"}</small></span>
+                      <code>{commit.id}</code>
+                    </header>
+                    {commit.events.length ? <div className="branch-events">{commit.events.map((event) => <div key={event.hash}><span>◆</span><strong>{event.title}</strong><code>{event.eventId}</code>{event.possibilityId && <small>possibility {event.possibilityId}</small>}</div>)}</div> : <p className="branch-genesis-note">Genesis checkpoint — no event payload.</p>}
+                    {index === 0 && <small className="branch-current-note">Current derived world state projects from this ancestry.</small>}
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : <EmptyState title="No ancestry available" body="The instance exists, but its commit history could not be projected." />}
+        </Panel>
+        <Panel title="Fork a timeline" action={<span className="panel-tag">counterfactual</span>}>
+          <form className="fork-form" onSubmit={(event) => { event.preventDefault(); if (!forkMutation.isPending && forkBranchId.trim()) forkMutation.mutate(); }}>
+            <p>Create an independent branch from any committed ancestor. Future canon remains outside active branch truth.</p>
+            <label className="field-label"><span>New branch ID</span><input value={forkBranchId} onChange={(event) => setForkBranchId(event.target.value)} placeholder={`${branchId}-fork`} /></label>
+            <label className="field-label"><span>Display name <small>optional</small></span><input value={forkName} onChange={(event) => setForkName(event.target.value)} placeholder="Alternative timeline" /></label>
+            <label className="field-label fork-commit-field"><span>Fork from commit</span><select value={forkCommitId} onChange={(event) => setForkCommitId(event.target.value)}>
+              {history.map((commit) => <option key={commit.id} value={commit.id}>step {commit.logicalStep} · {shortHash(commit.id)}{commit.id === instance.headCommitId ? " · HEAD" : ""}</option>)}
+            </select></label>
+            <div className="fork-truth-note"><span>Truth boundary</span><small>The child receives only ancestry through the selected commit. Trace data and future source events are not copied into world truth.</small></div>
+            <button className="primary-button" type="submit" disabled={!data?.csrfToken || !forkBranchId.trim() || !forkCommitId || forkBranchId.trim() === branchId || forkMutation.isPending}>{forkMutation.isPending ? "Forking…" : "Create timeline fork"}</button>
+            {forkMutation.error && <InlineError error={forkMutation.error} />}
+          </form>
+        </Panel>
+      </div>
     </>
   );
 }
@@ -598,8 +714,8 @@ function EmptyState({ title, body }: { title: string; body: string }) {
 function MissingState({ kind, id }: { kind: string; id: string }) {
   return <div className="center-state"><span className="eyebrow">Not found</span><h1>Unknown {kind}</h1><p>No item with ID <code>{id}</code> exists in the current workspace.</p><Link to="/">Return to overview</Link></div>;
 }
-function LoadingState() {
-  return <div className="center-state"><span className="loading-orbit" /><h1>Opening the world model</h1><p>Reading local catalog and Pi metadata…</p></div>;
+function LoadingState({ label = "Reading local catalog and Pi metadata…" }: { label?: string }) {
+  return <div className="center-state"><span className="loading-orbit" /><h1>Opening the world model</h1><p>{label}</p></div>;
 }
 function ErrorState({ error, retry }: { error: Error; retry: () => void }) {
   return <div className="center-state center-error"><span className="eyebrow">Request failed</span><h1>The local workspace could not be read</h1><p>{error.message}</p><button onClick={retry}>Try again</button></div>;

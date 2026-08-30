@@ -223,6 +223,12 @@ describe("local Web host", () => {
     const nestedPage = await app.inject({ method: "GET", url: "/instances/main", headers: { accept: "text/html" } });
     expect(nestedPage.statusCode).toBe(200);
     expect(nestedPage.body).toContain("NWH test shell");
+    const ingestPage = await app.inject({ method: "GET", url: "/novels/new", headers: { accept: "text/html" } });
+    expect(ingestPage.statusCode).toBe(200);
+    expect(ingestPage.body).toContain("NWH test shell");
+    const compilerPage = await app.inject({ method: "GET", url: "/novels/source-1/compile", headers: { accept: "text/html" } });
+    expect(compilerPage.statusCode).toBe(200);
+    expect(compilerPage.body).toContain("NWH test shell");
     const traceListPage = await app.inject({ method: "GET", url: "/traces", headers: { accept: "text/html" } });
     expect(traceListPage.statusCode).toBe(200);
     expect(traceListPage.body).toContain("NWH test shell");

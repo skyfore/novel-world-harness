@@ -111,6 +111,7 @@ describe("local Web host", () => {
     expect(response.statusCode).toBe(200);
     const bootstrap = bootstrapResponseSchema.parse(response.json());
     expect(bootstrap.workspace.displayName).toBe("Host Test");
+    expect(bootstrap.csrfToken).toHaveLength(43);
     expect(bootstrap.catalog.novels).toHaveLength(1);
     expect(bootstrap.features).toContainEqual({ id: "library", status: "available", phase: 0 });
 
@@ -119,6 +120,16 @@ describe("local Web host", () => {
     const missing = await app.inject({ method: "GET", url: "/api/v1/missing" });
     expect(missing.statusCode).toBe(404);
     expect(missing.json()).toMatchObject({ code: "NOT_FOUND", retry: { kind: "none" } });
+
+    const mutationWithoutToken = await app.inject({ method: "POST", url: "/api/v1/missing" });
+    expect(mutationWithoutToken.statusCode).toBe(403);
+    expect(mutationWithoutToken.json()).toMatchObject({ code: "CSRF_TOKEN_INVALID" });
+    const mutationWithToken = await app.inject({
+      method: "POST",
+      url: "/api/v1/missing",
+      headers: { "x-nwh-csrf": bootstrap.csrfToken },
+    });
+    expect(mutationWithToken.statusCode).toBe(404);
   });
 
   it("rejects cross-origin requests and unexpected Host headers", async () => {

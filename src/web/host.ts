@@ -1,7 +1,9 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
+import { ZodError } from "zod";
 import { CatalogService } from "../application/catalog-service.js";
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
 import {
@@ -13,6 +15,7 @@ import {
   type BootstrapResponse,
 } from "./contracts.js";
 import { serializeServerSentEvent, WebEventBroker } from "./event-stream.js";
+import { WebApplicationError } from "./errors.js";
 
 const SERVER_VERSION = "0.1.0";
 const DEFAULT_STATIC_ROOT = path.resolve(import.meta.dirname, "../../dist/web-ui");
@@ -26,6 +29,7 @@ export interface CreateWebHostOptions {
   modelCatalogService?: ModelCatalogReader;
   eventBroker?: WebEventBroker;
   startedAt?: string;
+  csrfToken?: string;
 }
 
 declare module "fastify" {
@@ -33,6 +37,7 @@ declare module "fastify" {
     nwh: {
       events: WebEventBroker;
       startedAt: string;
+      csrfToken: string;
     };
   }
 }
@@ -43,11 +48,12 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const root = path.resolve(options.root);
   const configuredHost = options.host ?? "127.0.0.1";
   const startedAt = options.startedAt ?? new Date().toISOString();
+  const csrfToken = options.csrfToken ?? crypto.randomBytes(32).toString("base64url");
   const events = options.eventBroker ?? new WebEventBroker();
   const catalogService = options.catalogService ?? new CatalogService(root);
   const modelCatalogService = options.modelCatalogService ?? new PiModelCatalogService();
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 1_048_576 });
-  app.decorate("nwh", { events, startedAt });
+  app.decorate("nwh", { events, startedAt, csrfToken });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isAllowedHost(request, configuredHost)) {
@@ -56,6 +62,12 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     const origin = request.headers.origin;
     if (origin && !isSameOrigin(origin, request.headers.host)) {
       return reply.code(403).send(apiError("ORIGIN_NOT_ALLOWED", "Cross-origin requests are not allowed."));
+    }
+    if (request.method !== "GET" && request.method !== "HEAD" && !matchesCsrfToken(request, csrfToken)) {
+      return reply.code(403).send(apiError(
+        "CSRF_TOKEN_INVALID",
+        "Mutating Web UI requests require the CSRF token returned by /api/v1/bootstrap.",
+      ));
     }
   });
 
@@ -73,6 +85,14 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   });
 
   app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof WebApplicationError) {
+      void reply.code(error.statusCode).send(error.detail);
+      return;
+    }
+    if (error instanceof ZodError) {
+      void reply.code(400).send(apiError("INVALID_REQUEST", "The request does not match the Web API contract.", error.issues));
+      return;
+    }
     const validation = typeof error === "object" && error !== null && "validation" in error
       ? error.validation
       : undefined;
@@ -109,6 +129,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
         root,
         displayName: catalog.project?.name ?? (path.basename(root) || "Novel World Harness"),
       },
+      csrfToken,
       catalog,
       modelCatalog,
       features: [
@@ -211,6 +232,15 @@ function isSameOrigin(origin: string, hostHeader: string | undefined): boolean {
   } catch {
     return false;
   }
+}
+
+function matchesCsrfToken(request: FastifyRequest, expected: string): boolean {
+  const header = request.headers["x-nwh-csrf"];
+  const received = Array.isArray(header) ? header[0] : header;
+  if (!received) return false;
+  const receivedBytes = Buffer.from(received);
+  const expectedBytes = Buffer.from(expected);
+  return receivedBytes.length === expectedBytes.length && crypto.timingSafeEqual(receivedBytes, expectedBytes);
 }
 
 function acceptsHtml(request: FastifyRequest): boolean {

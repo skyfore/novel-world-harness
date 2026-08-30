@@ -110,6 +110,7 @@ export const bootstrapResponseSchema = z.object({
     root: z.string().min(1),
     displayName: z.string().min(1),
   }).strict(),
+  csrfToken: z.string().min(32),
   catalog: catalogSnapshotSchema,
   modelCatalog: modelCatalogSchema,
   features: z.array(featureSummarySchema),
@@ -137,6 +138,9 @@ export const webEventTypeSchema = z.enum([
   "server.ready",
   "catalog.invalidated",
   "operation.changed",
+  "play.narration.delta",
+  "play.narration.completed",
+  "play.message.appended",
 ]);
 
 export const webEventSchema = z.object({
@@ -147,6 +151,118 @@ export const webEventSchema = z.object({
   operationId: z.string().optional(),
   runId: z.string().optional(),
   data: z.record(z.string(), z.unknown()),
+}).strict();
+
+export const operationStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "interrupted",
+]);
+
+export const operationKindSchema = z.enum([
+  "player-move",
+  "scene-narration",
+  "prepare",
+]);
+
+export const operationSnapshotSchema = z.object({
+  version: z.literal(1),
+  id: z.string().min(1),
+  kind: operationKindSchema,
+  scopeId: z.string().min(1),
+  clientRequestId: z.string().min(1),
+  requestFingerprint: z.string().min(1),
+  status: operationStatusSchema,
+  cancellable: z.boolean(),
+  commitBoundaryCrossed: z.boolean(),
+  phase: z.string().min(1),
+  createdAt: z.string().datetime({ offset: true }),
+  startedAt: z.string().datetime({ offset: true }).optional(),
+  finishedAt: z.string().datetime({ offset: true }).optional(),
+  progress: z.record(z.string(), z.unknown()),
+  result: z.unknown().optional(),
+  error: apiErrorSchema.optional(),
+}).strict();
+
+export const operationAcceptedSchema = z.object({
+  operation: operationSnapshotSchema,
+  reused: z.boolean(),
+}).strict();
+
+export const createPlaySessionRequestSchema = z.object({
+  branchId: z.string().min(1),
+  actorId: z.string().min(1),
+  sourceId: z.string().min(1).optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const updatePlaySessionRequestSchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  status: z.enum(["idle", "archived"]).optional(),
+}).strict().refine((value) => value.title !== undefined || value.status !== undefined, {
+  message: "At least one play-session field must be updated.",
+});
+
+export const playMoveRequestSchema = z.object({
+  text: z.string().trim().min(1).max(20_000),
+  intent: z.enum(["act", "observe", "reflect", "wait"]).optional(),
+  affordanceId: z.string().min(1).optional(),
+  expectedHead: z.string().min(1),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const sceneNarrationRequestSchema = z.object({
+  purpose: z.enum(["opening", "orientation", "turn", "blocked", "recovery"]),
+  expectedHead: z.string().min(1),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const playMessageSummarySchema = z.object({
+  id: z.string().min(1),
+  branchId: z.string().min(1),
+  actorId: z.string().min(1),
+  atCommit: z.string().min(1),
+  eventId: z.string().optional(),
+  role: z.enum(["player", "scene"]),
+  status: z.enum(["accepted", "rejected", "rendered"]),
+  text: z.string().min(1),
+  sequence: z.number().int().nonnegative(),
+  createdAt: z.string().datetime({ offset: true }),
+}).strict();
+
+export const playSessionDetailSchema = z.object({
+  session: playSessionSummarySchema,
+  headCommitId: z.string().min(1).nullable(),
+  messages: z.array(playMessageSummarySchema),
+}).strict();
+
+export const playerChoiceSummarySchema = z.object({
+  action: z.string().min(1),
+  affordanceId: z.string().optional(),
+}).strict();
+
+export const playOperationResultSchema = z.object({
+  sessionId: z.string().min(1),
+  branchId: z.string().min(1),
+  actorId: z.string().min(1),
+  accepted: z.boolean(),
+  stage: z.string().min(1),
+  previousHead: z.string().min(1),
+  finalHead: z.string().min(1),
+  logicalStep: z.number().int().nonnegative(),
+  narrationStatus: z.enum(["rendered", "failed", "skipped"]),
+  narration: z.string().optional(),
+  narrationError: z.string().optional(),
+  choices: z.array(playerChoiceSummarySchema),
+  issues: z.array(z.object({ code: z.string(), message: z.string() }).passthrough()),
+  auditId: z.string().optional(),
+  worldResponseEvents: z.array(z.object({ eventHash: z.string(), title: z.string(), possibilityId: z.string() }).strict()),
+  reactionEvents: z.array(z.object({ eventHash: z.string(), title: z.string(), actorId: z.string() }).passthrough()),
+  backgroundEvents: z.array(z.object({ eventHash: z.string(), title: z.string() }).strict()),
 }).strict();
 
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;
@@ -162,3 +278,15 @@ export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
 export type WebEventType = z.infer<typeof webEventTypeSchema>;
 export type WebEvent = z.infer<typeof webEventSchema>;
+export type OperationStatus = z.infer<typeof operationStatusSchema>;
+export type OperationKind = z.infer<typeof operationKindSchema>;
+export type OperationSnapshot = z.infer<typeof operationSnapshotSchema>;
+export type OperationAccepted = z.infer<typeof operationAcceptedSchema>;
+export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSchema>;
+export type UpdatePlaySessionRequest = z.infer<typeof updatePlaySessionRequestSchema>;
+export type PlayMoveRequest = z.infer<typeof playMoveRequestSchema>;
+export type SceneNarrationRequest = z.infer<typeof sceneNarrationRequestSchema>;
+export type PlayMessageSummary = z.infer<typeof playMessageSummarySchema>;
+export type PlaySessionDetail = z.infer<typeof playSessionDetailSchema>;
+export type PlayerChoiceSummary = z.infer<typeof playerChoiceSummarySchema>;
+export type PlayOperationResult = z.infer<typeof playOperationResultSchema>;

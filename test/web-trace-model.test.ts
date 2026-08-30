@@ -4,6 +4,7 @@ import { traceEventSchema, type TraceEventType } from "../src/trace/schema.js";
 import {
   buildTraceLedger,
   diffContextParts,
+  isWorldEffectEvent,
   playerVisibleText,
 } from "../apps/web/src/trace-model.js";
 
@@ -63,6 +64,20 @@ describe("Web trace projections", () => {
     expect(playerVisibleText({ text: "Visible scene" })).toBe("Visible scene");
     expect(playerVisibleText({ content: [{ type: "text", text: "A" }, { type: "text", text: "B" }] })).toBe("AB");
     expect(playerVisibleText({ thinking: "hidden" })).toBeUndefined();
+  });
+
+  it("presents restart reconciliation as an inspectable world-effect observation", () => {
+    const recovery = event(1, "recovery.diagnostic", "root", undefined, {
+      code: "PLAYER_MOVE_COMMIT_RECONCILED_FROM_AUDIT",
+      worldOutcome: "committed",
+    });
+    expect(isWorldEffectEvent(recovery)).toBe(true);
+    expect(buildTraceLedger([recovery], "root")[0]).toMatchObject({
+      category: "world",
+      label: "Restart reconciliation",
+      detail: "PLAYER_MOVE_COMMIT_RECONCILED_FROM_AUDIT",
+      terminal: true,
+    });
   });
 });
 

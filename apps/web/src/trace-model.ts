@@ -102,6 +102,7 @@ export function playerVisibleText(value: unknown): string | undefined {
 export function isWorldEffectEvent(event: TraceEvent): boolean {
   return event.type === "validation.completed"
     || event.type.startsWith("world.commit.")
+    || event.type === "recovery.diagnostic"
     || event.type === "presentation.message.appended";
 }
 
@@ -168,6 +169,12 @@ function describeTraceEvent(event: TraceEvent, callOrdinal?: number): Omit<Trace
     category: "world",
     label: "Deterministic validation",
     detail: booleanValue(data.accepted),
+    terminal: true,
+  };
+  if (event.type === "recovery.diagnostic") return {
+    category: "world",
+    label: "Restart reconciliation",
+    detail: stringValue(data.code) ?? stringValue(data.worldOutcome),
     terminal: true,
   };
   return {

@@ -188,6 +188,7 @@ export {
   type AppendTraceEventInput,
   type CreateTraceRunInput,
   type FinishTraceRunPatch,
+  type TraceRecoveryDiagnosticInput,
   type TraceRunFilter,
   type TraceRunLinkPatch,
 } from "./trace/store.js";
@@ -304,7 +305,7 @@ export {
   type InstantiatedCanonicalScaffold,
 } from "./world/canonical-adaptation.js";
 export { classifyPlayerInput, renderPlayerMetaResponse, type PlayerInputRoute } from "./world/player-input-route.js";
-export { PlayerTurnAuditStore, type PlayerTurnAudit, type PlayerTurnOrigin } from "./world/player-turn-audit.js";
+export { PlayerTurnAuditStore, type PlayerTurnAudit, type PlayerTurnAuditRecoveryLink, type PlayerTurnOrigin } from "./world/player-turn-audit.js";
 export {
   PlaySessionStore,
   activePlaySessionSchema,
@@ -362,6 +363,7 @@ export { openWorkspaceWorld, type WorkspaceWorld, type WorkspaceWorldOpenOptions
 export { CatalogService, legacyPlaySessionId } from "./application/catalog-service.js";
 export { PiModelCatalogService, type ModelCatalogReader } from "./application/model-catalog-service.js";
 export { PlayApplicationService, type PlayApplicationServiceOptions } from "./application/play-service.js";
+export { PlayTraceRecoveryService, traceProvesCommittedPlayerMove, type PlayTraceRecoverySummary } from "./application/play-trace-recovery-service.js";
 export { TraceApplicationService, type TraceRunSearchFilter } from "./application/trace-service.js";
 export { createPiPlayerOpeningNarrator, finalizePlayerSceneChoices, type PiPlayerOpeningNarratorOptions, type PlayerOpeningNarrator, type PlayerSceneNarrationObserver, type PlayerSceneNarrationResult } from "./agent/pi-player-opening.js";
 export * from "./web/contracts.js";

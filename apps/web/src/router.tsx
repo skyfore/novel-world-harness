@@ -684,7 +684,8 @@ function SessionPage() {
   const mutationError = firstError(moveMutation.error, narrationMutation.error, narrationRetryMutation.error, cancelMutation.error, archiveMutation.error, restoreMutation.error, activateMutation.error, clearMutation.error, removeMutation.error);
   const writable = session.status !== "archived" && session.status !== "detached" && Boolean(data.headCommitId);
   const canRetryNarration = Boolean(
-    current?.runId
+    writable
+    && current?.runId
     && data.headCommitId
     && current.kind === "player-move"
     && (

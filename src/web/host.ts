@@ -11,6 +11,7 @@ import { OntologyProjectionService } from "../application/ontology-projection-se
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
 import { ModelSettingsApplicationService } from "../application/model-settings-service.js";
 import { PlayApplicationService } from "../application/play-service.js";
+import { PlayTraceRecoveryService } from "../application/play-trace-recovery-service.js";
 import { PreparationApplicationService } from "../application/preparation-service.js";
 import { ProposalApplicationService } from "../application/proposal-service.js";
 import { SourceApplicationService } from "../application/source-service.js";
@@ -122,6 +123,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   await mutations.initialize();
   const traces = options.traceStore ?? options.playService?.traceStore ?? new TraceStore(root);
   await traces.initialize();
+  await new PlayTraceRecoveryService(root, traces).reconcileInterruptedPlayerMoves();
   const traceQueries = new TraceApplicationService(traces);
   const interactions = options.authInteractionManager ?? new AuthInteractionManager(events);
   const modelSettings = options.modelSettingsService ?? new ModelSettingsApplicationService({

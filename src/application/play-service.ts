@@ -75,6 +75,7 @@ import { webError } from "../web/errors.js";
 import { WebMutationJournal } from "../web/mutation-journal.js";
 import { OperationManager, type OperationRunContext } from "../web/operation-manager.js";
 import { CatalogService } from "./catalog-service.js";
+import { traceProvesCommittedPlayerMove } from "./play-trace-recovery-service.js";
 import { TraceRecorder, newTraceId, type TraceContext } from "../trace/recorder.js";
 import { TraceStore } from "../trace/store.js";
 import type { TraceErrorSummary, TraceRunManifest, TraceRunStatus } from "../trace/schema.js";
@@ -975,7 +976,7 @@ export class PlayApplicationService {
       });
     }
     const events = await this.traces.readEvents(sourceRun.id);
-    const committed = events.some((event) => event.type === "world.commit.completed" && event.data?.accepted === true);
+    const committed = traceProvesCommittedPlayerMove(sourceRun, events);
     if (!committed) {
       throw webError(409, "NARRATION_RETRY_WORLD_NOT_COMMITTED", `Run '${sourceRun.id}' has no accepted world commit. Narration retry cannot be used to replay or manufacture a move.`, { kind: "none" });
     }

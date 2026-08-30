@@ -210,6 +210,42 @@ describe("append-only trace storage", () => {
       expect.objectContaining({ seq: 1, type: "run.started" }),
       expect.objectContaining({ seq: 2, type: "run.interrupted" }),
     ]);
+
+    await restartedHost.appendRecoveryDiagnostic("run-orphaned", {
+      code: "PLAYER_MOVE_COMMIT_RECONCILED_FROM_AUDIT",
+      summary: "The durable audit proves that the move committed.",
+      data: { worldOutcome: "committed", unchangedWorldMutationReplayAllowed: false },
+      links: {
+        finalHead: "commit-after",
+        eventHash: "event-after",
+        auditId: "turn-after",
+        presentationMessageIds: ["message-after"],
+        storyTimeAfter: { commitId: "commit-after", logicalTime: { step: 1 } },
+      },
+    });
+    await expect(restartedHost.readEvents("run-orphaned")).resolves.toEqual([
+      expect.objectContaining({ seq: 1, type: "run.started" }),
+      expect.objectContaining({ seq: 2, type: "run.interrupted" }),
+      expect.objectContaining({ seq: 3, type: "recovery.diagnostic" }),
+    ]);
+
+    const thirdHost = new TraceStore(root);
+    await thirdHost.initialize();
+    await expect(thirdHost.getRun("run-orphaned")).resolves.toMatchObject({
+      status: "interrupted",
+      finalHead: "commit-after",
+      eventHash: "event-after",
+      auditId: "turn-after",
+      presentationMessageIds: ["message-after"],
+      storyTimeAfter: { commitId: "commit-after", logicalTime: { step: 1 } },
+      lastSeq: 3,
+    });
+    await thirdHost.appendRecoveryDiagnostic("run-orphaned", {
+      code: "PLAYER_MOVE_COMMIT_RECONCILED_FROM_AUDIT",
+      summary: "The durable audit proves that the move committed.",
+      links: { finalHead: "commit-after" },
+    });
+    await expect(thirdHost.readEvents("run-orphaned")).resolves.toHaveLength(3);
   });
 
   it("replays an event appended before a stale manifest and then closes the orphan", async () => {

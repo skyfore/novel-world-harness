@@ -90,6 +90,7 @@ export const traceEventTypeSchema = z.enum([
   "world.commit.started",
   "world.commit.completed",
   "world.commit.failed",
+  "recovery.diagnostic",
   "presentation.message.appended",
 ]);
 

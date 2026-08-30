@@ -94,6 +94,13 @@ retry narration only. The server verifies the original move trace and current
 branch head, creates a separate `narration-retry` trace, and never replays the
 world mutation.
 
+On startup, interrupted player-move traces are reconciled against content-checked
+turn audits, immutable commit ancestry, the current branch head, and retained
+presentation messages. The host appends an inspectable recovery diagnostic and
+repairs observation links only; ambiguous head advancement stays unknown, and
+committed moves expose narration-only repair without synthesizing or replaying a
+world event.
+
 Creating a new session from an instance defaults to forking the selected commit
 and opening the chosen character on the child branch. The Play status strip and
 message badges expose actor, branch/head, story step, run stage, LLM/tool counts,

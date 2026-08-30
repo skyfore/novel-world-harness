@@ -82,6 +82,13 @@ export type TraceRunLinkPatch = Pick<
 
 export type FinishTraceRunPatch = Partial<TraceRunLinkPatch & Pick<TraceRunManifest, "endedAt" | "error">>;
 
+export type TraceRecoveryDiagnosticInput = {
+  code: string;
+  summary: string;
+  data?: Record<string, unknown>;
+  links?: Partial<TraceRunLinkPatch>;
+};
+
 export class TraceStore {
   readonly root: string;
   readonly runsRoot: string;
@@ -184,6 +191,9 @@ export class TraceStore {
   async appendEvent(runId: string, input: AppendTraceEventInput): Promise<TraceEvent> {
     await this.initialize();
     return this.exclusive(async () => {
+      if (input.type === "recovery.diagnostic") {
+        throw new Error("Recovery diagnostics must use appendRecoveryDiagnostic after an interrupted terminal event.");
+      }
       const { manifest, relativePath } = await this.requireRun(runId);
       if (manifest.status !== "running") throw new Error(`Trace run '${runId}' is already ${manifest.status}; no new events may be appended.`);
       const appended = await this.appendEventAt(relativePath, manifest, input);
@@ -249,6 +259,49 @@ export class TraceStore {
       await this.writeManifestAt(relativePath, updated);
       await this.updateIndexEntry(updated, relativePath);
       return structuredClone(updated);
+    });
+  }
+
+  /**
+   * Adds one post-terminal startup observation to an interrupted run. This is
+   * the sole event allowed after a terminal marker and can repair diagnostic
+   * links only; it cannot alter the run's outcome or any world state.
+   */
+  async appendRecoveryDiagnostic(runId: string, input: TraceRecoveryDiagnosticInput): Promise<TraceEvent> {
+    await this.initialize();
+    return this.exclusive(async () => {
+      const found = await this.requireRun(runId);
+      let { manifest } = found;
+      const { relativePath } = found;
+      if (manifest.status !== "interrupted") {
+        throw new Error(`Trace run '${runId}' is ${manifest.status}; only interrupted runs accept recovery diagnostics.`);
+      }
+      const events = await this.readEventsAt(relativePath, runId);
+      const existing = events.find((event) => event.type === "recovery.diagnostic" && event.data?.code === input.code);
+      const sanitizedLinks = redactTraceSecrets(structuredClone(input.links ?? {})) as Partial<TraceRunLinkPatch>;
+      if (existing) {
+        const updated = traceRunManifestSchema.parse({ ...manifest, ...recoveryLinks(existing), ...sanitizedLinks });
+        if (!sameJson(manifest, updated)) {
+          await this.writeManifestAt(relativePath, updated);
+          await this.updateIndexEntry(updated, relativePath);
+        }
+        return structuredClone(existing);
+      }
+      const appended = await this.appendEventAt(relativePath, manifest, {
+        type: "recovery.diagnostic",
+        spanId: manifest.rootSpanId,
+        data: {
+          ...(input.data ?? {}),
+          version: 1,
+          code: input.code,
+          summary: input.summary,
+          ...sanitizedLinks,
+        },
+      });
+      manifest = traceRunManifestSchema.parse({ ...appended.manifest, ...sanitizedLinks });
+      await this.writeManifestAt(relativePath, manifest);
+      await this.updateIndexEntry(manifest, relativePath);
+      return structuredClone(appended.event);
     });
   }
 
@@ -400,13 +453,19 @@ export class TraceStore {
   private async readEventsAt(relativePath: string, runId: string): Promise<TraceEvent[]> {
     const content = await fs.readFile(path.join(this.root, relativePath, "events.jsonl"), "utf8");
     const events = content.split("\n").filter(Boolean).map((line) => traceEventSchema.parse(JSON.parse(line)));
+    let terminalStatus: Exclude<TraceRunStatus, "running"> | undefined;
     for (let index = 0; index < events.length; index += 1) {
       const event = events[index]!;
       if (event.runId !== runId) throw new Error(`Trace run '${runId}' contains an event for '${event.runId}'.`);
       if (event.seq !== index + 1) throw new Error(`Trace run '${runId}' has a non-contiguous event sequence at ${event.seq}; expected ${index + 1}.`);
-      if (index < events.length - 1 && terminalStatusForEvent(event.type)) {
-        throw new Error(`Trace run '${runId}' contains events after terminal event ${event.seq}.`);
+      if (event.type === "recovery.diagnostic") {
+        if (terminalStatus !== "interrupted") {
+          throw new Error(`Trace run '${runId}' contains a recovery diagnostic without an interrupted terminal event.`);
+        }
+        continue;
       }
+      if (terminalStatus) throw new Error(`Trace run '${runId}' contains '${event.type}' after its ${terminalStatus} terminal event.`);
+      terminalStatus = terminalStatusForEvent(event.type);
     }
     return events;
   }
@@ -475,6 +534,7 @@ function applyEventToManifest(manifest: TraceRunManifest, event: TraceEvent): Tr
   const error = event.data?.error ? traceErrorSummarySchema.safeParse(event.data.error) : undefined;
   return traceRunManifestSchema.parse({
     ...manifest,
+    ...recoveryLinks(event),
     lastSeq: event.seq,
     counts,
     usage,
@@ -482,6 +542,21 @@ function applyEventToManifest(manifest: TraceRunManifest, event: TraceEvent): Tr
     ...(finalHead ? { finalHead } : {}),
     ...(error?.success ? { error: error.data } : {}),
   });
+}
+
+function recoveryLinks(event: TraceEvent): Partial<TraceRunLinkPatch> {
+  if (event.type !== "recovery.diagnostic" || !event.data) return {};
+  const presentationMessageIds = Array.isArray(event.data.presentationMessageIds)
+    && event.data.presentationMessageIds.every((value) => typeof value === "string")
+    ? event.data.presentationMessageIds as string[]
+    : undefined;
+  return {
+    ...(typeof event.data.finalHead === "string" ? { finalHead: event.data.finalHead } : {}),
+    ...(typeof event.data.eventHash === "string" ? { eventHash: event.data.eventHash } : {}),
+    ...(typeof event.data.auditId === "string" ? { auditId: event.data.auditId } : {}),
+    ...(presentationMessageIds ? { presentationMessageIds } : {}),
+    ...(event.data.storyTimeAfter !== undefined ? { storyTimeAfter: event.data.storyTimeAfter } : {}),
+  };
 }
 
 function replayEvents(manifest: TraceRunManifest, events: TraceEvent[]): TraceRunManifest {

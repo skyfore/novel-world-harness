@@ -3,7 +3,7 @@ import path from "node:path";
 import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
 import type { PlayerActionCandidate, PlayerProgressCertificate, PlayerTurnStage, PlayerWorldResolution } from "./player-action.js";
-import type { EventProposal, ValidationIssue, ValidationReport } from "./model.js";
+import { idSchema, type EventProposal, type ValidationIssue, type ValidationReport } from "./model.js";
 import type { PlayerWorldResponseOption, PlayerWorldResponseResolution } from "./runtime.js";
 import type { NpcReactionEmotion, NpcReactionEvent, NpcResponseKind } from "./npc-reaction.js";
 import type { CanonicalAttachmentResolution } from "./canonical-adaptation.js";
@@ -67,6 +67,11 @@ export type PlayerTurnAudit = {
   conversationError?: string;
 };
 
+export type PlayerTurnAuditRecoveryLink = Pick<
+  PlayerTurnAudit,
+  "id" | "branchId" | "runId" | "playerMoveId" | "previousHead" | "finalHead" | "accepted" | "eventHash"
+>;
+
 export class PlayerTurnAuditStore {
   readonly root: string;
 
@@ -84,4 +89,65 @@ export class PlayerTurnAuditStore {
     await fs.rename(temporary, filePath);
     return audit;
   }
+
+  /**
+   * Finds the immutable turn audit that was durably written for one Web trace.
+   * This is intentionally a recovery-only lookup: audit data can repair
+   * observability links, but it never changes branch truth.
+   */
+  async findRecoveryLink(branchId: string, runId: string): Promise<PlayerTurnAuditRecoveryLink | undefined> {
+    idSchema.parse(branchId);
+    const directory = path.join(this.root, branchId);
+    let names: string[];
+    try {
+      names = (await fs.readdir(directory)).filter((name) => name.endsWith(".json")).sort();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+    const matches: PlayerTurnAuditRecoveryLink[] = [];
+    for (const name of names) {
+      const value = JSON.parse(await fs.readFile(path.join(directory, name), "utf8")) as unknown;
+      if (!isRecord(value) || value.runId !== runId) continue;
+      const audit = assertRecoveryAudit(value, branchId, runId);
+      matches.push({
+        id: audit.id,
+        branchId: audit.branchId,
+        runId: audit.runId,
+        ...(audit.playerMoveId ? { playerMoveId: audit.playerMoveId } : {}),
+        previousHead: audit.previousHead,
+        finalHead: audit.finalHead,
+        accepted: audit.accepted,
+        ...(audit.eventHash ? { eventHash: audit.eventHash } : {}),
+      });
+    }
+    if (matches.length > 1) {
+      throw new Error(`Player move trace '${runId}' has ${matches.length} turn audits on branch '${branchId}'.`);
+    }
+    return matches[0] ? structuredClone(matches[0]) : undefined;
+  }
+}
+
+function assertRecoveryAudit(value: Record<string, unknown>, branchId: string, runId: string): PlayerTurnAudit {
+  if (
+    value.version !== 1
+    || typeof value.id !== "string"
+    || value.branchId !== branchId
+    || value.runId !== runId
+    || typeof value.previousHead !== "string"
+    || typeof value.finalHead !== "string"
+    || typeof value.accepted !== "boolean"
+    || (value.playerMoveId !== undefined && typeof value.playerMoveId !== "string")
+    || (value.eventHash !== undefined && typeof value.eventHash !== "string")
+  ) {
+    throw new Error(`Invalid player-turn recovery audit for trace '${runId}' on branch '${branchId}'.`);
+  }
+  const { version: _version, id, ...input } = value;
+  const expectedId = `turn-${contentHash(input).slice(0, 24)}`;
+  if (id !== expectedId) throw new Error(`Player-turn audit '${id}' failed its content-integrity check.`);
+  return value as PlayerTurnAudit;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { z, ZodError } from "zod";
 import { CatalogService } from "../application/catalog-service.js";
+import { InstanceApplicationService } from "../application/instance-service.js";
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
 import { PlayApplicationService } from "../application/play-service.js";
 import { PreparationApplicationService } from "../application/preparation-service.js";
@@ -15,7 +16,9 @@ import {
   WEB_API_VERSION,
   apiErrorSchema,
   bootstrapResponseSchema,
+  createInstanceRequestSchema,
   createPlaySessionRequestSchema,
+  forkInstanceRequestSchema,
   healthResponseSchema,
   operationKindSchema,
   prepareNovelRequestSchema,
@@ -51,6 +54,7 @@ export interface CreateWebHostOptions {
   sourceService?: SourceApplicationService;
   preparationService?: PreparationApplicationService;
   proposalService?: ProposalApplicationService;
+  instanceService?: InstanceApplicationService;
   traceStore?: TraceStore;
   configPath?: string;
   model?: string;
@@ -69,6 +73,7 @@ declare module "fastify" {
       sources: SourceApplicationService;
       preparation: PreparationApplicationService;
       proposals: ProposalApplicationService;
+      instances: InstanceApplicationService;
       traces: TraceStore;
       traceQueries: TraceApplicationService;
     };
@@ -111,8 +116,9 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     ...(options.model ? { model: options.model } : {}),
   });
   const proposals = options.proposalService ?? new ProposalApplicationService({ root, events });
+  const instances = options.instanceService ?? new InstanceApplicationService({ root, events });
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 26_214_400 });
-  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, traces, traceQueries });
+  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, instances, traces, traceQueries });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isAllowedHost(request, configuredHost)) {
@@ -246,6 +252,19 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     return proposals.reject(proposalId, proposalRejectRequestSchema.parse(request.body));
   });
   app.get(`/api/${WEB_API_VERSION}/instances`, async () => (await catalogService.read()).instances);
+  app.post(`/api/${WEB_API_VERSION}/instances`, async (request, reply) => {
+    const result = await instances.create(createInstanceRequestSchema.parse(request.body));
+    return reply.code(result.created ? 201 : 200).send(result);
+  });
+  app.get(`/api/${WEB_API_VERSION}/instances/:branchId`, async (request) => {
+    const { branchId } = branchParamSchema.parse(request.params);
+    return instances.get(branchId);
+  });
+  app.post(`/api/${WEB_API_VERSION}/instances/:branchId/fork`, async (request, reply) => {
+    const { branchId } = branchParamSchema.parse(request.params);
+    const result = await instances.fork(branchId, forkInstanceRequestSchema.parse(request.body));
+    return reply.code(result.created ? 201 : 200).send(result);
+  });
   app.get(`/api/${WEB_API_VERSION}/play-sessions`, async () => (await catalogService.read()).playSessions);
   app.get(`/api/${WEB_API_VERSION}/instances/:branchId/characters`, async (request) => {
     const { branchId } = branchParamSchema.parse(request.params);

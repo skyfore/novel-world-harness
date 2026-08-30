@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { PreparationApplicationService } from "../src/application/preparation-service.js";
+import { InstanceApplicationService } from "../src/application/instance-service.js";
 import { ProposalApplicationService } from "../src/application/proposal-service.js";
 import { SourceApplicationService } from "../src/application/source-service.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
@@ -10,6 +11,8 @@ import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { TraceStore } from "../src/trace/store.js";
 import { WebEventBroker } from "../src/web/event-stream.js";
 import { OperationManager } from "../src/web/operation-manager.js";
+import { CanonicalModelStore } from "../src/world/canonical-model.js";
+import { InitialWorldStore } from "../src/world/initial.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -170,5 +173,75 @@ describe("Web proposal review", () => {
     await expect(service.get("entity-aning-web", "rejected")).resolves.toMatchObject({
       rejection: { errors: [{ code: "WEB_USER_REJECTED", message: "人物指代仍需人工核对。" }] },
     });
+  });
+});
+
+describe("Web world instances", () => {
+  it("publishes a prepared revision, creates a branch, exposes history, and forks from a selected commit", async () => {
+    const root = await workspace("nwh-web-instance-");
+    const cacheRoot = await workspace("nwh-web-instance-cache-");
+    const fixture = await createEvidenceFixture(root, "Hero waits at the gate.\n");
+    const evidence = fixture.evidence("Hero waits at the gate.");
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence,
+    });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      delta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }],
+      },
+      evidence,
+    });
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+    const service = new InstanceApplicationService({ root, cacheRoot, events: new WebEventBroker() });
+
+    const created = await service.create({
+      sourceId: fixture.source.id,
+      branchId: "main",
+      clientRequestId: "instance-create-1",
+    });
+
+    expect(created).toMatchObject({
+      created: true,
+      reused: false,
+      usedCanonicalInitial: true,
+      instance: { branchId: "main", sourceId: fixture.source.id, logicalStep: 0 },
+    });
+    expect(created.preparedRevisionHash).toMatch(/^[a-f0-9]{64}$/);
+    const detail = await service.get("main");
+    expect(detail.history).toEqual([
+      expect.objectContaining({
+        id: created.instance.headCommitId,
+        logicalStep: 0,
+        eventCount: 1,
+        events: [expect.objectContaining({ title: "Genesis" })],
+      }),
+    ]);
+
+    const forked = await service.fork("main", {
+      newBranchId: "what-if",
+      name: "What if",
+      fromCommit: detail.history[0]!.id,
+      clientRequestId: "fork-1",
+    });
+    expect(forked).toMatchObject({
+      created: true,
+      reused: false,
+      parentBranchId: "main",
+      forkCommitId: detail.history[0]!.id,
+      instance: { branchId: "what-if", parentBranchId: "main" },
+    });
+    await expect(service.fork("main", {
+      newBranchId: "what-if",
+      name: "What if",
+      fromCommit: detail.history[0]!.id,
+      clientRequestId: "fork-1",
+    })).resolves.toMatchObject({ reused: true, instance: { branchId: "what-if" } });
   });
 });

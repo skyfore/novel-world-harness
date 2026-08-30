@@ -396,6 +396,61 @@ export const proposalConvergenceResultSchema = z.object({
   reused: z.boolean(),
 }).strict();
 
+export const branchIdSchema = z.string().trim().min(1).max(200).regex(
+  /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
+  "Branch IDs may contain only letters, numbers, '.', '_', and '-'.",
+);
+
+export const createInstanceRequestSchema = z.object({
+  sourceId: z.string().min(1),
+  branchId: branchIdSchema,
+  entryActorId: z.string().min(1).optional(),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const createInstanceResultSchema = z.object({
+  instance: instanceSummarySchema,
+  created: z.boolean(),
+  reused: z.boolean(),
+  usedCanonicalInitial: z.boolean(),
+  preparedRevisionHash: z.string().min(1).optional(),
+}).strict();
+
+export const forkInstanceRequestSchema = z.object({
+  newBranchId: branchIdSchema,
+  name: z.string().trim().min(1).max(200).optional(),
+  fromCommit: z.string().min(1).optional(),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const forkInstanceResultSchema = z.object({
+  instance: instanceSummarySchema,
+  parentBranchId: z.string().min(1),
+  forkCommitId: z.string().min(1),
+  created: z.boolean(),
+  reused: z.boolean(),
+}).strict();
+
+export const instanceHistoryEventSchema = z.object({
+  hash: z.string().min(1),
+  eventId: z.string().min(1),
+  title: z.string().min(1),
+  possibilityId: z.string().min(1).optional(),
+}).strict();
+
+export const instanceHistoryCommitSchema = z.object({
+  id: z.string().min(1),
+  parentCommitId: z.string().min(1).optional(),
+  logicalStep: z.number().int().nonnegative(),
+  eventCount: z.number().int().nonnegative(),
+  events: z.array(instanceHistoryEventSchema),
+}).strict();
+
+export const instanceDetailSchema = z.object({
+  instance: instanceSummarySchema,
+  history: z.array(instanceHistoryCommitSchema),
+}).strict();
+
 export const createPlaySessionRequestSchema = z.object({
   branchId: z.string().min(1),
   actorId: z.string().min(1),
@@ -551,6 +606,13 @@ export type ProposalRejectRequest = z.infer<typeof proposalRejectRequestSchema>;
 export type ProposalDecisionResult = z.infer<typeof proposalDecisionResultSchema>;
 export type ProposalConvergeRequest = z.infer<typeof proposalConvergeRequestSchema>;
 export type ProposalConvergenceResult = z.infer<typeof proposalConvergenceResultSchema>;
+export type CreateInstanceRequest = z.infer<typeof createInstanceRequestSchema>;
+export type CreateInstanceResult = z.infer<typeof createInstanceResultSchema>;
+export type ForkInstanceRequest = z.infer<typeof forkInstanceRequestSchema>;
+export type ForkInstanceResult = z.infer<typeof forkInstanceResultSchema>;
+export type InstanceHistoryEvent = z.infer<typeof instanceHistoryEventSchema>;
+export type InstanceHistoryCommit = z.infer<typeof instanceHistoryCommitSchema>;
+export type InstanceDetail = z.infer<typeof instanceDetailSchema>;
 export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSchema>;
 export type PlayableCharacter = z.infer<typeof playableCharacterSchema>;
 export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;

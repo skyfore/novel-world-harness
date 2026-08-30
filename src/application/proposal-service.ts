@@ -24,6 +24,7 @@ import {
 } from "../web/contracts.js";
 import { WebEventBroker } from "../web/event-stream.js";
 import { webError } from "../web/errors.js";
+import { WebMutationJournal } from "../web/mutation-journal.js";
 
 const canonicalKinds = new Set<CanonicalProposalKind>([
   "entity",
@@ -40,23 +41,21 @@ const canonicalKinds = new Set<CanonicalProposalKind>([
   "character-model",
 ]);
 
-type DecisionRecord = { fingerprint: string; result: ProposalDecisionResult };
-type ConvergenceRecord = { fingerprint: string; result: ProposalConvergenceResult };
-
 export interface ProposalApplicationServiceOptions {
   root: string;
   events: WebEventBroker;
+  mutations?: WebMutationJournal;
 }
 
 export class ProposalApplicationService {
   readonly root: string;
   private readonly store: ProposalStore;
-  private readonly decisions = new Map<string, DecisionRecord>();
-  private readonly convergences = new Map<string, ConvergenceRecord>();
+  private readonly mutations: WebMutationJournal;
 
   constructor(private readonly options: ProposalApplicationServiceOptions) {
     this.root = path.resolve(options.root);
     this.store = new ProposalStore(this.root);
+    this.mutations = options.mutations ?? new WebMutationJournal(this.root);
   }
 
   async list(sourceId: string, status: ProposalStatus = "pending", kind?: string): Promise<ProposalSummary[]> {
@@ -80,10 +79,19 @@ export class ProposalApplicationService {
 
   async accept(proposalId: string, inputValue: ProposalAcceptRequest): Promise<ProposalDecisionResult> {
     const input = proposalAcceptRequestSchema.parse(inputValue);
-    const requestKey = `accept:${proposalId}:${input.clientRequestId}`;
-    const previous = this.decisions.get(requestKey);
-    if (previous) return proposalDecisionResultSchema.parse({ ...previous.result, reused: true });
+    const execution = await this.mutations.execute({
+      kind: "proposal-accept",
+      scopeId: proposalId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, () => this.acceptOnce(proposalId));
+    return proposalDecisionResultSchema.parse({
+      ...execution.value,
+      reused: execution.reused || execution.value.reused,
+    });
+  }
 
+  private async acceptOnce(proposalId: string): Promise<ProposalDecisionResult> {
     const found = await this.find(proposalId);
     if (found.status === "accepted") {
       return proposalDecisionResultSchema.parse({
@@ -140,7 +148,6 @@ export class ProposalApplicationService {
         warnings: validation.warnings,
       });
     });
-    this.decisions.set(requestKey, { fingerprint: "accept", result });
     this.options.events.publish("catalog.invalidated", {
       reason: result.accepted ? "proposal-accepted" : "proposal-validation-blocked",
       proposalId,
@@ -151,16 +158,19 @@ export class ProposalApplicationService {
 
   async reject(proposalId: string, inputValue: ProposalRejectRequest): Promise<ProposalDecisionResult> {
     const input = proposalRejectRequestSchema.parse(inputValue);
-    const fingerprint = input.reason;
-    const requestKey = `reject:${proposalId}:${input.clientRequestId}`;
-    const previous = this.decisions.get(requestKey);
-    if (previous) {
-      if (previous.fingerprint !== fingerprint) {
-        throw webError(409, "IDEMPOTENCY_CONFLICT", `Client request '${input.clientRequestId}' was already used with a different rejection reason.`, { kind: "none" });
-      }
-      return proposalDecisionResultSchema.parse({ ...previous.result, reused: true });
-    }
+    const execution = await this.mutations.execute({
+      kind: "proposal-reject",
+      scopeId: proposalId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, () => this.rejectOnce(proposalId, input.reason));
+    return proposalDecisionResultSchema.parse({
+      ...execution.value,
+      reused: execution.reused || execution.value.reused,
+    });
+  }
 
+  private async rejectOnce(proposalId: string, reason: string): Promise<ProposalDecisionResult> {
     const found = await this.find(proposalId);
     if (found.status === "accepted") {
       throw webError(409, "PROPOSAL_ALREADY_ACCEPTED", `Proposal '${proposalId}' is already committed and cannot be rejected.`, { kind: "none" });
@@ -175,13 +185,12 @@ export class ProposalApplicationService {
         errors: (await this.store.readRejection(proposalId))?.errors ?? [],
         warnings: [],
       });
-      this.decisions.set(requestKey, { fingerprint, result });
       return result;
     }
 
     const report = await withWorkspaceOperationLock(this.root, "compiler", () => this.store.reject(proposalId, [{
       code: "WEB_USER_REJECTED",
-      message: input.reason,
+      message: reason,
     }]));
     const result = proposalDecisionResultSchema.parse({
       proposalId,
@@ -192,7 +201,6 @@ export class ProposalApplicationService {
       errors: report.errors,
       warnings: [],
     });
-    this.decisions.set(requestKey, { fingerprint, result });
     this.options.events.publish("catalog.invalidated", {
       reason: "proposal-rejected",
       proposalId,
@@ -203,10 +211,20 @@ export class ProposalApplicationService {
 
   async converge(sourceId: string, inputValue: ProposalConvergeRequest): Promise<ProposalConvergenceResult> {
     const input = proposalConvergeRequestSchema.parse(inputValue);
+    const execution = await this.mutations.execute({
+      kind: "proposal-converge",
+      scopeId: sourceId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, () => this.convergeOnce(sourceId));
+    return proposalConvergenceResultSchema.parse({
+      ...execution.value,
+      reused: execution.reused || execution.value.reused,
+    });
+  }
+
+  private async convergeOnce(sourceId: string): Promise<ProposalConvergenceResult> {
     await this.requireSource(sourceId);
-    const requestKey = `${sourceId}:${input.clientRequestId}`;
-    const previous = this.convergences.get(requestKey);
-    if (previous) return proposalConvergenceResultSchema.parse({ ...previous.result, reused: true });
     const convergence = await withWorkspaceOperationLock(this.root, "compiler", () => convergeWorldProposals(this.root, sourceId));
     const result = proposalConvergenceResultSchema.parse({
       sourceId,
@@ -221,7 +239,6 @@ export class ProposalApplicationService {
       staging: convergence.staging,
       reused: false,
     });
-    this.convergences.set(requestKey, { fingerprint: "converge", result });
     this.options.events.publish("catalog.invalidated", {
       reason: "proposals-converged",
       sourceId,

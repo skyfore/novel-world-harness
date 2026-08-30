@@ -803,6 +803,10 @@ prompt 的一次性 seed，服务端只持久化请求 fingerprint。角色 prof
   `$NWH_HOME/workspaces/v1/<workspace-id>/web/v1/operations/`。Host 启动时重建
   `clientRequestId` 幂等索引；遗留的 `queued/running` 记录转为
   `interrupted`，并根据是否越过 commit boundary 给出不同的恢复约束。
+- 非 operation 的短命令把 request fingerprint 与脱敏后的 result/error 原子写入
+  同级 `web/v1/mutations/`；不保存 source 正文、API key 或其他原始请求体。启动时
+  遗留的 `running` 记录转为 unknown-outcome `interrupted`，禁止原 ID 原样重放，
+  必须先刷新权威 catalog/session/world snapshot 做对账。
 - SSE 丢失不是业务失败；浏览器通过 snapshot + cursor 恢复。
 - presentation persist 失败不能撤销已提交世界；UI 显示 committed-but-unrendered，并允许安全的 narration/presentation repair。
 - 后台 operation 默认只在 server 进程生命周期内运行；关闭进程时先 abort 可取消阶段、flush trace，再退出。MVP 不做 daemon queue。

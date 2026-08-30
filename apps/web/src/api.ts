@@ -15,6 +15,7 @@ import {
   modelProfileListSchema,
   narrationRetryRequestSchema,
   providerCredentialResultSchema,
+  providerCredentialRequestSchema,
   providerLoginRequestSchema,
   operationAcceptedSchema,
   operationSnapshotSchema,
@@ -24,6 +25,7 @@ import {
   preparationSnapshotSchema,
   playableCharacterListSchema,
   playMoveRequestSchema,
+  playSessionCommandRequestSchema,
   playSessionDetailSchema,
   removePlaySessionResultSchema,
   removalExecutionResultSchema,
@@ -56,6 +58,7 @@ import {
   type ModelRole,
   type NarrationRetryRequest,
   type ProviderCredentialResult,
+  type ProviderCredentialRequest,
   type ProviderLoginRequest,
   type OperationAccepted,
   type OperationSnapshot,
@@ -67,6 +70,7 @@ import {
   type PreparationSnapshot,
   type PlayableCharacterList,
   type PlayMoveRequest,
+  type PlaySessionCommandRequest,
   type PlaySessionDetail,
   type RemovePlaySessionResult,
   type RemovalExecutionResult,
@@ -344,20 +348,20 @@ export function updatePlaySession(sessionId: string, inputValue: UpdatePlaySessi
   );
 }
 
-export function activatePlaySession(sessionId: string, csrfToken: string): Promise<PlaySessionDetail> {
-  return mutation(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}/activate`, "POST", undefined, playSessionDetailSchema, csrfToken);
+export function activatePlaySession(sessionId: string, inputValue: PlaySessionCommandRequest, csrfToken: string): Promise<PlaySessionDetail> {
+  return mutation(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}/activate`, "POST", playSessionCommandRequestSchema.parse(inputValue), playSessionDetailSchema, csrfToken);
 }
 
-export function restorePlaySession(sessionId: string, csrfToken: string): Promise<PlaySessionDetail> {
-  return mutation(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}/restore`, "POST", undefined, playSessionDetailSchema, csrfToken);
+export function restorePlaySession(sessionId: string, inputValue: PlaySessionCommandRequest, csrfToken: string): Promise<PlaySessionDetail> {
+  return mutation(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}/restore`, "POST", playSessionCommandRequestSchema.parse(inputValue), playSessionDetailSchema, csrfToken);
 }
 
-export function clearPlayConversation(sessionId: string, csrfToken: string): Promise<ClearPlayConversationResult> {
-  return mutation(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}/messages`, "DELETE", undefined, clearPlayConversationResultSchema, csrfToken);
+export function clearPlayConversation(sessionId: string, inputValue: PlaySessionCommandRequest, csrfToken: string): Promise<ClearPlayConversationResult> {
+  return mutation(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}/messages`, "DELETE", playSessionCommandRequestSchema.parse(inputValue), clearPlayConversationResultSchema, csrfToken);
 }
 
-export function removePlaySession(sessionId: string, csrfToken: string): Promise<RemovePlaySessionResult> {
-  return mutation(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}`, "DELETE", undefined, removePlaySessionResultSchema, csrfToken);
+export function removePlaySession(sessionId: string, inputValue: PlaySessionCommandRequest, csrfToken: string): Promise<RemovePlaySessionResult> {
+  return mutation(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}`, "DELETE", playSessionCommandRequestSchema.parse(inputValue), removePlaySessionResultSchema, csrfToken);
 }
 
 export function startPlayerMove(sessionId: string, inputValue: PlayMoveRequest, csrfToken: string): Promise<OperationAccepted> {
@@ -410,11 +414,11 @@ export function loginProvider(providerId: string, inputValue: ProviderLoginReque
   );
 }
 
-export function logoutProvider(providerId: string, csrfToken: string): Promise<ProviderCredentialResult> {
+export function logoutProvider(providerId: string, inputValue: ProviderCredentialRequest, csrfToken: string): Promise<ProviderCredentialResult> {
   return mutation(
     `/api/v1/models/providers/${encodeURIComponent(providerId)}/credential`,
     "DELETE",
-    undefined,
+    providerCredentialRequestSchema.parse(inputValue),
     providerCredentialResultSchema,
     csrfToken,
   );

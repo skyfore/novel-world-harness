@@ -33,10 +33,9 @@ import {
 } from "../web/contracts.js";
 import { WebEventBroker } from "../web/event-stream.js";
 import { webError } from "../web/errors.js";
+import { WebMutationJournal } from "../web/mutation-journal.js";
 import { OperationManager } from "../web/operation-manager.js";
 import { CatalogService } from "./catalog-service.js";
-
-type StoredExecution = { fingerprint: string; result: RemovalExecutionResult };
 
 type AnalysisInventory = {
   canonicalIds: string[];
@@ -56,6 +55,7 @@ export interface MaintenanceApplicationServiceOptions {
   operations: OperationManager;
   traceStore?: TraceStore;
   cacheRoot?: string;
+  mutations?: WebMutationJournal;
 }
 
 /**
@@ -69,7 +69,7 @@ export class MaintenanceApplicationService {
   private readonly branches: BranchStore;
   private readonly conversations: PlayConversationStore;
   private readonly traces: TraceStore;
-  private readonly executions = new Map<string, StoredExecution>();
+  private readonly mutations: WebMutationJournal;
 
   constructor(private readonly options: MaintenanceApplicationServiceOptions) {
     this.root = path.resolve(options.root);
@@ -77,6 +77,7 @@ export class MaintenanceApplicationService {
     this.branches = new BranchStore(this.root);
     this.conversations = new PlayConversationStore(this.root);
     this.traces = options.traceStore ?? new TraceStore(this.root);
+    this.mutations = options.mutations ?? new WebMutationJournal(this.root);
   }
 
   async previewInstance(branchId: string): Promise<RemovalPreview> {
@@ -333,51 +334,51 @@ export class MaintenanceApplicationService {
     mutate: (previewValue: RemovalPreview) => Promise<RemovalExecutionResult>,
   ): Promise<RemovalExecutionResult> {
     const input = executeRemovalRequestSchema.parse(inputValue);
-    const requestKey = `${action}:${targetId}:${input.clientRequestId}`;
-    const fingerprint = contentHash({ action, targetId, ...input });
-    const prior = this.executions.get(requestKey);
-    if (prior) {
-      if (prior.fingerprint !== fingerprint) throw webError(409, "IDEMPOTENCY_CONFLICT", `Client request '${input.clientRequestId}' was already used with different removal input.`, { kind: "none" });
-      return prior.result;
-    }
-    const current = action === "remove-instance"
-      ? await this.previewInstance(targetId)
-      : action === "reset-analysis"
-        ? await this.previewAnalysis(targetId)
-        : await this.previewNovel(targetId);
-    if (input.confirmation !== current.target.confirmation) {
-      throw webError(400, "REMOVAL_CONFIRMATION_MISMATCH", `Type the exact target ID '${current.target.confirmation}' to confirm this operation.`, {
-        kind: "after-user-action",
-        discoveryEndpoint: previewEndpoint(action, targetId),
-        copyField: "target.confirmation",
-        maxAttempts: 1,
-      });
-    }
-    if (input.effectHash !== current.effectHash) {
-      throw webError(409, "REMOVAL_PREVIEW_STALE", "The removal effect changed after it was previewed. Refresh the effect manifest and review it before one corrected retry.", {
-        kind: "after-refresh",
-        discoveryEndpoint: previewEndpoint(action, targetId),
-        copyField: "effectHash",
-        maxAttempts: 1,
-      });
-    }
-    if (!current.executable) {
-      throw webError(409, "REMOVAL_BLOCKED", "The target cannot be removed while the preview reports blockers. Do not retry unchanged.", { kind: "none" }, { blockers: current.blockers });
-    }
-    try {
-      const result = await mutate(current);
-      this.executions.set(requestKey, { fingerprint, result });
-      this.options.events.publish("catalog.invalidated", { reason: action, targetId });
-      return result;
-    } catch (error) {
-      if (error instanceof Error && error.name === "WebApplicationError") throw error;
-      throw webError(409, "REMOVAL_FAILED", errorMessage(error), {
-        kind: "after-refresh",
-        discoveryEndpoint: previewEndpoint(action, targetId),
-        copyField: "effectHash",
-        maxAttempts: 1,
-      });
-    }
+    const execution = await this.mutations.execute({
+      kind: action,
+      scopeId: targetId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, async () => {
+      const current = action === "remove-instance"
+        ? await this.previewInstance(targetId)
+        : action === "reset-analysis"
+          ? await this.previewAnalysis(targetId)
+          : await this.previewNovel(targetId);
+      if (input.confirmation !== current.target.confirmation) {
+        throw webError(400, "REMOVAL_CONFIRMATION_MISMATCH", `Type the exact target ID '${current.target.confirmation}' to confirm this operation.`, {
+          kind: "after-user-action",
+          discoveryEndpoint: previewEndpoint(action, targetId),
+          copyField: "target.confirmation",
+          maxAttempts: 1,
+        });
+      }
+      if (input.effectHash !== current.effectHash) {
+        throw webError(409, "REMOVAL_PREVIEW_STALE", "The removal effect changed after it was previewed. Refresh the effect manifest and review it before one corrected retry.", {
+          kind: "after-refresh",
+          discoveryEndpoint: previewEndpoint(action, targetId),
+          copyField: "effectHash",
+          maxAttempts: 1,
+        });
+      }
+      if (!current.executable) {
+        throw webError(409, "REMOVAL_BLOCKED", "The target cannot be removed while the preview reports blockers. Do not retry unchanged.", { kind: "none" }, { blockers: current.blockers });
+      }
+      try {
+        const result = await mutate(current);
+        this.options.events.publish("catalog.invalidated", { reason: action, targetId });
+        return result;
+      } catch (error) {
+        if (error instanceof Error && error.name === "WebApplicationError") throw error;
+        throw webError(409, "REMOVAL_FAILED", errorMessage(error), {
+          kind: "after-refresh",
+          discoveryEndpoint: previewEndpoint(action, targetId),
+          copyField: "effectHash",
+          maxAttempts: 1,
+        });
+      }
+    });
+    return removalExecutionResultSchema.parse(execution.value);
   }
 
   private instanceNotFound(branchId: string) {

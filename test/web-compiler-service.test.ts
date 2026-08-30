@@ -48,8 +48,10 @@ describe("Web source registration", () => {
     expect(created.segmentCount).toBeGreaterThan(0);
     expect(created.structuralUnitCount).toBeGreaterThan(0);
     await expect(service.register(request)).resolves.toMatchObject({ reused: true, source: { id: created.source.id } });
-    await expect(service.register({ ...request, content: "different", clientRequestId: request.clientRequestId }))
-      .rejects.toThrow("already used with different source content");
+    const restarted = new SourceApplicationService({ root, events: new WebEventBroker() });
+    await expect(restarted.register(request)).resolves.toMatchObject({ reused: true, source: { id: created.source.id } });
+    await expect(restarted.register({ ...request, content: "different", clientRequestId: request.clientRequestId }))
+      .rejects.toThrow("already used with different input");
     expect(events.replayAfter().at(-1)?.data).toMatchObject({ sourceId: created.source.id });
   });
 });
@@ -160,19 +162,24 @@ describe("Web proposal review", () => {
       rejection: null,
     });
 
-    const accepted = await service.accept("entity-linqi-web", { clientRequestId: "accept-1" });
+    const acceptRequest = { clientRequestId: "accept-1" };
+    const accepted = await service.accept("entity-linqi-web", acceptRequest);
     expect(accepted).toMatchObject({ accepted: true, status: "accepted", reused: false });
-    await expect(service.accept("entity-linqi-web", { clientRequestId: "accept-1" }))
+    await expect(service.accept("entity-linqi-web", acceptRequest))
       .resolves.toMatchObject({ accepted: true, reused: true });
 
-    const rejected = await service.reject("entity-aning-web", {
+    const rejectRequest = {
       reason: "人物指代仍需人工核对。",
       clientRequestId: "reject-1",
-    });
+    };
+    const rejected = await service.reject("entity-aning-web", rejectRequest);
     expect(rejected).toMatchObject({ accepted: false, status: "rejected", reused: false });
     await expect(service.get("entity-aning-web", "rejected")).resolves.toMatchObject({
       rejection: { errors: [{ code: "WEB_USER_REJECTED", message: "人物指代仍需人工核对。" }] },
     });
+    const restarted = new ProposalApplicationService({ root, events: new WebEventBroker() });
+    await expect(restarted.accept("entity-linqi-web", acceptRequest)).resolves.toMatchObject({ accepted: true, reused: true });
+    await expect(restarted.reject("entity-aning-web", rejectRequest)).resolves.toMatchObject({ status: "rejected", reused: true });
   });
 });
 
@@ -201,11 +208,12 @@ describe("Web world instances", () => {
     await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
     const service = new InstanceApplicationService({ root, cacheRoot, events: new WebEventBroker() });
 
-    const created = await service.create({
+    const createRequest = {
       sourceId: fixture.source.id,
       branchId: "main",
       clientRequestId: "instance-create-1",
-    });
+    };
+    const created = await service.create(createRequest);
 
     expect(created).toMatchObject({
       created: true,
@@ -224,12 +232,13 @@ describe("Web world instances", () => {
       }),
     ]);
 
-    const forked = await service.fork("main", {
+    const forkRequest = {
       newBranchId: "what-if",
       name: "What if",
       fromCommit: detail.history[0]!.id,
       clientRequestId: "fork-1",
-    });
+    };
+    const forked = await service.fork("main", forkRequest);
     expect(forked).toMatchObject({
       created: true,
       reused: false,
@@ -237,11 +246,8 @@ describe("Web world instances", () => {
       forkCommitId: detail.history[0]!.id,
       instance: { branchId: "what-if", parentBranchId: "main" },
     });
-    await expect(service.fork("main", {
-      newBranchId: "what-if",
-      name: "What if",
-      fromCommit: detail.history[0]!.id,
-      clientRequestId: "fork-1",
-    })).resolves.toMatchObject({ reused: true, instance: { branchId: "what-if" } });
+    const restarted = new InstanceApplicationService({ root, cacheRoot, events: new WebEventBroker() });
+    await expect(restarted.create(createRequest)).resolves.toMatchObject({ reused: true, instance: { branchId: "main" } });
+    await expect(restarted.fork("main", forkRequest)).resolves.toMatchObject({ reused: true, instance: { branchId: "what-if" } });
   });
 });

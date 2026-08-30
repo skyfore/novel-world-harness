@@ -27,6 +27,8 @@ import {
   answerAuthInteractionRequestSchema,
   modelRoleSchema,
   narrationRetryRequestSchema,
+  playSessionCommandRequestSchema,
+  providerCredentialRequestSchema,
   providerLoginRequestSchema,
   operationKindSchema,
   ontologyLayerSchema,
@@ -47,6 +49,7 @@ import { serializeServerSentEvent, WebEventBroker } from "./event-stream.js";
 import { WebApplicationError } from "./errors.js";
 import { OperationManager } from "./operation-manager.js";
 import { AuthInteractionManager } from "./auth-interaction-manager.js";
+import { WebMutationJournal } from "./mutation-journal.js";
 import { traceIdentifierSchema, traceRunKindSchema, traceRunStatusSchema } from "../trace/schema.js";
 import { TraceStore } from "../trace/store.js";
 
@@ -64,6 +67,7 @@ export interface CreateWebHostOptions {
   authInteractionManager?: AuthInteractionManager;
   eventBroker?: WebEventBroker;
   operationManager?: OperationManager;
+  mutationJournal?: WebMutationJournal;
   playService?: PlayApplicationService;
   sourceService?: SourceApplicationService;
   preparationService?: PreparationApplicationService;
@@ -85,6 +89,7 @@ declare module "fastify" {
       startedAt: string;
       csrfToken: string;
       operations: OperationManager;
+      mutations: WebMutationJournal;
       play: PlayApplicationService;
       sources: SourceApplicationService;
       preparation: PreparationApplicationService;
@@ -113,6 +118,8 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const modelCatalogService = options.modelCatalogService ?? defaultModelCatalog!;
   const operations = options.operationManager ?? new OperationManager(events, { workspaceRoot: root });
   await operations.initialize();
+  const mutations = options.mutationJournal ?? new WebMutationJournal(root);
+  await mutations.initialize();
   const traces = options.traceStore ?? options.playService?.traceStore ?? new TraceStore(root);
   await traces.initialize();
   const traceQueries = new TraceApplicationService(traces);
@@ -123,6 +130,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     catalog: modelCatalogService,
     ...(defaultModelCatalog ? { credentials: defaultModelCatalog } : {}),
     operations,
+    mutations,
     interactions,
     events,
   });
@@ -131,12 +139,14 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     operations,
     events,
     traceStore: traces,
+    mutations,
     ...(options.configPath ? { configPath: options.configPath } : {}),
     ...(options.model ? { model: options.model } : {}),
   });
   const sources = options.sourceService ?? new SourceApplicationService({
     root,
     events,
+    mutations,
     ...(options.configPath ? { configPath: options.configPath } : {}),
   });
   const preparation = options.preparationService ?? new PreparationApplicationService({
@@ -147,12 +157,12 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     ...(options.configPath ? { configPath: options.configPath } : {}),
     ...(options.model ? { model: options.model } : {}),
   });
-  const proposals = options.proposalService ?? new ProposalApplicationService({ root, events });
-  const instances = options.instanceService ?? new InstanceApplicationService({ root, events });
-  const maintenance = options.maintenanceService ?? new MaintenanceApplicationService({ root, events, operations, traceStore: traces });
+  const proposals = options.proposalService ?? new ProposalApplicationService({ root, events, mutations });
+  const instances = options.instanceService ?? new InstanceApplicationService({ root, events, mutations });
+  const maintenance = options.maintenanceService ?? new MaintenanceApplicationService({ root, events, operations, traceStore: traces, mutations });
   const ontology = options.ontologyService ?? new OntologyProjectionService(root);
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 26_214_400 });
-  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, instances, maintenance, ontology, traces, traceQueries, modelSettings, interactions });
+  app.decorate("nwh", { events, startedAt, csrfToken, operations, mutations, play, sources, preparation, proposals, instances, maintenance, ontology, traces, traceQueries, modelSettings, interactions });
   app.addHook("onClose", async () => { operations.shutdown(); });
 
   app.addHook("onRequest", async (request, reply) => {
@@ -346,19 +356,19 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   });
   app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/activate`, async (request) => {
     const { sessionId } = sessionParamSchema.parse(request.params);
-    return play.activateSession(sessionId);
+    return play.activateSession(sessionId, playSessionCommandRequestSchema.parse(request.body));
   });
   app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/restore`, async (request) => {
     const { sessionId } = sessionParamSchema.parse(request.params);
-    return play.restoreSession(sessionId);
+    return play.restoreSession(sessionId, playSessionCommandRequestSchema.parse(request.body));
   });
   app.delete(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/messages`, async (request) => {
     const { sessionId } = sessionParamSchema.parse(request.params);
-    return play.clearConversation(sessionId);
+    return play.clearConversation(sessionId, playSessionCommandRequestSchema.parse(request.body));
   });
   app.delete(`/api/${WEB_API_VERSION}/play-sessions/:sessionId`, async (request) => {
     const { sessionId } = sessionParamSchema.parse(request.params);
-    return play.removeSession(sessionId);
+    return play.removeSession(sessionId, playSessionCommandRequestSchema.parse(request.body));
   });
   app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/moves`, async (request, reply) => {
     const { sessionId } = sessionParamSchema.parse(request.params);
@@ -443,7 +453,7 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   });
   app.delete(`/api/${WEB_API_VERSION}/models/providers/:providerId/credential`, async (request) => {
     const { providerId } = providerParamSchema.parse(request.params);
-    return modelSettings.logout(providerId);
+    return modelSettings.logout(providerId, providerCredentialRequestSchema.parse(request.body));
   });
   app.post(`/api/${WEB_API_VERSION}/interactions/:interactionId/answer`, async (request) => {
     const { interactionId } = interactionParamSchema.parse(request.params);

@@ -241,16 +241,17 @@ describe("Web Play application service", () => {
       clientRequestId: "move-stale",
     })).rejects.toMatchObject({ detail: { code: "STALE_BRANCH_HEAD" } });
 
-    await service.updateSession(created.session.id, { status: "archived" });
+    await service.updateSession(created.session.id, { status: "archived", clientRequestId: "archive-1" });
     await expect(service.startSceneNarration(created.session.id, {
       purpose: "orientation",
       expectedHead: result.finalHead,
       clientRequestId: "archived-narration",
     })).rejects.toMatchObject({ detail: { code: "PLAY_SESSION_ARCHIVED" } });
-    await service.restoreSession(created.session.id);
-    await service.activateSession(created.session.id);
+    await service.restoreSession(created.session.id, { clientRequestId: "restore-1" });
+    await service.activateSession(created.session.id, { clientRequestId: "activate-1" });
 
-    const removed = await service.removeSession(created.session.id);
+    const removeRequest = { clientRequestId: "remove-session-1" };
+    const removed = await service.removeSession(created.session.id, removeRequest);
     expect(removed).toEqual({
       sessionId: created.session.id,
       branchId: "main",
@@ -261,6 +262,8 @@ describe("Web Play application service", () => {
     expect((await engine.projector.project(result.finalHead)).values.hero?.["character.location"]).toBe("camp");
     expect(await new PlayConversationStore(root).list("main")).toEqual([]);
     await expect(service.traceStore.listRuns({ playSessionId: created.session.id })).resolves.toHaveLength(2);
+    const restarted = new PlayApplicationService({ root, events, operations, translator: () => moveCandidate(), narrator });
+    await expect(restarted.removeSession(created.session.id, removeRequest)).resolves.toEqual(removed);
   });
 
   it("cancels before commit without writing world truth or presentation messages", async () => {
@@ -494,6 +497,7 @@ describe("Web Play application service", () => {
         method: "DELETE",
         url: "/api/v1/play-sessions/play-main/messages",
         headers: { "x-nwh-csrf": csrfToken },
+        payload: { clientRequestId: "http-clear" },
       });
       expect(cleared.statusCode).toBe(200);
       expect(cleared.json()).toMatchObject({ branchPreserved: true, cleared: true });

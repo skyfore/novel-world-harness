@@ -637,32 +637,32 @@ function SessionPage() {
     onSuccess: (snapshot) => queryClient.setQueryData(operationKey(snapshot.id), snapshot),
   });
   const archiveMutation = useMutation({
-    mutationFn: () => updatePlaySession(sessionId, { status: "archived" }, csrfToken),
+    mutationFn: () => updatePlaySession(sessionId, { status: "archived", clientRequestId: requestId("archive-session") }, csrfToken),
     onSuccess: (next) => {
       queryClient.setQueryData(playSessionKey(sessionId), next);
       void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
     },
   });
   const restoreMutation = useMutation({
-    mutationFn: () => restorePlaySession(sessionId, csrfToken),
+    mutationFn: () => restorePlaySession(sessionId, { clientRequestId: requestId("restore-session") }, csrfToken),
     onSuccess: (next) => {
       queryClient.setQueryData(playSessionKey(sessionId), next);
       void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
     },
   });
   const activateMutation = useMutation({
-    mutationFn: () => activatePlaySession(sessionId, csrfToken),
+    mutationFn: () => activatePlaySession(sessionId, { clientRequestId: requestId("activate-session") }, csrfToken),
     onSuccess: (next) => {
       queryClient.setQueryData(playSessionKey(sessionId), next);
       void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
     },
   });
   const clearMutation = useMutation({
-    mutationFn: () => clearPlayConversation(sessionId, csrfToken),
+    mutationFn: () => clearPlayConversation(sessionId, { clientRequestId: requestId("clear-conversation") }, csrfToken),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: playSessionKey(sessionId) }),
   });
   const removeMutation = useMutation({
-    mutationFn: () => removePlaySession(sessionId, csrfToken),
+    mutationFn: () => removePlaySession(sessionId, { clientRequestId: requestId("remove-session") }, csrfToken),
     onSuccess: async (removed) => {
       await queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
       await navigate({ to: "/instances/$branchId", params: { branchId: removed.branchId } });
@@ -901,7 +901,7 @@ function ProviderCredentialCard({ provider, csrfToken, operations, onChanged }: 
     if (!window.confirm(`Remove the stored Pi credential for ${provider.name}? Environment credentials are not changed.`)) return;
     setBusy(true);
     setError(undefined);
-    try { await logoutProvider(provider.id, csrfToken); onChanged(); }
+    try { await logoutProvider(provider.id, { clientRequestId: requestId("provider-logout") }, csrfToken); onChanged(); }
     catch (cause) { setError(cause instanceof Error ? cause : new Error(String(cause))); }
     finally { setBusy(false); }
   };
@@ -936,7 +936,7 @@ function ModelProfileEditor({ profile, models, csrfToken, onSaved }: { profile: 
     mutationFn: () => {
       const model = models.find((candidate) => modelOptionKey(candidate.providerId, candidate.id) === selected);
       if (!model) throw new Error("Select one exact Pi model.");
-      return updateModelProfile(profile.role as ModelRole, { providerId: model.providerId, modelId: model.id, thinkingLevel: thinking }, csrfToken);
+      return updateModelProfile(profile.role as ModelRole, { providerId: model.providerId, modelId: model.id, thinkingLevel: thinking, clientRequestId: requestId("model-profile") }, csrfToken);
     },
     onSuccess: onSaved,
   });

@@ -8,6 +8,7 @@ import { redactTraceSecrets } from "../trace/pi-trace.js";
 import {
   modelProfileListSchema,
   modelRoleSchema,
+  providerCredentialRequestSchema,
   providerCredentialResultSchema,
   providerLoginRequestSchema,
   updateModelProfileRequestSchema,
@@ -15,6 +16,7 @@ import {
   type ModelProfileList,
   type ModelRole,
   type OperationAccepted,
+  type ProviderCredentialRequest,
   type ProviderCredentialResult,
   type ProviderLoginRequest,
   type UpdateModelProfileRequest,
@@ -22,6 +24,7 @@ import {
 import { AuthInteractionManager } from "../web/auth-interaction-manager.js";
 import { WebEventBroker } from "../web/event-stream.js";
 import { webError } from "../web/errors.js";
+import { WebMutationJournal } from "../web/mutation-journal.js";
 import { OperationManager } from "../web/operation-manager.js";
 import type { ModelCatalogReader, ModelCredentialRuntime } from "./model-catalog-service.js";
 
@@ -35,16 +38,19 @@ export interface ModelSettingsApplicationServiceOptions {
   operations: OperationManager;
   interactions: AuthInteractionManager;
   events: WebEventBroker;
+  mutations?: WebMutationJournal;
 }
 
 export class ModelSettingsApplicationService {
   readonly root: string;
   readonly configPath: string;
   private writeQueue: Promise<void> = Promise.resolve();
+  private readonly mutations: WebMutationJournal;
 
   constructor(private readonly options: ModelSettingsApplicationServiceOptions) {
     this.root = path.resolve(options.root);
     this.configPath = path.resolve(options.configPath ?? path.join(this.root, "novel-harness.yaml"));
+    this.mutations = options.mutations ?? new WebMutationJournal(this.root);
   }
 
   async listProfiles(): Promise<ModelProfileList> {
@@ -80,6 +86,16 @@ export class ModelSettingsApplicationService {
   async updateProfile(roleValue: string, inputValue: UpdateModelProfileRequest): Promise<ModelProfileList> {
     const role = modelRoleSchema.parse(roleValue);
     const input = updateModelProfileRequestSchema.parse(inputValue);
+    await this.mutations.execute({
+      kind: "model-profile-update",
+      scopeId: role,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, () => this.updateProfileOnce(role, input));
+    return this.listProfiles();
+  }
+
+  private async updateProfileOnce(role: ModelRole, input: UpdateModelProfileRequest): Promise<void> {
     const catalog = await this.options.catalog.read();
     const selected = catalog.models.find((model) => model.providerId === input.providerId && model.id === input.modelId);
     if (!selected) {
@@ -106,7 +122,6 @@ export class ModelSettingsApplicationService {
       await this.atomicWrite(document.toString());
     });
     this.options.events.publish("model.catalog.changed", { reason: "profile-updated", role });
-    return this.listProfiles();
   }
 
   async startLogin(providerId: string, inputValue: ProviderLoginRequest): Promise<OperationAccepted> {
@@ -178,20 +193,29 @@ export class ModelSettingsApplicationService {
     return accepted;
   }
 
-  async logout(providerId: string): Promise<ProviderCredentialResult> {
-    const credentials = this.requireCredentialRuntime();
-    const catalog = await this.options.catalog.read();
-    if (!catalog.providers.some((provider) => provider.id === providerId)) {
-      throw webError(404, "PROVIDER_NOT_FOUND", `Unknown Pi provider '${providerId}'.`, {
-        kind: "after-refresh",
-        discoveryEndpoint: "/api/v1/models/providers",
-        copyField: "id",
-        maxAttempts: 1,
-      });
-    }
-    const result = providerCredentialResultSchema.parse(await credentials.logout(providerId));
-    this.options.events.publish("model.catalog.changed", { reason: "provider-logout", providerId });
-    return result;
+  async logout(providerId: string, inputValue: ProviderCredentialRequest): Promise<ProviderCredentialResult> {
+    const input = providerCredentialRequestSchema.parse(inputValue);
+    const execution = await this.mutations.execute({
+      kind: "provider-logout",
+      scopeId: providerId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, async () => {
+      const credentials = this.requireCredentialRuntime();
+      const catalog = await this.options.catalog.read();
+      if (!catalog.providers.some((provider) => provider.id === providerId)) {
+        throw webError(404, "PROVIDER_NOT_FOUND", `Unknown Pi provider '${providerId}'.`, {
+          kind: "after-refresh",
+          discoveryEndpoint: "/api/v1/models/providers",
+          copyField: "id",
+          maxAttempts: 1,
+        });
+      }
+      const result = providerCredentialResultSchema.parse(await credentials.logout(providerId));
+      this.options.events.publish("model.catalog.changed", { reason: "provider-logout", providerId });
+      return result;
+    });
+    return providerCredentialResultSchema.parse(execution.value);
   }
 
   private requireCredentialRuntime(): ModelCredentialRuntime {

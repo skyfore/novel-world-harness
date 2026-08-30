@@ -46,6 +46,7 @@ import {
   narrationRetryRequestSchema,
   narrationRetryResultSchema,
   playableCharacterListSchema,
+  playSessionCommandRequestSchema,
   playMoveRequestSchema,
   playOperationResultSchema,
   playSessionDetailSchema,
@@ -59,6 +60,7 @@ import {
   type NarrationRetryResult,
   type OperationAccepted,
   type PlayableCharacterList,
+  type PlaySessionCommandRequest,
   type PlayMoveRequest,
   type PlayOperationResult,
   type PlaySessionDetail,
@@ -70,6 +72,7 @@ import {
 } from "../web/contracts.js";
 import { WebEventBroker } from "../web/event-stream.js";
 import { webError } from "../web/errors.js";
+import { WebMutationJournal } from "../web/mutation-journal.js";
 import { OperationManager, type OperationRunContext } from "../web/operation-manager.js";
 import { CatalogService } from "./catalog-service.js";
 import { TraceRecorder, newTraceId, type TraceContext } from "../trace/recorder.js";
@@ -90,6 +93,7 @@ export interface PlayApplicationServiceOptions {
   narrator?: PlayerOpeningNarrator;
   advanceBackground?: number;
   traceStore?: TraceStore;
+  mutations?: WebMutationJournal;
 }
 
 type NarrationOutcome = {
@@ -105,7 +109,7 @@ export class PlayApplicationService {
   private readonly branches: BranchStore;
   private readonly catalog: CatalogService;
   private readonly traces: TraceStore;
-  private readonly sessionRequests = new Map<string, { fingerprint: string; sessionId: string }>();
+  private readonly mutations: WebMutationJournal;
 
   constructor(private readonly options: PlayApplicationServiceOptions) {
     this.root = path.resolve(options.root);
@@ -114,6 +118,7 @@ export class PlayApplicationService {
     this.branches = new BranchStore(this.root);
     this.catalog = new CatalogService(this.root);
     this.traces = options.traceStore ?? new TraceStore(this.root);
+    this.mutations = options.mutations ?? new WebMutationJournal(this.root);
   }
 
   get traceStore(): TraceStore {
@@ -134,16 +139,16 @@ export class PlayApplicationService {
 
   async createSession(inputValue: CreatePlaySessionRequest): Promise<PlaySessionDetail> {
     const input = createPlaySessionRequestSchema.parse(inputValue);
-    const requestKey = `${input.branchId}:${input.clientRequestId}`;
-    const fingerprint = JSON.stringify(input);
-    const previous = this.sessionRequests.get(requestKey);
-    if (previous) {
-      if (previous.fingerprint !== fingerprint) {
-        throw webError(409, "IDEMPOTENCY_CONFLICT", `Client request '${input.clientRequestId}' was already used with different input.`, { kind: "none" });
-      }
-      return this.getSession(previous.sessionId);
-    }
+    const execution = await this.mutations.execute({
+      kind: "play-session-create",
+      scopeId: input.branchId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, () => this.createSessionOnce(input));
+    return this.getSession(execution.value.sessionId);
+  }
 
+  private async createSessionOnce(input: CreatePlaySessionRequest): Promise<{ sessionId: string }> {
     const existing = await this.sessions.readInstance(input.branchId);
     let selection;
     try {
@@ -164,9 +169,8 @@ export class PlayApplicationService {
     if (selection.session.title !== title) {
       await this.sessions.updateMetadata(selection.session.id, { title });
     }
-    this.sessionRequests.set(requestKey, { fingerprint, sessionId: selection.session.id });
     this.invalidateCatalog("play-session-created", selection.session.id);
-    return this.getSession(selection.session.id);
+    return { sessionId: selection.session.id };
   }
 
   async getSession(sessionId: string): Promise<PlaySessionDetail> {
@@ -185,65 +189,109 @@ export class PlayApplicationService {
     });
   }
 
-  async activateSession(sessionId: string): Promise<PlaySessionDetail> {
-    const session = await this.requireSession(sessionId);
-    if (session.status === "archived") {
-      throw webError(409, "PLAY_SESSION_ARCHIVED", `Play session '${session.id}' must be restored before it can be activated.`, {
-        kind: "after-user-action",
-        discoveryEndpoint: `/api/v1/play-sessions/${encodeURIComponent(session.id)}/restore`,
-        copyField: "session.id",
-        maxAttempts: 1,
-      });
-    }
-    await this.sessions.activate(session.id);
-    this.invalidateCatalog("play-session-activated", session.id);
-    return this.getSession(session.id);
+  async activateSession(sessionId: string, inputValue: PlaySessionCommandRequest): Promise<PlaySessionDetail> {
+    const input = playSessionCommandRequestSchema.parse(inputValue);
+    const execution = await this.mutations.execute({
+      kind: "play-session-activate",
+      scopeId: sessionId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, async () => {
+      const session = await this.requireSession(sessionId);
+      if (session.status === "archived") {
+        throw webError(409, "PLAY_SESSION_ARCHIVED", `Play session '${session.id}' must be restored before it can be activated.`, {
+          kind: "after-user-action",
+          discoveryEndpoint: `/api/v1/play-sessions/${encodeURIComponent(session.id)}/restore`,
+          copyField: "session.id",
+          maxAttempts: 1,
+        });
+      }
+      await this.sessions.activate(session.id);
+      this.invalidateCatalog("play-session-activated", session.id);
+      return { sessionId: session.id };
+    });
+    return this.getSession(execution.value.sessionId);
   }
 
   async updateSession(sessionId: string, inputValue: UpdatePlaySessionRequest): Promise<PlaySessionDetail> {
     const input = updatePlaySessionRequestSchema.parse(inputValue);
-    const session = await this.requireSession(sessionId);
-    this.assertNoActiveOperation(session.id);
-    await this.sessions.updateMetadata(session.id, {
-      ...(input.title !== undefined ? { title: input.title } : {}),
-      ...(input.status !== undefined ? { status: input.status } : {}),
+    const execution = await this.mutations.execute({
+      kind: "play-session-update",
+      scopeId: sessionId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, async () => {
+      const session = await this.requireSession(sessionId);
+      this.assertNoActiveOperation(session.id);
+      await this.sessions.updateMetadata(session.id, {
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+      });
+      this.invalidateCatalog("play-session-updated", session.id);
+      return { sessionId: session.id };
     });
-    this.invalidateCatalog("play-session-updated", session.id);
-    return this.getSession(session.id);
+    return this.getSession(execution.value.sessionId);
   }
 
-  async restoreSession(sessionId: string): Promise<PlaySessionDetail> {
-    const session = await this.requireSession(sessionId);
-    await this.sessions.restore(session.id);
-    this.invalidateCatalog("play-session-restored", session.id);
-    return this.getSession(session.id);
+  async restoreSession(sessionId: string, inputValue: PlaySessionCommandRequest): Promise<PlaySessionDetail> {
+    const input = playSessionCommandRequestSchema.parse(inputValue);
+    const execution = await this.mutations.execute({
+      kind: "play-session-restore",
+      scopeId: sessionId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, async () => {
+      const session = await this.requireSession(sessionId);
+      await this.sessions.restore(session.id);
+      this.invalidateCatalog("play-session-restored", session.id);
+      return { sessionId: session.id };
+    });
+    return this.getSession(execution.value.sessionId);
   }
 
-  async clearConversation(sessionId: string): Promise<ClearPlayConversationResult> {
-    const session = await this.requireSession(sessionId);
-    this.assertNoActiveOperation(session.id);
-    await this.conversations.remove(session.branchId);
-    this.invalidateCatalog("play-conversation-cleared", session.id);
-    return clearPlayConversationResultSchema.parse({
-      sessionId: session.id,
-      branchId: session.branchId,
-      branchPreserved: true,
-      cleared: true,
+  async clearConversation(sessionId: string, inputValue: PlaySessionCommandRequest): Promise<ClearPlayConversationResult> {
+    const input = playSessionCommandRequestSchema.parse(inputValue);
+    const execution = await this.mutations.execute({
+      kind: "play-conversation-clear",
+      scopeId: sessionId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, async () => {
+      const session = await this.requireSession(sessionId);
+      this.assertNoActiveOperation(session.id);
+      await this.conversations.remove(session.branchId);
+      this.invalidateCatalog("play-conversation-cleared", session.id);
+      return clearPlayConversationResultSchema.parse({
+        sessionId: session.id,
+        branchId: session.branchId,
+        branchPreserved: true,
+        cleared: true,
+      });
     });
+    return clearPlayConversationResultSchema.parse(execution.value);
   }
 
-  async removeSession(sessionId: string): Promise<RemovePlaySessionResult> {
-    const session = await this.requireSession(sessionId);
-    this.assertNoActiveOperation(session.id);
-    await this.sessions.removeSession(session.id);
-    await this.conversations.remove(session.branchId);
-    this.invalidateCatalog("play-session-removed", session.id);
-    return removePlaySessionResultSchema.parse({
-      sessionId: session.id,
-      branchId: session.branchId,
-      branchPreserved: true,
-      conversationRemoved: true,
+  async removeSession(sessionId: string, inputValue: PlaySessionCommandRequest): Promise<RemovePlaySessionResult> {
+    const input = playSessionCommandRequestSchema.parse(inputValue);
+    const execution = await this.mutations.execute({
+      kind: "play-session-remove",
+      scopeId: sessionId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, async () => {
+      const session = await this.requireSession(sessionId);
+      this.assertNoActiveOperation(session.id);
+      await this.sessions.removeSession(session.id);
+      await this.conversations.remove(session.branchId);
+      this.invalidateCatalog("play-session-removed", session.id);
+      return removePlaySessionResultSchema.parse({
+        sessionId: session.id,
+        branchId: session.branchId,
+        branchPreserved: true,
+        conversationRemoved: true,
+      });
     });
+    return removePlaySessionResultSchema.parse(execution.value);
   }
 
   async startPlayerMove(sessionId: string, inputValue: PlayMoveRequest): Promise<OperationAccepted> {

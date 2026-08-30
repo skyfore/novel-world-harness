@@ -16,41 +16,48 @@ import {
 } from "../web/contracts.js";
 import { WebEventBroker } from "../web/event-stream.js";
 import { webError } from "../web/errors.js";
+import { WebMutationJournal } from "../web/mutation-journal.js";
 import { createWorldBranch } from "../world/instance.js";
 import { BranchStore } from "../world/store.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import { CatalogService } from "./catalog-service.js";
 import { readPreparationSnapshot } from "./preparation-projection.js";
 
-type StoredRequest<T> = { fingerprint: string; result: T };
-
 export interface InstanceApplicationServiceOptions {
   root: string;
   events: WebEventBroker;
   cacheRoot?: string;
+  mutations?: WebMutationJournal;
 }
 
 export class InstanceApplicationService {
   readonly root: string;
   private readonly branches: BranchStore;
   private readonly catalog: CatalogService;
-  private readonly createRequests = new Map<string, StoredRequest<CreateInstanceResult>>();
-  private readonly forkRequests = new Map<string, StoredRequest<ForkInstanceResult>>();
+  private readonly mutations: WebMutationJournal;
 
   constructor(private readonly options: InstanceApplicationServiceOptions) {
     this.root = path.resolve(options.root);
     this.branches = new BranchStore(this.root);
     this.catalog = new CatalogService(this.root);
+    this.mutations = options.mutations ?? new WebMutationJournal(this.root);
   }
 
   async create(inputValue: CreateInstanceRequest): Promise<CreateInstanceResult> {
     const input = createInstanceRequestSchema.parse(inputValue);
-    const fingerprint = JSON.stringify(input);
-    const previous = this.createRequests.get(input.clientRequestId);
-    if (previous) {
-      if (previous.fingerprint !== fingerprint) throw this.idempotencyConflict(input.clientRequestId);
-      return createInstanceResultSchema.parse({ ...previous.result, reused: true });
-    }
+    const execution = await this.mutations.execute({
+      kind: "instance-create",
+      scopeId: input.branchId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, () => this.createOnce(input));
+    return createInstanceResultSchema.parse({
+      ...execution.value,
+      reused: execution.reused || execution.value.reused,
+    });
+  }
+
+  private async createOnce(input: CreateInstanceRequest): Promise<CreateInstanceResult> {
     const workspace = await WorkspaceStore.create(this.root);
     const source = await workspace.getSource(input.sourceId);
     if (!source) throw this.sourceNotFound(input.sourceId);
@@ -118,7 +125,6 @@ export class InstanceApplicationService {
       usedCanonicalInitial: created.usedCanonicalInitial,
       ...(created.preparedRevisionHash ? { preparedRevisionHash: created.preparedRevisionHash } : {}),
     });
-    this.createRequests.set(input.clientRequestId, { fingerprint, result });
     this.options.events.publish("catalog.invalidated", {
       reason: "instance-created",
       sourceId: source.id,
@@ -129,13 +135,19 @@ export class InstanceApplicationService {
 
   async fork(parentBranchId: string, inputValue: ForkInstanceRequest): Promise<ForkInstanceResult> {
     const input = forkInstanceRequestSchema.parse(inputValue);
-    const fingerprint = JSON.stringify({ parentBranchId, ...input });
-    const requestKey = `${parentBranchId}:${input.clientRequestId}`;
-    const previous = this.forkRequests.get(requestKey);
-    if (previous) {
-      if (previous.fingerprint !== fingerprint) throw this.idempotencyConflict(input.clientRequestId);
-      return forkInstanceResultSchema.parse({ ...previous.result, reused: true });
-    }
+    const execution = await this.mutations.execute({
+      kind: "branch-fork",
+      scopeId: parentBranchId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, () => this.forkOnce(parentBranchId, input));
+    return forkInstanceResultSchema.parse({
+      ...execution.value,
+      reused: execution.reused || execution.value.reused,
+    });
+  }
+
+  private async forkOnce(parentBranchId: string, input: ForkInstanceRequest): Promise<ForkInstanceResult> {
     if (input.newBranchId === parentBranchId) {
       throw webError(400, "FORK_BRANCH_ID_UNCHANGED", "A fork must use a new branch ID.", { kind: "after-user-action" });
     }
@@ -184,7 +196,6 @@ export class InstanceApplicationService {
       created: true,
       reused: false,
     });
-    this.forkRequests.set(requestKey, { fingerprint, result });
     this.options.events.publish("catalog.invalidated", {
       reason: "instance-forked",
       branchId: input.newBranchId,
@@ -253,7 +264,4 @@ export class InstanceApplicationService {
     });
   }
 
-  private idempotencyConflict(clientRequestId: string) {
-    return webError(409, "IDEMPOTENCY_CONFLICT", `Client request '${clientRequestId}' was already used with different input.`, { kind: "none" });
-  }
 }

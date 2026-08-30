@@ -124,6 +124,11 @@ export const updateModelProfileRequestSchema = z.object({
   providerId: z.string().min(1),
   modelId: z.string().min(1),
   thinkingLevel: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).default("medium"),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
+export const providerCredentialRequestSchema = z.object({
+  clientRequestId: z.string().min(1).max(200),
 }).strict();
 
 export const providerLoginRequestSchema = z.object({
@@ -706,9 +711,14 @@ export const playableCharacterListSchema = z.object({
 export const updatePlaySessionRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
   status: z.enum(["idle", "archived"]).optional(),
+  clientRequestId: z.string().min(1).max(200),
 }).strict().refine((value) => value.title !== undefined || value.status !== undefined, {
   message: "At least one play-session field must be updated.",
 });
+
+export const playSessionCommandRequestSchema = z.object({
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
 
 export const playMoveRequestSchema = z.object({
   text: z.string().trim().min(1).max(20_000),
@@ -832,6 +842,7 @@ export type ModelRole = z.infer<typeof modelRoleSchema>;
 export type ModelProfileSummary = z.infer<typeof modelProfileSummarySchema>;
 export type ModelProfileList = z.infer<typeof modelProfileListSchema>;
 export type UpdateModelProfileRequest = z.infer<typeof updateModelProfileRequestSchema>;
+export type ProviderCredentialRequest = z.infer<typeof providerCredentialRequestSchema>;
 export type ProviderLoginRequest = z.infer<typeof providerLoginRequestSchema>;
 export type AuthInteractionPrompt = z.infer<typeof authInteractionPromptSchema>;
 export type AuthInteractionSnapshot = z.infer<typeof authInteractionSnapshotSchema>;
@@ -886,6 +897,7 @@ export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSc
 export type PlayableCharacter = z.infer<typeof playableCharacterSchema>;
 export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;
 export type UpdatePlaySessionRequest = z.infer<typeof updatePlaySessionRequestSchema>;
+export type PlaySessionCommandRequest = z.infer<typeof playSessionCommandRequestSchema>;
 export type PlayMoveRequest = z.infer<typeof playMoveRequestSchema>;
 export type SceneNarrationRequest = z.infer<typeof sceneNarrationRequestSchema>;
 export type NarrationRetryRequest = z.infer<typeof narrationRetryRequestSchema>;

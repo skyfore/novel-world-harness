@@ -20,6 +20,7 @@ afterEach(async () => {
 class FakeCredentialRuntime implements ModelCredentialRuntime {
   configured = false;
   credentialType?: AuthType;
+  logoutCalls = 0;
   receivedAnswers: string[] = [];
   private promptStarted?: () => void;
   readonly atPrompt = new Promise<void>((resolve) => { this.promptStarted = resolve; });
@@ -60,6 +61,7 @@ class FakeCredentialRuntime implements ModelCredentialRuntime {
   }
 
   async logout(providerId: string): Promise<ProviderCredentialResult> {
+    this.logoutCalls += 1;
     this.configured = false;
     this.credentialType = undefined;
     return { providerId, configured: false };
@@ -86,7 +88,7 @@ async function fixture(prefix: string) {
 
 describe("Web model settings", () => {
   it("writes role profiles through shared YAML without expanding placeholders", async () => {
-    const { root, service } = await fixture("nwh-web-model-profile-");
+    const { root, runtime, service } = await fixture("nwh-web-model-profile-");
     await fs.writeFile(path.join(root, "novel-harness.yaml"), [
       "# preserve this project comment",
       "version: 1",
@@ -110,6 +112,7 @@ describe("Web model settings", () => {
       providerId: "fake",
       modelId: "deep",
       thinkingLevel: "high",
+      clientRequestId: "profile-narrator-1",
     });
     expect(updated.roles.find((role) => role.role === "narrator")).toMatchObject({
       profileId: "web-narrator",
@@ -128,10 +131,28 @@ describe("Web model settings", () => {
     expect(raw).toContain("narrator: web-narrator");
     expect(raw).not.toContain("canary-secret");
 
+    const restartedEvents = new WebEventBroker();
+    const restarted = new ModelSettingsApplicationService({
+      root,
+      catalog: runtime,
+      operations: new OperationManager(restartedEvents),
+      interactions: new AuthInteractionManager(restartedEvents, 30_000),
+      events: restartedEvents,
+    });
+    const replayed = await restarted.updateProfile("narrator", {
+      providerId: "fake",
+      modelId: "deep",
+      thinkingLevel: "high",
+      clientRequestId: "profile-narrator-1",
+    });
+    expect(replayed).toEqual(updated);
+    expect(restartedEvents.replayAfter()).toEqual([]);
+
     await expect(service.updateProfile("narrator", {
       providerId: "fake",
       modelId: "missing",
       thinkingLevel: "medium",
+      clientRequestId: "profile-narrator-missing",
     })).rejects.toMatchObject({ detail: { code: "MODEL_NOT_FOUND", retry: { maxAttempts: 1 } } });
   });
 
@@ -202,14 +223,14 @@ describe("Web model settings", () => {
       const denied = await app.inject({
         method: "PATCH",
         url: "/api/v1/model-profiles/narrator",
-        payload: { providerId: "fake", modelId: "deep", thinkingLevel: "high" },
+        payload: { providerId: "fake", modelId: "deep", thinkingLevel: "high", clientRequestId: "http-profile-denied" },
       });
       expect(denied.statusCode).toBe(403);
       const profile = await app.inject({
         method: "PATCH",
         url: "/api/v1/model-profiles/narrator",
         headers: { "x-nwh-csrf": csrfToken },
-        payload: { providerId: "fake", modelId: "deep", thinkingLevel: "high" },
+        payload: { providerId: "fake", modelId: "deep", thinkingLevel: "high", clientRequestId: "http-profile" },
       });
       expect(profile.statusCode, profile.body).toBe(200);
       expect(profile.json()).toMatchObject({ roles: expect.arrayContaining([expect.objectContaining({ role: "narrator", modelId: "deep" })]) });
@@ -240,9 +261,19 @@ describe("Web model settings", () => {
         method: "DELETE",
         url: "/api/v1/models/providers/fake/credential",
         headers: { "x-nwh-csrf": csrfToken },
+        payload: { clientRequestId: "http-logout" },
       });
       expect(logout.statusCode).toBe(200);
       expect(logout.json()).toEqual({ providerId: "fake", configured: false });
+      const replayedLogout = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/models/providers/fake/credential",
+        headers: { "x-nwh-csrf": csrfToken },
+        payload: { clientRequestId: "http-logout" },
+      });
+      expect(replayedLogout.statusCode).toBe(200);
+      expect(replayedLogout.json()).toEqual({ providerId: "fake", configured: false });
+      expect(runtime.logoutCalls).toBe(1);
     } finally {
       await app.close();
     }

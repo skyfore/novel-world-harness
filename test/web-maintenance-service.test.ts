@@ -70,11 +70,12 @@ describe("Web maintenance effect manifests", () => {
     })).rejects.toMatchObject({ detail: { code: "REMOVAL_PREVIEW_STALE" } });
 
     const current = await service.previewInstance("child");
-    const removed = await service.removeInstance("child", {
+    const removeRequest = {
       effectHash: current.effectHash,
       confirmation: "child",
       clientRequestId: "remove-child-current",
-    });
+    };
+    const removed = await service.removeInstance("child", removeRequest);
     expect(removed).toMatchObject({
       action: "remove-instance",
       removed: { branches: 1, sessions: 0, conversationMessages: 0 },
@@ -84,6 +85,13 @@ describe("Web maintenance effect manifests", () => {
     await expect(sessions.getById(childSession.id)).resolves.toMatchObject({ status: "detached" });
     await expect(conversations.list("child")).resolves.toHaveLength(2);
     await expect(traces.getRun(trace.id)).resolves.toMatchObject({ id: trace.id, branchId: "child" });
+    const restarted = new MaintenanceApplicationService({
+      root,
+      events: new WebEventBroker(),
+      operations: new OperationManager(new WebEventBroker()),
+      traceStore: traces,
+    });
+    await expect(restarted.removeInstance("child", removeRequest)).resolves.toEqual(removed);
   });
 
   it("resets source-scoped analysis, then removes the novel while retaining source bytes and traces", async () => {

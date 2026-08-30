@@ -11,68 +11,57 @@ import {
   type SourceRegistrationResult,
 } from "../web/contracts.js";
 import { WebEventBroker } from "../web/event-stream.js";
-import { webError } from "../web/errors.js";
+import { WebMutationJournal } from "../web/mutation-journal.js";
 import { readPreparationSnapshot } from "./preparation-projection.js";
-
-type StoredRegistration = {
-  fingerprint: string;
-  result: SourceRegistrationResult;
-};
 
 export interface SourceApplicationServiceOptions {
   root: string;
   events: WebEventBroker;
   configPath?: string;
+  mutations?: WebMutationJournal;
 }
 
 export class SourceApplicationService {
   readonly root: string;
-  private readonly requests = new Map<string, StoredRegistration>();
+  private readonly mutations: WebMutationJournal;
 
   constructor(private readonly options: SourceApplicationServiceOptions) {
     this.root = path.resolve(options.root);
+    this.mutations = options.mutations ?? new WebMutationJournal(this.root);
   }
 
   async register(inputValue: SourceRegistrationRequest): Promise<SourceRegistrationResult> {
     const input = sourceRegistrationRequestSchema.parse(inputValue);
-    const fingerprint = crypto.createHash("sha256")
-      .update(input.title)
-      .update("\0")
-      .update(input.content)
-      .digest("hex");
-    const previous = this.requests.get(input.clientRequestId);
-    if (previous) {
-      if (previous.fingerprint !== fingerprint) {
-        throw webError(
-          409,
-          "IDEMPOTENCY_CONFLICT",
-          `Client request '${input.clientRequestId}' was already used with different source content.`,
-          { kind: "none" },
-        );
-      }
-      return sourceRegistrationResultSchema.parse({ ...previous.result, reused: true });
-    }
-
-    const workspace = await WorkspaceStore.create(this.root);
-    const sourceId = crypto.createHash("sha256").update(input.content).digest("hex").slice(0, 20);
-    const alreadyRegistered = Boolean(await workspace.getSource(sourceId));
-    const configPath = this.options.configPath ?? path.join(this.root, "novel-harness.yaml");
-    const config = await loadOptionalConfig(configPath);
-    const ingested = await ingestWorkspaceContent(this.root, input.title, input.content, config?.project);
-    await new PreparedNovelCache(this.root).restore(ingested.document);
-    const preparation = await readPreparationSnapshot(this.root, ingested.document.id);
-    const result = sourceRegistrationResultSchema.parse({
-      source: preparation.source,
-      segmentCount: ingested.manifest.segments.length,
-      structuralUnitCount: ingested.structure.units.length,
-      reused: alreadyRegistered,
-      preparation,
+    const execution = await this.mutations.execute({
+      kind: "source-register",
+      scopeId: "workspace",
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, async () => {
+      const workspace = await WorkspaceStore.create(this.root);
+      const sourceId = crypto.createHash("sha256").update(input.content).digest("hex").slice(0, 20);
+      const alreadyRegistered = Boolean(await workspace.getSource(sourceId));
+      const configPath = this.options.configPath ?? path.join(this.root, "novel-harness.yaml");
+      const config = await loadOptionalConfig(configPath);
+      const ingested = await ingestWorkspaceContent(this.root, input.title, input.content, config?.project);
+      await new PreparedNovelCache(this.root).restore(ingested.document);
+      const preparation = await readPreparationSnapshot(this.root, ingested.document.id);
+      const result = sourceRegistrationResultSchema.parse({
+        source: preparation.source,
+        segmentCount: ingested.manifest.segments.length,
+        structuralUnitCount: ingested.structure.units.length,
+        reused: alreadyRegistered,
+        preparation,
+      });
+      this.options.events.publish("catalog.invalidated", {
+        reason: alreadyRegistered ? "source-refreshed" : "source-registered",
+        sourceId: ingested.document.id,
+      });
+      return result;
     });
-    this.requests.set(input.clientRequestId, { fingerprint, result });
-    this.options.events.publish("catalog.invalidated", {
-      reason: alreadyRegistered ? "source-refreshed" : "source-registered",
-      sourceId: ingested.document.id,
+    return sourceRegistrationResultSchema.parse({
+      ...execution.value,
+      reused: execution.reused || execution.value.reused,
     });
-    return result;
   }
 }

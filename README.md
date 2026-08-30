@@ -83,6 +83,12 @@ below the workspace state directory. A server restart retains completed runs and
 turns unfinished work into an explicit `interrupted` state; post-commit work is
 never presented as safe to replay unchanged.
 
+Short browser commands use the same restart-safe contract through a local
+mutation journal under `web/v1/mutations/`. It stores request fingerprints and
+redacted results, never raw source bodies or credentials. An orphaned `running`
+command is marked as having an unknown outcome and must be reconciled from the
+authoritative catalog/session snapshot before a new request is issued.
+
 If a committed move is stopped before presentation completes, the Play page can
 retry narration only. The server verifies the original move trace and current
 branch head, creates a separate `narration-retry` trace, and never replays the

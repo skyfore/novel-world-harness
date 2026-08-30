@@ -140,6 +140,50 @@ export { ingestWorkspaceContent, ingestWorkspaceSource } from "./commands/ingest
 export { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore, type SourceMaterialIdentity } from "./storage/source-material-store.js";
 export { sourceTitleInferenceSchema, sourceTitleProposalSchema, type SourceTitleInference, type SourceTitleProposal } from "./storage/novel-title.js";
 export { WorkspaceStore, type SourceDocument, type StoredProject } from "./storage/workspace-store.js";
+export {
+  contextAuthoritySchema,
+  contextPartKindSchema,
+  contextPartSchema,
+  contextSnapshotSchema,
+  traceBlobRefSchema,
+  traceCountsSchema,
+  traceErrorSummarySchema,
+  traceEventSchema,
+  traceEventTypeSchema,
+  traceIdentifierSchema,
+  traceRunDetailSchema,
+  traceRunKindSchema,
+  traceRunManifestSchema,
+  traceRunStatusSchema,
+  traceSourceRefSchema,
+  traceToolDescriptorSchema,
+  traceUsageSchema,
+  type ContextAuthority,
+  type ContextPart,
+  type ContextPartKind,
+  type ContextSnapshot,
+  type TraceBlobRef,
+  type TraceCounts,
+  type TraceErrorSummary,
+  type TraceEvent,
+  type TraceEventType,
+  type TraceRunDetail,
+  type TraceRunKind,
+  type TraceRunManifest,
+  type TraceRunStatus,
+  type TraceSourceRef,
+  type TraceToolDescriptor,
+  type TraceUsage,
+} from "./trace/schema.js";
+export { TraceRecorder, newTraceId, type TraceContext } from "./trace/recorder.js";
+export {
+  TraceStore,
+  type AppendTraceEventInput,
+  type CreateTraceRunInput,
+  type FinishTraceRunPatch,
+  type TraceRunFilter,
+  type TraceRunLinkPatch,
+} from "./trace/store.js";
 
 export { ActorModelStore, characterDevelopmentPhaseSchema, deterministicActorProposalSource, evaluateCharacterGoal, resolveCharacterModel, type CharacterDevelopmentPhase, type CharacterGoal, type CharacterModel, type EffectiveCharacterModel } from "./world/actors.js";
 export { APPRAISAL_EMOTION_IDS, CHARACTER_CONTEXT_IDS, CHARACTER_DIMENSIONS, CHARACTER_DIMENSION_IDS, CHARACTER_ONTOLOGY_VERSION, appraisalEpisodeSchema, characterContextIdSchema, characterDimensionIdSchema, characterDispositionSchema, characterOntologyEvidence, developmentEpisodeSchema, legacyCharacterDimensionValues, modelVisibleCharacterOntology, resolveCharacterOntology, validateCharacterOntologyEvidenceAssertions, validateCharacterOntologyReferences, type AppraisalEpisode, type CharacterContextId, type CharacterDimensionDefinition, type CharacterDimensionId, type CharacterDisposition, type DevelopmentEpisode, type EffectiveCharacterAppraisal, type EffectiveCharacterDisposition, type EffectiveCharacterOntology, type EffectiveDevelopmentEpisode, type ModelVisibleCharacterOntology } from "./world/character-ontology.js";

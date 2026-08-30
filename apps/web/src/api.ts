@@ -12,6 +12,8 @@ import {
   instanceDetailSchema,
   operationAcceptedSchema,
   operationSnapshotSchema,
+  ontologyGraphSchema,
+  ontologyNodeDetailSchema,
   prepareNovelRequestSchema,
   preparationSnapshotSchema,
   playableCharacterListSchema,
@@ -43,6 +45,10 @@ import {
   type InstanceDetail,
   type OperationAccepted,
   type OperationSnapshot,
+  type OntologyGraph,
+  type OntologyLayer,
+  type OntologyNodeDetail,
+  type OntologyView,
   type PrepareNovelRequest,
   type PreparationSnapshot,
   type PlayableCharacterList,
@@ -98,6 +104,14 @@ export type TraceRunFilters = {
   limit?: number;
 };
 
+export type OntologyFilters = {
+  branchId?: string;
+  atCommit?: string;
+  includeCanonicalFuture?: boolean;
+  layers?: OntologyLayer[];
+  limit?: number;
+};
+
 export function fetchBootstrap(signal?: AbortSignal): Promise<BootstrapResponse> {
   return request("/api/v1/bootstrap", bootstrapResponseSchema, { signal });
 }
@@ -134,6 +148,28 @@ export function fetchProposal(proposalId: string, status?: ProposalStatus, signa
 
 export function fetchInstance(branchId: string, signal?: AbortSignal): Promise<InstanceDetail> {
   return request(`/api/v1/instances/${encodeURIComponent(branchId)}`, instanceDetailSchema, { signal });
+}
+
+export function fetchOntology(
+  sourceId: string,
+  view: OntologyView,
+  filters: OntologyFilters = {},
+  signal?: AbortSignal,
+): Promise<OntologyGraph> {
+  const query = ontologyQuery(view, filters);
+  return request(`/api/v1/novels/${encodeURIComponent(sourceId)}/ontology?${query.toString()}`, ontologyGraphSchema, { signal });
+}
+
+export function fetchOntologyNode(
+  sourceId: string,
+  view: OntologyView,
+  nodeId: string,
+  filters: OntologyFilters = {},
+  signal?: AbortSignal,
+): Promise<OntologyNodeDetail> {
+  const query = ontologyQuery(view, filters);
+  query.set("sourceId", sourceId);
+  return request(`/api/v1/ontology/nodes/${encodeURIComponent(nodeId)}?${query.toString()}`, ontologyNodeDetailSchema, { signal });
 }
 
 export function fetchInstanceRemovalPreview(branchId: string, signal?: AbortSignal): Promise<RemovalPreview> {
@@ -362,4 +398,14 @@ export class WebApiError extends Error {
     super(detail.message);
     this.name = "WebApiError";
   }
+}
+
+function ontologyQuery(view: OntologyView, filters: OntologyFilters): URLSearchParams {
+  const query = new URLSearchParams({ view });
+  if (filters.branchId) query.set("branchId", filters.branchId);
+  if (filters.atCommit) query.set("atCommit", filters.atCommit);
+  if (filters.includeCanonicalFuture) query.set("includeCanonicalFuture", "true");
+  if (filters.layers?.length) query.set("layers", filters.layers.join(","));
+  if (filters.limit !== undefined) query.set("limit", String(filters.limit));
+  return query;
 }

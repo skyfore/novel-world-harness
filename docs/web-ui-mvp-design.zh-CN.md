@@ -1,10 +1,12 @@
 # Novel World Harness Web UI MVP 设计方案
 
-状态：提案
+状态：MVP 已实现（设计仍作为后续迭代约束）
 
-日期：2026-08-29
+日期：2026-08-30
 
 范围：本地单用户、无产品登录鉴权、继续使用 Pi 作为模型运行时；先交付 Play 与 Trace，再补齐浏览器中的完整编译与世界检查工作流。
+
+实现说明：当前代码已交付本设计的浏览器闭环，包括 source register、prepare、proposal review/convergence、instance create/fork/remove、play/resume/clear/archive、追加式 trace/context/trajectory 以及 model/events/places/rules/provenance 五类 ontology 投影。核心实现位于 `src/application/*-service.ts`、`src/trace/`、`src/web/` 与 `apps/web/src/`；世界真相和 Pi 边界未改变。
 
 ## 1. 结论
 

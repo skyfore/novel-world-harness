@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   Link,
@@ -8,6 +8,7 @@ import {
   createRouter,
   useNavigate,
   useParams,
+  useSearch,
 } from "@tanstack/react-router";
 import {
   activatePlaySession,
@@ -42,6 +43,7 @@ import {
 import { MaintenanceControl } from "./maintenance-dialog";
 import {
   operationSnapshotSchema,
+  ontologyViewSchema,
   playOperationResultSchema,
   sceneNarrationResultSchema,
   webEventSchema,
@@ -62,6 +64,7 @@ const playSessionKey = (sessionId: string) => ["play-session", sessionId] as con
 const operationsKey = (sessionId: string) => ["operations", sessionId] as const;
 const operationKey = (operationId: string) => ["operation", operationId] as const;
 const narrationStreamKey = (operationId: string) => ["narration-stream", operationId] as const;
+const LazyOntologyPage = lazy(() => import("./ontology-page").then((module) => ({ default: module.OntologyPage })));
 
 function useBootstrap() {
   return useQuery({ queryKey: bootstrapQueryKey, queryFn: ({ signal }) => fetchBootstrap(signal) });
@@ -72,13 +75,19 @@ const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", com
 const newNovelRoute = createRoute({ getParentRoute: () => rootRoute, path: "/novels/new", component: NewNovelRoutePage });
 const novelRoute = createRoute({ getParentRoute: () => rootRoute, path: "/novels/$sourceId", component: NovelPage });
 const compileRoute = createRoute({ getParentRoute: () => rootRoute, path: "/novels/$sourceId/compile", component: CompilerRoutePage });
+const ontologyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/novels/$sourceId/ontology/$view",
+  validateSearch: ontologyRouteSearch,
+  component: OntologyRoutePage,
+});
 const instanceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/instances/$branchId", component: InstancePage });
 const sessionRoute = createRoute({ getParentRoute: () => rootRoute, path: "/play/$sessionId", component: SessionPage });
 const sessionTraceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/play/$sessionId/trace/$runId", component: SessionTraceRoutePage });
 const tracesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/traces", component: TracesRoutePage });
 const traceRoute = createRoute({ getParentRoute: () => rootRoute, path: "/traces/$runId", component: TraceRoutePage });
 const modelsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/settings/models", component: ModelsPage });
-const routeTree = rootRoute.addChildren([indexRoute, newNovelRoute, novelRoute, compileRoute, instanceRoute, sessionRoute, sessionTraceRoute, tracesRoute, traceRoute, modelsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, newNovelRoute, novelRoute, compileRoute, ontologyRoute, instanceRoute, sessionRoute, sessionTraceRoute, tracesRoute, traceRoute, modelsRoute]);
 
 export const router = createRouter({ routeTree, context: { queryClient: undefined! } });
 
@@ -281,6 +290,17 @@ function NovelPage() {
       <Panel title="World instances" action={<span className="panel-tag">committed</span>}>
         {instances.length ? instances.map((instance) => <InstanceRow key={instance.branchId} instance={instance} />) : <EmptyState title="No committed instance" body="This source is registered but does not yet own a playable branch." />}
       </Panel>
+      <Panel title="Ontology workbench" action={<span className="panel-tag">five projections</span>}>
+        <div className="ontology-launch-grid">
+          {[
+            ["model", "World model", "Entities, claims, goals, and character semantics"],
+            ["events", "Events", "Canon, committed history, causality, and possibilities"],
+            ["places", "Places", "Spatial topology and validity at committed time"],
+            ["rules", "Rules", "Effective rules, authority, and jurisdiction"],
+            ["provenance", "Provenance", "Evidence → proposal → validation → artifact → history"],
+          ].map(([view, label, body]) => <Link key={view} to="/novels/$sourceId/ontology/$view" params={{ sourceId, view }} className="ontology-launch-card"><span>↗</span><strong>{label}</strong><p>{body}</p></Link>)}
+        </div>
+      </Panel>
       <Panel title="Maintenance" action={<span className="panel-tag">exact preview required</span>}>
         <div className="maintenance-zone">
           <div><strong>Reset derived analysis</strong><p>Keep the registration, immutable source bytes, committed branches, sessions, pinned prepared revisions, and traces. Remove source-scoped compiler material so the novel can be parsed again.</p></div>
@@ -296,7 +316,6 @@ function NovelPage() {
           }} />
         </div>
       </Panel>
-      <PlannedCallout title="Ontology workbench" phase="Next Phase 2 slice" body="Model, event, place, rule, and provenance projections will join this source checkpoint without creating a second truth store." />
     </>
   );
 }
@@ -317,6 +336,25 @@ function CompilerRoutePage() {
     models={data?.modelCatalog.models ?? []}
     onInstanceCreated={(branchId) => void navigate({ to: "/instances/$branchId", params: { branchId } })}
   />;
+}
+
+function OntologyRoutePage() {
+  const { sourceId, view: viewValue } = useParams({ from: ontologyRoute.id });
+  const search = useSearch({ from: ontologyRoute.id });
+  const { data } = useBootstrap();
+  const navigate = useNavigate({ from: ontologyRoute.id });
+  const view = ontologyViewSchema.safeParse(viewValue);
+  if (!view.success) return <MissingState kind="ontology view" id={viewValue} />;
+  return <Suspense fallback={<LoadingState label="Loading the graph renderer…" />}><LazyOntologyPage
+    sourceId={sourceId}
+    view={view.data}
+    novel={data?.catalog.novels.find((candidate) => candidate.id === sourceId)}
+    instances={data?.catalog.instances ?? []}
+    initialBranchId={search.branchId}
+    initialCommitId={search.atCommit}
+    initialIncludeCanonicalFuture={search.includeCanonicalFuture}
+    onScopeChange={(scope) => void navigate({ search: scope, replace: true })}
+  /></Suspense>;
 }
 
 function InstancePage() {
@@ -380,7 +418,7 @@ function InstancePage() {
     <>
       <div className="session-heading">
         <PageHeading eyebrow="Committed branch" title={instance.name} description={instance.sourceTitle ?? "Unscoped legacy world"} />
-        <div className="session-toolbar"><MaintenanceControl action="remove-instance" targetId={branchId} csrfToken={data?.csrfToken ?? ""} triggerLabel="Preview instance removal" onCompleted={() => {
+        <div className="session-toolbar">{instance.sourceId && <Link className="secondary-button" to="/novels/$sourceId/ontology/$view" params={{ sourceId: instance.sourceId, view: "events" }} search={{ branchId }}>Inspect ontology</Link>}<MaintenanceControl action="remove-instance" targetId={branchId} csrfToken={data?.csrfToken ?? ""} triggerLabel="Preview instance removal" onCompleted={() => {
           void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
           void navigate(instance.sourceId ? { to: "/novels/$sourceId", params: { sourceId: instance.sourceId } } : { to: "/" });
         }} /></div>
@@ -729,9 +767,6 @@ function InstanceRow({ instance }: { instance: InstanceSummary }) {
 function Detail({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return <div><dt>{label}</dt><dd className={mono ? "mono" : undefined}>{value}</dd></div>;
 }
-function PlannedCallout({ title, phase, body }: { title: string; phase: string; body: string }) {
-  return <section className="planned-callout"><span>{phase}</span><div><h2>{title}</h2><p>{body}</p></div></section>;
-}
 function EmptyState({ title, body }: { title: string; body: string }) {
   return <div className="empty-state"><span>◇</span><div><strong>{title}</strong><p>{body}</p></div></div>;
 }
@@ -757,6 +792,13 @@ function parseServerEvent(raw: Event) {
   }
 }
 function isTerminal(status?: OperationSnapshot["status"]): boolean { return status === "succeeded" || status === "failed" || status === "cancelled" || status === "interrupted"; }
+function ontologyRouteSearch(value: Record<string, unknown>) {
+  return {
+    ...(typeof value.branchId === "string" && value.branchId ? { branchId: value.branchId } : {}),
+    ...(typeof value.atCommit === "string" && value.atCommit ? { atCommit: value.atCommit } : {}),
+    ...((value.includeCanonicalFuture === true || value.includeCanonicalFuture === "true") ? { includeCanonicalFuture: true } : {}),
+  };
+}
 function firstError(...errors: Array<Error | null | undefined>): Error | undefined { return errors.find((error): error is Error => error instanceof Error); }
 function requestId(prefix: string): string { return `${prefix}-${crypto.randomUUID()}`; }
 function shortHash(value: string): string { return value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-5)}` : value; }

@@ -108,6 +108,34 @@ deleting the origin path does not change the registered source. Legacy
 workspace-local `.novel-harness/` state is copied into the user store on first
 open and deliberately left in place for recoverability.
 
+## Browser workbench command
+
+`nwh web` opens the local React workbench over the same workspace identity,
+application services, Pi credentials/model catalog, compiler stores, trace log,
+and event-sourced worlds as the TUI. It is not a separate cloud service or a
+second runtime.
+
+```bash
+nwh web --root /path/to/novel-workspace
+nwh web --host 127.0.0.1 --port 3080 --no-open
+```
+
+The default loopback binding requires no product login. Binding a non-loopback
+address is rejected unless `--allow-remote` is supplied explicitly; that flag
+does not add authentication. The host rejects unexpected Host/Origin values,
+requires a per-process CSRF token for mutations, redacts trace secrets, and
+applies strict browser security headers.
+
+Browser operations cover source registration, resumable preparation, proposal
+decisions, instance creation/forking/removal, play/resume, trace inspection, and
+five ontology views. Ontology data is projected from canonical artifacts and
+committed history. When a branch is selected, the commit must be an ancestor of
+its head, state/rule/place validity is derived at that commit, and later canon is
+excluded unless the user explicitly enables the separately styled possibility
+layer. Clear/archive/remove presentation actions do not rewrite committed branch
+history; destructive world/source actions require an exact effect preview and
+confirmation.
+
 Completed novel preparation is reusable across workspaces. NWH writes immutable
 bundles below `$NWH_HOME/prepared-novels/v1/<content-md5>/revisions/<bundle-hash>/`;
 the manifest also binds the full SHA-256 source digest. `active.json` is an atomic

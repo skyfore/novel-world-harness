@@ -1,8 +1,8 @@
 # Implementation status
 
-Date: 2026-08-26
+Date: 2026-08-30
 
-Verified baseline: `pnpm build`; `pnpm test` (110 test files, 625 tests passing).
+Verified baseline: `pnpm build`; `pnpm test` (125 test files, 709 tests passing).
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
@@ -18,6 +18,7 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 | Area | Status | What is actually usable |
 | --- | --- | --- |
 | Terminal hub | Implemented | Claude Code-style TUI, workspace catalogs, committed progress, durable world resume, local lexical discovery, and bounded reads; general model tools remain read-only |
+| Local Web UI | MVP implemented | Loopback-first React/Fastify workbench for source ingest, preparation/review, instance lifecycle, Pi-backed play/resume, append-only run/LLM/tool/context traces, and branch/time-scoped model/event/place/rule/provenance graphs; no product login or remote multi-user deployment |
 | Source ingest | Implemented | Exact file/stdin/inline bytes archived globally by SHA-256, source manifest, widened deterministic evidence segments, plus finish-gated declarative chapter discovery when built-in headings are insufficient |
 | Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce source-exclusive typed pending proposals, recover drafts across retries, allow narrow withdrawal, and use host-owned finish and total-tool-call circuit breakers |
 | Source observations | M2 + M3b-1 implemented | Immutable-source paragraph/sentence partition, exact entity/event mention, quotation, and discourse annotations, source-local closure, accounting, audit, batch recovery, and paged retrieval; event mentions carry no truth or canonical-event authority |

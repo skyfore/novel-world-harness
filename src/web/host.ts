@@ -7,6 +7,7 @@ import { z, ZodError } from "zod";
 import { CatalogService } from "../application/catalog-service.js";
 import { InstanceApplicationService } from "../application/instance-service.js";
 import { MaintenanceApplicationService } from "../application/maintenance-service.js";
+import { OntologyProjectionService } from "../application/ontology-projection-service.js";
 import { PiModelCatalogService, type ModelCatalogReader } from "../application/model-catalog-service.js";
 import { PlayApplicationService } from "../application/play-service.js";
 import { PreparationApplicationService } from "../application/preparation-service.js";
@@ -23,6 +24,8 @@ import {
   forkInstanceRequestSchema,
   healthResponseSchema,
   operationKindSchema,
+  ontologyLayerSchema,
+  ontologyViewSchema,
   prepareNovelRequestSchema,
   playMoveRequestSchema,
   proposalAcceptRequestSchema,
@@ -58,6 +61,7 @@ export interface CreateWebHostOptions {
   proposalService?: ProposalApplicationService;
   instanceService?: InstanceApplicationService;
   maintenanceService?: MaintenanceApplicationService;
+  ontologyService?: OntologyProjectionService;
   traceStore?: TraceStore;
   configPath?: string;
   model?: string;
@@ -78,6 +82,7 @@ declare module "fastify" {
       proposals: ProposalApplicationService;
       instances: InstanceApplicationService;
       maintenance: MaintenanceApplicationService;
+      ontology: OntologyProjectionService;
       traces: TraceStore;
       traceQueries: TraceApplicationService;
     };
@@ -122,8 +127,9 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   const proposals = options.proposalService ?? new ProposalApplicationService({ root, events });
   const instances = options.instanceService ?? new InstanceApplicationService({ root, events });
   const maintenance = options.maintenanceService ?? new MaintenanceApplicationService({ root, events, operations, traceStore: traces });
+  const ontology = options.ontologyService ?? new OntologyProjectionService(root);
   const app = Fastify({ logger: false, trustProxy: false, bodyLimit: 26_214_400 });
-  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, instances, maintenance, traces, traceQueries });
+  app.decorate("nwh", { events, startedAt, csrfToken, operations, play, sources, preparation, proposals, instances, maintenance, ontology, traces, traceQueries });
 
   app.addHook("onRequest", async (request, reply) => {
     if (!isAllowedHost(request, configuredHost)) {
@@ -207,8 +213,8 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
         { id: "model-settings", status: "foundation", phase: 0 },
         { id: "play", status: "available", phase: 1 },
         { id: "trace", status: "available", phase: 1 },
-        { id: "compiler", status: "foundation", phase: 2 },
-        { id: "ontology", status: "planned", phase: 2 },
+        { id: "compiler", status: "available", phase: 2 },
+        { id: "ontology", status: "available", phase: 2 },
       ],
     });
   };
@@ -228,6 +234,11 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     const { sourceId } = sourceParamSchema.parse(request.params);
     const { branchId } = preparationQuerySchema.parse(request.query);
     return preparation.inspect(sourceId, branchId);
+  });
+  app.get(`/api/${WEB_API_VERSION}/novels/:sourceId/ontology`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    const query = ontologyQuerySchema.parse(request.query);
+    return ontology.project({ sourceId, ...query });
   });
   app.post(`/api/${WEB_API_VERSION}/novels/:sourceId/prepare`, async (request, reply) => {
     const { sourceId } = sourceParamSchema.parse(request.params);
@@ -385,6 +396,11 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     const { runId } = traceCallQuerySchema.parse(request.query);
     return traceQueries.getCall(callId, runId);
   });
+  app.get(`/api/${WEB_API_VERSION}/ontology/nodes/:nodeId`, async (request) => {
+    const { nodeId } = ontologyNodeParamSchema.parse(request.params);
+    const query = ontologyNodeQuerySchema.parse(request.query);
+    return ontology.getNode(query, nodeId);
+  });
   app.get(`/api/${WEB_API_VERSION}/models/providers`, async () => (await modelCatalogService.read()).providers);
   app.get(`/api/${WEB_API_VERSION}/models`, async () => (await modelCatalogService.read()).models);
   app.get(`/api/${WEB_API_VERSION}/events`, (request, reply) => {
@@ -512,6 +528,26 @@ const proposalListQuerySchema = z.object({
 const proposalDetailQuerySchema = z.object({
   status: z.enum(["pending", "accepted", "rejected"]).optional(),
 }).strict();
+const ontologyLayersQuerySchema = z.preprocess(
+  (value) => typeof value === "string" ? value.split(",").filter(Boolean) : value,
+  z.array(ontologyLayerSchema).optional(),
+);
+const ontologyBooleanQuerySchema = z.preprocess(
+  (value) => value === "true" ? true : value === "false" || value === undefined ? false : value,
+  z.boolean(),
+);
+const ontologyQuerySchema = z.object({
+  view: ontologyViewSchema,
+  branchId: z.string().min(1).optional(),
+  atCommit: z.string().min(1).optional(),
+  includeCanonicalFuture: ontologyBooleanQuerySchema.default(false),
+  layers: ontologyLayersQuerySchema,
+  limit: z.coerce.number().int().min(1).max(2_000).optional(),
+}).strict();
+const ontologyNodeQuerySchema = ontologyQuerySchema.extend({
+  sourceId: z.string().min(1),
+}).strict();
+const ontologyNodeParamSchema = z.object({ nodeId: z.string().min(1) }).strict();
 const removalPreviewQuerySchema = z.object({
   mode: z.enum(["analysis", "novel"]),
 }).strict();

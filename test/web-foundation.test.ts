@@ -273,6 +273,9 @@ describe("local Web host", () => {
     const compilerPage = await app.inject({ method: "GET", url: "/novels/source-1/compile", headers: { accept: "text/html" } });
     expect(compilerPage.statusCode).toBe(200);
     expect(compilerPage.body).toContain("NWH test shell");
+    const ontologyPage = await app.inject({ method: "GET", url: "/novels/source-1/ontology/events", headers: { accept: "text/html" } });
+    expect(ontologyPage.statusCode).toBe(200);
+    expect(ontologyPage.body).toContain("NWH test shell");
     const traceListPage = await app.inject({ method: "GET", url: "/traces", headers: { accept: "text/html" } });
     expect(traceListPage.statusCode).toBe(200);
     expect(traceListPage.body).toContain("NWH test shell");

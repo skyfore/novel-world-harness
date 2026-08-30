@@ -64,21 +64,35 @@ the terminal harness. Use `--no-open` when a browser should not be launched.
 Binding beyond loopback is rejected unless `--allow-remote` is explicit because
 the MVP has no product login layer.
 
-The current Web MVP exposes the novel, instance, play-session, and Pi model
-catalog plus the first complete browser play loop. Open an instance, select a
-compiled character, render the actor-safe opening, submit actions through the
-same Pi translation/adjudication pipeline as the terminal harness, and continue
-the durable transcript. The operation side panel shows live phase/status data,
-the optimistic branch head, whether the deterministic commit boundary has been
-crossed, and safe Stop behavior. Session archive, restore, transcript clear, and
-presentation-session removal preserve committed branch truth.
+The Web MVP is a complete browser workbench over the same application services
+and Pi runtime as the terminal harness. It supports source upload/paste,
+resumable preparation, proposal review and convergence, world-instance creation
+and forking, character selection, durable play/resume, and previewed maintenance
+actions. The play operation panel shows live phase/status data, the branch head,
+whether the deterministic commit boundary has been crossed, and safe Stop
+behavior. Session archive, restore, transcript clear, and presentation-session
+removal preserve committed branch truth.
+
+Every play and compiler run has a durable trajectory inspector. It exposes the
+ordered LLM requests and tool calls, context-part composition (system policy,
+world model, source evidence, prior messages, and tool results), exact request
+and response payloads after secret redaction, usage/timing, retries, story-time
+transitions, and commit boundaries. Trace storage is append-only diagnostic data
+and never becomes world truth.
+
+Each novel also has five read-only ontology projections: world model, events,
+places, rules, and provenance. They derive from the existing canonical stores
+and committed history—there is no second graph database. A projection can be
+pinned to a branch and ancestor commit; future canon is hidden by default and
+can only be displayed in the explicitly labeled possibility layer. The graph,
+searchable table fallback, and node inspector expose status, relationships,
+revision identity, and exact source excerpts.
 
 Every mutating request uses the per-process CSRF token returned by bootstrap;
-long-running play and narration calls return an idempotent operation and stream
-updates over SSE. Full nested LLM/tool/context trajectories are the next Phase
-1B increment; compiler mutations and ontology projections follow in Phase 2.
-For frontend development, run `pnpm dev:web:server` and `pnpm dev:web` in
-separate terminals; Vite proxies `/api` to the local host.
+long-running compiler, play, and narration calls return an idempotent operation
+and stream updates over SSE. For frontend development, run
+`pnpm dev:web:server` and `pnpm dev:web` in separate terminals; Vite proxies
+`/api` to the local host.
 
 ## Local terminal assistant
 

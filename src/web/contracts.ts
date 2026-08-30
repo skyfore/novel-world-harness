@@ -502,6 +502,101 @@ export const removalExecutionResultSchema = z.object({
   tracesPreserved: z.literal(true),
 }).strict();
 
+export const ontologyViewSchema = z.enum(["model", "events", "places", "rules", "provenance"]);
+export const ontologyLayerSchema = z.enum(["canonical", "branch", "possibility", "proposal", "evidence"]);
+export const ontologyStatusSchema = z.enum([
+  "canonical",
+  "active",
+  "inactive",
+  "branch-committed",
+  "possibility",
+  "proposal",
+  "contested",
+  "rejected",
+]);
+
+export const ontologyScopeSchema = z.object({
+  sourceId: z.string().min(1),
+  view: ontologyViewSchema,
+  branchId: z.string().min(1).optional(),
+  atCommit: z.string().min(1).optional(),
+  branchHead: z.string().min(1).optional(),
+  includeCanonicalFuture: z.boolean(),
+  layers: z.array(ontologyLayerSchema),
+}).strict();
+
+export const ontologyEvidenceSchema = z.object({
+  sourceId: z.string().min(1),
+  startLine: z.number().int().positive(),
+  endLine: z.number().int().positive(),
+  startByte: z.number().int().nonnegative().optional(),
+  endByte: z.number().int().nonnegative().optional(),
+  quoteHash: z.string().min(1),
+  strength: z.enum(["explicit", "strong-inference", "weak-inference"]),
+  excerpt: z.string().optional(),
+  excerptTruncated: z.boolean().optional(),
+}).strict();
+
+export const ontologyNodeSchema = z.object({
+  id: z.string().min(1),
+  artifactId: z.string().min(1),
+  kind: z.string().min(1),
+  label: z.string().min(1),
+  status: ontologyStatusSchema,
+  layer: ontologyLayerSchema,
+  revisionHash: z.string().min(1).optional(),
+  evidenceCount: z.number().int().nonnegative(),
+  shared: z.boolean(),
+  storyTime: z.unknown().optional(),
+  summary: z.record(z.string(), z.unknown()),
+  detailsEndpoint: z.string().min(1),
+}).strict();
+
+export const ontologyEdgeSchema = z.object({
+  id: z.string().min(1),
+  kind: z.string().min(1),
+  label: z.string().min(1),
+  source: z.string().min(1),
+  target: z.string().min(1),
+  status: ontologyStatusSchema,
+  layer: ontologyLayerSchema,
+  evidenceCount: z.number().int().nonnegative(),
+  storyTime: z.unknown().optional(),
+  properties: z.record(z.string(), z.unknown()),
+}).strict();
+
+export const ontologyGraphSchema = z.object({
+  version: z.literal(1),
+  scope: ontologyScopeSchema,
+  nodes: z.array(ontologyNodeSchema),
+  edges: z.array(ontologyEdgeSchema),
+  legend: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    color: z.string().min(1),
+    count: z.number().int().nonnegative(),
+  }).strict()),
+  facets: z.object({
+    kinds: z.record(z.string(), z.number().int().nonnegative()),
+    statuses: z.record(z.string(), z.number().int().nonnegative()),
+    layers: z.record(z.string(), z.number().int().nonnegative()),
+  }).strict(),
+  totalNodes: z.number().int().nonnegative(),
+  totalEdges: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  diagnostics: z.array(z.string()),
+}).strict();
+
+export const ontologyNodeDetailSchema = z.object({
+  version: z.literal(1),
+  scope: ontologyScopeSchema,
+  node: ontologyNodeSchema,
+  payload: z.unknown(),
+  evidence: z.array(ontologyEvidenceSchema),
+  incoming: z.array(ontologyEdgeSchema),
+  outgoing: z.array(ontologyEdgeSchema),
+}).strict();
+
 export const createPlaySessionRequestSchema = z.object({
   branchId: z.string().min(1),
   actorId: z.string().min(1),
@@ -669,6 +764,15 @@ export type RemovalEffect = z.infer<typeof removalEffectSchema>;
 export type RemovalPreview = z.infer<typeof removalPreviewSchema>;
 export type ExecuteRemovalRequest = z.infer<typeof executeRemovalRequestSchema>;
 export type RemovalExecutionResult = z.infer<typeof removalExecutionResultSchema>;
+export type OntologyView = z.infer<typeof ontologyViewSchema>;
+export type OntologyLayer = z.infer<typeof ontologyLayerSchema>;
+export type OntologyStatus = z.infer<typeof ontologyStatusSchema>;
+export type OntologyScope = z.infer<typeof ontologyScopeSchema>;
+export type OntologyEvidence = z.infer<typeof ontologyEvidenceSchema>;
+export type OntologyNode = z.infer<typeof ontologyNodeSchema>;
+export type OntologyEdge = z.infer<typeof ontologyEdgeSchema>;
+export type OntologyGraph = z.infer<typeof ontologyGraphSchema>;
+export type OntologyNodeDetail = z.infer<typeof ontologyNodeDetailSchema>;
 export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSchema>;
 export type PlayableCharacter = z.infer<typeof playableCharacterSchema>;
 export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;

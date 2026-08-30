@@ -25,6 +25,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "dev": "node --import tsx src/cli.ts",
     "dev:web": "vite --config apps/web/vite.config.ts",
+    "dev:web:all": "pnpm run --parallel \"/^dev:web(?::server)?$/\"",
     "dev:web:server": "pnpm run build:web && pnpm dev web --no-open",
     "test": "vitest run",
     "test:e2e": "pnpm run build && playwright test"

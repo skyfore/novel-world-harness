@@ -144,7 +144,8 @@ revision identity, and exact source excerpts.
 
 Every mutating request uses the per-process CSRF token returned by bootstrap;
 long-running compiler, play, and narration calls return an idempotent operation
-and stream updates over SSE. For frontend development, run
+and stream updates over SSE. For frontend development, run `pnpm dev:web:all`
+to start the API host and Vite together. Alternatively, run
 `pnpm dev:web:server` and `pnpm dev:web` in separate terminals; Vite proxies
 `/api` to the local host.
 

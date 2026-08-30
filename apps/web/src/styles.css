@@ -1159,8 +1159,12 @@ body.play-immersive-active { height: 100dvh; overflow: hidden; }
 .play-edge-toggle { display: none; }
 @keyframes play-presence-pulse { 50% { opacity: .45; transform: scale(.72); } }
 
-.immersive-play .transcript { min-height: 0; height: auto; overflow-y: auto; padding: clamp(25px, 4vh, 52px) clamp(30px, 6vw, 92px) 34px; scroll-behavior: smooth; overscroll-behavior: contain; scrollbar-width: none; }
-.immersive-play .transcript::-webkit-scrollbar, .play-edge-scroll::-webkit-scrollbar { display: none; }
+.immersive-play .transcript { min-height: 0; height: auto; overflow-y: auto; padding: clamp(25px, 4vh, 52px) clamp(30px, 6vw, 92px) 34px; scroll-behavior: smooth; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #4c5b3e #111510; }
+.immersive-play .transcript::-webkit-scrollbar { width: 8px; }
+.immersive-play .transcript::-webkit-scrollbar-track { background: #111510; }
+.immersive-play .transcript::-webkit-scrollbar-thumb { border: 2px solid #111510; border-radius: 999px; background: #4c5b3e; }
+.immersive-play .transcript::-webkit-scrollbar-thumb:hover { background: #6d814f; }
+.play-edge-scroll::-webkit-scrollbar { display: none; }
 .immersive-play .message { width: 100%; max-width: 880px; margin: 0 auto 34px; }
 .immersive-play .message > header { margin-bottom: 10px; }
 .immersive-play .message > header span { font-size: 9px; letter-spacing: .08em; }

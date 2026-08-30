@@ -274,11 +274,15 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
     return {
       bodyOverflow: getComputedStyle(document.body).overflowY,
       pageOverflow: getComputedStyle(pageElement).overflowY,
+      transcriptOverflow: getComputedStyle(document.querySelector<HTMLElement>(".transcript")!).overflowY,
+      transcriptScrollbarWidth: getComputedStyle(document.querySelector<HTMLElement>(".transcript")!).scrollbarWidth,
       bottomGap: Math.abs(story.getBoundingClientRect().bottom - composer.getBoundingClientRect().bottom),
     };
   });
   expect(immersiveLayout.bodyOverflow).toBe("hidden");
   expect(immersiveLayout.pageOverflow).toBe("hidden");
+  expect(immersiveLayout.transcriptOverflow).toBe("auto");
+  expect(immersiveLayout.transcriptScrollbarWidth).toBe("thin");
   expect(immersiveLayout.bottomGap).toBeLessThanOrEqual(2);
 
   const triggers = page.getByRole("button", { name: "Open trace details for this message" });

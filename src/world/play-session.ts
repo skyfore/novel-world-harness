@@ -217,6 +217,31 @@ export class PlaySessionStore {
     return next ? this.activate(next.id) : null;
   }
 
+  async detachInstance(branchIdValue: string): Promise<{
+    detachedSession: ActivePlaySession | null;
+    nextActiveSession: ActivePlaySession | null;
+  }> {
+    const branchId = idSchema.parse(branchIdValue);
+    const session = await this.readInstance(branchId);
+    const active = await this.read();
+    let detachedSession: ActivePlaySession | null = null;
+    if (session) {
+      detachedSession = activePlaySessionSchema.parse({
+        ...session,
+        status: "detached",
+        updatedAt: new Date().toISOString(),
+      });
+      await this.atomicWrite(this.instanceFile(branchId), detachedSession);
+    }
+    if (active?.branchId !== branchId) return { detachedSession, nextActiveSession: active };
+    await fs.rm(this.filePath, { force: true });
+    const next = (await this.listInstances()).find((candidate) => candidate.status === "idle");
+    return {
+      detachedSession,
+      nextActiveSession: next ? await this.activate(next.id) : null,
+    };
+  }
+
   private async requireById(sessionId: string): Promise<ActivePlaySession> {
     const session = await this.getById(sessionId);
     if (!session) throw new Error(`Unknown play session '${sessionId}'. Use /play-sessions to list sessions in this workspace.`);

@@ -26,6 +26,8 @@ export type InstanceRemovalResult = {
   branchId: string;
   sourceId?: string;
   nextActiveSession: ActivePlaySession | null;
+  detachedSession?: ActivePlaySession;
+  presentationPreserved: boolean;
 };
 
 export type NovelAnalysisRemovalResult = {
@@ -49,14 +51,21 @@ export type NovelRemovalResult = {
   sourceUnregistered: boolean;
 };
 
-export async function removeWorldInstance(root: string, branchId: string): Promise<InstanceRemovalResult> {
+export async function removeWorldInstance(
+  root: string,
+  branchId: string,
+  options: { retainPresentation?: boolean } = {},
+): Promise<InstanceRemovalResult> {
   const catalog = await inspectPlayExperience(root);
   const instance = catalog.instances.find((candidate) => candidate.branchId === branchId);
   if (!instance) throw new Error(`Unknown instance '${branchId}'. Use /instances to list playable instances.`);
 
   await new BranchStore(root).remove(branchId);
-  const nextActiveSession = await new PlaySessionStore(root).removeInstance(branchId);
-  await new PlayConversationStore(root).remove(branchId);
+  const sessionStore = new PlaySessionStore(root);
+  const detached = options.retainPresentation
+    ? await sessionStore.detachInstance(branchId)
+    : { detachedSession: null, nextActiveSession: await sessionStore.removeInstance(branchId) };
+  if (!options.retainPresentation) await new PlayConversationStore(root).remove(branchId);
   await fs.rm(path.join(workspaceStateDir(root), "world", "v1", "frontier", branchId), {
     recursive: true,
     force: true,
@@ -64,7 +73,9 @@ export async function removeWorldInstance(root: string, branchId: string): Promi
   return {
     branchId,
     ...(instance.sourceId ? { sourceId: instance.sourceId } : {}),
-    nextActiveSession,
+    nextActiveSession: detached.nextActiveSession,
+    ...(detached.detachedSession ? { detachedSession: detached.detachedSession } : {}),
+    presentationPreserved: options.retainPresentation === true,
   };
 }
 
@@ -273,7 +284,7 @@ export async function removeNovelAnalysis(
 export async function removeNovel(
   root: string,
   sourceInput: string | SourceDocument,
-  options: { cacheRoot?: string } = {},
+  options: { cacheRoot?: string; retainPresentation?: boolean } = {},
 ): Promise<NovelRemovalResult> {
   const workspace = await WorkspaceStore.create(root);
   const source = typeof sourceInput === "string"
@@ -295,10 +306,12 @@ export async function removeNovel(
   );
 
   const analysis = await removeNovelAnalysis(root, source, {
-    ...options,
+    ...(options.cacheRoot ? { cacheRoot: options.cacheRoot } : {}),
     preservePreparedRevisionHashes: [],
   });
-  for (const branchId of removalOrder) await removeWorldInstance(root, branchId);
+  for (const branchId of removalOrder) {
+    await removeWorldInstance(root, branchId, options.retainPresentation ? { retainPresentation: true } : {});
+  }
   const sourceUnregistered = await workspace.unregisterSource(source.id);
   return { source, removedBranchIds: removalOrder, analysis, sourceUnregistered };
 }

@@ -58,6 +58,8 @@ describe("Web maintenance effect manifests", () => {
     });
     const first = await service.previewInstance("child");
     expect(first).toMatchObject({ executable: true, target: { confirmation: "child" } });
+    expect(first.effects).toContainEqual(expect.objectContaining({ id: "play-sessions", disposition: "modify", count: 1 }));
+    expect(first.effects).toContainEqual(expect.objectContaining({ id: "conversation", disposition: "preserve", count: 1 }));
     expect(first.effects).toContainEqual(expect.objectContaining({ id: "trace-runs", disposition: "preserve", count: 1 }));
 
     await conversations.append({ branchId: "child", actorId: "hero", atCommit: head, role: "player", status: "accepted", text: "second" });
@@ -75,10 +77,12 @@ describe("Web maintenance effect manifests", () => {
     });
     expect(removed).toMatchObject({
       action: "remove-instance",
-      removed: { branches: 1, sessions: 1, conversationMessages: 2 },
+      removed: { branches: 1, sessions: 0, conversationMessages: 0 },
       tracesPreserved: true,
     });
     await expect(engine.branches.read("child")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(sessions.getById(childSession.id)).resolves.toMatchObject({ status: "detached" });
+    await expect(conversations.list("child")).resolves.toHaveLength(2);
     await expect(traces.getRun(trace.id)).resolves.toMatchObject({ id: trace.id, branchId: "child" });
   });
 
@@ -114,6 +118,8 @@ describe("Web maintenance effect manifests", () => {
 
     const novel = await service.previewNovel(fixture.source.id);
     expect(novel.effects).toContainEqual(expect.objectContaining({ id: "source-material", disposition: "preserve", count: 1 }));
+    expect(novel.effects).toContainEqual(expect.objectContaining({ id: "play-sessions", disposition: "modify", count: 1 }));
+    expect(novel.effects).toContainEqual(expect.objectContaining({ id: "conversation", disposition: "preserve" }));
     const removed = await service.removeNovel(fixture.source.id, {
       effectHash: novel.effectHash,
       confirmation: fixture.source.id,
@@ -121,6 +127,7 @@ describe("Web maintenance effect manifests", () => {
     });
     expect(removed).toMatchObject({ action: "remove-novel", removed: { branches: 1, sourceRegistrations: 1 }, immutableSourcePreserved: true });
     await expect((await WorkspaceStore.create(root)).getSource(fixture.source.id)).resolves.toBeNull();
+    await expect(new PlaySessionStore(root).getById(session.id)).resolves.toMatchObject({ status: "detached" });
     await expect(traces.getRun(trace.id)).resolves.toMatchObject({ id: trace.id, sourceId: fixture.source.id });
   });
 });

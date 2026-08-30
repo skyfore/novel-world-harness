@@ -73,6 +73,11 @@ whether the deterministic commit boundary has been crossed, and safe Stop
 behavior. Session archive, restore, transcript clear, and presentation-session
 removal preserve committed branch truth.
 
+Web removal keeps observability and presentation lifecycles separate from world
+truth: removing an instance or novel detaches its historical play sessions and
+preserves their transcripts and traces, while removing a play session explicitly
+removes only that session's presentation data.
+
 Web operation snapshots and their idempotency keys are atomically persisted
 below the workspace state directory. A server restart retains completed runs and
 turns unfinished work into an explicit `interrupted` state; post-commit work is

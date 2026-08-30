@@ -45,6 +45,8 @@ code, .mono { font-family: "DM Mono", ui-monospace, monospace; }
 .nav-empty { display: block; padding: 9px 10px; }
 .nav-link-new { margin-bottom: 7px; border-color: #31372a; color: var(--accent); font: 10px/1 "DM Mono"; text-transform: uppercase; }
 .sidebar-footer { padding: 13px; border-top: 1px solid var(--line-soft); }
+.nav-archive-toggle { width: 100%; padding: 7px 9px; border: 0; background: transparent; color: var(--faint); font: 8px/1.2 "DM Mono"; text-align: left; cursor: pointer; }
+.nav-archive-toggle:hover { color: var(--muted); }
 .connection { display: flex; align-items: center; gap: 7px; padding: 10px; color: var(--faint); font: 10px/1 "DM Mono"; text-transform: uppercase; }
 .connection span, .status-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--faint); }
 .connection-online span, .status-available { background: var(--accent); box-shadow: 0 0 8px #d6ff7266; }
@@ -323,6 +325,7 @@ button.ontology-table-row:hover, .ontology-table-selected { background: #1d2019;
 .session-heading { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
 .session-toolbar { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .session-toolbar button { min-height: 34px; padding-inline: 11px; color: var(--muted); }
+.detached-pill { padding: 8px 10px; border: 1px solid #5d5140; border-radius: 4px; color: #c2ad87; font: 8px/1 "DM Mono"; text-transform: uppercase; }
 .live-pill { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 11px; border: 1px solid #45502f; border-radius: 99px; color: var(--accent); font: 10px/1 "DM Mono"; text-transform: uppercase; }
 .live-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px #d6ff7288; }
 .play-status-strip { display: grid; grid-template-columns: 1.1fr 1fr 1fr .8fr 1fr; margin: -15px 0 16px; border: 1px solid var(--line); border-radius: 5px; background: #141512; overflow: hidden; }

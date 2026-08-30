@@ -90,8 +90,8 @@ export class MaintenanceApplicationService {
     const blockers = await this.instanceBlockers(branchId, sessions.map((session) => session.id));
     const effects: RemovalEffect[] = [
       effect("branch", "Branch reference", "remove", 1, [branchId], "Deletes the selected leaf branch record and its mutable frontier."),
-      effect("play-sessions", "Play session metadata", "remove", sessions.length, sessions.map((session) => session.id), "Removes saved session selectors attached to this branch."),
-      effect("conversation", "Presentation messages", "remove", messages.length, messages.map((message) => message.id), "Removes the branch conversation; these messages never were world truth."),
+      effect("play-sessions", "Play session metadata", "modify", sessions.length, sessions.map((session) => session.id), "Marks saved sessions as detached historical presentation; they can no longer write world truth."),
+      effect("conversation", "Presentation messages", "preserve", messages.length, messages.map((message) => message.id), "Preserves the branch transcript for historical inspection; these messages never were world truth."),
       effect("children", "Dependent child branches", "preserve", children.length, children, children.length ? "Live children block deletion; remove them first." : "No child branch depends on this target."),
       effect("trace-runs", "LLM and tool traces", "preserve", traceIds.length, traceIds, "Observability records remain available and become detached historical evidence."),
       effect("world-objects", "Immutable commits and events", "preserve", instance.commitCount + instance.eventCount, [instance.headCommitId], "Content-addressed commit/event objects remain available because other branches may share them."),
@@ -112,7 +112,7 @@ export class MaintenanceApplicationService {
 
   async removeInstance(branchId: string, inputValue: ExecuteRemovalRequest): Promise<RemovalExecutionResult> {
     return this.execute("remove-instance", branchId, inputValue, async (current) => {
-      await removeWorldInstance(this.root, branchId);
+      await removeWorldInstance(this.root, branchId, { retainPresentation: true });
       return resultFromPreview(current);
     });
   }
@@ -142,7 +142,7 @@ export class MaintenanceApplicationService {
       const removal = await withWorkspaceOperationLock(this.root, "compiler", () => removeNovel(
         this.root,
         sourceId,
-        this.options.cacheRoot ? { cacheRoot: this.options.cacheRoot } : {},
+        { ...(this.options.cacheRoot ? { cacheRoot: this.options.cacheRoot } : {}), retainPresentation: true },
       ));
       return removalExecutionResultSchema.parse({
         ...resultFromPreview(current),
@@ -187,8 +187,8 @@ export class MaintenanceApplicationService {
       effect("prepared-revisions-remove", "Unpinned prepared revisions", "remove", unpinnedRevisionIds.length, unpinnedRevisionIds, "Removes mutable active cache state and revisions not required by a retained branch."),
       effect("prepared-revisions-pinned", "Branch-pinned prepared revisions", removeBranches ? "remove" : "preserve", inventory.pinnedRevisionIds.length, inventory.pinnedRevisionIds, removeBranches ? "Owned branches are removed, so their prepared bundles no longer need retention." : "Immutable bundles remain addressable only by retained branch revision hash."),
       effect("branches", "Owned branches", removeBranches ? "remove" : "preserve", branchIds.length, branchIds, removeBranches ? "Removes owned branches child-first." : "Committed branch history and derived world state remain playable."),
-      effect("play-sessions", "Owned play sessions", removeBranches ? "remove" : "preserve", sessions.length, sessions.map((session) => session.id), removeBranches ? "Removes session selectors attached to removed branches." : "Saved play sessions remain attached to retained branches."),
-      effect("conversation", "Presentation messages", removeBranches ? "remove" : "preserve", messages.length, messages.map((message) => message.id), removeBranches ? "Removes branch conversation files." : "Conversation presentation memory remains with retained sessions."),
+      effect("play-sessions", "Owned play sessions", removeBranches ? "modify" : "preserve", sessions.length, sessions.map((session) => session.id), removeBranches ? "Marks session selectors as detached historical presentation after their branches are removed." : "Saved play sessions remain attached to retained branches."),
+      effect("conversation", "Presentation messages", "preserve", messages.length, messages.map((message) => message.id), removeBranches ? "Preserves branch conversations for detached-session inspection." : "Conversation presentation memory remains with retained sessions."),
       effect("source-registration", "Novel registration", removeBranches ? "remove" : "preserve", 1, [source.id], removeBranches ? "Unregisters the source from this workspace." : "Keeps the novel registered for a fresh compilation."),
       effect("source-material", "Immutable archived source bytes", "preserve", 1, [source.contentSha256], "Content-addressed source evidence is never physically deleted by this command."),
       effect("trace-runs", "LLM and tool traces", "preserve", traceIds.size, [...traceIds].sort(), "Trace records remain read-only historical diagnostics."),

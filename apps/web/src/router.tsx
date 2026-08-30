@@ -114,6 +114,7 @@ function RootLayout() {
   const query = useBootstrap();
   const queryClient = useQueryClient();
   const [connection, setConnection] = useState<"connecting" | "online" | "offline">("connecting");
+  const [showArchivedSessions, setShowArchivedSessions] = useState(false);
   const operations = useQuery({
     queryKey: ["operations"],
     queryFn: ({ signal }) => fetchOperations(undefined, signal),
@@ -177,6 +178,8 @@ function RootLayout() {
 
   const data = query.data;
   const activeOperations = operations.data?.filter((operation) => !isTerminal(operation.status)) ?? [];
+  const visibleSessions = data?.catalog.playSessions.filter((session) => showArchivedSessions || session.status !== "archived") ?? [];
+  const archivedSessionCount = data?.catalog.playSessions.filter((session) => session.status === "archived").length ?? 0;
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -202,12 +205,13 @@ function RootLayout() {
               </Link>
             ))}
           </NavSection>
-          <NavSection label="Play sessions" count={data?.catalog.playSessions.length}>
-            {data?.catalog.playSessions.map((session) => (
+          <NavSection label="Play sessions" count={visibleSessions.length}>
+            {visibleSessions.map((session) => (
               <Link key={session.id} to="/play/$sessionId" params={{ sessionId: session.id }} className="nav-link nav-link-item">
                 <span>{session.title}</span><small>{session.status}</small>
               </Link>
             ))}
+            {archivedSessionCount > 0 && <button type="button" className="nav-archive-toggle" onClick={() => setShowArchivedSessions((value) => !value)}>{showArchivedSessions ? "Hide archived" : `Show archived (${archivedSessionCount})`}</button>}
           </NavSection>
         </nav>
         <div className="sidebar-footer">
@@ -352,7 +356,7 @@ function NovelPage() {
             void queryClient.invalidateQueries({ queryKey: preparationKey(sourceId) });
             void navigate({ to: "/novels/$sourceId/compile", params: { sourceId } });
           }} />
-          <div><strong>Remove novel</strong><p>Remove its registration, analysis, owned branches, sessions, and conversations. Archived content-addressed source bytes and traces remain preserved.</p></div>
+          <div><strong>Remove novel</strong><p>Remove its registration, analysis, and owned branches. Sessions, conversations, archived content-addressed source bytes, and traces remain as detached history.</p></div>
           <MaintenanceControl action="remove-novel" targetId={sourceId} csrfToken={data.csrfToken} triggerLabel="Preview novel removal" onCompleted={() => {
             void queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
             void navigate({ to: "/" });
@@ -702,9 +706,9 @@ function SessionPage() {
       <div className="session-heading">
         <PageHeading eyebrow="Live executable world" title={session.title} description={`${session.actorName ?? session.actorId} · ${session.branchId}`} />
         <div className="session-toolbar">
-          {session.status === "archived" ? <button onClick={() => restoreMutation.mutate()}>Restore</button> : session.status === "idle" ? <button onClick={() => activateMutation.mutate()}>Make active</button> : <span className="live-pill"><i />Active writer</span>}
+          {session.status === "detached" ? <span className="detached-pill">Detached world</span> : session.status === "archived" ? <button onClick={() => restoreMutation.mutate()}>Restore</button> : session.status === "idle" ? <button onClick={() => activateMutation.mutate()}>Make active</button> : <span className="live-pill"><i />Active writer</span>}
           <button disabled={busy || !data.messages.length} onClick={() => window.confirm("Clear presentation transcript? Committed world history will be preserved.") && clearMutation.mutate()}>Clear transcript</button>
-          {session.status !== "archived" && <button disabled={busy} onClick={() => archiveMutation.mutate()}>Archive</button>}
+          {session.status !== "archived" && session.status !== "detached" && <button disabled={busy} onClick={() => archiveMutation.mutate()}>Archive</button>}
           <button className="danger-button" disabled={busy} onClick={() => window.confirm("Remove this play session and its presentation transcript? The world branch will be preserved.") && removeMutation.mutate()}>Remove</button>
         </div>
       </div>
@@ -737,7 +741,7 @@ function SessionPage() {
           <footer className="composer-area">
             {choices.length > 0 && <div className="choice-strip">{choices.map((choice) => <ChoiceButton key={`${choice.affordanceId ?? "free"}:${choice.action}`} choice={choice} onChoose={(selected) => { setDraft(selected.action); setAffordanceId(selected.affordanceId); }} />)}</div>}
             <form className="composer" onSubmit={submitMove}>
-              <textarea value={draft} disabled={!writable || busy} onChange={(event) => { setDraft(event.target.value); setAffordanceId(undefined); }} placeholder={session.status === "archived" ? "Restore this session to continue" : "Describe one immediate action, observation, thought, or wait…"} rows={3} />
+              <textarea value={draft} disabled={!writable || busy} onChange={(event) => { setDraft(event.target.value); setAffordanceId(undefined); }} placeholder={session.status === "detached" ? "This historical session has no writable world instance" : session.status === "archived" ? "Restore this session to continue" : "Describe one immediate action, observation, thought, or wait…"} rows={3} />
               <div>
                 <button type="button" className="text-button" disabled={!draft} onClick={() => { setDraft(""); setAffordanceId(undefined); }}>Clear</button>
                 {!data.messages.length && <button type="button" className="secondary-button" disabled={!writable || busy || narrationMutation.isPending} onClick={() => narrationMutation.mutate()}>Render opening</button>}

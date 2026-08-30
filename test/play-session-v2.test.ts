@@ -110,4 +110,29 @@ describe("PlaySession v2", () => {
     await expect(store.getById(session.id)).resolves.toBeNull();
     await expect(store.read()).resolves.toBeNull();
   });
+
+  it("detaches presentation history when its world instance is removed", async () => {
+    const root = await workspace();
+    const store = new PlaySessionStore(root);
+    const main = await store.write({
+      branchId: "main",
+      sourceId: "novel-1",
+      actorId: "hero",
+      lastCommitId: "commit-main",
+    });
+    const child = await store.write({
+      branchId: "child",
+      sourceId: "novel-1",
+      actorId: "hero",
+      lastCommitId: "commit-child",
+    });
+
+    const result = await store.detachInstance("child");
+
+    expect(result.detachedSession).toMatchObject({ id: child.id, branchId: "child", status: "detached" });
+    expect(result.nextActiveSession).toMatchObject({ id: main.id, branchId: "main", status: "active" });
+    await expect(store.getById(child.id)).resolves.toMatchObject({ status: "detached" });
+    await expect(store.read()).resolves.toMatchObject({ id: main.id, status: "active" });
+    await expect(store.activate(child.id)).rejects.toThrow("detached because its branch no longer exists");
+  });
 });

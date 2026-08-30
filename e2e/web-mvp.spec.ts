@@ -177,6 +177,10 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await page.getByRole("link", { name: "Back to play" }).click();
   await page.getByRole("button", { name: "Archive" }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
+  const sessionNavigation = page.locator(".nav-section").filter({ hasText: "Play sessions" });
+  await expect(sessionNavigation.getByRole("link")).toHaveCount(0);
+  await sessionNavigation.getByRole("button", { name: /Show archived/ }).click();
+  await expect(sessionNavigation.getByRole("link")).toHaveCount(1);
   await page.getByRole("button", { name: "Restore" }).click();
   await expect(page.getByRole("button", { name: "Make active" })).toBeVisible();
   await page.getByRole("button", { name: "Make active" }).click();

@@ -213,7 +213,9 @@ character's grounded entry checkpoint, including its source-grounded completed-
 event recap, named participants, narrative mode/time, and known causal-parent
 titles. A later role is not offered if any preceding recap is missing. The
 TUI/compact command prints it as
-“读者前情（不等于角色知识）” before the first scene. It is not a `KnowledgeDelta`,
+“故事前情” before the first scene when prior beats exist and omits the
+empty recap at the novel opening. Player-visible copy never explains this
+knowledge boundary or names its internal representation. It is not a `KnowledgeDelta`,
 is not persisted as an actor observation, and is not included in narrator,
 player-action, adjudicator, NPC, or world-response model frames. A later-role
 genesis separately applies deterministic initial/main-timeline effects before

@@ -142,6 +142,7 @@ describe("player opening narration", () => {
     expect(literaryPrompt).toContain("playContinuity contains exact prior player and rendered-scene prose");
     expect(literaryPrompt).toContain("there is no fixed short target");
     expect(literaryPrompt).toContain("current scene, not an agency handoff");
+    expect(literaryPrompt).toContain("Never mention or explain character-knowledge boundaries");
     expect(literaryPrompt).toContain("Open the playable story");
     expect(literaryPrompt).not.toContain("propose_player_choices");
     expect(playScenePrompt(frame, "orientation")).toContain("not necessarily the beginning");
@@ -161,6 +162,8 @@ describe("player opening narration", () => {
       },
     }, "recovery")).toContain("did not become an in-world event");
     expect(() => assertPlaySceneNarration("你现在是福贵。故事开始。你要做什么？")).toThrow("underspecified");
+    expect(() => assertPlaySceneNarration("你听见门外的脚步越来越近，却还不知道来人是谁。这是因为角色知识只来自 committed state，读者前情不会成为你的知识。走廊里的灯影轻轻晃动，那人最终停在了门板另一侧。"))
+      .toThrow("internal character-knowledge");
     const menuInProse = "你把传达室那封也许存在的信压在心里，走廊里的声音忽远忽近。老唐和路鸣泽的名字一前一后浮出来。你停在原地，意识到先处理哪一条牵扯会改变寻找答案的方式。是把目光投向老唐，还是路鸣泽，或者干脆走出去，让新的线索自己撞上来？";
     expect(assertPlaySceneNarration(menuInProse)).toBe(menuInProse);
     const handoffCopy = "风从门缝里挤进来，卷起脚边一层薄灰。走廊深处传来两次短促的摩擦声，门板随之轻轻震动，昏黄灯光沿着墙角晃了一下。那道新鲜划痕还留在鞋尖前，木板另一侧的呼吸声却忽然停住。你可以先观察门前，也可以整理线索，或者径直离开——下一步由你决定。";

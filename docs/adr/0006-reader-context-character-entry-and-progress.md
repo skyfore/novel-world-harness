@@ -36,7 +36,9 @@ character checkpoint, the host derives an ordered `ReaderEntryContext` from ever
 canonical event already presented before that entry. Each beat carries
 a source-grounded completed-event recap, participant names, narrative mode/story
 time, and known causal-parent titles. It is rendered as a display-only
-`nwh-play`/CLI preface explicitly labelled “读者前情（不等于角色知识）”. A later
+`nwh-play`/CLI preface labelled “故事前情” when prior beats exist; an opening
+checkpoint with no prior beats skips the empty recap. The player-facing preface
+never explains character-knowledge boundaries or uses engine terminology. A later
 role is not offered if any preceding event lacks its recap. Reader context is
 never written to `KnowledgeDelta`, world state, scene narration input, NPC input,
 or player-action model input. Actor capability and claims continue to come only

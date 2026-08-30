@@ -215,13 +215,9 @@ export function formatReaderEntryContext(
   context: ReaderEntryContext,
   actorName: string,
 ): string {
-  const lines = [
-    "## 读者前情（不等于角色知识）",
-    "",
-    "以下是原文在该角色起点之前已经呈现的可核验事件；它只帮助未读过小说的玩家理解前因后果，不会写入角色知识。",
-    "",
-  ];
+  const lines: string[] = [];
   if (context.storySoFar.length) {
+    lines.push("## 故事前情", "");
     for (let index = 0; index < context.storySoFar.length; index += 1) {
       const beat = context.storySoFar[index]!;
       const details = [
@@ -231,21 +227,17 @@ export function formatReaderEntryContext(
       ].filter(Boolean).join("；");
       lines.push(
         `${index + 1}. **${beat.title}**${beat.mode === "unspecified" ? "" : `（${narrativeModeLabel(beat.mode)}）`}`,
-        beat.summary === beat.title ? "   原文编译记录尚未提供更完整的事件摘要。" : `   ${beat.summary}`,
+        ...(beat.summary === beat.title ? [] : [`   ${beat.summary}`]),
         ...(details ? [`   ${details}`] : []),
       );
     }
-  } else {
-    lines.push("- 这是原文的首个可玩时点，之前没有已呈现的正史事件。 ");
+    lines.push("");
   }
   lines.push(
-    "",
     `## ${actorName} 的代入起点`,
     "",
-    `${context.entryTitle}${context.entryKind === "canonical-scene" ? "（该角色首次可核验的亲历场景）" : "（小说开场时点）"}`,
+    context.entryTitle,
     ...(context.entrySetup ? ["", context.entrySetup] : []),
-    "",
-    `角色此刻只能使用其 committed state、亲历事件与已学习 claim；上面的读者前情不会自动变成 ${actorName} 知道的事实。`,
   );
   return lines.join("\n");
 }

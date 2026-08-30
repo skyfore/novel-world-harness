@@ -118,9 +118,12 @@ function bundle(): PreparedNovelBundle {
 describe("character entry context", () => {
   it("gives an unread opening-role player a display-only spoiler-free setup", () => {
     const seed = deriveCharacterEntrySeed(bundle(), "opening-actor");
+    const rendered = formatReaderEntryContext(seed.readerContext, "Opening Actor");
     expect(seed.readerContext.storySoFar).toEqual([]);
     expect(seed.readerContext.entrySetup).toContain("opening tower");
-    expect(formatReaderEntryContext(seed.readerContext, "Opening Actor")).toContain("departure urgent");
+    expect(rendered).toContain("departure urgent");
+    expect(rendered).not.toContain("故事前情");
+    expect(rendered).not.toMatch(/角色知识|committed state|claim|正史事件|编译记录/u);
   });
 
   it("starts a later role at its first embodied scene without treating a letter signer as present", () => {
@@ -154,10 +157,12 @@ describe("character entry context", () => {
     });
     expect(seed.actorObservation).toContain("summons still unresolved");
     expect(seed.readerContext.storySoFar.map((beat) => beat.eventId)).toEqual(["prologue-change", "letter-is-read"]);
-    expect(formatReaderEntryContext(seed.readerContext, "Later Actor")).toContain("不等于角色知识");
-    expect(formatReaderEntryContext(seed.readerContext, "Later Actor")).toContain("首次可核验的亲历场景");
-    expect(formatReaderEntryContext(seed.readerContext, "Later Actor")).toContain("document connects them without placing its signer in the room");
-    expect(formatReaderEntryContext(seed.readerContext, "Later Actor")).toContain("stands in the hall");
+    const rendered = formatReaderEntryContext(seed.readerContext, "Later Actor");
+    expect(rendered).toContain("## 故事前情");
+    expect(rendered).toContain("Later Actor 的首次亲历场景");
+    expect(rendered).toContain("document connects them without placing its signer in the room");
+    expect(rendered).toContain("stands in the hall");
+    expect(rendered).not.toMatch(/角色知识|committed state|claim|可核验的亲历场景|编译记录/u);
   });
 
   it("does not offer a later role when its prior reader recap is incomplete", () => {

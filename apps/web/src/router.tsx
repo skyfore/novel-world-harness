@@ -334,7 +334,10 @@ function NovelPage() {
     <>
       <div className="session-heading">
         <PageHeading eyebrow={t("Source evidence")} title={novel.title} description={novel.sourcePath} />
-        <div className="session-toolbar"><Link className="primary-button" to="/novels/$sourceId/compile" params={{ sourceId }}>{t("Open compiler workbench")}</Link></div>
+        <div className="session-toolbar novel-heading-actions">
+          <NovelPlayLauncher novel={novel} instances={instances} sessions={data.catalog.playSessions} csrfToken={data.csrfToken} />
+          <Link className="secondary-button" to="/novels/$sourceId/compile" params={{ sourceId }}>{t("Open compiler workbench")}</Link>
+        </div>
       </div>
       <div className="metric-grid">
         <Metric label={t("Size")} value={formatBytes(novel.bytes)} note={t("immutable source")} />
@@ -384,6 +387,150 @@ function NovelPage() {
           }} />
         </div>
       </Panel>
+    </>
+  );
+}
+
+function NovelPlayLauncher({
+  novel,
+  instances,
+  sessions,
+  csrfToken,
+}: {
+  novel: NovelSummary;
+  instances: InstanceSummary[];
+  sessions: PlaySessionSummary[];
+  csrfToken: string;
+}) {
+  const { t } = useI18n();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const preferredBranchId = instances.find((instance) => instance.active)?.branchId
+    ?? sessions.find((session) => session.active && session.sourceId === novel.id)?.branchId
+    ?? instances[0]?.branchId
+    ?? "";
+  const [open, setOpen] = useState(false);
+  const [branchId, setBranchId] = useState(preferredBranchId);
+  const [actorId, setActorId] = useState("");
+  const selectedInstance = instances.find((instance) => instance.branchId === branchId);
+  const existingSession = sessions.find((session) => session.branchId === branchId);
+  const characters = useQuery({
+    queryKey: ["characters", branchId, novel.id],
+    queryFn: ({ signal }) => fetchCharacters(branchId, novel.id, signal),
+    enabled: open && Boolean(branchId),
+  });
+  const selectedCharacter = characters.data?.characters.find((character) => character.id === actorId);
+  const createMutation = useMutation({
+    mutationFn: () => createPlaySession({
+      branchId,
+      actorId,
+      sourceId: novel.id,
+      clientRequestId: requestId("create-novel-session"),
+    }, csrfToken),
+    onSuccess: async (detail) => {
+      setOpen(false);
+      await queryClient.invalidateQueries({ queryKey: bootstrapQueryKey });
+      await navigate({ to: "/play/$sessionId", params: { sessionId: detail.session.id } });
+    },
+  });
+
+  useEffect(() => {
+    if (!open || instances.some((instance) => instance.branchId === branchId)) return;
+    setBranchId(preferredBranchId);
+    setActorId("");
+  }, [branchId, instances, open, preferredBranchId]);
+
+  useEffect(() => {
+    if (!open || !characters.data) return;
+    setActorId((current) => {
+      if (characters.data.characters.some((character) => character.id === current)) return current;
+      const savedActor = characters.data.characters.find((character) => character.id === existingSession?.actorId);
+      return savedActor?.id ?? characters.data.characters[0]?.id ?? "";
+    });
+  }, [characters.data, existingSession?.actorId, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || createMutation.isPending) return;
+      setOpen(false);
+      createMutation.reset();
+      window.requestAnimationFrame(() => trigger.current?.focus());
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [createMutation.isPending, open]);
+
+  const openLauncher = () => {
+    const nextBranchId = instances.some((instance) => instance.branchId === branchId) ? branchId : preferredBranchId;
+    setBranchId(nextBranchId);
+    setActorId("");
+    createMutation.reset();
+    setOpen(true);
+  };
+  const closeLauncher = () => {
+    if (createMutation.isPending) return;
+    setOpen(false);
+    createMutation.reset();
+    window.requestAnimationFrame(() => trigger.current?.focus());
+  };
+  const actionLabel = !selectedCharacter
+    ? t("Choose a role to begin")
+    : existingSession?.actorId === selectedCharacter.id
+      ? t("Continue as {character}", { character: selectedCharacter.canonicalName })
+      : t("Play as {character}", { character: selectedCharacter.canonicalName });
+
+  return (
+    <>
+      <button ref={trigger} className="primary-button novel-play-trigger" type="button" aria-haspopup="dialog" onClick={openLauncher}>
+        <span aria-hidden="true">▶</span>{t("Play")}
+      </button>
+      {open && <div className="novel-play-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeLauncher(); }}>
+        <section className="novel-play-dialog" role="dialog" aria-modal="true" aria-labelledby={`novel-play-title-${novel.id}`}>
+          <header>
+            <div><span className="eyebrow">{t("Enter the story")}</span><h2 id={`novel-play-title-${novel.id}`}>{t("Play {title}", { title: novel.title })}</h2><p>{t("Select a committed world and the character whose knowledge and body you will inhabit.")}</p></div>
+            <button type="button" aria-label={t("Close Play launcher")} disabled={createMutation.isPending} onClick={closeLauncher}>×</button>
+          </header>
+          <div className="novel-play-body">
+            {!instances.length ? <EmptyState title={t("No playable world yet")} body={t("Compile and publish a committed world before choosing a character.")} /> : <>
+              <label className="novel-play-branch">
+                <span>{t("World branch")}</span>
+                <select autoFocus aria-label={t("World branch")} value={branchId} onChange={(event) => { setBranchId(event.target.value); setActorId(""); createMutation.reset(); }}>
+                  {instances.map((instance) => <option key={instance.branchId} value={instance.branchId}>{instance.name} · {t("Step")} {instance.logicalStep}</option>)}
+                </select>
+                {selectedInstance && <small><code>{selectedInstance.branchId}</code><span>{t("{count} events", { count: selectedInstance.eventCount })}</span></small>}
+              </label>
+              <section className="novel-play-roles" aria-labelledby={`novel-play-roles-${novel.id}`}>
+                <header><div><span className="eyebrow">{t("Choose a role")}</span><strong id={`novel-play-roles-${novel.id}`}>{t("Who will you become?")}</strong></div><small>{t("Only knowledge visible to this character enters the Play context.")}</small></header>
+                {characters.isPending ? <InlineLoading label={t("Reading playable characters…")} /> : characters.isError ? <InlineError error={characters.error} /> : characters.data?.characters.length ? (
+                  <div className="character-picker novel-play-character-grid">
+                    {characters.data.characters.map((character) => (
+                      <label key={character.id} className={actorId === character.id ? "character-option character-option-selected" : "character-option"}>
+                        <input type="radio" name={`novel-play-actor-${novel.id}`} value={character.id} checked={actorId === character.id} onChange={() => { setActorId(character.id); createMutation.reset(); }} />
+                        <span><strong>{character.canonicalName}</strong><small>{character.locationName ?? character.locationId ?? t("location unknown")}</small></span>
+                        <code>{character.id}</code>
+                      </label>
+                    ))}
+                  </div>
+                ) : <EmptyState title={t("No playable character at this head")} body={t("The branch needs at least one living, embodied compiled character before play can begin.")} />}
+              </section>
+              {existingSession && <div className="novel-play-saved-session"><span>{t("Saved session")}</span><strong>{existingSession.title}</strong><small>{t(existingSession.status)} · {t("Step")} {selectedInstance?.logicalStep ?? 0}</small></div>}
+              {createMutation.error && <InlineError error={createMutation.error} />}
+            </>}
+          </div>
+          <footer>
+            {!instances.length && <Link className="secondary-button" to="/novels/$sourceId/compile" params={{ sourceId: novel.id }} onClick={() => setOpen(false)}>{t("Open compiler workbench")}</Link>}
+            <button type="button" className="text-button" disabled={createMutation.isPending} onClick={closeLauncher}>{t("Cancel")}</button>
+            {instances.length > 0 && <button type="button" className="primary-button" disabled={!selectedCharacter || characters.isPending || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? t("Opening…") : actionLabel}<span aria-hidden="true"> →</span></button>}
+          </footer>
+        </section>
+      </div>}
     </>
   );
 }

@@ -3,10 +3,8 @@ import { TooltipComponent, type TooltipComponentOption } from "echarts/component
 import { init as initChart, use as useECharts, type ComposeOption, type ECharts } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import {
-  forwardRef,
   useDeferredValue,
   useEffect,
-  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -95,7 +93,6 @@ export function OntologyPage({
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
   const [loadingAll, setLoadingAll] = useState(false);
   const stopFullLoad = useRef(false);
-  const graphRef = useRef<GraphCanvasHandle>(null);
   const onScopeChangeRef = useRef(onScopeChange);
   onScopeChangeRef.current = onScopeChange;
 
@@ -160,15 +157,11 @@ export function OntologyPage({
   const loadedGraph = useMemo(() => mergeGraphPages(graph.data?.pages), [graph.data?.pages]);
   const [canvasGraph, setCanvasGraph] = useState<OntologyGraph>();
 
-  useEffect(() => {
-    if (selectedNodeId && loadedGraph && !loadedGraph.nodes.some((node) => node.id === selectedNodeId)) {
-      setSelectedNodeId(undefined);
-    }
-  }, [loadedGraph, selectedNodeId]);
   useEffect(() => () => { stopFullLoad.current = true; }, []);
   useEffect(() => {
     stopFullLoad.current = true;
     setLoadingAll(false);
+    setSelectedNodeId(undefined);
   }, [sourceId, view, branchId, effectiveCommit, includeCanonicalFuture, deferredSearch, kind, status, layers.join(",")]);
   useEffect(() => {
     if (loadedGraph && !loadingAll) setCanvasGraph(loadedGraph);
@@ -181,13 +174,21 @@ export function OntologyPage({
       ...(effectiveCommit ? { atCommit: effectiveCommit } : {}),
       ...(includeCanonicalFuture ? { includeCanonicalFuture: true } : {}),
       layers,
-      relationLimit: 100,
+      relationLimit: 500,
     }, signal),
     enabled: Boolean(selectedNodeId),
   });
 
+  useEffect(() => {
+    if (loadedGraph && !loadingAll && selectedNodeId && detail.data?.node.id === selectedNodeId) {
+      setCanvasGraph(focusedGraph(loadedGraph, selectedNodeId, detail.data));
+    }
+  }, [detail.data, loadedGraph, loadingAll, selectedNodeId]);
+
   const visible = loadedGraph;
-  const selectedNode = loadedGraph?.nodes.find((node) => node.id === selectedNodeId);
+  const baseCanvasGraph = canvasGraph?.page.snapshotId === visible?.page.snapshotId ? canvasGraph : visible;
+  const interactiveGraph = baseCanvasGraph ? focusedGraph(baseCanvasGraph, selectedNodeId, detail.data) : undefined;
+  const selectedNode = interactiveGraph?.nodes.find((node) => node.id === selectedNodeId);
 
   const loadAllPages = async () => {
     stopFullLoad.current = false;
@@ -286,11 +287,6 @@ export function OntologyPage({
         <label className="ontology-search"><span>{t("Search")}</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Label, ID, kind, status…")} /></label>
         <label><span>{t("Kind")}</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option value="">{t("All kinds")}</option>{Object.keys(graph.data?.pages[0]?.facets.kinds ?? {}).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         <label><span>{t("Status")}</span><select value={status} onChange={(event) => setStatus(event.target.value as OntologyStatus | "")}><option value="">{t("All statuses")}</option>{Object.keys(graph.data?.pages[0]?.facets.statuses ?? {}).map((value) => <option key={value} value={value}>{t(value)}</option>)}</select></label>
-        <div className="ontology-graph-actions">
-          <button type="button" onClick={() => graphRef.current?.fit()} disabled={!visible?.nodes.length}>{t("Fit")}</button>
-          <button type="button" onClick={() => graphRef.current?.relayout()} disabled={!visible?.nodes.length}>{t("Re-layout")}</button>
-          <button type="button" onClick={() => void graph.refetch()} disabled={graph.isFetching}>{graph.isFetching ? t("Refreshing…") : t("Refresh")}</button>
-        </div>
       </section>
 
       <section className="ontology-layer-bar" aria-label={t("Projection layers")}>
@@ -334,7 +330,19 @@ export function OntologyPage({
                 <div><span className="eyebrow">{t("Graph")}</span><strong>{visible.truncated ? t("Progressive topology · {loaded}/{total} nodes", { loaded: visible.page.loadedNodes, total: visible.totalNodes }) : t("Complete selected projection")}</strong></div>
                 <div className="ontology-legend">{visible.legend.map((item) => <span key={item.id}><i style={{ background: item.color }} />{t(item.label)}<small>{item.count}</small></span>)}</div>
               </header>
-              {visible.nodes.length ? <GraphCanvas ref={graphRef} graph={canvasGraph?.page.snapshotId === visible.page.snapshotId ? canvasGraph : visible} view={view} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} /> : <EmptyGraph />}
+              {visible.nodes.length ? <GraphCanvas
+                graph={interactiveGraph ?? visible}
+                view={view}
+                selectedNodeId={selectedNodeId}
+                onSelect={setSelectedNodeId}
+                refreshing={graph.isFetching}
+                focusLoading={Boolean(selectedNodeId) && detail.isFetching}
+                neighborhoodTruncated={Boolean(detail.data && detail.data.node.id === selectedNodeId && detail.data.relationPage.truncated)}
+                onRefresh={() => {
+                  void graph.refetch();
+                  if (selectedNodeId) void detail.refetch();
+                }}
+              /> : <EmptyGraph />}
             </section>
             <NodeInspector node={selectedNode} detail={detail} onClose={() => setSelectedNodeId(undefined)} />
           </div>
@@ -345,34 +353,63 @@ export function OntologyPage({
   );
 }
 
-type GraphCanvasHandle = { fit: () => void; relayout: () => void };
+function focusedGraph(
+  graph: OntologyGraph,
+  selectedNodeId: string | undefined,
+  detail: Awaited<ReturnType<typeof fetchOntologyNode>> | undefined,
+): OntologyGraph {
+  if (!selectedNodeId || detail?.node.id !== selectedNodeId) return graph;
+  const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+  nodes.set(detail.node.id, detail.node);
+  for (const node of detail.relatedNodes) nodes.set(node.id, node);
+  const edges = new Map(graph.edges.map((edge) => [edge.id, edge]));
+  for (const edge of [...detail.incoming, ...detail.outgoing]) edges.set(edge.id, edge);
+  return { ...graph, nodes: [...nodes.values()], edges: [...edges.values()] };
+}
 
-const GraphCanvas = forwardRef<GraphCanvasHandle, {
+function GraphCanvas({
+  graph,
+  view,
+  selectedNodeId,
+  onSelect,
+  refreshing,
+  focusLoading,
+  neighborhoodTruncated,
+  onRefresh,
+}: {
   graph: OntologyGraph;
   view: OntologyView;
   selectedNodeId?: string;
-  onSelect: (nodeId: string) => void;
-}>(function GraphCanvas({ graph, view, selectedNodeId, onSelect }, ref) {
+  onSelect: (nodeId?: string) => void;
+  refreshing: boolean;
+  focusLoading: boolean;
+  neighborhoodTruncated: boolean;
+  onRefresh: () => void;
+}) {
   const { t } = useI18n();
   const container = useRef<HTMLDivElement>(null);
   const chart = useRef<ECharts | null>(null);
   const option = useRef<GraphChartOption | undefined>(undefined);
   const onSelectRef = useRef(onSelect);
+  const geometryKeyRef = useRef("");
   const [layoutRevision, setLayoutRevision] = useState(0);
+  const [viewport, setViewport] = useState({ width: 960, height: 600 });
+  const [showAllLabels, setShowAllLabels] = useState(false);
   onSelectRef.current = onSelect;
   const rendered = useMemo(
     () => renderableGraph(graph, selectedNodeId),
     [graph, selectedNodeId],
   );
+  const labels = useMemo(
+    () => graphLabelPlan(rendered, selectedNodeId, viewport, showAllLabels),
+    [rendered, selectedNodeId, showAllLabels, viewport],
+  );
+  const geometryKey = useMemo(() => rendered.focused
+    ? `focus:${selectedNodeId ?? ""}:${layoutRevision}:${rendered.nodes.map((node) => node.id).join("\u001f")}:${rendered.edges.map((edge) => edge.id).join("\u001f")}`
+    : `overview:${layoutRevision}`,
+  [layoutRevision, rendered, selectedNodeId]);
 
-  useImperativeHandle(ref, () => ({
-    fit: () => {
-      if (!chart.current || !option.current) return;
-      chart.current.setOption(option.current, { notMerge: true, lazyUpdate: false });
-      chart.current.resize();
-    },
-    relayout: () => setLayoutRevision((current) => current + 1),
-  }), []);
+  useEffect(() => setShowAllLabels(false), [selectedNodeId]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -384,7 +421,16 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, {
     instance.on("click", (event) => {
       if (event.dataType === "node" && typeof event.name === "string") onSelectRef.current(event.name);
     });
-    const observer = new ResizeObserver(() => instance.resize());
+    instance.getZr().on("click", (event) => {
+      if (!event.target) onSelectRef.current(undefined);
+    });
+    const observer = new ResizeObserver(([entry]) => {
+      instance.resize();
+      if (!entry) return;
+      const width = Math.round(entry.contentRect.width);
+      const height = Math.round(entry.contentRect.height);
+      setViewport((current) => current.width === width && current.height === height ? current : { width, height });
+    });
     observer.observe(container.current);
     return () => {
       observer.disconnect();
@@ -395,21 +441,66 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, {
 
   useEffect(() => {
     if (!chart.current) return;
-    option.current = graphOption(rendered, view, selectedNodeId, layoutRevision);
-    chart.current.setOption(option.current, { notMerge: true, lazyUpdate: true });
-  }, [layoutRevision, rendered, selectedNodeId, view]);
+    option.current = graphOption(rendered, view, selectedNodeId, layoutRevision, labels);
+    const resetViewport = geometryKeyRef.current !== geometryKey;
+    if (resetViewport) chart.current.clear();
+    chart.current.setOption(option.current, { notMerge: true, lazyUpdate: !resetViewport });
+    if (resetViewport) chart.current.resize();
+    geometryKeyRef.current = geometryKey;
+  }, [geometryKey, labels, layoutRevision, rendered, selectedNodeId, view]);
+
+  const fit = () => {
+    if (!chart.current || !option.current) return;
+    chart.current.clear();
+    chart.current.setOption(option.current, { notMerge: true, lazyUpdate: false });
+    chart.current.resize();
+  };
 
   return <div className="ontology-canvas-shell">
-    <div ref={container} className="ontology-canvas" role="img" aria-label={t("{view} ontology graph with {nodes} nodes and {edges} edges", { view: t(view), nodes: rendered.nodes.length, edges: rendered.edges.length })} />
+    <div className="ontology-canvas-actions" role="toolbar" aria-label={t("Canvas controls")}>
+      {rendered.focused && labels.dense && <button
+        type="button"
+        className={showAllLabels ? "ontology-canvas-action-active" : undefined}
+        aria-pressed={showAllLabels}
+        onClick={() => setShowAllLabels((current) => !current)}
+      >{showAllLabels ? t("Use smart labels") : t("Show all labels")}</button>}
+      {rendered.focused && <button type="button" onClick={() => onSelect(undefined)}>{t("Clear focus")}</button>}
+      <button type="button" onClick={fit}>{t("Fit")}</button>
+      <button type="button" onClick={() => setLayoutRevision((current) => current + 1)}>{t("Re-layout")}</button>
+      <button type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? t("Refreshing…") : t("Refresh")}</button>
+    </div>
+    <div
+      ref={container}
+      className="ontology-canvas"
+      role="img"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && rendered.focused) onSelect(undefined);
+      }}
+      aria-label={t("{view} ontology graph with {nodes} nodes and {edges} edges", { view: t(view), nodes: rendered.nodes.length, edges: rendered.edges.length })}
+    />
+    {rendered.focused && <div className="ontology-focus-note" aria-live="polite">
+      <strong>{t("Focused neighborhood")}</strong>
+      <span>{t("{nodes} related entities · {edges} relationships", { nodes: Math.max(0, rendered.nodes.length - 1), edges: rendered.edges.length })}</span>
+      {focusLoading && <small>{t("Loading the complete one-hop neighborhood…")}</small>}
+      {!focusLoading && labels.dense && !showAllLabels && <small>{t("Labels are distributed for readability: {nodes}/{totalNodes} entities · {edges}/{totalEdges} relationships.", {
+        nodes: labels.nodeIds.size,
+        totalNodes: rendered.nodes.length,
+        edges: labels.edgeIds.size,
+        totalEdges: rendered.edges.length,
+      })}</small>}
+      {neighborhoodTruncated && <small>{t("This entity has more than 500 incoming or outgoing relationships; load the complete dataset to resolve the remainder.")}</small>}
+    </div>}
     {rendered.sampled && <div className="ontology-render-note">{t("Canvas view sampled {nodes} high-connectivity nodes and {edges} relations; the virtual table retains all {total} loaded nodes.", { nodes: rendered.nodes.length, edges: rendered.edges.length, total: graph.nodes.length })}</div>}
   </div>;
-});
+}
 
 type RenderableGraph = {
   nodes: OntologyNode[];
   edges: OntologyEdge[];
   degree: Map<string, number>;
   sampled: boolean;
+  focused: boolean;
 };
 
 function renderableGraph(graph: OntologyGraph, selectedNodeId?: string): RenderableGraph {
@@ -418,17 +509,28 @@ function renderableGraph(graph: OntologyGraph, selectedNodeId?: string): Rendera
     degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
     degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
   }
+  if (selectedNodeId && degree.has(selectedNodeId)) {
+    const focusedIds = new Set([selectedNodeId]);
+    const edges = graph.edges.filter((edge) => {
+      const related = edge.source === selectedNodeId || edge.target === selectedNodeId;
+      if (related) {
+        focusedIds.add(edge.source);
+        focusedIds.add(edge.target);
+      }
+      return related;
+    });
+    return {
+      nodes: graph.nodes.filter((node) => focusedIds.has(node.id)),
+      edges,
+      degree,
+      sampled: false,
+      focused: true,
+    };
+  }
   const sampled = graph.nodes.length > GRAPH_RENDER_NODE_LIMIT || graph.edges.length > GRAPH_RENDER_EDGE_LIMIT;
-  if (!sampled) return { nodes: graph.nodes, edges: graph.edges, degree, sampled: false };
+  if (!sampled) return { nodes: graph.nodes, edges: graph.edges, degree, sampled: false, focused: false };
 
   const included = new Set<string>();
-  if (selectedNodeId) {
-    included.add(selectedNodeId);
-    for (const edge of graph.edges) {
-      if (edge.source === selectedNodeId) included.add(edge.target);
-      if (edge.target === selectedNodeId) included.add(edge.source);
-    }
-  }
   const ranked = [...graph.nodes].sort((left, right) =>
     (degree.get(right.id) ?? 0) - (degree.get(left.id) ?? 0) || left.id.localeCompare(right.id));
   for (const node of ranked) {
@@ -439,15 +541,57 @@ function renderableGraph(graph: OntologyGraph, selectedNodeId?: string): Rendera
   const edges = graph.edges
     .filter((edge) => included.has(edge.source) && included.has(edge.target))
     .sort((left, right) => {
-      const leftSelected = left.source === selectedNodeId || left.target === selectedNodeId ? 1 : 0;
-      const rightSelected = right.source === selectedNodeId || right.target === selectedNodeId ? 1 : 0;
-      return rightSelected - leftSelected
-        || (degree.get(right.source) ?? 0) + (degree.get(right.target) ?? 0)
+      return (degree.get(right.source) ?? 0) + (degree.get(right.target) ?? 0)
           - (degree.get(left.source) ?? 0) - (degree.get(left.target) ?? 0)
         || left.id.localeCompare(right.id);
     })
     .slice(0, GRAPH_RENDER_EDGE_LIMIT);
-  return { nodes, edges, degree, sampled: true };
+  return { nodes, edges, degree, sampled: true, focused: false };
+}
+
+type GraphLabelPlan = {
+  nodeIds: Set<string>;
+  edgeIds: Set<string>;
+  dense: boolean;
+};
+
+function graphLabelPlan(
+  graph: RenderableGraph,
+  selectedNodeId: string | undefined,
+  viewport: { width: number; height: number },
+  showAll: boolean,
+): GraphLabelPlan {
+  const area = Math.max(1, viewport.width * viewport.height);
+  const nodeCapacity = Math.max(18, Math.floor(area / 7_000));
+  const edgeCapacity = Math.max(14, Math.floor(area / 8_500));
+  if (!graph.focused) {
+    const visible = graph.nodes.length <= Math.min(90, nodeCapacity)
+      ? graph.nodes
+      : evenlySample(graph.nodes, Math.min(nodeCapacity, 42));
+    return { nodeIds: new Set(visible.map((node) => node.id)), edgeIds: new Set(), dense: false };
+  }
+
+  const dense = graph.nodes.length > nodeCapacity || graph.edges.length > edgeCapacity;
+  if (showAll || !dense) {
+    return {
+      nodeIds: new Set(graph.nodes.map((node) => node.id)),
+      edgeIds: new Set(graph.edges.map((edge) => edge.id)),
+      dense,
+    };
+  }
+  const neighbors = graph.nodes.filter((node) => node.id !== selectedNodeId);
+  const sampledNodes = evenlySample(neighbors, Math.max(0, nodeCapacity - (selectedNodeId ? 1 : 0)));
+  return {
+    nodeIds: new Set([...(selectedNodeId ? [selectedNodeId] : []), ...sampledNodes.map((node) => node.id)]),
+    edgeIds: new Set(evenlySample(graph.edges, edgeCapacity).map((edge) => edge.id)),
+    dense,
+  };
+}
+
+function evenlySample<T>(values: readonly T[], limit: number): T[] {
+  if (values.length <= limit) return [...values];
+  if (limit <= 0) return [];
+  return Array.from({ length: limit }, (_, index) => values[Math.floor(index * values.length / limit)]!);
 }
 
 function graphOption(
@@ -455,9 +599,10 @@ function graphOption(
   view: OntologyView,
   selectedNodeId: string | undefined,
   layoutRevision: number,
+  labels: GraphLabelPlan,
 ): GraphChartOption {
-  const positions = graphPositions(graph.nodes, view, layoutRevision);
-  const showLabels = graph.nodes.length <= 90;
+  const positions = graphPositions(graph.nodes, view, layoutRevision, graph.focused ? selectedNodeId : undefined);
+  const curves = relationCurves(graph.edges);
   return {
     backgroundColor: "transparent",
     tooltip: {
@@ -477,7 +622,11 @@ function graphOption(
       progressiveThreshold: 700,
       roam: true,
       scaleLimit: { min: 0.08, max: 6 },
-      selectedMode: "single",
+      left: graph.focused ? 58 : 24,
+      right: graph.focused ? 58 : 24,
+      top: graph.focused ? 72 : 24,
+      bottom: graph.focused ? 76 : 24,
+      selectedMode: false,
       edgeSymbol: ["none", graph.edges.length <= 900 ? "arrow" : "none"],
       edgeSymbolSize: 5,
       data: graph.nodes.map((node) => {
@@ -490,23 +639,29 @@ function graphOption(
           x: position.x,
           y: position.y,
           symbol: shapeFor(node),
-          symbolSize: selected ? 28 : Math.min(22, 10 + Math.log2((graph.degree.get(node.id) ?? 0) + 1) * 3),
-          selected,
+          symbolSize: selected ? 34 : graph.focused ? 23 : Math.min(22, 10 + Math.log2((graph.degree.get(node.id) ?? 0) + 1) * 3),
+          cursor: "pointer",
           itemStyle: {
-            color: statusColors[node.status],
-            borderColor: selected ? "#ffffff" : "#10110f",
-            borderWidth: selected ? 3 : 1,
+            color: selected ? "#f2ff9b" : graph.focused ? "#73c9e8" : statusColors[node.status],
+            borderColor: selected ? "#ffffff" : graph.focused ? statusColors[node.status] : "#10110f",
+            borderWidth: selected ? 4 : graph.focused ? 2 : 1,
+            shadowBlur: graph.focused ? selected ? 18 : 9 : 0,
+            shadowColor: selected ? "#d6ff72" : "#5bb9dc",
           },
           label: {
-            show: showLabels || selected,
+            show: labels.nodeIds.has(node.id),
             formatter: node.label,
             position: "bottom",
-            distance: 5,
-            color: "#d7d8d1",
+            distance: selected ? 8 : 6,
+            color: selected ? "#fbffd8" : graph.focused ? "#e4f6ff" : "#d7d8d1",
             fontFamily: "Manrope",
-            fontSize: 8,
-            width: 120,
+            fontSize: selected ? 11 : graph.focused ? 9 : 8,
+            fontWeight: selected ? 700 : 600,
+            width: graph.focused ? 150 : 120,
             overflow: "truncate",
+            backgroundColor: graph.focused ? "#101511dc" : "transparent",
+            borderRadius: 3,
+            padding: graph.focused ? [3, 5] : 0,
           },
           emphasis: {
             focus: "adjacency",
@@ -521,21 +676,55 @@ function graphOption(
         source: edge.source,
         target: edge.target,
         lineStyle: {
-          color: statusColors[edge.status],
-          width: edge.source === selectedNodeId || edge.target === selectedNodeId ? 2 : 0.8,
-          opacity: edge.source === selectedNodeId || edge.target === selectedNodeId ? 0.9 : 0.32,
-          curveness: graph.edges.length < 500 ? 0.06 : 0,
+          color: graph.focused ? "#8bd3f0" : statusColors[edge.status],
+          width: graph.focused ? 2.2 : 0.8,
+          opacity: graph.focused ? 0.92 : 0.32,
+          curveness: graph.focused ? curves.get(edge.id) ?? 0 : graph.edges.length < 500 ? 0.06 : 0,
+          shadowBlur: graph.focused ? 4 : 0,
+          shadowColor: "#4a9fbe",
+        },
+        label: {
+          show: graph.focused && labels.edgeIds.has(edge.id),
+          formatter: edge.label,
+          color: "#eefaff",
+          fontFamily: "DM Mono",
+          fontSize: 8,
+          backgroundColor: "#121a18ee",
+          borderColor: "#466878",
+          borderWidth: 1,
+          borderRadius: 3,
+          padding: [3, 5],
+        },
+        emphasis: {
+          focus: "adjacency" as const,
+          label: {
+            show: true,
+            formatter: edge.label,
+            color: "#ffffff",
+            fontSize: 9,
+            backgroundColor: "#17211eff",
+            padding: [4, 6],
+          },
+          lineStyle: { width: 3, opacity: 1 },
         },
       })),
       lineStyle: { opacity: 0.35 },
-      label: { show: showLabels },
+      label: { show: false },
       edgeLabel: { show: false },
-      emphasis: { focus: "adjacency", lineStyle: { width: 2, opacity: 0.95 } },
+      emphasis: { focus: "adjacency", lineStyle: { width: 3, opacity: 1 } },
     }],
   };
 }
 
-function graphPositions(nodes: readonly OntologyNode[], view: OntologyView, revision: number): Map<string, { x: number; y: number }> {
+function graphPositions(
+  nodes: readonly OntologyNode[],
+  view: OntologyView,
+  revision: number,
+  selectedNodeId?: string,
+): Map<string, { x: number; y: number }> {
+  if (selectedNodeId && nodes.some((node) => node.id === selectedNodeId)) {
+    return focusedGraphPositions(nodes, selectedNodeId, revision);
+  }
   const groups = new Map<string, OntologyNode[]>();
   for (const node of nodes) {
     const group = graphGroup(node, view);
@@ -559,6 +748,50 @@ function graphPositions(nodes: readonly OntologyNode[], view: OntologyView, revi
       });
     });
     groupOffset += columns * 58 + 180;
+  }
+  return result;
+}
+
+function focusedGraphPositions(
+  nodes: readonly OntologyNode[],
+  selectedNodeId: string,
+  revision: number,
+): Map<string, { x: number; y: number }> {
+  const result = new Map<string, { x: number; y: number }>([[selectedNodeId, { x: 0, y: 0 }]]);
+  const neighbors = nodes
+    .filter((node) => node.id !== selectedNodeId)
+    .sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+  let offset = 0;
+  let ring = 0;
+  const rotation = (hashNumber(`${selectedNodeId}:${revision}`) % 360) * Math.PI / 180;
+  while (offset < neighbors.length) {
+    const radius = 145 + ring * 92;
+    const capacity = Math.max(10, Math.floor(2 * Math.PI * radius / 68));
+    const ringNodes = neighbors.slice(offset, offset + capacity);
+    ringNodes.forEach((node, index) => {
+      const angle = rotation - Math.PI / 2 + index * 2 * Math.PI / ringNodes.length;
+      result.set(node.id, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
+    });
+    offset += ringNodes.length;
+    ring += 1;
+  }
+  return result;
+}
+
+function relationCurves(edges: readonly OntologyEdge[]): Map<string, number> {
+  const groups = new Map<string, OntologyEdge[]>();
+  for (const edge of edges) {
+    const key = [edge.source, edge.target].sort().join("\u001f");
+    const values = groups.get(key) ?? [];
+    values.push(edge);
+    groups.set(key, values);
+  }
+  const result = new Map<string, number>();
+  for (const values of groups.values()) {
+    values.sort((left, right) => left.id.localeCompare(right.id));
+    values.forEach((edge, index) => {
+      result.set(edge.id, values.length === 1 ? 0 : (index - (values.length - 1) / 2) * 0.13);
+    });
   }
   return result;
 }

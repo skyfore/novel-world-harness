@@ -170,14 +170,19 @@ export class OntologyProjectionService {
     );
     const allIncoming = projection.allEdges.filter((edge) => edge.target === node.id);
     const allOutgoing = projection.allEdges.filter((edge) => edge.source === node.id);
+    const incoming = allIncoming.slice(0, input.relationLimit);
+    const outgoing = allOutgoing.slice(0, input.relationLimit);
+    const relatedNodeIds = new Set([...incoming, ...outgoing].flatMap((edge) => [edge.source, edge.target]));
+    relatedNodeIds.delete(node.id);
     return ontologyNodeDetailSchema.parse({
       version: 1,
       scope: projection.graph.scope,
       node,
       payload: sanitizePayload(projection.payloads.get(node.id), input.sourceId),
       evidence,
-      incoming: allIncoming.slice(0, input.relationLimit),
-      outgoing: allOutgoing.slice(0, input.relationLimit),
+      incoming,
+      outgoing,
+      relatedNodes: projection.allNodes.filter((candidate) => relatedNodeIds.has(candidate.id)),
       relationPage: {
         limitPerDirection: input.relationLimit,
         incomingTotal: allIncoming.length,

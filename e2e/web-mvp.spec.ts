@@ -139,8 +139,15 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await expect(page.locator(".ontology-inspector")).toContainText("Evidence");
   await expect(page.locator(".ontology-inspector blockquote").first()).toContainText("Mara waits in the Hall");
 
-  await page.goto(`${origin}/instances/main`);
-  await page.getByRole("button", { name: "Start play session" }).click();
+  await page.goto(`${origin}/novels/${sourceId}`);
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  const playLauncher = page.getByRole("dialog", { name: /Play / });
+  await expect(playLauncher).toBeVisible();
+  await expect(playLauncher.getByLabel("World branch")).toHaveValue("main");
+  const playableMara = playLauncher.getByRole("radio", { name: /Mara/ });
+  await expect(playableMara).toBeChecked();
+  await playableMara.click();
+  await playLauncher.getByRole("button", { name: "Play as Mara" }).click();
   await expect(page).toHaveURL(/\/play\/play-main$/);
   await expect(page.getByLabel("Play status")).toContainText("step 0");
 
@@ -250,6 +257,7 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
   await page.getByPlaceholder("Paste the complete novel text here…").fill(`${SOURCE_TEXT}\nThis source exists to verify message-scoped trace inspection.`);
   await page.getByRole("button", { name: "Register and inspect" }).click();
   await expect(page).toHaveURL(/\/novels\/[a-f0-9]{20}\/compile$/);
+  const sourceId = sourceIdFrom(page);
   await page.getByRole("button", { name: "Compile all remaining" }).click();
   await expect(page.getByText("Review proposals", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Validate and accept" }).click();
@@ -258,7 +266,12 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
   await page.getByLabel("New instance branch ID").fill("trace-drawer");
   await page.getByRole("button", { name: "Create world instance" }).click();
   await expect(page).toHaveURL(/\/instances\/trace-drawer$/);
-  await page.getByRole("button", { name: "Start play session" }).click();
+  await page.goto(`${origin}/novels/${sourceId}`);
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  const playLauncher = page.getByRole("dialog", { name: /Play / });
+  await expect(playLauncher.getByLabel("World branch")).toHaveValue("trace-drawer");
+  await expect(playLauncher.getByRole("radio", { name: /Mara/ })).toBeChecked();
+  await playLauncher.getByRole("button", { name: "Play as Mara" }).click();
   await expect(page).toHaveURL(/\/play\/play-trace-drawer$/);
 
   await page.getByRole("button", { name: "Render opening" }).click();

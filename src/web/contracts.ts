@@ -714,6 +714,7 @@ export const ontologyNodeDetailSchema = z.object({
   evidence: z.array(ontologyEvidenceSchema),
   incoming: z.array(ontologyEdgeSchema),
   outgoing: z.array(ontologyEdgeSchema),
+  relatedNodes: z.array(ontologyNodeSchema),
   relationPage: z.object({
     limitPerDirection: z.number().int().positive(),
     incomingTotal: z.number().int().nonnegative(),

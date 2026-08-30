@@ -228,6 +228,9 @@ describe("Web ontology projection", () => {
       status: "active",
       label: "contains",
     }));
+    const placeDetail = await service.getNode({ sourceId: first.source.id, view: "places", branchId: "mara-main", atCommit: head }, "entity:hall");
+    expect(placeDetail.relatedNodes).toContainEqual(expect.objectContaining({ id: "entity:vault", label: "Vault" }));
+    expect(placeDetail.outgoing).toContainEqual(expect.objectContaining({ target: "entity:vault", label: "contains" }));
     const rules = await service.project({ sourceId: first.source.id, view: "rules", branchId: "mara-main", atCommit: head });
     expect(rules.nodes).toContainEqual(expect.objectContaining({ id: "rule:no-flame", status: "active" }));
 
@@ -342,6 +345,7 @@ describe("Web ontology projection", () => {
     expect(ontologyNodeDetailSchema.parse(detailResponse.json())).toMatchObject({
       node: { id: "entity:mara" },
       evidence: [expect.objectContaining({ excerpt: "Mara" })],
+      relatedNodes: [],
     });
 
     const invalid = await app.inject({

@@ -413,14 +413,22 @@ function NovelPlayLauncher({
   const [open, setOpen] = useState(false);
   const [branchId, setBranchId] = useState(preferredBranchId);
   const [actorId, setActorId] = useState("");
+  const [roleQuery, setRoleQuery] = useState("");
   const selectedInstance = instances.find((instance) => instance.branchId === branchId);
-  const existingSession = sessions.find((session) => session.branchId === branchId);
+  const savedSessionCount = sessions.filter((session) => session.branchId === branchId).length;
   const characters = useQuery({
     queryKey: ["characters", branchId, novel.id],
     queryFn: ({ signal }) => fetchCharacters(branchId, novel.id, signal),
     enabled: open && Boolean(branchId),
   });
   const selectedCharacter = characters.data?.characters.find((character) => character.id === actorId);
+  const filterCharacters = (value: string) => characters.data?.characters.filter((character) => {
+    const query = value.normalize("NFKC").trim().toLocaleLowerCase();
+    if (!query) return true;
+    return [character.canonicalName, character.id, ...character.aliases]
+      .some((value) => value.normalize("NFKC").toLocaleLowerCase().includes(query));
+  }) ?? [];
+  const visibleCharacters = filterCharacters(roleQuery);
   const createMutation = useMutation({
     mutationFn: () => createPlaySession({
       branchId,
@@ -445,10 +453,9 @@ function NovelPlayLauncher({
     if (!open || !characters.data) return;
     setActorId((current) => {
       if (characters.data.characters.some((character) => character.id === current)) return current;
-      const savedActor = characters.data.characters.find((character) => character.id === existingSession?.actorId);
-      return savedActor?.id ?? characters.data.characters[0]?.id ?? "";
+      return characters.data.characters[0]?.id ?? "";
     });
-  }, [characters.data, existingSession?.actorId, open]);
+  }, [characters.data, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -471,6 +478,7 @@ function NovelPlayLauncher({
     const nextBranchId = instances.some((instance) => instance.branchId === branchId) ? branchId : preferredBranchId;
     setBranchId(nextBranchId);
     setActorId("");
+    setRoleQuery("");
     createMutation.reset();
     setOpen(true);
   };
@@ -482,9 +490,7 @@ function NovelPlayLauncher({
   };
   const actionLabel = !selectedCharacter
     ? t("Choose a role to begin")
-    : existingSession?.actorId === selectedCharacter.id
-      ? t("Continue as {character}", { character: selectedCharacter.canonicalName })
-      : t("Play as {character}", { character: selectedCharacter.canonicalName });
+    : t("Start a new session as {character}", { character: selectedCharacter.canonicalName });
 
   return (
     <>
@@ -509,18 +515,27 @@ function NovelPlayLauncher({
               <section className="novel-play-roles" aria-labelledby={`novel-play-roles-${novel.id}`}>
                 <header><div><span className="eyebrow">{t("Choose a role")}</span><strong id={`novel-play-roles-${novel.id}`}>{t("Who will you become?")}</strong></div><small>{t("Only knowledge visible to this character enters the Play context.")}</small></header>
                 {characters.isPending ? <InlineLoading label={t("Reading playable characters…")} /> : characters.isError ? <InlineError error={characters.error} /> : characters.data?.characters.length ? (
-                  <div className="character-picker novel-play-character-grid">
-                    {characters.data.characters.map((character) => (
-                      <label key={character.id} className={actorId === character.id ? "character-option character-option-selected" : "character-option"}>
-                        <input type="radio" name={`novel-play-actor-${novel.id}`} value={character.id} checked={actorId === character.id} onChange={() => { setActorId(character.id); createMutation.reset(); }} />
-                        <span><strong>{character.canonicalName}</strong><small>{character.locationName ?? character.locationId ?? t("location unknown")}</small></span>
-                        <code>{character.id}</code>
-                      </label>
-                    ))}
-                  </div>
+                  <>
+                    <label className="novel-play-role-search"><span>{t("Find a role")}</span><input value={roleQuery} onChange={(event) => {
+                      const value = event.target.value;
+                      const matches = filterCharacters(value);
+                      setRoleQuery(value);
+                      if (!matches.some((character) => character.id === actorId)) setActorId(matches[0]?.id ?? "");
+                      createMutation.reset();
+                    }} placeholder={t("Search name, alias, or ID")} /></label>
+                    {visibleCharacters.length ? <div className="character-picker novel-play-character-grid">
+                      {visibleCharacters.map((character) => (
+                        <label key={character.id} className={actorId === character.id ? "character-option character-option-selected" : "character-option"}>
+                          <input type="radio" name={`novel-play-actor-${novel.id}`} value={character.id} checked={actorId === character.id} onChange={() => { setActorId(character.id); createMutation.reset(); }} />
+                          <span><strong>{character.canonicalName}</strong><small>{character.availability === "entry-checkpoint" ? t("Starts at {entry}", { entry: character.entryTitle ?? t("first grounded scene") }) : character.locationName ?? character.locationId ?? t("Current branch head")}</small></span>
+                          <span className="novel-play-role-meta"><em>{character.availability === "entry-checkpoint" ? t("New timeline") : t("Current world")}</em><code>{character.id}</code></span>
+                        </label>
+                      ))}
+                    </div> : <EmptyState title={t("No matching role")} body={t("Try a character name, alias, or compiled entity ID.")} />}
+                  </>
                 ) : <EmptyState title={t("No playable character at this head")} body={t("The branch needs at least one living, embodied compiled character before play can begin.")} />}
               </section>
-              {existingSession && <div className="novel-play-saved-session"><span>{t("Saved session")}</span><strong>{existingSession.title}</strong><small>{t(existingSession.status)} · {t("Step")} {selectedInstance?.logicalStep ?? 0}</small></div>}
+              <div className="novel-play-saved-session"><span>{t("New session")}</span><strong>{t("A fresh conversation will be created; saved sessions are never continued implicitly.")}</strong><small>{t("{count} saved", { count: savedSessionCount })}</small></div>
               {createMutation.error && <InlineError error={createMutation.error} />}
             </>}
           </div>
@@ -665,12 +680,12 @@ function InstancePage() {
               {characters.data.characters.map((character) => (
                 <label key={character.id} className={actorId === character.id ? "character-option character-option-selected" : "character-option"}>
                   <input type="radio" name="actor" value={character.id} checked={actorId === character.id} onChange={() => setActorId(character.id)} />
-                  <span><strong>{character.canonicalName}</strong><small>{character.locationName ?? character.locationId ?? t("location unknown")}</small></span>
+                  <span><strong>{character.canonicalName}</strong><small>{character.availability === "entry-checkpoint" ? t("Starts at {entry}", { entry: character.entryTitle ?? t("first grounded scene") }) : character.locationName ?? character.locationId ?? t("Current branch head")}</small></span>
                   <code>{character.id}</code>
                 </label>
               ))}
               <div className="action-row">
-                <button className="primary-button" disabled={!actorId || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? t("Opening…") : existingSession ? t("Switch / continue") : t("Start play session")}</button>
+                <button className="primary-button" disabled={!actorId || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? t("Opening…") : t("Start new play session")}</button>
                 {existingSession && <Link className="secondary-button" to="/play/$sessionId" params={{ sessionId: existingSession.id }}>{t("Open saved session")}</Link>}
               </div>
               {createMutation.error && <InlineError error={createMutation.error} />}

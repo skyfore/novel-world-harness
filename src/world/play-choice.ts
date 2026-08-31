@@ -86,6 +86,7 @@ export async function choosePlayExperience(
     instanceMode?: PlayInstanceMode;
     createIfMissing?: boolean;
     preparedCacheRoot?: string;
+    sessionIdentity?: { id: string; conversationId: string };
     onInstanceLifecycle?: (event: PlayInstanceLifecycleEvent) => void;
   },
   ask: AskPlayQuestion,
@@ -167,7 +168,7 @@ export async function choosePlayExperience(
   let branchEntryOptions: CharacterEntryOption[] = [];
   let branchPrepared: Awaited<ReturnType<PreparedNovelCache["loadRevision"]>> | null = null;
   const source = sourceId ? catalog.novels.find((novel) => novel.id === sourceId) : undefined;
-  if (!createdActorId && source && selectedInstance?.logicalStep === 0 && selectedInstance.preparedRevisionHash) {
+  if (!createdActorId && source && selectedInstance?.preparedRevisionHash) {
     try {
       branchPrepared = await new PreparedNovelCache(root, options.preparedCacheRoot)
         .loadRevision(source, selectedInstance.preparedRevisionHash);
@@ -233,7 +234,6 @@ export async function choosePlayExperience(
     && sourceId
     && selectedEntry
     && !playable.some((candidate) => candidate.id === character)
-    && selectedInstance?.logicalStep === 0
     && branchPrepared
   ) {
     const created = await createSourcePlayInstance(root, catalog, sourceId, {
@@ -269,7 +269,12 @@ export async function choosePlayExperience(
       ...(selectedInstance?.preparedRevisionHash ? { preparedRevisionHash: selectedInstance.preparedRevisionHash } : {}),
     });
   }
-  const selection = await selectPlayExperience(root, { branchId, character, ...(sourceId ? { source: sourceId } : {}) });
+  const selection = await selectPlayExperience(root, {
+    branchId,
+    character,
+    ...(sourceId ? { source: sourceId } : {}),
+    ...(options.sessionIdentity ? { sessionIdentity: options.sessionIdentity } : {}),
+  });
   if (createdReaderContext) selection.readerContext = createdReaderContext;
   else if (selection.logicalStep === 0 && source && selectedInstance?.preparedRevisionHash) {
     try {

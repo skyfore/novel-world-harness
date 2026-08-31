@@ -1,4 +1,5 @@
 import path from "node:path";
+import { CanonicalModelStore } from "../world/canonical-model.js";
 import { inspectPlayExperience } from "../world/play-experience.js";
 import { playSessionIdForBranch } from "../world/play-session.js";
 import {
@@ -15,7 +16,11 @@ export class CatalogService {
   }
 
   async read(): Promise<CatalogSnapshot> {
-    const catalog = await inspectPlayExperience(this.root);
+    const [catalog, canonicalEntities] = await Promise.all([
+      inspectPlayExperience(this.root),
+      new CanonicalModelStore(this.root).listEntities(),
+    ]);
+    const entityNames = new Map(canonicalEntities.map((entity) => [entity.id, entity.canonicalName]));
     const instancesByBranch = new Map(catalog.instances.map((instance) => [instance.branchId, instance]));
     const playSessions: PlaySessionSummary[] = catalog.savedSessions.map((session) => {
       const instance = instancesByBranch.get(session.branchId);
@@ -26,9 +31,10 @@ export class CatalogService {
         title: session.title,
         ...(session.sourceId ? { sourceId: session.sourceId } : {}),
         actorId: session.actorId,
-        ...(instance?.actorName ? { actorName: instance.actorName } : {}),
+        ...(entityNames.get(session.actorId) ? { actorName: entityNames.get(session.actorId) } : {}),
+        conversationId: session.conversationId,
         lastCommitId: session.lastCommitId,
-        active: catalog.activeSession?.branchId === session.branchId,
+        active: catalog.activeSession?.id === session.id,
         atHead: instance?.headCommitId === session.lastCommitId,
         status: session.status,
         updatedAt: session.updatedAt,

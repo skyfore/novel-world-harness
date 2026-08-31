@@ -88,6 +88,35 @@ describe("PlaySession v2", () => {
     expect(await store.readInstance("child")).toMatchObject({ id: child.id, status: "idle" });
   });
 
+  it("stores multiple independent sessions and conversations on one world branch", async () => {
+    const root = await workspace();
+    const store = new PlaySessionStore(root);
+    const first = await store.write({
+      id: "play-first",
+      conversationId: "conversation-first",
+      branchId: "main",
+      actorId: "hero",
+      lastCommitId: "commit-main",
+    });
+    const second = await store.write({
+      id: "play-second",
+      conversationId: "conversation-second",
+      branchId: "main",
+      actorId: "hero",
+      lastCommitId: "commit-main",
+    });
+
+    expect(first.id).not.toBe(second.id);
+    expect(await store.listInstances()).toEqual([
+      expect.objectContaining({ id: "play-second", status: "active", conversationId: "conversation-second" }),
+      expect.objectContaining({ id: "play-first", status: "idle", conversationId: "conversation-first" }),
+    ]);
+    expect(await store.readInstance("main")).toMatchObject({ id: "play-second" });
+    await store.activate(first.id);
+    expect(await store.getById(first.id)).toMatchObject({ status: "active" });
+    expect(await store.getById(second.id)).toMatchObject({ status: "idle" });
+  });
+
   it("archives, restores, and removes presentation sessions without changing IDs", async () => {
     const root = await workspace();
     const store = new PlaySessionStore(root);

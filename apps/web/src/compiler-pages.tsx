@@ -8,6 +8,8 @@ import {
   convergeProposals,
   createInstance,
   fetchOperation,
+  fetchOntology,
+  fetchOntologyNode,
   fetchOperations,
   fetchPreparation,
   fetchProposal,
@@ -16,12 +18,14 @@ import {
   rejectProposal,
   startPreparation,
 } from "./api";
+import { familyVisuals, nodeColor, nodeFamily, statusColors } from "./ontology-graph";
 import { canRetrySameRequest, recoveryInstruction, webErrorDetail } from "./recovery";
 import { useI18n } from "./i18n";
 import {
   preparationSnapshotSchema,
   type ModelSummary,
   type OperationSnapshot,
+  type OntologyNode,
   type PreparationSnapshot,
   type ProposalSummary,
   type ProposalStatus,
@@ -195,6 +199,7 @@ export function CompilerWorkbenchPage({
   const [model, setModel] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
   const [branchId, setBranchId] = useState("");
+  const [readyView, setReadyView] = useState<"entities" | "history">("entities");
 
   useEffect(() => {
     if (!branchId && preparation.data?.branchId) setBranchId(preparation.data.branchId);
@@ -306,7 +311,17 @@ export function CompilerWorkbenchPage({
 
       <PreparationHeader snapshot={snapshot} />
 
-      <section className="compile-control-strip">
+      {snapshot.stage === "ready" ? <section className="compile-ready-strip">
+        <div>
+          <span className="eyebrow">{t("Compiled world dataset")}</span>
+          <strong>{t("All {count} entities are available below.", { count: snapshot.audit?.canonical.entities ?? 0 })}</strong>
+          <small>{t("Select any entity to inspect its canonical record and source evidence.")}</small>
+        </div>
+        <div>
+          <Link className="secondary-button" to="/novels/$sourceId/ontology/$view" params={{ sourceId, view: "model" }}>{t("Explore relationships")}</Link>
+          <Link className="primary-button" to="/instances/$branchId" params={{ branchId: snapshot.branchId }}>{t("Open ready instance")}</Link>
+        </div>
+      </section> : <section className="compile-control-strip">
         <label>
           <span>{t("Pi model override")}</span>
           <select value={model} onChange={(event) => setModel(event.target.value)} disabled={busy}>
@@ -327,13 +342,25 @@ export function CompilerWorkbenchPage({
             <input className="branch-id-input" aria-label={t("New instance branch ID")} value={branchId} onChange={(event) => setBranchId(event.target.value)} />
             <button className="primary-button" disabled={!branchId || instanceMutation.isPending} onClick={() => instanceMutation.mutate()}>{t("Create world instance")}</button>
           </>}
-          {snapshot.stage === "ready" && <Link className="primary-button" to="/instances/$branchId" params={{ branchId: snapshot.branchId }}>{t("Open ready instance")}</Link>}
         </div>
-      </section>
+      </section>}
 
       {snapshot.stage === "repair" && <section className="repair-barrier"><span>{t("Repair barrier")}</span><div><strong>{t("Publication is blocked by deterministic checks")}</strong>{snapshot.repairReasons.map((reason) => <p key={reason}>{reason}</p>)}</div></section>}
 
-      <div className="compile-layout">
+      {snapshot.stage === "ready" && <nav className="compile-ready-tabs" aria-label={t("Compiled result views")}>
+        <button type="button" className={readyView === "entities" ? "selected" : ""} aria-pressed={readyView === "entities"} onClick={() => setReadyView("entities")}>
+          <span>{t("Compiled entities")}</span><small>{snapshot.audit?.canonical.entities ?? 0}</small>
+        </button>
+        <button type="button" className={readyView === "history" ? "selected" : ""} aria-pressed={readyView === "history"} onClick={() => setReadyView("history")}>
+          <span>{t("Compiler history")}</span><small>{snapshot.proposalCounts.accepted + snapshot.proposalCounts.rejected}</small>
+        </button>
+      </nav>}
+
+      {snapshot.stage === "ready" && readyView === "entities" ? <CompiledEntitiesWorkbench
+        sourceId={sourceId}
+        revisionKey={snapshot.updatedAt}
+        expectedCount={snapshot.audit?.canonical.entities ?? 0}
+      /> : <div className="compile-layout">
         <section className="compiler-operation-panel">
           <header>
             <div><span className="eyebrow">{t("Operation")}</span><strong>{current ? current.phase : t("No active compiler run")}</strong></div>
@@ -403,7 +430,7 @@ export function CompilerWorkbenchPage({
             </div>
           </div>
         </section>
-      </div>
+      </div>}
 
       {convergeMutation.data && <section className="convergence-result">
         <strong>{t("Convergence complete")}</strong>
@@ -414,6 +441,199 @@ export function CompilerWorkbenchPage({
       {decisionError && <div className="floating-error"><InlineError error={decisionError} /></div>}
     </>
   );
+}
+
+function CompiledEntitiesWorkbench({
+  sourceId,
+  revisionKey,
+  expectedCount,
+}: {
+  sourceId: string;
+  revisionKey: string;
+  expectedCount: number;
+}) {
+  const { t, localeTag } = useI18n();
+  const [search, setSearch] = useState("");
+  const [kind, setKind] = useState("");
+  const [selectedEntityId, setSelectedEntityId] = useState<string>();
+  const listParent = useRef<HTMLDivElement>(null);
+  const entities = useInfiniteQuery({
+    queryKey: ["compiled-entities", sourceId, revisionKey],
+    queryFn: ({ signal, pageParam }) => fetchOntology(sourceId, "model", {
+      layers: ["canonical"],
+      kind: "entity:*",
+      limit: 500,
+      ...(pageParam ? { cursor: pageParam } : {}),
+    }, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
+  });
+  const allEntities = useMemo(() => {
+    const byId = new Map<string, OntologyNode>();
+    for (const page of entities.data?.pages ?? []) {
+      for (const node of page.nodes) byId.set(node.id, node);
+    }
+    return [...byId.values()].sort((left, right) => left.label.localeCompare(right.label, localeTag));
+  }, [entities.data?.pages, localeTag]);
+  const kinds = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const node of allEntities) counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1);
+    return [...counts.entries()].sort(([left], [right]) => entityKindLabel(left, t).localeCompare(entityKindLabel(right, t), localeTag));
+  }, [allEntities, localeTag, t]);
+  const filteredEntities = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase();
+    return allEntities.filter((node) => {
+      if (kind && node.kind !== kind) return false;
+      if (!needle) return true;
+      return `${node.label} ${node.artifactId} ${node.kind} ${entityAliases(node).join(" ")}`.toLocaleLowerCase().includes(needle);
+    });
+  }, [allEntities, kind, search]);
+  const selectedEntity = allEntities.find((node) => node.id === selectedEntityId);
+  const detail = useQuery({
+    queryKey: ["compiled-entity-detail", sourceId, selectedEntityId, revisionKey],
+    queryFn: ({ signal }) => fetchOntologyNode(sourceId, "model", selectedEntityId!, {
+      layers: ["canonical"],
+      relationLimit: 500,
+    }, signal),
+    enabled: Boolean(selectedEntityId),
+  });
+  const virtual = useVirtualizer({
+    count: filteredEntities.length,
+    getScrollElement: () => listParent.current,
+    estimateSize: () => 64,
+    overscan: 12,
+  });
+  const total = entities.data?.pages[0]?.totalNodes ?? expectedCount;
+  const loadingCompleteSet = Boolean(entities.hasNextPage || entities.isFetchingNextPage);
+
+  useEffect(() => {
+    if (!entities.hasNextPage || entities.isFetchingNextPage || entities.isFetchNextPageError) return;
+    void entities.fetchNextPage();
+  }, [entities.fetchNextPage, entities.hasNextPage, entities.isFetchingNextPage, entities.isFetchNextPageError]);
+
+  useEffect(() => {
+    if (!selectedEntityId && allEntities[0]) setSelectedEntityId(allEntities[0].id);
+  }, [allEntities, selectedEntityId]);
+
+  return <section className="compiled-entities-workbench">
+    <header>
+      <div>
+        <span className="eyebrow">{t("Canonical entity registry")}</span>
+        <strong>{t("Compiled entities")}</strong>
+        <small>{loadingCompleteSet
+          ? t("Loading every entity · {loaded}/{total}", { loaded: allEntities.length, total })
+          : t("All {count} entities loaded", { count: allEntities.length })}</small>
+      </div>
+      <div className="compiled-entity-filters">
+        <label><span>{t("Find an entity")}</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Name, alias, ID…")} /></label>
+        <label><span>{t("Entity type")}</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option value="">{t("All entity types")}</option>{kinds.map(([value, count]) => <option key={value} value={value}>{entityKindLabel(value, t)} · {count}</option>)}</select></label>
+      </div>
+    </header>
+    {entities.isPending ? <LoadingState label={t("Reading every compiled entity…")} compact /> : entities.isError ? <div className="compiled-entity-error"><InlineError error={entities.error} /><button type="button" onClick={() => void entities.refetch()}>{t("Retry once")}</button></div> : <div className="compiled-entities-body">
+      <div className="compiled-entity-list" role="table" aria-label={t("Compiled entities")}>
+        <div className="compiled-entity-list-head" role="row"><span>{t("Entity")}</span><span>{t("Type")}</span><span>{t("Evidence")}</span></div>
+        <div ref={listParent} className="compiled-entity-list-scroll" role="rowgroup">
+          {filteredEntities.length ? <div className="compiled-entity-virtual-space" style={{ height: virtual.getTotalSize() }}>
+            {virtual.getVirtualItems().map((row) => {
+              const node = filteredEntities[row.index]!;
+              const aliases = entityAliases(node);
+              return <button
+                ref={virtual.measureElement}
+                data-index={row.index}
+                type="button"
+                role="row"
+                aria-selected={node.id === selectedEntityId}
+                key={node.id}
+                className={node.id === selectedEntityId ? "selected" : ""}
+                style={{ transform: `translateY(${row.start}px)` }}
+                onClick={() => setSelectedEntityId(node.id)}
+              >
+                <span className="compiled-entity-name"><i style={{ background: nodeColor(node), borderColor: statusColors[node.status] }} /><span><strong>{node.label}</strong><small>{aliases.length ? aliases.join(" · ") : node.artifactId}</small></span></span>
+                <span className="compiled-entity-kind">{entityKindLabel(node.kind, t)}</span>
+                <span className="compiled-entity-evidence-count">{node.evidenceCount}</span>
+              </button>;
+            })}
+          </div> : <div className="compiled-entity-empty"><span>◇</span><strong>{t("No entities match")}</strong><p>{t("Clear the name or type filter to restore the complete entity registry.")}</p></div>}
+        </div>
+        <footer><span>{t("Showing {shown} of {total} entities", { shown: filteredEntities.length, total: allEntities.length })}</span></footer>
+      </div>
+      <CompiledEntityInspector
+        sourceId={sourceId}
+        node={selectedEntity}
+        detail={detail}
+      />
+    </div>}
+  </section>;
+}
+
+function CompiledEntityInspector({
+  sourceId,
+  node,
+  detail,
+}: {
+  sourceId: string;
+  node?: OntologyNode;
+  detail: ReturnType<typeof useQuery<Awaited<ReturnType<typeof fetchOntologyNode>>, Error>>;
+}) {
+  const { t } = useI18n();
+  if (!node) return <aside className="compiled-entity-inspector compiled-entity-inspector-empty"><span>◇</span><strong>{t("Select an entity")}</strong><p>{t("Choose a row to inspect the complete canonical record and its source evidence.")}</p></aside>;
+  const aliases = entityAliases(node);
+  return <aside className="compiled-entity-inspector">
+    <header>
+      <span style={{ background: nodeColor(node), borderColor: statusColors[node.status] }} />
+      <div><small>{entityKindLabel(node.kind, t)}</small><h2>{node.label}</h2><code>{node.artifactId}</code></div>
+      <Link to="/novels/$sourceId/ontology/$view" params={{ sourceId, view: "model" }}>{t("View relationships")} ↗</Link>
+    </header>
+    <div className="compiled-entity-detail-scroll">
+      <div className="compiled-entity-stats">
+        <span><small>{t("Aliases")}</small><strong>{aliases.length}</strong></span>
+        <span><small>{t("Evidence")}</small><strong>{node.evidenceCount}</strong></span>
+        <span><small>{t("State")}</small><strong style={{ color: statusColors[node.status] }}>{t(node.status)}</strong></span>
+      </div>
+      <section className="compiled-entity-core">
+        <h3>{t("Canonical identity")}</h3>
+        <dl>
+          <div><dt>{t("Canonical name")}</dt><dd>{node.label}</dd></div>
+          <div><dt>{t("Entity type")}</dt><dd>{entityKindLabel(node.kind, t)}</dd></div>
+          <div><dt>{t("Aliases")}</dt><dd>{aliases.length ? aliases.join(" · ") : t("None")}</dd></div>
+          <div><dt>{t("Revision")}</dt><dd><code>{node.revisionHash ?? t("derived")}</code></dd></div>
+        </dl>
+      </section>
+      {detail.isPending ? <LoadingState label={t("Reading complete entity record…")} compact /> : detail.isError ? <InlineError error={detail.error} /> : detail.data ? <>
+        <section className="compiled-entity-relations">
+          <h3>{t("Relationship coverage")}</h3>
+          <div><span>{t("Incoming")}</span><strong>{detail.data.relationPage.incomingTotal}</strong><span>{t("Outgoing")}</span><strong>{detail.data.relationPage.outgoingTotal}</strong></div>
+        </section>
+        <section className="compiled-entity-evidence">
+          <h3>{t("Source evidence · {count}", { count: detail.data.evidence.length })}</h3>
+          {detail.data.evidence.length ? detail.data.evidence.map((evidence, index) => <article key={`${evidence.quoteHash}:${index}`}>
+            <header><span>{t("lines {start}–{end}", { start: evidence.startLine, end: evidence.endLine })}</span><small>{t(evidence.strength)}</small></header>
+            <blockquote>{evidence.excerpt ?? t("Exact byte excerpt is unavailable for this legacy reference.")}{evidence.excerptTruncated ? "…" : ""}</blockquote>
+          </article>) : <p>{t("No source-local evidence span is attached.")}</p>}
+        </section>
+        <DeferredJsonDetails className="compiled-entity-json" summary={t("Complete entity record")} value={detail.data.payload} />
+      </> : null}
+    </div>
+  </aside>;
+}
+
+function entityAliases(node: OntologyNode): string[] {
+  const aliases = node.summary.aliases;
+  return Array.isArray(aliases) ? aliases.filter((value): value is string => typeof value === "string") : [];
+}
+
+function entityKindLabel(kind: string, t: ReturnType<typeof useI18n>["t"]): string {
+  const label = ({
+    "entity:character": "Character",
+    "entity:location": "Location",
+    "entity:artifact": "Artifact",
+    "entity:concept": "Concept",
+    "entity:faction": "Faction",
+    "entity:institution": "Institution",
+    "entity:relationship": "Relationship",
+    "entity:other": "Other",
+  } as Record<string, string>)[kind] ?? kind.replace(/^entity:/, "").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return t(label);
 }
 
 function ProposalVirtualList({

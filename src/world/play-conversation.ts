@@ -61,10 +61,11 @@ export class PlayConversationStore {
     this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "play", "conversations");
   }
 
-  async list(branchIdValue: string): Promise<PlayConversationMessage[]> {
+  async list(branchIdValue: string, conversationIdValue?: string): Promise<PlayConversationMessage[]> {
     const branchId = idSchema.parse(branchIdValue);
+    const conversationId = conversationIdValue === undefined ? undefined : idSchema.parse(conversationIdValue);
     try {
-      const parsed = playConversationFileSchema.parse(JSON.parse(await fs.readFile(this.filePath(branchId), "utf8")));
+      const parsed = playConversationFileSchema.parse(JSON.parse(await fs.readFile(this.filePath(branchId, conversationId), "utf8")));
       if (parsed.branchId !== branchId) {
         throw new Error(`Play conversation '${branchId}' contains branch '${parsed.branchId}'.`);
       }
@@ -77,6 +78,7 @@ export class PlayConversationStore {
 
   async append(input: {
     branchId: string;
+    conversationId?: string;
     actorId: string;
     atCommit: string;
     eventId?: string;
@@ -87,14 +89,16 @@ export class PlayConversationStore {
     text: string;
   }): Promise<PlayConversationMessage> {
     const branchId = idSchema.parse(input.branchId);
-    const previous = await this.list(branchId);
+    const conversationId = input.conversationId === undefined ? undefined : idSchema.parse(input.conversationId);
+    const previous = await this.list(branchId, conversationId);
     if (previous.length >= MAX_BRANCH_MESSAGES) {
       throw new Error(`Play conversation '${branchId}' exceeds ${MAX_BRANCH_MESSAGES} messages.`);
     }
+    const { conversationId: _conversationId, ...messageInput } = input;
     const message = playConversationMessageSchema.parse({
       version: 1,
       id: `message-${crypto.randomUUID()}`,
-      ...input,
+      ...messageInput,
       branchId,
       sequence: previous.length ? previous.at(-1)!.sequence + 1 : 0,
       createdAt: new Date().toISOString(),
@@ -104,17 +108,20 @@ export class PlayConversationStore {
       branchId,
       messages: [...previous, message],
     });
-    await this.atomicWrite(this.filePath(branchId), value);
+    await this.atomicWrite(this.filePath(branchId, conversationId), value);
     return structuredClone(message);
   }
 
-  async remove(branchIdValue: string): Promise<void> {
+  async remove(branchIdValue: string, conversationIdValue?: string): Promise<void> {
     const branchId = idSchema.parse(branchIdValue);
-    await fs.rm(this.filePath(branchId), { force: true });
+    const conversationId = conversationIdValue === undefined ? undefined : idSchema.parse(conversationIdValue);
+    await fs.rm(this.filePath(branchId, conversationId), { force: true });
   }
 
-  private filePath(branchId: string): string {
-    return path.join(this.root, `${branchId}.json`);
+  private filePath(branchId: string, conversationId?: string): string {
+    const legacyConversationId = `conversation-${branchId}`;
+    const storageId = !conversationId || conversationId === legacyConversationId ? branchId : conversationId;
+    return path.join(this.root, `${storageId}.json`);
   }
 
   private async atomicWrite(filePath: string, value: z.infer<typeof playConversationFileSchema>): Promise<void> {
@@ -131,9 +138,19 @@ export async function playConversationAtCommit(
   branchId: string,
   commitId: string,
   actorId: string,
+  conversationId?: string,
 ): Promise<PlayConversationMessage[]> {
   const selectedActorId = idSchema.parse(actorId);
   const ancestry = await commitAncestry(engine, commitId);
+  if (conversationId) {
+    const messages = (await new PlayConversationStore(engine.workspaceRoot).list(branchId, conversationId))
+      .filter((message) => message.actorId === selectedActorId)
+      .filter((message) => ancestry.has(message.atCommit));
+    return structuredClone(messages.sort((left, right) =>
+      left.sequence - right.sequence
+      || Date.parse(left.createdAt) - Date.parse(right.createdAt)
+      || left.id.localeCompare(right.id)));
+  }
   const lineage: Array<Awaited<ReturnType<WorldEngine["branches"]["read"]>>> = [];
   const seen = new Set<string>();
   let cursor: string | undefined = branchId;

@@ -50,6 +50,7 @@ export const playSessionSummarySchema = z.object({
   sourceId: z.string().optional(),
   actorId: z.string().min(1),
   actorName: z.string().optional(),
+  conversationId: z.string().min(1),
   lastCommitId: z.string().min(1),
   active: z.boolean(),
   atHead: z.boolean(),
@@ -739,6 +740,9 @@ export const playableCharacterSchema = z.object({
   locationId: z.string().optional(),
   locationName: z.string().optional(),
   sourceIds: z.array(z.string()),
+  availability: z.enum(["current-head", "entry-checkpoint"]).optional(),
+  entryKind: z.enum(["opening", "canonical-scene"]).optional(),
+  entryTitle: z.string().min(1).optional(),
 }).strict();
 
 export const playableCharacterListSchema = z.object({

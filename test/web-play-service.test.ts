@@ -6,6 +6,7 @@ import { PlayApplicationService } from "../src/application/play-service.js";
 import type { PlayerOpeningNarrator } from "../src/agent/pi-player-opening.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { PlayConversationStore } from "../src/world/play-conversation.js";
+import { PlaySessionStore } from "../src/world/play-session.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { WebEventBroker } from "../src/web/event-stream.js";
 import { WebApplicationError } from "../src/web/errors.js";
@@ -97,10 +98,11 @@ describe("Web Play application service", () => {
       clientRequestId: "create-1",
     });
     expect(created).toMatchObject({
-      session: { id: "play-main", title: "林岐的支线", status: "active" },
+      session: { id: expect.stringMatching(/^play-[0-9a-f-]{36}$/), title: "林岐的支线", status: "active" },
       headCommitId: genesis,
       messages: [],
     });
+    expect(created.session.id).not.toBe("play-main");
     const replayedCreate = await service.createSession({
       branchId: "main",
       actorId: "hero",
@@ -108,6 +110,19 @@ describe("Web Play application service", () => {
       clientRequestId: "create-1",
     });
     expect(replayedCreate.session.id).toBe(created.session.id);
+    const freshSession = await service.createSession({
+      branchId: "main",
+      actorId: "hero",
+      clientRequestId: "create-2",
+    });
+    expect(freshSession.session.id).not.toBe(created.session.id);
+    expect(freshSession.messages).toEqual([]);
+    const storedSessions = (await new PlaySessionStore(root).listInstances())
+      .filter((session) => session.branchId === "main");
+    expect(storedSessions).toHaveLength(2);
+    expect(new Set(storedSessions.map((session) => session.conversationId)).size).toBe(2);
+    await expect(service.getSession(created.session.id)).resolves.toMatchObject({ session: { status: "idle" } });
+    await expect(service.getSession(freshSession.session.id)).resolves.toMatchObject({ session: { status: "active" } });
 
     const opening = await service.startSceneNarration(created.session.id, {
       purpose: "opening",
@@ -354,7 +369,8 @@ describe("Web Play application service", () => {
     });
     expect(await engine.branches.readHead("main")).not.toBe(genesis);
     const committedHead = await engine.branches.readHead("main");
-    expect(await new PlayConversationStore(root).list("main")).toEqual([
+    const storedSession = await new PlaySessionStore(root).getById(session.session.id);
+    expect(await new PlayConversationStore(root).list("main", storedSession!.conversationId)).toEqual([
       expect.objectContaining({ role: "player", status: "accepted", runId: accepted.operation.runId }),
     ]);
     await expect(service.traceStore.getRun(accepted.operation.runId!)).resolves.toMatchObject({
@@ -388,7 +404,7 @@ describe("Web Play application service", () => {
       },
     });
     expect(await engine.branches.readHead("main")).toBe(committedHead);
-    expect(await new PlayConversationStore(root).list("main")).toEqual([
+    expect(await new PlayConversationStore(root).list("main", storedSession!.conversationId)).toEqual([
       expect.objectContaining({ role: "player", status: "accepted", runId: accepted.operation.runId }),
       expect.objectContaining({ role: "scene", status: "rendered", runId: retry.operation.runId }),
     ]);
@@ -463,11 +479,12 @@ describe("Web Play application service", () => {
         payload: { branchId: "main", actorId: "hero", clientRequestId: "http-create" },
       });
       expect(created.statusCode).toBe(201);
-      expect(created.json()).toMatchObject({ session: { id: "play-main" }, headCommitId: genesis });
+      expect(created.json()).toMatchObject({ session: { id: expect.stringMatching(/^play-[0-9a-f-]{36}$/) }, headCommitId: genesis });
+      const sessionId = (created.json() as { session: { id: string } }).session.id;
 
       const narration = await app.inject({
         method: "POST",
-        url: "/api/v1/play-sessions/play-main/narrations",
+        url: `/api/v1/play-sessions/${sessionId}/narrations`,
         headers: { "x-nwh-csrf": csrfToken },
         payload: { purpose: "opening", expectedHead: genesis, clientRequestId: "http-opening" },
       });
@@ -478,27 +495,27 @@ describe("Web Play application service", () => {
       const operation = await app.inject({ method: "GET", url: `/api/v1/operations/${operationId}` });
       expect(operation.statusCode).toBe(200);
       expect(operation.json()).toMatchObject({ id: operationId, status: "succeeded" });
-      const detail = await app.inject({ method: "GET", url: "/api/v1/play-sessions/play-main" });
+      const detail = await app.inject({ method: "GET", url: `/api/v1/play-sessions/${sessionId}` });
       expect(detail.json()).toMatchObject({ messages: [expect.objectContaining({ role: "scene" })] });
-      const messages = await app.inject({ method: "GET", url: "/api/v1/play-sessions/play-main/messages" });
+      const messages = await app.inject({ method: "GET", url: `/api/v1/play-sessions/${sessionId}/messages` });
       expect(messages.statusCode).toBe(200);
       expect(messages.json()).toEqual([expect.objectContaining({ role: "scene", status: "rendered" })]);
 
       const missingRetrySource = await app.inject({
         method: "POST",
-        url: "/api/v1/play-sessions/play-main/retry-narration",
+        url: `/api/v1/play-sessions/${sessionId}/retry-narration`,
         headers: { "x-nwh-csrf": csrfToken },
         payload: { sourceRunId: "run-missing", expectedHead: genesis, clientRequestId: "http-retry-missing" },
       });
       expect(missingRetrySource.statusCode).toBe(404);
       expect(missingRetrySource.json()).toMatchObject({
         code: "TRACE_RUN_NOT_FOUND",
-        retry: { discoveryEndpoint: "/api/v1/runs?sessionId=play-main&kind=player-move", copyField: "id", maxAttempts: 1 },
+        retry: { discoveryEndpoint: `/api/v1/runs?sessionId=${sessionId}&kind=player-move`, copyField: "id", maxAttempts: 1 },
       });
 
       const cleared = await app.inject({
         method: "DELETE",
-        url: "/api/v1/play-sessions/play-main/messages",
+        url: `/api/v1/play-sessions/${sessionId}/messages`,
         headers: { "x-nwh-csrf": csrfToken },
         payload: { clientRequestId: "http-clear" },
       });

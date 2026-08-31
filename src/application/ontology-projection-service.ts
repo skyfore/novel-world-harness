@@ -767,12 +767,18 @@ function validateInput(input: OntologyProjectionInput) {
 function filterNodes(nodes: readonly OntologyNode[], input: ValidatedOntologyProjectionInput): OntologyNode[] {
   const needle = input.search?.toLocaleLowerCase();
   return nodes.filter((node) => {
-    if (input.kind && node.kind !== input.kind) return false;
+    if (input.kind && !matchesKindFilter(node.kind, input.kind)) return false;
     if (input.status && node.status !== input.status) return false;
     return !needle || `${node.label} ${node.id} ${node.artifactId} ${node.kind} ${node.status} ${node.layer}`
       .toLocaleLowerCase()
       .includes(needle);
   });
+}
+
+function matchesKindFilter(kind: string, filter: string): boolean {
+  if (!filter.endsWith("*")) return kind === filter;
+  const prefix = filter.slice(0, -1);
+  return prefix.length > 0 && kind.startsWith(prefix);
 }
 
 function topologyOrder(nodes: readonly OntologyNode[], edges: readonly OntologyEdge[]): OntologyNode[] {

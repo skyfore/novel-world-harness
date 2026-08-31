@@ -147,4 +147,32 @@ describe("play conversation memory", () => {
     expect(forkMessages.map((message) => message.text)).not.toContain("main-only request");
     expect(forkMessages.map((message) => message.text)).not.toContain("late parent rendering at the fork commit");
   });
+
+  it("keeps fresh Web sessions on the same branch conversation-isolated", async () => {
+    const { root, engine, genesis } = await engineFixture();
+    const store = new PlayConversationStore(root);
+    await store.append({
+      branchId: "main",
+      conversationId: "conversation-first",
+      actorId: "hero",
+      atCommit: genesis,
+      role: "scene",
+      status: "rendered",
+      text: "first session opening",
+    });
+    await store.append({
+      branchId: "main",
+      conversationId: "conversation-second",
+      actorId: "hero",
+      atCommit: genesis,
+      role: "scene",
+      status: "rendered",
+      text: "second session opening",
+    });
+
+    await expect(playConversationAtCommit(engine, "main", genesis, "hero", "conversation-first"))
+      .resolves.toEqual([expect.objectContaining({ text: "first session opening", sequence: 0 })]);
+    await expect(playConversationAtCommit(engine, "main", genesis, "hero", "conversation-second"))
+      .resolves.toEqual([expect.objectContaining({ text: "second session opening", sequence: 0 })]);
+  });
 });

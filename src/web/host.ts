@@ -174,11 +174,15 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     if (!isAllowedHost(request, configuredHost)) {
       return reply.code(403).send(apiError("HOST_NOT_ALLOWED", "The request Host is not allowed for this local Web UI."));
     }
+    const isMutation = request.method !== "GET" && request.method !== "HEAD";
+    const csrfMatches = isMutation && matchesCsrfToken(request, csrfToken);
     const origin = request.headers.origin;
-    if (origin && !isSameOrigin(origin, request.headers.host)) {
+    if (origin
+      && !isSameOrigin(origin, request.headers.host, configuredHost)
+      && !isTrustedSameOriginProxyMutation(request, csrfMatches)) {
       return reply.code(403).send(apiError("ORIGIN_NOT_ALLOWED", "Cross-origin requests are not allowed."));
     }
-    if (request.method !== "GET" && request.method !== "HEAD" && !matchesCsrfToken(request, csrfToken)) {
+    if (isMutation && !csrfMatches) {
       return reply.code(403).send(apiError(
         "CSRF_TOKEN_INVALID",
         "Mutating Web UI requests require the CSRF token returned by /api/v1/bootstrap.",
@@ -547,13 +551,27 @@ function isAllowedHost(request: FastifyRequest, configuredHost: string): boolean
   return allowed.has(requestHost);
 }
 
-function isSameOrigin(origin: string, hostHeader: string | undefined): boolean {
+function isSameOrigin(origin: string, hostHeader: string | undefined, configuredHost: string): boolean {
   if (!hostHeader) return false;
   try {
-    return new URL(origin).host.toLowerCase() === hostHeader.toLowerCase();
+    const parsedOrigin = new URL(origin);
+    if (parsedOrigin.host.toLowerCase() === hostHeader.toLowerCase()) return true;
+    if (!isLoopbackHost(configuredHost)) return false;
+    const requestHostname = new URL(`http://${hostHeader}`).hostname;
+    return isLoopbackHost(parsedOrigin.hostname) && isLoopbackHost(requestHostname);
   } catch {
     return false;
   }
+}
+
+function isTrustedSameOriginProxyMutation(request: FastifyRequest, csrfMatches: boolean): boolean {
+  if (!csrfMatches) return false;
+  const fetchSite = request.headers["sec-fetch-site"];
+  const value = Array.isArray(fetchSite) ? fetchSite[0] : fetchSite;
+  // Chromium sets this forbidden request header from the browser-visible URL.
+  // It lets a same-origin local reverse proxy preserve the external Origin while
+  // the backend still requires the unguessable bootstrap CSRF token.
+  return value === "same-origin";
 }
 
 function matchesCsrfToken(request: FastifyRequest, expected: string): boolean {

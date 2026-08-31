@@ -10,6 +10,7 @@ import { TraceRecorder } from "../src/trace/recorder.js";
 import { TraceStore } from "../src/trace/store.js";
 import { createWebHost } from "../src/web/host.js";
 import { PlayConversationStore } from "../src/world/play-conversation.js";
+import { PlaySessionStore } from "../src/world/play-session.js";
 import { PlayerTurnAuditStore } from "../src/world/player-turn-audit.js";
 import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION } from "../src/world/model.js";
 import { BranchStore, WorldObjectStore } from "../src/world/store.js";
@@ -69,12 +70,12 @@ async function world(root: string): Promise<{
   return { branches, genesis, committed, eventHash };
 }
 
-async function orphanedRun(root: string, previousHead: string, id: string): Promise<void> {
+async function orphanedRun(root: string, previousHead: string, id: string, playSessionId = "play-main"): Promise<void> {
   const recorder = await TraceRecorder.start(new TraceStore(root), {
     id,
     kind: "player-move",
     branchId: "main",
-    playSessionId: "play-main",
+    playSessionId,
     playerMoveId: `move-${id}`,
     actorId: "hero",
     previousHead,
@@ -91,7 +92,14 @@ describe("player-move trace startup reconciliation", () => {
     await branches.updateHead("main", genesis, committed);
     const runId = "run-recover-after-commit";
     const playerMoveId = `move-${runId}`;
-    await orphanedRun(root, genesis, runId);
+    const session = await new PlaySessionStore(root).write({
+      id: "play-fresh",
+      conversationId: "conversation-fresh",
+      branchId: "main",
+      actorId: "hero",
+      lastCommitId: committed,
+    });
+    await orphanedRun(root, genesis, runId, session.id);
     const audit = await new PlayerTurnAuditStore(root).write({
       startedAt: "2026-08-30T12:00:00.000Z",
       finishedAt: "2026-08-30T12:00:02.000Z",
@@ -113,6 +121,7 @@ describe("player-move trace startup reconciliation", () => {
     });
     const playerMessage = await new PlayConversationStore(root).append({
       branchId: "main",
+      conversationId: session.conversationId,
       actorId: "hero",
       atCommit: committed,
       eventId: "event-player-move",

@@ -59,13 +59,18 @@ export async function removeWorldInstance(
   const catalog = await inspectPlayExperience(root);
   const instance = catalog.instances.find((candidate) => candidate.branchId === branchId);
   if (!instance) throw new Error(`Unknown instance '${branchId}'. Use /instances to list playable instances.`);
+  const instanceSessions = catalog.savedSessions.filter((session) => session.branchId === branchId);
 
   await new BranchStore(root).remove(branchId);
   const sessionStore = new PlaySessionStore(root);
   const detached = options.retainPresentation
     ? await sessionStore.detachInstance(branchId)
     : { detachedSession: null, nextActiveSession: await sessionStore.removeInstance(branchId) };
-  if (!options.retainPresentation) await new PlayConversationStore(root).remove(branchId);
+  if (!options.retainPresentation) {
+    const conversations = new PlayConversationStore(root);
+    await Promise.all(instanceSessions.map((session) => conversations.remove(branchId, session.conversationId)));
+    if (!instanceSessions.length) await conversations.remove(branchId);
+  }
   await fs.rm(path.join(workspaceStateDir(root), "world", "v1", "frontier", branchId), {
     recursive: true,
     force: true,

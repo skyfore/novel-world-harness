@@ -1,6 +1,7 @@
 import type { TraceEvent, TraceRunManifest } from "../trace/schema.js";
 import { TraceStore, type TraceRunLinkPatch } from "../trace/store.js";
 import { PlayConversationStore, type PlayConversationMessage } from "../world/play-conversation.js";
+import { PlaySessionStore } from "../world/play-session.js";
 import { PlayerTurnAuditStore, type PlayerTurnAuditRecoveryLink } from "../world/player-turn-audit.js";
 import { BranchStore, WorldObjectStore } from "../world/store.js";
 
@@ -40,12 +41,14 @@ export class PlayTraceRecoveryService {
   private readonly objects: WorldObjectStore;
   private readonly audits: PlayerTurnAuditStore;
   private readonly conversations: PlayConversationStore;
+  private readonly sessions: PlaySessionStore;
 
   constructor(readonly root: string, readonly traces: TraceStore) {
     this.branches = new BranchStore(root);
     this.objects = new WorldObjectStore(root);
     this.audits = new PlayerTurnAuditStore(root);
     this.conversations = new PlayConversationStore(root);
+    this.sessions = new PlaySessionStore(root);
   }
 
   async reconcileInterruptedPlayerMoves(): Promise<PlayTraceRecoverySummary> {
@@ -265,7 +268,9 @@ export class PlayTraceRecoveryService {
     if (!run.branchId) return { messageIds: [], sceneRendered: false, data: { presentationStatus: "unavailable" } };
     let messages: PlayConversationMessage[];
     try {
-      messages = (await this.conversations.list(run.branchId)).filter((message) => message.runId === run.id);
+      const session = run.playSessionId ? await this.sessions.getById(run.playSessionId) : null;
+      messages = (await this.conversations.list(run.branchId, session?.conversationId))
+        .filter((message) => message.runId === run.id);
     } catch {
       return {
         messageIds: [],

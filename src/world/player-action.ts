@@ -682,6 +682,7 @@ export const playerTurnInputSchema = z
   .object({
     branchId: idSchema,
     sourceId: idSchema.optional(),
+    conversationId: idSchema.optional(),
     actorId: idSchema,
     utterance: z.string().trim().min(1).max(20_000),
   })
@@ -1375,7 +1376,7 @@ export class PlayerTurnService {
       latestCommittedStoryTime(this.engine, previousHead),
       this.engine.contextForCommit(previousHead),
       this.engine.projector.project(previousHead),
-      playConversationAtCommit(this.engine, input.branchId, previousHead, input.actorId),
+      playConversationAtCommit(this.engine, input.branchId, previousHead, input.actorId, input.conversationId),
     ]);
     const relatedMessages = modelPlayConversation(conversation);
     const recentMessages = modelPlayConversation(recentPlayConversation(conversation));

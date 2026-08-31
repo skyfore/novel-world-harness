@@ -85,7 +85,10 @@ export class MaintenanceApplicationService {
     const instance = catalog.instances.find((candidate) => candidate.branchId === branchId);
     if (!instance) throw this.instanceNotFound(branchId);
     const sessions = catalog.playSessions.filter((session) => session.branchId === branchId);
-    const messages = await this.conversations.list(branchId);
+    const messages = sessions.length
+      ? (await Promise.all(sessions.map((session) =>
+          this.conversations.list(branchId, session.conversationId)))).flat()
+      : await this.conversations.list(branchId);
     const traceIds = await this.traces.listRunIds({ branchId });
     const children = catalog.instances.filter((candidate) => candidate.parentBranchId === branchId).map((candidate) => candidate.branchId).sort();
     const blockers = await this.instanceBlockers(branchId, sessions.map((session) => session.id));
@@ -168,7 +171,10 @@ export class MaintenanceApplicationService {
     const instances = catalog.instances.filter((instance) => instance.sourceId === sourceId);
     const branchIds = instances.map((instance) => instance.branchId).sort();
     const sessions = catalog.playSessions.filter((session) => branchIds.includes(session.branchId));
-    const messages = (await Promise.all(branchIds.map((branchId) => this.conversations.list(branchId)))).flat();
+    const messages = sessions.length
+      ? (await Promise.all(sessions.map((session) =>
+          this.conversations.list(session.branchId, session.conversationId)))).flat()
+      : (await Promise.all(branchIds.map((branchId) => this.conversations.list(branchId)))).flat();
     const traceIds = new Set(await this.traces.listRunIds({ sourceId }));
     for (const branchId of branchIds) {
       for (const runId of await this.traces.listRunIds({ branchId })) traceIds.add(runId);

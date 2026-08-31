@@ -211,7 +211,12 @@ export async function listPlayableCharacters(
 
 export async function selectPlayExperience(
   root: string,
-  options: { branchId?: string; character?: string; source?: string } = {},
+  options: {
+    branchId?: string;
+    character?: string;
+    source?: string;
+    sessionIdentity?: { id: string; conversationId: string };
+  } = {},
 ): Promise<SelectedPlayExperience> {
   const sessionStore = new PlaySessionStore(root);
   const active = await sessionStore.read();
@@ -256,6 +261,7 @@ export async function selectPlayExperience(
     ...(activeSourceId ? { sourceId: activeSourceId } : {}),
     actorId: actor.id,
     lastCommitId: branch.headCommitId,
+    ...(options.sessionIdentity ? options.sessionIdentity : {}),
   });
   const readinessWarnings: string[] = [];
   const readinessDiagnostics: string[] = [];
@@ -299,6 +305,9 @@ export async function performPlayTurn(options: {
   expectedHead?: string;
   runId?: string;
   playerMoveId?: string;
+  sessionId?: string;
+  conversationId?: string;
+  sourceId?: string;
 }): Promise<PlayTurnOutcome> {
   const startedAt = new Date();
   const advanceBackground = options.advanceBackground ?? 0;
@@ -319,12 +328,14 @@ export async function performPlayTurn(options: {
     engine.contextForCommit(previousHead),
   ]);
   const sessionStore = new PlaySessionStore(options.root);
-  const previousSession = await sessionStore.readInstance(options.branchId);
+  const previousSession = options.sessionId
+    ? await sessionStore.getById(options.sessionId)
+    : await sessionStore.readInstance(options.branchId);
   const sourceId = await resolveCommitSourceId(
     engine,
     context,
     previousHead,
-    previousSession?.sourceId ?? branch.sourceId,
+    options.sourceId ?? previousSession?.sourceId ?? branch.sourceId,
     "Player turn",
   );
   const actor = context.entities.get(options.actorId);
@@ -361,6 +372,7 @@ export async function performPlayTurn(options: {
   const result = await turns.turn({
     branchId: options.branchId,
     ...(sourceId ? { sourceId } : {}),
+    ...(options.conversationId ? { conversationId: options.conversationId } : {}),
     actorId: options.actorId,
     utterance: options.utterance,
   }, {
@@ -379,6 +391,7 @@ export async function performPlayTurn(options: {
     const playerEvent = result.eventHash ? await engine.objects.getEvent(result.eventHash) : undefined;
     playerMessage = await new PlayConversationStore(options.root).append({
       branchId: options.branchId,
+      ...(options.conversationId ? { conversationId: options.conversationId } : {}),
       actorId: options.actorId,
       atCommit: result.newHead,
       ...(playerEvent ? { eventId: playerEvent.eventId } : {}),
@@ -459,7 +472,13 @@ export async function performPlayTurn(options: {
         if (!presentEntities.some((entity) => entity.id === actor.id)) {
           presentEntities.unshift({ id: actor.id, name: actor.canonicalName, kind: actor.kind });
         }
-        const responseConversation = await playConversationAtCommit(engine, options.branchId, finalHead, options.actorId);
+        const responseConversation = await playConversationAtCommit(
+          engine,
+          options.branchId,
+          finalHead,
+          options.actorId,
+          options.conversationId,
+        );
         const relatedMessages = modelPlayConversation(responseConversation);
         const response = await runtime.respondToPlayer({
           branchId: options.branchId,
@@ -559,10 +578,12 @@ export async function performPlayTurn(options: {
   }
   const finalState = await engine.projector.project(finalHead);
   await sessionStore.write({
+    ...(options.sessionId ? { id: options.sessionId } : {}),
     branchId: options.branchId,
     ...(sourceId ? { sourceId } : {}),
     actorId: options.actorId,
     lastCommitId: finalHead,
+    ...(options.conversationId ? { conversationId: options.conversationId } : {}),
   });
   const finishedAt = new Date();
   let auditId: string | undefined;

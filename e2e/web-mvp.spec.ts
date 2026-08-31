@@ -127,6 +127,15 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await expect(page).toHaveURL(/\/instances\/main$/);
   await expect(page.getByText("Prepared revision", { exact: true })).toBeVisible();
 
+  await page.goto(`${origin}/novels/${sourceId}/compile`);
+  const compiledEntities = page.getByRole("table", { name: "Compiled entities" });
+  await expect(compiledEntities).toContainText("Mara");
+  await compiledEntities.getByRole("row").filter({ hasText: "Mara" }).first().click();
+  await expect(page.locator(".compiled-entity-inspector")).toContainText("Canonical identity");
+  await expect(page.locator(".compiled-entity-inspector")).toContainText("Complete entity record");
+
+  await page.goto(`${origin}/instances/main`);
+
   await page.getByRole("link", { name: "Inspect ontology" }).click();
   await expect(page.getByRole("heading", { name: "Events" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Ontology projection" }).getByRole("link")).toHaveCount(5);
@@ -146,9 +155,10 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await expect(playLauncher.getByLabel("World branch")).toHaveValue("main");
   const playableMara = playLauncher.getByRole("radio", { name: /Mara/ });
   await expect(playableMara).toBeChecked();
+  await expect(playLauncher).toContainText("A fresh conversation will be created");
   await playableMara.click();
-  await playLauncher.getByRole("button", { name: "Play as Mara" }).click();
-  await expect(page).toHaveURL(/\/play\/play-main$/);
+  await playLauncher.getByRole("button", { name: "Start a new session as Mara" }).click();
+  await expect(page).toHaveURL(/\/play\/play-[0-9a-f-]{36}$/);
   await expect(page.getByLabel("Play status")).toContainText("step 0");
 
   await page.getByRole("button", { name: "Render opening" }).click();
@@ -271,8 +281,8 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
   const playLauncher = page.getByRole("dialog", { name: /Play / });
   await expect(playLauncher.getByLabel("World branch")).toHaveValue("trace-drawer");
   await expect(playLauncher.getByRole("radio", { name: /Mara/ })).toBeChecked();
-  await playLauncher.getByRole("button", { name: "Play as Mara" }).click();
-  await expect(page).toHaveURL(/\/play\/play-trace-drawer$/);
+  await playLauncher.getByRole("button", { name: "Start a new session as Mara" }).click();
+  await expect(page).toHaveURL(/\/play\/play-[0-9a-f-]{36}$/);
 
   await page.getByRole("button", { name: "Render opening" }).click();
   await expect(page.locator(".message-scene").last()).toContainText("斑驳的窗影");

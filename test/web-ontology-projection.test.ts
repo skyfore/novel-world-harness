@@ -167,6 +167,26 @@ describe("Web ontology projection", () => {
     }
   });
 
+  it("filters a complete semantic kind family without mixing other model nodes", async () => {
+    const { service, first } = await ontologyFixture();
+    const entities = await service.project({
+      sourceId: first.source.id,
+      view: "model",
+      kind: "entity:*",
+      limit: 500,
+    });
+    expect(entities.nodes.map((node) => node.artifactId).sort()).toEqual(["hall", "mara", "vault"]);
+    expect(entities.nodes.every((node) => node.kind.startsWith("entity:"))).toBe(true);
+    expect(entities.totalNodes).toBe(3);
+
+    const characters = await service.project({
+      sourceId: first.source.id,
+      view: "model",
+      kind: "entity:character",
+    });
+    expect(characters.nodes.map((node) => node.artifactId)).toEqual(["mara"]);
+  });
+
   it("keeps future canon outside branch truth unless it is explicitly requested", async () => {
     const { service, first, head } = await ontologyFixture();
     const scoped = await service.project({

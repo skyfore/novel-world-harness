@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { PreparedNovelCache } from "../src/compiler/prepared-cache.js";
+import { PlayApplicationService } from "../src/application/play-service.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { InitialWorldStore } from "../src/world/initial.js";
 import { choosePlayExperience } from "../src/world/play-choice.js";
@@ -11,6 +12,8 @@ import { listPlayableCharacters, selectPlayExperience } from "../src/world/play-
 import { createWorldBranch } from "../src/world/instance.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { projectActorScene } from "../src/world/scene.js";
+import { WebEventBroker } from "../src/web/event-stream.js";
+import { OperationManager } from "../src/web/operation-manager.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -107,6 +110,31 @@ describe("character-specific play entry", () => {
     await expect(listPlayableCharacters(root, { branchId: "main", source: local.source.id })).resolves.toMatchObject({
       characters: [{ id: "hero" }],
     });
+    const webEvents = new WebEventBroker();
+    const webOperations = new OperationManager(webEvents);
+    const webPlay = new PlayApplicationService({
+      root,
+      events: webEvents,
+      operations: webOperations,
+      preparedCacheRoot: cacheRoot,
+    });
+    await expect(webPlay.listCharacters("main", local.source.id)).resolves.toMatchObject({
+      characters: [
+        { id: "hero", availability: "current-head" },
+        { id: "later", availability: "entry-checkpoint", entryKind: "canonical-scene" },
+      ],
+    });
+    const webLater = await webPlay.createSession({
+      branchId: "main",
+      sourceId: local.source.id,
+      actorId: "later",
+      clientRequestId: "web-later-entry",
+    });
+    expect(webLater.session).toMatchObject({
+      id: expect.stringMatching(/^play-[0-9a-f-]{36}$/),
+      actorId: "later",
+    });
+    expect(webLater.session.branchId).not.toBe("main");
     await selectPlayExperience(root, { branchId: "main", character: "hero", source: local.source.id });
     const selection = await choosePlayExperience(root, {
       source: local.source.id,
@@ -143,5 +171,6 @@ describe("character-specific play entry", () => {
     expect(scene.recentEvents).toContainEqual(expect.objectContaining({
       title: "You are at the hall with the summons still unanswered.",
     }));
+    webOperations.shutdown();
   });
 });

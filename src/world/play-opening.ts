@@ -229,6 +229,7 @@ export async function buildPlayOpeningFrame(
   branchId: string,
   actorId: string,
   sourceId?: string,
+  conversationId?: string,
 ): Promise<PlayOpeningFrame> {
   const { engine, runtime } = await openWorkspaceWorld(root);
   const head = await engine.branches.readHead(branchId);
@@ -240,7 +241,7 @@ export async function buildPlayOpeningFrame(
     buildNarrativeDirection(engine, runtime, actorId, head, sourceId),
     projectCharacterDevelopment(engine, actorId, head),
     committedHistory(engine, head),
-    playConversationAtCommit(engine, branchId, head, actorId),
+    playConversationAtCommit(engine, branchId, head, actorId, conversationId),
   ]);
   const actor = context.entities.get(actorId);
   if (!actor || actor.kind !== "character") throw new Error(`Actor view requires a character: ${actorId}`);

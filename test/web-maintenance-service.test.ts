@@ -44,8 +44,17 @@ describe("Web maintenance effect manifests", () => {
     await runtime.forkBranch("main", head, "child", "Child");
     const sessions = new PlaySessionStore(root);
     const childSession = await sessions.write({ branchId: "child", sourceId: fixture.source.id, actorId: "hero", lastCommitId: head });
+    const freshSession = await sessions.write({
+      id: "play-child-fresh",
+      conversationId: "conversation-child-fresh",
+      branchId: "child",
+      sourceId: fixture.source.id,
+      actorId: "hero",
+      lastCommitId: head,
+    });
     const conversations = new PlayConversationStore(root);
     await conversations.append({ branchId: "child", actorId: "hero", atCommit: head, role: "player", status: "accepted", text: "first" });
+    await conversations.append({ branchId: "child", conversationId: freshSession.conversationId, actorId: "hero", atCommit: head, role: "player", status: "accepted", text: "fresh" });
     const traces = new TraceStore(root);
     const trace = await traces.createRun({ kind: "player-move", sourceId: fixture.source.id, branchId: "child", playSessionId: childSession.id });
     await traces.finishRun(trace.id, "succeeded");
@@ -58,8 +67,8 @@ describe("Web maintenance effect manifests", () => {
     });
     const first = await service.previewInstance("child");
     expect(first).toMatchObject({ executable: true, target: { confirmation: "child" } });
-    expect(first.effects).toContainEqual(expect.objectContaining({ id: "play-sessions", disposition: "modify", count: 1 }));
-    expect(first.effects).toContainEqual(expect.objectContaining({ id: "conversation", disposition: "preserve", count: 1 }));
+    expect(first.effects).toContainEqual(expect.objectContaining({ id: "play-sessions", disposition: "modify", count: 2 }));
+    expect(first.effects).toContainEqual(expect.objectContaining({ id: "conversation", disposition: "preserve", count: 2 }));
     expect(first.effects).toContainEqual(expect.objectContaining({ id: "trace-runs", disposition: "preserve", count: 1 }));
 
     await conversations.append({ branchId: "child", actorId: "hero", atCommit: head, role: "player", status: "accepted", text: "second" });
@@ -83,7 +92,9 @@ describe("Web maintenance effect manifests", () => {
     });
     await expect(engine.branches.read("child")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(sessions.getById(childSession.id)).resolves.toMatchObject({ status: "detached" });
+    await expect(sessions.getById(freshSession.id)).resolves.toMatchObject({ status: "detached" });
     await expect(conversations.list("child")).resolves.toHaveLength(2);
+    await expect(conversations.list("child", freshSession.conversationId)).resolves.toHaveLength(1);
     await expect(traces.getRun(trace.id)).resolves.toMatchObject({ id: trace.id, branchId: "child" });
     const restarted = new MaintenanceApplicationService({
       root,

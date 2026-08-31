@@ -275,6 +275,44 @@ describe("local Web host", () => {
     expect(origin.statusCode).toBe(403);
     expect(origin.json()).toMatchObject({ code: "ORIGIN_NOT_ALLOWED" });
 
+    const loopbackAlias = await app.inject({
+      method: "GET",
+      url: "/api/v1/health",
+      headers: { host: "127.0.0.1:3080", origin: "http://localhost:5173" },
+    });
+    expect(loopbackAlias.statusCode).toBe(200);
+
+    const bootstrap = await app.inject({
+      method: "GET",
+      url: "/api/v1/bootstrap",
+      headers: { host: "127.0.0.1:3080" },
+    });
+    const csrfToken = (bootstrap.json() as { csrfToken: string }).csrfToken;
+    const trustedProxyMutation = await app.inject({
+      method: "POST",
+      url: "/api/v1/missing",
+      headers: {
+        host: "127.0.0.1:3080",
+        origin: "https://workspace-proxy.example",
+        "sec-fetch-site": "same-origin",
+        "x-nwh-csrf": csrfToken,
+      },
+    });
+    expect(trustedProxyMutation.statusCode).toBe(404);
+
+    const crossSiteMutation = await app.inject({
+      method: "POST",
+      url: "/api/v1/missing",
+      headers: {
+        host: "127.0.0.1:3080",
+        origin: "https://evil.example",
+        "sec-fetch-site": "cross-site",
+        "x-nwh-csrf": csrfToken,
+      },
+    });
+    expect(crossSiteMutation.statusCode).toBe(403);
+    expect(crossSiteMutation.json()).toMatchObject({ code: "ORIGIN_NOT_ALLOWED" });
+
     const host = await app.inject({
       method: "GET",
       url: "/api/v1/health",

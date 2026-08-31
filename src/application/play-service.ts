@@ -11,7 +11,9 @@ import { createPiPlayerWorldResponseResolver } from "../agent/pi-player-world-re
 import { playerSceneChoicesSchema, type PlayerSceneChoice } from "../agent/player-scene-choice-tool.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import type { LlmProfile } from "../config/schema.js";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
+import { deriveCharacterEntryOptions } from "../world/entry-context.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
 import {
   type PlayerActionTranslator,
@@ -23,11 +25,12 @@ import {
   type PlayConversationMessage,
 } from "../world/play-conversation.js";
 import {
+  inspectPlayExperience,
   listPlayableCharacters,
   performPlayTurn,
-  selectPlayExperience,
   type PlayTurnOutcome,
 } from "../world/play-experience.js";
+import { choosePlayExperience } from "../world/play-choice.js";
 import {
   assertPlaySceneNarration,
   buildPlayOpeningFrame,
@@ -36,7 +39,7 @@ import {
   type PlayScenePurpose,
   type PlayerTurnResolution,
 } from "../world/play-opening.js";
-import { PlaySessionStore, type ActivePlaySession } from "../world/play-session.js";
+import { newPlaySessionIdentity, PlaySessionStore, type ActivePlaySession } from "../world/play-session.js";
 import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import { BranchStore } from "../world/store.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
@@ -86,6 +89,7 @@ export interface PlayApplicationServiceOptions {
   events: WebEventBroker;
   configPath?: string;
   model?: string;
+  preparedCacheRoot?: string;
   translator?: PlayerActionTranslator;
   adjudicator?: PlayerWorldAdjudicator;
   worldResponseResolver?: PlayerWorldResponseResolver;
@@ -131,10 +135,46 @@ export class PlayApplicationService {
       branchId,
       ...(sourceId ? { source: sourceId } : {}),
     });
+    const currentCharacters = listed.characters.map((character) => ({
+      ...character,
+      availability: "current-head" as const,
+    }));
+    let characters: PlayableCharacterList["characters"] = currentCharacters;
+    try {
+      const catalog = await inspectPlayExperience(this.root);
+      const instance = catalog.instances.find((candidate) => candidate.branchId === branchId);
+      const source = catalog.novels.find((candidate) => candidate.id === (sourceId ?? instance?.sourceId));
+      if (source && instance?.preparedRevisionHash) {
+        const prepared = await new PreparedNovelCache(this.root, this.options.preparedCacheRoot)
+          .loadRevision(source, instance.preparedRevisionHash);
+        if (prepared) {
+          const currentById = new Map(currentCharacters.map((character) => [character.id, character]));
+          const entryCharacters = deriveCharacterEntryOptions(prepared.bundle).map((entry) => {
+            const current = currentById.get(entry.actorId);
+            currentById.delete(entry.actorId);
+            return {
+              ...(current ?? {
+                id: entry.actorId,
+                canonicalName: entry.canonicalName,
+                aliases: entry.aliases,
+                sourceIds: [source.id],
+              }),
+              availability: current ? "current-head" as const : "entry-checkpoint" as const,
+              entryKind: entry.entry.kind,
+              entryTitle: entry.entry.title,
+            };
+          });
+          characters = [...entryCharacters, ...currentById.values()];
+        }
+      }
+    } catch {
+      // A pinned legacy revision may remain playable even when its newer entry
+      // metadata cannot be loaded. Current committed roles still remain valid.
+    }
     return playableCharacterListSchema.parse({
       branchId: listed.branchId,
       ...(listed.source ? { sourceId: listed.source.id, sourceTitle: listed.source.title } : {}),
-      characters: listed.characters,
+      characters,
     });
   }
 
@@ -150,14 +190,17 @@ export class PlayApplicationService {
   }
 
   private async createSessionOnce(input: CreatePlaySessionRequest): Promise<{ sessionId: string }> {
-    const existing = await this.sessions.readInstance(input.branchId);
     let selection;
     try {
-      selection = await selectPlayExperience(this.root, {
+      selection = await choosePlayExperience(this.root, {
         branchId: input.branchId,
         character: input.actorId,
         ...(input.sourceId ? { source: input.sourceId } : {}),
-      });
+        preferSavedCharacter: false,
+        instanceMode: "switch",
+        ...(this.options.preparedCacheRoot ? { preparedCacheRoot: this.options.preparedCacheRoot } : {}),
+        sessionIdentity: newPlaySessionIdentity(),
+      }, async () => undefined);
     } catch (error) {
       throw webError(400, "PLAY_SESSION_SELECTION_FAILED", errorMessage(error), {
         kind: "after-refresh",
@@ -166,7 +209,15 @@ export class PlayApplicationService {
         maxAttempts: 1,
       });
     }
-    const title = input.title ?? existing?.title ?? `${selection.actor.canonicalName} · ${selection.branchName}`;
+    if (!selection) {
+      throw webError(400, "PLAY_SESSION_SELECTION_FAILED", `No unique playable role '${input.actorId}' is available.`, {
+        kind: "after-refresh",
+        discoveryEndpoint: `/api/v1/instances/${encodeURIComponent(input.branchId)}/characters`,
+        copyField: "characters[].id",
+        maxAttempts: 1,
+      });
+    }
+    const title = input.title ?? `${selection.actor.canonicalName} · ${selection.branchName}`;
     if (selection.session.title !== title) {
       await this.sessions.updateMetadata(selection.session.id, { title });
     }
@@ -178,7 +229,7 @@ export class PlayApplicationService {
     const session = await this.requireSession(sessionId);
     const [catalog, messages, headCommitId] = await Promise.all([
       this.catalog.read(),
-      this.conversations.list(session.branchId),
+      this.conversations.list(session.branchId, session.conversationId),
       this.readHeadOrNull(session.branchId),
     ]);
     const summary = catalog.playSessions.find((candidate) => candidate.id === session.id);
@@ -260,7 +311,7 @@ export class PlayApplicationService {
     }, async () => {
       const session = await this.requireSession(sessionId);
       this.assertNoActiveOperation(session.id);
-      await this.conversations.remove(session.branchId);
+      await this.conversations.remove(session.branchId, session.conversationId);
       this.invalidateCatalog("play-conversation-cleared", session.id);
       return clearPlayConversationResultSchema.parse({
         sessionId: session.id,
@@ -283,7 +334,7 @@ export class PlayApplicationService {
       const session = await this.requireSession(sessionId);
       this.assertNoActiveOperation(session.id);
       await this.sessions.removeSession(session.id);
-      await this.conversations.remove(session.branchId);
+      await this.conversations.remove(session.branchId, session.conversationId);
       this.invalidateCatalog("play-session-removed", session.id);
       return removePlaySessionResultSchema.parse({
         sessionId: session.id,
@@ -486,6 +537,9 @@ export class PlayApplicationService {
           root: this.root,
           branchId: session.branchId,
           actorId: session.actorId,
+          sessionId: session.id,
+          conversationId: session.conversationId,
+          ...(session.sourceId ? { sourceId: session.sourceId } : {}),
           utterance: input.text,
           expectedHead: input.expectedHead,
           translator: adapters.translator,
@@ -754,6 +808,7 @@ export class PlayApplicationService {
       session.branchId,
       session.actorId,
       session.sourceId,
+      session.conversationId,
     );
     if (turnResolution) frame = { ...frame, turnResolution: structuredClone(turnResolution) };
     context.update("narrating", { purpose });
@@ -788,6 +843,7 @@ export class PlayApplicationService {
       const choices = mergeChoices(hostChoices, narratedChoices);
       const message = await this.conversations.append({
         branchId: session.branchId,
+        conversationId: session.conversationId,
         actorId: session.actorId,
         atCommit: frame.commitId,
         role: "scene",
@@ -980,7 +1036,7 @@ export class PlayApplicationService {
     if (!committed) {
       throw webError(409, "NARRATION_RETRY_WORLD_NOT_COMMITTED", `Run '${sourceRun.id}' has no accepted world commit. Narration retry cannot be used to replay or manufacture a move.`, { kind: "none" });
     }
-    const existingNarration = (await this.conversations.list(session.branchId)).find((message) =>
+    const existingNarration = (await this.conversations.list(session.branchId, session.conversationId)).find((message) =>
       message.playerMoveId === sourceRun.playerMoveId
       && message.role === "scene"
       && message.status === "rendered");

@@ -13,6 +13,20 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Link } from "@tanstack/react-router";
 import { fetchInstance, fetchOntology, fetchOntologyNode, type OntologyFilters } from "./api";
+import {
+  buildRenderableGraph,
+  familyCounts,
+  familyVisuals,
+  graphPositions,
+  nodeColor,
+  nodeFamily,
+  nodeShape,
+  relationCurves,
+  statusColors,
+  type EdgeDensity,
+  type Point,
+  type RenderableGraph,
+} from "./ontology-graph";
 import { canRetrySameRequest, recoveryInstruction, webErrorDetail } from "./recovery";
 import { useI18n } from "./i18n";
 import type {
@@ -30,8 +44,6 @@ useECharts([GraphChart, TooltipComponent, CanvasRenderer]);
 type GraphChartOption = ComposeOption<GraphSeriesOption | TooltipComponentOption>;
 
 const GRAPH_PAGE_SIZE = 180;
-const GRAPH_RENDER_NODE_LIMIT = 1_200;
-const GRAPH_RENDER_EDGE_LIMIT = 3_000;
 
 const views: Array<{ id: OntologyView; label: string; description: string }> = [
   { id: "model", label: "World model", description: "Entities, propositions, claims, character models, goals, and their semantic links." },
@@ -48,17 +60,6 @@ const allLayers: Array<{ id: OntologyLayer; label: string }> = [
   { id: "proposal", label: "Proposals" },
   { id: "evidence", label: "Evidence" },
 ];
-
-const statusColors: Record<OntologyStatus, string> = {
-  canonical: "#d6ff72",
-  active: "#8fe388",
-  inactive: "#64685f",
-  "branch-committed": "#80b7d8",
-  possibility: "#e8bb68",
-  proposal: "#caa0d7",
-  contested: "#ffb36f",
-  rejected: "#ff8d7f",
-};
 
 export function OntologyPage({
   sourceId,
@@ -91,6 +92,7 @@ export function OntologyPage({
   const [status, setStatus] = useState<OntologyStatus | "">("");
   const deferredSearch = useDeferredValue(search.trim());
   const [selectedNodeId, setSelectedNodeId] = useState<string>();
+  const [focusedNodeId, setFocusedNodeId] = useState<string>();
   const [loadingAll, setLoadingAll] = useState(false);
   const stopFullLoad = useRef(false);
   const onScopeChangeRef = useRef(onScopeChange);
@@ -107,6 +109,7 @@ export function OntologyPage({
     setKind("");
     setStatus("");
     setSelectedNodeId(undefined);
+    setFocusedNodeId(undefined);
     if (view !== "events" && view !== "provenance") {
       setIncludeCanonicalFuture(false);
       if (initialIncludeCanonicalFuture) onScopeChangeRef.current?.({
@@ -162,6 +165,7 @@ export function OntologyPage({
     stopFullLoad.current = true;
     setLoadingAll(false);
     setSelectedNodeId(undefined);
+    setFocusedNodeId(undefined);
   }, [sourceId, view, branchId, effectiveCommit, includeCanonicalFuture, deferredSearch, kind, status, layers.join(",")]);
   useEffect(() => {
     if (loadedGraph && !loadingAll) setCanvasGraph(loadedGraph);
@@ -179,16 +183,14 @@ export function OntologyPage({
     enabled: Boolean(selectedNodeId),
   });
 
-  useEffect(() => {
-    if (loadedGraph && !loadingAll && selectedNodeId && detail.data?.node.id === selectedNodeId) {
-      setCanvasGraph(focusedGraph(loadedGraph, selectedNodeId, detail.data));
-    }
-  }, [detail.data, loadedGraph, loadingAll, selectedNodeId]);
-
   const visible = loadedGraph;
   const baseCanvasGraph = canvasGraph?.page.snapshotId === visible?.page.snapshotId ? canvasGraph : visible;
-  const interactiveGraph = baseCanvasGraph ? focusedGraph(baseCanvasGraph, selectedNodeId, detail.data) : undefined;
-  const selectedNode = interactiveGraph?.nodes.find((node) => node.id === selectedNodeId);
+  const interactiveGraph = baseCanvasGraph ? focusedGraph(baseCanvasGraph, focusedNodeId, detail.data) : undefined;
+  const selectedDetailNode = detail.data?.node;
+  const selectedNode = selectedDetailNode?.id === selectedNodeId
+    ? selectedDetailNode
+    : interactiveGraph?.nodes.find((node) => node.id === selectedNodeId);
+  const actionableDiagnostics = visible?.diagnostics.filter((message) => !message.startsWith("Loaded ")) ?? [];
 
   const loadAllPages = async () => {
     stopFullLoad.current = false;
@@ -211,15 +213,15 @@ export function OntologyPage({
 
   return (
     <>
-      <div className="ontology-heading">
+      <div className="ontology-heading ontology-heading-compact">
         <div>
           <Link className="ontology-back-link" to="/novels/$sourceId" params={{ sourceId }}>← {novel.title}</Link>
-          <span className="eyebrow">{t("Ontology workbench")}</span>
-          <h1>{t(meta.label)}</h1>
+          <div className="ontology-title-row"><div><span className="eyebrow">{t("World graph")}</span><h1>{t(meta.label)}</h1></div>
+            <span className={branchId ? "truth-badge truth-badge-branch" : "truth-badge"}>{branchId ? t("Committed branch scope") : t("Compiled source scope")}</span>
+          </div>
           <p>{t(meta.description)}</p>
         </div>
         <div className="ontology-heading-actions">
-          <span className={branchId ? "truth-badge truth-badge-branch" : "truth-badge"}>{branchId ? t("Committed branch scope") : t("Compiled source scope")}</span>
           {effectiveCommit && <code>{shortHash(effectiveCommit)}</code>}
         </div>
       </div>
@@ -242,111 +244,113 @@ export function OntologyPage({
         ))}
       </nav>
 
-      <section className="ontology-scope" aria-label={t("Projection scope")}>
-        <label>
-          <span>{t("Truth scope")}</span>
-          <select value={branchId} onChange={(event) => {
-            const nextBranchId = event.target.value;
-            setBranchId(nextBranchId);
-            setCommitId("");
-            onScopeChangeRef.current?.(nextBranchId ? { branchId: nextBranchId } : {});
-          }}>
-            <option value="">{t("Current compiled source")}</option>
-            {sourceInstances.map((candidate) => <option key={candidate.branchId} value={candidate.branchId}>{candidate.name} · {t("step")} {candidate.logicalStep}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>{t("Committed time")}</span>
-          <select
-            value={effectiveCommit ?? ""}
-            disabled={!branchId || instance.isPending || !instance.data}
-            onChange={(event) => {
-              setCommitId(event.target.value);
-              onScopeChangeRef.current?.({ branchId, atCommit: event.target.value, ...(includeCanonicalFuture ? { includeCanonicalFuture: true } : {}) });
-            }}
-          >
-            {!branchId && <option value="">{t("Not branch-scoped")}</option>}
-            {branchId && instance.isPending && <option value="">{t("Resolving ancestry…")}</option>}
-            {instance.data?.history.map((commit) => (
-              <option key={commit.id} value={commit.id}>{t("step")} {commit.logicalStep} · {shortHash(commit.id)}{commit.id === instance.data.instance.headCommitId ? ` · ${t("HEAD")}` : ""}</option>
-            ))}
-          </select>
-        </label>
-        {(view === "events" || view === "provenance") && branchId ? (
-          <label className="ontology-future-toggle">
+      <section className="ontology-command-bar" aria-label={t("Graph scope and filters")}>
+        <div className="ontology-command-grid">
+          <label>
+            <span>{t("Truth scope")}</span>
+            <select value={branchId} onChange={(event) => {
+              const nextBranchId = event.target.value;
+              setBranchId(nextBranchId);
+              setCommitId("");
+              onScopeChangeRef.current?.(nextBranchId ? { branchId: nextBranchId } : {});
+            }}>
+              <option value="">{t("Current compiled source")}</option>
+              {sourceInstances.map((candidate) => <option key={candidate.branchId} value={candidate.branchId}>{candidate.name} · {t("step")} {candidate.logicalStep}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>{t("Committed time")}</span>
+            <select
+              value={effectiveCommit ?? ""}
+              disabled={!branchId || instance.isPending || !instance.data}
+              onChange={(event) => {
+                setCommitId(event.target.value);
+                onScopeChangeRef.current?.({ branchId, atCommit: event.target.value, ...(includeCanonicalFuture ? { includeCanonicalFuture: true } : {}) });
+              }}
+            >
+              {!branchId && <option value="">{t("Not branch-scoped")}</option>}
+              {branchId && instance.isPending && <option value="">{t("Resolving ancestry…")}</option>}
+              {instance.data?.history.map((commit) => (
+                <option key={commit.id} value={commit.id}>{t("step")} {commit.logicalStep} · {shortHash(commit.id)}{commit.id === instance.data.instance.headCommitId ? ` · ${t("HEAD")}` : ""}</option>
+              ))}
+            </select>
+          </label>
+          <label className="ontology-search"><span>{t("Find in graph")}</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Name, ID, type…")} /></label>
+          <label><span>{t("Type")}</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option value="">{t("All types")}</option>{Object.keys(graph.data?.pages[0]?.facets.kinds ?? {}).map((value) => <option key={value} value={value}>{t(humanize(value))}</option>)}</select></label>
+          <label><span>{t("State")}</span><select value={status} onChange={(event) => setStatus(event.target.value as OntologyStatus | "")}><option value="">{t("All states")}</option>{Object.keys(graph.data?.pages[0]?.facets.statuses ?? {}).map((value) => <option key={value} value={value}>{t(value)}</option>)}</select></label>
+        </div>
+        <div className="ontology-command-secondary">
+          <span className="ontology-layer-label">{t("Truth layers")}</span>
+          {allLayers.map((layer) => (
+            <label key={layer.id} className={layers.includes(layer.id) ? "layer-chip layer-chip-active" : "layer-chip"}>
+              <input
+                type="checkbox"
+                checked={layers.includes(layer.id)}
+                onChange={() => setLayers((current) => current.includes(layer.id)
+                  ? current.length === 1 ? current : current.filter((item) => item !== layer.id)
+                  : [...current, layer.id])}
+              />
+              {t(layer.label)}
+            </label>
+          ))}
+          {(view === "events" || view === "provenance") && branchId && <label className="ontology-future-toggle ontology-future-toggle-compact">
             <input type="checkbox" checked={includeCanonicalFuture} onChange={(event) => {
               setIncludeCanonicalFuture(event.target.checked);
               onScopeChangeRef.current?.({ branchId, ...(effectiveCommit ? { atCommit: effectiveCommit } : {}), ...(event.target.checked ? { includeCanonicalFuture: true } : {}) });
             }} />
-            <span><strong>{t("Show future canon as possibility")}</strong><small>{t("Never promotes it into branch truth.")}</small></span>
-          </label>
-        ) : <div className="ontology-scope-note"><strong>{t("Truth boundary")}</strong><span>{branchId ? t("State and validity derive from the selected commit.") : t("Shows current accepted compiler artifacts, not a runtime state.")}</span></div>}
-      </section>
-
-      <section className="ontology-toolbar" aria-label={t("Graph filters")}>
-        <label className="ontology-search"><span>{t("Search")}</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Label, ID, kind, status…")} /></label>
-        <label><span>{t("Kind")}</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option value="">{t("All kinds")}</option>{Object.keys(graph.data?.pages[0]?.facets.kinds ?? {}).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-        <label><span>{t("Status")}</span><select value={status} onChange={(event) => setStatus(event.target.value as OntologyStatus | "")}><option value="">{t("All statuses")}</option>{Object.keys(graph.data?.pages[0]?.facets.statuses ?? {}).map((value) => <option key={value} value={value}>{t(value)}</option>)}</select></label>
-      </section>
-
-      <section className="ontology-layer-bar" aria-label={t("Projection layers")}>
-        <span>{t("Layers")}</span>
-        {allLayers.map((layer) => (
-          <label key={layer.id} className={layers.includes(layer.id) ? "layer-chip layer-chip-active" : "layer-chip"}>
-            <input
-              type="checkbox"
-              checked={layers.includes(layer.id)}
-              onChange={() => setLayers((current) => current.includes(layer.id)
-                ? current.length === 1 ? current : current.filter((item) => item !== layer.id)
-                : [...current, layer.id])}
-            />
-            {t(layer.label)}
-          </label>
-        ))}
-        <span className="ontology-count">{t("{nodes} nodes · {edges} edges", { nodes: visible?.nodes.length ?? 0, edges: visible?.edges.length ?? 0 })}</span>
-      </section>
-
-      {visible && <section className="ontology-load-bar" aria-live="polite">
-        <div>
-          <span>{t("Topology pages")}</span>
-          <strong>{t("{loaded} of {total} nodes · {edges} closed relations", { loaded: visible.page.loadedNodes, total: visible.totalNodes, edges: visible.page.loadedEdges })}</strong>
-          <div className="paged-load-track"><i style={{ width: `${percentage(visible.page.loadedNodes, visible.totalNodes)}%` }} /></div>
-          {visible.page.remainingEdges > 0 && <small>{t("{count} relationships remain deferred until their endpoint nodes are loaded.", { count: visible.page.remainingEdges })}</small>}
+            <span>{t("Show future canon as possibility")}</span>
+          </label>}
+          {(search || kind || status) && <button className="ontology-clear-filters" type="button" onClick={() => { setSearch(""); setKind(""); setStatus(""); }}>{t("Clear filters")}</button>}
+          <span className="ontology-count">{t("{nodes} entities · {edges} relations", { nodes: visible?.nodes.length ?? 0, edges: visible?.edges.length ?? 0 })}</span>
         </div>
-        {graph.hasNextPage && !loadingAll && <>
-          <button type="button" onClick={() => void graph.fetchNextPage()} disabled={graph.isFetchingNextPage}>{graph.isFetchingNextPage ? t("Loading next page…") : t("Load next page")}</button>
-          <button type="button" onClick={() => void loadAllPages()} disabled={graph.isFetchingNextPage}>{t("Load complete dataset")}</button>
-        </>}
-        {loadingAll && <button type="button" onClick={() => { stopFullLoad.current = true; }}>{t("Stop loading")}</button>}
-      </section>}
+      </section>
 
       {instance.isError && <InlineError error={instance.error} />}
       {graph.isPending ? <PageState loading title={t("Projecting the ontology")} body={t("Resolving source-scoped artifacts and temporal validity…")} /> : graph.isError ? <OntologyErrorState error={graph.error} retry={() => void graph.refetch()} /> : graph.data && visible ? (
         <>
-          {visible.diagnostics.length > 0 && <div className="ontology-diagnostics">{visible.diagnostics.map((message) => <p key={message}>{message}</p>)}</div>}
+          {actionableDiagnostics.length > 0 && <div className="ontology-diagnostics">{actionableDiagnostics.map((message) => <p key={message}>{message}</p>)}</div>}
           <div className="ontology-workbench">
             <section className="ontology-canvas-panel">
               <header>
-                <div><span className="eyebrow">{t("Graph")}</span><strong>{visible.truncated ? t("Progressive topology · {loaded}/{total} nodes", { loaded: visible.page.loadedNodes, total: visible.totalNodes }) : t("Complete selected projection")}</strong></div>
-                <div className="ontology-legend">{visible.legend.map((item) => <span key={item.id}><i style={{ background: item.color }} />{t(item.label)}<small>{item.count}</small></span>)}</div>
+                <div><span className="eyebrow">{focusedNodeId ? t("Relationship focus") : t("World graph")}</span><strong>{focusedNodeId ? selectedNode?.label ?? t("Focused neighborhood") : t("Drag to arrange · double-click to explore")}</strong></div>
+                <div className="ontology-legend" aria-label={t("Entity type colors")}>{familyCounts(visible.nodes).map(({ family, count }) => <span key={family}><i style={{ background: familyVisuals[family].color }} />{t(familyVisuals[family].label)}<small>{count}</small></span>)}</div>
               </header>
               {visible.nodes.length ? <GraphCanvas
                 graph={interactiveGraph ?? visible}
                 view={view}
                 selectedNodeId={selectedNodeId}
+                focusNodeId={focusedNodeId}
                 onSelect={setSelectedNodeId}
+                onFocus={(nodeId) => { setSelectedNodeId(nodeId); setFocusedNodeId(nodeId); }}
+                onClearFocus={() => setFocusedNodeId(undefined)}
                 refreshing={graph.isFetching}
-                focusLoading={Boolean(selectedNodeId) && detail.isFetching}
-                neighborhoodTruncated={Boolean(detail.data && detail.data.node.id === selectedNodeId && detail.data.relationPage.truncated)}
+                focusLoading={Boolean(focusedNodeId) && focusedNodeId === selectedNodeId && detail.isFetching}
+                neighborhoodTruncated={Boolean(detail.data && detail.data.node.id === focusedNodeId && detail.data.relationPage.truncated)}
                 onRefresh={() => {
                   void graph.refetch();
                   if (selectedNodeId) void detail.refetch();
                 }}
               /> : <EmptyGraph />}
+              <TopologyLoadBar
+                graph={visible}
+                hasNextPage={Boolean(graph.hasNextPage)}
+                fetchingNext={graph.isFetchingNextPage}
+                loadingAll={loadingAll}
+                onNext={() => void graph.fetchNextPage()}
+                onAll={() => void loadAllPages()}
+                onStop={() => { stopFullLoad.current = true; }}
+              />
             </section>
-            <NodeInspector node={selectedNode} detail={detail} onClose={() => setSelectedNodeId(undefined)} />
+            <NodeInspector
+              graph={visible}
+              node={selectedNode}
+              detail={detail}
+              focused={Boolean(selectedNode && focusedNodeId === selectedNode.id)}
+              onSelect={setSelectedNodeId}
+              onFocus={(nodeId) => { setSelectedNodeId(nodeId); setFocusedNodeId(nodeId); }}
+              onClose={() => { setSelectedNodeId(undefined); setFocusedNodeId(undefined); }}
+            />
           </div>
-          <OntologyTable graph={visible} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
         </>
       ) : null}
     </>
@@ -371,7 +375,10 @@ function GraphCanvas({
   graph,
   view,
   selectedNodeId,
+  focusNodeId,
   onSelect,
+  onFocus,
+  onClearFocus,
   refreshing,
   focusLoading,
   neighborhoodTruncated,
@@ -380,7 +387,10 @@ function GraphCanvas({
   graph: OntologyGraph;
   view: OntologyView;
   selectedNodeId?: string;
+  focusNodeId?: string;
   onSelect: (nodeId?: string) => void;
+  onFocus: (nodeId: string) => void;
+  onClearFocus: () => void;
   refreshing: boolean;
   focusLoading: boolean;
   neighborhoodTruncated: boolean;
@@ -391,25 +401,29 @@ function GraphCanvas({
   const chart = useRef<ECharts | null>(null);
   const option = useRef<GraphChartOption | undefined>(undefined);
   const onSelectRef = useRef(onSelect);
+  const onFocusRef = useRef(onFocus);
   const geometryKeyRef = useRef("");
+  const manualPositions = useRef(new Map<string, Point>());
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [viewport, setViewport] = useState({ width: 960, height: 600 });
   const [showAllLabels, setShowAllLabels] = useState(false);
+  const [density, setDensity] = useState<EdgeDensity>("balanced");
   onSelectRef.current = onSelect;
+  onFocusRef.current = onFocus;
   const rendered = useMemo(
-    () => renderableGraph(graph, selectedNodeId),
-    [graph, selectedNodeId],
+    () => buildRenderableGraph(graph, { focusNodeId, density }),
+    [density, focusNodeId, graph],
   );
   const labels = useMemo(
-    () => graphLabelPlan(rendered, selectedNodeId, viewport, showAllLabels),
-    [rendered, selectedNodeId, showAllLabels, viewport],
+    () => graphLabelPlan(rendered, viewport, showAllLabels),
+    [rendered, showAllLabels, viewport],
   );
-  const geometryKey = useMemo(() => rendered.focused
-    ? `focus:${selectedNodeId ?? ""}:${layoutRevision}:${rendered.nodes.map((node) => node.id).join("\u001f")}:${rendered.edges.map((edge) => edge.id).join("\u001f")}`
-    : `overview:${layoutRevision}`,
-  [layoutRevision, rendered, selectedNodeId]);
+  const geometryKey = useMemo(
+    () => `${focusNodeId ? `focus:${focusNodeId}` : `overview:${density}`}:${layoutRevision}:${rendered.nodes.map((node) => node.id).join("\u001f")}:${rendered.edges.map((edge) => edge.id).join("\u001f")}`,
+    [density, focusNodeId, layoutRevision, rendered.edges, rendered.nodes],
+  );
 
-  useEffect(() => setShowAllLabels(false), [selectedNodeId]);
+  useEffect(() => setShowAllLabels(false), [focusNodeId]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -419,7 +433,25 @@ function GraphCanvas({
     });
     chart.current = instance;
     instance.on("click", (event) => {
-      if (event.dataType === "node" && typeof event.name === "string") onSelectRef.current(event.name);
+      const nodeId = chartEventNodeId(event);
+      if (event.dataType === "node" && nodeId) onSelectRef.current(nodeId);
+    });
+    instance.on("dblclick", (event) => {
+      const nodeId = chartEventNodeId(event);
+      if (event.dataType === "node" && nodeId) onFocusRef.current(nodeId);
+    });
+    instance.on("dragend", (event) => {
+      const nodeId = chartEventNodeId(event);
+      const dataIndex = Array.isArray(event.dataIndex) ? event.dataIndex[0] : event.dataIndex;
+      if (!nodeId || typeof dataIndex !== "number") return;
+      const runtime = instance as unknown as { getModel: () => { getSeriesByIndex: (index: number) => unknown } };
+      const series = runtime.getModel().getSeriesByIndex(0) as {
+        getData: () => { getItemLayout: (index: number) => unknown };
+      };
+      const layout = series.getData().getItemLayout(dataIndex);
+      if (Array.isArray(layout) && typeof layout[0] === "number" && typeof layout[1] === "number") {
+        manualPositions.current.set(nodeId, { x: layout[0], y: layout[1] });
+      }
     });
     instance.getZr().on("click", (event) => {
       if (!event.target) onSelectRef.current(undefined);
@@ -441,33 +473,73 @@ function GraphCanvas({
 
   useEffect(() => {
     if (!chart.current) return;
-    option.current = graphOption(rendered, view, selectedNodeId, layoutRevision, labels);
     const resetViewport = geometryKeyRef.current !== geometryKey;
+    if (resetViewport) manualPositions.current.clear();
+    option.current = graphOption(rendered, view, layoutRevision, labels, manualPositions.current, t);
     if (resetViewport) chart.current.clear();
     chart.current.setOption(option.current, { notMerge: true, lazyUpdate: !resetViewport });
     if (resetViewport) chart.current.resize();
     geometryKeyRef.current = geometryKey;
-  }, [geometryKey, labels, layoutRevision, rendered, selectedNodeId, view]);
+  }, [geometryKey, labels, layoutRevision, rendered, t, view]);
+
+  useEffect(() => {
+    if (!chart.current) return;
+    chart.current.dispatchAction({ type: "downplay", seriesIndex: 0 });
+    const dataIndex = rendered.nodes.findIndex((node) => node.id === selectedNodeId);
+    if (dataIndex >= 0) chart.current.dispatchAction({ type: "highlight", seriesIndex: 0, dataIndex });
+  }, [rendered.nodes, selectedNodeId]);
 
   const fit = () => {
     if (!chart.current || !option.current) return;
     chart.current.clear();
     chart.current.setOption(option.current, { notMerge: true, lazyUpdate: false });
     chart.current.resize();
+    const dataIndex = rendered.nodes.findIndex((node) => node.id === selectedNodeId);
+    if (dataIndex >= 0) chart.current.dispatchAction({ type: "highlight", seriesIndex: 0, dataIndex });
+  };
+
+  const zoom = (scale: number) => {
+    if (!chart.current) return;
+    chart.current.dispatchAction({
+      type: "graphRoam",
+      seriesIndex: 0,
+      zoom: scale,
+      originX: viewport.width / 2,
+      originY: viewport.height / 2,
+    } as never);
+  };
+
+  const relayout = () => {
+    manualPositions.current.clear();
+    setLayoutRevision((current) => current + 1);
   };
 
   return <div className="ontology-canvas-shell">
     <div className="ontology-canvas-actions" role="toolbar" aria-label={t("Canvas controls")}>
-      {rendered.focused && labels.dense && <button
+      {!rendered.focused && <div className="ontology-density-control" role="group" aria-label={t("Relationship detail")}>
+        {(["essential", "balanced", "complete"] as const).map((value) => <button
+          key={value}
+          type="button"
+          className={density === value ? "ontology-canvas-action-active" : undefined}
+          aria-pressed={density === value}
+          onClick={() => setDensity(value)}
+        >{t(value === "essential" ? "Essential" : value === "balanced" ? "Balanced" : "All relations")}</button>)}
+      </div>}
+      <button
         type="button"
         className={showAllLabels ? "ontology-canvas-action-active" : undefined}
         aria-pressed={showAllLabels}
         onClick={() => setShowAllLabels((current) => !current)}
-      >{showAllLabels ? t("Use smart labels") : t("Show all labels")}</button>}
-      {rendered.focused && <button type="button" onClick={() => onSelect(undefined)}>{t("Clear focus")}</button>}
-      <button type="button" onClick={fit}>{t("Fit")}</button>
-      <button type="button" onClick={() => setLayoutRevision((current) => current + 1)}>{t("Re-layout")}</button>
-      <button type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? t("Refreshing…") : t("Refresh")}</button>
+      >{showAllLabels ? t("Smart labels") : t("All labels")}</button>
+      {!rendered.focused && selectedNodeId && <button type="button" className="ontology-focus-action" onClick={() => onFocus(selectedNodeId)}>{t("Focus selection")}</button>}
+      {rendered.focused && <button type="button" className="ontology-focus-action" onClick={onClearFocus}>← {t("Overview")}</button>}
+      <button type="button" aria-label={t("Re-layout graph")} title={t("Re-layout graph")} onClick={relayout}>↻</button>
+      <button type="button" aria-label={t("Refresh graph")} title={t("Refresh graph")} onClick={onRefresh} disabled={refreshing}>{refreshing ? "…" : "⟳"}</button>
+    </div>
+    <div className="ontology-zoom-actions" role="toolbar" aria-label={t("Zoom controls")}>
+      <button type="button" aria-label={t("Zoom in")} title={t("Zoom in")} onClick={() => zoom(1.25)}>＋</button>
+      <button type="button" aria-label={t("Zoom out")} title={t("Zoom out")} onClick={() => zoom(.8)}>−</button>
+      <button type="button" aria-label={t("Fit graph")} title={t("Fit graph")} onClick={fit}>⌗</button>
     </div>
     <div
       ref={container}
@@ -475,7 +547,7 @@ function GraphCanvas({
       role="img"
       tabIndex={0}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && rendered.focused) onSelect(undefined);
+        if (event.key === "Escape" && rendered.focused) onClearFocus();
       }}
       aria-label={t("{view} ontology graph with {nodes} nodes and {edges} edges", { view: t(view), nodes: rendered.nodes.length, edges: rendered.edges.length })}
     />
@@ -483,70 +555,20 @@ function GraphCanvas({
       <strong>{t("Focused neighborhood")}</strong>
       <span>{t("{nodes} related entities · {edges} relationships", { nodes: Math.max(0, rendered.nodes.length - 1), edges: rendered.edges.length })}</span>
       {focusLoading && <small>{t("Loading the complete one-hop neighborhood…")}</small>}
-      {!focusLoading && labels.dense && !showAllLabels && <small>{t("Labels are distributed for readability: {nodes}/{totalNodes} entities · {edges}/{totalEdges} relationships.", {
+      {!focusLoading && labels.dense && !showAllLabels && <small>{t("Labels are distributed for readability: {nodes}/{totalNodes} entity names. Hover a node or edge for exact details.", {
         nodes: labels.nodeIds.size,
         totalNodes: rendered.nodes.length,
-        edges: labels.edgeIds.size,
-        totalEdges: rendered.edges.length,
       })}</small>}
       {neighborhoodTruncated && <small>{t("This entity has more than 500 incoming or outgoing relationships; load the complete dataset to resolve the remainder.")}</small>}
     </div>}
-    {rendered.sampled && <div className="ontology-render-note">{t("Canvas view sampled {nodes} high-connectivity nodes and {edges} relations; the virtual table retains all {total} loaded nodes.", { nodes: rendered.nodes.length, edges: rendered.edges.length, total: graph.nodes.length })}</div>}
+    {!rendered.focused && (rendered.hiddenNodeCount > 0 || rendered.hiddenEdgeCount > 0) && <div className="ontology-render-note">{t("Showing {nodes}/{totalNodes} entities · {edges}/{totalEdges} relations", {
+      nodes: rendered.nodes.length,
+      totalNodes: rendered.sourceNodeCount,
+      edges: rendered.edges.length,
+      totalEdges: rendered.sourceEdgeCount,
+    })}</div>}
+    <div className="ontology-canvas-hint">{t("Drag nodes · scroll to zoom · double-click for relationships")}</div>
   </div>;
-}
-
-type RenderableGraph = {
-  nodes: OntologyNode[];
-  edges: OntologyEdge[];
-  degree: Map<string, number>;
-  sampled: boolean;
-  focused: boolean;
-};
-
-function renderableGraph(graph: OntologyGraph, selectedNodeId?: string): RenderableGraph {
-  const degree = new Map(graph.nodes.map((node) => [node.id, 0]));
-  for (const edge of graph.edges) {
-    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
-    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
-  }
-  if (selectedNodeId && degree.has(selectedNodeId)) {
-    const focusedIds = new Set([selectedNodeId]);
-    const edges = graph.edges.filter((edge) => {
-      const related = edge.source === selectedNodeId || edge.target === selectedNodeId;
-      if (related) {
-        focusedIds.add(edge.source);
-        focusedIds.add(edge.target);
-      }
-      return related;
-    });
-    return {
-      nodes: graph.nodes.filter((node) => focusedIds.has(node.id)),
-      edges,
-      degree,
-      sampled: false,
-      focused: true,
-    };
-  }
-  const sampled = graph.nodes.length > GRAPH_RENDER_NODE_LIMIT || graph.edges.length > GRAPH_RENDER_EDGE_LIMIT;
-  if (!sampled) return { nodes: graph.nodes, edges: graph.edges, degree, sampled: false, focused: false };
-
-  const included = new Set<string>();
-  const ranked = [...graph.nodes].sort((left, right) =>
-    (degree.get(right.id) ?? 0) - (degree.get(left.id) ?? 0) || left.id.localeCompare(right.id));
-  for (const node of ranked) {
-    if (included.size >= GRAPH_RENDER_NODE_LIMIT) break;
-    included.add(node.id);
-  }
-  const nodes = graph.nodes.filter((node) => included.has(node.id));
-  const edges = graph.edges
-    .filter((edge) => included.has(edge.source) && included.has(edge.target))
-    .sort((left, right) => {
-      return (degree.get(right.source) ?? 0) + (degree.get(right.target) ?? 0)
-          - (degree.get(left.source) ?? 0) - (degree.get(left.target) ?? 0)
-        || left.id.localeCompare(right.id);
-    })
-    .slice(0, GRAPH_RENDER_EDGE_LIMIT);
-  return { nodes, edges, degree, sampled: true, focused: false };
 }
 
 type GraphLabelPlan = {
@@ -557,20 +579,14 @@ type GraphLabelPlan = {
 
 function graphLabelPlan(
   graph: RenderableGraph,
-  selectedNodeId: string | undefined,
   viewport: { width: number; height: number },
   showAll: boolean,
 ): GraphLabelPlan {
   const area = Math.max(1, viewport.width * viewport.height);
-  const nodeCapacity = Math.max(18, Math.floor(area / 7_000));
-  const edgeCapacity = Math.max(14, Math.floor(area / 8_500));
-  if (!graph.focused) {
-    const visible = graph.nodes.length <= Math.min(90, nodeCapacity)
-      ? graph.nodes
-      : evenlySample(graph.nodes, Math.min(nodeCapacity, 42));
-    return { nodeIds: new Set(visible.map((node) => node.id)), edgeIds: new Set(), dense: false };
-  }
-
+  const nodeCapacity = graph.focused
+    ? Math.min(36, Math.max(14, Math.floor(area / 26_000)))
+    : Math.min(34, Math.max(12, Math.floor(area / 22_000)));
+  const edgeCapacity = Math.min(40, Math.max(10, Math.floor(area / 18_000)));
   const dense = graph.nodes.length > nodeCapacity || graph.edges.length > edgeCapacity;
   if (showAll || !dense) {
     return {
@@ -579,41 +595,79 @@ function graphLabelPlan(
       dense,
     };
   }
-  const neighbors = graph.nodes.filter((node) => node.id !== selectedNodeId);
-  const sampledNodes = evenlySample(neighbors, Math.max(0, nodeCapacity - (selectedNodeId ? 1 : 0)));
+  const ranked = [...graph.nodes].sort((left, right) => {
+    const leftFocus = left.id === graph.focusNodeId ? 1 : 0;
+    const rightFocus = right.id === graph.focusNodeId ? 1 : 0;
+    return rightFocus - leftFocus
+      || (graph.degree.get(right.id) ?? 0) - (graph.degree.get(left.id) ?? 0)
+      || left.label.localeCompare(right.label);
+  });
+  const visibleNodes = typeBalancedPrefix(ranked, nodeCapacity);
   return {
-    nodeIds: new Set([...(selectedNodeId ? [selectedNodeId] : []), ...sampledNodes.map((node) => node.id)]),
-    edgeIds: new Set(evenlySample(graph.edges, edgeCapacity).map((edge) => edge.id)),
+    nodeIds: new Set(visibleNodes.map((node) => node.id)),
+    edgeIds: new Set(),
     dense,
   };
 }
 
-function evenlySample<T>(values: readonly T[], limit: number): T[] {
-  if (values.length <= limit) return [...values];
-  if (limit <= 0) return [];
-  return Array.from({ length: limit }, (_, index) => values[Math.floor(index * values.length / limit)]!);
+function typeBalancedPrefix(nodes: readonly OntologyNode[], limit: number): OntologyNode[] {
+  if (nodes.length <= limit) return [...nodes];
+  const result: OntologyNode[] = [];
+  const selected = new Set<string>();
+  for (const family of new Set(nodes.map(nodeFamily))) {
+    const node = nodes.find((candidate) => nodeFamily(candidate) === family);
+    if (node && result.length < limit) { result.push(node); selected.add(node.id); }
+  }
+  for (const node of nodes) {
+    if (result.length >= limit) break;
+    if (!selected.has(node.id)) result.push(node);
+  }
+  return result;
 }
 
 function graphOption(
   graph: RenderableGraph,
   view: OntologyView,
-  selectedNodeId: string | undefined,
   layoutRevision: number,
   labels: GraphLabelPlan,
+  manualPositions: ReadonlyMap<string, Point>,
+  translate: (message: string) => string,
 ): GraphChartOption {
-  const positions = graphPositions(graph.nodes, view, layoutRevision, graph.focused ? selectedNodeId : undefined);
+  const positions = graphPositions(graph, view, layoutRevision);
+  for (const [id, position] of manualPositions) if (positions.has(id)) positions.set(id, position);
   const curves = relationCurves(graph.edges);
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const edgeById = new Map(graph.edges.map((edge) => [edge.id, edge]));
   return {
     backgroundColor: "transparent",
     tooltip: {
       trigger: "item",
       renderMode: "richText",
       confine: true,
-      backgroundColor: "#1b1d18",
-      borderColor: "#4d5246",
-      textStyle: { color: "#d7d8d1", fontFamily: "DM Mono", fontSize: 10 },
+      backgroundColor: "#111815f2",
+      borderColor: "#43544c",
+      padding: 10,
+      formatter: (params) => {
+        const item = Array.isArray(params) ? params[0] : params;
+        if (!item) return "";
+        const data = item.data as { id?: string } | undefined;
+        const id = data?.id;
+        if (!id) return "";
+        if (item.dataType === "edge") {
+          const edge = edgeById.get(id);
+          return edge ? `${tooltipText(edge.label)}\n${tooltipText(translate(humanize(edge.kind)))} · ${tooltipText(translate(edge.status))}` : "";
+        }
+        const node = nodeById.get(id);
+        return node ? `${tooltipText(node.label)}\n${tooltipText(translate(humanize(node.kind)))} · ${tooltipText(translate(node.status))}` : "";
+      },
+      textStyle: {
+        color: "#d7e1da",
+        fontFamily: "DM Mono",
+        fontSize: 10,
+      },
     },
     series: [{
+      id: "ontology-graph",
       type: "graph",
       layout: "none",
       coordinateSystem: undefined,
@@ -621,76 +675,85 @@ function graphOption(
       progressive: 400,
       progressiveThreshold: 700,
       roam: true,
-      scaleLimit: { min: 0.08, max: 6 },
-      left: graph.focused ? 58 : 24,
-      right: graph.focused ? 58 : 24,
-      top: graph.focused ? 72 : 24,
-      bottom: graph.focused ? 76 : 24,
+      preserveAspect: "contain",
+      scaleLimit: { min: 0.12, max: 8 },
+      left: graph.focused ? 72 : 48,
+      right: graph.focused ? 72 : 48,
+      top: graph.focused ? 84 : 56,
+      bottom: graph.focused ? 86 : 58,
       selectedMode: false,
-      edgeSymbol: ["none", graph.edges.length <= 900 ? "arrow" : "none"],
-      edgeSymbolSize: 5,
+      edgeSymbol: ["none", graph.focused && graph.edges.length <= 320 ? "arrow" : "none"],
+      edgeSymbolSize: 6,
       data: graph.nodes.map((node) => {
         const position = positions.get(node.id) ?? { x: 0, y: 0 };
-        const selected = node.id === selectedNodeId;
+        const focus = node.id === graph.focusNodeId;
+        const opacity = node.status === "rejected" ? .42 : node.status === "inactive" ? .62 : 1;
         return {
           id: node.id,
-          name: node.id,
-          value: node.label,
+          name: node.label,
+          value: graph.degree.get(node.id) ?? 0,
           x: position.x,
           y: position.y,
-          symbol: shapeFor(node),
-          symbolSize: selected ? 34 : graph.focused ? 23 : Math.min(22, 10 + Math.log2((graph.degree.get(node.id) ?? 0) + 1) * 3),
-          cursor: "pointer",
+          symbol: nodeShape(node),
+          symbolSize: focus ? 38 : graph.focused ? 24 : Math.min(29, 14 + Math.log2((graph.degree.get(node.id) ?? 0) + 1) * 3.2),
+          draggable: true,
+          cursor: "grab",
           itemStyle: {
-            color: selected ? "#f2ff9b" : graph.focused ? "#73c9e8" : statusColors[node.status],
-            borderColor: selected ? "#ffffff" : graph.focused ? statusColors[node.status] : "#10110f",
-            borderWidth: selected ? 4 : graph.focused ? 2 : 1,
-            shadowBlur: graph.focused ? selected ? 18 : 9 : 0,
-            shadowColor: selected ? "#d6ff72" : "#5bb9dc",
+            color: nodeColor(node),
+            opacity,
+            borderColor: statusColors[node.status],
+          borderWidth: focus ? 4 : 1.35,
+          shadowBlur: focus ? 22 : graph.focused ? 7 : (graph.degree.get(node.id) ?? 0) > 8 ? 4 : 0,
+            shadowColor: focus ? statusColors[node.status] : `${nodeColor(node)}66`,
           },
           label: {
             show: labels.nodeIds.has(node.id),
             formatter: node.label,
             position: "bottom",
-            distance: selected ? 8 : 6,
-            color: selected ? "#fbffd8" : graph.focused ? "#e4f6ff" : "#d7d8d1",
+            distance: focus ? 10 : 7,
+            color: focus ? "#ffffff" : "#dce6df",
             fontFamily: "Manrope",
-            fontSize: selected ? 11 : graph.focused ? 9 : 8,
-            fontWeight: selected ? 700 : 600,
-            width: graph.focused ? 150 : 120,
+            fontSize: focus ? 12 : graph.focused ? 10 : 9,
+            fontWeight: focus ? 750 : 650,
+            width: graph.focused ? 168 : 130,
             overflow: "truncate",
-            backgroundColor: graph.focused ? "#101511dc" : "transparent",
-            borderRadius: 3,
-            padding: graph.focused ? [3, 5] : 0,
+            backgroundColor: "#101713e8",
+            borderColor: focus ? statusColors[node.status] : "transparent",
+            borderWidth: focus ? 1 : 0,
+            borderRadius: 5,
+            padding: [3, 6],
           },
           emphasis: {
             focus: "adjacency",
-            scale: true,
-            label: { show: true, formatter: node.label, color: "#ffffff", fontSize: 10 },
-            itemStyle: { borderColor: "#ffffff", borderWidth: 3 },
+            scale: 1.18,
+            label: { show: true, formatter: node.label, color: "#ffffff", fontSize: 11, backgroundColor: "#111a16f2", padding: [4, 7], borderRadius: 5 },
+            itemStyle: { borderColor: "#ffffff", borderWidth: 3, opacity: 1, shadowBlur: 18, shadowColor: `${nodeColor(node)}bb` },
           },
+          blur: { itemStyle: { opacity: .12 }, label: { show: false } },
         };
       }),
       links: graph.edges.map((edge) => ({
         id: edge.id,
         source: edge.source,
         target: edge.target,
+        value: edge.evidenceCount,
         lineStyle: {
-          color: graph.focused ? "#8bd3f0" : statusColors[edge.status],
-          width: graph.focused ? 2.2 : 0.8,
-          opacity: graph.focused ? 0.92 : 0.32,
-          curveness: graph.focused ? curves.get(edge.id) ?? 0 : graph.edges.length < 500 ? 0.06 : 0,
-          shadowBlur: graph.focused ? 4 : 0,
-          shadowColor: "#4a9fbe",
+          color: statusColors[edge.status],
+          width: graph.focused ? 2.1 : Math.min(.95, .5 + edge.evidenceCount * .035),
+          opacity: graph.focused ? .84 : .16,
+          type: edge.status === "possibility" || edge.status === "proposal" || edge.status === "contested" ? "dashed" : "solid",
+          curveness: curves.get(edge.id) ?? 0,
+          shadowBlur: graph.focused ? 3 : 0,
+          shadowColor: statusColors[edge.status],
         },
         label: {
           show: graph.focused && labels.edgeIds.has(edge.id),
           formatter: edge.label,
-          color: "#eefaff",
+          color: "#f1f8f3",
           fontFamily: "DM Mono",
           fontSize: 8,
-          backgroundColor: "#121a18ee",
-          borderColor: "#466878",
+          backgroundColor: "#111916f2",
+          borderColor: statusColors[edge.status],
           borderWidth: 1,
           borderRadius: 3,
           padding: [3, 5],
@@ -698,7 +761,7 @@ function graphOption(
         emphasis: {
           focus: "adjacency" as const,
           label: {
-            show: true,
+            show: !labels.dense && graph.edges.length <= 24,
             formatter: edge.label,
             color: "#ffffff",
             fontSize: 9,
@@ -707,6 +770,7 @@ function graphOption(
           },
           lineStyle: { width: 3, opacity: 1 },
         },
+        blur: { lineStyle: { opacity: .035 }, label: { show: false } },
       })),
       lineStyle: { opacity: 0.35 },
       label: { show: false },
@@ -716,137 +780,61 @@ function graphOption(
   };
 }
 
-function graphPositions(
-  nodes: readonly OntologyNode[],
-  view: OntologyView,
-  revision: number,
-  selectedNodeId?: string,
-): Map<string, { x: number; y: number }> {
-  if (selectedNodeId && nodes.some((node) => node.id === selectedNodeId)) {
-    return focusedGraphPositions(nodes, selectedNodeId, revision);
-  }
-  const groups = new Map<string, OntologyNode[]>();
-  for (const node of nodes) {
-    const group = graphGroup(node, view);
-    const values = groups.get(group) ?? [];
-    values.push(node);
-    groups.set(group, values);
-  }
-  const result = new Map<string, { x: number; y: number }>();
-  let groupOffset = 0;
-  for (const [group, values] of [...groups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
-    values.sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
-    const rows = Math.max(1, Math.min(28, Math.ceil(Math.sqrt(values.length * 1.7))));
-    const columns = Math.max(1, Math.ceil(values.length / rows));
-    values.forEach((node, index) => {
-      const column = Math.floor(index / rows);
-      const row = index % rows;
-      const jitter = hashNumber(`${node.id}:${revision}`) % 13;
-      result.set(node.id, {
-        x: groupOffset + column * 58 + jitter,
-        y: row * 52 + (hashNumber(`${group}:${node.id}:${revision}`) % 9),
-      });
-    });
-    groupOffset += columns * 58 + 180;
-  }
-  return result;
+function chartEventNodeId(event: { data?: unknown }): string | undefined {
+  if (!event.data || typeof event.data !== "object" || Array.isArray(event.data)) return undefined;
+  const id = (event.data as { id?: unknown }).id;
+  return typeof id === "string" ? id : undefined;
 }
 
-function focusedGraphPositions(
-  nodes: readonly OntologyNode[],
-  selectedNodeId: string,
-  revision: number,
-): Map<string, { x: number; y: number }> {
-  const result = new Map<string, { x: number; y: number }>([[selectedNodeId, { x: 0, y: 0 }]]);
-  const neighbors = nodes
-    .filter((node) => node.id !== selectedNodeId)
-    .sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
-  let offset = 0;
-  let ring = 0;
-  const rotation = (hashNumber(`${selectedNodeId}:${revision}`) % 360) * Math.PI / 180;
-  while (offset < neighbors.length) {
-    const radius = 145 + ring * 92;
-    const capacity = Math.max(10, Math.floor(2 * Math.PI * radius / 68));
-    const ringNodes = neighbors.slice(offset, offset + capacity);
-    ringNodes.forEach((node, index) => {
-      const angle = rotation - Math.PI / 2 + index * 2 * Math.PI / ringNodes.length;
-      result.set(node.id, { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
-    });
-    offset += ringNodes.length;
-    ring += 1;
-  }
-  return result;
-}
-
-function relationCurves(edges: readonly OntologyEdge[]): Map<string, number> {
-  const groups = new Map<string, OntologyEdge[]>();
-  for (const edge of edges) {
-    const key = [edge.source, edge.target].sort().join("\u001f");
-    const values = groups.get(key) ?? [];
-    values.push(edge);
-    groups.set(key, values);
-  }
-  const result = new Map<string, number>();
-  for (const values of groups.values()) {
-    values.sort((left, right) => left.id.localeCompare(right.id));
-    values.forEach((edge, index) => {
-      result.set(edge.id, values.length === 1 ? 0 : (index - (values.length - 1) / 2) * 0.13);
-    });
-  }
-  return result;
-}
-
-function graphGroup(node: OntologyNode, view: OntologyView): string {
-  if (view === "provenance") {
-    if (node.kind === "source") return "0-source";
-    if (node.kind === "source-span") return "1-evidence";
-    if (node.kind.includes("proposal") || node.layer === "proposal") return "2-proposal";
-    if (node.kind === "validation") return "3-validation";
-    if (node.kind.includes("commit") || node.layer === "branch") return "5-history";
-    return "4-artifact";
-  }
-  if (view === "events") return `${node.layer}:${node.status}`;
-  return `${node.layer}:${node.kind}`;
-}
-
-function hashNumber(value: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
-  return hash >>> 0;
-}
+function tooltipText(value: string): string { return value.replaceAll("{", "(").replaceAll("}", ")"); }
 
 function NodeInspector({
+  graph,
   node,
   detail,
+  focused,
+  onSelect,
+  onFocus,
   onClose,
 }: {
+  graph: OntologyGraph;
   node?: OntologyNode;
   detail: ReturnType<typeof useQuery<Awaited<ReturnType<typeof fetchOntologyNode>>, Error>>;
+  focused: boolean;
+  onSelect: (nodeId: string) => void;
+  onFocus: (nodeId: string) => void;
   onClose: () => void;
 }) {
   const { t } = useI18n();
+  const relatedLabels = new Map(detail.data?.relatedNodes.map((item) => [item.id, item.label]) ?? []);
   return (
     <aside className="ontology-inspector">
       <header>
-        <div><span className="eyebrow">{t("Inspector")}</span><strong>{node?.label ?? t("Select a node")}</strong></div>
+        <div><span className="eyebrow">{node ? t("Entity detail") : t("Entity browser")}</span><strong>{node?.label ?? t("Everything in this graph")}</strong></div>
         {node && <button type="button" aria-label={t("Close inspector")} onClick={onClose}>×</button>}
       </header>
-      {!node ? <div className="ontology-inspector-empty"><span>◇</span><p>{t("Click a graph node or table row to inspect its exact payload, evidence, and relationships.")}</p></div> : (
+      {!node ? <OntologyNodeBrowser graph={graph} onSelect={onSelect} /> : (
         <div className="ontology-inspector-scroll">
           <div className="node-identity">
-            <span style={{ background: statusColors[node.status] }} />
-            <div><strong>{node.kind}</strong><small>{node.status} · {node.layer}</small></div>
+            <span style={{ background: nodeColor(node), borderColor: statusColors[node.status] }} />
+            <div><strong>{t(familyVisuals[nodeFamily(node)].label)}</strong><small>{t(node.status)} · {t(node.layer)}</small></div>
+            <button type="button" className={focused ? "node-focus-button node-focus-button-active" : "node-focus-button"} aria-pressed={focused} onClick={() => onFocus(node.id)}>{focused ? t("Focused") : t("Focus relations")}</button>
           </div>
-          <dl className="ontology-node-meta">
-            <div><dt>{t("Artifact")}</dt><dd>{node.artifactId}</dd></div>
-            <div><dt>{t("Node ID")}</dt><dd>{node.id}</dd></div>
-            <div><dt>{t("Revision")}</dt><dd>{node.revisionHash ?? t("derived")}</dd></div>
-            <div><dt>{t("Evidence")}</dt><dd>{node.evidenceCount}{node.shared ? ` · ${t("shared artifact, locally filtered")}` : ""}</dd></div>
-            {node.storyTime !== undefined && <div><dt>{t("Story time")}</dt><dd>{compactJson(node.storyTime)}</dd></div>}
-          </dl>
+          <div className="ontology-node-facts">
+            <span><small>{t("Evidence")}</small><strong>{node.evidenceCount}</strong></span>
+            <span><small>{t("Truth layer")}</small><strong>{t(node.layer)}</strong></span>
+            <span><small>{t("State")}</small><strong style={{ color: statusColors[node.status] }}>{t(node.status)}</strong></span>
+          </div>
           {detail.isPending ? <InlineLoading /> : detail.isError ? <InlineError error={detail.error} /> : detail.data ? (
             <>
               <InspectorSection title={t("Summary")}><JsonRecord value={node.summary} /></InspectorSection>
+              <InspectorSection title={t("Relationships · {count}", { count: detail.data.incoming.length + detail.data.outgoing.length })}>
+                <div className="inspector-relation-groups">
+                  <details open={detail.data.incoming.length > 0}><summary>{t("Incoming · {loaded}/{total}", { loaded: detail.data.incoming.length, total: detail.data.relationPage.incomingTotal })}</summary><EdgeList edges={detail.data.incoming} direction="incoming" labels={relatedLabels} onSelect={onSelect} /></details>
+                  <details open={detail.data.outgoing.length > 0}><summary>{t("Outgoing · {loaded}/{total}", { loaded: detail.data.outgoing.length, total: detail.data.relationPage.outgoingTotal })}</summary><EdgeList edges={detail.data.outgoing} direction="outgoing" labels={relatedLabels} onSelect={onSelect} /></details>
+                </div>
+                {detail.data.relationPage.truncated && <p className="inspector-muted">{t("Node detail shows a bounded relationship preview; load the complete topology to inspect every connected edge.")}</p>}
+              </InspectorSection>
               <InspectorSection title={`${t("Evidence")} · ${detail.data.evidence.length}`}>
                 {detail.data.evidence.length ? <div className="evidence-list">{detail.data.evidence.map((evidence, index) => (
                   <article key={`${evidence.quoteHash}:${index}`}>
@@ -856,9 +844,15 @@ function NodeInspector({
                   </article>
                 ))}</div> : <p className="inspector-muted">{t("No source-local evidence span is attached.")}</p>}
               </InspectorSection>
-              <InspectorSection title={t("Incoming · {loaded}/{total}", { loaded: detail.data.incoming.length, total: detail.data.relationPage.incomingTotal })}><EdgeList edges={detail.data.incoming} direction="incoming" /></InspectorSection>
-              <InspectorSection title={t("Outgoing · {loaded}/{total}", { loaded: detail.data.outgoing.length, total: detail.data.relationPage.outgoingTotal })}><EdgeList edges={detail.data.outgoing} direction="outgoing" /></InspectorSection>
-              {detail.data.relationPage.truncated && <p className="inspector-muted">{t("Node detail shows a bounded relationship preview; load the complete topology to inspect every connected edge.")}</p>}
+              <details className="ontology-technical-details">
+                <summary>{t("Technical identity")}</summary>
+                <dl className="ontology-node-meta">
+                  <div><dt>{t("Artifact")}</dt><dd>{node.artifactId}</dd></div>
+                  <div><dt>{t("Node ID")}</dt><dd>{node.id}</dd></div>
+                  <div><dt>{t("Revision")}</dt><dd>{node.revisionHash ?? t("derived")}</dd></div>
+                  {node.storyTime !== undefined && <div><dt>{t("Story time")}</dt><dd>{compactJson(node.storyTime)}</dd></div>}
+                </dl>
+              </details>
               <DeferredPayload value={detail.data.payload} />
             </>
           ) : null}
@@ -885,25 +879,38 @@ function JsonRecord({ value }: { value: Record<string, unknown> }) {
   return entries.length ? <dl className="summary-record">{entries.map(([key, item]) => <div key={key}><dt>{key}</dt><dd>{formatValue(item)}</dd></div>)}</dl> : <p className="inspector-muted">{t("No summary fields.")}</p>;
 }
 
-function EdgeList({ edges, direction }: { edges: OntologyEdge[]; direction: "incoming" | "outgoing" }) {
+function EdgeList({
+  edges,
+  direction,
+  labels,
+  onSelect,
+}: {
+  edges: OntologyEdge[];
+  direction: "incoming" | "outgoing";
+  labels: ReadonlyMap<string, string>;
+  onSelect: (nodeId: string) => void;
+}) {
   const { t } = useI18n();
-  return edges.length ? <div className="inspector-edge-list">{edges.map((edge) => <div key={edge.id}><span>{edge.label}</span><code>{direction === "incoming" ? edge.source : edge.target}</code></div>)}</div> : <p className="inspector-muted">{t(direction === "incoming" ? "No incoming relationships in this projection." : "No outgoing relationships in this projection.")}</p>;
+  return edges.length ? <div className="inspector-edge-list">{edges.map((edge) => {
+    const relatedId = direction === "incoming" ? edge.source : edge.target;
+    return <button type="button" key={edge.id} onClick={() => onSelect(relatedId)}><span>{edge.label}</span><strong>{labels.get(relatedId) ?? humanize(relatedId.split(":").at(-1) ?? relatedId)}</strong><code>{humanize(edge.kind)}</code></button>;
+  })}</div> : <p className="inspector-muted">{t(direction === "incoming" ? "No incoming relationships in this projection." : "No outgoing relationships in this projection.")}</p>;
 }
 
-function OntologyTable({ graph, selectedNodeId, onSelect }: { graph: OntologyGraph; selectedNodeId?: string; onSelect: (nodeId: string) => void }) {
+function OntologyNodeBrowser({ graph, onSelect }: { graph: OntologyGraph; onSelect: (nodeId: string) => void }) {
   const { t } = useI18n();
   const parent = useRef<HTMLDivElement>(null);
   const virtual = useVirtualizer({
     count: graph.nodes.length,
     getScrollElement: () => parent.current,
-    estimateSize: () => 48,
+    estimateSize: () => 58,
     overscan: 10,
   });
   return (
-    <section className="ontology-table-panel">
-      <header><div><span className="eyebrow">{t("Accessible table")}</span><strong>{t("Searchable projection fallback")}</strong></div><span className="panel-tag">{t("{count} rows", { count: graph.nodes.length })}</span></header>
+    <div className="ontology-node-browser">
+      <div className="ontology-browser-intro"><p>{t("Choose an entity to inspect its evidence and complete one-hop relationships.")}</p><span>{t("{count} loaded", { count: graph.nodes.length })}</span></div>
       <div className="ontology-table" role="table" aria-label={t("Ontology nodes")}>
-        <div className="ontology-table-row ontology-table-head" role="row"><span>{t("Node")}</span><span>{t("Kind")}</span><span>{t("Status")}</span><span>{t("Layer")}</span><span>{t("Evidence")}</span></div>
+        <div className="ontology-table-row ontology-table-head" role="row"><span>{t("Entity")}</span><span>{t("State")}</span></div>
         <div ref={parent} className="ontology-table-scroll" role="rowgroup">
           <div className="ontology-table-virtual-space" style={{ height: virtual.getTotalSize() }}>
             {virtual.getVirtualItems().map((row) => {
@@ -915,17 +922,50 @@ function OntologyTable({ graph, selectedNodeId, onSelect }: { graph: OntologyGra
                 type="button"
                 role="row"
                 style={{ transform: `translateY(${row.start}px)` }}
-                className={node.id === selectedNodeId ? "ontology-table-row ontology-table-selected" : "ontology-table-row"}
+                className="ontology-table-row"
                 onClick={() => onSelect(node.id)}
               >
-                <span><strong>{node.label}</strong><small>{node.artifactId}</small></span><code>{node.kind}</code><span><i style={{ background: statusColors[node.status] }} />{t(node.status)}</span><span>{t(node.layer)}</span><span>{node.evidenceCount}</span>
+                <span className="ontology-browser-identity"><i style={{ background: nodeColor(node), borderColor: statusColors[node.status] }} /><span><strong>{node.label}</strong><small>{t(familyVisuals[nodeFamily(node)].label)}</small></span></span>
+                <span className="ontology-browser-state"><strong>{t(node.status)}</strong><small>{t("{count} evidence", { count: node.evidenceCount })}</small></span>
               </button>;
             })}
           </div>
         </div>
       </div>
-    </section>
+    </div>
   );
+}
+
+function TopologyLoadBar({
+  graph,
+  hasNextPage,
+  fetchingNext,
+  loadingAll,
+  onNext,
+  onAll,
+  onStop,
+}: {
+  graph: OntologyGraph;
+  hasNextPage: boolean;
+  fetchingNext: boolean;
+  loadingAll: boolean;
+  onNext: () => void;
+  onAll: () => void;
+  onStop: () => void;
+}) {
+  const { t } = useI18n();
+  return <footer className="ontology-load-bar" aria-live="polite">
+    <div>
+      <span>{loadingAll || fetchingNext ? t("Loading graph") : graph.truncated ? t("Partial graph") : t("Graph loaded")}</span>
+      <strong>{t("{loaded}/{total} entities · {edges} relations ready", { loaded: graph.page.loadedNodes, total: graph.totalNodes, edges: graph.page.loadedEdges })}</strong>
+      <div className="paged-load-track"><i style={{ width: `${percentage(graph.page.loadedNodes, graph.totalNodes)}%` }} /></div>
+    </div>
+    {hasNextPage && !loadingAll && <>
+      <button type="button" onClick={onNext} disabled={fetchingNext}>{fetchingNext ? t("Loading…") : t("Load more")}</button>
+      <button type="button" className="ontology-load-all" onClick={onAll} disabled={fetchingNext}>{t("Load all")}</button>
+    </>}
+    {loadingAll && <button type="button" onClick={onStop}>{t("Stop loading")}</button>}
+  </footer>;
 }
 
 function mergeGraphPages(pages: OntologyGraph[] | undefined): OntologyGraph | undefined {
@@ -977,15 +1017,6 @@ function defaultLayers(view: OntologyView): OntologyLayer[] {
   return ["canonical", "branch"];
 }
 
-function shapeFor(node: OntologyNode): string {
-  if (node.kind.includes("event") || node.kind === "world-commit") return "diamond";
-  if (node.kind.includes("rule")) return "triangle";
-  if (node.kind.includes("location") || node.kind === "source") return "roundRect";
-  if (node.kind.includes("proposal") || node.kind === "validation") return "pin";
-  if (node.kind === "source-span") return "rect";
-  return "circle";
-}
-
 function EmptyGraph() {
   const { t } = useI18n();
   return <div className="ontology-empty"><span>◇</span><strong>{t("No nodes match this projection")}</strong><p>{t("Adjust the search, facets, layers, branch, or commit.")}</p></div>;
@@ -1004,6 +1035,7 @@ function OntologyErrorState({ error, retry }: { error: Error; retry: () => void 
 function InlineError({ error }: { error: Error }) { const { t } = useI18n(); const detail = webErrorDetail(error); return <div className="ontology-inline-error"><strong>{detail?.code ?? error.name}</strong><span>{error.message}</span>{detail && <small>{recoveryInstruction(detail, t)}</small>}</div>; }
 function compactJson(value: unknown): string { return JSON.stringify(value); }
 function formatValue(value: unknown): string { return typeof value === "string" ? value : JSON.stringify(value); }
+function humanize(value: string): string { return value.replaceAll(":", " · ").replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function shortHash(value: string): string { return value.length > 16 ? `${value.slice(0, 9)}…${value.slice(-5)}` : value; }
 function percentage(loaded: number, total: number): number { return total === 0 ? 100 : Math.min(100, Math.round(loaded / total * 100)); }
 function yieldToBrowser(): Promise<void> { return new Promise((resolve) => requestAnimationFrame(() => resolve())); }

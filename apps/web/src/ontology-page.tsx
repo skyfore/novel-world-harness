@@ -17,6 +17,7 @@ import {
   buildRenderableGraph,
   familyCounts,
   familyVisuals,
+  graphLabelBox,
   graphPositions,
   nodeColor,
   nodeFamily,
@@ -191,6 +192,10 @@ export function OntologyPage({
     ? selectedDetailNode
     : interactiveGraph?.nodes.find((node) => node.id === selectedNodeId);
   const actionableDiagnostics = visible?.diagnostics.filter((message) => !message.startsWith("Loaded ")) ?? [];
+  const openNode = (nodeId?: string) => {
+    setSelectedNodeId(nodeId);
+    setFocusedNodeId(nodeId);
+  };
 
   const loadAllPages = async () => {
     stopFullLoad.current = false;
@@ -312,7 +317,11 @@ export function OntologyPage({
           <div className="ontology-workbench">
             <section className="ontology-canvas-panel">
               <header>
-                <div><span className="eyebrow">{focusedNodeId ? t("Relationship focus") : t("World graph")}</span><strong>{focusedNodeId ? selectedNode?.label ?? t("Focused neighborhood") : t("Drag to arrange · double-click to explore")}</strong></div>
+                <div className="ontology-canvas-heading">
+                  {focusedNodeId && <button type="button" className="ontology-graph-back" onClick={() => setFocusedNodeId(undefined)}>← {t("Back to full graph")}</button>}
+                  <span className="eyebrow">{focusedNodeId ? t("Relationship focus") : t("World graph")}</span>
+                  <strong>{focusedNodeId ? selectedNode?.label ?? t("Focused neighborhood") : t("Drag to arrange · click an entity to explore")}</strong>
+                </div>
                 <div className="ontology-legend" aria-label={t("Entity type colors")}>{familyCounts(visible.nodes).map(({ family, count }) => <span key={family}><i style={{ background: familyVisuals[family].color }} />{t(familyVisuals[family].label)}<small>{count}</small></span>)}</div>
               </header>
               {visible.nodes.length ? <GraphCanvas
@@ -320,7 +329,7 @@ export function OntologyPage({
                 view={view}
                 selectedNodeId={selectedNodeId}
                 focusNodeId={focusedNodeId}
-                onSelect={setSelectedNodeId}
+                onSelect={openNode}
                 onFocus={(nodeId) => { setSelectedNodeId(nodeId); setFocusedNodeId(nodeId); }}
                 onClearFocus={() => setFocusedNodeId(undefined)}
                 refreshing={graph.isFetching}
@@ -346,7 +355,7 @@ export function OntologyPage({
               node={selectedNode}
               detail={detail}
               focused={Boolean(selectedNode && focusedNodeId === selectedNode.id)}
-              onSelect={setSelectedNodeId}
+              onSelect={(nodeId) => openNode(nodeId)}
               onFocus={(nodeId) => { setSelectedNodeId(nodeId); setFocusedNodeId(nodeId); }}
               onClose={() => { setSelectedNodeId(undefined); setFocusedNodeId(undefined); }}
             />
@@ -688,6 +697,8 @@ function graphOption(
         const position = positions.get(node.id) ?? { x: 0, y: 0 };
         const focus = node.id === graph.focusNodeId;
         const opacity = node.status === "rejected" ? .42 : node.status === "inactive" ? .62 : 1;
+        const fontSize = focus ? 12 : graph.focused ? 10 : 9;
+        const labelBox = graphLabelBox(node.label, fontSize, graph.focused ? 168 : 132);
         return {
           id: node.id,
           name: node.label,
@@ -713,10 +724,14 @@ function graphOption(
             distance: focus ? 10 : 7,
             color: focus ? "#ffffff" : "#dce6df",
             fontFamily: "Manrope",
-            fontSize: focus ? 12 : graph.focused ? 10 : 9,
+            fontSize,
             fontWeight: focus ? 750 : 650,
-            width: graph.focused ? 168 : 130,
-            overflow: "truncate",
+            width: labelBox.width,
+            height: labelBox.height,
+            lineHeight: labelBox.lineHeight,
+            overflow: "break",
+            lineOverflow: "truncate",
+            ellipsis: "…",
             backgroundColor: "#101713e8",
             borderColor: focus ? statusColors[node.status] : "transparent",
             borderWidth: focus ? 1 : 0,
@@ -726,52 +741,81 @@ function graphOption(
           emphasis: {
             focus: "adjacency",
             scale: 1.18,
-            label: { show: true, formatter: node.label, color: "#ffffff", fontSize: 11, backgroundColor: "#111a16f2", padding: [4, 7], borderRadius: 5 },
+            label: {
+              show: true,
+              formatter: node.label,
+              color: "#ffffff",
+              fontSize: 11,
+              width: graphLabelBox(node.label, 11, 184).width,
+              height: graphLabelBox(node.label, 11, 184).height,
+              lineHeight: graphLabelBox(node.label, 11, 184).lineHeight,
+              overflow: "break",
+              lineOverflow: "truncate",
+              ellipsis: "…",
+              backgroundColor: "#111a16f2",
+              padding: [4, 7],
+              borderRadius: 5,
+            },
             itemStyle: { borderColor: "#ffffff", borderWidth: 3, opacity: 1, shadowBlur: 18, shadowColor: `${nodeColor(node)}bb` },
           },
           blur: { itemStyle: { opacity: .12 }, label: { show: false } },
         };
       }),
-      links: graph.edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        value: edge.evidenceCount,
-        lineStyle: {
-          color: statusColors[edge.status],
-          width: graph.focused ? 2.1 : Math.min(.95, .5 + edge.evidenceCount * .035),
-          opacity: graph.focused ? .84 : .16,
-          type: edge.status === "possibility" || edge.status === "proposal" || edge.status === "contested" ? "dashed" : "solid",
-          curveness: curves.get(edge.id) ?? 0,
-          shadowBlur: graph.focused ? 3 : 0,
-          shadowColor: statusColors[edge.status],
-        },
-        label: {
-          show: graph.focused && labels.edgeIds.has(edge.id),
-          formatter: edge.label,
-          color: "#f1f8f3",
-          fontFamily: "DM Mono",
-          fontSize: 8,
-          backgroundColor: "#111916f2",
-          borderColor: statusColors[edge.status],
-          borderWidth: 1,
-          borderRadius: 3,
-          padding: [3, 5],
-        },
-        emphasis: {
-          focus: "adjacency" as const,
-          label: {
-            show: !labels.dense && graph.edges.length <= 24,
-            formatter: edge.label,
-            color: "#ffffff",
-            fontSize: 9,
-            backgroundColor: "#17211eff",
-            padding: [4, 6],
+      links: graph.edges.map((edge) => {
+        const edgeBox = graphLabelBox(edge.label, 8, 124);
+        return {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          value: edge.evidenceCount,
+          lineStyle: {
+            color: statusColors[edge.status],
+            width: graph.focused ? 2.1 : Math.min(.95, .5 + edge.evidenceCount * .035),
+            opacity: graph.focused ? .84 : .16,
+            type: edge.status === "possibility" || edge.status === "proposal" || edge.status === "contested" ? "dashed" : "solid",
+            curveness: curves.get(edge.id) ?? 0,
+            shadowBlur: graph.focused ? 3 : 0,
+            shadowColor: statusColors[edge.status],
           },
-          lineStyle: { width: 3, opacity: 1 },
-        },
-        blur: { lineStyle: { opacity: .035 }, label: { show: false } },
-      })),
+          label: {
+            show: graph.focused && labels.edgeIds.has(edge.id),
+            formatter: edge.label,
+            color: "#f1f8f3",
+            fontFamily: "DM Mono",
+            fontSize: 8,
+            width: edgeBox.width,
+            height: edgeBox.height,
+            lineHeight: edgeBox.lineHeight,
+            overflow: "break" as const,
+            lineOverflow: "truncate" as const,
+            ellipsis: "…",
+            backgroundColor: "#111916f2",
+            borderColor: statusColors[edge.status],
+            borderWidth: 1,
+            borderRadius: 3,
+            padding: [3, 5],
+          },
+          emphasis: {
+            focus: "adjacency" as const,
+            label: {
+              show: !labels.dense && graph.edges.length <= 24,
+              formatter: edge.label,
+              color: "#ffffff",
+              fontSize: 9,
+              width: graphLabelBox(edge.label, 9, 148).width,
+              height: graphLabelBox(edge.label, 9, 148).height,
+              lineHeight: graphLabelBox(edge.label, 9, 148).lineHeight,
+              overflow: "break" as const,
+              lineOverflow: "truncate" as const,
+              ellipsis: "…",
+              backgroundColor: "#17211eff",
+              padding: [4, 6],
+            },
+            lineStyle: { width: 3, opacity: 1 },
+          },
+          blur: { lineStyle: { opacity: .035 }, label: { show: false } },
+        };
+      }),
       lineStyle: { opacity: 0.35 },
       label: { show: false },
       edgeLabel: { show: false },

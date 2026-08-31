@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import path from "node:path";
 import { createPiCanonicalAttachmentResolver } from "../agent/pi-canonical-attachment.js";
 import { createPiNpcReactionReasoner } from "../agent/pi-npc-reaction.js";
@@ -34,11 +35,14 @@ import { choosePlayExperience } from "../world/play-choice.js";
 import {
   assertPlaySceneNarration,
   buildPlayOpeningFrame,
+  playSceneRequestForEntry,
   playerSceneModelFrame,
+  resolvePlayScenePurpose,
   type PlayOpeningFrame,
   type PlayScenePurpose,
   type PlayerTurnResolution,
 } from "../world/play-opening.js";
+import { logicalTimeSchema } from "../world/model.js";
 import { newPlaySessionIdentity, PlaySessionStore, type ActivePlaySession } from "../world/play-session.js";
 import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import { BranchStore } from "../world/store.js";
@@ -46,12 +50,14 @@ import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import {
   clearPlayConversationResultSchema,
   createPlaySessionRequestSchema,
+  enterPlaySessionRequestSchema,
   narrationRetryRequestSchema,
   narrationRetryResultSchema,
   playableCharacterListSchema,
   playSessionCommandRequestSchema,
   playMoveRequestSchema,
   playOperationResultSchema,
+  playSessionEntryResultSchema,
   playSessionDetailSchema,
   removePlaySessionResultSchema,
   sceneNarrationRequestSchema,
@@ -59,6 +65,7 @@ import {
   updatePlaySessionRequestSchema,
   type ClearPlayConversationResult,
   type CreatePlaySessionRequest,
+  type EnterPlaySessionRequest,
   type NarrationRetryRequest,
   type NarrationRetryResult,
   type OperationAccepted,
@@ -66,6 +73,7 @@ import {
   type PlaySessionCommandRequest,
   type PlayMoveRequest,
   type PlayOperationResult,
+  type PlaySessionEntryResult,
   type PlaySessionDetail,
   type PlayerChoiceSummary,
   type RemovePlaySessionResult,
@@ -107,6 +115,10 @@ type NarrationOutcome = {
   message: PlayConversationMessage;
 };
 
+type ResolvedSceneNarrationRequest = Omit<SceneNarrationRequest, "purpose"> & {
+  purpose: PlayScenePurpose;
+};
+
 export class PlayApplicationService {
   readonly root: string;
   private readonly sessions: PlaySessionStore;
@@ -115,6 +127,7 @@ export class PlayApplicationService {
   private readonly catalog: CatalogService;
   private readonly traces: TraceStore;
   private readonly mutations: WebMutationJournal;
+  private readonly entryRequests = new Map<string, Promise<PlaySessionEntryResult>>();
 
   constructor(private readonly options: PlayApplicationServiceOptions) {
     this.root = path.resolve(options.root);
@@ -238,6 +251,116 @@ export class PlayApplicationService {
       session: summary,
       headCommitId,
       messages: messages.map(({ version: _version, ...message }) => message),
+    });
+  }
+
+  async enterSession(sessionId: string, inputValue: EnterPlaySessionRequest): Promise<PlaySessionEntryResult> {
+    const input = enterPlaySessionRequestSchema.parse(inputValue);
+    const pending = this.entryRequests.get(sessionId);
+    if (pending) return structuredClone(await pending);
+    const execution = this.enterSessionOnce(sessionId, input);
+    this.entryRequests.set(sessionId, execution);
+    try {
+      return structuredClone(await execution);
+    } finally {
+      if (this.entryRequests.get(sessionId) === execution) this.entryRequests.delete(sessionId);
+    }
+  }
+
+  private async enterSessionOnce(sessionId: string, input: EnterPlaySessionRequest): Promise<PlaySessionEntryResult> {
+    const session = await this.requireSession(sessionId);
+    if (session.status === "archived" || session.status === "detached") {
+      return playSessionEntryResultSchema.parse({
+        sessionId: session.id,
+        state: "unavailable",
+        reason: "session-not-writable",
+      });
+    }
+
+    const [messages, headCommitId] = await Promise.all([
+      this.conversations.list(session.branchId, session.conversationId),
+      this.readHeadOrNull(session.branchId),
+    ]);
+    if (!headCommitId) {
+      return playSessionEntryResultSchema.parse({
+        sessionId: session.id,
+        state: "unavailable",
+        reason: "session-not-writable",
+      });
+    }
+    if (messages.some((message) =>
+      message.role === "scene"
+      && message.status === "rendered"
+      && message.atCommit === headCommitId)) {
+      return playSessionEntryResultSchema.parse({
+        sessionId: session.id,
+        state: "ready",
+        reason: "scene-present",
+      });
+    }
+
+    const sceneRequest = playSceneRequestForEntry(input.intent, messages.length === 0);
+    const storyTime = await this.storyTimeAt(headCommitId);
+    const logicalTime = logicalTimeSchema.parse(storyTime.logicalTime);
+    const purpose = resolvePlayScenePurpose(sceneRequest, {
+      logicalStep: logicalTime.step,
+      selectionChanged: true,
+      hadPreviousSelection: false,
+    });
+    const clientRequestId = entryNarrationClientRequestId(session.id, headCommitId);
+    const existing = this.options.operations.findByClientRequest("scene-narration", session.id, clientRequestId);
+    if (existing) {
+      const terminal = operationIsTerminal(existing.status);
+      return playSessionEntryResultSchema.parse({
+        sessionId: session.id,
+        state: terminal ? "recovery-required" : "starting",
+        reason: terminal
+          ? existing.status === "succeeded" ? "prior-session-activity" : "scene-operation-failed"
+          : "scene-operation-active",
+        sceneRequest,
+        ...(purpose ? { purpose } : {}),
+        operation: existing,
+      });
+    }
+
+    const priorRuns = await this.traces.listRuns({ playSessionId: session.id, limit: 1_000 });
+    const hasCurrentActivity = messages.some((message) => message.atCommit === headCommitId)
+      || priorRuns.some((run) => run.previousHead === headCommitId || run.finalHead === headCommitId);
+    if (hasCurrentActivity) {
+      return playSessionEntryResultSchema.parse({
+        sessionId: session.id,
+        state: "recovery-required",
+        reason: "prior-session-activity",
+        sceneRequest,
+        ...(purpose ? { purpose } : {}),
+      });
+    }
+    if (!purpose) {
+      return playSessionEntryResultSchema.parse({
+        sessionId: session.id,
+        state: "ready",
+        reason: "entry-does-not-request-scene",
+        sceneRequest,
+      });
+    }
+
+    const accepted = await this.startSceneNarration(session.id, {
+      purpose,
+      expectedHead: headCommitId,
+      clientRequestId,
+    });
+    const terminal = operationIsTerminal(accepted.operation.status);
+    return playSessionEntryResultSchema.parse({
+      sessionId: session.id,
+      state: terminal
+        ? accepted.operation.status === "succeeded" ? "ready" : "recovery-required"
+        : "starting",
+      reason: terminal
+        ? accepted.operation.status === "succeeded" ? "prior-session-activity" : "scene-operation-failed"
+        : accepted.reused ? "scene-operation-active" : "scene-started",
+      sceneRequest,
+      purpose,
+      operation: accepted.operation,
     });
   }
 
@@ -419,6 +542,14 @@ export class PlayApplicationService {
     await this.assertExpectedHead(session, input.expectedHead);
     this.assertNoActiveOperation(session.id);
     const storyTimeBefore = await this.storyTimeAt(input.expectedHead);
+    const logicalTime = logicalTimeSchema.parse(storyTimeBefore.logicalTime);
+    const purpose = resolvePlayScenePurpose(input.purpose, {
+      logicalStep: logicalTime.step,
+      selectionChanged: true,
+      hadPreviousSelection: false,
+    });
+    if (!purpose) throw new Error(`Scene request '${input.purpose}' did not resolve to a narration purpose.`);
+    const resolvedInput: ResolvedSceneNarrationRequest = { ...input, purpose };
     const recorder = await TraceRecorder.start(this.traces, {
       kind: "scene-narration",
       sourceId: session.sourceId,
@@ -439,7 +570,7 @@ export class PlayApplicationService {
           recorder,
           session.branchId,
           context,
-          () => this.runSceneNarration(session.id, input, context, recorder),
+          () => this.runSceneNarration(session.id, resolvedInput, context, recorder),
         ),
       });
       if (accepted.reused) {
@@ -695,7 +826,7 @@ export class PlayApplicationService {
 
   private async runSceneNarration(
     sessionId: string,
-    input: SceneNarrationRequest,
+    input: ResolvedSceneNarrationRequest,
     context: OperationRunContext,
     recorder: TraceRecorder,
   ): Promise<SceneNarrationResult> {
@@ -1147,6 +1278,16 @@ function playWarnings(outcome: PlayTurnOutcome): string[] {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function entryNarrationClientRequestId(sessionId: string, headCommitId: string): string {
+  const direct = `auto-entry-${sessionId}-${headCommitId}`;
+  if (direct.length <= 200) return direct;
+  return `auto-entry-${crypto.createHash("sha256").update(`${sessionId}:${headCommitId}`).digest("hex")}`;
+}
+
+function operationIsTerminal(status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted"): boolean {
+  return status === "succeeded" || status === "failed" || status === "cancelled" || status === "interrupted";
 }
 
 function traceError(error: unknown, status: Exclude<TraceRunStatus, "running">): TraceErrorSummary {

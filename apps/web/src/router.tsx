@@ -16,6 +16,7 @@ import {
   cancelOperation,
   clearPlayConversation,
   createPlaySession,
+  enterPlaySession,
   fetchBootstrap,
   fetchCharacters,
   fetchInstance,
@@ -769,6 +770,7 @@ function SessionPage() {
   const [affordanceId, setAffordanceId] = useState<string>();
   const [selectedTraceRunId, setSelectedTraceRunId] = useState<string>();
   const [edgePanelOpen, setEdgePanelOpen] = useState(false);
+  const entryAttempt = useRef<string | undefined>(undefined);
   const transcriptElement = useRef<HTMLDivElement>(null);
   const composerInput = useRef<HTMLTextAreaElement>(null);
   const closeTraceDrawer = useCallback(() => setSelectedTraceRunId(undefined), []);
@@ -814,12 +816,23 @@ function SessionPage() {
   });
   const narrationMutation = useMutation({
     mutationFn: () => startSceneNarration(sessionId, {
-      purpose: detail.data?.messages.length ? "orientation" : "opening",
+      purpose: detail.data?.messages.length ? "orientation" : "auto",
       expectedHead: detail.data!.headCommitId!,
       clientRequestId: requestId("scene"),
     }, csrfToken),
     onSuccess: acceptOperation,
   });
+  const entryMutation = useMutation({
+    mutationFn: () => enterPlaySession(sessionId, { intent: "play" }, csrfToken),
+    onSuccess: (entry) => {
+      if (entry.operation) acceptOperation({ operation: entry.operation });
+    },
+  });
+  useEffect(() => {
+    if (!detail.isSuccess || !csrfToken || entryAttempt.current === sessionId) return;
+    entryAttempt.current = sessionId;
+    entryMutation.mutate();
+  }, [csrfToken, detail.isSuccess, sessionId]);
   const narrationRetryMutation = useMutation({
     mutationFn: () => retryNarration(sessionId, {
       sourceRunId: current!.runId!,
@@ -855,7 +868,11 @@ function SessionPage() {
   });
   const clearMutation = useMutation({
     mutationFn: () => clearPlayConversation(sessionId, { clientRequestId: requestId("clear-conversation") }, csrfToken),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: playSessionKey(sessionId) }),
+    onSuccess: () => {
+      setDraft("");
+      setAffordanceId(undefined);
+      void queryClient.invalidateQueries({ queryKey: playSessionKey(sessionId) });
+    },
   });
   const removeMutation = useMutation({
     mutationFn: () => removePlaySession(sessionId, { clientRequestId: requestId("remove-session") }, csrfToken),
@@ -879,8 +896,18 @@ function SessionPage() {
   const retryResult = narrationRetryResultSchema.safeParse(result);
   const choices = playResult.success ? playResult.data.choices : sceneResult.success ? sceneResult.data.choices : retryResult.success ? retryResult.data.choices : [];
   const settledNarration = playResult.success ? playResult.data.narration : sceneResult.success ? sceneResult.data.narration : retryResult.success ? retryResult.data.narration : undefined;
-  const mutationError = firstError(moveMutation.error, narrationMutation.error, narrationRetryMutation.error, cancelMutation.error, archiveMutation.error, restoreMutation.error, activateMutation.error, clearMutation.error, removeMutation.error);
+  const mutationError = firstError(entryMutation.error, moveMutation.error, narrationMutation.error, narrationRetryMutation.error, cancelMutation.error, archiveMutation.error, restoreMutation.error, activateMutation.error, clearMutation.error, removeMutation.error);
   const writable = session.status !== "archived" && session.status !== "detached" && Boolean(data.headCommitId);
+  const enteringScene = !data.messages.length
+    && writable
+    && !entryMutation.isError
+    && (
+      !entryMutation.data
+      || entryMutation.isPending
+      || (entryMutation.data.state === "starting" && (!current || !isTerminal(current.status)))
+      || (busy && current?.kind === "scene-narration")
+    );
+  const sceneReady = data.messages.some((message) => message.role === "scene" && message.status === "rendered");
   const canRetryNarration = Boolean(
     writable
     && current?.runId
@@ -897,7 +924,7 @@ function SessionPage() {
 
   const submitMove = (event: FormEvent) => {
     event.preventDefault();
-    if (!draft.trim() || busy || !writable) return;
+    if (!draft.trim() || busy || !writable || !sceneReady) return;
     moveMutation.mutate();
   };
   const chooseAction = (selected: PlayerChoiceSummary) => {
@@ -910,12 +937,20 @@ function SessionPage() {
       <section className="transcript-panel play-story-panel" aria-label={t("Transcript")}>
         <header className="play-story-bar">
           <span className={busy ? "play-presence play-presence-busy" : "play-presence"} aria-hidden="true" />
-          <small>{busy ? (current?.progress.statusText ? String(current.progress.statusText) : current?.phase) : t("The world waits for your move")}</small>
+          <small>{busy
+            ? (current?.progress.statusText ? String(current.progress.statusText) : current?.phase)
+            : enteringScene
+              ? t("The narrator is setting the scene")
+              : sceneReady
+                ? t("The world waits for your move")
+                : t("Scene context required")}</small>
           <span>{t("{count} messages", { count: data.messages.length })}</span>
           <button className="play-edge-toggle" type="button" aria-label={t("Open session controls")} aria-expanded={edgePanelOpen} onClick={() => setEdgePanelOpen(true)}>•••</button>
         </header>
         <div ref={transcriptElement} className="transcript">
-          {!data.messages.length && !busy && <EmptyState title={t("The scene has not been rendered")} body={t("Render the opening from the actor-safe committed frame. This does not advance world truth.")} />}
+          {!data.messages.length && !busy && (enteringScene
+            ? <EmptyState title={t("Entering the scene")} body={t("The narrator is establishing your background and immediate situation from the actor-safe committed frame.")} />
+            : <EmptyState title={t("The scene has not been rendered")} body={t("The automatic scene did not complete, or the presentation transcript was cleared. Re-establishing it does not advance world truth.")} />)}
           {data.messages.map((message) => {
             const run = message.role === "scene"
               ? (message.runId ? runsById.get(message.runId) : undefined) ?? runsByMessageId.get(message.id)
@@ -930,7 +965,7 @@ function SessionPage() {
               </article>
             );
           })}
-          {busy && (streamed || current?.phase.includes("narrat")) && (
+          {busy && (current?.kind === "scene-narration" || streamed || current?.phase.includes("narrat")) && (
             <article className="message message-scene message-streaming">
               <header><span>{t("Narrator")} · {t("live")}</span><small>{current?.phase}</small></header>
               <p>{streamed || t("The scene is being composed…")}</p>
@@ -953,7 +988,7 @@ function SessionPage() {
             <textarea
               ref={composerInput}
               value={draft}
-              disabled={!writable || busy}
+              disabled={!writable || busy || !sceneReady}
               onChange={(event) => { setDraft(event.target.value); setAffordanceId(undefined); }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -961,13 +996,21 @@ function SessionPage() {
                   event.currentTarget.form?.requestSubmit();
                 }
               }}
-              placeholder={session.status === "detached" ? t("This historical session has no writable world instance") : session.status === "archived" ? t("Restore this session to continue") : t("Describe one immediate action, observation, thought, or wait…")}
+              placeholder={session.status === "detached"
+                ? t("This historical session has no writable world instance")
+                : session.status === "archived"
+                  ? t("Restore this session to continue")
+                  : !sceneReady
+                    ? enteringScene
+                      ? t("Wait while the narrator establishes the scene…")
+                      : t("Re-establish the scene before taking an action.")
+                    : t("Describe one immediate action, observation, thought, or wait…")}
               rows={2}
             />
             <div className="composer-actions">
               <button type="button" className="text-button" disabled={!draft} onClick={() => { setDraft(""); setAffordanceId(undefined); }}>{t("Clear")}</button>
-              {!data.messages.length && <button type="button" className="secondary-button" disabled={!writable || busy || narrationMutation.isPending} onClick={() => narrationMutation.mutate()}>{t("Render opening")}</button>}
-              <button type="submit" className="primary-button" disabled={!draft.trim() || !writable || busy || moveMutation.isPending}>{t("Commit action")} <span aria-hidden="true">↵</span></button>
+              {!data.messages.length && !enteringScene && <button type="button" className="secondary-button" disabled={!writable || busy || narrationMutation.isPending} onClick={() => narrationMutation.mutate()}>{t("Re-establish scene")}</button>}
+              <button type="submit" className="primary-button" disabled={!draft.trim() || !writable || !sceneReady || busy || moveMutation.isPending}>{t("Commit action")} <span aria-hidden="true">↵</span></button>
             </div>
           </form>
         </footer>

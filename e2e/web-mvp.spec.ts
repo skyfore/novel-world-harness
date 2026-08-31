@@ -161,9 +161,12 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await expect(page).toHaveURL(/\/play\/play-[0-9a-f-]{36}$/);
   await expect(page.getByLabel("Play status")).toContainText("step 0");
 
-  await page.getByRole("button", { name: "Render opening" }).click();
   await expect(page.locator(".message-scene").last()).toContainText("斑驳的窗影");
+  await expect(page.getByRole("button", { name: "Re-establish scene" })).toHaveCount(0);
   await expect(page.locator(".operation-panel")).toContainText("succeeded");
+  await page.reload();
+  await expect(page.locator(".transcript-panel > header")).toContainText("1 message");
+  await expect(page.locator(".message-scene")).toHaveCount(1);
 
   const suggestedChoice = page.locator(".choice-strip button").first();
   await expect(suggestedChoice).toBeVisible();
@@ -241,6 +244,7 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await page.getByRole("button", { name: "Clear transcript" }).click();
   await expect(page.locator(".transcript-panel > header")).toContainText("0 messages");
   await expect(page.getByText("The scene has not been rendered", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Re-establish scene" })).toBeVisible();
 
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "Remove", exact: true }).click();
@@ -284,7 +288,6 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
   await playLauncher.getByRole("button", { name: "Start a new session as Mara" }).click();
   await expect(page).toHaveURL(/\/play\/play-[0-9a-f-]{36}$/);
 
-  await page.getByRole("button", { name: "Render opening" }).click();
   await expect(page.locator(".message-scene").last()).toContainText("斑驳的窗影");
   await submitMove(page, "我继续听雨。", 1);
   await expect(page.locator(".transcript-panel > header")).toContainText("3 messages");

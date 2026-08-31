@@ -124,27 +124,38 @@ describe("Web Play application service", () => {
     await expect(service.getSession(created.session.id)).resolves.toMatchObject({ session: { status: "idle" } });
     await expect(service.getSession(freshSession.session.id)).resolves.toMatchObject({ session: { status: "active" } });
 
-    const opening = await service.startSceneNarration(created.session.id, {
+    const [entry, concurrentEntry] = await Promise.all([
+      service.enterSession(created.session.id, { intent: "play" }),
+      service.enterSession(created.session.id, { intent: "play" }),
+    ]);
+    expect(entry).toMatchObject({
+      state: "starting",
+      reason: "scene-started",
+      sceneRequest: "auto",
       purpose: "opening",
-      expectedHead: genesis,
-      clientRequestId: "opening-1",
+      operation: { kind: "scene-narration" },
     });
-    const openingDone = await operations.wait(opening.operation.id);
+    expect(concurrentEntry.operation?.id).toBe(entry.operation?.id);
+    const openingDone = await operations.wait(entry.operation!.id);
     expect(openingDone).toMatchObject({
       status: "succeeded",
-      runId: opening.operation.runId,
-      result: { narrationStatus: "rendered", headCommitId: genesis, runId: opening.operation.runId },
+      runId: entry.operation!.runId,
+      result: { purpose: "opening", narrationStatus: "rendered", headCommitId: genesis, runId: entry.operation!.runId },
     });
-    const openingTrace = await service.traceStore.getRun(opening.operation.runId!);
+    const openingTrace = await service.traceStore.getRun(entry.operation!.runId!);
     expect(openingTrace).toMatchObject({
       kind: "scene-narration",
       status: "succeeded",
-      operationId: opening.operation.id,
+      operationId: entry.operation!.id,
       finalHead: genesis,
       storyTimeBefore: { commitId: genesis, logicalTime: { step: 0 } },
       storyTimeAfter: { commitId: genesis, logicalTime: { step: 0 } },
     });
     expect(openingTrace.presentationMessageIds).toHaveLength(1);
+    await expect(service.enterSession(created.session.id, { intent: "play" })).resolves.toMatchObject({
+      state: "ready",
+      reason: "scene-present",
+    });
 
     const accepted = await service.startPlayerMove(created.session.id, {
       text: "我离开前厅，去营地。",
@@ -182,7 +193,7 @@ describe("Web Play application service", () => {
       ["scene", "rendered"],
     ]);
     expect(detail.messages.map((message) => message.runId)).toEqual([
-      opening.operation.runId,
+      entry.operation!.runId,
       accepted.operation.runId,
       accepted.operation.runId,
     ]);
@@ -279,6 +290,114 @@ describe("Web Play application service", () => {
     await expect(service.traceStore.listRuns({ playSessionId: created.session.id })).resolves.toHaveLength(2);
     const restarted = new PlayApplicationService({ root, events, operations, translator: () => moveCandidate(), narrator });
     await expect(restarted.removeSession(created.session.id, removeRequest)).resolves.toEqual(removed);
+  });
+
+  it("resolves an automatic scene to orientation after the branch has advanced", async () => {
+    const { root, genesis, events, operations } = await fixture();
+    const service = new PlayApplicationService({
+      root,
+      events,
+      operations,
+      translator: () => moveCandidate(),
+      narrator,
+      advanceBackground: 0,
+    });
+    const session = await service.createSession({
+      branchId: "main",
+      actorId: "hero",
+      clientRequestId: "create-auto-orientation",
+    });
+    const move = await service.startPlayerMove(session.session.id, {
+      text: "我离开前厅，去营地。",
+      expectedHead: genesis,
+      clientRequestId: "move-auto-orientation",
+    });
+    const moved = await operations.wait(move.operation.id);
+    const finalHead = (moved.result as { finalHead: string }).finalHead;
+
+    const orientationSession = await service.createSession({
+      branchId: "main",
+      actorId: "hero",
+      clientRequestId: "create-orientation-at-advanced-head",
+    });
+    const orientation = await service.enterSession(orientationSession.session.id, { intent: "play" });
+    expect(orientation).toMatchObject({
+      state: "starting",
+      sceneRequest: "auto",
+      purpose: "orientation",
+    });
+    await expect(operations.wait(orientation.operation!.id)).resolves.toMatchObject({
+      status: "succeeded",
+      result: { purpose: "orientation", headCommitId: finalHead },
+    });
+  });
+
+  it("reorients an existing session when its shared branch advances beyond the rendered scene", async () => {
+    const { root, genesis, events, operations } = await fixture();
+    const service = new PlayApplicationService({
+      root,
+      events,
+      operations,
+      translator: () => moveCandidate(),
+      narrator,
+      advanceBackground: 0,
+    });
+    const staleSession = await service.createSession({
+      branchId: "main",
+      actorId: "hero",
+      clientRequestId: "create-stale-scene",
+    });
+    const staleOpening = await service.enterSession(staleSession.session.id, { intent: "play" });
+    await operations.wait(staleOpening.operation!.id);
+
+    const driverSession = await service.createSession({
+      branchId: "main",
+      actorId: "hero",
+      clientRequestId: "create-branch-driver",
+    });
+    const driverOpening = await service.enterSession(driverSession.session.id, { intent: "play" });
+    await operations.wait(driverOpening.operation!.id);
+    const move = await service.startPlayerMove(driverSession.session.id, {
+      text: "我离开前厅，去营地。",
+      expectedHead: genesis,
+      clientRequestId: "move-branch-driver",
+    });
+    const moved = await operations.wait(move.operation.id);
+    const finalHead = (moved.result as { finalHead: string }).finalHead;
+
+    const orientation = await service.enterSession(staleSession.session.id, { intent: "play" });
+    expect(orientation).toMatchObject({ state: "starting", purpose: "orientation" });
+    await expect(operations.wait(orientation.operation!.id)).resolves.toMatchObject({
+      status: "succeeded",
+      result: { purpose: "orientation", headCommitId: finalHead },
+    });
+  });
+
+  it("requires explicit recovery after a same-head scene attempt fails", async () => {
+    const { root, genesis, events, operations } = await fixture();
+    const service = new PlayApplicationService({
+      root,
+      events,
+      operations,
+      narrator: async () => { throw new Error("narrator unavailable"); },
+    });
+    const session = await service.createSession({
+      branchId: "main",
+      actorId: "hero",
+      clientRequestId: "create-failed-entry",
+    });
+    const failed = await service.startSceneNarration(session.session.id, {
+      purpose: "opening",
+      expectedHead: genesis,
+      clientRequestId: "manual-failed-opening",
+    });
+    await expect(operations.wait(failed.operation.id)).resolves.toMatchObject({ status: "failed" });
+
+    await expect(service.enterSession(session.session.id, { intent: "play" })).resolves.toMatchObject({
+      state: "recovery-required",
+      reason: "prior-session-activity",
+      purpose: "opening",
+    });
   });
 
   it("cancels before commit without writing world truth or presentation messages", async () => {
@@ -484,17 +603,18 @@ describe("Web Play application service", () => {
 
       const narration = await app.inject({
         method: "POST",
-        url: `/api/v1/play-sessions/${sessionId}/narrations`,
+        url: `/api/v1/play-sessions/${sessionId}/enter`,
         headers: { "x-nwh-csrf": csrfToken },
-        payload: { purpose: "opening", expectedHead: genesis, clientRequestId: "http-opening" },
+        payload: { intent: "play" },
       });
       expect(narration.statusCode).toBe(202);
+      expect(narration.json()).toMatchObject({ state: "starting", purpose: "opening" });
       const operationId = (narration.json() as { operation: { id: string } }).operation.id;
       await operations.wait(operationId);
 
       const operation = await app.inject({ method: "GET", url: `/api/v1/operations/${operationId}` });
       expect(operation.statusCode).toBe(200);
-      expect(operation.json()).toMatchObject({ id: operationId, status: "succeeded" });
+      expect(operation.json()).toMatchObject({ id: operationId, status: "succeeded", result: { purpose: "opening" } });
       const detail = await app.inject({ method: "GET", url: `/api/v1/play-sessions/${sessionId}` });
       expect(detail.json()).toMatchObject({ messages: [expect.objectContaining({ role: "scene" })] });
       const messages = await app.inject({ method: "GET", url: `/api/v1/play-sessions/${sessionId}/messages` });
@@ -521,6 +641,18 @@ describe("Web Play application service", () => {
       });
       expect(cleared.statusCode).toBe(200);
       expect(cleared.json()).toMatchObject({ branchPreserved: true, cleared: true });
+      const reentered = await app.inject({
+        method: "POST",
+        url: `/api/v1/play-sessions/${sessionId}/enter`,
+        headers: { "x-nwh-csrf": csrfToken },
+        payload: { intent: "play" },
+      });
+      expect(reentered.statusCode).toBe(200);
+      expect(reentered.json()).toMatchObject({
+        state: "recovery-required",
+        reason: "prior-session-activity",
+        operation: { id: operationId, status: "succeeded" },
+      });
     } finally {
       await app.close();
     }

@@ -650,6 +650,7 @@ export const ontologyNodeSchema = z.object({
   artifactId: z.string().min(1),
   kind: z.string().min(1),
   label: z.string().min(1),
+  description: z.string().min(1).optional(),
   status: ontologyStatusSchema,
   layer: ontologyLayerSchema,
   revisionHash: z.string().min(1).optional(),
@@ -658,6 +659,13 @@ export const ontologyNodeSchema = z.object({
   storyTime: z.unknown().optional(),
   summary: z.record(z.string(), z.unknown()),
   detailsEndpoint: z.string().min(1),
+}).strict();
+
+export const ontologyAssociationSchema = z.object({
+  node: ontologyNodeSchema,
+  relationLabels: z.array(z.string().min(1)).min(1),
+  contextLabels: z.array(z.string().min(1)),
+  evidenceCount: z.number().int().nonnegative(),
 }).strict();
 
 export const ontologyEdgeSchema = z.object({
@@ -716,6 +724,7 @@ export const ontologyNodeDetailSchema = z.object({
   incoming: z.array(ontologyEdgeSchema),
   outgoing: z.array(ontologyEdgeSchema),
   relatedNodes: z.array(ontologyNodeSchema),
+  associations: z.array(ontologyAssociationSchema),
   relationPage: z.object({
     limitPerDirection: z.number().int().positive(),
     incomingTotal: z.number().int().nonnegative(),
@@ -764,6 +773,27 @@ export const playSessionCommandRequestSchema = z.object({
   clientRequestId: z.string().min(1).max(200),
 }).strict();
 
+export const enterPlaySessionRequestSchema = z.object({
+  intent: z.enum(["play", "create", "switch", "continue", "resume", "startup"]),
+}).strict();
+
+export const playSessionEntryResultSchema = z.object({
+  sessionId: z.string().min(1),
+  state: z.enum(["ready", "starting", "recovery-required", "unavailable"]),
+  reason: z.enum([
+    "scene-present",
+    "scene-started",
+    "scene-operation-active",
+    "scene-operation-failed",
+    "prior-session-activity",
+    "entry-does-not-request-scene",
+    "session-not-writable",
+  ]),
+  sceneRequest: z.enum(["auto", "continue", "none", "opening", "orientation", "turn", "blocked", "recovery"]).optional(),
+  purpose: z.enum(["opening", "orientation", "turn", "blocked", "recovery"]).optional(),
+  operation: operationSnapshotSchema.optional(),
+}).strict();
+
 export const playMoveRequestSchema = z.object({
   text: z.string().trim().min(1).max(20_000),
   intent: z.enum(["act", "observe", "reflect", "wait"]).optional(),
@@ -773,7 +803,7 @@ export const playMoveRequestSchema = z.object({
 }).strict();
 
 export const sceneNarrationRequestSchema = z.object({
-  purpose: z.enum(["opening", "orientation", "turn", "blocked", "recovery"]),
+  purpose: z.enum(["auto", "opening", "orientation", "turn", "blocked", "recovery"]),
   expectedHead: z.string().min(1),
   clientRequestId: z.string().min(1).max(200),
 }).strict();
@@ -937,12 +967,15 @@ export type OntologyEvidence = z.infer<typeof ontologyEvidenceSchema>;
 export type OntologyNode = z.infer<typeof ontologyNodeSchema>;
 export type OntologyEdge = z.infer<typeof ontologyEdgeSchema>;
 export type OntologyGraph = z.infer<typeof ontologyGraphSchema>;
+export type OntologyAssociation = z.infer<typeof ontologyAssociationSchema>;
 export type OntologyNodeDetail = z.infer<typeof ontologyNodeDetailSchema>;
 export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSchema>;
 export type PlayableCharacter = z.infer<typeof playableCharacterSchema>;
 export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;
 export type UpdatePlaySessionRequest = z.infer<typeof updatePlaySessionRequestSchema>;
 export type PlaySessionCommandRequest = z.infer<typeof playSessionCommandRequestSchema>;
+export type EnterPlaySessionRequest = z.infer<typeof enterPlaySessionRequestSchema>;
+export type PlaySessionEntryResult = z.infer<typeof playSessionEntryResultSchema>;
 export type PlayMoveRequest = z.infer<typeof playMoveRequestSchema>;
 export type SceneNarrationRequest = z.infer<typeof sceneNarrationRequestSchema>;
 export type NarrationRetryRequest = z.infer<typeof narrationRetryRequestSchema>;

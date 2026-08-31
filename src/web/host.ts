@@ -22,6 +22,7 @@ import {
   bootstrapResponseSchema,
   createInstanceRequestSchema,
   createPlaySessionRequestSchema,
+  enterPlaySessionRequestSchema,
   executeRemovalRequestSchema,
   forkInstanceRequestSchema,
   healthResponseSchema,
@@ -365,6 +366,11 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
   app.get(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/messages`, async (request) => {
     const { sessionId } = sessionParamSchema.parse(request.params);
     return z.array(playMessageSummarySchema).parse((await play.getSession(sessionId)).messages);
+  });
+  app.post(`/api/${WEB_API_VERSION}/play-sessions/:sessionId/enter`, async (request, reply) => {
+    const { sessionId } = sessionParamSchema.parse(request.params);
+    const result = await play.enterSession(sessionId, enterPlaySessionRequestSchema.parse(request.body));
+    return reply.code(result.state === "starting" ? 202 : 200).send(result);
   });
   app.patch(`/api/${WEB_API_VERSION}/play-sessions/:sessionId`, async (request) => {
     const { sessionId } = sessionParamSchema.parse(request.params);

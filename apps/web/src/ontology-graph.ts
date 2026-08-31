@@ -24,6 +24,13 @@ export type NodeFamily =
 
 export type Point = { x: number; y: number };
 
+export type GraphLabelBox = {
+  width: number;
+  height: number;
+  lineHeight: number;
+  wrapped: boolean;
+};
+
 export type RenderableGraph = {
   nodes: OntologyNode[];
   edges: OntologyEdge[];
@@ -62,6 +69,27 @@ export const familyVisuals: Record<NodeFamily, { color: string; label: string }>
   provenance: { color: "#c59ad9", label: "Evidence & compile" },
   other: { color: "#9aa39c", label: "Other" },
 };
+
+/**
+ * ECharts only exposes a fixed text width, not CSS-style max-width. Measure a
+ * stable approximation so short labels hug their text while long labels wrap
+ * inside a two-line cap.
+ */
+export function graphLabelBox(text: string, fontSize: number, maxWidth: number): GraphLabelBox {
+  const measured = [...text].reduce((width, character) => {
+    if (/\s/u.test(character)) return width + fontSize * .34;
+    if (/^[\u0000-\u00ff]$/u.test(character)) return width + fontSize * .61;
+    return width + fontSize;
+  }, 0);
+  const lineHeight = Math.ceil(fontSize * 1.35);
+  const wrapped = measured > maxWidth;
+  return {
+    width: Math.max(fontSize * 2, Math.min(maxWidth, Math.ceil(measured))),
+    height: lineHeight * (wrapped ? 2 : 1),
+    lineHeight,
+    wrapped,
+  };
+}
 
 export function nodeFamily(node: Pick<OntologyNode, "kind" | "layer">): NodeFamily {
   const kind = node.kind;

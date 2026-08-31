@@ -6,6 +6,7 @@ import {
   createInstanceRequestSchema,
   createInstanceResultSchema,
   createPlaySessionRequestSchema,
+  enterPlaySessionRequestSchema,
   executeRemovalRequestSchema,
   forkInstanceRequestSchema,
   forkInstanceResultSchema,
@@ -25,6 +26,7 @@ import {
   preparationSnapshotSchema,
   playableCharacterListSchema,
   playMoveRequestSchema,
+  playSessionEntryResultSchema,
   playSessionCommandRequestSchema,
   playSessionDetailSchema,
   removePlaySessionResultSchema,
@@ -48,6 +50,7 @@ import {
   type CreateInstanceRequest,
   type CreateInstanceResult,
   type CreatePlaySessionRequest,
+  type EnterPlaySessionRequest,
   type ExecuteRemovalRequest,
   type ForkInstanceRequest,
   type ForkInstanceResult,
@@ -71,6 +74,7 @@ import {
   type PreparationSnapshot,
   type PlayableCharacterList,
   type PlayMoveRequest,
+  type PlaySessionEntryResult,
   type PlaySessionCommandRequest,
   type PlaySessionDetail,
   type RemovePlaySessionResult,
@@ -363,6 +367,16 @@ export function activatePlaySession(sessionId: string, inputValue: PlaySessionCo
 
 export function restorePlaySession(sessionId: string, inputValue: PlaySessionCommandRequest, csrfToken: string): Promise<PlaySessionDetail> {
   return mutation(`/api/v1/play-sessions/${encodeURIComponent(sessionId)}/restore`, "POST", playSessionCommandRequestSchema.parse(inputValue), playSessionDetailSchema, csrfToken);
+}
+
+export function enterPlaySession(sessionId: string, inputValue: EnterPlaySessionRequest, csrfToken: string): Promise<PlaySessionEntryResult> {
+  return mutation(
+    `/api/v1/play-sessions/${encodeURIComponent(sessionId)}/enter`,
+    "POST",
+    enterPlaySessionRequestSchema.parse(inputValue),
+    playSessionEntryResultSchema,
+    csrfToken,
+  );
 }
 
 export function clearPlayConversation(sessionId: string, inputValue: PlaySessionCommandRequest, csrfToken: string): Promise<ClearPlayConversationResult> {

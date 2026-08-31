@@ -32,6 +32,7 @@ import {
   ontologyGraphSchema,
   ontologyNodeDetailSchema,
   ontologyViewSchema,
+  type OntologyAssociation,
   type OntologyEdge,
   type OntologyEvidence,
   type OntologyGraph,
@@ -174,6 +175,7 @@ export class OntologyProjectionService {
     const outgoing = allOutgoing.slice(0, input.relationLimit);
     const relatedNodeIds = new Set([...incoming, ...outgoing].flatMap((edge) => [edge.source, edge.target]));
     relatedNodeIds.delete(node.id);
+    const associations = entityAssociations(node, projection.allNodes, projection.allEdges);
     return ontologyNodeDetailSchema.parse({
       version: 1,
       scope: projection.graph.scope,
@@ -183,6 +185,7 @@ export class OntologyProjectionService {
       incoming,
       outgoing,
       relatedNodes: projection.allNodes.filter((candidate) => relatedNodeIds.has(candidate.id)),
+      associations,
       relationPage: {
         limitPerDirection: input.relationLimit,
         incomingTotal: allIncoming.length,
@@ -371,7 +374,7 @@ export class OntologyProjectionService {
         priority: goal.priority,
         actorId: goal.actorId,
         requiresKnowledge: goal.requiresKnowledge.length,
-      });
+      }, undefined, characterGoalDescription(goal, frame));
       builder.artifact(node);
       builder.edge(link("actor-goal", entityId(goal.actorId), node.node.id, "pursues", node.node.status, "canonical", goal.evidence));
       for (const targetId of goal.targetIds ?? []) builder.edge(link("goal-target", node.node.id, entityId(targetId), "targets", node.node.status, "canonical", goal.evidence));
@@ -380,12 +383,13 @@ export class OntologyProjectionService {
 
   private addCharacterModel(builder: GraphBuilder, model: CharacterModel, frame: ProjectionFrame): void {
     const modelEvidence = model.evidence;
-    const modelNode = artifactNode(`actor-model:${model.actorId}`, model.actorId, "character-model", `Model · ${model.actorId}`, "canonical", "canonical", model, modelEvidence, frame, {
+    const actorName = displayEntityName(model.actorId, frame);
+    const modelNode = artifactNode(`actor-model:${model.actorId}`, model.actorId, "character-model", `Model · ${actorName}`, "canonical", "canonical", model, modelEvidence, frame, {
       dispositions: model.dispositions?.length ?? 0,
       appraisals: model.appraisalEpisodes?.length ?? 0,
       developmentEpisodes: model.developmentEpisodes?.length ?? 0,
       relationships: (model.relationshipStances?.length ?? 0) + (model.relationshipObligations?.length ?? 0) + (model.relationshipChanges?.length ?? 0),
-    });
+    }, undefined, characterModelDescription(model));
     builder.artifact(modelNode);
     builder.edge(link("actor-model", entityId(model.actorId), modelNode.node.id, "has model", "canonical", "canonical", modelEvidence));
     const semantics = [
@@ -403,7 +407,7 @@ export class OntologyProjectionService {
       const node = artifactNode(id, item.id, semantic.kind, semantic.label, statusFrom(item), "canonical", item, evidence, frame, {
         actorId: model.actorId,
         confidence: "confidence" in item ? item.confidence : undefined,
-      });
+      }, undefined, semanticDescription(semantic.kind, item));
       builder.artifact(node);
       builder.edge(link("model-semantic", modelNode.node.id, id, "defines", node.node.status, "canonical", evidence));
       if ("targetEntityId" in item && typeof item.targetEntityId === "string") builder.edge(link("semantic-target", id, entityId(item.targetEntityId), "targets", node.node.status, "canonical", evidence));
@@ -989,6 +993,7 @@ function artifactNode(
   frame: ProjectionFrame,
   summary: Record<string, unknown>,
   storyTime?: StoryTime,
+  description?: string,
 ) {
   const localEvidence = evidence.filter((item) => item.span.sourceId === frame.source.id);
   const sourceIds = new Set(evidence.map((item) => item.span.sourceId));
@@ -1001,6 +1006,7 @@ function artifactNode(
     artifactId,
     kind,
     label,
+    ...(description ? { description } : {}),
     status,
     layer,
     revisionHash: contentHash(payload),
@@ -1014,35 +1020,65 @@ function artifactNode(
 }
 
 function entityNode(entity: Entity, frame: ProjectionFrame) {
+  const goals = frame.artifacts.goals.filter((goal) => goal.actorId === entity.id);
+  const claims = frame.artifacts.claims.filter((claim) => claim.subject === entity.id || claim.speaker === entity.id);
+  const propositions = frame.artifacts.propositions.filter((proposition) => proposition.subjectEntityId === entity.id);
+  const model = frame.artifacts.models.find((candidate) => candidate.actorId === entity.id);
+  const eventIds = new Set([
+    ...frame.artifacts.events.filter((event) => event.participants.includes(entity.id)).map((event) => event.id),
+    ...frame.artifacts.eventParticipations.filter((participation) => participation.entityId === entity.id).map((participation) => participation.eventId),
+  ]);
   return artifactNode(entityId(entity.id), entity.id, `entity:${entity.kind}`, entity.canonicalName, "canonical", "canonical", entity, entity.evidence, frame, {
     entityKind: entity.kind,
     aliases: entity.aliases,
-  });
+    claimCount: claims.length,
+    propositionCount: propositions.length,
+    goalCount: goals.length,
+    eventCount: eventIds.size,
+    hasCharacterModel: Boolean(model),
+    dispositions: model?.dispositions?.map((item) => ({
+      dimensionId: item.dimensionId,
+      value: item.value,
+      stability: item.stability,
+      status: item.status,
+      confidence: item.confidence,
+    })),
+  }, undefined, entityDescription(entity, frame, { goals: goals.length, claims, propositions: propositions.length, eventCount: eventIds.size, model }));
 }
 
 function propositionNode(proposition: Proposition, frame: ProjectionFrame) {
-  return artifactNode(propositionId(proposition.id), proposition.id, "proposition", `${proposition.subjectEntityId} · ${proposition.relationId}`, statusFrom(proposition), "canonical", proposition, proposition.evidence, frame, {
+  const subjectName = displayEntityName(proposition.subjectEntityId, frame);
+  const relation = readableIdentifier(proposition.relationId);
+  const object = propositionObjectLabel(proposition, frame);
+  const statement = [subjectName, relation, object].filter(Boolean).join(" · ");
+  return artifactNode(propositionId(proposition.id), proposition.id, "proposition", `${subjectName} · ${relation}`, statusFrom(proposition), "canonical", proposition, proposition.evidence, frame, {
     polarity: proposition.polarity,
     modality: proposition.modality,
     relationId: proposition.relationId,
-  }, proposition.validStoryTime);
+  }, proposition.validStoryTime, statement);
 }
 
 function attributionNode(attribution: Attribution, frame: ProjectionFrame) {
-  return artifactNode(attributionId(attribution.id), attribution.id, "attribution", `${attribution.holderKind} ${attribution.attitude}`, statusFrom(attribution), "canonical", attribution, attribution.evidence, frame, {
+  const holder = attribution.holderEntityId ? displayEntityName(attribution.holderEntityId, frame) : readableIdentifier(attribution.holderKind);
+  const attitude = readableIdentifier(attribution.attitude);
+  return artifactNode(attributionId(attribution.id), attribution.id, "attribution", `${holder} · ${attitude}`, statusFrom(attribution), "canonical", attribution, attribution.evidence, frame, {
     holderKind: attribution.holderKind,
     holderEntityId: attribution.holderEntityId,
     attitude: attribution.attitude,
     certainty: attribution.certainty,
-  });
+  }, undefined, `${holder} ${attitude}此命题 · 置信度 ${Math.round(attribution.certainty * 100)}%`);
 }
 
 function claimNode(claim: Claim, frame: ProjectionFrame) {
-  return artifactNode(claimId(claim.id), claim.id, "claim", `${claim.subject} · ${claim.predicate}`, claim.epistemicType === "rumor" || claim.epistemicType === "interpretation" ? "contested" : "canonical", "canonical", claim, claim.evidence, frame, {
+  const subjectName = displayEntityName(claim.subject, frame);
+  const predicate = readableIdentifier(claim.predicate);
+  const object = claimObjectLabel(claim.object, frame);
+  const statement = [subjectName, predicate, object].filter(Boolean).join(" · ");
+  return artifactNode(claimId(claim.id), claim.id, "claim", `${subjectName} · ${predicate}`, claim.epistemicType === "rumor" || claim.epistemicType === "interpretation" ? "contested" : "canonical", "canonical", claim, claim.evidence, frame, {
     epistemicType: claim.epistemicType,
     speaker: claim.speaker,
     predicate: claim.predicate,
-  });
+  }, undefined, statement);
 }
 
 function eventNode(event: CanonicalEvent, frame: ProjectionFrame) {
@@ -1053,7 +1089,7 @@ function eventNode(event: CanonicalEvent, frame: ProjectionFrame) {
     narrativeOrder: event.narrativeContext?.discourseOrder,
     narrativeMode: event.narrativeContext?.mode,
     futureCanonicalReference: future,
-  }, event.storyTime);
+  }, event.storyTime, event.readerSummary ?? `${event.participants.length} 个参与实体 · 置信度 ${Math.round(event.confidence * 100)}%`);
 }
 
 function possibilityNode(possibility: PossibilityTemplate, frame: ProjectionFrame) {
@@ -1062,7 +1098,197 @@ function possibilityNode(possibility: PossibilityTemplate, frame: ProjectionFram
     pressure: possibility.pressure,
     relevance: possibility.relevance,
     canonicalEventId: possibility.canonicalEventId,
-  }, possibility.candidateWindow);
+  }, possibility.candidateWindow, `${readableIdentifier(possibility.kind)} · 压力 ${possibility.pressure.toFixed(2)} · 相关性 ${possibility.relevance.toFixed(2)}`);
+}
+
+function displayEntityName(entityIdValue: string, frame: ProjectionFrame): string {
+  return frame.artifacts.entities.find((entity) => entity.id === entityIdValue)?.canonicalName ?? readableIdentifier(entityIdValue);
+}
+
+function readableIdentifier(value: string): string {
+  if (/[^\u0000-\u007f]/u.test(value)) return value;
+  return value.replaceAll("_", " ").replaceAll("-", " ").replace(/\s+/gu, " ").trim();
+}
+
+function propositionObjectLabel(proposition: Proposition, frame: ProjectionFrame): string | undefined {
+  if (proposition.object.kind === "entity") return displayEntityName(proposition.object.entityId, frame);
+  if (proposition.object.kind === "proposition") return readableIdentifier(proposition.object.propositionId);
+  return primitiveLabel(proposition.object.value);
+}
+
+function claimObjectLabel(value: unknown, frame: ProjectionFrame): string | undefined {
+  if (typeof value === "string") {
+    const entity = frame.artifacts.entities.find((candidate) => candidate.id === value);
+    return entity?.canonicalName ?? readableIdentifier(value);
+  }
+  return primitiveLabel(value);
+}
+
+function primitiveLabel(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  return undefined;
+}
+
+function entityDescription(
+  entity: Entity,
+  frame: ProjectionFrame,
+  profile: {
+    goals: number;
+    claims: Claim[];
+    propositions: number;
+    eventCount: number;
+    model?: CharacterModel;
+  },
+): string | undefined {
+  if (entity.kind !== "character") return entity.aliases.length ? entity.aliases.join(" · ") : undefined;
+  const highlights = profile.claims
+    .filter((claim) => claim.subject === entity.id)
+    .map((claim) => ({
+      id: claim.id,
+      value: [readableIdentifier(claim.predicate), claimObjectLabel(claim.object, frame)].filter(Boolean).join(" · "),
+      score: claimHighlightScore(claim),
+    }))
+    .filter((item) => item.value.length >= 3 && item.value.length <= 96)
+    .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+  const unique: string[] = [];
+  for (const highlight of highlights) {
+    if (unique.includes(highlight.value)) continue;
+    unique.push(highlight.value);
+    if (unique.length === 2) break;
+  }
+  return unique.length ? unique.join("；") : entity.aliases.length ? entity.aliases.join(" · ") : undefined;
+}
+
+function claimHighlightScore(claim: Claim): number {
+  const semantic = readableIdentifier(claim.predicate);
+  const sourceGrounded = claim.epistemicType === "explicit-fact" || claim.epistemicType === "narrator-claim" ? 30 : 0;
+  const naturalLanguage = /[^\u0000-\u007f]/u.test(semantic) ? 45 : 0;
+  const concise = Math.max(0, 30 - Math.abs(semantic.length - 18));
+  return sourceGrounded + naturalLanguage + concise;
+}
+
+function characterGoalDescription(goal: ArtifactSet["goals"][number], frame: ProjectionFrame): string {
+  const targets = (goal.targetIds ?? []).map((targetId) => displayEntityName(targetId, frame));
+  return [`Priority ${Math.round(goal.priority * 100)}%`, targets.length ? `Targets: ${targets.join(", ")}` : undefined]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function characterModelDescription(model: CharacterModel): string {
+  return [
+    `${model.dispositions?.length ?? 0} dispositions`,
+    `${model.appraisalEpisodes?.length ?? 0} appraisals`,
+    `${model.developmentEpisodes?.length ?? 0} development episodes`,
+  ].join(" · ");
+}
+
+function semanticDescription(kind: string, value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const item = value as Record<string, unknown>;
+  if (kind === "disposition" && typeof item.dimensionId === "string" && typeof item.value === "number") {
+    return [readableIdentifier(item.dimensionId), formatSigned(item.value), typeof item.stability === "string" ? readableIdentifier(item.stability) : undefined]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (typeof item.resultingIntention === "string") return item.resultingIntention;
+  if (typeof item.label === "string") return item.label;
+  return undefined;
+}
+
+function entityAssociations(
+  root: OntologyNode,
+  nodes: readonly OntologyNode[],
+  edges: readonly OntologyEdge[],
+): OntologyAssociation[] {
+  if (!root.kind.startsWith("entity:")) return [];
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const edgesByNode = new Map<string, OntologyEdge[]>();
+  for (const edge of edges) {
+    edgesByNode.set(edge.source, [...(edgesByNode.get(edge.source) ?? []), edge]);
+    edgesByNode.set(edge.target, [...(edgesByNode.get(edge.target) ?? []), edge]);
+  }
+  const collected = new Map<string, {
+    node: OntologyNode;
+    relations: Set<string>;
+    contexts: Set<string>;
+    edgeIds: Set<string>;
+    evidenceCount: number;
+  }>();
+  const add = (node: OntologyNode, relation: string, context: string | undefined, pathEdges: readonly OntologyEdge[]) => {
+    if (node.id === root.id) return;
+    const current = collected.get(node.id) ?? {
+      node,
+      relations: new Set<string>(),
+      contexts: new Set<string>(),
+      edgeIds: new Set<string>(),
+      evidenceCount: 0,
+    };
+    if (relation) current.relations.add(relation);
+    if (context && context !== relation) current.contexts.add(context);
+    for (const edge of pathEdges) {
+      if (current.edgeIds.has(edge.id)) continue;
+      current.edgeIds.add(edge.id);
+      current.evidenceCount += edge.evidenceCount;
+    }
+    collected.set(node.id, current);
+  };
+
+  for (const rootEdge of edgesByNode.get(root.id) ?? []) {
+    const adjacentId = rootEdge.source === root.id ? rootEdge.target : rootEdge.source;
+    const adjacent = nodesById.get(adjacentId);
+    if (!adjacent) continue;
+    if (adjacent.kind.startsWith("entity:")) {
+      add(adjacent, readableIdentifier(rootEdge.label), undefined, [rootEdge]);
+      continue;
+    }
+    if (!isAssociationBridge(adjacent.kind)) continue;
+    for (const bridgeEdge of edgesByNode.get(adjacent.id) ?? []) {
+      const candidateId = bridgeEdge.source === adjacent.id ? bridgeEdge.target : bridgeEdge.source;
+      const candidate = nodesById.get(candidateId);
+      if (!candidate?.kind.startsWith("entity:") || candidate.id === root.id) continue;
+      add(
+        candidate,
+        associationRelation(adjacent, rootEdge, bridgeEdge),
+        adjacent.description ?? adjacent.label,
+        [rootEdge, bridgeEdge],
+      );
+    }
+  }
+
+  return [...collected.values()]
+    .map(({ node, relations, contexts, evidenceCount }) => ({
+      node,
+      relationLabels: [...relations].slice(0, 6),
+      contextLabels: [...contexts].slice(0, 4),
+      evidenceCount,
+    }))
+    .filter((association) => association.relationLabels.length > 0)
+    .sort((left, right) => {
+      const leftCharacter = left.node.kind === "entity:character" ? 1 : 0;
+      const rightCharacter = right.node.kind === "entity:character" ? 1 : 0;
+      return rightCharacter - leftCharacter
+        || right.relationLabels.length - left.relationLabels.length
+        || left.node.label.localeCompare(right.node.label);
+    })
+    .slice(0, 100);
+}
+
+function isAssociationBridge(kind: string): boolean {
+  return kind === "proposition"
+    || kind === "claim"
+    || kind === "goal"
+    || kind === "entity:relationship"
+    || kind.startsWith("relationship-");
+}
+
+function associationRelation(bridge: OntologyNode, first: OntologyEdge, second: OntologyEdge): string {
+  if (bridge.kind === "goal") return bridge.label;
+  const semantic = bridge.kind === "proposition" ? bridge.summary.relationId : bridge.kind === "claim" ? bridge.summary.predicate : undefined;
+  if (typeof semantic === "string") return readableIdentifier(semantic);
+  const label = first.label === "subject" || first.label === "object" || first.label === "targets" ? second.label : first.label;
+  return readableIdentifier(label);
 }
 
 function link(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildRenderableGraph,
   familyVisuals,
+  graphLabelBox,
   graphPositions,
   nodeColor,
   nodeFamily,
@@ -120,6 +121,17 @@ describe("ontology graph presentation", () => {
     const curves = relationCurves(edges);
     expect([...curves.values()]).toEqual([-0.13, 0, 0.13]);
     expect(relationCurves([...edges].reverse())).toEqual(curves);
+  });
+
+  it("sizes label backgrounds to content and caps long text at two lines", () => {
+    const short = graphLabelBox("Mara", 10, 140);
+    const medium = graphLabelBox("Mara considers the Garden", 10, 140);
+    const long = graphLabelBox("A very long relationship label that cannot fit on one line", 10, 140);
+
+    expect(short.width).toBeLessThan(medium.width);
+    expect(medium.width).toBeLessThanOrEqual(140);
+    expect(long).toMatchObject({ width: 140, wrapped: true, height: long.lineHeight * 2 });
+    expect(short).toMatchObject({ wrapped: false, height: short.lineHeight });
   });
 });
 

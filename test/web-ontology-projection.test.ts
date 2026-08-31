@@ -65,6 +65,14 @@ async function ontologyFixture() {
     aliases: [],
     evidence: second.evidence("Sea"),
   });
+  await canon.putClaim({
+    id: "mara-waits-in-hall",
+    subject: "mara",
+    predicate: "waits-in",
+    object: "hall",
+    epistemicType: "explicit-fact",
+    evidence: first.evidence("Mara entered the Hall"),
+  });
   await canon.putEvent({
     id: "mara-arrives",
     title: "Mara enters the Hall",
@@ -235,10 +243,14 @@ describe("Web ontology projection", () => {
     expect(provenance.edges).toContainEqual(expect.objectContaining({ kind: "supports", target: "proposal:pending-witness" }));
 
     const detail = await service.getNode({ sourceId: first.source.id, view: "model" }, "entity:mara");
-    expect(detail.node).toMatchObject({ id: "entity:mara", artifactId: "mara" });
+    expect(detail.node).toMatchObject({ id: "entity:mara", artifactId: "mara", description: "waits in · Hall" });
     expect(detail.evidence).toContainEqual(expect.objectContaining({
       sourceId: first.source.id,
       excerpt: "Mara",
+    }));
+    expect(detail.associations).toContainEqual(expect.objectContaining({
+      node: expect.objectContaining({ id: "entity:hall", label: "Hall" }),
+      relationLabels: ["waits in"],
     }));
     expect(JSON.stringify(detail.payload)).not.toContain("orin");
 
@@ -363,9 +375,10 @@ describe("Web ontology projection", () => {
     });
     expect(detailResponse.statusCode).toBe(200);
     expect(ontologyNodeDetailSchema.parse(detailResponse.json())).toMatchObject({
-      node: { id: "entity:mara" },
+      node: { id: "entity:mara", description: "waits in · Hall" },
       evidence: [expect.objectContaining({ excerpt: "Mara" })],
-      relatedNodes: [],
+      relatedNodes: [expect.objectContaining({ id: "claim:mara-waits-in-hall" })],
+      associations: [expect.objectContaining({ node: expect.objectContaining({ id: "entity:hall" }) })],
     });
 
     const invalid = await app.inject({

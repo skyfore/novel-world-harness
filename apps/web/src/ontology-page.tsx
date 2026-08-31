@@ -33,10 +33,12 @@ import { useI18n } from "./i18n";
 import type {
   InstanceSummary,
   NovelSummary,
+  OntologyAssociation,
   OntologyEdge,
   OntologyGraph,
   OntologyLayer,
   OntologyNode,
+  OntologyNodeDetail,
   OntologyStatus,
   OntologyView,
 } from "../../../src/web/contracts";
@@ -319,8 +321,8 @@ export function OntologyPage({
               <header>
                 <div className="ontology-canvas-heading">
                   {focusedNodeId && <button type="button" className="ontology-graph-back" onClick={() => setFocusedNodeId(undefined)}>← {t("Back to full graph")}</button>}
-                  <span className="eyebrow">{focusedNodeId ? t("Relationship focus") : t("World graph")}</span>
-                  <strong>{focusedNodeId ? selectedNode?.label ?? t("Focused neighborhood") : t("Drag to arrange · click an entity to explore")}</strong>
+                  <div><span className="eyebrow">{focusedNodeId ? t("Relationship focus") : t("World graph")}</span>
+                    <strong>{focusedNodeId ? selectedNode?.label ?? t("Focused neighborhood") : t("Drag to arrange · click an entity to explore")}</strong></div>
                 </div>
                 <div className="ontology-legend" aria-label={t("Entity type colors")}>{familyCounts(visible.nodes).map(({ family, count }) => <span key={family}><i style={{ background: familyVisuals[family].color }} />{t(familyVisuals[family].label)}<small>{count}</small></span>)}</div>
               </header>
@@ -541,7 +543,6 @@ function GraphCanvas({
         onClick={() => setShowAllLabels((current) => !current)}
       >{showAllLabels ? t("Smart labels") : t("All labels")}</button>
       {!rendered.focused && selectedNodeId && <button type="button" className="ontology-focus-action" onClick={() => onFocus(selectedNodeId)}>{t("Focus selection")}</button>}
-      {rendered.focused && <button type="button" className="ontology-focus-action" onClick={onClearFocus}>← {t("Overview")}</button>}
       <button type="button" aria-label={t("Re-layout graph")} title={t("Re-layout graph")} onClick={relayout}>↻</button>
       <button type="button" aria-label={t("Refresh graph")} title={t("Refresh graph")} onClick={onRefresh} disabled={refreshing}>{refreshing ? "…" : "⟳"}</button>
     </div>
@@ -576,7 +577,7 @@ function GraphCanvas({
       edges: rendered.edges.length,
       totalEdges: rendered.sourceEdgeCount,
     })}</div>}
-    <div className="ontology-canvas-hint">{t("Drag nodes · scroll to zoom · double-click for relationships")}</div>
+    <div className="ontology-canvas-hint">{t("Drag nodes · scroll to zoom · click an entity for relationships")}</div>
   </div>;
 }
 
@@ -850,7 +851,8 @@ function NodeInspector({
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const relatedLabels = new Map(detail.data?.relatedNodes.map((item) => [item.id, item.label]) ?? []);
+  const resolvedDetail = detail.data?.node.id === node?.id ? detail.data : undefined;
+  const aliases = stringSummary(node?.summary.aliases);
   return (
     <aside className="ontology-inspector">
       <header>
@@ -861,44 +863,24 @@ function NodeInspector({
         <div className="ontology-inspector-scroll">
           <div className="node-identity">
             <span style={{ background: nodeColor(node), borderColor: statusColors[node.status] }} />
-            <div><strong>{t(familyVisuals[nodeFamily(node)].label)}</strong><small>{t(node.status)} · {t(node.layer)}</small></div>
-            <button type="button" className={focused ? "node-focus-button node-focus-button-active" : "node-focus-button"} aria-pressed={focused} onClick={() => onFocus(node.id)}>{focused ? t("Focused") : t("Focus relations")}</button>
+            <div className="node-identity-copy">
+              <div className="node-tag-row">
+                <span className="node-kind-tag" style={{ borderColor: `${nodeColor(node)}88`, color: nodeColor(node) }}>{t(nodeKindLabel(node))}</span>
+                <span className="node-state-tag" style={{ color: statusColors[node.status] }}>{t(node.status)}</span>
+              </div>
+              {aliases.length > 0 && <small>{t("Also known as {aliases}", { aliases: aliases.join("、") })}</small>}
+            </div>
+            {focused
+              ? <span className="node-focus-state">{t("Focused")}</span>
+              : <button type="button" className="node-focus-button" onClick={() => onFocus(node.id)}>{t("View relationships")}</button>}
           </div>
-          <div className="ontology-node-facts">
-            <span><small>{t("Evidence")}</small><strong>{node.evidenceCount}</strong></span>
-            <span><small>{t("Truth layer")}</small><strong>{t(node.layer)}</strong></span>
-            <span><small>{t("State")}</small><strong style={{ color: statusColors[node.status] }}>{t(node.status)}</strong></span>
-          </div>
+          <p className="node-description">{node.description ?? fallbackNodeDescription(node, t)}</p>
           {detail.isPending ? <InlineLoading /> : detail.isError ? <InlineError error={detail.error} /> : detail.data ? (
-            <>
-              <InspectorSection title={t("Summary")}><JsonRecord value={node.summary} /></InspectorSection>
-              <InspectorSection title={t("Relationships · {count}", { count: detail.data.incoming.length + detail.data.outgoing.length })}>
-                <div className="inspector-relation-groups">
-                  <details open={detail.data.incoming.length > 0}><summary>{t("Incoming · {loaded}/{total}", { loaded: detail.data.incoming.length, total: detail.data.relationPage.incomingTotal })}</summary><EdgeList edges={detail.data.incoming} direction="incoming" labels={relatedLabels} onSelect={onSelect} /></details>
-                  <details open={detail.data.outgoing.length > 0}><summary>{t("Outgoing · {loaded}/{total}", { loaded: detail.data.outgoing.length, total: detail.data.relationPage.outgoingTotal })}</summary><EdgeList edges={detail.data.outgoing} direction="outgoing" labels={relatedLabels} onSelect={onSelect} /></details>
-                </div>
-                {detail.data.relationPage.truncated && <p className="inspector-muted">{t("Node detail shows a bounded relationship preview; load the complete topology to inspect every connected edge.")}</p>}
-              </InspectorSection>
-              <InspectorSection title={`${t("Evidence")} · ${detail.data.evidence.length}`}>
-                {detail.data.evidence.length ? <div className="evidence-list">{detail.data.evidence.map((evidence, index) => (
-                  <article key={`${evidence.quoteHash}:${index}`}>
-                    <header><span>{t("lines {start}–{end}", { start: evidence.startLine, end: evidence.endLine })}</span><small>{t(evidence.strength)}</small></header>
-                    {evidence.excerpt !== undefined ? <blockquote>{evidence.excerpt}{evidence.excerptTruncated ? "…" : ""}</blockquote> : <p>{t("Exact byte excerpt is unavailable for this legacy reference.")}</p>}
-                    <code>{shortHash(evidence.quoteHash)}</code>
-                  </article>
-                ))}</div> : <p className="inspector-muted">{t("No source-local evidence span is attached.")}</p>}
-              </InspectorSection>
-              <details className="ontology-technical-details">
-                <summary>{t("Technical identity")}</summary>
-                <dl className="ontology-node-meta">
-                  <div><dt>{t("Artifact")}</dt><dd>{node.artifactId}</dd></div>
-                  <div><dt>{t("Node ID")}</dt><dd>{node.id}</dd></div>
-                  <div><dt>{t("Revision")}</dt><dd>{node.revisionHash ?? t("derived")}</dd></div>
-                  {node.storyTime !== undefined && <div><dt>{t("Story time")}</dt><dd>{compactJson(node.storyTime)}</dd></div>}
-                </dl>
-              </details>
-              <DeferredPayload value={detail.data.payload} />
-            </>
+            resolvedDetail && node.kind === "entity:character"
+              ? <CharacterInspector node={node} detail={resolvedDetail} onSelect={onSelect} />
+              : resolvedDetail
+                ? <GeneralInspector node={node} detail={resolvedDetail} onSelect={onSelect} />
+                : null
           ) : null}
         </div>
       )}
@@ -917,28 +899,362 @@ function InspectorSection({ title, children }: { title: string; children: React.
   return <section className="inspector-section"><h3>{title}</h3>{children}</section>;
 }
 
-function JsonRecord({ value }: { value: Record<string, unknown> }) {
+function CharacterInspector({
+  node,
+  detail,
+  onSelect,
+}: {
+  node: OntologyNode;
+  detail: OntologyNodeDetail;
+  onSelect: (nodeId: string) => void;
+}) {
   const { t } = useI18n();
-  const entries = Object.entries(value);
-  return entries.length ? <dl className="summary-record">{entries.map(([key, item]) => <div key={key}><dt>{key}</dt><dd>{formatValue(item)}</dd></div>)}</dl> : <p className="inspector-muted">{t("No summary fields.")}</p>;
+  const related = relationItems(node.id, detail);
+  const ownGoals = related.filter(({ edge, node: relatedNode }) => edge.kind === "actor-goal" && edge.source === node.id && relatedNode.kind === "goal");
+  const facts = keyFactItems(related);
+  const people = detail.associations.filter((association) => association.node.kind === "entity:character");
+  const dispositions = dispositionSummary(node.summary.dispositions);
+  const hasModel = booleanSummary(node.summary.hasCharacterModel);
+  const goals = numberSummary(node.summary.goalCount);
+  const events = numberSummary(node.summary.eventCount);
+  const claims = numberSummary(node.summary.claimCount);
+  return <>
+    <div className="ontology-node-facts ontology-character-facts">
+      <span><small>{t("Related characters")}</small><strong>{people.length}</strong></span>
+      <span><small>{t("Story events")}</small><strong>{events}</strong></span>
+      <span><small>{t("Goals")}</small><strong>{goals}</strong></span>
+      <span><small>{t("Character model")}</small><strong className={hasModel ? "model-present" : "model-missing"}>{hasModel ? t("Available") : t("Not built")}</strong></span>
+    </div>
+
+    <InspectorSection title={t("Character profile")}>
+      {dispositions.length > 0 ? <div className="character-trait-list">{dispositions.map((disposition) => (
+        <article className="character-trait" key={disposition.dimensionId}>
+          <header><strong>{t(dimensionLabel(disposition.dimensionId))}</strong><span>{formatSignedValue(disposition.value)}</span></header>
+          <div className="character-trait-track"><i style={{ width: `${Math.round((disposition.value + 1) / 2 * 100)}%` }} /></div>
+          <small>{t(disposition.stability)} · {t("{percent}% confidence", { percent: Math.round(disposition.confidence * 100) })}</small>
+        </article>
+      ))}</div> : <div className="character-model-empty"><strong>{t("No character model yet")}</strong><p>{t("Goals and source-backed information are available, but this character has no persistent behavioral dispositions yet.")}</p></div>}
+    </InspectorSection>
+
+    {ownGoals.length > 0 && <InspectorSection title={t("Current goals · {count}", { count: ownGoals.length })}>
+      <SemanticCards items={ownGoals} onSelect={onSelect} />
+    </InspectorSection>}
+
+    {facts.length > 0 && <InspectorSection title={t("Key character information · {shown}/{total}", { shown: facts.length, total: claims })}>
+      <SemanticCards items={facts} onSelect={onSelect} />
+    </InspectorSection>}
+
+    {people.length > 0 && <InspectorSection title={t("Related characters · {count}", { count: people.length })}>
+      <AssociationCards associations={people} onSelect={onSelect} />
+    </InspectorSection>}
+
+    <RelationshipDisclosure node={node} detail={detail} onSelect={onSelect} />
+    <EvidenceDisclosure detail={detail} />
+    <TechnicalDisclosure node={node} payload={detail.payload} />
+  </>;
+}
+
+function GeneralInspector({
+  node,
+  detail,
+  onSelect,
+}: {
+  node: OntologyNode;
+  detail: OntologyNodeDetail;
+  onSelect: (nodeId: string) => void;
+}) {
+  const { t } = useI18n();
+  const entries = usefulSummaryEntries(node.summary);
+  return <>
+    <div className="ontology-node-facts">
+      <span><small>{t("Relationships")}</small><strong>{detail.relationPage.incomingTotal + detail.relationPage.outgoingTotal}</strong></span>
+      <span><small>{t("Related entities")}</small><strong>{detail.associations.length}</strong></span>
+      <span><small>{t("Evidence")}</small><strong>{detail.evidence.length}</strong></span>
+    </div>
+    {entries.length > 0 && <InspectorSection title={t("What matters")}><HumanSummary entries={entries} /></InspectorSection>}
+    {detail.associations.length > 0 && <InspectorSection title={t("Related entities · {count}", { count: detail.associations.length })}>
+      <AssociationCards associations={detail.associations} onSelect={onSelect} />
+    </InspectorSection>}
+    <RelationshipDisclosure node={node} detail={detail} onSelect={onSelect} />
+    <EvidenceDisclosure detail={detail} />
+    <TechnicalDisclosure node={node} payload={detail.payload} />
+  </>;
+}
+
+type RelatedItem = {
+  edge: OntologyEdge;
+  node: OntologyNode;
+  direction: "incoming" | "outgoing";
+};
+
+function relationItems(rootId: string, detail: OntologyNodeDetail): RelatedItem[] {
+  const nodes = new Map(detail.relatedNodes.map((node) => [node.id, node]));
+  return [
+    ...detail.incoming.map((edge) => ({ edge, node: nodes.get(edge.source), direction: "incoming" as const })),
+    ...detail.outgoing.map((edge) => ({ edge, node: nodes.get(edge.target), direction: "outgoing" as const })),
+  ].flatMap((item) => item.node && item.node.id !== rootId ? [{ ...item, node: item.node }] : []);
+}
+
+function keyFactItems(items: RelatedItem[]): RelatedItem[] {
+  const candidates = items
+    .filter(({ edge, node }) => edge.source !== node.id && (node.kind === "claim" || node.kind === "proposition"))
+    .sort((left, right) => {
+      const leftClaim = left.node.kind === "claim" ? 1 : 0;
+      const rightClaim = right.node.kind === "claim" ? 1 : 0;
+      return factImportance(right.node) - factImportance(left.node)
+        || rightClaim - leftClaim
+        || right.node.evidenceCount - left.node.evidenceCount
+        || left.node.label.localeCompare(right.node.label);
+    });
+  const seen = new Set<string>();
+  return candidates.filter(({ node }) => {
+    const key = typeof node.summary.predicate === "string"
+      ? node.summary.predicate
+      : typeof node.summary.relationId === "string"
+        ? node.summary.relationId
+        : node.label;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 6);
+}
+
+function factImportance(node: OntologyNode): number {
+  const statement = typeof node.summary.predicate === "string"
+    ? node.summary.predicate
+    : typeof node.summary.relationId === "string"
+      ? node.summary.relationId
+      : node.label;
+  const identity = /(身份|血统|等级|候选|学生|会长|教授|校长|成员|所属|任职|担任|评级|级新生|bloodline|blood-status|is-blood|status|rating|student|candidate|member|leader|president|professor|director|captain)/iu.test(statement) ? 80 : 0;
+  const grounded = node.summary.epistemicType === "explicit-fact" || node.summary.epistemicType === "narrator-claim" ? 30 : 0;
+  const naturalLanguage = /[^\u0000-\u007f]/u.test(statement) ? 45 : 0;
+  const concise = Math.max(0, 30 - Math.abs(statement.length - 18));
+  return identity + grounded + naturalLanguage + concise;
+}
+
+function SemanticCards({ items, onSelect }: { items: RelatedItem[]; onSelect: (nodeId: string) => void }) {
+  const { t } = useI18n();
+  return <div className="semantic-card-list">{items.map(({ edge, node }) => {
+    const targets = stringSummary(node.summary.targetNames);
+    const description = node.kind === "goal" && targets.length
+      ? t("Targets: {targets}", { targets: targets.join("、") })
+      : node.description !== node.label ? node.description : undefined;
+    return <button type="button" key={edge.id} onClick={() => onSelect(node.id)}>
+      <span className="semantic-card-tag">{t(nodeKindLabel(node))}</span>
+      <strong>{compactNodeTitle(node)}</strong>
+      {description && <p>{description}</p>}
+      <small>{semanticCardMeta(node, edge, t)}</small>
+    </button>;
+  })}</div>;
+}
+
+function AssociationCards({ associations, onSelect }: { associations: OntologyAssociation[]; onSelect: (nodeId: string) => void }) {
+  const { t } = useI18n();
+  return <div className="association-card-list">{associations.map((association) => (
+    <button type="button" key={association.node.id} onClick={() => onSelect(association.node.id)}>
+      <header><span style={{ background: nodeColor(association.node) }} /><strong>{association.node.label}</strong><small>{t(nodeKindLabel(association.node))}</small></header>
+      <p>{association.node.description ?? fallbackNodeDescription(association.node, t)}</p>
+      <div>{association.relationLabels.slice(0, 3).map((label) => <span key={label}>{humanize(label)}</span>)}</div>
+    </button>
+  ))}</div>;
+}
+
+function RelationshipDisclosure({ node, detail, onSelect }: { node: OntologyNode; detail: OntologyNodeDetail; onSelect: (nodeId: string) => void }) {
+  const { t } = useI18n();
+  const related = new Map(detail.relatedNodes.map((item) => [item.id, item]));
+  return <details className="inspector-disclosure relationship-disclosure">
+    <summary><span>{t("All connected content")}</span><strong>{detail.relationPage.incomingTotal + detail.relationPage.outgoingTotal}</strong></summary>
+    <div className="inspector-relation-groups">
+      <details open={detail.incoming.length > 0}><summary>{t("Incoming · {loaded}/{total}", { loaded: detail.incoming.length, total: detail.relationPage.incomingTotal })}</summary><EdgeList edges={detail.incoming} direction="incoming" related={related} root={node} onSelect={onSelect} /></details>
+      <details open={detail.outgoing.length > 0}><summary>{t("Outgoing · {loaded}/{total}", { loaded: detail.outgoing.length, total: detail.relationPage.outgoingTotal })}</summary><EdgeList edges={detail.outgoing} direction="outgoing" related={related} root={node} onSelect={onSelect} /></details>
+    </div>
+    {detail.relationPage.truncated && <p className="inspector-muted">{t("Node detail shows a bounded relationship preview; load the complete topology to inspect every connected edge.")}</p>}
+  </details>;
+}
+
+function EvidenceDisclosure({ detail }: { detail: OntologyNodeDetail }) {
+  const { t } = useI18n();
+  return <details className="inspector-disclosure evidence-disclosure">
+    <summary><span>{t("Source evidence")}</span><strong>{detail.evidence.length}</strong></summary>
+    <div className="disclosure-body">
+      {detail.evidence.length ? <div className="evidence-list">{detail.evidence.map((evidence, index) => (
+        <article key={`${evidence.quoteHash}:${index}`}>
+          <header><span>{t("lines {start}–{end}", { start: evidence.startLine, end: evidence.endLine })}</span><small>{t(evidence.strength)}</small></header>
+          {evidence.excerpt !== undefined ? <blockquote>{evidence.excerpt}{evidence.excerptTruncated ? "…" : ""}</blockquote> : <p>{t("Exact byte excerpt is unavailable for this legacy reference.")}</p>}
+          <code>{shortHash(evidence.quoteHash)}</code>
+        </article>
+      ))}</div> : <p className="inspector-muted">{t("No source-local evidence span is attached.")}</p>}
+    </div>
+  </details>;
+}
+
+function TechnicalDisclosure({ node, payload }: { node: OntologyNode; payload: unknown }) {
+  const { t } = useI18n();
+  return <>
+    <details className="ontology-technical-details">
+      <summary>{t("Technical identity")}</summary>
+      <dl className="ontology-node-meta">
+        <div><dt>{t("Artifact")}</dt><dd>{node.artifactId}</dd></div>
+        <div><dt>{t("Node ID")}</dt><dd>{node.id}</dd></div>
+        <div><dt>{t("Revision")}</dt><dd>{node.revisionHash ?? t("derived")}</dd></div>
+        {node.storyTime !== undefined && <div><dt>{t("Story time")}</dt><dd>{compactJson(node.storyTime)}</dd></div>}
+      </dl>
+    </details>
+    <DeferredPayload value={payload} />
+  </>;
 }
 
 function EdgeList({
   edges,
   direction,
-  labels,
+  related,
+  root,
   onSelect,
 }: {
   edges: OntologyEdge[];
   direction: "incoming" | "outgoing";
-  labels: ReadonlyMap<string, string>;
+  related: ReadonlyMap<string, OntologyNode>;
+  root: OntologyNode;
   onSelect: (nodeId: string) => void;
 }) {
   const { t } = useI18n();
   return edges.length ? <div className="inspector-edge-list">{edges.map((edge) => {
     const relatedId = direction === "incoming" ? edge.source : edge.target;
-    return <button type="button" key={edge.id} onClick={() => onSelect(relatedId)}><span>{edge.label}</span><strong>{labels.get(relatedId) ?? humanize(relatedId.split(":").at(-1) ?? relatedId)}</strong><code>{humanize(edge.kind)}</code></button>;
+    const relatedNode = related.get(relatedId);
+    const label = relatedNode?.label ?? humanize(relatedId.split(":").at(-1) ?? relatedId);
+    return <button type="button" key={edge.id} onClick={() => onSelect(relatedId)}>
+      <header><strong>{label}</strong><span>{t(humanize(edge.label))}</span></header>
+      <p>{relatedNode?.description ?? t(direction === "incoming" ? "Connects into {entity}." : "Connected from {entity}.", { entity: root.label })}</p>
+      <small>{relatedNode ? t(nodeKindLabel(relatedNode)) : t("Related content")} · {t("{count} evidence", { count: edge.evidenceCount })}</small>
+    </button>;
   })}</div> : <p className="inspector-muted">{t(direction === "incoming" ? "No incoming relationships in this projection." : "No outgoing relationships in this projection.")}</p>;
+}
+
+function HumanSummary({ entries }: { entries: Array<[string, unknown]> }) {
+  const { t } = useI18n();
+  return <dl className="summary-record">{entries.map(([key, item]) => <div key={key}><dt>{t(summaryLabel(key))}</dt><dd>{formatValue(item)}</dd></div>)}</dl>;
+}
+
+function usefulSummaryEntries(summary: Record<string, unknown>): Array<[string, unknown]> {
+  const hidden = new Set(["entityKind", "aliases", "actorId", "holderEntityId", "hasCharacterModel", "dispositions", "claimCount", "propositionCount", "goalCount", "eventCount"]);
+  return Object.entries(summary).filter(([key, value]) => !hidden.has(key) && value !== undefined && !(Array.isArray(value) && value.length === 0));
+}
+
+function stringSummary(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function numberSummary(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function booleanSummary(value: unknown): boolean {
+  return value === true;
+}
+
+type DispositionSummary = { dimensionId: string; value: number; stability: string; confidence: number };
+
+function dispositionSummary(value: unknown): DispositionSummary[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): DispositionSummary[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.dimensionId !== "string" || typeof candidate.value !== "number") return [];
+    return [{
+      dimensionId: candidate.dimensionId,
+      value: Math.max(-1, Math.min(1, candidate.value)),
+      stability: typeof candidate.stability === "string" ? candidate.stability : "situational",
+      confidence: typeof candidate.confidence === "number" ? Math.max(0, Math.min(1, candidate.confidence)) : 0,
+    }];
+  });
+}
+
+function dimensionLabel(value: string): string {
+  const labels: Record<string, string> = {
+    "risk-tolerance": "Risk tolerance",
+    deliberation: "Deliberation",
+    affiliation: "Affiliation",
+    dominance: "Dominance",
+    "norm-adherence": "Norm adherence",
+    "trust-readiness": "Trust readiness",
+    persistence: "Persistence",
+    "openness-to-revision": "Openness to revision",
+  };
+  return labels[value] ?? humanize(value);
+}
+
+function nodeKindLabel(node: Pick<OntologyNode, "kind" | "layer">): string {
+  const entityKind = node.kind.startsWith("entity:") ? node.kind.slice("entity:".length) : undefined;
+  const entityLabels: Record<string, string> = {
+    character: "Character",
+    location: "Location",
+    concept: "Concept",
+    faction: "Faction",
+    institution: "Institution",
+    relationship: "Relationship",
+    artifact: "Artifact",
+    other: "Other",
+  };
+  if (entityKind) return entityLabels[entityKind] ?? humanize(entityKind);
+  const artifactLabels: Record<string, string> = {
+    goal: "Goal",
+    claim: "Character information",
+    proposition: "Proposition",
+    attribution: "Knowledge attribution",
+    "character-model": "Character model",
+    disposition: "Disposition",
+    appraisal: "Appraisal",
+    development: "Development",
+    "canonical-event": "Event",
+    "committed-event": "Event",
+    "world-rule": "Rule",
+  };
+  return artifactLabels[node.kind] ?? familyVisuals[nodeFamily(node)].label;
+}
+
+function fallbackNodeDescription(node: OntologyNode, translate: (message: string, values?: Record<string, string | number>) => string): string {
+  const facts = numberSummary(node.summary.claimCount) + numberSummary(node.summary.propositionCount);
+  const goals = numberSummary(node.summary.goalCount);
+  const events = numberSummary(node.summary.eventCount);
+  if (facts || goals || events) return translate("{facts} information items · {goals} goals · {events} events", { facts, goals, events });
+  return translate("Source-backed {kind} with {count} evidence references.", { kind: translate(nodeKindLabel(node)), count: node.evidenceCount });
+}
+
+function semanticCardMeta(node: OntologyNode, edge: OntologyEdge, translate: (message: string, values?: Record<string, string | number>) => string): string {
+  if (node.kind === "goal") return translate("Priority {percent}% · {count} evidence", { percent: Math.round(numberSummary(node.summary.priority) * 100), count: edge.evidenceCount });
+  const type = typeof node.summary.epistemicType === "string" ? humanize(node.summary.epistemicType) : humanize(edge.label);
+  return `${translate(type)} · ${translate("{count} evidence", { count: edge.evidenceCount })}`;
+}
+
+function compactNodeTitle(node: OntologyNode): string {
+  const separator = node.label.indexOf(" · ");
+  return separator >= 0 ? node.label.slice(separator + 3) : node.label;
+}
+
+function summaryLabel(value: string): string {
+  const labels: Record<string, string> = {
+    priority: "Priority",
+    requiresKnowledge: "Required knowledge",
+    polarity: "Polarity",
+    modality: "Modality",
+    relationId: "Relation",
+    epistemicType: "Information type",
+    speaker: "Speaker",
+    predicate: "Statement",
+    confidence: "Confidence",
+    participants: "Participants",
+    narrativeOrder: "Narrative order",
+    narrativeMode: "Narrative mode",
+    dispositions: "Dispositions",
+    appraisals: "Appraisals",
+    developmentEpisodes: "Development",
+    relationships: "Relationships",
+  };
+  return labels[value] ?? humanize(value);
+}
+
+function formatSignedValue(value: number): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
 function OntologyNodeBrowser({ graph, onSelect }: { graph: OntologyGraph; onSelect: (nodeId: string) => void }) {

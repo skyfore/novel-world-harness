@@ -374,7 +374,8 @@ export class OntologyProjectionService {
         priority: goal.priority,
         actorId: goal.actorId,
         requiresKnowledge: goal.requiresKnowledge.length,
-      }, undefined, characterGoalDescription(goal, frame));
+        targetNames: (goal.targetIds ?? []).map((targetId) => displayEntityName(targetId, frame)),
+      });
       builder.artifact(node);
       builder.edge(link("actor-goal", entityId(goal.actorId), node.node.id, "pursues", node.node.status, "canonical", goal.evidence));
       for (const targetId of goal.targetIds ?? []) builder.edge(link("goal-target", node.node.id, entityId(targetId), "targets", node.node.status, "canonical", goal.evidence));
@@ -1066,7 +1067,7 @@ function attributionNode(attribution: Attribution, frame: ProjectionFrame) {
     holderEntityId: attribution.holderEntityId,
     attitude: attribution.attitude,
     certainty: attribution.certainty,
-  }, undefined, `${holder} ${attitude}此命题 · 置信度 ${Math.round(attribution.certainty * 100)}%`);
+  }, undefined, `${holder} · ${attitude} · ${Math.round(attribution.certainty * 100)}%`);
 }
 
 function claimNode(claim: Claim, frame: ProjectionFrame) {
@@ -1089,7 +1090,7 @@ function eventNode(event: CanonicalEvent, frame: ProjectionFrame) {
     narrativeOrder: event.narrativeContext?.discourseOrder,
     narrativeMode: event.narrativeContext?.mode,
     futureCanonicalReference: future,
-  }, event.storyTime, event.readerSummary ?? `${event.participants.length} 个参与实体 · 置信度 ${Math.round(event.confidence * 100)}%`);
+  }, event.storyTime, event.readerSummary ?? `${event.participants.length} participants · ${Math.round(event.confidence * 100)}% confidence`);
 }
 
 function possibilityNode(possibility: PossibilityTemplate, frame: ProjectionFrame) {
@@ -1098,7 +1099,7 @@ function possibilityNode(possibility: PossibilityTemplate, frame: ProjectionFram
     pressure: possibility.pressure,
     relevance: possibility.relevance,
     canonicalEventId: possibility.canonicalEventId,
-  }, possibility.candidateWindow, `${readableIdentifier(possibility.kind)} · 压力 ${possibility.pressure.toFixed(2)} · 相关性 ${possibility.relevance.toFixed(2)}`);
+  }, possibility.candidateWindow, `${readableIdentifier(possibility.kind)} · pressure ${possibility.pressure.toFixed(2)} · relevance ${possibility.relevance.toFixed(2)}`);
 }
 
 function displayEntityName(entityIdValue: string, frame: ProjectionFrame): string {
@@ -1145,12 +1146,16 @@ function entityDescription(
   if (entity.kind !== "character") return entity.aliases.length ? entity.aliases.join(" · ") : undefined;
   const highlights = profile.claims
     .filter((claim) => claim.subject === entity.id)
-    .map((claim) => ({
-      id: claim.id,
-      value: [readableIdentifier(claim.predicate), claimObjectLabel(claim.object, frame)].filter(Boolean).join(" · "),
-      score: claimHighlightScore(claim),
-    }))
-    .filter((item) => item.value.length >= 3 && item.value.length <= 96)
+    .map((claim) => {
+      const statement = readableIdentifier(claim.predicate);
+      const object = claimObjectLabel(claim.object, frame);
+      return {
+        id: claim.id,
+        value: [statement, object && object !== statement && object.length <= 36 ? object : undefined].filter(Boolean).join(" · "),
+        score: claimHighlightScore(claim),
+      };
+    })
+    .filter((item) => item.value.length >= 3 && item.value.length <= 72)
     .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
   const unique: string[] = [];
   for (const highlight of highlights) {
@@ -1164,16 +1169,11 @@ function entityDescription(
 function claimHighlightScore(claim: Claim): number {
   const semantic = readableIdentifier(claim.predicate);
   const sourceGrounded = claim.epistemicType === "explicit-fact" || claim.epistemicType === "narrator-claim" ? 30 : 0;
-  const naturalLanguage = /[^\u0000-\u007f]/u.test(semantic) ? 45 : 0;
+  const naturalLanguage = /[^\u0000-\u007f]/u.test(semantic) ? 90 : 0;
   const concise = Math.max(0, 30 - Math.abs(semantic.length - 18));
-  return sourceGrounded + naturalLanguage + concise;
-}
-
-function characterGoalDescription(goal: ArtifactSet["goals"][number], frame: ProjectionFrame): string {
-  const targets = (goal.targetIds ?? []).map((targetId) => displayEntityName(targetId, frame));
-  return [`Priority ${Math.round(goal.priority * 100)}%`, targets.length ? `Targets: ${targets.join(", ")}` : undefined]
-    .filter(Boolean)
-    .join(" · ");
+  const identity = /(身份|血统|等级|候选|学生|会长|教授|校长|成员|所属|任职|担任|评级|级新生|bloodline|blood-status|is-blood|status|rating|student|candidate|member|leader|president|professor|director|captain)/iu.test(semantic) ? 80 : 0;
+  const characterization = /(性格|普通|平凡|谨慎|勇敢|信任|坚持|身份|character|ordinary|brave|cautious)/iu.test(semantic) ? 35 : 0;
+  return sourceGrounded + naturalLanguage + concise + identity + characterization;
 }
 
 function characterModelDescription(model: CharacterModel): string {

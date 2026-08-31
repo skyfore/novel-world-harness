@@ -26,7 +26,7 @@ button { font: inherit; }
 button:disabled { cursor: not-allowed; opacity: .48; }
 code, .mono { font-family: "DM Mono", ui-monospace, monospace; }
 
-.app-shell { min-height: 100vh; display: grid; grid-template-columns: 272px minmax(0, 1fr); }
+.app-shell { min-height: 100vh; display: grid; grid-template-columns: 240px minmax(0, 1fr); }
 .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; border-right: 1px solid var(--line); background: #121310; }
 .brand { height: 88px; display: flex; align-items: center; gap: 13px; padding: 0 22px; border-bottom: 1px solid var(--line-soft); }
 .brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid #657044; border-radius: 50%; color: var(--accent); font: 500 11px/1 "DM Mono"; letter-spacing: .08em; box-shadow: inset 0 0 0 5px #171a12; }
@@ -709,7 +709,7 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 }
 .skip-link:focus { transform: translateY(0); }
 
-.app-shell { grid-template-columns: 288px minmax(0, 1fr); }
+.app-shell { grid-template-columns: 240px minmax(0, 1fr); }
 .sidebar {
   z-index: 40;
   background: linear-gradient(180deg, #121511 0%, #0f110e 100%);
@@ -1460,6 +1460,64 @@ body.play-immersive-active { height: 100dvh; overflow: hidden; }
 .ontology-technical-details > summary { padding: 12px 14px; color: #728078; font-size: 8px; cursor: pointer; }
 .ontology-technical-details .ontology-node-meta { padding: 0 14px 10px; border: 0; }
 .payload-json { border-color: #2b3530; border-radius: 7px; }
+
+.ontology-canvas-heading { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.ontology-canvas-heading > div { min-width: 0; }
+.ontology-canvas-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ontology-graph-back { min-height: 34px; flex: none; padding: 0 11px; border: 1px solid #557184; border-radius: 7px; background: #17272e; color: #b8e7fa; font: 8px/1 "DM Mono"; cursor: pointer; transition: border-color .14s ease, background .14s ease, color .14s ease; }
+.ontology-graph-back:hover { border-color: #7ea9bd; background: #1c323b; color: #edfbff; }
+
+.node-identity-copy { min-width: 0; }
+.node-tag-row { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.node-kind-tag, .node-state-tag { display: inline-flex; align-items: center; min-height: 22px; padding: 0 7px; border: 1px solid #3b4740; border-radius: 99px; font: 7px/1 "DM Mono"; }
+.node-state-tag { border-color: #37413b; background: #111713; }
+.node-identity-copy > small { display: block; margin-top: 6px; overflow: hidden; color: #79857d; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.node-focus-state { min-height: 28px; display: inline-flex; align-items: center; padding: 0 8px; border: 1px solid #4f7080; border-radius: 7px; background: #15252b; color: #9fd5e9; font: 7px/1 "DM Mono"; }
+.node-description { display: -webkit-box; margin: 0; padding: 12px 14px 13px; overflow: hidden; border-bottom: 1px solid #252e29; background: linear-gradient(180deg, #131a16, #111613); color: #b7c2ba; font-size: 10px; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.ontology-character-facts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ontology-character-facts > span { padding: 10px 7px; }
+.ontology-node-facts .model-present { color: #cbea83; }
+.ontology-node-facts .model-missing { color: #d0aa69; }
+
+.character-trait-list { display: grid; gap: 8px; }
+.character-trait { padding: 9px 10px; border: 1px solid #2d3932; border-radius: 7px; background: #101512; }
+.character-trait header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.character-trait header strong { color: #d1dbd3; font-size: 9px; }
+.character-trait header span { color: #c9e97f; font: 8px/1 "DM Mono"; }
+.character-trait-track { height: 4px; margin-top: 8px; overflow: hidden; border-radius: 99px; background: linear-gradient(90deg, #623f3b 0 49.5%, #354038 49.5% 50.5%, #243b2b 50.5%); }
+.character-trait-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #759b59, #d6ff72); box-shadow: 0 0 9px #d6ff7242; }
+.character-trait small { display: block; margin-top: 7px; color: #66736b; font: 7px/1 "DM Mono"; }
+.character-model-empty { padding: 11px; border: 1px solid #4d432d; border-radius: 8px; background: #1b1912; }
+.character-model-empty strong { color: #e3bd72; font-size: 9px; }
+.character-model-empty p { margin: 6px 0 0; color: #9c8e70; font-size: 9px; line-height: 1.55; }
+
+.semantic-card-list, .association-card-list { display: grid; gap: 7px; }
+.semantic-card-list > button, .association-card-list > button { width: 100%; min-width: 0; padding: 10px; border: 1px solid #2d3932; border-radius: 8px; background: #101512; color: inherit; text-align: left; cursor: pointer; transition: border-color .14s ease, background .14s ease, transform .14s ease; }
+.semantic-card-list > button:hover, .association-card-list > button:hover { border-color: #52675a; background: #17201a; transform: translateY(-1px); }
+.semantic-card-tag { display: inline-flex; min-height: 19px; align-items: center; padding: 0 6px; border: 1px solid #34423a; border-radius: 99px; color: #819087; font: 6px/1 "DM Mono"; }
+.semantic-card-list strong { display: block; margin-top: 7px; color: #d6ded8; font-size: 9px; line-height: 1.45; }
+.semantic-card-list p { display: -webkit-box; margin: 5px 0 0; overflow: hidden; color: #8f9c94; font-size: 8px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.semantic-card-list small { display: block; margin-top: 7px; color: #5e6b63; font: 7px/1.3 "DM Mono"; }
+.association-card-list > button > header { min-width: 0; display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 7px; }
+.association-card-list header > span { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+.association-card-list header strong { overflow: hidden; color: #d8e1da; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.association-card-list header small { color: #657169; font: 6px/1 "DM Mono"; }
+.association-card-list p { display: -webkit-box; margin: 7px 0 8px; overflow: hidden; color: #8f9b93; font-size: 8px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.association-card-list > button > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.association-card-list > button > div span { max-width: 100%; overflow: hidden; padding: 4px 6px; border: 1px solid #34423a; border-radius: 99px; color: #839189; font: 6px/1 "DM Mono"; text-overflow: ellipsis; white-space: nowrap; }
+
+.inspector-disclosure { margin: 0; border-bottom: 1px solid #252e29; }
+.inspector-disclosure > summary { min-height: 43px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; color: #97a39b; font-size: 9px; cursor: pointer; list-style-position: inside; }
+.inspector-disclosure > summary strong { color: #65736a; font: 8px/1 "DM Mono"; }
+.inspector-disclosure[open] > summary { color: #d3dcd5; background: #141b17; }
+.relationship-disclosure > .inspector-relation-groups, .relationship-disclosure > .inspector-muted, .disclosure-body { margin: 0 12px 12px; }
+
+.inspector-edge-list > button { display: block; }
+.inspector-edge-list > button header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inspector-edge-list > button header strong { min-width: 0; overflow: hidden; color: #d1dad3; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.inspector-edge-list > button header span { flex: none; max-width: 45%; overflow: hidden; padding: 3px 5px; border: 1px solid #344139; border-radius: 99px; color: #809087; font: 6px/1 "DM Mono"; text-overflow: ellipsis; white-space: nowrap; }
+.inspector-edge-list > button p { display: -webkit-box; margin: 6px 0; overflow: hidden; color: #7f8d84; font-size: 8px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.inspector-edge-list > button > small { color: #56635b; font: 6px/1 "DM Mono"; }
 
 .ontology-node-browser { min-height: 0; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .ontology-browser-intro { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #252e29; background: #101512; }

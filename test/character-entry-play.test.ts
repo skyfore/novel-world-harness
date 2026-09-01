@@ -12,6 +12,8 @@ import { listPlayableCharacters, selectPlayExperience } from "../src/world/play-
 import { createWorldBranch } from "../src/world/instance.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { projectActorScene } from "../src/world/scene.js";
+import { readFrozenWorldBase } from "../src/world/base.js";
+import { buildPlayOpeningFrame, playSceneChoicePrompt, playScenePrompt, playerSceneModelFrame } from "../src/world/play-opening.js";
 import { WebEventBroker } from "../src/web/event-stream.js";
 import { OperationManager } from "../src/web/operation-manager.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
@@ -80,6 +82,7 @@ describe("character-specific play entry", () => {
     });
     await new InitialWorldStore(publisherRoot).put({
       version: 1,
+      readerSetup: "Hero stands at the prologue threshold, just before the crossing that opens the novel.",
       participantPresence: [{ entityId: "hero", mode: "physical" }],
       delta: {
         version: 1,
@@ -107,6 +110,19 @@ describe("character-specific play entry", () => {
     const openingCommit = await openingWorld.engine.objects.getCommit(openingBranch.headCommitId);
     const openingGenesis = await openingWorld.engine.objects.getEvent(openingCommit.eventHashes[0]!);
     expect(openingGenesis.participantPresence).toEqual([{ entityId: "hero", mode: "physical" }]);
+    const originalOpening = await buildPlayOpeningFrame(
+      root,
+      "main",
+      "hero",
+      local.source.id,
+      undefined,
+      cacheRoot,
+    );
+    expect(originalOpening.readerPrelude).toMatchObject({
+      authority: "reader-orientation-only",
+      entryTitle: "小说开场",
+      entrySetup: "Hero stands at the prologue threshold, just before the crossing that opens the novel.",
+    });
     await expect(listPlayableCharacters(root, { branchId: "main", source: local.source.id })).resolves.toMatchObject({
       characters: [{ id: "hero" }],
     });
@@ -124,6 +140,117 @@ describe("character-specific play entry", () => {
         { id: "later", availability: "entry-checkpoint", entryKind: "canonical-scene" },
       ],
     });
+    const sourceRoles = await webPlay.listSourceRoles(local.source.id);
+    expect(sourceRoles).toMatchObject({
+      sourceId: local.source.id,
+      preparedRevisionHash: revision.bundleHash,
+      roles: [
+        { id: "hero", entryKind: "opening" },
+        { id: "later", entryKind: "canonical-scene" },
+      ],
+    });
+    await expect(webPlay.startFreshPlay({
+      sourceId: local.source.id,
+      preparedRevisionHash: "0".repeat(64),
+      actorId: "hero",
+      clientRequestId: "fresh-hero-stale-base",
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      detail: { code: "FROZEN_BASE_MOVED", retry: { copyField: "preparedRevisionHash" } },
+    });
+
+    const firstHeroPlay = await webPlay.startFreshPlay({
+      sourceId: local.source.id,
+      preparedRevisionHash: revision.bundleHash,
+      actorId: "hero",
+      clientRequestId: "fresh-hero-one",
+    });
+    const repeatedFirstHeroPlay = await webPlay.startFreshPlay({
+      sourceId: local.source.id,
+      preparedRevisionHash: revision.bundleHash,
+      actorId: "hero",
+      clientRequestId: "fresh-hero-one",
+    });
+    const secondHeroPlay = await webPlay.startFreshPlay({
+      sourceId: local.source.id,
+      preparedRevisionHash: revision.bundleHash,
+      actorId: "hero",
+      clientRequestId: "fresh-hero-two",
+    });
+    expect(repeatedFirstHeroPlay.reused).toBe(true);
+    expect(repeatedFirstHeroPlay.instance.branchId).toBe(firstHeroPlay.instance.branchId);
+    expect(repeatedFirstHeroPlay.session.session.id).toBe(firstHeroPlay.session.session.id);
+    expect(firstHeroPlay.instance.branchId).not.toBe(secondHeroPlay.instance.branchId);
+    expect(firstHeroPlay.session.session.conversationId).not.toBe(secondHeroPlay.session.session.conversationId);
+    await expect(openingWorld.engine.branches.read(firstHeroPlay.instance.branchId)).resolves.toMatchObject({
+      entryActorId: "hero",
+    });
+    await expect(openingWorld.engine.branches.read(secondHeroPlay.instance.branchId)).resolves.toMatchObject({
+      entryActorId: "hero",
+    });
+    expect(firstHeroPlay.base).toEqual(secondHeroPlay.base);
+    expect(firstHeroPlay.base).toEqual({
+      version: 1,
+      sourceId: local.source.id,
+      sourceContentSha256: local.source.contentSha256,
+      preparedRevisionHash: revision.bundleHash,
+      canonicalSnapshotHash: firstHeroPlay.base.canonicalSnapshotHash,
+    });
+    expect(Object.isFrozen(await readFrozenWorldBase(root, firstHeroPlay.instance.branchId))).toBe(true);
+    const mainHeadBeforeFreshMove = await openingWorld.engine.branches.readHead("main");
+    const secondHeadBeforeFreshMove = secondHeroPlay.instance.headCommitId;
+    const firstOpening = await buildPlayOpeningFrame(
+      root,
+      firstHeroPlay.instance.branchId,
+      "hero",
+      local.source.id,
+      firstHeroPlay.session.session.conversationId,
+      cacheRoot,
+    );
+    expect(firstOpening.readerPrelude).toEqual({
+      authority: "reader-orientation-only",
+      entryTitle: "小说开场",
+      entrySetup: "Hero stands at the prologue threshold, just before the crossing that opens the novel.",
+      storySoFar: [],
+    });
+    const openingModelFrame = playerSceneModelFrame(firstOpening);
+    expect(openingModelFrame).toMatchObject({
+      narrativeContract: {
+        person: "third",
+        focalCharacter: "Hero",
+        narratorAddressesPlayer: false,
+      },
+    });
+    expect(playScenePrompt(openingModelFrame, "opening")).toContain("Hero stands at the prologue threshold");
+    expect(playerSceneModelFrame(firstOpening, "blocked")).not.toHaveProperty("readerPrelude");
+    expect(playScenePrompt(openingModelFrame, "blocked")).not.toContain("Hero stands at the prologue threshold");
+    expect(playSceneChoicePrompt(openingModelFrame, "opening")).not.toContain("Hero stands at the prologue threshold");
+
+    const freshWorld = await openWorkspaceWorld(root);
+    const firstMove = await freshWorld.engine.commitProposal({
+      proposalId: "first-hero-shouts",
+      branchId: firstHeroPlay.instance.branchId,
+      expectedParentCommit: firstHeroPlay.instance.headCommitId,
+      source: "player",
+      title: "Hero calls into the threshold",
+      actorObservations: [{ actorId: "hero", summary: "Hero hears the call carry across the threshold." }],
+      participants: ["hero"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "wait for an answer" }],
+      },
+      causalParents: [],
+      evidence: [],
+    });
+    await expect(freshWorld.engine.branches.readHead(firstHeroPlay.instance.branchId)).resolves.toBe(firstMove.newHead);
+    await expect(freshWorld.engine.branches.readHead(secondHeroPlay.instance.branchId)).resolves.toBe(secondHeadBeforeFreshMove);
+    await expect(freshWorld.engine.branches.readHead("main")).resolves.toBe(mainHeadBeforeFreshMove);
+    expect((await freshWorld.engine.projector.project(secondHeadBeforeFreshMove)).values.hero?.["character.plan"]).toBe("cross the gate");
+    expect((await freshWorld.engine.projector.project(firstMove.newHead)).values.hero?.["character.plan"]).toBe("wait for an answer");
+    expect(await readFrozenWorldBase(root, firstHeroPlay.instance.branchId)).toEqual(firstHeroPlay.base);
+
     const webLater = await webPlay.createSession({
       branchId: "main",
       sourceId: local.source.id,
@@ -135,6 +262,19 @@ describe("character-specific play entry", () => {
       actorId: "later",
     });
     expect(webLater.session.branchId).not.toBe("main");
+    const laterOpening = await buildPlayOpeningFrame(
+      root,
+      webLater.session.branchId,
+      "later",
+      local.source.id,
+      webLater.session.conversationId,
+      cacheRoot,
+    );
+    expect(laterOpening.readerPrelude).toMatchObject({
+      authority: "reader-orientation-only",
+      entrySetup: "The prologue crossing has led to a summons; Later is at the hall before deciding how to answer it.",
+      storySoFar: [{ title: "Hero crosses the prologue", participantNames: ["Hero"] }],
+    });
     await selectPlayExperience(root, { branchId: "main", character: "hero", source: local.source.id });
     const selection = await choosePlayExperience(root, {
       source: local.source.id,

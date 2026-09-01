@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { frozenWorldBaseSchema } from "../world/base-schema.js";
 
 export const WEB_API_VERSION = "v1" as const;
 
@@ -741,6 +742,30 @@ export const createPlaySessionRequestSchema = z.object({
   clientRequestId: z.string().min(1).max(200),
 }).strict();
 
+/** Roles grounded in the active immutable base, independent of any branch head. */
+export const sourcePlayRoleSchema = z.object({
+  id: z.string().min(1),
+  canonicalName: z.string().min(1),
+  aliases: z.array(z.string()),
+  entryKind: z.enum(["opening", "canonical-scene"]),
+  entryTitle: z.string().min(1),
+}).strict();
+
+export const sourcePlayRoleListSchema = z.object({
+  sourceId: z.string().min(1),
+  sourceTitle: z.string().min(1),
+  preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/),
+  roles: z.array(sourcePlayRoleSchema),
+}).strict();
+
+export const startFreshPlayRequestSchema = z.object({
+  sourceId: z.string().min(1),
+  preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/),
+  actorId: z.string().min(1),
+  title: z.string().trim().min(1).max(200).optional(),
+  clientRequestId: z.string().min(1).max(200),
+}).strict();
+
 export const playableCharacterSchema = z.object({
   id: z.string().min(1),
   canonicalName: z.string().min(1),
@@ -833,6 +858,13 @@ export const playSessionDetailSchema = z.object({
   session: playSessionSummarySchema,
   headCommitId: z.string().min(1).nullable(),
   messages: z.array(playMessageSummarySchema),
+}).strict();
+
+export const startFreshPlayResultSchema = z.object({
+  instance: instanceSummarySchema,
+  session: playSessionDetailSchema,
+  base: frozenWorldBaseSchema,
+  reused: z.boolean(),
 }).strict();
 
 export const playerChoiceSummarySchema = z.object({
@@ -970,6 +1002,10 @@ export type OntologyGraph = z.infer<typeof ontologyGraphSchema>;
 export type OntologyAssociation = z.infer<typeof ontologyAssociationSchema>;
 export type OntologyNodeDetail = z.infer<typeof ontologyNodeDetailSchema>;
 export type CreatePlaySessionRequest = z.infer<typeof createPlaySessionRequestSchema>;
+export type SourcePlayRole = z.infer<typeof sourcePlayRoleSchema>;
+export type SourcePlayRoleList = z.infer<typeof sourcePlayRoleListSchema>;
+export type StartFreshPlayRequest = z.infer<typeof startFreshPlayRequestSchema>;
+export type StartFreshPlayResult = z.infer<typeof startFreshPlayResultSchema>;
 export type PlayableCharacter = z.infer<typeof playableCharacterSchema>;
 export type PlayableCharacterList = z.infer<typeof playableCharacterListSchema>;
 export type UpdatePlaySessionRequest = z.infer<typeof updatePlaySessionRequestSchema>;

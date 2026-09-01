@@ -351,6 +351,9 @@ export class WorldEngine {
     }
     const branchSourceId = sourceId ?? this.context.sourceId;
     const branchPreparedRevisionHash = preparedRevisionHash ?? this.context.preparedRevisionHash;
+    if (branchPreparedRevisionHash && !branchSourceId) {
+      throw new Error("A frozen prepared revision requires a source identity.");
+    }
     if (branchSourceId && initialEvidence.length) {
       assertEvidenceExclusiveToSource(initialEvidence, branchSourceId, "Genesis evidence");
     }
@@ -466,6 +469,9 @@ export class WorldEngine {
       name,
       ...(branchSourceId ? { sourceId: branchSourceId } : {}),
       ...(branchPreparedRevisionHash ? { preparedRevisionHash: branchPreparedRevisionHash } : {}),
+      ...(genesisOptions.entryActorId && branchSourceId && branchPreparedRevisionHash
+        ? { entryActorId: genesisOptions.entryActorId }
+        : {}),
       createdAt: new Date().toISOString(),
       headCommitId: commitHash,
     });
@@ -478,6 +484,15 @@ export class WorldEngine {
     const context = await this.contextForCommit(head);
     if (branch.sourceId && context.sourceId && branch.sourceId !== context.sourceId) {
       throw new Error(`Branch source '${branch.sourceId}' does not match committed context '${context.sourceId}'.`);
+    }
+    if (
+      branch.preparedRevisionHash
+      && branch.preparedRevisionHash !== context.preparedRevisionHash
+    ) {
+      throw new Error(
+        `Branch '${branch.id}' is frozen to prepared revision ${branch.preparedRevisionHash}, `
+        + `but commit ${head} resolves ${context.preparedRevisionHash ?? "no prepared revision"}.`,
+      );
     }
     const sourceId = branch.sourceId ?? context.sourceId;
     if (sourceId && parsed.evidence.length) {

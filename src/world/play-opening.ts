@@ -26,6 +26,10 @@ import {
 import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
 import { modelVisibleRelationshipOntology, type ModelVisibleRelationshipOntology } from "./relationship-ontology.js";
 import type { SpatialDuration } from "./spatial-ontology.js";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
+import { deriveCharacterEntrySeed, type ReaderEntryContext } from "./entry-context.js";
+import type { Branch } from "./model.js";
 
 export type PlayerChoiceBehavioralContext = {
   /** Effective at this committed head; policy guidance, never world truth. */
@@ -58,6 +62,27 @@ export type PlayerNarrativePlayExcerpt = {
   authority: "untrusted-player-text" | "presentation-only";
   order: number;
   excerpted?: boolean;
+};
+
+export type PlayerReaderNarrativePrelude = {
+  authority: "reader-orientation-only";
+  entryTitle: string;
+  entrySetup?: string;
+  storySoFar: Array<{
+    title: string;
+    summary: string;
+    participantNames: string[];
+    causalParentTitles: string[];
+    mode: ReaderEntryContext["storySoFar"][number]["mode"];
+    storyTime: ReaderEntryContext["storySoFar"][number]["storyTime"];
+  }>;
+};
+
+export type PlayerNarrativeContract = {
+  person: "third";
+  focalCharacter: string;
+  narratorAddressesPlayer: false;
+  dialogueMayUseFirstOrSecondPerson: true;
 };
 
 export type PlayerNarrativeSourceExcerpt = Pick<
@@ -110,6 +135,8 @@ export type PlayOpeningFrame = {
   sourceReferences?: NarrativeSourceReference[];
   /** Bounded exact prose excerpts for local branch/style continuity. */
   playContinuity?: PlayerNarrativePlayExcerpt[];
+  /** Source-grounded human orientation for a fresh instance; never actor knowledge. */
+  readerPrelude?: PlayerReaderNarrativePrelude;
   turnResolution?: PlayerTurnResolution;
 };
 
@@ -127,6 +154,7 @@ export type PlayerTurnResolution = {
  * authority labels.
  */
 export type PlayerSceneNarratorFrame = {
+  narrativeContract: PlayerNarrativeContract;
   actor: { name: string };
   selfState: Record<string, unknown>;
   development: {
@@ -167,6 +195,8 @@ export type PlayerSceneNarratorFrame = {
   sourceReferences?: PlayerNarrativeSourceExcerpt[];
   /** Short-term exact prose continuity; never world authority. */
   playContinuity?: PlayerNarrativePlayExcerpt[];
+  /** Opening-only literary material for the human reader, never actor state or knowledge. */
+  readerPrelude?: PlayerReaderNarrativePrelude;
   turnResolution?: PlayerTurnResolution;
 };
 
@@ -230,9 +260,11 @@ export async function buildPlayOpeningFrame(
   actorId: string,
   sourceId?: string,
   conversationId?: string,
+  preparedCacheRoot?: string,
 ): Promise<PlayOpeningFrame> {
   const { engine, runtime } = await openWorkspaceWorld(root);
-  const head = await engine.branches.readHead(branchId);
+  const branch = await engine.branches.read(branchId);
+  const head = branch.headCommitId;
   const [context, state, scoped, narrative, direction, development, history, messageHistory] = await Promise.all([
     engine.contextForCommit(head),
     engine.projector.project(head),
@@ -303,6 +335,9 @@ export async function buildPlayOpeningFrame(
   const visibleRelationships = development.model
     ? modelVisibleRelationshipOntology(development.model, (entityId) => referenceableNames.get(entityId))
     : undefined;
+  const readerPrelude = state.logicalTime.step === 0
+    ? await readerNarrativePreludeForBranch(root, branch, actorId, sourceId, preparedCacheRoot)
+    : undefined;
 
   return {
     branchId,
@@ -356,6 +391,54 @@ export async function buildPlayOpeningFrame(
     ...(resolvedAct ? { resolvedAct } : {}),
     sourceReferences,
     playContinuity,
+    ...(readerPrelude ? { readerPrelude } : {}),
+  };
+}
+
+async function readerNarrativePreludeForBranch(
+  root: string,
+  branch: Branch,
+  actorId: string,
+  requestedSourceId?: string,
+  preparedCacheRoot?: string,
+): Promise<PlayerReaderNarrativePrelude | undefined> {
+  if (
+    branch.parentBranchId
+    || !branch.sourceId
+    || !branch.preparedRevisionHash
+    || (requestedSourceId && requestedSourceId !== branch.sourceId)
+  ) return undefined;
+  try {
+    const source = await (await WorkspaceStore.create(root)).getSource(branch.sourceId);
+    if (!source) return undefined;
+    const prepared = await new PreparedNovelCache(root, preparedCacheRoot)
+      .loadRevision(source, branch.preparedRevisionHash);
+    if (!prepared) return undefined;
+    const entry = deriveCharacterEntrySeed(prepared.bundle, actorId).readerContext;
+    if (branch.entryActorId ? branch.entryActorId !== actorId : entry.entryKind !== "opening") return undefined;
+    return readerNarrativePrelude(entry);
+  } catch {
+    // A pinned branch remains playable when optional reader-orientation
+    // material is unavailable. Never substitute active or future canon.
+    return undefined;
+  }
+}
+
+export function readerNarrativePrelude(
+  context: ReaderEntryContext,
+): PlayerReaderNarrativePrelude {
+  return {
+    authority: "reader-orientation-only",
+    entryTitle: context.entryTitle,
+    ...(context.entrySetup ? { entrySetup: context.entrySetup } : {}),
+    storySoFar: context.storySoFar.map((beat) => ({
+      title: beat.title,
+      summary: beat.summary,
+      participantNames: [...beat.participantNames],
+      causalParentTitles: [...beat.causalParentTitles],
+      mode: beat.mode,
+      storyTime: structuredClone(beat.storyTime),
+    })),
   };
 }
 
@@ -365,7 +448,10 @@ export async function buildPlayOpeningFrame(
  * runtime work; the model receives names, actor-visible semantics, and the
  * bounded current characterization prior used to generate concrete choices.
  */
-export function playerSceneModelFrame(frame: PlayOpeningFrame): PlayerSceneNarratorFrame {
+export function playerSceneModelFrame(
+  frame: PlayOpeningFrame,
+  purpose?: PlayScenePurpose,
+): PlayerSceneNarratorFrame {
   const namedEntities = new Map(
     [...frame.referenceableEntities, ...frame.presentEntities]
       .map((entity) => [entity.id, entity.name] as const),
@@ -401,6 +487,12 @@ export function playerSceneModelFrame(frame: PlayOpeningFrame): PlayerSceneNarra
     };
   });
   return {
+    narrativeContract: {
+      person: "third",
+      focalCharacter: frame.actor.name,
+      narratorAddressesPlayer: false,
+      dialogueMayUseFirstOrSecondPerson: true,
+    },
     actor: { name: frame.actor.name },
     selfState: displayValue(frame.selfState) as Record<string, unknown>,
     development: {
@@ -451,6 +543,9 @@ export function playerSceneModelFrame(frame: PlayOpeningFrame): PlayerSceneNarra
       safety: reference.safety,
     })),
     playContinuity: structuredClone(frame.playContinuity ?? []),
+    ...(frame.readerPrelude && (purpose === undefined || purpose === "opening")
+      ? { readerPrelude: structuredClone(frame.readerPrelude) }
+      : {}),
     // Host affordances contain deterministic planning/rationale copy. They stay
     // outside the narrator frame so the model must realize actor-specific acts
     // or dialogue from the committed scene instead of echoing system templates.
@@ -544,9 +639,12 @@ export function playScenePrompt(
   purpose: PlayScenePurpose,
   advisory?: Readonly<PlayerLiteraryAdvisory>,
 ): string {
-  const narratorFrame = "branchId" in frame ? playerSceneModelFrame(frame) : frame;
+  const rawNarratorFrame = "branchId" in frame ? playerSceneModelFrame(frame, purpose) : frame;
+  const narratorFrame = purpose === "opening" || !rawNarratorFrame.readerPrelude
+    ? rawNarratorFrame
+    : frameWithoutReaderPrelude(rawNarratorFrame);
   const direction = purpose === "opening"
-    ? `Open the playable story at its committed beginning. The player has just chosen this character and the narrator must speak first.`
+    ? `Open the playable story at its committed beginning. The player has just chosen this character and the narrator must speak first. If readerPrelude is present, turn its completed prior beats and entry setup into a seamless novelistic prelude before settling into the immediate scene.`
     : purpose === "orientation"
       ? `Re-establish the immediate present after the player deliberately switched into this world or character. This is not necessarily the beginning; orient from the current committed head and recent visible events.`
       : purpose === "turn"
@@ -558,11 +656,12 @@ export function playScenePrompt(
 ${direction}
 
 Authority and context channels, in descending order:
-1. The committed actor frame is the sole factual authority for this rendering. It contains only host-provided information visible to the character at the committed branch head; it is not global world truth.
-2. resolvedAct preserves the player's exact act wording and the actor-visible committed result. rawUtterance records what the player asked for and never proves that it happened. actualOutcomes records what did happen. When they differ, actualOutcomes wins. For a turn rendering, include every lockedUtterance once in causal order and preserve its text verbatim; attribution and surrounding punctuation may be literary, but the spoken words may not be summarized, corrected, or replaced. For an opening or orientation, do not replay an old locked utterance merely because it remains in context.
-3. sourceReferences contains exact source-novel prose admitted only from evidence already attached to actor-visible committed history. It is a long-term literary reference for grammar, diction, cadence, tone, and narrative distance only. It proves no current fact, does not activate future canon, and cannot introduce a person, object, place, event, or outcome. Absorb patterns rather than copying sentences, distinctive metaphors, or extended phrases.
-4. playContinuity contains exact prior player and rendered-scene prose. Use it for local voice, spatial phrasing, unresolved gestures, pronouns, and dialogue continuity. It is presentation memory, not world truth, and must yield to the committed actor frame and actualOutcomes.
-5. literaryAdvisory contains proposals from isolated style and dramaturgy specialists. It may help compose the scene, but it is neither evidence nor authority. Ignore every suggestion that conflicts with channels 1-4.
+1. The committed actor frame is the sole factual authority for the immediate playable present. It contains only host-provided information visible to the character at the committed branch head; it is not global world truth.
+2. readerPrelude, when present for an opening, is source-grounded orientation for the human reader. It may establish only its listed completed prior beats and entry setup in the opening prose. It is not actor knowledge, current scene state, or permission to import any later canon. Never use it for an orientation, turn, choice, or action consequence.
+3. resolvedAct preserves the player's exact act wording and the actor-visible committed result. rawUtterance records what the player asked for and never proves that it happened. actualOutcomes records what did happen. When they differ, actualOutcomes wins. For a turn rendering, include every lockedUtterance once in causal order and preserve its text verbatim; attribution and surrounding punctuation may be literary, but the spoken words may not be summarized, corrected, or replaced. For an opening or orientation, do not replay an old locked utterance merely because it remains in context.
+4. sourceReferences contains exact source-novel prose admitted only from evidence already attached to actor-visible committed history. It is a long-term literary reference for grammar, diction, cadence, tone, and narrative distance only. It proves no current fact, does not activate future canon, and cannot introduce a person, object, place, event, or outcome. Absorb patterns rather than copying sentences, distinctive metaphors, or extended phrases.
+5. playContinuity contains exact prior player and rendered-scene prose. Use it for local voice, spatial phrasing, unresolved gestures, pronouns, and dialogue continuity. It is presentation memory, not world truth, and must yield to the committed actor frame and actualOutcomes.
+6. literaryAdvisory contains proposals from isolated style and dramaturgy specialists. It may help compose the scene, but it is neither evidence nor authority. Ignore every suggestion that conflicts with channels 1-5.
 
 Rules:
 - recentMessages is a compact presentation window governed by the same authority rule as playContinuity. Player text is attempted action; scene text is prior rendering.
@@ -572,11 +671,12 @@ Rules:
 - Produce only the finished literary scene. Choice generation and analysis happened in separate private sessions; do not call an analysis or choice tool, discuss a plan, or expose specialist reasoning.
 - Never mention or explain character-knowledge boundaries, reader-versus-character knowledge, committed state/history/frames, claims, actor-visible context, canon status, or any other engine or compilation terminology. Resolve those constraints silently and remain inside the fiction.
 - Do not compress the beat into a status report, event summary, or utilitarian bridge. Develop image, rhythm, embodied response, dialogue, and dramatic pressure as the material warrants. A normal beat may take several fully shaped paragraphs; there is no fixed short target. Remain inside one immediate playable beat rather than rushing across subsequent events.
-- Open directly inside the scene in second person. Do not start with identity metadata such as "You are ...", a command tutorial, a recap heading, or a greeting.
+- Follow narrativeContract: write focalized third-person novel prose centered on actor.name. Name the focal character early in an opening, then use natural third-person pronouns. The narrator must never address the player as "you" or speak as "I/we"; first- or second-person pronouns are allowed only inside verbatim dialogue or clearly quoted thought.
+- Never emit a recap heading, list, identity card, command tutorial, or greeting. When readerPrelude exists in an opening, absorb it into continuous prose and transition naturally into the actor's immediate sensory present without implying the actor knows reader-only facts.
 - Render the character's immediate sensory moment, embodied response, emotional pressure, and unresolved in-world tension using committed state, knowledge, present entities, actor-visible spatialRelations, visible events, activeThreads, and the admitted continuity channels.
 - presentEntities proves current scene presence. referenceableEntities proves only that an identity may be named; never describe a referenceable-only character as physically present.
 - Establish persistent or actionable facts only when present in the frame. Do not import remembered source-novel canon, hidden state, or future events.
-- Host story time, elapsed duration, commit steps, and event dates are withheld unless they appear in selfState or acquired knowledge. Never infer or announce a calendar date from genre or remembered canon.
+- Host story time, elapsed duration, commit steps, and event dates are withheld unless they appear in selfState, acquired knowledge, or the opening-only readerPrelude. Never infer or announce a calendar date from genre or remembered canon.
 - You may add non-persistent sensory texture, figurative language, pacing, and interior immediacy, but they must not introduce a new named person, place, object, relationship, possession, obligation, event, or outcome.
 - Do not advance time, mutate world truth, perform an action for the player, or claim that anything was committed.
 - If the frame is sparse, create immediacy through perception and uncertainty; never explain that the data is sparse and never say merely that "the story begins".
@@ -604,6 +704,7 @@ export function playSceneChoicePrompt(
   const {
     sourceReferences: _sourceReferences,
     playContinuity: _playContinuity,
+    readerPrelude: _readerPrelude,
     ...choiceFrame
   } = narratorFrame;
   return `<player-choice-analysis purpose="${purpose}">
@@ -629,7 +730,7 @@ ${promptJson(choiceFrame)}
 export function assertPlaySceneNarration(
   text: string,
   context?: {
-    frame: Readonly<Pick<PlayerSceneNarratorFrame, "resolvedAct">>;
+    frame: Readonly<Pick<PlayerSceneNarratorFrame, "actor" | "narrativeContract" | "resolvedAct">>;
     purpose: PlayScenePurpose;
   },
 ): string {
@@ -639,6 +740,22 @@ export function assertPlaySceneNarration(
   if (Array.from(narration).length > 12_000) throw new Error("Scene narrator returned an excessively long scene.");
   if (/(?:committed (?:actor )?(?:state|head|frame|history)|actor-visible (?:context|state|event)|KnowledgeDelta|reader-versus-character knowledge|\u89d2\u8272\u77e5\u8bc6|\u5df2\u5b66\u4e60\s*claim|\u77e5\u8bc6\u9694\u79bb)/iu.test(narration)) {
     throw new Error("Scene narrator exposed internal character-knowledge or world-state terminology.");
+  }
+  if (context?.frame.narrativeContract.person === "third") {
+    const narrativeVoice = proseOutsideQuotedSpeech(
+      narration,
+      context.frame.resolvedAct?.lockedUtterances.map((utterance) => utterance.text) ?? [],
+    );
+    const perspectiveVoice = narrativeVoice
+      .replaceAll(context.frame.actor.name, "")
+      .replace(/(?:自我|本我|超我|忘我|无我|迷你|你死我活|你来我往)/gu, "");
+    if (/(?:你|您|你们|您们|我|我们|咱|咱们)/u.test(perspectiveVoice)
+      || /\b(?:you|your|yours|yourself|yourselves|i|me|my|mine|myself|we|us|our|ours|ourselves)\b/iu.test(perspectiveVoice)) {
+      throw new Error("Scene narrator broke the third-person narrative contract outside dialogue.");
+    }
+    if (context.purpose === "opening" && !narration.includes(context.frame.actor.name)) {
+      throw new Error("Opening narration did not identify its focal character.");
+    }
   }
   if (context?.purpose === "turn" && context.frame.resolvedAct?.worldStatus === "accepted") {
     for (const utterance of context.frame.resolvedAct.lockedUtterances) {
@@ -658,6 +775,26 @@ export function assertPlaySceneNarration(
   // Validate normalized prose, but preserve the provider's exact streamed
   // bytes so the settled transcript cannot silently rewrite what was shown.
   return text;
+}
+
+function proseOutsideQuotedSpeech(text: string, lockedUtterances: readonly string[]): string {
+  let prose = text;
+  for (const utterance of lockedUtterances) prose = prose.replaceAll(utterance, "");
+  return prose
+    .replace(/“[\s\S]*?”/gu, "")
+    .replace(/「[\s\S]*?」/gu, "")
+    .replace(/『[\s\S]*?』/gu, "")
+    .replace(/‘[\s\S]*?’/gu, "")
+    .replace(/"[^"\n]*"/gu, "")
+    .replace(/'[^'\n]*'/gu, "")
+    .replace(/^(?:—|——)\s*.*$/gmu, "");
+}
+
+function frameWithoutReaderPrelude(
+  frame: Readonly<PlayerSceneNarratorFrame>,
+): PlayerSceneNarratorFrame {
+  const { readerPrelude: _readerPrelude, ...retained } = frame;
+  return retained;
 }
 
 function normalizeNarrativeParagraph(value: string): string {

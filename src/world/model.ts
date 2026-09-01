@@ -985,11 +985,28 @@ export const branchSchema = z.object({
   name: z.string().min(1),
   sourceId: idSchema.optional(),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  /** Character whose grounded checkpoint seeded a fresh source-based instance. */
+  entryActorId: idSchema.optional(),
   createdAt: z.string().datetime({ offset: true }).optional(),
   parentBranchId: idSchema.optional(),
   forkCommitId: idSchema.optional(),
   headCommitId: idSchema,
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.preparedRevisionHash && !value.sourceId) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["preparedRevisionHash"],
+      message: "A frozen prepared revision requires a source identity",
+    });
+  }
+  if (value.entryActorId && (!value.sourceId || !value.preparedRevisionHash || value.parentBranchId)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["entryActorId"],
+      message: "An entry actor belongs only to a fresh source-based instance with a frozen prepared revision",
+    });
+  }
+});
 export type Branch = z.infer<typeof branchSchema>;
 export const worldCommitSchema = z.object({ version: z.literal(1), parentCommitId: idSchema.optional(), branchId: idSchema, logicalTime: logicalTimeSchema, eventHashes: z.array(idSchema), canonicalSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), engineVersion: z.string().min(1), schemaVersion: z.number().int().positive() }).strict();
 export type WorldCommit = z.infer<typeof worldCommitSchema>;

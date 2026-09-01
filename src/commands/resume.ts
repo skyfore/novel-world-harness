@@ -3,7 +3,6 @@ import { choosePlayExperience, type AskPlayQuestion, type PlayInstanceMode } fro
 import { askUserQuestion } from "../util/ask-user-question.js";
 import { playCommand } from "./play.js";
 import { playSceneRequestForEntry } from "../world/play-opening.js";
-import { formatReaderEntryContext } from "../world/entry-context.js";
 
 export type ResumeCommandOptions = {
   root: string;
@@ -33,9 +32,6 @@ export async function resumeCommand(options: ResumeCommandOptions): Promise<void
     },
   }, options.ask ?? askUserQuestion);
   if (!selection) return;
-  if (selection.readerContext) {
-    process.stdout.write(`${formatReaderEntryContext(selection.readerContext, selection.actor.canonicalName)}\n`);
-  }
   await playCommand({
     root: options.root,
     configPath: options.configPath,

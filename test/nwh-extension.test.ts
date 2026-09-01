@@ -180,10 +180,10 @@ async function fixture(
       ? { playerWorldAdjudicator: extensionConfig.playerWorldAdjudicator }
       : {}),
     playerOpeningNarrator: playerOpeningNarrator ?? (async (frame, purpose) => purpose === "opening"
-      ? `门外的风声忽远忽近，你的意识落回此刻。${frame.actor.name}所能确认的一切都在眼前，尚未发生的事仍旧沉默。门缝下的光被什么遮住了一瞬，檐下铜铃却没有响；片刻之后，木板深处又传来一声很轻的摩擦。`
+      ? `门外的风声忽远忽近，${frame.actor.name}的意识落回此刻。他所能确认的一切都在眼前，尚未发生的事仍旧沉默。门缝下的光被什么遮住了一瞬，檐下铜铃却没有响；片刻之后，木板深处又传来一声很轻的摩擦。`
       : purpose === "turn"
-        ? `脚下的路已经把你带离原处，新的位置与刚才的行动一起成为无法抹去的事实。${frame.actor.name}能感到行动留下的余波，鞋底还沾着一路带来的细尘。近处的风向已经变了，陌生墙面把远处的声响折回来，身后的来路渐渐沉入昏暗。`
-        : `方才的余波还停在感官里，你重新看清自己所处的这一刻。${frame.actor.name}所知道的事情没有凭空增减，周围也没有多出未经证实的答案。近处的光线缓慢移动，刚才那阵响动在墙后停住，空气里只留下潮湿木料的气味。`),
+        ? `脚下的路已经把${frame.actor.name}带离原处，新的位置与刚才的行动一起成为无法抹去的事实。他能感到行动留下的余波，鞋底还沾着一路带来的细尘。近处的风向已经变了，陌生墙面把远处的声响折回来，身后的来路渐渐沉入昏暗。`
+        : `方才的余波还停在感官里，${frame.actor.name}重新看清所处的这一刻。他所知道的事情没有凭空增减，周围也没有多出未经证实的答案。近处的光线缓慢移动，刚才那阵响动在墙后停住，空气里只留下潮湿木料的气味。`),
     ...(activeWorldScene !== undefined ? { activeWorldScene } : {}),
     ...(restoreSavedWorldOnStartup !== undefined ? { restoreSavedWorldOnStartup } : {}),
     ...(runReparse ? { runReparse } : {}),
@@ -1001,7 +1001,7 @@ describe("NWH TUI extension", () => {
     const reopened = await openWorkspaceWorld(root);
     const head = await reopened.engine.branches.readHead("main");
     expect((await reopened.engine.projector.project(head)).values.hero?.["character.location"]).toBe("camp");
-    expect(sentVisibleMessages.join("\n")).toContain("脚下的路已经把你带离原处");
+    expect(sentVisibleMessages.join("\n")).toContain("脚下的路已经把林岐带离原处");
     expect(sentVisibleMessages.join("\n")).not.toContain("Committed at step 1");
     expect(widgets.flatMap((widget) => widget ?? []).join("\n")).toContain("正在理解你的行动");
     expect(notifications).toEqual([]);
@@ -1126,8 +1126,8 @@ describe("NWH TUI extension", () => {
         purposes.push(purpose);
         if (purpose === "turn") turnFrames.push(JSON.stringify(frame));
         return purpose === "opening"
-          ? "冷风从门缝里钻进来，你的意识落回眼前。屋檐下的光影正在缓慢移动，远处的声音被墙面折回，方向仍隐在没有看清的细节里。门板深处又传来一声很轻的摩擦。"
-          : "你停在当前的位置，把注意力收回眼前。风声、光影和墙面转角依次进入视野，几处门框的轮廓在明暗之间分开，更远的字迹仍被阴影遮住。走廊尽头，一片窄窄的光斑正落在墙角。";
+          ? "冷风从门缝里钻进来，福贵的意识落回眼前。屋檐下的光影正在缓慢移动，远处的声音被墙面折回，方向仍隐在没有看清的细节里。门板深处又传来一声很轻的摩擦。"
+          : "福贵停在当前的位置，把注意力收回眼前。风声、光影和墙面转角依次进入视野，几处门框的轮廓在明暗之间分开，更远的字迹仍被阴影遮住。走廊尽头，一片窄窄的光斑正落在墙角。";
       },
       undefined,
       undefined,
@@ -1187,8 +1187,8 @@ describe("NWH TUI extension", () => {
     const turnNarrated = deferred();
     const translatedUtterances: string[] = [];
     let adjudicationCalls = 0;
-    const opening = "冷风从门缝里钻进来，你听见近处细碎的响动。光影落在脚边，已经知道的事没有凭空改变；门板深处的摩擦声停了片刻，又比先前更近地响了一次。墙角薄灰被风卷出一道弯曲的痕迹。";
-    const afterObserve = "你把注意力收回眼前，细小的风声、光影和近处动静重新有了层次。门缝右侧留着一道新鲜划痕，细灰在边缘堆成浅线；木板另一侧的呼吸声忽然停住，走廊也随之安静下来。";
+    const opening = "冷风从门缝里钻进来，福贵听见近处细碎的响动。光影落在脚边，已经知道的事没有凭空改变；门板深处的摩擦声停了片刻，又比先前更近地响了一次。墙角薄灰被风卷出一道弯曲的痕迹。";
+    const afterObserve = "福贵把注意力收回眼前，细小的风声、光影和近处动静重新有了层次。门缝右侧留着一道新鲜划痕，细灰在边缘堆成浅线；木板另一侧的呼吸声忽然停住，走廊也随之安静下来。";
     const { commands, root } = await fixture(
       undefined,
       (input) => {
@@ -1415,7 +1415,7 @@ describe("NWH TUI extension", () => {
   });
 
   it("retains preflighted host actions when the narrator choice tool is empty", async () => {
-    const narration = "热风从门廊里缓缓挤过来，你听见脚边的沙粒被吹得轻轻滚动。眼前已经发生的事情没有退回原处，近处的光影却仍在一点点变化；墙后忽然传来一声短促的碰响，随后又只剩下压低了的说话声。";
+    const narration = "热风从门廊里缓缓挤过来，福贵听见脚边的沙粒被吹得轻轻滚动。眼前已经发生的事情没有退回原处，近处的光影却仍在一点点变化；墙后忽然传来一声短促的碰响，随后又只剩下压低了的说话声。";
     let translatorCalled = false;
     const { commands, root, sentVisibleMessages, sentMessages } = await fixture(
       undefined,
@@ -1468,7 +1468,7 @@ describe("NWH TUI extension", () => {
   it("bridges isolated narrator deltas into the active TUI before persisting the final scene", async () => {
     const started = deferred();
     const release = deferred();
-    const finalNarration = "黄昏的微光沿着门边慢慢退去，你听见近处的风声在停顿之间改变方向。熟悉与陌生的感觉同时压在心口，门框投下的影子越拉越长。檐角忽然落下一滴水，正砸在脚边那枚尚未干透的泥印中央。";
+    const finalNarration = "黄昏的微光沿着门边慢慢退去，福贵听见近处的风声在停顿之间改变方向。熟悉与陌生的感觉同时压在心口，门框投下的影子越拉越长。檐角忽然落下一滴水，正砸在脚边那枚尚未干透的泥印中央。";
     const { commands, root, sentMessages } = await fixture(
       undefined,
       undefined,
@@ -1541,7 +1541,7 @@ describe("NWH TUI extension", () => {
     const started = deferred();
     const release = deferred();
     const completed = deferred();
-    const finalNarration = "风声从看不见的地方穿过来，你重新意识到脚下的世界仍停在原处。眼前能够确认的细节没有变化，记忆里已经知道的事情也没有多出答案。墙后传来一声压低的咳嗽，随即被木门合页细长的轻响盖住。";
+    const finalNarration = "风声从看不见的地方穿过来，福贵重新意识到脚下的世界仍停在原处。眼前能够确认的细节没有变化，记忆里已经知道的事情也没有多出答案。墙后传来一声压低的咳嗽，随即被木门合页细长的轻响盖住。";
     const { events, root, sentMessages } = await fixture(
       undefined,
       undefined,
@@ -1793,7 +1793,7 @@ describe("NWH TUI extension", () => {
       undefined,
       async () => {
         narratorCalls += 1;
-        return "风从院墙上缓慢压下来，你站在门窗投下的阴影里。脚下的尘土被吹开一小片，远处模糊的响动隔着墙时断时续。窗纸忽然向内凹了一下，又慢慢恢复原状，院角那串铜片始终没有发出声音。";
+        return "风从院墙上缓慢压下来，福贵站在门窗投下的阴影里。脚下的尘土被吹开一小片，远处模糊的响动隔着墙时断时续。窗纸忽然向内凹了一下，又慢慢恢复原状，院角那串铜片始终没有发出声音。";
       },
     );
     const canon = new CanonicalModelStore(root);
@@ -1974,7 +1974,7 @@ describe("NWH TUI extension", () => {
 
   it("automatically recovers a legacy transcript that ended on a raw engine rejection", async () => {
     const purposes: string[] = [];
-    const recovery = "你重新把注意力放回眼前，风声和近处细小的动静都还停留在原来的位置。刚才没有任何未经确认的结果被写进世界，现场也没有因此消失。你仍然可以观察、整理已知之事，或者换一个更明确的即时行动，让这一刻从自己的选择继续。";
+    const recovery = "福贵重新把注意力放回眼前，风声和近处细小的动静都还停留在原来的位置。刚才没有任何未经确认的结果改变现场，眼前的一切也没有因此消失。他仍停在原处，近旁那道细响沿着门板缓慢退去，只留下一线尚未落定的薄灰。";
     const { events, root } = await fixture(
       undefined,
       undefined,
@@ -2020,7 +2020,7 @@ describe("NWH TUI extension", () => {
   });
 
   it("renders native narrator text and thinking deltas and persists exactly the streamed final text", async () => {
-    const narration = "雨声沿着屋檐一寸寸落下，你站在昏暗的门槛前。眼前能确认的痕迹都留在湿润光线里，远处的动静却还没有给出答案。檐角最后一滴水砸进石缝，门内随即传来衣料擦过木板的窸窣声。";
+    const narration = "雨声沿着屋檐一寸寸落下，福贵站在昏暗的门槛前。眼前能确认的痕迹都留在湿润光线里，远处的动静却还没有给出答案。檐角最后一滴水砸进石缝，门内随即传来衣料擦过木板的窸窣声。";
     const { commands, root, sentMessages } = await fixture(
       undefined,
       undefined,
@@ -2120,7 +2120,7 @@ describe("NWH TUI extension", () => {
 
   it("disposes a rejected scene stream before mounting the replacement attempt", async () => {
     const rejected = "首稿只是一段不足以成立的场景。";
-    const accepted = "夜色压低了远处的轮廓，你仍站在原来的位置。近处能够确认的声音和光线都属于此刻，墙上的影子随着灯芯轻轻摇晃。门外传来一声鞋底碾过碎石的脆响，随后停在离门槛很近的地方。";
+    const accepted = "夜色压低了远处的轮廓，福贵仍站在原来的位置。近处能够确认的声音和光线都属于此刻，墙上的影子随着灯芯轻轻摇晃。门外传来一声鞋底碾过碎石的脆响，随后停在离门槛很近的地方。";
     const { commands, root, sentMessages } = await fixture(
       undefined,
       undefined,
@@ -2179,8 +2179,8 @@ describe("NWH TUI extension", () => {
   });
 
   it("rejects a settled narrator result that differs from the native text stream", async () => {
-    const streamed = "雨停在门槛之外，你能听见檐角最后几滴水落下。屋里没有新的事实凭空出现，眼前仍只有已经看见的门和微暗的光。靠近门轴的位置泛着一线湿亮，木板另一侧忽然传来短促的呼吸声。";
-    const settled = "这是一段与用户实际看到的流不相同、因此绝不能写入会话的替代文本。它即使看起来完整，也不能越过真实流与最终消息必须一致的校验边界。用户应当得到明确失败，而不是被悄悄替换输出。";
+    const streamed = "雨停在门槛之外，福贵能听见檐角最后几滴水落下。屋里没有新的事实凭空出现，眼前仍只有已经看见的门和微暗的光。靠近门轴的位置泛着一线湿亮，木板另一侧忽然传来短促的呼吸声。";
+    const settled = "福贵站在门槛内侧，雨后的冷意沿着木纹缓慢渗进屋里。檐角的水滴已经停住，门轴附近那线湿亮却仍在微光中发颤。木板另一侧没有脚步离去的声音，只有一道短促呼吸贴着门缝落下。";
     const { commands, root, sentMessages } = await fixture(
       undefined,
       undefined,
@@ -2226,7 +2226,7 @@ describe("NWH TUI extension", () => {
   it("keeps free-form input available beside grounded host choices and routes it through the normal player gate", async () => {
     const translated = deferred();
     const utterances: string[] = [];
-    const narratorText = "冷风卷过空地，你听见脚边细碎的沙石声。近处的光影和记忆里已经知道的事情彼此交错，却没有带来新的答案。门边压着半片被雨浸透的叶子，叶脉上的水珠正沿着石阶一格一格滚落。";
+    const narratorText = "冷风卷过空地，福贵听见脚边细碎的沙石声。近处的光影和记忆里已经知道的事情彼此交错，却没有带来新的答案。门边压着半片被雨浸透的叶子，叶脉上的水珠正沿着石阶一格一格滚落。";
     const { commands, root } = await fixture(
       undefined,
       async (input) => {

@@ -135,8 +135,10 @@ development. It cannot stream prose. In parallel, private style and dramaturgy
 specialists produce bounded advisory records. A fresh final narrator then sees
 the actor-safe committed frame, exact resolved act/locked dialogue, admitted
 style-only source prose, exact presentation-only play continuity, and successful
-advisories; it receives read-only retrieval but no choice or analysis capture
-tool. Only this final session streams into the TUI.
+advisories; a fresh step-zero entry additionally receives a pinned reader-only
+prelude that never reaches the choice or semantic loops. It receives read-only
+retrieval but no choice or analysis capture tool. Only this final session streams
+focalized third-person prose into the TUI.
 
 The structural choice contract enforces only action-only object shape, bounded
 count/length, and duplicate removal; behavioral semantics remain the isolated
@@ -153,10 +155,11 @@ checks, engine validation, and commit path as typed player input.
 The prose and choice channels are also separate. The narrator may end on a
 concrete current fact, sensation, motion, spoken cue, or unresolved signal, but
 may not append “你可以……”, “是……还是……”, “下一步由你决定”, or equivalent
-player-facing action scaffolding. This is a model-layer semantic constraint;
-host validation remains language-neutral except for exact preservation of
-committed locked utterances, and otherwise checks structural narration
-properties. Model-authored possible actions may appear only in the private
+player-facing action scaffolding. Menu detection remains a model-layer semantic
+constraint. Host validation additionally enforces the third-person narrative
+contract outside quoted speech, the focal character's name in an opening, exact
+committed locked utterances, and other structural narration properties.
+Model-authored possible actions may appear only in the private
 choice specialist's `propose_player_choices`; private host exits are merged
 later and never enter the final narrator prompt.
 

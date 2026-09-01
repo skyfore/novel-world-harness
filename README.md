@@ -36,7 +36,7 @@ The governing invariant is:
 proposal -> validate -> commit -> render
 ```
 
-See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [ADR 0004](docs/adr/0004-model-first-player-intent-and-world-adjudication.md) for model-first player intent and world consequences, [ADR 0006](docs/adr/0006-reader-context-character-entry-and-progress.md) for reader context, role entry, presence, and material progression, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, [the cited semantic-compilation research and technical plan](docs/novel-semantic-compilation-plan.zh-CN.md) for the ontology audit and phased roadmap, [the Web UI MVP design](docs/web-ui-mvp-design.zh-CN.md) for the browser, play-trace, and ontology workbench proposal, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
+See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [ADR 0004](docs/adr/0004-model-first-player-intent-and-world-adjudication.md) for model-first player intent and world consequences, [ADR 0006](docs/adr/0006-reader-context-character-entry-and-progress.md) for reader context, role entry, presence, and material progression, [ADR 0008](docs/adr/0008-frozen-base-isolated-play-and-third-person-narration.md) for frozen bases, isolated new play, and third-person prose, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, [the cited semantic-compilation research and technical plan](docs/novel-semantic-compilation-plan.zh-CN.md) for the ontology audit and phased roadmap, [the Web UI MVP design](docs/web-ui-mvp-design.zh-CN.md) for the browser, play-trace, and ontology workbench proposal, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
 
 The browser MVP's requirement-to-code-to-test release gate is recorded in the
 [Web UI MVP acceptance matrix](docs/web-ui-mvp-acceptance.zh-CN.md).
@@ -450,14 +450,16 @@ role uses the accepted opening cut; a supporting role begins at its first
 source-backed embodied scene, with prior main-timeline effects and an explicit
 pre-event actor checkpoint but without realizing that scene's canonical outcome.
 A step-zero opening instance is preserved and a sibling is created when a later
-role is selected. Before opening narration, the UI shows a source-grounded,
+role is selected. The final opening narrator weaves a source-grounded,
 spoiler-free reader setup for the novel's place, time, people, needed premise,
-and unresolved situation. The opening role additionally requires explicit
-physical presence and grounded location, plan, or momentum. For a later role it also shows every prior discourse
+and unresolved situation into continuous third-person prose. The opening role
+additionally requires explicit physical presence and grounded location, plan, or
+momentum. For a later role the opening also incorporates every prior discourse
 event as a source-grounded recap with participants, time/mode, and causal links.
-That context is display-only—not actor knowledge or model context—and a later role
-is unavailable until all of its prior recaps and actionable entry checkpoint are
-complete.
+That channel is presentation-only—not actor knowledge or world state—and is
+excluded from action choices, intent translation, adjudication, and NPC
+reasoning. A later role is unavailable until all of its prior recaps and
+actionable entry checkpoint are complete.
 
 Scene narration follows the command's intent: `play` makes the narrator speak
 first for the chosen character, `create` opens a new story, and an actual
@@ -468,9 +470,11 @@ through an explicit player-entry command gets one orientation; an unbound
 explicitly re-renders a selected current moment. The scene path first runs three
 private isolated specialists in parallel: concrete next-action choice, literary
 style, and immediate-beat dramaturgy. A fresh final narrator receives their
-bounded advisories plus an authority-ranked packet containing the committed
+bounded advisories plus an authority-ranked packet containing the third-person
+narrative contract, committed
 actor frame, the exact resolved player act and locked dialogue, narrator-safe
-style-only source excerpts, and exact presentation-only play prose. It has only
+style-only source excerpts, exact presentation-only play prose, and—only for a
+fresh opening—the reader-orientation prelude. It has only
 read access over actor-safe context and branch-safe conversation memory; no
 choice, analysis, file, or mutation tool. Only this final session streams its Pi
 events into the current TUI. It automatically retries a structurally invalid,

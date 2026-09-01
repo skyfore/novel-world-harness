@@ -233,9 +233,13 @@ The general model inside `nwh` / `nwh play` remains read-only with respect to fi
 
 For a new instance, the role is resolved before genesis. An opening role uses the
 accepted opening cut; a later role receives a sibling branch at its first
-source-backed embodied checkpoint plus a display-only recap of every preceding
-discourse event. That reader recap never enters actor knowledge, the player-action
-model, NPC reasoning, or scene narration input.
+source-backed embodied checkpoint plus a reader-only recap of every preceding
+discourse event. The final step-zero opening renderer may weave that recap into
+continuous third-person novel prose, but it never enters actor knowledge, the
+player-action/choice model, NPC reasoning, adjudication, or world state. Every
+modern instance exposes one checked frozen-base identity made from its source,
+prepared revision, and canonical snapshot hashes; each intentional new Play
+creates a separate branch and conversation.
 
 ## Removed obsolete scaffold
 

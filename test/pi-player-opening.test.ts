@@ -81,7 +81,7 @@ function frame(): PlayOpeningFrame {
 }
 
 const styleAnalysis = {
-  proseMode: "贴近人物身体感受的第二人称限知叙事",
+  proseMode: "贴近人物身体感受的第三人称限知叙事",
   syntax: ["长句承载感官流动，短句压住转折"],
   diction: ["克制、具体，不使用游戏术语"],
   cadence: "先缓后紧，在台词后留出静默",
@@ -111,7 +111,7 @@ describe("Pi player scene narrator", () => {
   it("keeps valid literary prose when optional experts omit or fail their capture calls", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-opening-soft-experts-"));
     roots.push(root);
-    const narration = "闷热的风贴着走廊缓慢移动，你听见自己的问话越过门槛——“门外是谁？”尾音碰上木板，轻得像一粒灰。墙内断续的说话声听不真切，鞋底擦过水泥地面时，那声短促的金属碰响又从前方落下来，近得像有什么刚刚碰上门框。";
+    const narration = "闷热的风贴着走廊缓慢移动，福贵听见方才的问话越过门槛——“门外是谁？”尾音碰上木板，轻得像一粒灰。墙内断续的说话声听不真切，鞋底擦过水泥地面时，那声短促的金属碰响又从前方落下来，近得像有什么刚刚碰上门框。";
     const calls: Array<{ kind: ReturnType<typeof toolKind>; prompt: string; streamed: boolean; system: string }> = [];
     vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
       const names = options.additionalTools?.map((tool) => tool.name) ?? [];
@@ -132,8 +132,15 @@ describe("Pi player scene narrator", () => {
       } as unknown as PiAgentSession;
     });
     const attempts: number[] = [];
+    const turnFrame = playerSceneModelFrame(frame());
+    turnFrame.readerPrelude = {
+      authority: "reader-orientation-only",
+      entryTitle: "小说开场",
+      entrySetup: "NON_OPENING_PRELUDE_MUST_BE_DROPPED",
+      storySoFar: [],
+    };
 
-    const result = await createPiPlayerOpeningNarrator({ root })(playerSceneModelFrame(frame()), "turn", {
+    const result = await createPiPlayerOpeningNarrator({ root })(turnFrame, "turn", {
       onAttempt: (attempt) => attempts.push(attempt),
     });
 
@@ -147,17 +154,19 @@ describe("Pi player scene narrator", () => {
     expect(choice.prompt).toContain("我刚才问过门外是谁");
     expect(choice.prompt).not.toContain("风贴着旧门走");
     expect(final.system).toContain("final literary narrator");
+    expect(final.system).toContain("focalized third-person");
     expect(final.prompt).toContain("sourceReferences contains exact source-novel prose");
     expect(final.prompt).toContain("风贴着旧门走");
     expect(final.prompt).toContain("上一阵风停在门槛外");
     expect(final.prompt).not.toContain("private-source-id");
     expect(final.prompt).not.toContain("propose_player_choices");
+    expect(calls.every((call) => !call.prompt.includes("NON_OPENING_PRELUDE_MUST_BE_DROPPED"))).toBe(true);
   });
 
   it("fans private choice, style, and dramaturgy experts into a tool-free literary narrator", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-opening-fan-in-"));
     roots.push(root);
-    const narration = "门缝里的风卷起脚边一层薄灰，你的呼吸在开口前顿了一下。“门外是谁？”问句越过门槛，撞进木板另一侧的昏暗里。没有答案立刻回来；昏黄灯光只沿门框轻轻晃动，那道新鲜划痕仍停在鞋尖前，片刻之后，一声压得极低的咳嗽贴着门板落下，又倏然安静。";
+    const narration = "门缝里的风卷起脚边一层薄灰，福贵的呼吸在开口前顿了一下。“门外是谁？”问句越过门槛，撞进木板另一侧的昏暗里。没有答案立刻回来；昏黄灯光只沿门框轻轻晃动，那道新鲜划痕仍停在鞋尖前，片刻之后，一声压得极低的咳嗽贴着门板落下，又倏然安静。";
     const prompts = new Map<string, string>();
     const toolResults: string[] = [];
     const narratorToolNames: string[][] = [];
@@ -224,7 +233,7 @@ describe("Pi player scene narrator", () => {
   it("does not use host phrase matching to reject structurally valid literary output", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-opening-language-neutral-"));
     roots.push(root);
-    const narration = "REJECTED_DRAFT_SENTINEL：风从门缝里挤进来，卷起脚边一层薄灰。你听见自己问出“门外是谁？”，门板随之轻轻震动，昏黄灯光沿着墙角晃了一下。那道新鲜划痕还留在鞋尖前，木板另一侧的呼吸声却忽然停住。你可以先检查门前，也可以隔门询问，或者转身离开——下一步由你决定。";
+    const narration = "REJECTED_DRAFT_SENTINEL：福贵听见风从门缝里挤进来，卷起脚边一层薄灰。他问出“门外是谁？”，门板随之轻轻震动，昏黄灯光沿着墙角晃了一下。那道新鲜划痕还留在鞋尖前，木板另一侧的呼吸声却忽然停住。他可以先检查门前，也可以隔门询问，或者转身离开——下一步由福贵决定。";
     const prompts: Array<{ kind: ReturnType<typeof toolKind>; prompt: string }> = [];
     let created = 0;
     vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
@@ -249,8 +258,15 @@ describe("Pi player scene narrator", () => {
       } as unknown as PiAgentSession;
     });
     const attempts: number[] = [];
+    const openingFrame = playerSceneModelFrame(frame());
+    openingFrame.readerPrelude = {
+      authority: "reader-orientation-only",
+      entryTitle: "小说开场",
+      entrySetup: "READER_PRELUDE_SENTINEL：福贵在旧门前等待一场尚未得到回应的会面。",
+      storySoFar: [],
+    };
 
-    const result = await createPiPlayerOpeningNarrator({ root })(playerSceneModelFrame(frame()), "opening", {
+    const result = await createPiPlayerOpeningNarrator({ root })(openingFrame, "opening", {
       onAttempt: (attempt) => attempts.push(attempt),
     });
 
@@ -263,17 +279,21 @@ describe("Pi player scene narrator", () => {
     expect(finalPrompt).not.toContain("branch-stable-id");
     expect(finalPrompt).not.toContain("commit-stable-id");
     expect(finalPrompt).not.toContain("hero-stable-id");
+    expect(finalPrompt).toContain("READER_PRELUDE_SENTINEL");
     expect(choicePrompt).toContain("exact concrete thing the actor could do now");
     expect(choicePrompt).toContain("leaves a later model to decide");
     expect(choicePrompt).not.toContain("aff-observe");
+    expect(choicePrompt).not.toContain("READER_PRELUDE_SENTINEL");
+    expect(prompts.find((entry) => entry.kind === "style")?.prompt).not.toContain("READER_PRELUDE_SENTINEL");
+    expect(prompts.find((entry) => entry.kind === "dramaturgy")?.prompt).not.toContain("READER_PRELUDE_SENTINEL");
   });
 
   it("retries only the final literary session when committed dialogue is omitted", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-pi-opening-dialogue-retry-"));
     roots.push(root);
     const drafts = [
-      "FIRST_DRAFT_WITHOUT_DIALOGUE：风从门缝里挤进来，薄灰沿着你的鞋尖缓慢打转。木板另一侧始终没有清楚的回应，只有一道细微的摩擦声贴着门框落下；你站在原地，方才开口后的呼吸还没有完全平复，走廊深处的灯影便轻轻晃了一次。",
-      "风从门缝里挤进来，薄灰沿着你的鞋尖缓慢打转。你抬眼望着门板，让那句话完整地落过去：“门外是谁？”尾音停住后，木板另一侧仍没有清楚的回应；只有一道细微的摩擦声贴着门框落下，走廊深处的灯影随之轻轻晃了一次。",
+      "FIRST_DRAFT_WITHOUT_DIALOGUE：风从门缝里挤进来，薄灰沿着福贵的鞋尖缓慢打转。木板另一侧始终没有清楚的回应，只有一道细微的摩擦声贴着门框落下；他站在原地，方才开口后的呼吸还没有完全平复，走廊深处的灯影便轻轻晃了一次。",
+      "风从门缝里挤进来，薄灰沿着福贵的鞋尖缓慢打转。他抬眼望着门板，让那句话完整地落过去：“门外是谁？”尾音停住后，木板另一侧仍没有清楚的回应；只有一道细微的摩擦声贴着门框落下，走廊深处的灯影随之轻轻晃了一次。",
     ];
     const counts = { choice: 0, style: 0, dramaturgy: 0, narrator: 0 };
     const narratorPrompts: string[] = [];

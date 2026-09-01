@@ -13,7 +13,9 @@ import { playerSceneChoicesSchema, type PlayerSceneChoice } from "../agent/playe
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import type { LlmProfile } from "../config/schema.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { WorkspaceStore } from "../storage/workspace-store.js";
 import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
+import { readFrozenWorldBase } from "../world/base.js";
 import { deriveCharacterEntryOptions } from "../world/entry-context.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
 import {
@@ -62,6 +64,9 @@ import {
   removePlaySessionResultSchema,
   sceneNarrationRequestSchema,
   sceneNarrationResultSchema,
+  sourcePlayRoleListSchema,
+  startFreshPlayRequestSchema,
+  startFreshPlayResultSchema,
   updatePlaySessionRequestSchema,
   type ClearPlayConversationResult,
   type CreatePlaySessionRequest,
@@ -79,6 +84,9 @@ import {
   type RemovePlaySessionResult,
   type SceneNarrationRequest,
   type SceneNarrationResult,
+  type SourcePlayRoleList,
+  type StartFreshPlayRequest,
+  type StartFreshPlayResult,
   type UpdatePlaySessionRequest,
 } from "../web/contracts.js";
 import { WebEventBroker } from "../web/event-stream.js";
@@ -189,6 +197,125 @@ export class PlayApplicationService {
       ...(listed.source ? { sourceId: listed.source.id, sourceTitle: listed.source.title } : {}),
       characters,
     });
+  }
+
+  /** List role checkpoints from the active frozen base, not from a mutable branch head. */
+  async listSourceRoles(sourceId: string): Promise<SourcePlayRoleList> {
+    const workspace = await WorkspaceStore.create(this.root);
+    const source = await workspace.getSource(sourceId);
+    if (!source) throw this.sourceNotFound(sourceId);
+    let prepared;
+    try {
+      prepared = await new PreparedNovelCache(this.root, this.options.preparedCacheRoot).loadFreshActive(source);
+    } catch (error) {
+      throw webError(409, "FROZEN_BASE_NOT_READY", errorMessage(error), {
+        kind: "after-refresh",
+        discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(sourceId)}/preparation`,
+        copyField: "stage",
+        maxAttempts: 1,
+      });
+    }
+    if (!prepared) {
+      throw webError(409, "FROZEN_BASE_NOT_READY", `Novel '${source.title}' has no published frozen world base.`, {
+        kind: "after-user-action",
+        discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(sourceId)}/preparation`,
+        copyField: "nextAction",
+        maxAttempts: 1,
+      });
+    }
+    return sourcePlayRoleListSchema.parse({
+      sourceId: source.id,
+      sourceTitle: source.title,
+      preparedRevisionHash: prepared.bundleHash,
+      roles: deriveCharacterEntryOptions(prepared.bundle).map((entry) => ({
+        id: entry.actorId,
+        canonicalName: entry.canonicalName,
+        aliases: entry.aliases,
+        entryKind: entry.entry.kind,
+        entryTitle: entry.entry.title,
+      })),
+    });
+  }
+
+  /**
+   * Start a new playthrough as one atomic harness use case: select a role from
+   * the frozen base, create a sibling branch, and create its private
+   * conversation. The Web UI never assembles these state transitions itself.
+   */
+  async startFreshPlay(inputValue: StartFreshPlayRequest): Promise<StartFreshPlayResult> {
+    const input = startFreshPlayRequestSchema.parse(inputValue);
+    const execution = await this.mutations.execute({
+      kind: "fresh-play-start",
+      scopeId: input.sourceId,
+      clientRequestId: input.clientRequestId,
+      request: input,
+    }, () => this.startFreshPlayOnce(input));
+    return startFreshPlayResultSchema.parse({
+      ...execution.value,
+      reused: execution.reused,
+    });
+  }
+
+  private async startFreshPlayOnce(
+    input: StartFreshPlayRequest,
+  ): Promise<Omit<StartFreshPlayResult, "reused">> {
+    const roles = await this.listSourceRoles(input.sourceId);
+    if (roles.preparedRevisionHash !== input.preparedRevisionHash) {
+      throw webError(409, "FROZEN_BASE_MOVED", "The active frozen base changed after role selection. Refresh the role list before starting play.", {
+        kind: "after-refresh",
+        discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(input.sourceId)}/play-roles`,
+        copyField: "preparedRevisionHash",
+        maxAttempts: 1,
+      });
+    }
+    if (!roles.roles.some((role) => role.id === input.actorId)) {
+      throw webError(400, "PLAY_ROLE_NOT_IN_FROZEN_BASE", `Role '${input.actorId}' has no grounded entry in the active frozen base.`, {
+        kind: "after-refresh",
+        discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(input.sourceId)}/play-roles`,
+        copyField: "roles[].id",
+        maxAttempts: 1,
+      });
+    }
+    let selection;
+    try {
+      selection = await choosePlayExperience(this.root, {
+        source: input.sourceId,
+        expectedPreparedRevisionHash: input.preparedRevisionHash,
+        character: input.actorId,
+        instanceMode: "create",
+        preferSavedCharacter: false,
+        preferActiveSource: false,
+        ...(this.options.preparedCacheRoot ? { preparedCacheRoot: this.options.preparedCacheRoot } : {}),
+        sessionIdentity: newPlaySessionIdentity(),
+      }, async () => undefined);
+    } catch (error) {
+      throw webError(409, "FRESH_PLAY_START_FAILED", errorMessage(error), {
+        kind: "after-refresh",
+        discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(input.sourceId)}/play-roles`,
+        copyField: "preparedRevisionHash",
+        maxAttempts: 1,
+      });
+    }
+    if (!selection) {
+      throw webError(409, "FRESH_PLAY_START_FAILED", "The selected frozen-base role could not create a play instance.", {
+        kind: "after-refresh",
+        discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(input.sourceId)}/play-roles`,
+        copyField: "roles[].id",
+        maxAttempts: 1,
+      });
+    }
+    if (input.title && selection.session.title !== input.title) {
+      await this.sessions.updateMetadata(selection.session.id, { title: input.title });
+    }
+    const catalog = await this.catalog.read();
+    const instance = catalog.instances.find((candidate) => candidate.branchId === selection.session.branchId);
+    if (!instance) throw new Error(`Fresh instance '${selection.session.branchId}' was not discoverable after creation.`);
+    const [session, base] = await Promise.all([
+      this.getSession(selection.session.id),
+      readFrozenWorldBase(this.root, selection.session.branchId),
+    ]);
+    this.invalidateCatalog("fresh-play-created", selection.session.id);
+    return { instance, session, base };
   }
 
   async createSession(inputValue: CreatePlaySessionRequest): Promise<PlaySessionDetail> {
@@ -940,12 +1067,13 @@ export class PlayApplicationService {
       session.actorId,
       session.sourceId,
       session.conversationId,
+      this.options.preparedCacheRoot,
     );
     if (turnResolution) frame = { ...frame, turnResolution: structuredClone(turnResolution) };
     context.update("narrating", { purpose });
     try {
       const output = await narrator(
-        playerSceneModelFrame(frame),
+        playerSceneModelFrame(frame, purpose),
         purpose,
         {
           signal: context.signal,
@@ -962,7 +1090,7 @@ export class PlayApplicationService {
       context.signal.throwIfAborted();
       const narration = assertPlaySceneNarration(
         typeof output === "string" ? output : output.narration,
-        { frame: playerSceneModelFrame(frame), purpose },
+        { frame: playerSceneModelFrame(frame, purpose), purpose },
       );
       const narratedChoices = typeof output === "string"
         ? []
@@ -1092,6 +1220,15 @@ export class PlayApplicationService {
     return webError(404, "PLAY_SESSION_NOT_FOUND", `Unknown play session '${sessionId}'.`, {
       kind: "after-refresh",
       discoveryEndpoint: "/api/v1/play-sessions",
+      copyField: "id",
+      maxAttempts: 1,
+    });
+  }
+
+  private sourceNotFound(sourceId: string) {
+    return webError(404, "SOURCE_NOT_FOUND", `Unknown novel source '${sourceId}'.`, {
+      kind: "after-refresh",
+      discoveryEndpoint: "/api/v1/novels",
       copyField: "id",
       maxAttempts: 1,
     });

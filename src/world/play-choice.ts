@@ -86,6 +86,7 @@ export async function choosePlayExperience(
     instanceMode?: PlayInstanceMode;
     createIfMissing?: boolean;
     preparedCacheRoot?: string;
+    expectedPreparedRevisionHash?: string;
     sessionIdentity?: { id: string; conversationId: string };
     onInstanceLifecycle?: (event: PlayInstanceLifecycleEvent) => void;
   },
@@ -122,6 +123,11 @@ export async function choosePlayExperience(
     if (!source) throw new Error(`Unknown novel source '${sourceId}'.`);
     const prepared = await new PreparedNovelCache(root, options.preparedCacheRoot).loadFreshActive(source);
     if (!prepared) throw new Error(`Novel '${source.title}' has no active prepared revision with character entry checkpoints.`);
+    if (options.expectedPreparedRevisionHash && prepared.bundleHash !== options.expectedPreparedRevisionHash) {
+      throw new Error(
+        `Active prepared revision changed from ${options.expectedPreparedRevisionHash} to ${prepared.bundleHash}; refresh the frozen base before creating an instance.`,
+      );
+    }
     const entryOptions = deriveCharacterEntryOptions(prepared.bundle);
     if (!entryOptions.length) {
       throw new Error(`Novel '${source.title}' has no grounded embodied character entry with complete prior reader context. Recompile its opening and canonical scenes before play.`);
@@ -133,6 +139,7 @@ export async function choosePlayExperience(
       ...(mode === "create" ? { alwaysCreate: true } : {}),
       ...(mode === "create" && options.branchId ? { requestedBranchId: options.branchId } : {}),
       ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}),
+      expectedPreparedRevisionHash: prepared.bundleHash,
       entryActorId: createdActorId,
     });
     options.onInstanceLifecycle?.({
@@ -319,7 +326,13 @@ export async function createSourcePlayInstance(
   root: string,
   catalog: PlayExperienceCatalog,
   sourceId: string,
-  options: { alwaysCreate?: boolean; requestedBranchId?: string; cacheRoot?: string; entryActorId?: string } = {},
+  options: {
+    alwaysCreate?: boolean;
+    requestedBranchId?: string;
+    cacheRoot?: string;
+    entryActorId?: string;
+    expectedPreparedRevisionHash?: string;
+  } = {},
 ): Promise<PlayInstanceSummary> {
   const source = catalog.novels.find((novel) => novel.id === sourceId);
   if (!source) throw new Error(`Unknown novel source '${sourceId}'.`);
@@ -348,7 +361,15 @@ export async function createSourcePlayInstance(
       ].filter(Boolean).join(" "));
     }
   }
-  await createWorldBranch(root, branchId, undefined, sourceId, options.cacheRoot, options.entryActorId);
+  await createWorldBranch(
+    root,
+    branchId,
+    undefined,
+    sourceId,
+    options.cacheRoot,
+    options.entryActorId,
+    options.expectedPreparedRevisionHash,
+  );
   const refreshed = await inspectPlayExperience(root);
   const created = refreshed.instances.find((instance) => instance.branchId === branchId);
   if (!created) throw new Error(`Created instance '${branchId}' was not discoverable.`);

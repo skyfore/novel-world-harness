@@ -79,7 +79,6 @@ import { parseOrdinalSelection, reparseCommand } from "../commands/reparse.js";
 import { WorkspaceOperationLock, withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { NwhTask, showNwhTask, taskSummary } from "./nwh-task.js";
 import { createWorldBranch } from "../world/instance.js";
-import { formatReaderEntryContext } from "../world/entry-context.js";
 import {
   assertPlaySceneNarration,
   buildPlayOpeningFrame,
@@ -935,6 +934,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           selection.session.branchId,
           selection.actor.id,
           selection.source?.id,
+          undefined,
+          options.preparedCacheRoot,
         );
         if (turnResolution) {
           frame = {
@@ -963,12 +964,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
         });
         const output = await narrator(
-          playerSceneModelFrame(frame),
+          playerSceneModelFrame(frame, purpose),
           purpose,
           stream.observer,
           modelPlayConversation(frame.messageHistory),
         );
-        const narration = assertPlaySceneNarration(typeof output === "string" ? output : output.narration);
+        const narration = assertPlaySceneNarration(
+          typeof output === "string" ? output : output.narration,
+          { frame: playerSceneModelFrame(frame, purpose), purpose },
+        );
         const parsedChoices = typeof output === "string"
           ? undefined
           : playerSceneChoicesSchema.safeParse({ choices: output.choices });
@@ -1103,9 +1107,6 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         || previousSelection.actor.id !== selection.actor.id;
       if (selectionChanged) {
         for (const warning of selection.readinessWarnings) ctx.ui.notify(warning, "warning");
-        if (selection.readerContext) {
-          showPlayMessage(formatReaderEntryContext(selection.readerContext, selection.actor.canonicalName));
-        }
       }
       const requestedScene = input.scene ?? "none";
       const purpose = resolvePlayScenePurpose(requestedScene, {

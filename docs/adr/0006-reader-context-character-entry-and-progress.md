@@ -1,6 +1,6 @@
 # ADR 0006: Reader context, character entry, presence, and material progress
 
-- **Status:** Accepted
+- **Status:** Accepted; opening-renderer detail partially superseded by ADR 0008
 - **Date:** 2026-08-22
 - **Scope:** Novel onboarding, alternate-role checkpoints, participant presence, scene progression, and open-world pressure
 
@@ -40,8 +40,10 @@ time, and known causal-parent titles. It is rendered as a display-only
 checkpoint with no prior beats skips the empty recap. The player-facing preface
 never explains character-knowledge boundaries or uses engine terminology. A later
 role is not offered if any preceding event lacks its recap. Reader context is
-never written to `KnowledgeDelta`, world state, scene narration input, NPC input,
-or player-action model input. Actor capability and claims continue to come only
+never written to `KnowledgeDelta`, world state, NPC input, or player-action model
+input. Under ADR 0008, a bounded presentation-only form may enter only the final
+step-zero opening renderer so it can become seamless novel prose; it remains
+excluded from choice generation and every semantic decision. Actor capability and claims continue to come only
 from committed state, learned claims, and actor observations.
 
 ### 2. Select the role before creating its branch

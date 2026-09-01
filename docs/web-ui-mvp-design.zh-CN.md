@@ -697,6 +697,7 @@ POST   /api/v1/proposals/:proposalId/accept
 POST   /api/v1/proposals/:proposalId/reject
 POST   /api/v1/instances
 POST   /api/v1/instances/:branchId/fork
+POST   /api/v1/play-instances                    # 从 frozen base 原子创建独立 instance + session
 POST   /api/v1/play-sessions
 POST   /api/v1/play-sessions/:sessionId/moves  # text/intent/expectedHead/clientRequestId
 POST   /api/v1/play-sessions/:sessionId/retry-narration # sourceRunId/expectedHead/clientRequestId
@@ -708,6 +709,10 @@ DELETE /api/v1/instances/:branchId
 POST   /api/v1/novels/:sourceId/reset-analysis
 DELETE /api/v1/novels/:sourceId
 ```
+
+查询可从冻结底本进入的角色使用
+`GET /api/v1/novels/:sourceId/play-roles`。小说页的 Play 只调用上述
+`POST /play-instances`；继续已有 session 与创建全新 instance 在交互上明确分区。
 
 模型设置：
 

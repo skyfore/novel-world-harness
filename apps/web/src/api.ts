@@ -42,6 +42,9 @@ import {
   sceneNarrationRequestSchema,
   sourceRegistrationRequestSchema,
   sourceRegistrationResultSchema,
+  sourcePlayRoleListSchema,
+  startFreshPlayRequestSchema,
+  startFreshPlayResultSchema,
   updatePlaySessionRequestSchema,
   updateModelProfileRequestSchema,
   type ApiError,
@@ -89,6 +92,9 @@ import {
   type ProposalRejectRequest,
   type ProposalStatus,
   type SceneNarrationRequest,
+  type SourcePlayRoleList,
+  type StartFreshPlayRequest,
+  type StartFreshPlayResult,
   type SourceRegistrationRequest,
   type SourceRegistrationResult,
   type UpdatePlaySessionRequest,
@@ -147,6 +153,10 @@ export function fetchBootstrap(signal?: AbortSignal): Promise<BootstrapResponse>
 export function fetchCharacters(branchId: string, sourceId?: string, signal?: AbortSignal): Promise<PlayableCharacterList> {
   const query = sourceId ? `?sourceId=${encodeURIComponent(sourceId)}` : "";
   return request(`/api/v1/instances/${encodeURIComponent(branchId)}/characters${query}`, playableCharacterListSchema, { signal });
+}
+
+export function fetchSourcePlayRoles(sourceId: string, signal?: AbortSignal): Promise<SourcePlayRoleList> {
+  return request(`/api/v1/novels/${encodeURIComponent(sourceId)}/play-roles`, sourcePlayRoleListSchema, { signal });
 }
 
 export function fetchPlaySession(sessionId: string, signal?: AbortSignal): Promise<PlaySessionDetail> {
@@ -261,6 +271,10 @@ export function fetchTraceCall(callId: string, runId?: string, signal?: AbortSig
 
 export function createPlaySession(inputValue: CreatePlaySessionRequest, csrfToken: string): Promise<PlaySessionDetail> {
   return mutation("/api/v1/play-sessions", "POST", createPlaySessionRequestSchema.parse(inputValue), playSessionDetailSchema, csrfToken);
+}
+
+export function startFreshPlay(inputValue: StartFreshPlayRequest, csrfToken: string): Promise<StartFreshPlayResult> {
+  return mutation("/api/v1/play-instances", "POST", startFreshPlayRequestSchema.parse(inputValue), startFreshPlayResultSchema, csrfToken);
 }
 
 export function registerSource(inputValue: SourceRegistrationRequest, csrfToken: string): Promise<SourceRegistrationResult> {

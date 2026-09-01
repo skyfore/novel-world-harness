@@ -145,19 +145,19 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   const maraRow = page.locator(".ontology-table-row").filter({ hasText: "Mara" }).first();
   await expect(maraRow).toBeVisible();
   await maraRow.click();
-  await expect(page.locator(".ontology-inspector")).toContainText("Evidence");
+  await expect(page.locator(".ontology-inspector")).toContainText("Source evidence");
   await expect(page.locator(".ontology-inspector blockquote").first()).toContainText("Mara waits in the Hall");
 
   await page.goto(`${origin}/novels/${sourceId}`);
   await page.getByRole("button", { name: "Play", exact: true }).click();
-  const playLauncher = page.getByRole("dialog", { name: /Play / });
+  const playLauncher = page.getByRole("dialog", { name: /Enter / });
   await expect(playLauncher).toBeVisible();
-  await expect(playLauncher.getByLabel("World branch")).toHaveValue("main");
+  await expect(playLauncher).toContainText("Frozen world base");
   const playableMara = playLauncher.getByRole("radio", { name: /Mara/ });
   await expect(playableMara).toBeChecked();
-  await expect(playLauncher).toContainText("A fresh conversation will be created");
+  await expect(playLauncher).toContainText("Every new instance starts from this immutable revision");
   await playableMara.click();
-  await playLauncher.getByRole("button", { name: "Start a new session as Mara" }).click();
+  await playLauncher.getByRole("button", { name: "Start an independent instance as Mara" }).click();
   await expect(page).toHaveURL(/\/play\/play-[0-9a-f-]{36}$/);
   await expect(page.getByLabel("Play status")).toContainText("step 0");
 
@@ -248,7 +248,7 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
 
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "Remove", exact: true }).click();
-  await expect(page).toHaveURL(/\/instances\/main$/);
+  await expect(page).toHaveURL(/\/instances\/novel-[a-f0-9]{8}$/);
   await expect(page.locator(".metric").filter({ hasText: "Story step" })).toContainText("2");
 
   await page.getByRole("button", { name: "Preview instance removal" }).click();
@@ -282,10 +282,10 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
   await expect(page).toHaveURL(/\/instances\/trace-drawer$/);
   await page.goto(`${origin}/novels/${sourceId}`);
   await page.getByRole("button", { name: "Play", exact: true }).click();
-  const playLauncher = page.getByRole("dialog", { name: /Play / });
-  await expect(playLauncher.getByLabel("World branch")).toHaveValue("trace-drawer");
+  const playLauncher = page.getByRole("dialog", { name: /Enter / });
+  await expect(playLauncher).toContainText("Frozen world base");
   await expect(playLauncher.getByRole("radio", { name: /Mara/ })).toBeChecked();
-  await playLauncher.getByRole("button", { name: "Start a new session as Mara" }).click();
+  await playLauncher.getByRole("button", { name: "Start an independent instance as Mara" }).click();
   await expect(page).toHaveURL(/\/play\/play-[0-9a-f-]{36}$/);
 
   await expect(page.locator(".message-scene").last()).toContainText("斑驳的窗影");
@@ -416,6 +416,7 @@ async function seedBrowserCompilation(options: CompileSourceOptions): Promise<vo
   });
   await new InitialWorldStore(options.root).put({
     version: 1,
+    readerSetup: "Mara waits inside the rain-darkened Hall before deciding whether to approach the closed Garden door.",
     participantPresence: [{ entityId: heroId, mode: "physical" }],
     delta: {
       version: 1,
@@ -482,8 +483,8 @@ function tracedTranslator(store: TraceStore): PlayerActionTranslator {
 }
 
 function tracedNarrator(store: TraceStore): PlayerOpeningNarrator {
-  return async (_frame, purpose, observer) => {
-    const narration = `你站在大厅斑驳的窗影里，雨声从檐角缓慢落下，空气里有潮湿木料与泥土的气味。你听见自己的呼吸，也看见通往花园的门仍然关闭。此刻世界没有替你作出决定，只有已经发生的${purpose}场景等待你的下一步。`;
+  return async (frame, purpose, observer) => {
+    const narration = `${frame.actor.name}站在大厅斑驳的窗影里，雨声从檐角缓慢落下，空气里有潮湿木料与泥土的气味。他听见自己的呼吸，也看见通往花园的门仍然关闭。此刻世界没有替他作出决定，只有已经发生的${purpose}场景仍在眼前铺开，门边的微光随风轻轻一颤。`;
     await recordSyntheticModelCall(store, {
       invocationName: "render-player-scene",
       playerText: `Render ${purpose} narration from committed actor-visible state.`,

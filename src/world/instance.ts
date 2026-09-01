@@ -21,6 +21,7 @@ export async function createWorldBranch(
   sourceId?: string,
   cacheRoot?: string,
   entryActorId?: string,
+  expectedPreparedRevisionHash?: string,
 ): Promise<CreatedWorldBranch> {
   const workspace = await WorkspaceStore.create(root);
   const sources = await workspace.listSources();
@@ -35,6 +36,11 @@ export async function createWorldBranch(
   }
   const effectiveSourceId = source?.id;
   const prepared = source ? await new PreparedNovelCache(root, cacheRoot).loadFreshActive(source) : null;
+  if (expectedPreparedRevisionHash && prepared?.bundleHash !== expectedPreparedRevisionHash) {
+    throw new Error(
+      `Active prepared revision changed from ${expectedPreparedRevisionHash} to ${prepared?.bundleHash ?? "none"}; refresh the frozen base before creating an instance.`,
+    );
+  }
   const artifacts = prepared ? {
     entities: prepared.bundle.canonical.entities,
     propositions: prepared.bundle.canonical.propositions,

@@ -44,6 +44,7 @@ import {
   proposalRejectRequestSchema,
   sceneNarrationRequestSchema,
   sourceRegistrationRequestSchema,
+  startFreshPlayRequestSchema,
   updatePlaySessionRequestSchema,
   updateModelProfileRequestSchema,
   type ApiError,
@@ -350,6 +351,14 @@ export async function createWebHost(options: CreateWebHostOptions): Promise<NwhW
     return maintenance.removeNovel(sourceId, executeRemovalRequestSchema.parse(request.body));
   });
   app.get(`/api/${WEB_API_VERSION}/play-sessions`, async () => (await catalogService.read()).playSessions);
+  app.get(`/api/${WEB_API_VERSION}/novels/:sourceId/play-roles`, async (request) => {
+    const { sourceId } = sourceParamSchema.parse(request.params);
+    return play.listSourceRoles(sourceId);
+  });
+  app.post(`/api/${WEB_API_VERSION}/play-instances`, async (request, reply) => {
+    const result = await play.startFreshPlay(startFreshPlayRequestSchema.parse(request.body));
+    return reply.code(result.reused ? 200 : 201).send(result);
+  });
   app.get(`/api/${WEB_API_VERSION}/instances/:branchId/characters`, async (request) => {
     const { branchId } = branchParamSchema.parse(request.params);
     const { sourceId } = sourceQuerySchema.parse(request.query);

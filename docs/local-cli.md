@@ -222,16 +222,18 @@ remain unrealized so the player can act. If a step-zero opening instance already
 exists—even if it has been viewed or saved—selecting a later role creates a
 sibling instance instead of rewriting or jumping the old branch.
 
-Before an opening-role scene, NWH displays the initial world's source-grounded,
-spoiler-free reader setup: where, when, who, the premise needed to understand the
-scene, and its immediate unresolved situation. The opening role must also have
+Before an opening-role scene, NWH gives the final narrator the initial world's
+source-grounded, spoiler-free reader setup: where, when, who, the premise needed
+to understand the scene, and its immediate unresolved situation. The narrator
+weaves it into continuous focalized third-person prose. The opening role must also have
 explicit physical presence plus grounded location, plan, or momentum. Before a later-role scene, NWH
 displays the complete ordered source-event synopsis preceding that role entry as
 **reader context**. Every beat includes its
 source-grounded recap, participants, narrative mode/time, and available causal
 links; a later role is not offered if any prior recap is missing. Reader context
-is explicitly not character knowledge and is never sent to the narrator,
-translator, NPC reasoner, or world state. The scene timing then follows player intent: `play` renders the selected
+is explicitly not character knowledge and is sent only to the final step-zero
+opening renderer—not the choice expert, translator, adjudicator, NPC reasoner,
+or world state. The scene timing then follows player intent: `play` renders the selected
 character's current scene, `create` opens the new story, and a real `switch`
 re-orients the player at the selected head. `continue`, `resume`, and an ordinary
 restart preserve the existing time/conversation context without inserting

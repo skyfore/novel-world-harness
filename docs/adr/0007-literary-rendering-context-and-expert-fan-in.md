@@ -1,6 +1,6 @@
 # ADR 0007: Literary rendering uses authority-ranked context and isolated expert fan-in
 
-- **Status:** Accepted
+- **Status:** Accepted; narrative-person detail partially superseded by ADR 0008
 - **Date:** 2026-08-25
 - **Scope:** Player turns, committed dialogue, scene narration, source-prose admission, play continuity, and model-session orchestration
 
@@ -77,7 +77,8 @@ The final narrator receives the following channels in descending authority:
 4. **Play continuity.** Bounded exact player/scene prose from the selected actor,
    branch lineage, and commit ancestry. It preserves local voice, pronouns,
    spatial language, unfinished gestures, and discourse continuity, but remains
-   presentation-only memory.
+   presentation-only memory. Its prior pronouns do not override the host's
+   focalized third-person narrative contract.
 
 Specialist output is a fifth, lower-priority advisory layer. The final narrator
 must discard any advisory suggestion that conflicts with the four channels.

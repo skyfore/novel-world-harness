@@ -3,6 +3,11 @@ export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type Co
 export { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./compiler/boundary-calibration.js";
 export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleSchema, chapterSplitPlanSchema, type ChapterHeadingRule, type ChapterSplitPlan, type ChapterStructureSample } from "./compiler/chapter-split.js";
 export {
+  frozenWorldBaseSchema,
+  readFrozenWorldBase,
+  type FrozenWorldBase,
+} from "./world/base.js";
+export {
   convergeWorldProposals,
   quarantineInvalidResolutionBindings,
   quarantineUncommittableProposals,
@@ -320,6 +325,7 @@ export {
 export {
   assertPlaySceneNarration,
   buildPlayOpeningFrame,
+  readerNarrativePrelude,
   playSceneRequestForEntry,
   playSceneChoicePrompt,
   playerSceneModelFrame,
@@ -330,6 +336,8 @@ export {
   type PlayerLiteraryAdvisory,
   type PlayerLiteraryStyleAnalysis,
   type PlayerNarrativePlayExcerpt,
+  type PlayerNarrativeContract,
+  type PlayerReaderNarrativePrelude,
   type PlayerNarrativeResolvedAct,
   type PlayerNarrativeSourceExcerpt,
   type PlayerSceneDramaturgyAnalysis,

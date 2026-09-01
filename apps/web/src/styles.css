@@ -885,6 +885,8 @@ input, select, textarea { caret-color: var(--accent); }
 .novel-play-branch select:focus { border-color: #798d58; box-shadow: 0 0 0 2px #798d5826; }
 .novel-play-branch > small { display: grid; justify-items: end; gap: 4px; padding-bottom: 2px; color: var(--faint); font-size: 8px; white-space: nowrap; }
 .novel-play-branch code { color: #8b9485; }
+.novel-play-base { align-items: center; }
+.novel-play-base > strong { min-width: 0; overflow: hidden; color: #d8decf; font: 600 14px/1.35 "Playfair Display", Georgia, serif; text-overflow: ellipsis; white-space: nowrap; }
 .novel-play-roles { display: grid; gap: 10px; margin-top: 16px; }
 .novel-play-roles > header { display: flex; align-items: end; justify-content: space-between; gap: 20px; padding: 0 3px; }
 .novel-play-roles > header strong { display: block; margin-top: 6px; font: 600 17px/1.2 "Playfair Display", Georgia, serif; }
@@ -903,6 +905,18 @@ input, select, textarea { caret-color: var(--accent); }
 .novel-play-saved-session > span { color: var(--accent); font: 8px/1 "DM Mono"; letter-spacing: .07em; text-transform: uppercase; }
 .novel-play-saved-session > strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .novel-play-saved-session > small { color: var(--faint); font-size: 8px; white-space: nowrap; }
+.novel-play-saved-list { display: grid; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid #30372d; }
+.novel-play-saved-list > header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 0 3px; }
+.novel-play-saved-list > header span { color: #b8c4ac; font-size: 10px; font-weight: 700; }
+.novel-play-saved-list > header small { color: var(--faint); font-size: 8px; text-align: right; }
+.novel-play-saved-list > div { display: grid; gap: 6px; }
+.novel-play-saved-list a { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 48px; padding: 9px 11px; border: 1px solid #343d31; border-radius: 8px; background: #111510; color: var(--text); text-decoration: none; }
+.novel-play-saved-list a:hover { border-color: #60704e; background: #151a14; }
+.novel-play-saved-list a span { min-width: 0; display: grid; gap: 4px; }
+.novel-play-saved-list a strong, .novel-play-saved-list a small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.novel-play-saved-list a strong { font-size: 10px; }
+.novel-play-saved-list a small { color: var(--faint); font-size: 8px; }
+.novel-play-saved-list a em { flex: none; color: var(--accent); font: 7px/1 "DM Mono"; font-style: normal; text-transform: uppercase; }
 .novel-play-body > .inline-error { margin-top: 12px; }
 .novel-play-dialog > footer { min-height: 68px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid #30372d; background: #101310; }
 .novel-play-dialog > footer .primary-button { min-width: 190px; }

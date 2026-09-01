@@ -51,8 +51,8 @@ async function fixture() {
   return { root, engine, genesis, events, operations };
 }
 
-const narrator: PlayerOpeningNarrator = (_frame, purpose, observer) => {
-  const narration = `你站在前厅斑驳的窗影里，风从门缝缓慢穿过，带来远处草木与尘土的气味。你听见自己的呼吸落在寂静中，也看见通往营地的道路在门外延伸。此刻没有任何力量替你作出决定，只有眼前已经发生的${purpose}场景，等待你的下一步。`;
+const narrator: PlayerOpeningNarrator = (frame, purpose, observer) => {
+  const narration = `${frame.actor.name}站在前厅斑驳的窗影里，风从门缝缓慢穿过，带来远处草木与尘土的气味。他听见自己的呼吸落在寂静中，也看见通往营地的道路在门外延伸。此刻没有任何力量替他作出决定，只有眼前已经发生的${purpose}场景仍在延展，门槛边的微光随风轻轻一颤。`;
   observer?.onAttempt?.(1);
   observer?.onText?.(narration);
   return {

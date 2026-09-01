@@ -103,6 +103,12 @@ describe("player opening narration", () => {
     expect(frame.referenceableEntities.map((entity) => entity.id)).toEqual(["hall", "hero"]);
     expect(JSON.stringify(frame)).not.toContain("rival");
     const modelFrame = playerSceneModelFrame(frame);
+    expect(modelFrame.narrativeContract).toEqual({
+      person: "third",
+      focalCharacter: "福贵",
+      narratorAddressesPlayer: false,
+      dialogueMayUseFirstOrSecondPerson: true,
+    });
     expect(modelFrame).not.toHaveProperty("branchId");
     expect(modelFrame).not.toHaveProperty("commitId");
     expect(modelFrame).not.toHaveProperty("logicalStep");
@@ -143,6 +149,8 @@ describe("player opening narration", () => {
     expect(literaryPrompt).toContain("there is no fixed short target");
     expect(literaryPrompt).toContain("current scene, not an agency handoff");
     expect(literaryPrompt).toContain("Never mention or explain character-knowledge boundaries");
+    expect(literaryPrompt).toContain("focalized third-person novel prose");
+    expect(literaryPrompt).toContain("narrator must never address the player as \"you\"");
     expect(literaryPrompt).toContain("Open the playable story");
     expect(literaryPrompt).not.toContain("propose_player_choices");
     expect(playScenePrompt(frame, "orientation")).toContain("not necessarily the beginning");
@@ -170,6 +178,18 @@ describe("player opening narration", () => {
     expect(assertPlaySceneNarration(handoffCopy)).toBe(handoffCopy);
     const streamed = "\n风从门缝里挤进来，带着一点凉意。走廊深处传来两次短促的摩擦声，门板随之轻轻震动。昏黄灯光在地面晃了一下，墙角的薄灰还没有落定。门外忽然有人压低声音问：“你是走还是留？”随后只剩指节抵住木板的轻响。\n";
     expect(assertPlaySceneNarration(streamed)).toBe(streamed);
+    const thirdPersonOpening = "福贵站在前厅昏暗的窗影里，檐下的雨声一层层压低了院中的杂响。他没有立刻碰那扇门，只看着门缝下缓慢游移的冷光。木板另一侧忽然传来衣料擦墙的细声，随后是一记克制的叩响，余音贴着地面散开。";
+    expect(assertPlaySceneNarration(thirdPersonOpening, { frame: modelFrame, purpose: "opening" })).toBe(thirdPersonOpening);
+    const dialogueKeepsNaturalPronouns = "福贵站在前厅昏暗的窗影里，檐下的雨声一层层压低了院中的杂响。他把手停在门闩上，听见门外的人低声说：“你若还认得我，就别让我们在雨里等。”木板随即轻轻一震，潮冷的气息从门缝漫进来。";
+    expect(assertPlaySceneNarration(dialogueKeepsNaturalPronouns, { frame: modelFrame, purpose: "opening" })).toBe(dialogueKeepsNaturalPronouns);
+    const thirdPersonWithSelfDoubt = "福贵站在前厅昏暗的窗影里，檐下的雨声一层层压低了院中的杂响。他的自我怀疑没有消散，手指却已经停在门闩上。门外的人低声说：‘你若还认得我，就别让我们在雨里等。’木板随即轻轻一震，潮冷的气息从门缝漫进来。";
+    expect(assertPlaySceneNarration(thirdPersonWithSelfDoubt, { frame: modelFrame, purpose: "opening" })).toBe(thirdPersonWithSelfDoubt);
+    const secondPersonOpening = "你站在前厅昏暗的窗影里，檐下的雨声一层层压低了院中的杂响。你没有立刻碰那扇门，只看着门缝下缓慢游移的冷光。木板另一侧忽然传来衣料擦墙的细声，随后是一记克制的叩响，余音贴着地面散开。";
+    expect(() => assertPlaySceneNarration(secondPersonOpening, { frame: modelFrame, purpose: "opening" }))
+      .toThrow("third-person narrative contract");
+    const unnamedOpening = "他站在前厅昏暗的窗影里，檐下的雨声一层层压低了院中的杂响。他没有立刻碰那扇门，只看着门缝下缓慢游移的冷光。木板另一侧忽然传来衣料擦墙的细声，随后是一记克制的叩响，余音贴着地面散开。";
+    expect(() => assertPlaySceneNarration(unnamedOpening, { frame: modelFrame, purpose: "opening" }))
+      .toThrow("identify its focal character");
     await expect(engine.branches.readHead("main")).resolves.toBe(committed.newHead);
   });
 
@@ -362,10 +382,10 @@ describe("player opening narration", () => {
     expect(prompt).toContain("我抬头对见证人说");
     expect(prompt).toContain("你问见证人门外是谁。");
     expect(prompt).toContain("authority=\"non-authoritative\"");
-    const withoutDialogue = "雨声贴着檐角落下来，你看着见证人，方才的问题还横在两人之间。空气微微一紧，门外的动静被衬得越发清晰；他没有立刻移开目光，昏暗里只剩雨丝接连擦过屋檐的细响。你喉间残留着开口后的干涩，门闩上凝着的一线水光却在这时轻轻颤了一下，随即又停住。";
+    const withoutDialogue = "雨声贴着檐角落下来，福贵看着见证人，方才的问题还横在两人之间。空气微微一紧，门外的动静被衬得越发清晰；他没有立刻移开目光，昏暗里只剩雨丝接连擦过屋檐的细响。他喉间残留着开口后的干涩，门闩上凝着的一线水光却在这时轻轻颤了一下，随即又停住。";
     expect(() => assertPlaySceneNarration(withoutDialogue, { frame: modelFrame, purpose: "turn" }))
       .toThrow("changed or omitted exact dialogue");
-    const withDialogue = `${withoutDialogue}\n\n“门外是谁？”你问。檐下的雨声忽然显得更密，见证人的目光仍停在你脸上。`;
+    const withDialogue = `${withoutDialogue}\n\n“门外是谁？”福贵问。檐下的雨声忽然显得更密，见证人的目光仍停在福贵脸上。`;
     expect(assertPlaySceneNarration(withDialogue, { frame: modelFrame, purpose: "turn" })).toBe(withDialogue);
   });
 });

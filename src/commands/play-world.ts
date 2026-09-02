@@ -4,6 +4,7 @@ import { createPiPlayerActionTranslator } from "../agent/pi-player-action.js";
 import { createPiPlayerWorldAdjudicator } from "../agent/pi-player-world-adjudicator.js";
 import { createPiPlayerWorldResponseResolver } from "../agent/pi-player-world-response.js";
 import { createPiNpcReactionReasoner } from "../agent/pi-npc-reaction.js";
+import { createPiActorReasoner } from "../agent/pi-actor-reasoner.js";
 import { createPiCanonicalAttachmentResolver } from "../agent/pi-canonical-attachment.js";
 import { createPiRuntimeContextResolver } from "../agent/pi-runtime-context.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
@@ -12,6 +13,7 @@ import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
 import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
 import type { RuntimeContextResolver } from "../world/runtime-context.js";
+import type { ActorReasoner } from "../world/model-actor-policy.js";
 import { PlayConversationStore } from "../world/play-conversation.js";
 import {
   inspectPlayExperience,
@@ -38,6 +40,7 @@ export type PlayWorldCommandOptions = {
   worldResponseResolver?: PlayerWorldResponseResolver;
   canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
+  actorReasoner?: ActorReasoner;
   advanceBackground?: number;
   ask?: AskPlayQuestion;
 };
@@ -107,6 +110,13 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
         ...(options.model ? { model: options.model } : {}),
       })
     : undefined);
+  const actorReasoner = options.actorReasoner ?? (!options.translator
+    ? createPiActorReasoner({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
   const canonicalAttachmentResolver = options.canonicalAttachmentResolver ?? (!options.translator
     ? createPiCanonicalAttachmentResolver({
         root: options.root,
@@ -119,7 +129,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
     throw new Error("advanceBackground must be an integer between 0 and 100");
   }
   if (options.action !== undefined) {
-    return runAndPrintTurn(options.root, selection, translator, adjudicator, contextResolver, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, options.action, advanceBackground);
+    return runAndPrintTurn(options.root, selection, translator, adjudicator, contextResolver, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, actorReasoner, options.action, advanceBackground);
   }
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error("Pass --action <text> for non-interactive play.");
@@ -132,7 +142,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
       const utterance = (await terminal.question(`${selection.actor.canonicalName}> `)).trim();
       if (!utterance) continue;
       if (utterance === "/exit" || utterance === "/quit") break;
-      await runAndPrintTurn(options.root, selection, translator, adjudicator, contextResolver, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, utterance, advanceBackground);
+      await runAndPrintTurn(options.root, selection, translator, adjudicator, contextResolver, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, actorReasoner, utterance, advanceBackground);
     }
   } finally {
     terminal.close();
@@ -149,6 +159,7 @@ async function runAndPrintTurn(
   worldResponseResolver: PlayerWorldResponseResolver | undefined,
   canonicalAttachmentResolver: CanonicalAttachmentResolver | undefined,
   npcResponseReasoner: NpcReactionReasoner | undefined,
+  actorReasoner: ActorReasoner | undefined,
   utterance: string,
   advanceBackground: number,
 ): Promise<PlayerTurnResult> {
@@ -163,6 +174,7 @@ async function runAndPrintTurn(
     ...(worldResponseResolver ? { worldResponseResolver } : {}),
     ...(canonicalAttachmentResolver ? { canonicalAttachmentResolver } : {}),
     ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
+    ...(actorReasoner ? { actorReasoner } : {}),
     advanceBackground,
     origin: "cli",
   });

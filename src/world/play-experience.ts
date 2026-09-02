@@ -32,6 +32,7 @@ import type {
 import type { CanonicalRecoveryTrace } from "./runtime.js";
 import type { RuntimeContextConsultationObserver, RuntimeContextResolver } from "./runtime-context.js";
 import { RuntimeCompilerRepairHintStore } from "../compiler/runtime-repair-hints.js";
+import type { ActorReasoner } from "./model-actor-policy.js";
 
 export type PlayableCharacter = {
   id: string;
@@ -302,6 +303,8 @@ export async function performPlayTurn(options: {
   worldResponseResolver?: PlayerWorldResponseResolver;
   canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
+  actorReasoner?: ActorReasoner;
+  maxActorModelCallsPerRefresh?: number;
   advanceBackground?: number;
   origin?: PlayerTurnOrigin;
   intent?: "act" | "observe" | "reflect" | "wait";
@@ -324,7 +327,12 @@ export async function performPlayTurn(options: {
   if (!Number.isInteger(advanceActors) || advanceActors < 0 || advanceActors > 10) {
     throw new Error("advanceActors must be an integer between 0 and 10");
   }
-  const { engine, runtime } = await openWorkspaceWorld(options.root);
+  const { engine, runtime } = await openWorkspaceWorld(options.root, undefined, {
+    ...(options.actorReasoner ? { actorReasoner: options.actorReasoner } : {}),
+    ...(options.maxActorModelCallsPerRefresh !== undefined
+      ? { maxActorModelCallsPerRefresh: options.maxActorModelCallsPerRefresh }
+      : {}),
+  });
   const previousHead = await engine.branches.readHead(options.branchId);
   if (options.expectedHead && previousHead !== options.expectedHead) {
     throw new Error(`Player turn expected branch head '${options.expectedHead}', but '${options.branchId}' is at '${previousHead}'.`);

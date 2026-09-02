@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { createPiCanonicalAttachmentResolver } from "../agent/pi-canonical-attachment.js";
 import { createPiNpcReactionReasoner } from "../agent/pi-npc-reaction.js";
+import { createPiActorReasoner } from "../agent/pi-actor-reasoner.js";
 import { createPiPlayerActionTranslator } from "../agent/pi-player-action.js";
 import {
   createPiPlayerOpeningNarrator,
@@ -19,6 +20,7 @@ import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.
 import { readFrozenWorldBase } from "../world/base.js";
 import { deriveCharacterEntryOptions } from "../world/entry-context.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
+import type { ActorReasoner } from "../world/model-actor-policy.js";
 import {
   type PlayerActionTranslator,
   type PlayerWorldAdjudicator,
@@ -115,6 +117,7 @@ export interface PlayApplicationServiceOptions {
   worldResponseResolver?: PlayerWorldResponseResolver;
   canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
+  actorReasoner?: ActorReasoner;
   narrator?: PlayerOpeningNarrator;
   advanceBackground?: number;
   traceStore?: TraceStore;
@@ -830,6 +833,7 @@ export class PlayApplicationService {
           ...(adapters.worldResponseResolver ? { worldResponseResolver: adapters.worldResponseResolver } : {}),
           ...(adapters.canonicalAttachmentResolver ? { canonicalAttachmentResolver: adapters.canonicalAttachmentResolver } : {}),
           ...(adapters.npcResponseReasoner ? { npcResponseReasoner: adapters.npcResponseReasoner } : {}),
+          ...(adapters.actorReasoner ? { actorReasoner: adapters.actorReasoner } : {}),
           advanceBackground: this.options.advanceBackground ?? 0,
           origin: "web",
           runId: recorder.manifest.id,
@@ -1194,9 +1198,10 @@ export class PlayApplicationService {
     worldResponseResolver?: PlayerWorldResponseResolver;
     canonicalAttachmentResolver?: CanonicalAttachmentResolver;
     npcResponseReasoner?: NpcReactionReasoner;
+    actorReasoner?: ActorReasoner;
     narrator: PlayerOpeningNarrator;
   }> {
-    const profiles = await this.profiles(["player-action", "adjudicator", "specialist", "npc", "narrator"]);
+    const profiles = await this.profiles(["player-action", "adjudicator", "specialist", "npc", "actor", "narrator"]);
     const onStatus = (statusText: string) => context.update("model-working", { statusText });
     const common = (profile: LlmProfile | undefined) => ({
       root: this.root,
@@ -1229,6 +1234,9 @@ export class PlayApplicationService {
       ...(this.options.npcResponseReasoner
         ? { npcResponseReasoner: this.options.npcResponseReasoner }
         : usePiTurnAdapters ? { npcResponseReasoner: createPiNpcReactionReasoner(common(profiles.get("npc"))) } : {}),
+      ...(this.options.actorReasoner
+        ? { actorReasoner: this.options.actorReasoner }
+        : usePiTurnAdapters ? { actorReasoner: createPiActorReasoner(common(profiles.get("actor"))) } : {}),
       narrator: this.options.narrator ?? createPiPlayerOpeningNarrator({
         root: this.root,
         ...(profiles.get("narrator") ? { profile: profiles.get("narrator") } : {}),

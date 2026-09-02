@@ -8,7 +8,9 @@ import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js"
 import { isCommunicatingKnowledgeSource } from "./knowledge-semantics.js";
 import { worldStorageRoot } from "./paths.js";
 import {
+  actionInvocationSchema,
   evidenceRefSchema,
+  eventProposalSchema,
   idSchema,
   knowledgeDeltaSchema,
   predicateSchema,
@@ -47,6 +49,19 @@ import {
   type RelationshipStance,
 } from "./relationship-ontology.js";
 
+export const actorCoordinationSchema = z.object({
+  exclusiveParticipantIds: z.array(idSchema).max(32).default([]),
+  consentActorIds: z.array(idSchema).max(32).default([]),
+  authorityEntityIds: z.array(idSchema).max(32).default([]),
+}).strict().superRefine((value, ctx) => {
+  for (const [field, ids] of Object.entries(value) as Array<[keyof typeof value, string[]]>) {
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({ code: "custom", path: [field], message: `${field} must contain unique IDs` });
+    }
+  }
+});
+export type ActorCoordination = z.infer<typeof actorCoordinationSchema>;
+
 const goalActionSchema = z
   .object({
     title: z.string().min(1),
@@ -54,6 +69,8 @@ const goalActionSchema = z
     preconditions: z.array(predicateSchema),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    action: actionInvocationSchema.optional(),
+    coordination: actorCoordinationSchema.optional(),
   })
   .strict();
 
@@ -510,20 +527,42 @@ async function atomicJson(filePath: string, value: unknown): Promise<void> {
   await fs.rename(temporary, filePath);
 }
 
-export type ActorProposalCandidate = {
-  proposal: EventProposal;
-  priority: number;
-  goalId: string;
-};
+export const actorCandidateSourceSchema = z.enum(["compiled-action", "model-reasoner", "injected"]);
+export type ActorCandidateSource = z.infer<typeof actorCandidateSourceSchema>;
+
+export const actorSalienceTraceSchema = z.object({
+  tier: z.number().int().min(0).max(4),
+  dueNormCount: z.number().int().nonnegative(),
+  dueProcessCount: z.number().int().nonnegative(),
+  latestEventParticipant: z.boolean(),
+  currentScene: z.boolean(),
+  goalPriority: z.number().finite().min(0).max(1),
+  cooldownPenalty: z.number().finite().min(0).max(1),
+}).strict();
+export type ActorSalienceTrace = z.infer<typeof actorSalienceTraceSchema>;
+
+export const actorProposalCandidateSchema = z.object({
+  proposal: eventProposalSchema,
+  priority: z.number().finite().min(0).max(1),
+  goalId: idSchema,
+  candidateSource: actorCandidateSourceSchema.optional(),
+  salience: actorSalienceTraceSchema.optional(),
+  coordination: actorCoordinationSchema.optional(),
+}).strict();
+export type ActorProposalCandidate = z.infer<typeof actorProposalCandidateSchema>;
 
 export type ActorProposalSource = (input: {
   branchId: string;
   commitId: string;
+  /** Host-owned selection budget; a source must rank before any model calls. */
+  maxActors?: number;
+  /** Hard cap on logical model-reasoner calls for this refresh. */
+  maxModelCalls?: number;
 }) => Promise<readonly ActorProposalCandidate[]> | readonly ActorProposalCandidate[];
 
 export function deterministicActorProposalSource(engine: WorldEngine, actors: ActorModelStore): ActorProposalSource {
   const knowledge = new KnowledgeProjector(engine);
-  return async ({ branchId, commitId }) => {
+  return async ({ branchId, commitId, maxActors }) => {
     const candidates: ActorProposalCandidate[] = [];
     const [context, state, history] = await Promise.all([
       engine.contextForCommit(commitId),
@@ -555,9 +594,9 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           || belongsToActiveWorld(entry.event.evidence));
         const realizedCanonicalEventIds = realizedCanonicalEvents(actorHistory);
         const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
-        const action = goal.candidateAction ?? goal.actionPatterns?.find((pattern) =>
-          pattern.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
-        if (!action) continue;
+        const action = [goal.candidateAction, ...(goal.actionPatterns ?? [])]
+          .find((pattern) => pattern?.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
+        if (!action || !actorActionHasMaterialEffect(action)) continue;
         const view = await knowledge.view(goal.actorId, commitId);
         const known = actionableKnowledgeClaimIds(view, activeSourceId);
         if (!evaluateCharacterGoal(goal, {
@@ -570,6 +609,8 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
         candidates.push({
           goalId: goal.id,
           priority: goal.priority,
+          candidateSource: "compiled-action",
+          coordination: normalizeActorCoordination(goal.actorId, action.coordination),
           proposal: {
             proposalId: `goal-${contentHash({ goalId: goal.id, branchId, commitId }).slice(0, 24)}`,
             branchId,
@@ -583,6 +624,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
             preconditions: action.preconditions,
             proposedDelta: action.proposedDelta,
             ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+            ...(action.action ? { action: structuredClone(action.action) } : {}),
             causalParents: [],
             evidence: goal.evidence,
             progress: {
@@ -595,7 +637,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           },
         });
       }
-      return candidates.sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId));
+      return limitActorCandidates(candidates, maxActors);
     }
     const initiatingActorId = latestPlayerEvent.event.actorId;
     const scene = await projectActorScene(engine, initiatingActorId, commitId, activeSourceId);
@@ -622,8 +664,8 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
         storyTime: state.logicalTime.storyTime,
       });
       if (!activation.active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;
-      const proposedAction = goal.candidateAction ?? goal.actionPatterns?.find((pattern) =>
-        pattern.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
+      const proposedAction = [goal.candidateAction, ...(goal.actionPatterns ?? [])]
+        .find((pattern) => pattern?.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
       const action = proposedAction && actorActionIsLocal(
         proposedAction,
         goal.actorId,
@@ -632,13 +674,14 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
         state,
         context.entities,
       ) ? proposedAction : undefined;
-      const actionParticipants = action?.participants ?? goal.targetIds ?? [initiatingActorId];
+      if (!action || !actorActionHasMaterialEffect(action)) continue;
+      const actionParticipants = action.participants ?? goal.targetIds ?? [initiatingActorId];
       const participants = [...new Set([goal.actorId, ...actionParticipants])]
         .filter((participantId) => participantId === goal.actorId || localActors.has(participantId) || participantId === initiatingActorId);
       const proposalId = `goal-${contentHash({ goalId: goal.id, branchId, commitId }).slice(0, 24)}`;
       const progress: NarrativeProgress = {
         version: 1,
-        channels: action && action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["relationship", "thread", "consequence"],
+        channels: action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["knowledge", "thread", "consequence"],
         threadIds: [`goal-${goal.id}`],
         noveltyKey: `actor-goal:${goal.id}:${latestPlayerEvent.event.eventId}`,
         outcome: "succeeded",
@@ -646,29 +689,72 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
       candidates.push({
         goalId: goal.id,
         priority: goal.priority,
+        candidateSource: "compiled-action",
+        coordination: normalizeActorCoordination(goal.actorId, action.coordination),
         proposal: {
           proposalId,
           branchId,
           expectedParentCommit: commitId,
           source: "actor",
           actorId: goal.actorId,
-          title: action?.title ?? `${entity.canonicalName}回应当前局势`,
+          title: action.title,
           participants,
           participantPresence: participants
             .filter((participantId) => context.entities.get(participantId)?.kind === "character")
             .map((entityId) => ({ entityId, mode: "physical" as const })),
           proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
-          preconditions: action?.preconditions ?? [],
-          proposedDelta: action?.proposedDelta ?? { version: 1, operations: [] },
-          ...(action?.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+          preconditions: action.preconditions,
+          proposedDelta: action.proposedDelta,
+          ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+          ...(action.action ? { action: structuredClone(action.action) } : {}),
+          causalRelations: [{
+            fromEventId: latestPlayerEvent.event.eventId,
+            type: "causes",
+            operationality: "contributory",
+            description: "Compiled actor response to the latest perceived actor event",
+          }],
           causalParents: [latestPlayerEvent.event.eventId],
           evidence: goal.evidence,
           progress,
         },
       });
     }
-    return candidates.sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId));
+    return limitActorCandidates(candidates, maxActors);
   };
+}
+
+function actorActionHasMaterialEffect(action: z.infer<typeof goalActionSchema>): boolean {
+  return action.proposedDelta.operations.length > 0
+    || (action.proposedKnowledge?.operations.length ?? 0) > 0;
+}
+
+export function normalizeActorCoordination(
+  actorId: string,
+  value?: ActorCoordination,
+): ActorCoordination {
+  return actorCoordinationSchema.parse({
+    exclusiveParticipantIds: [...new Set([actorId, ...(value?.exclusiveParticipantIds ?? [])])].sort(),
+    consentActorIds: [...new Set(value?.consentActorIds ?? [])].sort(),
+    authorityEntityIds: [...new Set(value?.authorityEntityIds ?? [])].sort(),
+  });
+}
+
+function limitActorCandidates(
+  candidates: readonly ActorProposalCandidate[],
+  maxActors: number | undefined,
+): ActorProposalCandidate[] {
+  const limit = maxActors ?? 32;
+  if (!Number.isInteger(limit) || limit < 0 || limit > 32) throw new Error("Actor source maxActors must be an integer between 0 and 32");
+  const seenActors = new Set<string>();
+  return [...candidates]
+    .sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId))
+    .filter((candidate) => {
+      const actorId = candidate.proposal.actorId;
+      if (!actorId || seenActors.has(actorId)) return false;
+      seenActors.add(actorId);
+      return true;
+    })
+    .slice(0, limit);
 }
 
 export function goalSupportedInCurrentPhase(

@@ -1454,7 +1454,7 @@ The semantic core and typed compiler proposal boundary now exist. The next miles
 2. orchestrate ingest, bounded compile, proposal review summary, audit, and branch creation without bypassing explicit acceptance;
 3. evaluate the actor-scoped intent interpreter and current-world adjudicator on multilingual paraphrases, open destinations, direct contradictions, and impossible desired effects without adding host phrase lists;
 4. broaden narrow typed consequence capabilities for physical and social effects only where corpus failures show that committed event progress is insufficient;
-5. connect one Pi-backed actor reasoner behind the opaque `ActorReasoningInput` projection (actor-visible state/knowledge, one active goal, active disposition, and committed development);
+5. evaluate and refine the connected Pi-backed hybrid actor reasoner on representative long-horizon novel scenarios without widening its opaque actor-safe projection or deterministic commit gates;
 6. connect one Pi-backed narrative adapter behind the immutable `NarrativeFrame` contract;
 7. measure epistemic leakage, event/state-delta fidelity, divergence durability, and narrative quality on several genres;
 8. refine schemas and scheduling only from observed corpus failures.

@@ -1,4 +1,4 @@
-import { ActorModelStore, deterministicActorProposalSource } from "./actors.js";
+import { ActorModelStore, deterministicActorProposalSource, type ActorProposalSource } from "./actors.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { canonicalEventToPossibility } from "./canon-runtime.js";
 import { loadWorldContext, type ScopedWorldArtifacts } from "./context.js";
@@ -7,6 +7,7 @@ import { PossibilityTemplateStore } from "./possibility-model.js";
 import { WorldRuntime, type NarrativeRender, type PossibilitySource } from "./runtime.js";
 import { contextContainsGroundedArtifacts, evidenceBelongsExclusivelyToSource, inferLegacyBranchSourceId } from "./source-scope.js";
 import type { EvidenceRef } from "./model.js";
+import { modelActorProposalSource, type ActorReasoner } from "./model-actor-policy.js";
 
 export type WorkspaceWorld = {
   engine: WorldEngine;
@@ -19,6 +20,11 @@ export type WorkspaceWorldOpenOptions = {
   sourceId?: string;
   preparedRevisionHash?: string;
   artifacts?: ScopedWorldArtifacts;
+  /** Overrides all built-in actor scheduling; intended for tests and custom hosts. */
+  actorProposalSource?: ActorProposalSource;
+  /** Enables the hybrid compiled-first/model-fallback actor policy. */
+  actorReasoner?: ActorReasoner;
+  maxActorModelCallsPerRefresh?: number;
 };
 
 export async function openWorkspaceWorld(
@@ -72,11 +78,22 @@ export async function openWorkspaceWorld(
     }
     return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
   };
+  const actorProposalSource = options.actorProposalSource
+    ?? (options.actorReasoner
+      ? modelActorProposalSource(engine, {
+          goals: () => actorModels.listGoals(),
+          modelFor: (actorId) => actorModels.getModel(actorId),
+          reasoner: options.actorReasoner,
+          ...(options.maxActorModelCallsPerRefresh !== undefined
+            ? { maxModelCallsPerRefresh: options.maxActorModelCallsPerRefresh }
+            : {}),
+        })
+      : deterministicActorProposalSource(engine, actorModels));
   const runtime = new WorldRuntime(
     engine,
     possibilitySource,
     render,
-    deterministicActorProposalSource(engine, actorModels),
+    actorProposalSource,
   );
   return { engine, runtime, actorModels, possibilityTemplates };
 }

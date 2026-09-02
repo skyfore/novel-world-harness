@@ -2,7 +2,7 @@
 
 Date: 2026-09-02
 
-Verified baseline: `pnpm run check`; `pnpm test` (134 test files, 776 tests
+Verified baseline: `pnpm run check`; `pnpm test` (146 test files, 825 tests
 passing); `pnpm test:e2e` (production Fastify host + 2 Chromium journeys
 passing).
 
@@ -37,7 +37,7 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
 | Canon replay and branching | Implemented vertical slice | Predicate checkpoints, fork, diff, divergent possibility eligibility |
-| Actor behavior | Partial | Direct typed player interactions invoke a Pi-backed, actor-scoped NPC response lane with perceived-history retrieval, development/goals/affect context, and validated causal commits; unrelated proactive behavior still uses deterministic candidates |
+| Actor behavior | Implemented vertical slice | Direct interactions use the actor-scoped reactive NPC lane; unrelated initiative uses a bounded hybrid policy that prefers compiled actions, then calls an isolated Pi actor reasoner for host-ranked salient actors and revalidates multi-actor footprints at each new branch head |
 | Narrative | Implemented vertical slice | Actor-scoped Pi scene narrator receives a bounded actor-safe frame plus exact retrieval and authority-projected current/prior literary context when a move triggered consultation; choice and narrative channels remain isolated, and accepted prose cannot mutate world truth |
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
 | Prepared revisions | Implemented with evidence-portability gap | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation; canonical `EvidenceRef`s travel, but exact assertion revisions/bindings are not yet serialized in the bundle |
@@ -304,7 +304,7 @@ ambiguous evidence cannot use this path. A source-only explanation may enrich
 the current scene as presentation or become a compiler repair hint, but never a
 state/knowledge delta.
 
-### 3. Proactive model actor policy is not connected to the product CLI
+### 3. Proactive actor behavior is connected but still corpus-limited
 
 The product now connects a separate reactive Pi lane for NPCs directly
 addressed by typed player speech, gesture, or physical interaction. That lane
@@ -313,14 +313,22 @@ development/goals/affect and bounded capabilities, and commits explicit speech,
 gesture, refusal, or silence through normal deterministic gates with the player
 event as causal parent.
 
-`modelActorProposalSource` limits an unrelated proactive reasoner to turn-local opaque actor handles,
-actor-visible state/knowledge, one currently active goal's description,
-priority and visible targets, the active disposition, and committed development.
-Inactive/future policy phases, goal IDs/triggers, canonical IDs, evidence and
-engine chronology are excluded, and the returned action crosses the normal
-actor capability gates. No Pi-backed proactive `ActorReasoner` is constructed
-by `world move`; unrelated initiative still uses deterministic pre-authored
-candidates only.
+`modelActorProposalSource` is now the shared proactive policy used by the CLI,
+TUI, and Web play composition roots. The host ranks active actors before any
+model call, prefers a valid compiled action, and spends a separately bounded Pi
+fallback call only when no compiled action is executable. The isolated reasoner
+receives turn-local opaque handles, actor-visible state/knowledge, one active
+goal, effective dispositions and branch character semantics, plus only visible
+active norms/processes. Inactive/future policy phases, goal IDs/triggers,
+canonical IDs, evidence, engine chronology, hidden rules, and other actors'
+private knowledge remain excluded.
+
+Every returned action is a capture-only proposal. The host decodes opaque
+handles, checks capability/spatial grounding and materiality, detects
+write/write, read/write, resource, exclusivity, consent, authority, and temporal
+overlap, then revalidates each winner against the new branch head before commit.
+The remaining gap is behavioral quality and recall across representative novel
+genres—not connection or mutation authority.
 
 ### 4. The low-level renderer remains diagnostic
 

@@ -6,6 +6,8 @@ import type { CharacterGoal, CharacterModel } from "../src/world/actors.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import { modelActorProposalSource, type ActorReasoningInput } from "../src/world/model-actor-policy.js";
 import type { Claim, Entity } from "../src/world/model.js";
+import type { NormTemplate } from "../src/world/norm-ontology.js";
+import type { ProcessTemplate } from "../src/world/process-ontology.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 
 const roots: string[] = [];
@@ -92,7 +94,7 @@ describe("model actor policy", () => {
           title: "Hero responds",
           participants: [],
           preconditions: [],
-          proposedDelta: { version: 1, operations: [] },
+          proposedDelta: { version: 1, operations: [{ op: "set", entityId: input.actor.actorId, field: "character.plan", value: "respond" }] },
         };
       },
     });
@@ -361,5 +363,158 @@ describe("model actor policy", () => {
     observed = undefined;
     await expect(source({ branchId: "main", commitId: closed.newHead })).resolves.toEqual([]);
     expect(observed).toBeUndefined();
+  });
+
+  it("includes only actor-visible active norms and owned processes", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-model-actor-pressure-"));
+    roots.push(root);
+    const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] };
+    const publicDuty: NormTemplate = {
+      ontologyVersion: "norm-template-v1",
+      id: "public-duty",
+      name: "Keep the public promise",
+      modality: "obligation",
+      actionPattern: { kind: "ad-hoc", actionKindId: "keep-promise" },
+      appliesWhen: [],
+      exceptions: [],
+      reparations: [],
+      priority: 10,
+      defeasible: false,
+      overridesTemplateIds: [],
+      status: "supported",
+      visibility: "public",
+      knownByClaimIds: [],
+      induction: { kind: "domain-module", moduleId: "social", moduleVersion: "1" },
+      evidence: [],
+    };
+    const hiddenDuty: NormTemplate = {
+      ...publicDuty,
+      id: "hidden-duty",
+      name: "Engine-only hidden duty",
+      visibility: "engine",
+    };
+    const visibleProcess: ProcessTemplate = {
+      ontologyVersion: "process-template-v1",
+      id: "visible-journey",
+      name: "Visible journey",
+      ownerRoles: [{ id: "traveler", label: "Traveler", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      phases: [
+        { id: "departed", label: "On the road", terminal: false },
+        { id: "arrived", label: "Arrived", terminal: true },
+      ],
+      initialPhaseId: "departed",
+      transitions: [{ fromPhaseId: "departed", toPhaseId: "arrived", minimumProgress: 1 }],
+      outcomeIds: ["arrival"],
+      visibility: "observable",
+      induction: { kind: "domain-module", moduleId: "travel", moduleVersion: "1" },
+      evidence: [],
+    };
+    const hiddenProcess: ProcessTemplate = {
+      ...visibleProcess,
+      id: "hidden-process",
+      name: "Engine-only hidden process",
+      visibility: "engine",
+    };
+    const goal: CharacterGoal = {
+      id: "answer-pressure",
+      actorId: hero.id,
+      description: "Respond to current pressure",
+      priority: 1,
+      requiresKnowledge: [],
+      activation: { preconditions: [], afterCanonicalEventIds: [] },
+      evidence: [],
+    };
+    const engine = new WorldEngine(root, {
+      entities: new Map([[hero.id, hero]]),
+      rules: new Map(),
+      actorGoals: [goal],
+      normTemplates: new Map([[publicDuty.id, publicDuty], [hiddenDuty.id, hiddenDuty]]),
+      processTemplates: new Map([[visibleProcess.id, visibleProcess], [hiddenProcess.id, hiddenProcess]]),
+      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    });
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: hero.id, field: "character.alive", value: true }],
+    });
+    const activated = await engine.commitProposal({
+      proposalId: "activate-pressure",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "background",
+      title: "Current obligations and journeys become active",
+      participants: [hero.id],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      proposedNorms: {
+        version: 1,
+        operations: [publicDuty, hiddenDuty].map((template) => ({
+          op: "instantiate-norm" as const,
+          localRef: `local-${template.id}`,
+          norm: {
+            templateId: template.id,
+            subjectActorId: hero.id,
+            description: template.name,
+            dueAtElapsedDays: 0,
+          },
+        })),
+      },
+      proposedProcesses: {
+        version: 1,
+        operations: [visibleProcess, hiddenProcess].map((template) => ({
+          op: "start-process" as const,
+          localRef: `local-${template.id}`,
+          process: {
+            templateId: template.id,
+            ownerBindings: [{ roleId: "traveler", entityIds: [hero.id] }],
+            progress: 0.25,
+            dueAtElapsedDays: 0,
+          },
+        })),
+      },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(activated.report.accepted).toBe(true);
+
+    let observed: ActorReasoningInput | undefined;
+    const source = modelActorProposalSource(engine, {
+      goals: async () => [goal],
+      modelFor: async () => null,
+      reasoner: (input) => {
+        observed = input;
+        return {
+          title: "Act under pressure",
+          participants: [],
+          preconditions: [],
+          proposedDelta: {
+            version: 1,
+            operations: [{ op: "set", entityId: input.actor.actorId, field: "character.plan", value: "respond" }],
+          },
+        };
+      },
+    });
+    const candidates = await source({ branchId: "main", commitId: activated.newHead });
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.salience).toMatchObject({ tier: 0, dueNormCount: 2, dueProcessCount: 2 });
+    expect(observed?.actor.activeNorms).toEqual([{
+      name: publicDuty.name,
+      modality: "obligation",
+      role: "subject",
+      status: "active",
+      dueInDays: 0,
+    }]);
+    expect(observed?.actor.activeProcesses).toEqual([{
+      name: visibleProcess.name,
+      phase: "On the road",
+      status: "running",
+      progress: 0.25,
+      dueInDays: 0,
+    }]);
+    expect(JSON.stringify(observed)).not.toContain(hiddenDuty.name);
+    expect(JSON.stringify(observed)).not.toContain(hiddenProcess.name);
+    expect(JSON.stringify(observed)).not.toContain("public-duty");
+    expect(JSON.stringify(observed)).not.toContain("visible-journey");
   });
 });

@@ -41,6 +41,7 @@ import { createPiPlayerActionTranslator } from "./pi-player-action.js";
 import { createPiPlayerWorldAdjudicator } from "./pi-player-world-adjudicator.js";
 import { createPiPlayerWorldResponseResolver } from "./pi-player-world-response.js";
 import { createPiNpcReactionReasoner } from "./pi-npc-reaction.js";
+import { createPiActorReasoner } from "./pi-actor-reasoner.js";
 import { createPiCanonicalAttachmentResolver } from "./pi-canonical-attachment.js";
 import { createPiRuntimeContextResolver } from "./pi-runtime-context.js";
 import { withNwhToolRecovery } from "./tool-recovery.js";
@@ -101,6 +102,7 @@ import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
 import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
 import type { RuntimeContextResolver, RuntimeContextSupplement } from "../world/runtime-context.js";
+import type { ActorReasoner } from "../world/model-actor-policy.js";
 import { formatElapsed } from "../util/elapsed-status.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/removal.js";
 import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
@@ -173,6 +175,7 @@ export type NwhExtensionOptions = {
   playerWorldResponseResolver?: PlayerWorldResponseResolver;
   canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
+  actorReasoner?: ActorReasoner;
   advanceBackground?: number;
   onSessionShutdown?: () => Promise<void>;
   resetCompilerProposalTools?: (segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string) => Promise<void> | void;
@@ -1222,6 +1225,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             signal: controller.signal,
           })
         : undefined);
+      const actorReasoner = options.actorReasoner ?? (!options.playerTranslator
+        ? createPiActorReasoner({
+            root: workspace.root,
+            ...(options.profile ? { profile: options.profile } : {}),
+            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+            onStatus: showTurnActivity,
+            signal: controller.signal,
+          })
+        : undefined);
       const canonicalAttachmentResolver = options.canonicalAttachmentResolver ?? (!options.playerTranslator
         ? createPiCanonicalAttachmentResolver({
             root: workspace.root,
@@ -1245,6 +1257,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           ...(worldResponseResolver ? { worldResponseResolver } : {}),
           ...(canonicalAttachmentResolver ? { canonicalAttachmentResolver } : {}),
           ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
+          ...(actorReasoner ? { actorReasoner } : {}),
           advanceBackground: options.advanceBackground ?? 0,
           origin: input.origin ?? "freeform",
           ...(input.intent ? { intent: input.intent } : {}),

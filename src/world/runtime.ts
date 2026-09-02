@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ActorProposalCandidate, ActorProposalSource } from "./actors.js";
+import { actorProposalCandidateSchema, type ActorProposalCandidate, type ActorProposalSource } from "./actors.js";
 import {
   eventProposalSchema,
   idSchema,
@@ -7,10 +7,12 @@ import {
   possibilitySchema,
   type BranchId,
   type CommitId,
+  type ActionResourceClaim,
   type EventProposal,
   type EvidenceRef,
   type Possibility,
   type PossibilityKind,
+  type Predicate,
   type StoryTime,
   type WorldState,
 } from "./model.js";
@@ -29,16 +31,11 @@ import {
 } from "./canonical-adaptation.js";
 import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import { projectActorScene } from "./scene.js";
-import { comparableStoryTime } from "./time.js";
+import { comparableStoryTime, compareStoryTime } from "./time.js";
 import { contentHash } from "./canonical.js";
 
 const MAX_CALLBACK_CANDIDATES = 10_000;
 const MAX_PLAYER_WORLD_RESPONSES = 64;
-const actorProposalCandidateSchema = z.object({
-  proposal: eventProposalSchema,
-  priority: z.number().finite().min(0).max(1),
-  goalId: idSchema,
-}).strict();
 
 export type PossibilitySource = (input: {
   branchId: BranchId;
@@ -62,6 +59,26 @@ export type AdjudicationConflict = {
   winnerProposalId: string;
   loserProposalId: string;
   writeKeys: string[];
+  conflictKinds: ActorConflictKind[];
+  keys: string[];
+};
+
+export type ActorConflictKind =
+  | "write-write"
+  | "read-write"
+  | "resource"
+  | "exclusive-participant"
+  | "consent"
+  | "authority";
+
+export type ActorCandidateFootprint = {
+  reads: string[];
+  writes: string[];
+  resources: ActionResourceClaim[];
+  exclusiveParticipantIds: string[];
+  consentActorIds: string[];
+  authorityEntityIds: string[];
+  temporalWindow: StoryTime;
 };
 
 export type MoveResult = {
@@ -217,13 +234,24 @@ export class WorldRuntime {
       const rawCandidates = await this.actorProposalSource(immutableClone({
         branchId: input.branchId,
         commitId: currentHead,
+        maxActors: Math.min(actorLimit, 32),
+        maxModelCalls: Math.min(actorLimit, 8),
       }));
-      const candidates = actorProposalCandidateSchema.array().max(MAX_CALLBACK_CANDIDATES)
+      const parsedCandidates = actorProposalCandidateSchema.array().max(64)
         .parse(structuredClone(rawCandidates));
+      const candidates = parsedCandidates.filter((candidate) => {
+        if (actorProposalHasMaterialEffect(candidate.proposal)) return true;
+        rejectedProposals.push(candidate.proposal.proposalId);
+        return false;
+      });
       const adjudicated = adjudicateActorCandidates(candidates, actorLimit);
       adjudicationConflicts.push(...adjudicated.conflicts);
       rejectedProposals.push(...adjudicated.conflicts.map((conflict) => conflict.loserProposalId));
       for (const candidate of adjudicated.selected) {
+        const observedHead = await this.engine.branches.readHead(input.branchId);
+        if (observedHead !== currentHead) {
+          throw new Error(`Cannot revalidate actor candidate at stale head ${currentHead}; current branch head is ${observedHead}`);
+        }
         const proposal = { ...candidate.proposal, branchId: input.branchId, expectedParentCommit: currentHead };
         const result = await this.engine.commitProposal(proposal);
         if (!result.report.accepted) {
@@ -985,31 +1013,159 @@ function proposalPossibilityAffinity(proposal: EventProposal, possibility: Possi
 export function adjudicateActorCandidates(candidates: readonly ActorProposalCandidate[], limit: number): { selected: ActorProposalCandidate[]; conflicts: AdjudicationConflict[] } {
   const ordered = [...candidates].sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId));
   const selected: ActorProposalCandidate[] = [];
-  const selectedWrites = new Map<string, string>();
+  const footprints = new Map(ordered.map((candidate) => [candidate.proposal.proposalId, actorCandidateFootprint(candidate)]));
   const conflicts: AdjudicationConflict[] = [];
   for (const candidate of ordered) {
     if (selected.length >= limit) break;
-    const writes = proposalWriteSet(candidate.proposal);
-    const collisions = [...writes].filter((key) => selectedWrites.has(key));
-    if (collisions.length) {
-      const winnerProposalId = selectedWrites.get(collisions[0]!)!;
-      conflicts.push({ winnerProposalId, loserProposalId: candidate.proposal.proposalId, writeKeys: collisions.sort() });
+    const footprint = footprints.get(candidate.proposal.proposalId)!;
+    const collision = selected
+      .map((winner) => ({ winner, conflict: actorFootprintConflict(footprints.get(winner.proposal.proposalId)!, footprint, winner, candidate) }))
+      .find((entry) => entry.conflict.keys.length > 0);
+    if (collision) {
+      conflicts.push({
+        winnerProposalId: collision.winner.proposal.proposalId,
+        loserProposalId: candidate.proposal.proposalId,
+        writeKeys: collision.conflict.writeKeys,
+        conflictKinds: collision.conflict.kinds,
+        keys: collision.conflict.keys,
+      });
       continue;
     }
     selected.push(candidate);
-    for (const key of writes) selectedWrites.set(key, candidate.proposal.proposalId);
   }
   return { selected, conflicts };
 }
 
-function proposalWriteSet(proposal: EventProposal): Set<string> {
+export function actorCandidateFootprint(candidate: ActorProposalCandidate): ActorCandidateFootprint {
+  const proposal = candidate.proposal;
+  const reads = new Set<string>();
   const writes = new Set<string>();
+  proposal.preconditions.forEach((predicate) => predicateReadKeys(predicate).forEach((key) => reads.add(key)));
   for (const operation of proposal.proposedDelta.operations) {
     if (operation.op === "activate-rule" || operation.op === "deactivate-rule") writes.add(`rule:${operation.ruleId}`);
     else writes.add(`state:${operation.entityId}:${operation.field}`);
   }
   for (const operation of proposal.proposedKnowledge?.operations ?? []) writes.add(`knowledge:${operation.actorId}:${operation.claimId}`);
-  return writes;
+  if (proposal.timeAdvance) writes.add("time:branch-clock");
+  const resources = proposal.action?.lane === "ad-hoc"
+    ? proposal.action.footprint.resources.map((claim) => structuredClone(claim))
+    : [];
+  if (proposal.action?.lane === "ad-hoc") {
+    for (const address of proposal.action.footprint.reads) reads.add(`state:${address.entityId}:${address.field}`);
+    for (const address of proposal.action.footprint.writes) writes.add(`state:${address.entityId}:${address.field}`);
+  }
+  const coordination = candidate.coordination;
+  return {
+    reads: [...reads].sort(),
+    writes: [...writes].sort(),
+    resources: resources.sort((left, right) => resourceKey(left).localeCompare(resourceKey(right)) || left.mode.localeCompare(right.mode)),
+    exclusiveParticipantIds: [...new Set([
+      ...(proposal.actorId ? [proposal.actorId] : []),
+      ...(coordination?.exclusiveParticipantIds ?? []),
+    ])].sort(),
+    consentActorIds: [...new Set(coordination?.consentActorIds ?? [])].sort(),
+    authorityEntityIds: [...new Set(coordination?.authorityEntityIds ?? [])].sort(),
+    temporalWindow: structuredClone(proposal.proposedTime),
+  };
+}
+
+function actorFootprintConflict(
+  left: ActorCandidateFootprint,
+  right: ActorCandidateFootprint,
+  leftCandidate: ActorProposalCandidate,
+  rightCandidate: ActorProposalCandidate,
+): { kinds: ActorConflictKind[]; keys: string[]; writeKeys: string[] } {
+  if (!actorWindowsMayOverlap(left.temporalWindow, right.temporalWindow)) return { kinds: [], keys: [], writeKeys: [] };
+  const kinds = new Set<ActorConflictKind>();
+  const keys = new Set<string>();
+  const writeKeys = new Set<string>();
+  const leftReads = new Set(left.reads);
+  const rightReads = new Set(right.reads);
+  const leftWrites = new Set(left.writes);
+  const rightWrites = new Set(right.writes);
+  for (const key of intersection(leftWrites, rightWrites)) {
+    kinds.add("write-write");
+    keys.add(key);
+    writeKeys.add(key);
+  }
+  for (const key of [...intersection(leftReads, rightWrites), ...intersection(rightReads, leftWrites)]) {
+    kinds.add("read-write");
+    keys.add(key);
+    writeKeys.add(key);
+  }
+  for (const leftClaim of left.resources) {
+    for (const rightClaim of right.resources) {
+      if (resourceKey(leftClaim) !== resourceKey(rightClaim)) continue;
+      if (leftClaim.mode === "read" && rightClaim.mode === "read") continue;
+      kinds.add("resource");
+      keys.add(`resource:${resourceKey(leftClaim)}`);
+    }
+  }
+  for (const entityId of intersection(new Set(left.exclusiveParticipantIds), new Set(right.exclusiveParticipantIds))) {
+    kinds.add("exclusive-participant");
+    keys.add(`participant:${entityId}`);
+  }
+  addCoordinationDependencyConflicts("consent", left.consentActorIds, right, rightCandidate, kinds, keys);
+  addCoordinationDependencyConflicts("consent", right.consentActorIds, left, leftCandidate, kinds, keys);
+  addCoordinationDependencyConflicts("authority", left.authorityEntityIds, right, rightCandidate, kinds, keys);
+  addCoordinationDependencyConflicts("authority", right.authorityEntityIds, left, leftCandidate, kinds, keys);
+  return {
+    kinds: [...kinds].sort(),
+    keys: [...keys].sort(),
+    writeKeys: [...writeKeys].sort(),
+  };
+}
+
+function addCoordinationDependencyConflicts(
+  kind: "consent" | "authority",
+  dependencies: readonly string[],
+  other: ActorCandidateFootprint,
+  otherCandidate: ActorProposalCandidate,
+  kinds: Set<ActorConflictKind>,
+  keys: Set<string>,
+): void {
+  const otherActorId = otherCandidate.proposal.actorId;
+  for (const entityId of dependencies) {
+    const otherWritesEntity = other.writes.some((key) => key.startsWith(`state:${entityId}:`));
+    if (otherActorId !== entityId && !other.exclusiveParticipantIds.includes(entityId) && !otherWritesEntity) continue;
+    kinds.add(kind);
+    keys.add(`${kind}:${entityId}`);
+  }
+}
+
+function predicateReadKeys(predicate: Predicate): string[] {
+  if (predicate.op === "all" || predicate.op === "any") return predicate.items.flatMap(predicateReadKeys);
+  if (predicate.op === "not") return predicateReadKeys(predicate.item);
+  if (predicate.op === "rule-active") return [`rule:${predicate.ruleId}`];
+  if ("entityId" in predicate && "field" in predicate) return [`state:${predicate.entityId}:${predicate.field}`];
+  if (["after-step", "before-step", "elapsed-days-gte", "elapsed-days-lte", "story-time-at-or-after", "story-time-before"].includes(predicate.op)) {
+    return ["time:branch-clock"];
+  }
+  return [];
+}
+
+function actorWindowsMayOverlap(left: StoryTime, right: StoryTime): boolean {
+  const order = compareStoryTime(left, right);
+  return order === undefined || order === 0;
+}
+
+function resourceKey(claim: ActionResourceClaim): string {
+  return `${claim.entityId}:${claim.field}`;
+}
+
+function intersection(left: ReadonlySet<string>, right: ReadonlySet<string>): string[] {
+  return [...left].filter((key) => right.has(key)).sort();
+}
+
+function actorProposalHasMaterialEffect(proposal: EventProposal): boolean {
+  return proposal.proposedDelta.operations.length > 0
+    || (proposal.proposedKnowledge?.operations.length ?? 0) > 0
+    || (proposal.proposedSemantics?.operations.length ?? 0) > 0
+    || (proposal.proposedProcesses?.operations.length ?? 0) > 0
+    || (proposal.proposedNorms?.operations.length ?? 0) > 0
+    || (proposal.spokenUtterances?.length ?? 0) > 0
+    || Boolean(proposal.timeAdvance)
+    || Boolean(proposal.progress?.scene);
 }
 
 function deltasConflict(left: EventProposal["proposedDelta"], right?: EventProposal["proposedDelta"]): boolean {

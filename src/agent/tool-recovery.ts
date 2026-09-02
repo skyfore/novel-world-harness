@@ -99,6 +99,7 @@ const LOOKUP_RECOVERY: Readonly<Record<string, LookupRecovery>> = Object.freeze(
 
 const CAPTURE_ONLY_TOOLS = new Set([
   "attach_canonical_scaffold",
+  "propose_actor_action",
   "propose_literary_style_analysis",
   "propose_npc_reaction",
   "propose_player_action",

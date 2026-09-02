@@ -255,6 +255,12 @@ describe("actor adjudication", () => {
     ];
     const result = adjudicateActorCandidates(candidates, 2);
     expect(result.selected.map((candidate) => candidate.proposal.proposalId)).toEqual(["high"]);
-    expect(result.conflicts).toEqual([{ winnerProposalId: "high", loserProposalId: "low", writeKeys: ["state:shared:character.location"] }]);
+    expect(result.conflicts).toEqual([{
+      winnerProposalId: "high",
+      loserProposalId: "low",
+      writeKeys: ["state:shared:character.location"],
+      conflictKinds: ["write-write"],
+      keys: ["state:shared:character.location"],
+    }]);
   });
 });

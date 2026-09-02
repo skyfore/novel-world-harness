@@ -802,7 +802,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T8 — Hybrid actor 与 multi-actor adjudication
 
-- **状态：** pending
+- **状态：** complete
 - **依赖：** T3、T5、T6、T7
 - **主要文件：**
   - `src/world/workspace-runtime.ts`
@@ -813,6 +813,20 @@ CanonicalSnapshot V8 至少固定：
 - **交付：** injectable actor policy、salience budget、ActionFootprint conflicts、new-head revalidation
 - **测试：** no omniscience/future canon、bounded calls、read/write/resource conflict、no-op omission
 - **建议提交：** `feat: connect bounded autonomous actor decisions`
+- **完成说明：** Workspace、CLI、TUI 与 Web play service 已注入同一 hybrid actor
+  policy：宿主先对全部 active goal 做确定性 salience 排序，每个 actor 只保留一个最高优先
+  goal；有效 compiled action 不消耗模型预算，只有缺少可执行模板的入选 actor 才进入独立
+  Pi reasoner，且每次 refresh 的 actor/model-call 上限分别由宿主硬限制。Pi 会话只收到匿名化的
+  actor state/knowledge、当前 goal、已生效 character/relationship/branch semantics，以及通过
+  visibility/knowledge gate 的 active norm/process；future canon、compiler evidence、真实稳定 ID、
+  other-actor private knowledge 和 engine-hidden policy 均不进入上下文。模型只能调用一次
+  capture-only `propose_actor_action`，输出仍需 opaque-handle decode、capability/spatial grounding、
+  materiality、ActionSchema/ActionConstraint、resource、norm 与 commit validation。
+  Multi-actor adjudicator 已按 typed footprint 检测 write/write、read/write、resource、exclusive
+  participant、consent、authority 和 temporal-overlap 冲突；胜出 proposal 仍按新 branch head
+  顺序重新验证，失败者不提交。无 material effect、越权 handle、malformed output 和模型异常
+  都只消耗有界调用并安全省略，不会制造空事件或中断 world move。
+  全量验证：`pnpm run check` 通过，`pnpm test` 146 files / 825 tests 通过。
 
 ### T9 — Full compiler integration、audit 与 eval
 

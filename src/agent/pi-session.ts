@@ -379,6 +379,7 @@ async function registeredSourceRealPaths(workspaceRoot: string, runtimeDir?: str
 function toolAuthority(name: string): "read-only" | "pending-proposal" | "capture-only" | "session-metadata" | "host-defined" {
   if (name === "rename_session") return "session-metadata";
   if ([
+    "propose_actor_action",
     "propose_player_action",
     "propose_player_choices",
     "propose_player_world_resolution",

@@ -498,6 +498,160 @@ export type KnowledgeOperation = z.infer<typeof knowledgeOperationSchema>;
 export const knowledgeDeltaSchema = z.object({ version: z.literal(1), operations: z.array(knowledgeOperationSchema) }).strict();
 export type KnowledgeDelta = z.infer<typeof knowledgeDeltaSchema>;
 
+/** Branch-emergent semantic facts. These records are event-provenanced, not source evidence. */
+export const branchSemanticOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("record-proposition"),
+    proposition: z.object({
+      id: idSchema,
+      subjectEntityId: idSchema,
+      relationId: idSchema,
+      object: propositionObjectSchema,
+      polarity: z.enum(["positive", "negative"]),
+      modality: z.enum(["asserted", "possible", "necessary", "counterfactual"]),
+      validStoryTime: storyTimeSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("record-attribution"),
+    attribution: z.object({
+      id: idSchema,
+      propositionId: idSchema,
+      holderKind: z.enum(["character", "system", "document", "unknown"]),
+      holderEntityId: idSchema.optional(),
+      attitude: z.enum(["asserts", "knows", "believes", "suspects", "reports", "denies", "questions"]),
+      certainty: z.number().finite().min(0).max(1),
+      sourceAttributionId: idSchema.optional(),
+    }).strict().superRefine((value, ctx) => {
+      if (value.holderKind !== "unknown" && !value.holderEntityId) {
+        ctx.addIssue({ code: "custom", path: ["holderEntityId"], message: `${value.holderKind} attribution requires holderEntityId` });
+      }
+      if (value.holderKind === "unknown" && value.holderEntityId) {
+        ctx.addIssue({ code: "custom", path: ["holderEntityId"], message: "Unknown attribution cannot name a holder entity" });
+      }
+      if (value.sourceAttributionId === value.id) {
+        ctx.addIssue({ code: "custom", path: ["sourceAttributionId"], message: "An attribution cannot source itself" });
+      }
+    }),
+  }).strict(),
+  z.object({
+    op: z.literal("record-claim"),
+    claim: z.object({
+      id: idSchema,
+      propositionId: idSchema,
+      attributionId: idSchema.optional(),
+      status: z.enum(["asserted", "contested", "retracted"]),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("open-goal"),
+    goal: z.object({
+      id: idSchema,
+      actorId: idSchema,
+      description: z.string().trim().min(1).max(1_000),
+      priority: z.number().finite().min(0).max(1),
+      targetEntityIds: z.array(idSchema).max(32).default([]),
+      parentGoalId: idSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("close-goal"),
+    goalId: idSchema,
+    outcome: z.enum(["achieved", "abandoned", "failed", "superseded"]),
+  }).strict(),
+  z.object({
+    op: z.literal("record-appraisal"),
+    appraisal: z.object({
+      id: idSchema,
+      actorId: idSchema,
+      target: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("entity"), entityId: idSchema }).strict(),
+        z.object({ kind: z.literal("event"), eventId: idSchema }).strict(),
+        z.object({ kind: z.literal("proposition"), propositionId: idSchema }).strict(),
+      ]),
+      dimensionId: idSchema,
+      value: z.number().finite().min(-1).max(1),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("adjust-relationship"),
+    relationshipId: idSchema,
+    fromActorId: idSchema,
+    toActorId: idSchema,
+    dimensionId: idSchema,
+    amount: z.number().finite().min(-2).max(2).refine((value) => value !== 0, "Relationship adjustment cannot be zero"),
+  }).strict(),
+  z.object({
+    op: z.literal("create-obligation"),
+    obligation: z.object({
+      id: idSchema,
+      debtorActorId: idSchema,
+      creditorActorId: idSchema.optional(),
+      kindId: idSchema,
+      description: z.string().trim().min(1).max(1_000),
+      dueStoryTime: storyTimeSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("resolve-obligation"),
+    obligationId: idSchema,
+    resolution: z.enum(["fulfilled", "violated", "waived", "expired"]),
+  }).strict(),
+]);
+export type BranchSemanticOperation = z.infer<typeof branchSemanticOperationSchema>;
+export const branchSemanticDeltaSchema = z.object({
+  version: z.literal(1),
+  operations: z.array(branchSemanticOperationSchema).max(256),
+}).strict();
+export type BranchSemanticDelta = z.infer<typeof branchSemanticDeltaSchema>;
+
+export const processOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("start-process"),
+    process: z.object({
+      id: idSchema,
+      templateId: idSchema.optional(),
+      ownerEntityIds: z.array(idSchema).min(1).max(32),
+      phaseId: idSchema,
+      progress: z.number().finite().min(0).max(1).default(0),
+      dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("advance-process"),
+    processId: idSchema,
+    amount: z.number().finite().positive().max(1),
+    phaseId: idSchema.optional(),
+    dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+  }).strict(),
+  z.object({ op: z.literal("pause-process"), processId: idSchema, reasonId: idSchema }).strict(),
+  z.object({ op: z.literal("resume-process"), processId: idSchema, dueAtElapsedDays: z.number().finite().nonnegative().optional() }).strict(),
+  z.object({ op: z.literal("finish-process"), processId: idSchema, outcomeId: idSchema }).strict(),
+]);
+export type ProcessOperation = z.infer<typeof processOperationSchema>;
+export const processDeltaSchema = z.object({ version: z.literal(1), operations: z.array(processOperationSchema).max(256) }).strict();
+export type ProcessDelta = z.infer<typeof processDeltaSchema>;
+
+export const normOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("instantiate-norm"),
+    norm: z.object({
+      id: idSchema,
+      templateId: idSchema,
+      subjectActorId: idSchema,
+      beneficiaryActorId: idSchema.optional(),
+      description: z.string().trim().min(1).max(1_000),
+      dueStoryTime: storyTimeSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({ op: z.literal("satisfy-norm"), normId: idSchema, byActorId: idSchema.optional() }).strict(),
+  z.object({ op: z.literal("violate-norm"), normId: idSchema, byActorId: idSchema.optional(), reasonId: idSchema.optional() }).strict(),
+  z.object({ op: z.literal("repair-norm"), normId: idSchema, byActorId: idSchema.optional(), reparationId: idSchema }).strict(),
+]);
+export type NormOperation = z.infer<typeof normOperationSchema>;
+export const normDeltaSchema = z.object({ version: z.literal(1), operations: z.array(normOperationSchema).max(256) }).strict();
+export type NormDelta = z.infer<typeof normDeltaSchema>;
+
 /**
  * A source-backed canonical possibility may expose a small number of semantic
  * roles that can be rebound after branch divergence.  This policy belongs to
@@ -924,6 +1078,9 @@ export const eventEffectsRefSchema = z.object({
   version: z.literal(1),
   stateDeltaHash: objectHashSchema.optional(),
   knowledgeDeltaHash: objectHashSchema.optional(),
+  semanticDeltaHash: objectHashSchema.optional(),
+  processDeltaHash: objectHashSchema.optional(),
+  normDeltaHash: objectHashSchema.optional(),
 }).strict();
 export type EventEffectsRef = z.infer<typeof eventEffectsRefSchema>;
 

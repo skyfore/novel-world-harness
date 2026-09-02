@@ -661,7 +661,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T2 — Shared projection 与 typed effect channels
 
-- **状态：** pending
+- **状态：** in progress
 - **依赖：** T1
 - **主要文件：**
   - 新建 `src/world/projection-service.ts`

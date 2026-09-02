@@ -80,6 +80,63 @@ describe("WorldObjectStore", () => {
     const commitHash = await store.putCommit(commit);
     await expect(store.getCommit(commitHash)).resolves.toEqual(commit);
   });
+
+  it("stores semantic, process, and norm deltas in distinct typed channels", async () => {
+    const root = await tempRoot();
+    const store = new WorldObjectStore(root);
+    const semantic = {
+      version: 1 as const,
+      operations: [{
+        op: "record-proposition" as const,
+        proposition: {
+          id: "branch-proposition-1",
+          subjectEntityId: "hero",
+          relationId: "promised-to-return",
+          object: { kind: "literal" as const, value: true },
+          polarity: "positive" as const,
+          modality: "asserted" as const,
+        },
+      }],
+    };
+    const processes = {
+      version: 1 as const,
+      operations: [{
+        op: "start-process" as const,
+        process: { id: "storm-1", ownerEntityIds: ["valley"], phaseId: "forming", progress: 0.1 },
+      }],
+    };
+    const norms = {
+      version: 1 as const,
+      operations: [{
+        op: "instantiate-norm" as const,
+        norm: {
+          id: "promise-1",
+          templateId: "keep-promises",
+          subjectActorId: "hero",
+          beneficiaryActorId: "witness",
+          description: "Hero should return before nightfall.",
+        },
+      }],
+    };
+
+    const semanticHash = await store.putSemanticDelta(semantic);
+    const processHash = await store.putProcessDelta(processes);
+    const normHash = await store.putNormDelta(norms);
+    await expect(store.getSemanticDelta(semanticHash)).resolves.toEqual(semantic);
+    await expect(store.getProcessDelta(processHash)).resolves.toEqual(processes);
+    await expect(store.getNormDelta(normHash)).resolves.toEqual(norms);
+    await expect(store.putSemanticDelta({
+      version: 1,
+      operations: [{
+        op: "adjust-relationship",
+        relationshipId: "hero-witness",
+        fromActorId: "hero",
+        toActorId: "witness",
+        dimensionId: "trust",
+        amount: 0,
+      }],
+    })).rejects.toThrow("Relationship adjustment cannot be zero");
+  });
 });
 
 describe("BranchStore", () => {

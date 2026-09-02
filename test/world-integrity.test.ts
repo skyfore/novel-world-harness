@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import { fsckWorld } from "../src/world/fsck.js";
-import type { Entity } from "../src/world/model.js";
+import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, type Entity } from "../src/world/model.js";
 import { WorldSnapshotStore } from "../src/world/snapshot.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 
@@ -81,6 +81,50 @@ describe("world fsck", () => {
     const report = await fsckWorld(engine);
     expect(report.ok).toBe(false);
     expect(report.issues.some((issue) => issue.code === "BRANCH_REPLAY_FAILED")).toBe(true);
+  });
+
+  it("tracks every typed effect channel as reachable branch history", async () => {
+    const { engine, head } = await fixture();
+    const semanticDeltaHash = await engine.objects.putSemanticDelta({
+      version: 1,
+      operations: [{
+        op: "record-proposition",
+        proposition: {
+          id: "hero-remembers-vow",
+          subjectEntityId: "hero",
+          relationId: "remembers-vow",
+          object: { kind: "literal", value: true },
+          polarity: "positive",
+          modality: "asserted",
+        },
+      }],
+    });
+    const eventHash = await engine.objects.putEvent({
+      version: 2,
+      eventId: "records-vow",
+      branchId: "main",
+      logicalTime: { step: 2 },
+      title: "The vow becomes branch truth",
+      participants: ["hero"],
+      effects: { version: 1, semanticDeltaHash },
+      evidence: [],
+      causalParents: [],
+    });
+    const commitHash = await engine.objects.putCommit({
+      version: 1,
+      parentCommitId: head,
+      branchId: "main",
+      logicalTime: { step: 2 },
+      eventHashes: [eventHash],
+      engineVersion: WORLD_ENGINE_VERSION,
+      schemaVersion: WORLD_SCHEMA_VERSION,
+    });
+    await engine.branches.updateHead("main", head, commitHash);
+
+    const report = await fsckWorld(engine);
+    expect(report.ok).toBe(true);
+    expect(report.reachableSemanticDeltas).toBe(1);
+    expect(report.orphanObjects.semantics).toEqual([]);
   });
 
   it("isolates an incomplete branch and continues checking healthy branches", async () => {

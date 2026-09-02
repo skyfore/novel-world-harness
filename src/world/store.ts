@@ -6,23 +6,29 @@ import type { z } from "zod";
 import { canonicalJson, assertContentHash, contentHash } from "./canonical.js";
 import {
   branchSchema,
+  branchSemanticDeltaSchema,
   committedEventSchema,
   knowledgeDeltaSchema,
+  normDeltaSchema,
+  processDeltaSchema,
   stateDeltaSchema,
   worldCommitSchema,
   type Branch,
+  type BranchSemanticDelta,
   type BranchId,
   type CommitId,
   type CommittedEvent,
   type KnowledgeDelta,
+  type NormDelta,
   type ObjectHash,
+  type ProcessDelta,
   type StateDelta,
   type WorldCommit,
 } from "./model.js";
 import { worldStorageRoot } from "./paths.js";
 
 const BRANCH_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-type ObjectKind = "deltas" | "knowledge" | "events" | "commits";
+type ObjectKind = "deltas" | "knowledge" | "semantics" | "processes" | "norms" | "events" | "commits";
 type Schema<T> = z.ZodType<T>;
 export type BranchHead = { version: 1; commitId: CommitId; updatedAt: string };
 export type BranchLockMetadata =
@@ -99,6 +105,15 @@ export class WorldObjectStore {
   putKnowledgeDelta(delta: KnowledgeDelta): Promise<ObjectHash> {
     return this.put("knowledge", knowledgeDeltaSchema, delta);
   }
+  putSemanticDelta(delta: BranchSemanticDelta): Promise<ObjectHash> {
+    return this.put("semantics", branchSemanticDeltaSchema, delta);
+  }
+  putProcessDelta(delta: ProcessDelta): Promise<ObjectHash> {
+    return this.put("processes", processDeltaSchema, delta);
+  }
+  putNormDelta(delta: NormDelta): Promise<ObjectHash> {
+    return this.put("norms", normDeltaSchema, delta);
+  }
   putEvent(event: CommittedEvent): Promise<ObjectHash> {
     return this.put("events", committedEventSchema, event);
   }
@@ -110,6 +125,15 @@ export class WorldObjectStore {
   }
   getKnowledgeDelta(hash: ObjectHash): Promise<KnowledgeDelta> {
     return this.get("knowledge", knowledgeDeltaSchema, hash);
+  }
+  getSemanticDelta(hash: ObjectHash): Promise<BranchSemanticDelta> {
+    return this.get("semantics", branchSemanticDeltaSchema, hash);
+  }
+  getProcessDelta(hash: ObjectHash): Promise<ProcessDelta> {
+    return this.get("processes", processDeltaSchema, hash);
+  }
+  getNormDelta(hash: ObjectHash): Promise<NormDelta> {
+    return this.get("norms", normDeltaSchema, hash);
   }
   getEvent(hash: ObjectHash): Promise<CommittedEvent> {
     return this.get("events", committedEventSchema, hash);

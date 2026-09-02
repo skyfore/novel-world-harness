@@ -21,6 +21,9 @@ export type WorldFsckReport = {
   reachableEvents: number;
   reachableDeltas: number;
   reachableKnowledgeDeltas: number;
+  reachableSemanticDeltas: number;
+  reachableProcessDeltas: number;
+  reachableNormDeltas: number;
   orphanObjects: Record<string, string[]>;
   issues: FsckIssue[];
 };
@@ -30,6 +33,9 @@ type Reachable = {
   events: Set<string>;
   deltas: Set<string>;
   knowledge: Set<string>;
+  semantics: Set<string>;
+  processes: Set<string>;
+  norms: Set<string>;
 };
 
 export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
@@ -39,6 +45,9 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
     events: new Set(),
     deltas: new Set(),
     knowledge: new Set(),
+    semantics: new Set(),
+    processes: new Set(),
+    norms: new Set(),
   };
   const branches = await listBranches(engine, issues);
   const snapshots = new WorldSnapshotStore(path.resolve(engine.objects.root, "../../.."));
@@ -84,7 +93,7 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
     }
   }
 
-  const objectKinds = ["commits", "events", "deltas", "knowledge"] as const;
+  const objectKinds = ["commits", "events", "deltas", "knowledge", "semantics", "processes", "norms"] as const;
   const orphanObjects: Record<string, string[]> = {};
   for (const kind of objectKinds) {
     const all = await listObjectHashes(engine.objects.root, kind);
@@ -103,6 +112,9 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
     reachableEvents: reachable.events.size,
     reachableDeltas: reachable.deltas.size,
     reachableKnowledgeDeltas: reachable.knowledge.size,
+    reachableSemanticDeltas: reachable.semantics.size,
+    reachableProcessDeltas: reachable.processes.size,
+    reachableNormDeltas: reachable.norms.size,
     orphanObjects,
     issues,
   };
@@ -144,6 +156,21 @@ async function auditBranch(engine: WorldEngine, branch: Branch, reachable: Reach
       if (event.effects.knowledgeDeltaHash) {
         reachable.knowledge.add(event.effects.knowledgeDeltaHash);
         const delta = await engine.objects.getKnowledgeDelta(event.effects.knowledgeDeltaHash);
+        material ||= delta.operations.length > 0;
+      }
+      if (event.effects.semanticDeltaHash) {
+        reachable.semantics.add(event.effects.semanticDeltaHash);
+        const delta = await engine.objects.getSemanticDelta(event.effects.semanticDeltaHash);
+        material ||= delta.operations.length > 0;
+      }
+      if (event.effects.processDeltaHash) {
+        reachable.processes.add(event.effects.processDeltaHash);
+        const delta = await engine.objects.getProcessDelta(event.effects.processDeltaHash);
+        material ||= delta.operations.length > 0;
+      }
+      if (event.effects.normDeltaHash) {
+        reachable.norms.add(event.effects.normDeltaHash);
+        const delta = await engine.objects.getNormDelta(event.effects.normDeltaHash);
         material ||= delta.operations.length > 0;
       }
       if (commit.parentCommitId && !material) {

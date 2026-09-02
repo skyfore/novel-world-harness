@@ -52,8 +52,8 @@ export class KnowledgeProjector {
     for (const entry of chain) {
       for (const eventHash of entry.eventHashes) {
         const event = await this.engine.objects.getEvent(eventHash);
-        if (!event.knowledgeDeltaHash) continue;
-        const delta = await this.engine.objects.getKnowledgeDelta(event.knowledgeDeltaHash);
+        if (!event.effects.knowledgeDeltaHash) continue;
+        const delta = await this.engine.objects.getKnowledgeDelta(event.effects.knowledgeDeltaHash);
         for (const operation of delta.operations) {
           const actor = (actors[operation.actorId] ??= {});
           if (operation.op === "forget") {

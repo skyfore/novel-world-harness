@@ -640,7 +640,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T1 — 新 schema 核心与干净存储边界
 
-- **状态：** pending
+- **状态：** in progress（已完成 `world/v2` 干净命名空间；Event V2 正在落地）
 - **依赖：** T0
 - **主要文件：**
   - `src/world/model.ts`

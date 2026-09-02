@@ -836,7 +836,7 @@ function trailingStagnationDepth(
     if (!event.participants.includes(actorId) && event.actorId !== actorId) continue;
     const sceneMoved = Boolean(event.progress?.scene && event.progress.scene.kind !== "stay");
     const materiallyAdvanced = delta.operations.length > 0
-      || Boolean(event.knowledgeDeltaHash)
+      || Boolean(event.effects.knowledgeDeltaHash)
       || Boolean(event.timeAdvance)
       || sceneMoved;
     if (materiallyAdvanced) break;

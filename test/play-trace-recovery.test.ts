@@ -46,14 +46,14 @@ async function world(root: string): Promise<{
   await branches.create({ id: "main", name: "Main", headCommitId: genesis });
   const deltaHash = await objects.putDelta({ version: 1, operations: [] });
   const eventHash = await objects.putEvent({
-    version: 1,
+    version: 2,
     eventId: "event-player-move",
     branchId: "main",
     logicalTime: { step: 1 },
     proposalId: "proposal-player-move",
     title: "The player waits",
     participants: ["hero"],
-    deltaHash,
+    effects: { version: 1, stateDeltaHash: deltaHash },
     evidence: [],
     causalParents: [],
     actorId: "hero",

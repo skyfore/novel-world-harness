@@ -428,7 +428,7 @@ function npcExchangeStagnationDepth(
     if (event.title === "Genesis") break;
     if (!event.participants.includes(playerId) || !event.participants.includes(npcId)) continue;
     const sceneMoved = Boolean(event.progress?.scene && event.progress.scene.kind !== "stay");
-    if (delta.operations.length || event.knowledgeDeltaHash || event.timeAdvance || sceneMoved) break;
+    if (delta.operations.length || event.effects.knowledgeDeltaHash || event.timeAdvance || sceneMoved) break;
     depth += 1;
   }
   return depth;

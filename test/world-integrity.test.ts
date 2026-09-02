@@ -75,7 +75,8 @@ describe("world fsck", () => {
   it("detects corruption in a reachable content-addressed delta", async () => {
     const { engine, eventHash } = await fixture();
     const event = await engine.objects.getEvent(eventHash);
-    const filePath = path.join(engine.objects.root, "objects", "deltas", `${event.deltaHash}.json`);
+    if (!event.effects.stateDeltaHash) throw new Error("fixture event must reference a state delta");
+    const filePath = path.join(engine.objects.root, "objects", "deltas", `${event.effects.stateDeltaHash}.json`);
     await fs.writeFile(filePath, '{"version":1,"operations":[]}\n', "utf8");
     const report = await fsckWorld(engine);
     expect(report.ok).toBe(false);

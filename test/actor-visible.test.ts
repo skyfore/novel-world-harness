@@ -5,13 +5,13 @@ import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js
 
 function event(overrides: Partial<CommittedEvent> = {}): CommittedEvent {
   return {
-    version: 1,
+    version: 2,
     eventId: "event-1",
     branchId: "main",
     logicalTime: { step: 1 },
     title: "The hidden conspirator marks Hero without Hero noticing",
     participants: ["hero"],
-    deltaHash: "delta-1",
+    effects: { version: 1, stateDeltaHash: "0".repeat(64) },
     evidence: [],
     causalParents: [],
     ...overrides,

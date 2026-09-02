@@ -119,7 +119,15 @@ export class WorldProjector {
       for (const eventHash of entry.commit.eventHashes) {
         const event = await this.objects.getEvent(eventHash);
         if (event.logicalTime.step !== entry.commit.logicalTime.step) throw new Error(`Event/commit logical time mismatch for ${eventHash}`);
-        state = applyStateDelta(state, await this.objects.getDelta(event.deltaHash), context.stateSchema, context.entities, context.rules);
+        if (event.effects.stateDeltaHash) {
+          state = applyStateDelta(
+            state,
+            await this.objects.getDelta(event.effects.stateDeltaHash),
+            context.stateSchema,
+            context.entities,
+            context.rules,
+          );
+        }
       }
       state = { ...state, atCommit: entry.id, logicalTime: entry.commit.logicalTime };
       const invariantErrors = validateEngineInvariants(state, context.stateSchema, context.entities, context.rules);
@@ -417,6 +425,11 @@ export class WorldEngine {
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
     const deltaHash = await this.objects.putDelta(initialDelta);
     const knowledgeDeltaHash = knowledge ? await this.objects.putKnowledgeDelta(knowledge) : undefined;
+    const effects: CommittedEvent["effects"] = {
+      version: 1,
+      stateDeltaHash: deltaHash,
+      ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
+    };
     const inferredRealizations = [...(this.context.events?.values() ?? [])]
       .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge))
       .map((event) => event.id);
@@ -432,8 +445,7 @@ export class WorldEngine {
       kind: "genesis",
       branchId,
       logicalTime,
-      deltaHash,
-      knowledgeDeltaHash,
+      effects,
       realizesCanonicalEventIds,
       evidence,
       entryActorId: genesisOptions.entryActorId,
@@ -448,7 +460,7 @@ export class WorldEngine {
       ...(genesisOptions.entryActorId ? [genesisOptions.entryActorId] : []),
     ])].sort();
     const event: CommittedEvent = {
-      version: 1,
+      version: 2,
       eventId,
       branchId,
       logicalTime,
@@ -456,8 +468,7 @@ export class WorldEngine {
       ...(actorObservations.length ? { actorObservations } : {}),
       participants,
       ...(participantPresence.length ? { participantPresence } : {}),
-      deltaHash,
-      ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
+      effects,
       evidence,
       causalParents: [],
       ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
@@ -587,6 +598,11 @@ export class WorldEngine {
     if (!postState) throw new Error("Accepted event proposal did not produce a projected post-state");
     const deltaHash = await this.objects.putDelta(parsed.proposedDelta);
     const knowledgeDeltaHash = parsed.proposedKnowledge ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge) : undefined;
+    const effects: CommittedEvent["effects"] = {
+      version: 1,
+      stateDeltaHash: deltaHash,
+      ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
+    };
     const logicalTime = postState.logicalTime;
     const canonicalPossibilityId = !parsed.canonicalAdaptation && parsed.possibilityId?.startsWith("canon-")
       ? parsed.possibilityId.slice("canon-".length)
@@ -601,8 +617,7 @@ export class WorldEngine {
       title: parsed.title,
       logicalTime,
       timeAdvance: parsed.timeAdvance,
-      deltaHash,
-      knowledgeDeltaHash,
+      effects,
       supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds,
       possibilityId: parsed.possibilityId,
       canonicalAdaptation: parsed.canonicalAdaptation,
@@ -614,7 +629,7 @@ export class WorldEngine {
       spokenUtterances: parsed.spokenUtterances,
     });
     const event: CommittedEvent = {
-      version: 1,
+      version: 2,
       eventId,
       branchId: parsed.branchId,
       logicalTime,
@@ -627,8 +642,7 @@ export class WorldEngine {
       ...(parsed.spokenUtterances ? { spokenUtterances: structuredClone(parsed.spokenUtterances) } : {}),
       participants: parsed.participants,
       ...(parsed.participantPresence ? { participantPresence: structuredClone(parsed.participantPresence) } : {}),
-      deltaHash,
-      ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
+      effects,
       evidence: parsed.evidence,
       causalParents: parsed.causalParents,
       ...(parsed.supersedesCanonicalEventIds ? { supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds } : {}),

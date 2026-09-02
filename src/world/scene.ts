@@ -242,7 +242,10 @@ export async function committedHistory(engine: WorldEngine, commitId: CommitId):
   for (const commit of commits) {
     for (const eventHash of commit.eventHashes) {
       const event = await engine.objects.getEvent(eventHash);
-      result.push({ commitId: commit.id, eventHash, event, delta: await engine.objects.getDelta(event.deltaHash) });
+      const delta = event.effects.stateDeltaHash
+        ? await engine.objects.getDelta(event.effects.stateDeltaHash)
+        : { version: 1 as const, operations: [] };
+      result.push({ commitId: commit.id, eventHash, event, delta });
     }
   }
   return result;

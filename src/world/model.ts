@@ -18,6 +18,9 @@ export const idSchema = z.string().regex(
   "IDs must start with an ASCII letter or digit and contain only letters, digits, dot, underscore, or hyphen",
 ).max(200, "IDs must be at most 200 characters");
 
+/** A SHA-256 content address. Logical IDs and immutable object references are intentionally distinct. */
+export const objectHashSchema = z.string().regex(/^[a-f0-9]{64}$/, "Object hashes must be lowercase SHA-256 hex strings");
+
 export const sourceSpanSchema = z
   .object({
     sourceId: idSchema,
@@ -910,9 +913,23 @@ export const eventProposalSchema = eventProposalBaseSchema.superRefine((value, c
 });
 export type EventProposal = z.infer<typeof eventProposalSchema>;
 
+/**
+ * References to independently validated, content-addressed event effects.
+ *
+ * StateDelta and KnowledgeDelta remain separate channels because they have
+ * different reducers and visibility rules.  The event is the atomic envelope
+ * that binds their hashes into branch history.
+ */
+export const eventEffectsRefSchema = z.object({
+  version: z.literal(1),
+  stateDeltaHash: objectHashSchema.optional(),
+  knowledgeDeltaHash: objectHashSchema.optional(),
+}).strict();
+export type EventEffectsRef = z.infer<typeof eventEffectsRefSchema>;
+
 export const committedEventSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     eventId: idSchema,
     branchId: idSchema,
     logicalTime: logicalTimeSchema,
@@ -924,8 +941,7 @@ export const committedEventSchema = z
     spokenUtterances: z.array(spokenUtteranceSchema).max(32).optional(),
     participants: z.array(idSchema),
     participantPresence: z.array(participantPresenceSchema).max(128).optional(),
-    deltaHash: idSchema,
-    knowledgeDeltaHash: idSchema.optional(),
+    effects: eventEffectsRefSchema,
     evidence: z.array(evidenceRefSchema),
     causalParents: z.array(idSchema),
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
@@ -1136,5 +1152,5 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
-export const WORLD_SCHEMA_VERSION = 1;
-export const WORLD_ENGINE_VERSION = "0.1.0";
+export const WORLD_SCHEMA_VERSION = 2;
+export const WORLD_ENGINE_VERSION = "0.2.0";

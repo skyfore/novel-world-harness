@@ -132,11 +132,13 @@ async function auditBranch(engine: WorldEngine, branch: Branch, reachable: Reach
       if (event.logicalTime.step !== commit.logicalTime.step) {
         issues.push(error("EVENT_TIME_MISMATCH", `Event ${eventHash} step ${event.logicalTime.step} differs from commit step ${commit.logicalTime.step}`, branch.id, eventHash));
       }
-      reachable.deltas.add(event.deltaHash);
-      await engine.objects.getDelta(event.deltaHash);
-      if (event.knowledgeDeltaHash) {
-        reachable.knowledge.add(event.knowledgeDeltaHash);
-        await engine.objects.getKnowledgeDelta(event.knowledgeDeltaHash);
+      if (event.effects.stateDeltaHash) {
+        reachable.deltas.add(event.effects.stateDeltaHash);
+        await engine.objects.getDelta(event.effects.stateDeltaHash);
+      }
+      if (event.effects.knowledgeDeltaHash) {
+        reachable.knowledge.add(event.effects.knowledgeDeltaHash);
+        await engine.objects.getKnowledgeDelta(event.effects.knowledgeDeltaHash);
       }
     }
     cursor = commit.parentCommitId;

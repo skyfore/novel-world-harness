@@ -3,7 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { canonicalJson, contentHash } from "../src/world/canonical.js";
-import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, type StateDelta, type WorldCommit } from "../src/world/model.js";
+import {
+  WORLD_ENGINE_VERSION,
+  WORLD_SCHEMA_VERSION,
+  committedEventSchema,
+  type StateDelta,
+  type WorldCommit,
+} from "../src/world/model.js";
 import { BranchStore, WorldObjectStore } from "../src/world/store.js";
 
 const roots: string[] = [];
@@ -22,6 +28,32 @@ describe("canonical world objects", () => {
   it("hashes semantically identical object key order identically", () => {
     expect(canonicalJson({ b: 2, a: { d: 4, c: 3 } })).toBe('{"a":{"c":3,"d":4},"b":2}');
     expect(contentHash({ a: 1, b: 2 })).toBe(contentHash({ b: 2, a: 1 }));
+  });
+
+  it("accepts only Event V2 with typed content-addressed effect references", () => {
+    const knowledgeDeltaHash = "a".repeat(64);
+    const event = {
+      version: 2,
+      eventId: "event-1",
+      branchId: "main",
+      logicalTime: { step: 1 },
+      title: "A witness learns the password",
+      participants: ["witness"],
+      effects: { version: 1, knowledgeDeltaHash },
+      evidence: [],
+      causalParents: [],
+    } as const;
+
+    expect(committedEventSchema.parse(event).effects).toEqual({ version: 1, knowledgeDeltaHash });
+    expect(committedEventSchema.safeParse({
+      ...event,
+      version: 1,
+      deltaHash: "legacy-delta",
+    }).success).toBe(false);
+    expect(committedEventSchema.safeParse({
+      ...event,
+      effects: { version: 1, stateDeltaHash: "logical-id-is-not-a-content-hash" },
+    }).success).toBe(false);
   });
 });
 

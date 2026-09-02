@@ -42,7 +42,7 @@ import {
   canonicalAdaptationRoleRequirements,
   validateCanonicalAdaptationContract,
 } from "./canonical-adaptation.js";
-import { emptyKnowledgeState, isActionableKnowledge, KnowledgeProjector, type KnowledgeState } from "./knowledge.js";
+import { applyKnowledgeDelta, emptyKnowledgeState, isActionableKnowledge, KnowledgeProjector, type KnowledgeState } from "./knowledge.js";
 import { isCommunicatingKnowledgeSource, validateKnowledgeSemanticReferences } from "./knowledge-semantics.js";
 import { committedHistory, projectActorScene } from "./scene.js";
 import type { SpatialRelation } from "./spatial-ontology.js";
@@ -57,6 +57,13 @@ import { deriveProgressCertificate, hasMaterialProgress } from "./progress.js";
 import { resolveActionInvocation, type ActionSchema } from "./action-ontology.js";
 import type { EventFrame } from "./event-frame.js";
 import type { SceneOccurrence } from "./scene-occurrence.js";
+import {
+  applyBranchSemanticDelta,
+  materializeBranchSemanticProposal,
+  resolveSemanticKnowledgeRefs,
+  type BranchSemanticState,
+  type EffectProvenance,
+} from "./semantic-effects.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -119,11 +126,18 @@ function stateFactsChanged(before: WorldState, after: WorldState): boolean {
 function hasNonStateMateriality(proposal: EventProposal, timeChanged: boolean): boolean {
   return timeChanged
     || Boolean(proposal.proposedKnowledge?.operations.length)
+    || Boolean(proposal.proposedSemantics?.operations.length)
     || Boolean(proposal.spokenUtterances?.length)
     || Boolean(proposal.progress?.scene);
 }
 
-export function validateEventProposal(proposalInput: EventProposal, head: CommitId, state: WorldState, context: WorldModelContext): { report: ValidationReport; postState?: WorldState } {
+export function validateEventProposal(
+  proposalInput: EventProposal,
+  head: CommitId,
+  state: WorldState,
+  context: WorldModelContext,
+  options: { branchSemantics?: BranchSemanticState } = {},
+): { report: ValidationReport; postState?: WorldState } {
   const proposal = eventProposalSchema.parse(proposalInput);
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
@@ -254,7 +268,14 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
       const operation = knowledge.operations[index]!;
       const actor = context.entities.get(operation.actorId);
       if (!actor || actor.kind !== "character") errors.push({ code: "INVALID_KNOWLEDGE_ACTOR", message: `Knowledge actor ${operation.actorId} is not a character`, path: `proposedKnowledge.operations.${index}` });
-      if (context.claims && !context.claims.has(operation.claimId)) errors.push({ code: "UNKNOWN_KNOWLEDGE_CLAIM", message: `Unknown claim ${operation.claimId}`, path: `proposedKnowledge.operations.${index}` });
+      const requiresCataloguedClaim = Boolean(context.claims)
+        || Boolean(operation.propositionId)
+        || (operation.op === "learn" && Boolean(operation.attributionId));
+      if (requiresCataloguedClaim
+        && !context.claims?.has(operation.claimId)
+        && !options.branchSemantics?.claims[operation.claimId]) {
+        errors.push({ code: "UNKNOWN_KNOWLEDGE_CLAIM", message: `Unknown claim ${operation.claimId}`, path: `proposedKnowledge.operations.${index}` });
+      }
       if (operation.op === "learn") {
         if (operation.sourceActorId) {
           const source = context.entities.get(operation.sourceActorId);
@@ -265,6 +286,7 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
         claims: context.claims ?? new Map(),
         propositions: context.propositions,
         attributions: context.attributions,
+        ...(options.branchSemantics ? { branchSemantics: options.branchSemantics } : {}),
       }, `proposedKnowledge.operations.${index}`));
     }
   }
@@ -540,7 +562,7 @@ export class WorldEngine {
     return commitHash;
   }
   async commitProposal(proposal: EventProposal): Promise<CommitProposalResult> {
-    const parsed = eventProposalSchema.parse(proposal);
+    let parsed = eventProposalSchema.parse(proposal);
     const branch = await this.branches.read(parsed.branchId);
     const head = branch.headCommitId;
     const context = await this.contextForCommit(head);
@@ -562,8 +584,65 @@ export class WorldEngine {
     }
     const projection = await this.projections.project(head);
     const state = projection.state;
-    const { report: baseReport, postState } = validateEventProposal(parsed, head, state, context);
+    let semanticDelta: import("./model.js").BranchSemanticDelta | undefined;
+    let stagedSemantics = projection.semantics;
+    const semanticErrors: ValidationIssue[] = [];
+    if (parsed.proposedSemantics) {
+      try {
+        const materialized = materializeBranchSemanticProposal(parsed.proposedSemantics, {
+          branchId: parsed.branchId,
+          parentCommitId: head,
+          proposalHash: contentHash({
+            proposalId: parsed.proposalId,
+            branchId: parsed.branchId,
+            parentCommitId: head,
+            proposedSemantics: parsed.proposedSemantics,
+          }),
+        });
+        semanticDelta = materialized.delta;
+        if (parsed.proposedKnowledge) {
+          parsed = eventProposalSchema.parse({
+            ...parsed,
+            proposedKnowledge: resolveSemanticKnowledgeRefs(parsed.proposedKnowledge, materialized.localBindings),
+          });
+        }
+        const provisionalProvenance: EffectProvenance = {
+          commitId: head,
+          eventId: "pending-event",
+          eventHash: "0".repeat(64),
+        };
+        stagedSemantics = applyBranchSemanticDelta(projection.semantics, semanticDelta, {
+          entities: context.entities,
+          canonicalPropositionIds: context.propositions ? new Set(context.propositions.keys()) : undefined,
+          canonicalAttributionIds: context.attributions ? new Set(context.attributions.keys()) : undefined,
+          canonicalClaimIds: context.claims ? new Set(context.claims.keys()) : undefined,
+          canonicalGoalIds: context.actorGoals ? new Set(context.actorGoals.map((goal) => goal.id)) : undefined,
+          canonicalEventIds: context.events ? new Set(context.events.keys()) : undefined,
+          knownCommittedEventIds: new Set(Object.keys(projection.causality.events)),
+        }, provisionalProvenance);
+        if (parsed.proposedKnowledge) {
+          applyKnowledgeDelta(projection.knowledge, parsed.proposedKnowledge, head, {
+            entities: context.entities,
+            claims: context.claims,
+            propositions: context.propositions,
+            attributions: context.attributions,
+            branchSemantics: stagedSemantics,
+          });
+        }
+      } catch (error) {
+        semanticErrors.push({
+          code: "INVALID_SEMANTIC_DELTA",
+          message: error instanceof Error ? error.message : String(error),
+          path: "proposedSemantics",
+        });
+      }
+    }
+    const { report: baseReport, postState } = validateEventProposal(parsed, head, state, context, { branchSemantics: stagedSemantics });
     let report = baseReport;
+    if (semanticErrors.length) {
+      const { derivedDeltaHash: _derivedDeltaHash, ...withoutDerivedHash } = report;
+      report = { ...withoutDerivedHash, accepted: false, errors: [...report.errors, ...semanticErrors] };
+    }
     if (report.accepted && parsed.canonicalAdaptation) {
       const runtimeErrors: ValidationIssue[] = [];
       const sceneActor = context.entities.get(parsed.canonicalAdaptation.sceneActorId);
@@ -687,6 +766,7 @@ export class WorldEngine {
       || JSON.stringify(postState.logicalTime.storyTime) !== JSON.stringify(state.logicalTime.storyTime);
     const hasMaterialCandidate = effectiveStateIndexes.length > 0
       || effectiveKnowledgeIndexes.length > 0
+      || Boolean(semanticDelta?.operations.length)
       || Boolean(parsed.spokenUtterances?.length)
       || Boolean(parsed.progress?.scene)
       || timeAdvanced;
@@ -708,16 +788,21 @@ export class WorldEngine {
     const knowledgeDeltaHash = parsed.proposedKnowledge && effectiveKnowledgeIndexes.length
       ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge)
       : undefined;
+    const semanticDeltaHash = semanticDelta?.operations.length
+      ? await this.objects.putSemanticDelta(semanticDelta)
+      : undefined;
     const effects: CommittedEvent["effects"] = {
       version: 1,
       ...(deltaHash ? { stateDeltaHash: deltaHash } : {}),
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
+      ...(semanticDeltaHash ? { semanticDeltaHash } : {}),
     };
     const progressCertificate = deriveProgressCertificate({
       effects,
       loaded: {
         ...(deltaHash ? { stateDelta: parsed.proposedDelta } : {}),
         ...(knowledgeDeltaHash && parsed.proposedKnowledge ? { knowledgeDelta: parsed.proposedKnowledge } : {}),
+        ...(semanticDeltaHash && semanticDelta ? { semanticDelta } : {}),
       },
       effectiveStateOperationIndexes: effectiveStateIndexes,
       effectiveKnowledgeOperationIndexes: effectiveKnowledgeIndexes,

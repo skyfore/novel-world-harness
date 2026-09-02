@@ -12,7 +12,7 @@ import type {
 import type { WorldEngine } from "./engine.js";
 import { knownStateFieldKeys, projectActorVisibleState } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
-import { isCommunicatingKnowledgeSource } from "./knowledge-semantics.js";
+import { isCommunicatingKnowledgeSource, projectPropositionObject } from "./knowledge-semantics.js";
 import type { BranchSemanticState } from "./semantic-effects.js";
 
 export type KnowledgeState = {
@@ -24,7 +24,7 @@ export type ActorWorldView = {
   actorId: EntityId;
   atCommit: CommitId;
   selfState: Record<string, unknown>;
-  knowledge: Array<{ fact: KnowledgeFact; claim?: Claim; proposition?: Proposition; attribution?: Attribution }>;
+  knowledge: Array<{ fact: KnowledgeFact; claim?: Claim; proposition?: Proposition; attribution?: Attribution; branchGrounded?: boolean }>;
 };
 
 export type KnowledgeReducerContext = {
@@ -116,7 +116,7 @@ export function actionableKnowledgeEntries(
   return view.knowledge.filter((entry): entry is ActorWorldView["knowledge"][number] & { claim: Claim } =>
     Boolean(entry.claim)
     && isActionableKnowledge(entry.fact)
-    && evidenceBelongsExclusivelyToSource(entry.claim?.evidence ?? [], sourceId));
+    && (entry.branchGrounded || evidenceBelongsExclusivelyToSource(entry.claim?.evidence ?? [], sourceId)));
 }
 
 export function actionableKnowledgeClaimIds(view: ActorWorldView, sourceId?: string): Set<string> {
@@ -136,20 +136,41 @@ export class KnowledgeProjector {
     if (!entity || entity.kind !== "character") throw new Error(`Actor view requires a character: ${actorId}`);
     const state = worldState ?? (await this.engine.projector.project(commitId));
     if (state.atCommit !== commitId) throw new Error(`World state ${state.atCommit} does not match requested commit ${commitId}`);
-    const knowledge = await this.project(commitId);
+    const projection = await this.engine.projections.project(commitId);
+    const knowledge = projection.knowledge;
     const facts = Object.values(knowledge.actors[actorId] ?? {})
       .sort((left, right) => left.claimId.localeCompare(right.claimId))
-      .map((fact) => ({
-        fact,
-        claim: context.claims?.get(fact.claimId),
-        proposition: fact.propositionId ? context.propositions?.get(fact.propositionId) : undefined,
-        attribution: fact.attributionId ? context.attributions?.get(fact.attributionId) : undefined,
-      }))
-      .map(({ fact, claim, proposition, attribution }) => ({
+      .map((fact) => {
+        const branchProposition = fact.propositionId ? projection.semantics.propositions[fact.propositionId] : undefined;
+        const proposition = fact.propositionId
+          ? context.propositions?.get(fact.propositionId) ?? (branchProposition ? stripIntroduced(branchProposition) : undefined)
+          : undefined;
+        const branchAttribution = fact.attributionId ? projection.semantics.attributions[fact.attributionId] : undefined;
+        const attribution = fact.attributionId
+          ? context.attributions?.get(fact.attributionId) ?? (branchAttribution ? stripIntroduced(branchAttribution) : undefined)
+          : undefined;
+        const branchClaim = projection.semantics.claims[fact.claimId];
+        const claim = context.claims?.get(fact.claimId) ?? (branchClaim && proposition
+          ? {
+              id: branchClaim.id,
+              subject: proposition.subjectEntityId,
+              predicate: proposition.relationId,
+              object: projectPropositionObject(proposition.object),
+              epistemicType: attribution?.holderKind === "character" ? "character-claim" as const : "inference" as const,
+              ...(attribution?.holderKind === "character" && attribution.holderEntityId
+                ? { speaker: attribution.holderEntityId }
+                : {}),
+              evidence: [],
+            }
+          : undefined);
+        return { fact, claim, proposition, attribution, branchGrounded: Boolean(branchClaim) };
+      })
+      .map(({ fact, claim, proposition, attribution, branchGrounded }) => ({
         fact,
         ...(claim ? { claim } : {}),
         ...(proposition ? { proposition } : {}),
         ...(attribution ? { attribution } : {}),
+        ...(branchGrounded ? { branchGrounded: true } : {}),
       }));
     const stateKnowledge = knownStateFieldKeys(
       actorId,
@@ -169,4 +190,9 @@ export class KnowledgeProjector {
       knowledge: facts,
     };
   }
+}
+
+function stripIntroduced<T extends { introducedBy: unknown }>(value: T): Omit<T, "introducedBy"> & { evidence: [] } {
+  const { introducedBy: _introducedBy, ...semantic } = value;
+  return { ...structuredClone(semantic), evidence: [] };
 }

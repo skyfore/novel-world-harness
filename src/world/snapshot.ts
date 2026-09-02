@@ -19,7 +19,7 @@ import type { WorldProjectionBundle } from "./projection-service.js";
 export const PROJECTION_REDUCER_VERSIONS = {
   state: 1,
   knowledge: 1,
-  semantics: 1,
+  semantics: 2,
   processes: 1,
   norms: 1,
   scenes: 1,

@@ -13,6 +13,7 @@ import { evaluatePredicate } from "./state.js";
 import { observeCommittedEvent } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { characterOntologyEvidence } from "./character-ontology.js";
+import { projectActorBranchSemantics, type ActorBranchSemanticView } from "./semantic-effects.js";
 
 export type CharacterLifeStage = {
   value: string;
@@ -45,6 +46,7 @@ export type CharacterDevelopmentView = {
   completedGoalIds: string[];
   expiredGoalIds: string[];
   achievedMilestoneIds: string[];
+  branchSemantics: ActorBranchSemanticView;
 };
 
 export type ActorVisibleCharacterDevelopment = {
@@ -69,12 +71,13 @@ export async function projectCharacterDevelopment(
   commitId: string,
   overrides: { goals?: readonly CharacterGoal[]; model?: CharacterModel | null } = {},
 ): Promise<CharacterDevelopmentView> {
-  const [context, state, history, actorView] = await Promise.all([
+  const [context, projection, history, actorView] = await Promise.all([
     engine.contextForCommit(commitId),
-    engine.projector.project(commitId),
+    engine.projections.project(commitId),
     committedHistory(engine, commitId),
     new KnowledgeProjector(engine).view(actorId, commitId),
   ]);
+  const state = projection.state;
   const actor = context.entities.get(actorId);
   if (!actor || actor.kind !== "character") throw new Error(`Character development requires a character: ${actorId}`);
   const effectiveSourceId = await resolveCommitSourceId(engine, context, commitId, undefined, "Character development");
@@ -154,6 +157,11 @@ export async function projectCharacterDevelopment(
       }
     }
   }
+  const branchSemantics = projectActorBranchSemantics(projection.semantics, actorId);
+  for (const goal of branchSemantics.goals) {
+    if (goal.status === "open") activeGoalIds.push(goal.id);
+    else completedGoalIds.push(goal.id);
+  }
 
   const age = state.values[actorId]?.["character.ageYears"];
   const explicitLifeStage = state.values[actorId]?.["character.lifeStage"];
@@ -177,6 +185,7 @@ export async function projectCharacterDevelopment(
     completedGoalIds: completedGoalIds.sort(),
     expiredGoalIds: expiredGoalIds.sort(),
     achievedMilestoneIds: achievedMilestoneIds.sort(),
+    branchSemantics,
   };
 }
 

@@ -296,11 +296,17 @@ export {
 export {
   applyBranchSemanticDelta,
   emptyBranchSemanticState,
+  materializeBranchSemanticProposal,
+  projectActorBranchSemantics,
+  resolveSemanticKnowledgeRefs,
+  type ActorBranchSemanticView,
   type BranchGoal,
   type BranchObligation,
   type BranchRelationship,
   type BranchSemanticState,
   type EffectProvenance,
+  type MaterializedBranchSemantics,
+  type SemanticLocalBinding,
   type SemanticReducerContext,
 } from "./world/semantic-effects.js";
 export { applyProcessDelta, emptyProcessState, type ProcessInstance, type ProcessState } from "./world/process-effects.js";

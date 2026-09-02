@@ -10,11 +10,13 @@ import type {
   ValidationIssue,
 } from "./model.js";
 import { knowledgeDeltaSchema } from "./model.js";
+import type { BranchSemanticState } from "./semantic-effects.js";
 
 export type KnowledgeSemanticCatalog = {
   claims: ReadonlyMap<string, Claim>;
   propositions?: ReadonlyMap<string, Proposition>;
   attributions?: ReadonlyMap<string, Attribution>;
+  branchSemantics?: BranchSemanticState;
 };
 
 export type LocatedKnowledgeDelta = { path: string; delta: KnowledgeDelta };
@@ -66,7 +68,8 @@ export function validateKnowledgeSemanticReferences(
   const errors: ValidationIssue[] = [];
   if (!operation.propositionId) return errors;
 
-  const proposition = catalog.propositions?.get(operation.propositionId);
+  const proposition = catalog.propositions?.get(operation.propositionId)
+    ?? catalog.branchSemantics?.propositions[operation.propositionId];
   if (!proposition) {
     errors.push(issue(
       "UNKNOWN_KNOWLEDGE_PROPOSITION",
@@ -85,10 +88,20 @@ export function validateKnowledgeSemanticReferences(
         `${path}.claimId`,
       ));
     }
+  } else {
+    const branchClaim = catalog.branchSemantics?.claims[operation.claimId];
+    if (branchClaim && branchClaim.propositionId !== proposition.id) {
+      errors.push(issue(
+        "KNOWLEDGE_PROJECTION_MISMATCH",
+        `Branch claim ${branchClaim.id} describes proposition ${branchClaim.propositionId}, not ${proposition.id}`,
+        `${path}.claimId`,
+      ));
+    }
   }
   if (operation.op !== "learn" || !operation.attributionId) return errors;
 
-  const attribution = catalog.attributions?.get(operation.attributionId);
+  const attribution = catalog.attributions?.get(operation.attributionId)
+    ?? catalog.branchSemantics?.attributions[operation.attributionId];
   if (!attribution) {
     errors.push(issue(
       "UNKNOWN_KNOWLEDGE_ATTRIBUTION",
@@ -136,7 +149,10 @@ export function validateKnowledgeSemanticReferences(
   return errors;
 }
 
-export function claimProjectionMismatches(claim: Claim, proposition: Proposition): string[] {
+export function claimProjectionMismatches(
+  claim: Claim,
+  proposition: Pick<Proposition, "id" | "subjectEntityId" | "relationId" | "object" | "polarity" | "modality">,
+): string[] {
   const mismatches: string[] = [];
   if (claim.subject !== proposition.subjectEntityId) mismatches.push("subject differs");
   if (claim.predicate !== proposition.relationId) mismatches.push("predicate/relation differs");

@@ -147,7 +147,7 @@ describe("ProjectionService", () => {
             id: "obligation-return",
             debtorActorId: "hero",
             creditorActorId: "witness",
-            kindId: "promise",
+            kindId: "provide",
             description: "Return before nightfall",
           },
         },

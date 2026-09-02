@@ -268,4 +268,98 @@ describe("model actor policy", () => {
     });
     await expect(source({ branchId: "main", commitId: head })).resolves.toEqual([]);
   });
+
+  it("lets committed branch goals and actor-scoped semantic overlays evolve model policy", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-model-actor-branch-semantics-"));
+    roots.push(root);
+    const hero: Entity = { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] };
+    const rival: Entity = { id: "rival", kind: "character", canonicalName: "Rival", aliases: [], evidence: [] };
+    const hall: Entity = { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: [] };
+    const engine = new WorldEngine(root, {
+      entities: new Map([[hero.id, hero], [rival.id, rival], [hall.id, hall]]),
+      rules: new Map(),
+      actorGoals: [],
+      stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    });
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [
+        { op: "set", entityId: "hero", field: "character.alive", value: true },
+        { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+        { op: "set", entityId: "rival", field: "character.alive", value: true },
+        { op: "set", entityId: "rival", field: "character.location", value: "hall" },
+      ],
+    });
+    const changed = await engine.commitProposal({
+      proposalId: "branch-policy-change",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "background",
+      title: "A commitment changes the situation",
+      participants: ["hero", "rival"],
+      participantPresence: [
+        { entityId: "hero", mode: "physical" },
+        { entityId: "rival", mode: "physical" },
+      ],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      proposedSemantics: {
+        version: 1,
+        operations: [
+          { op: "open-goal", localRef: "local-goal", goal: { actorId: "hero", description: "Seek the offered aid", priority: 1, targetEntityIds: ["rival"] } },
+          { op: "record-appraisal", localRef: "local-appraisal", appraisal: { actorId: "hero", target: { kind: "current-event" }, dimensionId: "hope", value: 0.6 } },
+          { op: "adjust-relationship", relationshipRef: "local-relation", createIfMissing: true, fromActorId: "hero", toActorId: "rival", dimensionId: "trust", amount: 0.5 },
+          { op: "create-obligation", localRef: "local-obligation", obligation: { debtorActorId: "rival", creditorActorId: "hero", kindId: "provide", description: "A favor is owed" } },
+        ],
+      },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(changed.report.accepted).toBe(true);
+
+    let observed: ActorReasoningInput | undefined;
+    const source = modelActorProposalSource(engine, {
+      goals: async () => [],
+      modelFor: async () => null,
+      reasoner: (input) => {
+        observed = input;
+        return {
+          title: "Act on the new goal",
+          participants: [],
+          preconditions: [],
+          proposedDelta: { version: 1, operations: [{ op: "set", entityId: input.actor.actorId, field: "character.plan", value: "Ask for aid" }] },
+        };
+      },
+    });
+    const candidates = await source({ branchId: "main", commitId: changed.newHead });
+    expect(candidates).toHaveLength(1);
+    expect(observed?.goal).toMatchObject({ description: "Seek the offered aid", priority: 1 });
+    expect(observed?.model?.branchAppraisals).toEqual([{ targetKind: "event", dimensionId: "hope", value: 0.6 }]);
+    expect(observed?.model?.branchRelationships).toEqual([expect.objectContaining({ direction: "outgoing", dimensions: { trust: 0.5 } })]);
+    expect(observed?.model?.branchObligations).toEqual([expect.objectContaining({ role: "creditor", kindId: "provide", status: "open" })]);
+    expect(JSON.stringify(observed)).not.toContain("branch-");
+    expect(JSON.stringify(observed)).not.toContain('"hero"');
+    expect(JSON.stringify(observed)).not.toContain('"rival"');
+
+    const branchGoalId = Object.keys((await engine.projections.project(changed.newHead)).semantics.goals)[0]!;
+    const closed = await engine.commitProposal({
+      proposalId: "close-branch-goal",
+      branchId: "main",
+      expectedParentCommit: changed.newHead,
+      source: "background",
+      title: "The goal is abandoned",
+      participants: ["hero"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      proposedSemantics: { version: 1, operations: [{ op: "close-goal", goalId: branchGoalId, outcome: "abandoned" }] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(closed.report.accepted).toBe(true);
+    observed = undefined;
+    await expect(source({ branchId: "main", commitId: closed.newHead })).resolves.toEqual([]);
+    expect(observed).toBeUndefined();
+  });
 });

@@ -730,7 +730,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T5 — Branch semantic character evolution
 
-- **状态：** pending
+- **状态：** complete
 - **依赖：** T2、T4
 - **主要文件：**
   - `src/world/semantic-effects.ts`
@@ -741,6 +741,14 @@ CanonicalSnapshot V8 至少固定：
 - **交付：** branch proposition/claim、goal、appraisal、relationship、obligation overlays
 - **测试：** deterministic IDs、same-event local refs、fork isolation、visibility、canonical immutability
 - **建议提交：** `feat: evolve character policy from branch events`
+- **完成说明：** EventProposal 可提交 proposition/attribution/claim、goal、appraisal、
+  relationship 与 obligation 的 turn-local proposal；宿主以 branch/head/proposal/operation
+  派生稳定 ID，严格按操作顺序解析同事件引用，并在 semantic staging 成功后才允许
+  KnowledgeDelta 引用。人物 projection 与 model policy 仅暴露本人的目标/评价以及关系、
+  义务端点可见的 overlay，稳定 ID 和真实实体 ID 在模型边界继续匿名化；关闭后的 branch
+  goal 不再驱动自主推理。人物评价、关系 stance 和义务类型接入 ontology 受控词表，
+  canonical maps 保持冻结，fork 后语义完全隔离。全量验证：`pnpm run check` 通过，
+  `pnpm test` 141 files / 802 tests 通过。
 
 ### T6 — StateRule、ActionConstraint、Norm、Process
 

@@ -567,6 +567,7 @@ export const branchSemanticOperationSchema = z.discriminatedUnion("op", [
       target: z.discriminatedUnion("kind", [
         z.object({ kind: z.literal("entity"), entityId: idSchema }).strict(),
         z.object({ kind: z.literal("event"), eventId: idSchema }).strict(),
+        z.object({ kind: z.literal("current-event") }).strict(),
         z.object({ kind: z.literal("proposition"), propositionId: idSchema }).strict(),
       ]),
       dimensionId: idSchema,
@@ -604,6 +605,132 @@ export const branchSemanticDeltaSchema = z.object({
   operations: z.array(branchSemanticOperationSchema).max(256),
 }).strict();
 export type BranchSemanticDelta = z.infer<typeof branchSemanticDeltaSchema>;
+
+/**
+ * Turn-local semantic proposal refs never become persistent IDs. The host
+ * resolves them after the branch head is fixed and before validation/commit.
+ */
+export const localSemanticRefSchema = z.string().regex(
+  /^local-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/,
+  "A semantic proposal ref must use the local-<token> form",
+);
+
+export const branchSemanticProposalOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("record-proposition"),
+    localRef: localSemanticRefSchema,
+    proposition: z.object({
+      subjectEntityId: idSchema,
+      relationId: idSchema,
+      object: propositionObjectSchema,
+      polarity: z.enum(["positive", "negative"]),
+      modality: z.enum(["asserted", "possible", "necessary", "counterfactual"]),
+      validStoryTime: storyTimeSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("record-attribution"),
+    localRef: localSemanticRefSchema,
+    attribution: z.object({
+      propositionId: idSchema,
+      holderKind: z.enum(["character", "system", "document", "unknown"]),
+      holderEntityId: idSchema.optional(),
+      attitude: z.enum(["asserts", "knows", "believes", "suspects", "reports", "denies", "questions"]),
+      certainty: z.number().finite().min(0).max(1),
+      sourceAttributionId: idSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("record-claim"),
+    localRef: localSemanticRefSchema,
+    claim: z.object({
+      propositionId: idSchema,
+      attributionId: idSchema.optional(),
+      status: z.enum(["asserted", "contested", "retracted"]),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("open-goal"),
+    localRef: localSemanticRefSchema,
+    goal: z.object({
+      actorId: idSchema,
+      description: z.string().trim().min(1).max(1_000),
+      priority: z.number().finite().min(0).max(1),
+      targetEntityIds: z.array(idSchema).max(32).default([]),
+      parentGoalId: idSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("close-goal"),
+    goalId: idSchema,
+    outcome: z.enum(["achieved", "abandoned", "failed", "superseded"]),
+  }).strict(),
+  z.object({
+    op: z.literal("record-appraisal"),
+    localRef: localSemanticRefSchema,
+    appraisal: z.object({
+      actorId: idSchema,
+      target: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("entity"), entityId: idSchema }).strict(),
+        z.object({ kind: z.literal("event"), eventId: idSchema }).strict(),
+        z.object({ kind: z.literal("current-event") }).strict(),
+        z.object({ kind: z.literal("proposition"), propositionId: idSchema }).strict(),
+      ]),
+      dimensionId: idSchema,
+      value: z.number().finite().min(-1).max(1),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("adjust-relationship"),
+    relationshipRef: idSchema,
+    createIfMissing: z.boolean().default(false),
+    fromActorId: idSchema,
+    toActorId: idSchema,
+    dimensionId: idSchema,
+    amount: z.number().finite().min(-2).max(2).refine((value) => value !== 0, "Relationship adjustment cannot be zero"),
+  }).strict(),
+  z.object({
+    op: z.literal("create-obligation"),
+    localRef: localSemanticRefSchema,
+    obligation: z.object({
+      debtorActorId: idSchema,
+      creditorActorId: idSchema.optional(),
+      kindId: idSchema,
+      description: z.string().trim().min(1).max(1_000),
+      dueStoryTime: storyTimeSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("resolve-obligation"),
+    obligationId: idSchema,
+    resolution: z.enum(["fulfilled", "violated", "waived", "expired"]),
+  }).strict(),
+]);
+export type BranchSemanticProposalOperation = z.infer<typeof branchSemanticProposalOperationSchema>;
+export const branchSemanticProposalDeltaSchema = z.object({
+  version: z.literal(1),
+  operations: z.array(branchSemanticProposalOperationSchema).min(1).max(256),
+}).strict().superRefine((value, ctx) => {
+  value.operations.forEach((operation, index) => {
+    if (operation.op === "adjust-relationship"
+      && operation.createIfMissing
+      && !localSemanticRefSchema.safeParse(operation.relationshipRef).success) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["operations", index, "relationshipRef"],
+        message: "A newly created relationship must use a turn-local semantic ref",
+      });
+    }
+  });
+  const introduced = value.operations.flatMap((operation) => {
+    if ("localRef" in operation) return [operation.localRef];
+    return operation.op === "adjust-relationship" && operation.createIfMissing ? [operation.relationshipRef] : [];
+  });
+  if (new Set(introduced).size !== introduced.length) {
+    ctx.addIssue({ code: "custom", path: ["operations"], message: "Each turn-local semantic ref must be introduced exactly once" });
+  }
+});
+export type BranchSemanticProposalDelta = z.infer<typeof branchSemanticProposalDeltaSchema>;
 
 export const processOperationSchema = z.discriminatedUnion("op", [
   z.object({
@@ -1160,6 +1287,7 @@ export const eventProposalBaseSchema = z
     preconditions: z.array(predicateSchema),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    proposedSemantics: branchSemanticProposalDeltaSchema.optional(),
     causalParents: z.array(idSchema),
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     evidence: z.array(evidenceRefSchema),

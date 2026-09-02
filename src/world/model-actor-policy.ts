@@ -33,6 +33,7 @@ import { AmbiguousLegacySourceError, evidenceBelongsExclusivelyToSource, resolve
 import { immutableClone } from "../util/immutable.js";
 import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
 import { modelVisibleRelationshipOntology, type ModelVisibleRelationshipOntology } from "./relationship-ontology.js";
+import type { ActorBranchSemanticView } from "./semantic-effects.js";
 
 export const actorActionTemplateSchema = z
   .object({
@@ -66,6 +67,19 @@ export type ModelActorDispositionView = Pick<EffectiveCharacterModel, "traits" |
   appraisals?: ModelVisibleCharacterOntology["appraisals"];
   development?: ModelVisibleCharacterOntology["development"];
   relationships?: ModelVisibleRelationshipOntology;
+  branchAppraisals?: Array<{ targetKind: "entity" | "event" | "proposition"; targetId?: string; dimensionId: string; value: number }>;
+  branchRelationships?: Array<{ direction: "outgoing" | "incoming"; counterpartyId: string; dimensions: Record<string, number> }>;
+  branchObligations?: Array<{ role: "debtor" | "creditor"; counterpartyId?: string; kindId: string; description: string; status: string }>;
+};
+
+type RuntimeActorGoal = {
+  id: string;
+  actorId: string;
+  description: string;
+  priority: number;
+  targetIds: string[];
+  evidence: EvidenceRef[];
+  canonical?: CharacterGoal;
 };
 
 export type ModelActorWorldView = {
@@ -114,11 +128,12 @@ export function modelActorProposalSource(
   if (!Number.isInteger(maxActors) || maxActors <= 0 || maxActors > 100) throw new Error("maxActorsPerRefresh must be 1..100");
 
   return async ({ branchId, commitId }) => {
-    const [context, state, history] = await Promise.all([
+    const [context, projection, history] = await Promise.all([
       engine.contextForCommit(commitId),
-      engine.projector.project(commitId),
+      engine.projections.project(commitId),
       committedHistory(engine, commitId),
     ]);
+    const state = projection.state;
     let activeSourceId: string | undefined;
     try {
       activeSourceId = await resolveCommitSourceId(engine, context, commitId, undefined, "Model actor scheduler");
@@ -129,8 +144,28 @@ export function modelActorProposalSource(
     const belongsToActiveWorld = (evidence: Parameters<typeof evidenceBelongsExclusivelyToSource>[0]) => activeSourceId
       ? evidenceBelongsExclusivelyToSource(evidence, activeSourceId)
       : evidence.length === 0;
-    const goals = [...(context.actorGoals ?? await options.goals())]
+    const canonicalGoals = [...(context.actorGoals ?? await options.goals())]
       .filter((goal) => belongsToActiveWorld(goal.evidence))
+      .map((goal): RuntimeActorGoal => ({
+        id: goal.id,
+        actorId: goal.actorId,
+        description: goal.description,
+        priority: goal.priority,
+        targetIds: [...(goal.targetIds ?? [])],
+        evidence: [...goal.evidence],
+        canonical: goal,
+      }));
+    const branchGoals = Object.values(projection.semantics.goals)
+      .filter((goal) => goal.status === "open")
+      .map((goal): RuntimeActorGoal => ({
+        id: goal.id,
+        actorId: goal.actorId,
+        description: goal.description,
+        priority: goal.priority,
+        targetIds: [...goal.targetEntityIds],
+        evidence: [],
+      }));
+    const goals = [...canonicalGoals, ...branchGoals]
       .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
       .slice(0, maxActors);
     const candidates: ActorProposalCandidate[] = [];
@@ -138,20 +173,20 @@ export function modelActorProposalSource(
     for (const goal of goals) {
       const entity = context.entities.get(goal.actorId);
       if (!entity || entity.kind !== "character") continue;
-      if (!belongsToActiveWorld(entity.evidence) || !belongsToActiveWorld(goal.evidence)) continue;
+      if (!belongsToActiveWorld(entity.evidence) || (goal.canonical && !belongsToActiveWorld(goal.evidence))) continue;
       const actorHistory = history.filter((entry) => !entry.event.evidence.length
         || belongsToActiveWorld(entry.event.evidence));
       const realizedCanonicalEventIds = realizedCanonicalEvents(actorHistory);
       const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
       const rawActor = await knowledge.view(goal.actorId, commitId);
       const known = actionableKnowledgeClaimIds(rawActor, activeSourceId);
-      if (!evaluateCharacterGoal(goal, {
-        state,
-        knownClaimIds: known,
-        realizedCanonicalEventIds,
-        experiencedCanonicalEventIds,
-        storyTime: state.logicalTime.storyTime,
-      }).active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;
+      if (goal.canonical && (!evaluateCharacterGoal(goal.canonical, {
+          state,
+          knownClaimIds: known,
+          realizedCanonicalEventIds,
+          experiencedCanonicalEventIds,
+          storyTime: state.logicalTime.storyTime,
+        }).active || !goalSupportedInCurrentPhase(goal.canonical, actorHistory, goal.actorId))) continue;
 
       const candidateModel = context.actorModels
         ? context.actorModels.get(goal.actorId) ?? null
@@ -163,7 +198,7 @@ export function modelActorProposalSource(
       let developmentPromise = developmentByActor.get(goal.actorId);
       if (!developmentPromise) {
         developmentPromise = projectCharacterDevelopment(engine, goal.actorId, commitId, {
-          goals,
+          goals: canonicalGoals.flatMap((candidate) => candidate.canonical ? [candidate.canonical] : []),
           model,
         });
         developmentByActor.set(goal.actorId, developmentPromise);
@@ -184,6 +219,7 @@ export function modelActorProposalSource(
       const visibleRelationships = development.model
         ? modelVisibleRelationshipOntology(development.model, (entityId) => entityHandles.get(entityId))
         : undefined;
+      const visibleBranch = modelVisibleBranchSemantics(development.branchSemantics, goal.actorId, entityHandles);
       const actor: ModelActorWorldView = {
         actorId: modelScoped.actorId,
         selfState: structuredClone(modelScoped.selfState),
@@ -208,18 +244,21 @@ export function modelActorProposalSource(
         goal: {
           description: goal.description,
           priority: goal.priority,
-          targetIds: (goal.targetIds ?? [])
+          targetIds: goal.targetIds
             .filter((id) => referenceable.has(id))
             .flatMap((id) => entityHandles.get(id) ?? []),
         },
-        model: development.model
+        model: development.model || hasVisibleBranchSemantics(visibleBranch)
           ? {
-              traits: structuredClone(development.model.traits),
-              decisionBiases: structuredClone(development.model.decisionBiases),
+              traits: structuredClone(development.model?.traits ?? {}),
+              decisionBiases: structuredClone(development.model?.decisionBiases ?? {}),
               ...(visibleOntology?.dispositions.length ? { dispositions: structuredClone(visibleOntology.dispositions) } : {}),
               ...(visibleOntology?.appraisals.length ? { appraisals: structuredClone(visibleOntology.appraisals) } : {}),
               ...(visibleOntology?.development.length ? { development: structuredClone(visibleOntology.development) } : {}),
               ...(visibleRelationships?.length ? { relationships: structuredClone(visibleRelationships) } : {}),
+              ...(visibleBranch.branchAppraisals.length ? { branchAppraisals: visibleBranch.branchAppraisals } : {}),
+              ...(visibleBranch.branchRelationships.length ? { branchRelationships: visibleBranch.branchRelationships } : {}),
+              ...(visibleBranch.branchObligations.length ? { branchObligations: visibleBranch.branchObligations } : {}),
             }
           : null,
         development: {
@@ -272,4 +311,54 @@ export function modelActorProposalSource(
     }
     return candidates;
   };
+}
+
+function modelVisibleBranchSemantics(
+  semantics: ActorBranchSemanticView,
+  actorId: string,
+  entityHandles: ReadonlyMap<string, string>,
+): Required<Pick<ModelActorDispositionView, "branchAppraisals" | "branchRelationships" | "branchObligations">> {
+  const branchAppraisals: NonNullable<ModelActorDispositionView["branchAppraisals"]> = [];
+  for (const appraisal of semantics.appraisals) {
+    if (appraisal.target.kind === "entity") {
+      const targetId = entityHandles.get(appraisal.target.entityId);
+      if (targetId) branchAppraisals.push({ targetKind: "entity", targetId, dimensionId: appraisal.dimensionId, value: appraisal.value });
+      continue;
+    }
+    branchAppraisals.push({
+      targetKind: appraisal.target.kind === "current-event" ? "event" : appraisal.target.kind,
+      dimensionId: appraisal.dimensionId,
+      value: appraisal.value,
+    });
+  }
+  const branchRelationships = semantics.relationships.flatMap((relationship) => {
+    const outgoing = relationship.fromActorId === actorId;
+    const counterpartyId = entityHandles.get(outgoing ? relationship.toActorId : relationship.fromActorId);
+    return counterpartyId ? [{
+      direction: outgoing ? "outgoing" as const : "incoming" as const,
+      counterpartyId,
+      dimensions: structuredClone(relationship.dimensions),
+    }] : [];
+  });
+  const branchObligations = semantics.obligations.map((obligation) => {
+    const role = obligation.debtorActorId === actorId ? "debtor" as const : "creditor" as const;
+    const counterparty = role === "debtor" ? obligation.creditorActorId : obligation.debtorActorId;
+    const counterpartyId = counterparty ? entityHandles.get(counterparty) : undefined;
+    return {
+      role,
+      ...(counterpartyId ? { counterpartyId } : {}),
+      kindId: obligation.kindId,
+      description: obligation.description,
+      status: obligation.status,
+    };
+  });
+  return { branchAppraisals, branchRelationships, branchObligations };
+}
+
+function hasVisibleBranchSemantics(
+  value: ReturnType<typeof modelVisibleBranchSemantics>,
+): boolean {
+  return value.branchAppraisals.length > 0
+    || value.branchRelationships.length > 0
+    || value.branchObligations.length > 0;
 }

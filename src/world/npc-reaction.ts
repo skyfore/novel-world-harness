@@ -166,7 +166,7 @@ export async function respondToNpcInteractions(input: {
     try {
       const existing = (await committedHistory(input.engine, currentHead)).find(({ event }) =>
         event.actorId === npcId
-        && event.causalParents.includes(input.triggerEvent.eventId)
+        && event.causalRelations.some((relation) => relation.fromEventId === input.triggerEvent.eventId)
         && event.progress?.noveltyKey.startsWith(npcReactionNoveltyPrefix(input.triggerEvent.eventId, npcId)));
       if (existing) {
         const affect = existing.event.actorAffects?.find((entry) => entry.actorId === npcId);
@@ -389,6 +389,12 @@ async function respondOneNpc(input: {
     preconditions: reaction.preconditions,
     proposedDelta: reaction.proposedDelta,
     ...(proposedKnowledge ? { proposedKnowledge } : {}),
+    causalRelations: [{
+      fromEventId: input.triggerEvent.eventId,
+      type: "causes",
+      operationality: "contributory",
+      description: "Direct response to an addressed interaction",
+    }],
     causalParents: [input.triggerEvent.eventId],
     evidence: [],
     progress: {

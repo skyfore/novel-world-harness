@@ -317,6 +317,7 @@ describe("compiler proposal tools", () => {
       fromEventId: "door-opens",
       toEventId: "witness-reacts",
       type: "before",
+      operationality: "non-operational",
       status: "contested",
       confidence: 0.55,
     };

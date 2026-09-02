@@ -126,6 +126,13 @@ async function appendEvent(
     progressCertificate: suppliedCertificate
       ?? deriveProgressCertificate({ effects, loaded, utteranceCount: 0, timeAdvanced: false, sceneTransition: scene }),
     evidence: [],
+    causalRelations: causalParents.map((fromEventId, index) => ({
+      id: `relation-${eventId}-${index}`,
+      fromEventId,
+      toEventId: eventId,
+      type: "causes" as const,
+      operationality: "contributory" as const,
+    })),
     causalParents,
     progress: {
       version: 1,

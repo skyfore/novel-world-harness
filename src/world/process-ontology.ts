@@ -28,6 +28,10 @@ export const processTransitionSchema = z.object({
   fromPhaseId: idSchema,
   toPhaseId: idSchema,
   minimumProgress: z.number().finite().min(0).max(1).default(0),
+  onDue: z.object({
+    advanceBy: z.number().finite().positive().max(1),
+    outcomeId: idSchema.optional(),
+  }).strict().optional(),
 }).strict();
 export type ProcessTransition = z.infer<typeof processTransitionSchema>;
 
@@ -63,6 +67,15 @@ export const processTemplateSchema = z.object({
     if (!phases.has(transition.fromPhaseId)) ctx.addIssue({ code: "custom", path: ["transitions", index, "fromPhaseId"], message: "Unknown source phase" });
     if (!phases.has(transition.toPhaseId)) ctx.addIssue({ code: "custom", path: ["transitions", index, "toPhaseId"], message: "Unknown target phase" });
     if (transition.fromPhaseId === transition.toPhaseId) ctx.addIssue({ code: "custom", path: ["transitions", index], message: "A phase transition must change phase" });
+    if (transition.onDue && transition.onDue.advanceBy < transition.minimumProgress) {
+      ctx.addIssue({ code: "custom", path: ["transitions", index, "onDue", "advanceBy"], message: "A due transition must advance far enough to satisfy its minimum progress" });
+    }
+    if (transition.onDue?.outcomeId && !value.outcomeIds.includes(transition.onDue.outcomeId)) {
+      ctx.addIssue({ code: "custom", path: ["transitions", index, "onDue", "outcomeId"], message: "A due transition outcome must be declared by the process template" });
+    }
+    if (transition.onDue?.outcomeId && !phases.get(transition.toPhaseId)?.terminal) {
+      ctx.addIssue({ code: "custom", path: ["transitions", index, "onDue", "outcomeId"], message: "Only a transition into a terminal phase may commit an outcome" });
+    }
     const key = `${transition.fromPhaseId}\u0000${transition.toPhaseId}`;
     if (transitions.has(key)) ctx.addIssue({ code: "custom", path: ["transitions", index], message: "Process phase transitions must be unique" });
     transitions.add(key);

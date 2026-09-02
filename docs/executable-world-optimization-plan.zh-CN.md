@@ -769,16 +769,16 @@ CanonicalSnapshot V8 至少固定：
   ActionConstraint 对 schema-bound/ad-hoc action 执行 before/after 条件、显式 exception、
   defeasible override 与环检测。Ad-hoc action 必须声明精确 state/resource footprint，资源账户
   支持 conserved/non-increasing 校验。NormTemplate/NormInstance 已实现实例化、履行、违反、
-  deadline 自动违约和受验证 reparation；法律/社会违规不会回滚物理动作，而会生成 committed
+  deadline 到期判定和受验证 reparation；法律/社会违规不会回滚物理动作，而会生成 committed
   NormDelta。ProcessTemplate/ProcessInstance 已实现受角色约束的启动、阶段推进、暂停、恢复、
   terminal outcome 与 meaningful due time。三类 artifact 均进入 content-addressed canonical
   revision、CanonicalSnapshot V8、PreparedNovelBundle V3、context hydration、event proposal、
   commit/replay/checkpoint 和公开 API。全量验证：`pnpm run check` 通过，`pnpm test`
-  142 files / 808 tests 通过。
+  142 files / 808 tests 通过。T7 进一步把 deadline 的到期结果改为显式调度并提交的事件。
 
 ### T7 — Typed causal frontier 与 scheduler v2
 
-- **状态：** pending
+- **状态：** complete
 - **依赖：** T4、T6
 - **主要文件：**
   - `src/world/event-relations.ts`
@@ -789,6 +789,16 @@ CanonicalSnapshot V8 至少固定：
 - **交付：** operationality、CausalIndex、tier ranking、due process/norm candidates、trace reasons
 - **测试：** necessary/contributory/prevents/motivates/explains、canon invalidation、stable ordering
 - **建议提交：** `feat: schedule from typed causality and world pressure`
+- **完成说明：** canonical `EventRelation` 增加显式 operationality，并把 necessary、
+  contributory、blocking、motivational、explanatory 与 non-operational 分离；contested
+  关系保留供审阅，但不进入硬时间/因果图、eligibility 或 commit ancestry。branch history
+  以宿主生成 ID 的 typed causal relation 为权威，`CausalIndex` V2 同时维护 relation record、
+  incoming/outgoing 索引与祖先约束，`causalParents` 仅保留为非权威兼容投影。Frontier V2
+  使用 Tier 0–4 与稳定 lexicographic tuple，明确输出 factor、gate、causal resolution 和
+  rejection reason；乘法 score 不再参与选择。到期 norm 与 executable process transition
+  会先成为 Tier 0 possibility，再作为独立 committed event 推进，避免 projection 随时间
+  静默制造历史。NPC 直接响应及只读 ontology 图均消费 typed relation。全量验证：
+  `pnpm run check` 通过，`pnpm test` 143 files / 813 tests 通过。
 
 ### T8 — Hybrid actor 与 multi-actor adjudication
 

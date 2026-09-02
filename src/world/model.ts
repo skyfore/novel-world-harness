@@ -399,11 +399,24 @@ export type EventRelationType = z.infer<typeof eventRelationTypeSchema>;
 export const eventRelationStatusSchema = z.enum(["explicit", "inferred", "contested"]);
 export type EventRelationStatus = z.infer<typeof eventRelationStatusSchema>;
 
+export const relationOperationalitySchema = z.enum([
+  "necessary",
+  "contributory",
+  "blocking",
+  "motivational",
+  "explanatory",
+  "non-operational",
+]);
+export type RelationOperationality = z.infer<typeof relationOperationalitySchema>;
+
 export const eventRelationSchema = z.object({
   id: idSchema,
   fromEventId: idSchema,
   toEventId: idSchema,
   type: eventRelationTypeSchema,
+  operationality: relationOperationalitySchema,
+  motivatedActorIds: z.array(idSchema).max(32).optional(),
+  goalIds: z.array(idSchema).max(32).optional(),
   status: eventRelationStatusSchema,
   confidence: z.number().finite().min(0).max(1),
   mechanism: z.string().trim().min(1).max(1_000).optional(),
@@ -424,8 +437,116 @@ export const eventRelationSchema = z.object({
     && relation.status === "inferred" && !relation.mechanism) {
     ctx.addIssue({ code: "custom", path: ["mechanism"], message: "An inferred causal or explanatory relation requires a mechanism" });
   }
+  const allowed: Record<EventRelationType, readonly RelationOperationality[]> = {
+    coreference: ["non-operational"],
+    subevent: ["non-operational"],
+    before: ["non-operational"],
+    after: ["non-operational"],
+    during: ["non-operational"],
+    contains: ["non-operational"],
+    overlaps: ["non-operational"],
+    starts: ["non-operational"],
+    finishes: ["non-operational"],
+    causes: ["necessary", "contributory"],
+    enables: ["necessary"],
+    prevents: ["blocking"],
+    motivates: ["motivational"],
+    explains: ["explanatory"],
+    "narrative-continuation": ["non-operational"],
+  };
+  if (!allowed[relation.type].includes(relation.operationality)) {
+    ctx.addIssue({ code: "custom", path: ["operationality"], message: `${relation.type} cannot use ${relation.operationality} operationality` });
+  }
+  if (relation.operationality === "motivational" && !relation.motivatedActorIds?.length) {
+    ctx.addIssue({ code: "custom", path: ["motivatedActorIds"], message: "A motivational relation must name at least one motivated actor" });
+  }
+  if (relation.operationality !== "motivational" && (relation.motivatedActorIds?.length || relation.goalIds?.length)) {
+    ctx.addIssue({ code: "custom", path: ["motivatedActorIds"], message: "Actor/goal motivation bindings are reserved for motivational relations" });
+  }
+  for (const [path, values] of [["motivatedActorIds", relation.motivatedActorIds], ["goalIds", relation.goalIds]] as const) {
+    if (values && new Set(values).size !== values.length) {
+      ctx.addIssue({ code: "custom", path: [path], message: `${path} must contain unique IDs` });
+    }
+  }
 }).describe("An evidence-backed relation between canonical events. Narrative continuation and temporal order never imply causation.");
 export type EventRelation = z.infer<typeof eventRelationSchema>;
+
+export const possibilityCausalLinkSchema = z.object({
+  relationId: idSchema,
+  sourceEventId: idSchema,
+  type: eventRelationTypeSchema,
+  operationality: relationOperationalitySchema,
+  motivatedActorIds: z.array(idSchema).max(32).optional(),
+  goalIds: z.array(idSchema).max(32).optional(),
+}).strict().superRefine((relation, ctx) => {
+  const allowed: Record<EventRelationType, readonly RelationOperationality[]> = {
+    coreference: ["non-operational"],
+    subevent: ["non-operational"],
+    before: ["non-operational"],
+    after: ["non-operational"],
+    during: ["non-operational"],
+    contains: ["non-operational"],
+    overlaps: ["non-operational"],
+    starts: ["non-operational"],
+    finishes: ["non-operational"],
+    causes: ["necessary", "contributory"],
+    enables: ["necessary"],
+    prevents: ["blocking"],
+    motivates: ["motivational"],
+    explains: ["explanatory"],
+    "narrative-continuation": ["non-operational"],
+  };
+  if (!allowed[relation.type].includes(relation.operationality)) {
+    ctx.addIssue({ code: "custom", path: ["operationality"], message: `${relation.type} cannot use ${relation.operationality} operationality` });
+  }
+  if (relation.operationality === "motivational" && !relation.motivatedActorIds?.length && !relation.goalIds?.length) {
+    ctx.addIssue({ code: "custom", path: ["motivatedActorIds"], message: "A motivational possibility relation must bind an actor or goal" });
+  }
+  if (relation.operationality !== "motivational" && (relation.motivatedActorIds?.length || relation.goalIds?.length)) {
+    ctx.addIssue({ code: "custom", path: ["motivatedActorIds"], message: "Actor/goal motivation bindings are reserved for motivational relations" });
+  }
+  for (const [path, values] of [["motivatedActorIds", relation.motivatedActorIds], ["goalIds", relation.goalIds]] as const) {
+    if (values && new Set(values).size !== values.length) {
+      ctx.addIssue({ code: "custom", path: [path], message: `${path} must contain unique IDs` });
+    }
+  }
+});
+export type PossibilityCausalLink = z.infer<typeof possibilityCausalLinkSchema>;
+
+const branchCausalRelationTypeSchema = z.enum(["causes", "enables", "motivates", "explains"]);
+const branchCausalOperationalitySchema = z.enum(["necessary", "contributory", "motivational", "explanatory"]);
+export const branchEventRelationProposalSchema = z.object({
+  fromEventId: idSchema,
+  type: branchCausalRelationTypeSchema,
+  operationality: branchCausalOperationalitySchema,
+  actorId: idSchema.optional(),
+  goalId: idSchema.optional(),
+  description: z.string().trim().min(1).max(500).optional(),
+}).strict().superRefine((relation, ctx) => {
+  const allowed = relation.type === "causes"
+    ? ["necessary", "contributory"]
+    : relation.type === "enables"
+      ? ["necessary"]
+      : relation.type === "motivates"
+        ? ["motivational"]
+        : ["explanatory"];
+  if (!allowed.includes(relation.operationality)) {
+    ctx.addIssue({ code: "custom", path: ["operationality"], message: `${relation.type} cannot use ${relation.operationality} operationality` });
+  }
+  if (relation.operationality === "motivational" && !relation.actorId && !relation.goalId) {
+    ctx.addIssue({ code: "custom", path: ["actorId"], message: "A motivational branch relation must bind an actor or goal" });
+  }
+  if (relation.operationality !== "motivational" && (relation.actorId || relation.goalId)) {
+    ctx.addIssue({ code: "custom", path: ["actorId"], message: "Actor/goal bindings are reserved for motivational branch relations" });
+  }
+});
+export type BranchEventRelationProposal = z.infer<typeof branchEventRelationProposalSchema>;
+
+export const branchEventRelationSchema = branchEventRelationProposalSchema.safeExtend({
+  id: idSchema,
+  toEventId: idSchema,
+});
+export type BranchEventRelation = z.infer<typeof branchEventRelationSchema>;
 
 export const stateOperationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("set"), entityId: idSchema, field: z.string().min(1), value: stateValueSchema }).strict(),
@@ -1389,6 +1510,8 @@ export const eventProposalBaseSchema = z
     proposedSemantics: branchSemanticProposalDeltaSchema.optional(),
     proposedProcesses: processProposalDeltaSchema.optional(),
     proposedNorms: normProposalDeltaSchema.optional(),
+    causalRelations: z.array(branchEventRelationProposalSchema).max(128).optional(),
+    /** @deprecated Runtime authority is causalRelations; retained until compiler T9 rewrites source artifacts. */
     causalParents: z.array(idSchema),
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     evidence: z.array(evidenceRefSchema),
@@ -1416,6 +1539,7 @@ export function validateCanonicalAdaptationProposalEnvelope(
 export const eventProposalSchema = eventProposalBaseSchema.superRefine((value, ctx) => {
   validateSpokenUtteranceParticipants(value, ctx);
   validateCanonicalAdaptationProposalEnvelope(value, ctx);
+  validateCausalRelationProjection(value, ctx);
 });
 export type EventProposal = z.infer<typeof eventProposalSchema>;
 
@@ -1453,6 +1577,8 @@ export const committedEventSchema = z
     effects: eventEffectsRefSchema,
     progressCertificate: progressCertificateSchema,
     evidence: z.array(evidenceRefSchema),
+    causalRelations: z.array(branchEventRelationSchema).max(128),
+    /** @deprecated Non-authoritative display projection; causalRelations drives replay and scheduling. */
     causalParents: z.array(idSchema),
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     realizesCanonicalEventIds: z.array(idSchema).optional(),
@@ -1466,6 +1592,7 @@ export const committedEventSchema = z
   .superRefine(validateSpokenUtteranceParticipants)
   .superRefine(validateParticipantPresence)
   .superRefine((value, ctx) => {
+    validateCausalRelationProjection(value, ctx);
     if (value.canonicalAdaptation && value.possibilityId !== value.canonicalAdaptation.scaffoldPossibilityId) {
       ctx.addIssue({
         code: "custom",
@@ -1482,6 +1609,21 @@ export const committedEventSchema = z
     }
   });
 export type CommittedEvent = z.infer<typeof committedEventSchema>;
+
+function validateCausalRelationProjection(
+  value: { causalParents: string[]; causalRelations?: readonly { fromEventId: string }[] },
+  ctx: z.RefinementCtx,
+): void {
+  if (new Set(value.causalParents).size !== value.causalParents.length) {
+    ctx.addIssue({ code: "custom", path: ["causalParents"], message: "Causal parent display IDs must be unique" });
+  }
+  if (!value.causalRelations) return;
+  const relationSources = [...new Set(value.causalRelations.map((relation) => relation.fromEventId))].sort();
+  const parentSources = [...value.causalParents].sort();
+  if (JSON.stringify(relationSources) !== JSON.stringify(parentSources)) {
+    ctx.addIssue({ code: "custom", path: ["causalParents"], message: "causalParents must exactly project the authoritative causalRelations source IDs" });
+  }
+}
 
 function validateSpokenUtteranceParticipants(
   value: { participants: string[]; spokenUtterances?: SpokenUtterance[] },
@@ -1543,18 +1685,24 @@ export type WorldState = z.infer<typeof worldStateSchema>;
 export const possibilityKindSchema = z.enum([
   "canon-analogue",
   "player-choice",
+  "direct-response",
   "actor-plan",
   "obligation",
+  "due-process",
   "causal-consequence",
   "background-pressure",
+  "institutional-pressure",
   "environmental",
   "generated",
 ]);
 export type PossibilityKind = z.infer<typeof possibilityKindSchema>;
 export const AUTONOMOUS_BACKGROUND_KINDS = [
+  "direct-response",
   "obligation",
+  "due-process",
   "causal-consequence",
   "background-pressure",
+  "institutional-pressure",
   "environmental",
   "generated",
 ] as const satisfies readonly PossibilityKind[];
@@ -1573,12 +1721,20 @@ export const possibilityBaseSchema = z
     expiry: z.array(predicateSchema).optional(),
     participants: z.array(idSchema),
     participantPresence: z.array(participantPresenceSchema).max(128).optional(),
+    causalLinks: z.array(possibilityCausalLinkSchema).max(128).optional(),
+    /** @deprecated Runtime canonical possibilities always carry causalLinks. */
     causalParents: z.array(idSchema),
+    dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+    sourceActorId: idSchema.optional(),
+    sourceGoalId: idSchema.optional(),
     canonicalEventId: idSchema.optional(),
     pressure: z.number().min(0),
     relevance: z.number().min(0),
     proposedDelta: stateDeltaSchema.optional(),
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    proposedSemantics: branchSemanticProposalDeltaSchema.optional(),
+    proposedProcesses: processProposalDeltaSchema.optional(),
+    proposedNorms: normProposalDeltaSchema.optional(),
     action: actionInvocationSchema.optional(),
     canonicalScaffold: canonicalScaffoldSchema.optional(),
     evidence: z.array(evidenceRefSchema),
@@ -1613,7 +1769,20 @@ export function validateCanonicalScaffoldPossibility(value: CanonicalScaffoldPos
   });
 }
 
-export const possibilitySchema = possibilityBaseSchema.superRefine(validateCanonicalScaffoldPossibility);
+export const possibilitySchema = possibilityBaseSchema
+  .superRefine(validateCanonicalScaffoldPossibility)
+  .superRefine((value, ctx) => {
+    const ids = value.causalLinks?.map((link) => link.relationId) ?? [];
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({ code: "custom", path: ["causalLinks"], message: "Possibility causal relation IDs must be unique" });
+    }
+    value.causalLinks?.forEach((link, index) => {
+      if (link.operationality === "motivational") {
+        const outside = (link.motivatedActorIds ?? []).find((actorId) => !value.participants.includes(actorId));
+        if (outside) ctx.addIssue({ code: "custom", path: ["causalLinks", index, "motivatedActorIds"], message: `Motivated actor ${outside} is not a possibility participant` });
+      }
+    });
+  });
 export type Possibility = z.infer<typeof possibilitySchema>;
 
 export function validateParticipantPresence(

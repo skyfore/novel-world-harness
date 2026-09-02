@@ -6,6 +6,7 @@ import { resolveActionConstraints, validateActionConstraintCatalog, type ActionC
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { WorldContextStore } from "../src/world/context.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
+import { WorldRuntime } from "../src/world/runtime.js";
 import { dueNormInstances, nextNormDueAt, resolveEffectiveNormTemplates, validateNormTemplateCatalog, type NormTemplate } from "../src/world/norm-ontology.js";
 import { dueProcessInstances, nextProcessDueAt, type ProcessTemplate } from "../src/world/process-ontology.js";
 import type { ActionInvocation, Entity, EventProposal, WorldRule, WorldState } from "../src/world/model.js";
@@ -397,12 +398,17 @@ describe("executable state rules, constraints, norms, and processes", () => {
     expect(nextNormDueAt(bundle.norms)).toBe(1);
     expect(dueNormInstances(bundle.norms, 0)).toEqual([]);
 
-    const deadline = await engine.commitProposal(proposal(instantiated.newHead, {
+    const clock = await engine.commitProposal(proposal(instantiated.newHead, {
       proposalId: "deadline-arrives",
       timeAdvance: { amount: 1, unit: "day" },
     }));
-    expect(deadline.report.accepted).toBe(true);
-    expect(deadline.progressCertificate?.channels).toContain("norm");
+    expect(clock.report.accepted).toBe(true);
+    expect((await engine.projections.project(clock.newHead)).norms.instances[debt.id]?.status).toBe("active");
+    const deadline = await new WorldRuntime(engine, () => []).move({
+      branchId: "main",
+      maxBackgroundCandidates: 1,
+    });
+    expect(deadline.committedEvents).toHaveLength(1);
     bundle = await engine.projections.project(deadline.newHead);
     expect(bundle.norms.instances[debt.id]).toMatchObject({ status: "violated", violationReasonId: "deadline-expired" });
 

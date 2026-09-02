@@ -438,12 +438,12 @@ export class OntologyProjectionService {
         if (explicitParticipationKeys.has(`${event.id}:${participantId}`)) continue;
         builder.edge(link("participates", entityId(participantId), canonicalEventId(event.id), "participant", "canonical", "canonical", event.evidence));
       }
-      for (const parentId of event.causalParents) builder.edge(link("canonical-causal-parent", canonicalEventId(parentId), canonicalEventId(event.id), "causes", "canonical", "canonical", event.evidence));
     }
     for (const relation of frame.artifacts.eventRelations) {
       if (!visibleEvents.some((event) => event.id === relation.fromEventId) || !visibleEvents.some((event) => event.id === relation.toEventId)) continue;
       builder.edge(link(`event-relation:${relation.id}`, canonicalEventId(relation.fromEventId), canonicalEventId(relation.toEventId), relation.type, statusFrom(relation), "canonical", [...relation.evidence, ...(relation.counterEvidence ?? [])], {
         relationId: relation.id,
+        operationality: relation.operationality,
         confidence: relation.confidence,
         mechanism: relation.mechanism,
       }, relation.id));
@@ -470,7 +470,24 @@ export class OntologyProjectionService {
       builder.artifact(eventNodeValue);
       builder.edge(link("committed-in", eventNodeValue.node.id, commitNode.node.id, "committed in", "branch-committed", "branch", entry.event.evidence));
       for (const participantId of entry.event.participants) builder.edge(link("committed-participant", entityId(participantId), eventNodeValue.node.id, "participant", "branch-committed", "branch", entry.event.evidence));
-      for (const parentId of entry.event.causalParents) builder.edge(link("runtime-causal-parent", `committed-event:${parentId}`, eventNodeValue.node.id, "causal parent", "branch-committed", "branch", entry.event.evidence));
+      for (const relation of entry.event.causalRelations) {
+        builder.edge(link(
+          `runtime-causal-relation:${relation.id}`,
+          `committed-event:${relation.fromEventId}`,
+          eventNodeValue.node.id,
+          `${relation.type} · ${relation.operationality}`,
+          "branch-committed",
+          "branch",
+          entry.event.evidence,
+          {
+            relationId: relation.id,
+            operationality: relation.operationality,
+            ...(relation.actorId ? { actorId: relation.actorId } : {}),
+            ...(relation.goalId ? { goalId: relation.goalId } : {}),
+          },
+          relation.id,
+        ));
+      }
       for (const canonicalId of entry.event.realizesCanonicalEventIds ?? []) builder.edge(link("realizes", eventNodeValue.node.id, canonicalEventId(canonicalId), "realizes", "branch-committed", "branch", entry.event.evidence));
       if (entry.event.canonicalAdaptation?.adaptedFromCanonicalEventId) builder.edge(link("adapted-from", eventNodeValue.node.id, canonicalEventId(entry.event.canonicalAdaptation.adaptedFromCanonicalEventId), "adapted from", "branch-committed", "branch", entry.event.evidence));
     }

@@ -215,19 +215,11 @@ export function deriveAutomaticNormDelta(input: {
 }): NormDelta | undefined {
   const action = input.action ? actionInvocationSchema.parse(input.action) : undefined;
   const operations: NormDelta["operations"] = [];
-  const elapsedDays = input.after.logicalTime.elapsedDays ?? 0;
-
   for (const instance of Object.values(input.state.instances).sort((left, right) => left.id.localeCompare(right.id))) {
     if (instance.status !== "active") continue;
     const template = new Map(resolveEffectiveNormTemplates(input.templates.values(), input.before, instance.subjectActorId)
       .map((item) => [item.template.id, item.template])).get(instance.templateId);
     if (!template) continue;
-    if (template.modality === "obligation"
-      && instance.dueAtElapsedDays !== undefined
-      && elapsedDays >= instance.dueAtElapsedDays) {
-      operations.push({ op: "violate-norm", normId: instance.id, byActorId: instance.subjectActorId, reasonId: "deadline-expired" });
-      continue;
-    }
     if (instance.subjectActorId !== input.actorId) continue;
     if (!action || !actionPatternMatches(template.actionPattern, action)) continue;
     if (template.modality === "obligation") {

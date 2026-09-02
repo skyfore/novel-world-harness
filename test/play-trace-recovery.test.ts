@@ -74,6 +74,7 @@ async function world(root: string): Promise<{
       scene: { kind: "stay", beat: 1 },
     },
     evidence: [],
+    causalRelations: [],
     causalParents: [],
     actorId: "hero",
   });

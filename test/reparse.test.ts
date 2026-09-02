@@ -289,6 +289,7 @@ describe("explicit prepared-novel reparsing", () => {
       fromEventId: "villain-decides",
       toEventId: "villain-acts-event",
       type: "causes",
+      operationality: "necessary",
       status: "explicit",
       confidence: 1,
       evidence: exactChapterTwoEvidence,

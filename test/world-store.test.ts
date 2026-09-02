@@ -52,6 +52,7 @@ describe("canonical world objects", () => {
         channels: ["knowledge"],
       },
       evidence: [],
+      causalRelations: [],
       causalParents: [],
     } as const;
 

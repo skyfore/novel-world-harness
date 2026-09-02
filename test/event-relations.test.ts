@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  eventRelationProjectsLegacyCausalParent,
+  eventRelationIsRuntimeOperational,
   projectEventRelations,
   validateEventRelationCatalog,
 } from "../src/world/event-relations.js";
@@ -31,11 +31,22 @@ function relation(
   toEventId: string,
   type: EventRelation["type"],
 ): EventRelation {
+  const operationality = type === "causes" || type === "enables"
+    ? "necessary" as const
+    : type === "prevents"
+      ? "blocking" as const
+      : type === "motivates"
+        ? "motivational" as const
+        : type === "explains"
+          ? "explanatory" as const
+          : "non-operational" as const;
   return {
     id,
     fromEventId,
     toEventId,
     type,
+    operationality,
+    ...(type === "motivates" ? { motivatedActorIds: ["hero"] } : {}),
     status: "inferred",
     confidence: 0.8,
     ...(["causes", "enables", "prevents", "motivates", "explains"].includes(type)
@@ -46,7 +57,7 @@ function relation(
 }
 
 describe("typed event relations", () => {
-  it("validates independent temporal and causal relations and projects only causes/enables", () => {
+  it("validates independent temporal and causal relations without rewriting canonical events", () => {
     const relations = [
       relation("first-causes-second", "first", "second", "causes"),
       relation("second-enables-third", "second", "third", "enables"),
@@ -58,19 +69,14 @@ describe("typed event relations", () => {
     expect(validateEventRelationCatalog({ events, relations })).toEqual([]);
     expect(projectEventRelations(second, relations)).toEqual(second);
     expect(projectEventRelations(third, relations)).toEqual(third);
-    expect(eventRelationProjectsLegacyCausalParent(relations[0]!)).toBe(true);
-    expect(eventRelationProjectsLegacyCausalParent(relations[4]!)).toBe(false);
+    expect(eventRelationIsRuntimeOperational(relations[0]!)).toBe(true);
+    expect(eventRelationIsRuntimeOperational(relations[4]!)).toBe(false);
   });
 
-  it("does not let narrative continuation satisfy a required causal projection", () => {
+  it("keeps narrative continuation explicitly non-operational", () => {
     const narrative = relation("first-continues-second", "first", "second", "narrative-continuation");
-    const issues = validateEventRelationCatalog({
-      events,
-      relations: [narrative],
-      requireCompleteCausalProjectionForEventIds: new Set(["second"]),
-    });
-
-    expect(issues).toContainEqual(expect.objectContaining({ code: "INCOMPLETE_CAUSAL_RELATION_PROJECTION" }));
+    expect(validateEventRelationCatalog({ events, relations: [narrative] })).toEqual([]);
+    expect(eventRelationIsRuntimeOperational(narrative)).toBe(false);
   });
 
   it("keeps contested causal interpretations reviewable but outside runtime causal ancestry", () => {
@@ -83,13 +89,28 @@ describe("typed event relations", () => {
       }],
     };
 
-    expect(eventRelationProjectsLegacyCausalParent(contested)).toBe(false);
+    expect(eventRelationIsRuntimeOperational(contested)).toBe(false);
     expect(projectEventRelations(second, [contested])).toEqual(second);
+    expect(validateEventRelationCatalog({ events, relations: [contested] })).toEqual([]);
+  });
+
+  it("does not let contested interpretations create hard graph contradictions", () => {
+    const contestedReverse = {
+      ...relation("third-may-cause-first", "third", "first", "causes"),
+      status: "contested" as const,
+      counterEvidence: [{
+        span: { sourceId: "novel", startLine: 1, endLine: 1, quoteHash: "counter" },
+        strength: "explicit" as const,
+      }],
+    };
     expect(validateEventRelationCatalog({
       events,
-      relations: [contested],
-      requireCompleteCausalProjectionForEventIds: new Set(["second"]),
-    })).toContainEqual(expect.objectContaining({ code: "INCOMPLETE_CAUSAL_RELATION_PROJECTION" }));
+      relations: [
+        relation("first-causes-second", "first", "second", "causes"),
+        relation("second-causes-third", "second", "third", "causes"),
+        contestedReverse,
+      ],
+    })).toEqual([]);
   });
 
   it("normalizes inverse relations and blocks temporal and causal contradictions", () => {
@@ -136,11 +157,20 @@ describe("typed event relations", () => {
       fromEventId: "first",
       toEventId: "second",
       type: "causes" as const,
+      operationality: "necessary" as const,
       confidence: 0.8,
       evidence: [],
     };
     expect(eventRelationSchema.safeParse({ ...base, status: "explicit" }).success).toBe(false);
     expect(eventRelationSchema.safeParse({ ...base, status: "inferred" }).success).toBe(false);
     expect(eventRelationSchema.safeParse({ ...base, status: "contested", mechanism: "Weather", counterEvidence: [] }).success).toBe(false);
+    expect(eventRelationSchema.safeParse({ ...base, status: "inferred", mechanism: "Weather", operationality: "blocking" }).success).toBe(false);
+    expect(eventRelationSchema.safeParse({
+      ...base,
+      status: "inferred",
+      mechanism: "A warning changes Hero's plan",
+      type: "motivates",
+      operationality: "motivational",
+    }).success).toBe(false);
   });
 });

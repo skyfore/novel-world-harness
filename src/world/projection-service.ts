@@ -3,6 +3,7 @@ import type { ResolvedWorldModelContext } from "./engine.js";
 import {
   WORLD_ENGINE_VERSION,
   WORLD_SCHEMA_VERSION,
+  type BranchEventRelation,
   type CommitId,
   type CommittedEvent,
   type KnowledgeDelta,
@@ -69,13 +70,17 @@ export type SceneIndex = {
 };
 
 export type CausalIndex = {
-  version: 1;
+  version: 2;
   atCommit: CommitId;
   events: Record<string, {
     commitId: CommitId;
     eventHash: ObjectHash;
-    causalParents: string[];
+    relationIds: string[];
   }>;
+  relations: Record<string, BranchEventRelation>;
+  incomingByEvent: Record<string, string[]>;
+  outgoingByEvent: Record<string, string[]>;
+  /** Derived compatibility index; relation records remain authoritative. */
   childrenByParent: Record<string, string[]>;
 };
 
@@ -172,7 +177,15 @@ export class ProjectionService {
     let processes = restored?.processes ?? emptyProcessState(genesisId);
     let norms = restored?.norms ?? emptyNormState(genesisId);
     let scenes: SceneIndex = restored?.scenes ?? { version: 1, atCommit: genesisId, transitions: [] };
-    let causality: CausalIndex = restored?.causality ?? { version: 1, atCommit: genesisId, events: {}, childrenByParent: {} };
+    let causality: CausalIndex = restored?.causality ?? {
+      version: 2,
+      atCommit: genesisId,
+      events: {},
+      relations: {},
+      incomingByEvent: {},
+      outgoingByEvent: {},
+      childrenByParent: {},
+    };
     const history: ProjectedHistoryEntry[] = restored?.history ?? [];
     const knownCommittedEventIds = new Set<string>(Object.keys(causality.events));
     let previousTime: LogicalTime | undefined = restored?.state.logicalTime;
@@ -277,16 +290,32 @@ export class ProjectionService {
           throw new Error(`Cannot project event ${event.eventId} (${eventHash}) at commit ${entry.id}: ${messageOf(error)}`);
         }
 
-        causality.events[event.eventId] = {
-          commitId: entry.id,
-          eventHash,
-          causalParents: [...event.causalParents],
-        };
-        for (const parentId of event.causalParents) {
-          const children = (causality.childrenByParent[parentId] ??= []);
+        const relationIds: string[] = [];
+        for (const relation of event.causalRelations) {
+          if (relation.toEventId !== event.eventId) {
+            throw new Error(`Causal relation ${relation.id} targets ${relation.toEventId}, expected current event ${event.eventId}`);
+          }
+          if (!knownCommittedEventIds.has(relation.fromEventId)) {
+            throw new Error(`Causal relation ${relation.id} references non-ancestral event ${relation.fromEventId}`);
+          }
+          if (causality.relations[relation.id]) throw new Error(`Duplicate committed causal relation ID ${relation.id}`);
+          causality.relations[relation.id] = structuredClone(relation);
+          relationIds.push(relation.id);
+          const incoming = (causality.incomingByEvent[event.eventId] ??= []);
+          incoming.push(relation.id);
+          incoming.sort();
+          const outgoing = (causality.outgoingByEvent[relation.fromEventId] ??= []);
+          outgoing.push(relation.id);
+          outgoing.sort();
+          const children = (causality.childrenByParent[relation.fromEventId] ??= []);
           if (!children.includes(event.eventId)) children.push(event.eventId);
           children.sort();
         }
+        causality.events[event.eventId] = {
+          commitId: entry.id,
+          eventHash,
+          relationIds: relationIds.sort(),
+        };
         if (event.progressCertificate.sceneTransition) {
           scenes.transitions.push({
             commitId: entry.id,

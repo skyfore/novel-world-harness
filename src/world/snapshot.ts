@@ -23,7 +23,7 @@ export const PROJECTION_REDUCER_VERSIONS = {
   processes: 2,
   norms: 2,
   scenes: 1,
-  causality: 1,
+  causality: 2,
 } as const;
 
 export type ProjectionReducerVersions = typeof PROJECTION_REDUCER_VERSIONS;
@@ -129,12 +129,12 @@ function validateProjection(input: unknown, commitId: CommitId): WorldProjection
   }
   const state = worldStateSchema.parse(input.state);
   if (state.atCommit !== commitId) throw new Error("State reducer checkpoint is at a different commit");
-  assertReducerState(input.knowledge, commitId, "knowledge", false);
-  assertReducerState(input.semantics, commitId, "semantics", true);
-  assertReducerState(input.processes, commitId, "processes", true);
-  assertReducerState(input.norms, commitId, "norms", true);
-  assertReducerState(input.scenes, commitId, "scenes", true);
-  assertReducerState(input.causality, commitId, "causality", true);
+  assertReducerState(input.knowledge, commitId, "knowledge");
+  assertReducerState(input.semantics, commitId, "semantics", 1);
+  assertReducerState(input.processes, commitId, "processes", 1);
+  assertReducerState(input.norms, commitId, "norms", 1);
+  assertReducerState(input.scenes, commitId, "scenes", 1);
+  assertReducerState(input.causality, commitId, "causality", 2);
   if (!Array.isArray(input.history)) throw new Error("Projection checkpoint history must be an array");
   for (const [index, raw] of input.history.entries()) {
     if (!isRecord(raw) || typeof raw.commitId !== "string" || typeof raw.eventHash !== "string") {
@@ -150,9 +150,9 @@ function validateProjection(input: unknown, commitId: CommitId): WorldProjection
   return input as WorldProjectionBundle;
 }
 
-function assertReducerState(input: unknown, commitId: CommitId, name: string, requiresVersion: boolean): void {
+function assertReducerState(input: unknown, commitId: CommitId, name: string, expectedVersion?: number): void {
   if (!isRecord(input) || input.atCommit !== commitId) throw new Error(`${name} reducer checkpoint is at a different commit`);
-  if (requiresVersion && input.version !== 1) throw new Error(`${name} reducer checkpoint version is unsupported`);
+  if (expectedVersion !== undefined && input.version !== expectedVersion) throw new Error(`${name} reducer checkpoint version is unsupported`);
 }
 
 function sameReducerVersions(input: unknown): input is ProjectionReducerVersions {

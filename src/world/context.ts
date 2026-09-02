@@ -7,7 +7,7 @@ import { CanonicalModelStore, type CanonicalKind, type CanonicalRevisionRef } fr
 import type { WorldModelContext } from "./engine.js";
 import { idSchema, stateFieldSpecSchema, type Attribution, type CanonicalEvent, type Claim, type Entity, type EventParticipation, type EventRelation, type EvidenceRef, type Proposition, type WorldRule } from "./model.js";
 import { eventParticipationsByEvent, projectEventParticipations, validateEventParticipationCatalog } from "./event-semantics.js";
-import { eventRelationsByTarget, projectEventRelations, validateEventRelationCatalog } from "./event-relations.js";
+import { validateEventRelationCatalog } from "./event-relations.js";
 import { characterOntologyEvidence } from "./character-ontology.js";
 import { validateSpatialRelationCatalog, type SpatialRelation } from "./spatial-ontology.js";
 import { PossibilityTemplateStore, type PossibilityTemplate } from "./possibility-model.js";
@@ -336,11 +336,8 @@ export class WorldContextStore {
       processTemplates,
     });
     const participationIndex = eventParticipationsByEvent(eventParticipations);
-    const relationIndex = eventRelationsByTarget(eventRelations);
-    const projectedEvents = events.map((event) => projectEventRelations(
-      projectEventParticipations(event, participationIndex.get(event.id) ?? []),
-      relationIndex.get(event.id) ?? [],
-    ));
+    const projectedEvents = events.map((event) =>
+      projectEventParticipations(event, participationIndex.get(event.id) ?? []));
     return {
       canonicalSnapshotHash: snapshotHash,
       ...(snapshot.sourceId ? { sourceId: snapshot.sourceId } : {}),

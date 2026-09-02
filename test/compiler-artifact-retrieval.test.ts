@@ -68,6 +68,7 @@ describe("compiler artifact retrieval", () => {
       fromEventId: "hall-opens",
       toEventId: "hero-enters",
       type: "enables",
+      operationality: "necessary",
       status: "explicit",
       confidence: 1,
       mechanism: "The opened Hall permits the Hero to enter.",

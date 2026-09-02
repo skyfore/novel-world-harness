@@ -14,7 +14,7 @@ import {
   type StoryTime,
   type WorldState,
 } from "./model.js";
-import { buildFrontier, FrontierStore, possibilityToProposal, selectEligible, type Frontier, type FrontierTemporalMode } from "./frontier.js";
+import { buildFrontier, deriveDuePossibilities, FrontierStore, possibilityToProposal, selectEligible, type Frontier, type FrontierTemporalMode } from "./frontier.js";
 import { WorldEngine } from "./engine.js";
 import { committedHistory } from "./scene.js";
 import { immutableClone } from "../util/immutable.js";
@@ -312,19 +312,33 @@ export class WorldRuntime {
     options: { temporalMode?: FrontierTemporalMode } = {},
   ): Promise<Frontier> {
     const head = commitId ?? (await this.engine.branches.readHead(branchId));
-    const [state, temporalAnchor, activity] = await Promise.all([
-      this.engine.projector.project(head),
+    const [projection, context, temporalAnchor, activity] = await Promise.all([
+      this.engine.projections.project(head),
+      this.engine.contextForCommit(head),
       this.temporalAnchor(head),
       this.branchActivity(head),
     ]);
+    const state = projection.state;
     const rawTemplates = await this.possibilitySource(immutableClone({ branchId, commitId: head, state }));
+    const due = deriveDuePossibilities({
+      branchId,
+      commitId: head,
+      state,
+      processes: projection.processes,
+      norms: projection.norms,
+      processTemplates: context.processTemplates ?? new Map(),
+      normTemplates: context.normTemplates ?? new Map(),
+    });
     const templates = possibilitySchema.array().max(MAX_CALLBACK_CANDIDATES)
-      .parse(structuredClone(rawTemplates));
+      .parse(structuredClone([...rawTemplates, ...due]));
+    const duplicateId = templates.find((template, index) => templates.findIndex((candidate) => candidate.id === template.id) !== index)?.id;
+    if (duplicateId) throw new Error(`Duplicate possibility id ${duplicateId} in the current frontier`);
     const history = await this.possibilityHistory(head);
     const frontier = buildFrontier(branchId, head, state, templates, {
       realizedIds: history.realizedIds,
       adaptedIds: history.adaptedIds,
       supersededIds: history.supersededIds,
+      realizationEventIds: history.realizationEventIds,
       temporalMode: options.temporalMode ?? "current-window",
       ...(temporalAnchor ? { temporalAnchor } : {}),
       activeEntityIds: activity.entityIds,
@@ -461,8 +475,17 @@ export class WorldRuntime {
     const proposal = eventProposalSchema.parse({
       ...baseProposal,
       expectedParentCommit: input.expectedHead,
+      causalRelations: [
+        ...(baseProposal.causalRelations ?? []),
+        ...(input.causalParentEventId ? [{
+          fromEventId: input.causalParentEventId,
+          type: "causes" as const,
+          operationality: "contributory" as const,
+          description: "Immediate world response to the committed player event",
+        }] : []),
+      ],
       causalParents: [...new Set([
-        ...baseProposal.causalParents,
+        ...(baseProposal.causalRelations ?? []).map((relation) => relation.fromEventId),
         ...(input.causalParentEventId ? [input.causalParentEventId] : []),
       ])],
     });
@@ -754,10 +777,12 @@ export class WorldRuntime {
     realizedIds: ReadonlySet<string>;
     adaptedIds: ReadonlySet<string>;
     supersededIds: ReadonlySet<string>;
+    realizationEventIds: ReadonlyMap<string, string>;
   }> {
     const realized = new Set<string>();
     const adapted = new Set<string>();
     const superseded = new Set<string>();
+    const realizationEventIds = new Map<string, string>();
     const seen = new Set<string>();
     let cursor: CommitId | undefined = commitId;
     while (cursor) {
@@ -766,14 +791,30 @@ export class WorldRuntime {
       const commit = await this.engine.objects.getCommit(cursor);
       for (const eventHash of commit.eventHashes) {
         const event = await this.engine.objects.getEvent(eventHash);
-        if (event.possibilityId) realized.add(event.possibilityId);
-        for (const eventId of event.realizesCanonicalEventIds ?? []) realized.add(`canon-${eventId}`);
-        if (event.canonicalAdaptation) adapted.add(`canon-${event.canonicalAdaptation.adaptedFromCanonicalEventId}`);
+        realized.add(event.eventId);
+        realizationEventIds.set(event.eventId, event.eventId);
+        if (event.possibilityId) {
+          realized.add(event.possibilityId);
+          realizationEventIds.set(event.possibilityId, event.eventId);
+        }
+        for (const eventId of event.realizesCanonicalEventIds ?? []) {
+          realized.add(eventId);
+          realized.add(`canon-${eventId}`);
+          realizationEventIds.set(eventId, event.eventId);
+          realizationEventIds.set(`canon-${eventId}`, event.eventId);
+        }
+        if (event.canonicalAdaptation) {
+          const eventId = event.canonicalAdaptation.adaptedFromCanonicalEventId;
+          adapted.add(eventId);
+          adapted.add(`canon-${eventId}`);
+          realizationEventIds.set(eventId, event.eventId);
+          realizationEventIds.set(`canon-${eventId}`, event.eventId);
+        }
         for (const eventId of event.supersedesCanonicalEventIds ?? []) superseded.add(`canon-${eventId}`);
       }
       cursor = commit.parentCommitId;
     }
-    return { realizedIds: realized, adaptedIds: adapted, supersededIds: superseded };
+    return { realizedIds: realized, adaptedIds: adapted, supersededIds: superseded, realizationEventIds };
   }
 
   private async temporalAnchor(commitId: CommitId): Promise<StoryTime | undefined> {

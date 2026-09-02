@@ -66,7 +66,8 @@ export async function worldFrontierCommand(root: string, branchId: string): Prom
   const { runtime } = await openWorld(root);
   const frontier = await runtime.refreshFrontier(branchId);
   for (const entry of frontier.evaluated) {
-    stdout.write(`${entry.status}\t${entry.score.toFixed(4)}\t${entry.possibility.id}\t${entry.possibility.title}\n`);
+    const tuple = entry.trace.tuple;
+    stdout.write(`${entry.status}\tT${tuple.tier}\tdue=${tuple.dueTime ?? "-"}\t${entry.possibility.id}\t${entry.possibility.title}\n`);
     for (const reason of entry.reasons) stdout.write(`  - ${reason}\n`);
   }
 }

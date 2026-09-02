@@ -1,4 +1,3 @@
-import { canonicalJson } from "./canonical.js";
 import type {
   CanonicalEvent,
   EventRelation,
@@ -9,18 +8,24 @@ import { compareStoryTime } from "./time.js";
 
 export const EVENT_RELATION_PROJECTION_VERSION = 1 as const;
 
-const LEGACY_CAUSAL_TYPES = new Set<EventRelationType>(["causes", "enables"]);
 const CAUSAL_ORDER_TYPES = new Set<EventRelationType>(["causes", "enables", "prevents", "motivates", "explains"]);
 const INTERVAL_TYPES = new Set<EventRelationType>(["coreference", "subevent", "during", "contains", "overlaps", "starts", "finishes"]);
 
 export type EventRelationCatalog = {
   events: ReadonlyMap<string, CanonicalEvent>;
   relations: Iterable<EventRelation>;
+  /** @deprecated T9 removes canonical-event parent projection from compiler convergence. */
   requireCompleteCausalProjectionForEventIds?: ReadonlySet<string>;
 };
 
+export function eventRelationIsRuntimeOperational(relation: EventRelation): boolean {
+  return relation.status !== "contested"
+    && !["explanatory", "non-operational"].includes(relation.operationality);
+}
+
+/** @deprecated Compiler-only bridge until T9; runtime reads operationality directly. */
 export function eventRelationProjectsLegacyCausalParent(relation: EventRelation): boolean {
-  return LEGACY_CAUSAL_TYPES.has(relation.type) && relation.status !== "contested";
+  return relation.status !== "contested" && relation.operationality === "necessary";
 }
 
 export function validateEventRelationRecord(
@@ -37,35 +42,36 @@ export function validateEventRelationRecord(
   }
   if (!from || !to) return issues;
 
-  const temporalOrder = compareStoryTime(from.storyTime, to.storyTime);
-  if (relation.type === "before" && temporalOrder === 1) {
-    issues.push(issue("TEMPORAL_RELATION_CONTRADICTION", `Relation ${relation.id} says ${from.id} is before ${to.id}, but their story-time anchors establish the reverse`, "type"));
-  } else if (relation.type === "after" && temporalOrder === -1) {
-    issues.push(issue("TEMPORAL_RELATION_CONTRADICTION", `Relation ${relation.id} says ${from.id} is after ${to.id}, but their story-time anchors establish the reverse`, "type"));
-  } else if (INTERVAL_TYPES.has(relation.type) && temporalOrder !== undefined && temporalOrder !== 0) {
-    issues.push(issue("TEMPORAL_RELATION_CONTRADICTION", `Relation ${relation.id} requires temporally compatible intervals, but ${from.id} and ${to.id} are definitely disjoint`, "type"));
-  } else if (CAUSAL_ORDER_TYPES.has(relation.type) && temporalOrder === 1) {
-    issues.push(issue("TEMPORAL_CAUSAL_REGRESSION", `Relation ${relation.id} has later event ${from.id} ${relation.type} earlier event ${to.id}`, "type"));
+  // Contested relations remain reviewable evidence. They cannot reject a
+  // canonical publication or enter any hard temporal/causal execution graph.
+  if (relation.status !== "contested") {
+    const temporalOrder = compareStoryTime(from.storyTime, to.storyTime);
+    if (relation.type === "before" && temporalOrder === 1) {
+      issues.push(issue("TEMPORAL_RELATION_CONTRADICTION", `Relation ${relation.id} says ${from.id} is before ${to.id}, but their story-time anchors establish the reverse`, "type"));
+    } else if (relation.type === "after" && temporalOrder === -1) {
+      issues.push(issue("TEMPORAL_RELATION_CONTRADICTION", `Relation ${relation.id} says ${from.id} is after ${to.id}, but their story-time anchors establish the reverse`, "type"));
+    } else if (INTERVAL_TYPES.has(relation.type) && temporalOrder !== undefined && temporalOrder !== 0) {
+      issues.push(issue("TEMPORAL_RELATION_CONTRADICTION", `Relation ${relation.id} requires temporally compatible intervals, but ${from.id} and ${to.id} are definitely disjoint`, "type"));
+    } else if (CAUSAL_ORDER_TYPES.has(relation.type) && temporalOrder === 1) {
+      issues.push(issue("TEMPORAL_CAUSAL_REGRESSION", `Relation ${relation.id} has later event ${from.id} ${relation.type} earlier event ${to.id}`, "type"));
+    }
   }
-  if (eventRelationProjectsLegacyCausalParent(relation) && !to.causalParents.includes(from.id)) {
-    issues.push(issue("RELATION_LEGACY_CAUSAL_MISMATCH", `Relation ${relation.id} projects ${from.id} as a causal parent of ${to.id}, but the legacy event does not contain that parent`, "type"));
+  if (relation.operationality === "motivational") {
+    relation.motivatedActorIds?.forEach((actorId, index) => {
+      if (!to.participants.includes(actorId)) {
+        issues.push(issue("MOTIVATED_ACTOR_NOT_TARGET_PARTICIPANT", `Relation ${relation.id} motivates ${actorId}, who is not a participant in target event ${to.id}`, `motivatedActorIds.${index}`));
+      }
+    });
   }
   return issues;
 }
 
+/** @deprecated Typed EventRelation records are read directly; events are never rewritten into parent lists. */
 export function projectEventRelations(
   event: CanonicalEvent,
-  relations: readonly EventRelation[],
+  _relations: readonly EventRelation[],
 ): CanonicalEvent {
-  const projectedIds = new Set(relations
-    .filter((item) => item.toEventId === event.id && eventRelationProjectsLegacyCausalParent(item))
-    .map((item) => item.fromEventId));
-  if (!projectedIds.size) return structuredClone(event);
-  const causalParents = [
-    ...event.causalParents.filter((eventId) => projectedIds.delete(eventId)),
-    ...[...projectedIds].sort(),
-  ];
-  return { ...structuredClone(event), causalParents };
+  return structuredClone(event);
 }
 
 export function validateEventRelationCatalog(catalog: EventRelationCatalog): ValidationIssue[] {
@@ -75,10 +81,14 @@ export function validateEventRelationCatalog(catalog: EventRelationCatalog): Val
   const temporalBefore = new Map<string, string>();
   const temporalOverlap = new Map<string, string>();
   const causalEdges: Array<{ from: string; to: string; id: string }> = [];
-  const projectedCausalEdges: Array<{ from: string; to: string; id: string }> = [];
   const subeventEdges: Array<{ from: string; to: string; id: string }> = [];
+  const relationIds = new Set<string>();
 
   for (const relation of relations) {
+    if (relationIds.has(relation.id)) {
+      issues.push(issue("DUPLICATE_EVENT_RELATION_ID", `Duplicate event relation ID ${relation.id}`, relation.id));
+    }
+    relationIds.add(relation.id);
     issues.push(...validateEventRelationRecord(relation, catalog.events)
       .map((item) => ({ ...item, path: `${relation.id}.${item.path ?? "payload"}` })));
     const key = normalizedRelationKey(relation);
@@ -89,7 +99,7 @@ export function validateEventRelationCatalog(catalog: EventRelationCatalog): Val
       normalized.set(key, relation.id);
     }
 
-    const beforeEdge = normalizedBeforeEdge(relation);
+    const beforeEdge = relation.status === "contested" ? undefined : normalizedBeforeEdge(relation);
     if (beforeEdge) {
       const reverseKey = directedKey(beforeEdge.to, beforeEdge.from);
       const reverse = temporalBefore.get(reverseKey);
@@ -98,14 +108,11 @@ export function validateEventRelationCatalog(catalog: EventRelationCatalog): Val
       }
       temporalBefore.set(directedKey(beforeEdge.from, beforeEdge.to), relation.id);
     }
-    if (relation.type === "overlaps") temporalOverlap.set(undirectedKey(relation.fromEventId, relation.toEventId), relation.id);
-    if (relation.type === "causes" || relation.type === "enables") {
+    if (relation.status !== "contested" && relation.type === "overlaps") temporalOverlap.set(undirectedKey(relation.fromEventId, relation.toEventId), relation.id);
+    if (relation.status !== "contested" && (relation.type === "causes" || relation.type === "enables")) {
       causalEdges.push({ from: relation.fromEventId, to: relation.toEventId, id: relation.id });
-      if (eventRelationProjectsLegacyCausalParent(relation)) {
-        projectedCausalEdges.push({ from: relation.fromEventId, to: relation.toEventId, id: relation.id });
-      }
     }
-    if (relation.type === "subevent") subeventEdges.push({ from: relation.fromEventId, to: relation.toEventId, id: relation.id });
+    if (relation.status !== "contested" && relation.type === "subevent") subeventEdges.push({ from: relation.fromEventId, to: relation.toEventId, id: relation.id });
   }
 
   for (const [key, relationId] of temporalOverlap) {
@@ -130,25 +137,6 @@ export function validateEventRelationCatalog(catalog: EventRelationCatalog): Val
     "Strict temporal relations",
   ));
 
-  const projectedByTarget = new Map<string, Set<string>>();
-  for (const edge of projectedCausalEdges) {
-    const values = projectedByTarget.get(edge.to) ?? new Set<string>();
-    values.add(edge.from);
-    projectedByTarget.set(edge.to, values);
-  }
-  const requiredTargets = new Set([
-    ...projectedByTarget.keys(),
-    ...(catalog.requireCompleteCausalProjectionForEventIds ?? []),
-  ]);
-  for (const eventId of requiredTargets) {
-    const event = catalog.events.get(eventId);
-    if (!event) continue;
-    const typedIds = [...(projectedByTarget.get(eventId) ?? new Set<string>())].sort();
-    const legacyIds = [...new Set(event.causalParents)].sort();
-    if (canonicalJson(typedIds) !== canonicalJson(legacyIds)) {
-      issues.push(issue("INCOMPLETE_CAUSAL_RELATION_PROJECTION", `Event ${eventId} typed causes/enables parents (${typedIds.join(", ") || "none"}) do not project exactly to legacy causalParents (${legacyIds.join(", ") || "none"})`, eventId));
-    }
-  }
   return issues;
 }
 

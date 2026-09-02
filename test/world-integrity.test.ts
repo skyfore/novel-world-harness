@@ -134,6 +134,7 @@ describe("world fsck", () => {
         timeAdvanced: false,
       }),
       evidence: [],
+      causalRelations: [],
       causalParents: [],
     });
     const commitHash = await engine.objects.putCommit({

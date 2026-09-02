@@ -249,6 +249,7 @@ describe("compiler gold evaluation", () => {
     });
     await canon.putEventRelation({
       id: "tell-causes-leave", fromEventId: "tell", toEventId: "leave", type: "causes",
+      operationality: "necessary",
       status: "explicit", confidence: 1, evidence: fixture.evidence("Hero tells Friend to run. Friend leaves"),
     });
     await new ActorModelStore(root).putGoal({

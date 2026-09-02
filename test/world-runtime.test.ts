@@ -317,6 +317,9 @@ describe("WorldRuntime", () => {
         { op: "set", entityId: "hero", field: "character.location", value: "hall" },
       ],
     });
+    const playerEventId = (await engine.objects.getEvent(
+      (await engine.objects.getCommit(playerHead)).eventHashes[0]!,
+    )).eventId;
     let callbackWasFrozen = false;
     const response = await runtime.respondToPlayer({
       branchId: "main",
@@ -340,7 +343,7 @@ describe("WorldRuntime", () => {
         expect(input.eligibleResponses[0]?.stateEffects).toContain("Hero.character.title = Commander");
         return { decision: "select", possibilityId: input.eligibleResponses[0]!.possibilityId };
       },
-      causalParentEventId: "player-opened-commission",
+      causalParentEventId: playerEventId,
     });
 
     expect(callbackWasFrozen).toBe(true);
@@ -349,7 +352,11 @@ describe("WorldRuntime", () => {
     expect(response.possibilityId).toBe("canon-promotion");
     expect((await engine.projector.project(response.newHead)).values.hero?.["character.title"]).toBe("Commander");
     const event = await engine.objects.getEvent(response.eventHash!);
-    expect(event.causalParents).toContain("player-opened-commission");
+    expect(event.causalRelations).toContainEqual(expect.objectContaining({
+      fromEventId: playerEventId,
+      type: "causes",
+      operationality: "contributory",
+    }));
     expect(event.possibilityId).toBe("canon-promotion");
     expect((await runtime.refreshFrontier("main", response.newHead)).evaluated
       .find((entry) => entry.possibility.id === "canon-promotion")?.status).toBe("realized");

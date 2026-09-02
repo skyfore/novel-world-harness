@@ -2608,6 +2608,7 @@ describe("NWH TUI extension", () => {
           fromEventId: `weather-${String(index - 1).padStart(2, "0")}`,
           toEventId: `weather-${String(index).padStart(2, "0")}`,
           type: "causes",
+          operationality: "necessary",
           status: "explicit",
           confidence: 1,
           mechanism: "The continuing weather change produces the next access-state shift.",

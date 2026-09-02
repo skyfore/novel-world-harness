@@ -54,7 +54,12 @@ export async function openWorkspaceWorld(
       .map((template) => ({ ...template, branchId, evaluatedAtCommit: commitId }));
     const events = [...(commitContext.events?.values() ?? [])]
       .filter(belongsToActiveWorld);
-    const canonical = events.map((event) => canonicalEventToPossibility(event, branchId, commitId));
+    const canonical = events.map((event) => canonicalEventToPossibility(
+      event,
+      branchId,
+      commitId,
+      commitContext.eventRelations ?? [],
+    ));
     const byId = new Map(canonical.map((possibility) => [possibility.id, possibility]));
     for (const template of templates) {
       if (template.id.startsWith("canon-")) {

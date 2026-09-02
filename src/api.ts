@@ -234,7 +234,7 @@ export { canonicalSnapshotSchema, loadWorldContext, WorldContextStore, type Cano
 export { diffWorldBranches, diffWorldStates, type HistoryDifference, type KnowledgeDifference, type StateDifference, type WorldBranchDiff } from "./world/diff.js";
 export { WorldEngine, WorldProjector, validateEventProposal, type ResolvedWorldModelContext, type WorldContextResolver, type WorldModelContext } from "./world/engine.js";
 export { fsckWorld, type FsckIssue, type WorldFsckReport } from "./world/fsck.js";
-export { buildFrontier, evaluatePossibility, selectEligible, type Frontier, type FrontierTemporalMode, type PossibilityStatus, type SchedulerFactors } from "./world/frontier.js";
+export { buildFrontier, deriveDuePossibilities, evaluatePossibility, possibilityToProposal, selectEligible, type EvaluatedPossibility, type Frontier, type FrontierTemporalMode, type PossibilityStatus, type SchedulerCausalTrace, type SchedulerFactors, type SchedulerGateTrace, type SchedulerTier, type SchedulerTrace, type SchedulerTuple } from "./world/frontier.js";
 export {
   projectCharacterDevelopment,
   type CharacterDevelopmentView,
@@ -321,6 +321,7 @@ export {
 } from "./world/event-semantics.js";
 export {
   EVENT_RELATION_PROJECTION_VERSION,
+  eventRelationIsRuntimeOperational,
   eventRelationProjectsLegacyCausalParent,
   eventRelationsByTarget,
   projectEventRelations,

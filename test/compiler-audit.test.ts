@@ -504,6 +504,7 @@ describe("compiler audit", () => {
       fromEventId: "hero-reports-gate-open",
       toEventId: "hero-infers-gate-open",
       type: "causes",
+      operationality: "necessary",
       status: "explicit",
       confidence: 1,
       mechanism: "The report supplies the content from which the belief is formed.",

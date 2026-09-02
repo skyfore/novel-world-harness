@@ -204,7 +204,7 @@ export async function buildNarrativeDirection(
         ? `你与${named}之间存在一个已经具备条件、但尚未被决定的节点。`
         : "当前局势中有一个已经具备条件、但尚未被决定的节点。",
       participantIds: [...entry.possibility.participants],
-      pressure: Math.max(0.1, Math.min(1, entry.score || entry.possibility.pressure)),
+      pressure: Math.max(0.1, entry.factors.pressure),
       stage: threadStage(entry.possibility.id, scopedHistory),
       possibility: entry.possibility,
     });

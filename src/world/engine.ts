@@ -11,6 +11,8 @@ import {
   stateDeltaSchema,
   type ActorEventObservation,
   type Attribution,
+  type BranchEventRelation,
+  type BranchEventRelationProposal,
   type BranchId,
   type CanonicalEvent,
   type Claim,
@@ -65,7 +67,7 @@ import {
   resolveEffectiveWorldRules,
   type EffectiveWorldRule,
 } from "./world-rule-ontology.js";
-import { ProjectionService, type ProjectionOptions } from "./projection-service.js";
+import { ProjectionService, type ProjectionOptions, type WorldProjectionBundle } from "./projection-service.js";
 import { WorldSnapshotStore } from "./snapshot.js";
 import { deriveProgressCertificate, hasMaterialProgress } from "./progress.js";
 import { resolveActionInvocation, type ActionSchema } from "./action-ontology.js";
@@ -538,7 +540,7 @@ export class WorldEngine {
       timeAdvanced: false,
     });
     const inferredRealizations = [...(this.context.events?.values() ?? [])]
-      .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge))
+      .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
       .map((event) => event.id);
     const realizesCanonicalEventIds = [...new Set([
       ...inferredRealizations,
@@ -579,6 +581,7 @@ export class WorldEngine {
       effects,
       progressCertificate,
       evidence,
+      causalRelations: [],
       causalParents: [],
       ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
     };
@@ -620,6 +623,13 @@ export class WorldEngine {
     }
     const projection = await this.projections.project(head);
     const state = projection.state;
+    const causalRelationProposals = normalizedCausalRelationProposals(parsed, projection);
+    const causalRelationErrors = validateBranchCausalRelationProposals(
+      causalRelationProposals,
+      parsed,
+      projection,
+      context,
+    );
     let semanticDelta: import("./model.js").BranchSemanticDelta | undefined;
     let stagedSemantics = projection.semantics;
     const semanticErrors: ValidationIssue[] = [];
@@ -678,9 +688,13 @@ export class WorldEngine {
       deferMateriality: true,
     });
     let report = baseReport;
-    if (semanticErrors.length) {
+    if (semanticErrors.length || causalRelationErrors.length) {
       const { derivedDeltaHash: _derivedDeltaHash, ...withoutDerivedHash } = report;
-      report = { ...withoutDerivedHash, accepted: false, errors: [...report.errors, ...semanticErrors] };
+      report = {
+        ...withoutDerivedHash,
+        accepted: false,
+        errors: [...report.errors, ...semanticErrors, ...causalRelationErrors],
+      };
     }
     let processDelta: ProcessDelta | undefined;
     let normDelta: NormDelta | undefined;
@@ -787,7 +801,7 @@ export class WorldEngine {
         report = { ...withoutDerivedHash, accepted: false, errors: [...report.errors, ...effectErrors] };
       }
     }
-    if (report.accepted && parsed.canonicalAdaptation) {
+    if (parsed.canonicalAdaptation) {
       const runtimeErrors: ValidationIssue[] = [];
       const sceneActor = context.entities.get(parsed.canonicalAdaptation.sceneActorId);
       const [knowledge, history, scene] = await Promise.all([
@@ -993,7 +1007,13 @@ export class WorldEngine {
       actorAffects: parsed.actorAffects,
       spokenUtterances: parsed.spokenUtterances,
       action: parsed.action,
+      causalRelationProposals,
     });
+    const causalRelations: BranchEventRelation[] = causalRelationProposals.map((relation, index) => ({
+      id: `branch-relation-${contentHash({ eventId, index, relation }).slice(0, 32)}`,
+      toEventId: eventId,
+      ...structuredClone(relation),
+    }));
     const event: CommittedEvent = {
       version: 2,
       eventId,
@@ -1011,7 +1031,8 @@ export class WorldEngine {
       effects,
       progressCertificate,
       evidence: parsed.evidence,
-      causalParents: parsed.causalParents,
+      causalRelations,
+      causalParents: [...new Set(causalRelations.map((relation) => relation.fromEventId))],
       ...(parsed.supersedesCanonicalEventIds ? { supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds } : {}),
       ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
       ...(parsed.possibilityId ? { possibilityId: parsed.possibilityId } : {}),
@@ -1039,6 +1060,78 @@ export class WorldEngine {
   }
 }
 
+function normalizedCausalRelationProposals(
+  proposal: EventProposal,
+  projection: WorldProjectionBundle,
+): BranchEventRelationProposal[] {
+  const resolveSource = (sourceId: string): string => {
+    const aliases = sourceId.startsWith("canon-")
+      ? new Set([sourceId, sourceId.slice("canon-".length)])
+      : new Set([sourceId, `canon-${sourceId}`]);
+    const realized = [...projection.history].reverse().find(({ event }) =>
+      aliases.has(event.eventId)
+      || Boolean(event.possibilityId && aliases.has(event.possibilityId))
+      || (event.realizesCanonicalEventIds ?? []).some((eventId) => aliases.has(eventId) || aliases.has(`canon-${eventId}`))
+      || Boolean(event.canonicalAdaptation && (
+        aliases.has(event.canonicalAdaptation.adaptedFromCanonicalEventId)
+        || aliases.has(`canon-${event.canonicalAdaptation.adaptedFromCanonicalEventId}`)
+      )));
+    return realized?.event.eventId ?? sourceId;
+  };
+  if (proposal.causalRelations) {
+    return proposal.causalRelations.map((relation) => ({ ...structuredClone(relation), fromEventId: resolveSource(relation.fromEventId) }));
+  }
+  return [...new Set(proposal.causalParents)].map((sourceId) => ({
+    fromEventId: resolveSource(sourceId),
+    type: "causes",
+    operationality: "contributory",
+    description: "Legacy proposal linkage normalized by the host",
+  }));
+}
+
+function validateBranchCausalRelationProposals(
+  relations: readonly BranchEventRelationProposal[],
+  proposal: EventProposal,
+  projection: WorldProjectionBundle,
+  context: WorldModelContext,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const signatures = new Set<string>();
+  relations.forEach((relation, index) => {
+    const path = `causalRelations.${index}`;
+    if (!projection.causality.events[relation.fromEventId]) {
+      issues.push({
+        code: "UNKNOWN_CAUSAL_SOURCE_EVENT",
+        message: `Branch causal relation references event ${relation.fromEventId}, which is not in committed ancestry`,
+        path: `${path}.fromEventId`,
+      });
+    }
+    const signature = `${relation.fromEventId}\u0000${relation.type}\u0000${relation.operationality}\u0000${relation.actorId ?? ""}\u0000${relation.goalId ?? ""}`;
+    if (signatures.has(signature)) {
+      issues.push({ code: "DUPLICATE_BRANCH_CAUSAL_RELATION", message: `Duplicate branch causal relation from ${relation.fromEventId}`, path });
+    }
+    signatures.add(signature);
+    if (relation.actorId) {
+      const actor = context.entities.get(relation.actorId);
+      if (!actor || actor.kind !== "character") {
+        issues.push({ code: "INVALID_CAUSAL_MOTIVATED_ACTOR", message: `Causal relation actor ${relation.actorId} must be a character`, path: `${path}.actorId` });
+      } else if (!proposal.participants.includes(relation.actorId)) {
+        issues.push({ code: "CAUSAL_ACTOR_NOT_PARTICIPANT", message: `Motivated actor ${relation.actorId} must participate in the target event`, path: `${path}.actorId` });
+      }
+    }
+    if (relation.goalId) {
+      const canonicalGoal = context.actorGoals?.find((goal) => goal.id === relation.goalId);
+      const branchGoal = projection.semantics.goals[relation.goalId];
+      if (!canonicalGoal && !branchGoal) {
+        issues.push({ code: "UNKNOWN_CAUSAL_GOAL", message: `Causal relation references unknown goal ${relation.goalId}`, path: `${path}.goalId` });
+      } else if (relation.actorId && (canonicalGoal?.actorId ?? branchGoal?.actorId) !== relation.actorId) {
+        issues.push({ code: "CAUSAL_GOAL_ACTOR_MISMATCH", message: `Goal ${relation.goalId} does not belong to motivated actor ${relation.actorId}`, path: `${path}.goalId` });
+      }
+    }
+  });
+  return issues;
+}
+
 function validateKnowledgeDeltaForContext(knowledge: KnowledgeDelta, context: WorldModelContext): void {
   for (let index = 0; index < knowledge.operations.length; index += 1) {
     const operation = knowledge.operations[index]!;
@@ -1062,8 +1155,14 @@ function validateKnowledgeDeltaForContext(knowledge: KnowledgeDelta, context: Wo
   }
 }
 
-function canonicalEventSatisfiedAtGenesis(event: CanonicalEvent, state: WorldState, knowledge?: KnowledgeDelta): boolean {
-  if (event.causalParents.length > 0 || event.preconditions.some((predicate) => !evaluatePredicate(state, predicate))) return false;
+function canonicalEventSatisfiedAtGenesis(
+  event: CanonicalEvent,
+  state: WorldState,
+  knowledge: KnowledgeDelta | undefined,
+  relations: readonly EventRelation[],
+): boolean {
+  if (relations.some((relation) => relation.toEventId === event.id && relation.status !== "contested" && relation.operationality === "necessary")
+    || event.preconditions.some((predicate) => !evaluatePredicate(state, predicate))) return false;
   const stateSatisfied = event.observedOutcome.operations.every((operation) => {
     if (operation.op === "activate-rule") return state.activeRuleIds.includes(operation.ruleId);
     if (operation.op === "deactivate-rule") return !state.activeRuleIds.includes(operation.ruleId);

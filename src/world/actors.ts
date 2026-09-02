@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
 import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
 import { isCommunicatingKnowledgeSource } from "./knowledge-semantics.js";
+import { worldStorageRoot } from "./paths.js";
 import {
   evidenceRefSchema,
   idSchema,
@@ -346,7 +346,7 @@ type StoredActorRef = { version: 1; id: string; hash: string; updatedAt: string 
 export class ActorModelStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "canon", "actors");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "canon", "actors");
   }
 
   async putGoal(input: CharacterGoal): Promise<void> {

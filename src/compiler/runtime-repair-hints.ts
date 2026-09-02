@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "../world/canonical.js";
 import { idSchema } from "../world/model.js";
+import { worldStorageRoot } from "../world/paths.js";
 import {
   runtimeCompilerRepairHintSchema,
   type RuntimeCompilerRepairHint,
@@ -22,9 +22,7 @@ export class RuntimeCompilerRepairHintStore {
 
   constructor(workspaceRoot: string) {
     this.root = path.join(
-      workspaceStateDir(workspaceRoot),
-      "world",
-      "v1",
+      worldStorageRoot(workspaceRoot),
       "compiler",
       "runtime-repair-hints",
       "v1",

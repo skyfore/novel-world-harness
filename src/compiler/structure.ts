@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { worldStorageRoot } from "../world/paths.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
 import { canonicalJson } from "../world/canonical.js";
@@ -171,7 +171,7 @@ export class SourceStructureStore {
   readonly root: string;
 
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "compiler", "observations", "v1", "structure");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "compiler", "observations", "v1", "structure");
   }
 
   async read(sourceId: string): Promise<SourceStructureManifest | null> {

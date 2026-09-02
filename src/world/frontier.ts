@@ -1,10 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
 import type { BranchId, CommitId, EventProposal, EvidenceRef, Possibility, StoryTime, WorldState } from "./model.js";
 import { evaluatePredicate } from "./state.js";
 import { comparableStoryTime } from "./time.js";
+import { worldStorageRoot } from "./paths.js";
 
 export type PossibilityStatus = "latent" | "eligible" | "blocked" | "expired" | "superseded" | "invalidated" | "adapted" | "realized";
 export type SchedulerFactors = { urgency: number; causalSupport: number; actorPressure: number; runtimeRelevance: number; conditionStrength: number; canonAffinity: number };
@@ -222,7 +222,7 @@ export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: str
 
 export class FrontierStore {
   readonly root: string;
-  constructor(workspaceRoot: string) { this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "frontier"); }
+  constructor(workspaceRoot: string) { this.root = path.join(worldStorageRoot(workspaceRoot), "frontier"); }
   async write(frontier: Frontier): Promise<void> {
     const filePath = this.filePath(frontier.branchId, frontier.commitId, frontier.temporalMode);
     await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });

@@ -12,7 +12,7 @@ import { WebEventBroker } from "../src/web/event-stream.js";
 import { WebApplicationError } from "../src/web/errors.js";
 import { createWebHost } from "../src/web/host.js";
 import { OperationManager } from "../src/web/operation-manager.js";
-import { workspaceStateDir } from "../src/agent/runtime-paths.js";
+import { worldStorageRoot } from "../src/world/paths.js";
 
 const roots: string[] = [];
 
@@ -224,9 +224,9 @@ describe("Web Play application service", () => {
       commitId: result.finalHead,
       logicalTime: { step: 1 },
     });
-    const auditFiles = await fs.readdir(path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main"));
+    const auditFiles = await fs.readdir(path.join(worldStorageRoot(root), "play", "turns", "main"));
     const audit = JSON.parse(await fs.readFile(
-      path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main", auditFiles[0]!),
+      path.join(worldStorageRoot(root), "play", "turns", "main", auditFiles[0]!),
       "utf8",
     )) as Record<string, unknown>;
     expect(audit).toMatchObject({

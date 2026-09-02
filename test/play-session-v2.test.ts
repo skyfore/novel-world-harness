@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { workspaceStateDir } from "../src/agent/runtime-paths.js";
+import { worldStorageRoot } from "../src/world/paths.js";
 import {
   PlaySessionStore,
   activePlaySessionSchema,
@@ -25,7 +25,7 @@ async function workspace(): Promise<string> {
 describe("PlaySession v2", () => {
   it("lazily migrates the v1 active pointer and branch record", async () => {
     const root = await workspace();
-    const playRoot = path.join(workspaceStateDir(root), "world", "v1", "play");
+    const playRoot = path.join(worldStorageRoot(root), "play");
     const legacy = {
       version: 1,
       branchId: "main",

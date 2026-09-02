@@ -8,7 +8,7 @@ import { WorldRuntime, type NarrativeRender } from "../src/world/runtime.js";
 import { buildFrontier, selectEligible } from "../src/world/frontier.js";
 import { emptyWorldState } from "../src/world/state.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
-import { workspaceStateDir } from "../src/agent/runtime-paths.js";
+import { worldStorageRoot } from "../src/world/paths.js";
 import type { PlayerActionCandidate } from "../src/world/player-action.js";
 
 const roots: string[] = [];
@@ -290,7 +290,7 @@ describe("WorldRuntime", () => {
     const noImplicitBackground = await runtime.move({ branchId: "main" });
     expect(noImplicitBackground.newHead).toBe(genesis);
     expect(noImplicitBackground.committedEvents).toEqual([]);
-    expect(runtime.frontierStore.root).toBe(path.join(workspaceStateDir(root), "world", "v1", "frontier"));
+    expect(runtime.frontierStore.root).toBe(path.join(worldStorageRoot(root), "frontier"));
 
     const result = await runtime.move({ branchId: "main", maxBackgroundCandidates: 1 });
     expect(result.previousHead).toBe(genesis);

@@ -2,7 +2,6 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import {
   evidenceAssertionSchema,
   idSchema,
@@ -10,6 +9,7 @@ import {
   type ValidationIssue,
 } from "../world/model.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
+import { worldStorageRoot } from "../world/paths.js";
 import { jsonPointerExists } from "./text-anchors.js";
 
 const bindingSchema = z.object({
@@ -43,7 +43,7 @@ export class EvidenceAssertionStore {
   readonly root: string;
 
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "compiler", "evidence", "v1");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "compiler", "evidence", "v1");
   }
 
   async replaceForArtifact(

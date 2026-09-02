@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { worldStorageRoot } from "../world/paths.js";
 
 const sourceIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -30,7 +30,7 @@ export class RepairRunStore {
   readonly root: string;
 
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "compiler", "repair-runs");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "compiler", "repair-runs");
   }
 
   async read(sourceId: string): Promise<RepairRun | null> {

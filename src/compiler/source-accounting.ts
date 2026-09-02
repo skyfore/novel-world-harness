@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { worldStorageRoot } from "../world/paths.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
 import { canonicalJson } from "../world/canonical.js";
 import { idSchema, type EvidenceAssertion, type TextAnchor } from "../world/model.js";
@@ -125,7 +125,7 @@ export class SourceAccountingStore {
   readonly root: string;
 
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "compiler", "observations", "v1", "accounting");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "compiler", "observations", "v1", "accounting");
   }
 
   async read(sourceId: string): Promise<SourceAccountingManifest | null> {

@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { contentHash } from "./canonical.js";
 import type { PlayerActionCandidate, PlayerProgressCertificate, PlayerTurnStage, PlayerWorldResolution } from "./player-action.js";
 import { idSchema, type EventProposal, type ValidationIssue, type ValidationReport } from "./model.js";
@@ -9,6 +8,7 @@ import type { NpcReactionEmotion, NpcReactionEvent, NpcResponseKind } from "./np
 import type { CanonicalAttachmentResolution } from "./canonical-adaptation.js";
 import type { CanonicalRecoveryTrace } from "./runtime.js";
 import type { RuntimeContextConsultationRecord } from "./runtime-context.js";
+import { worldStorageRoot } from "./paths.js";
 
 export type PlayerTurnOrigin = "freeform" | "scene-choice" | "host-safe-choice" | "cli" | "web";
 
@@ -80,7 +80,7 @@ export class PlayerTurnAuditStore {
   readonly root: string;
 
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "play", "turns");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "play", "turns");
   }
 
   async write(input: Omit<PlayerTurnAudit, "version" | "id">): Promise<PlayerTurnAudit> {

@@ -2,8 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { idSchema } from "../world/model.js";
+import { worldStorageRoot } from "../world/paths.js";
 
 const boundaryCalibrationRequesterSchema = z.object({
   batchId: idSchema,
@@ -58,7 +58,7 @@ export class BoundaryCalibrationStore {
   readonly root: string;
 
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "compiler", "boundary-calibrations");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "compiler", "boundary-calibrations");
   }
 
   async list(sourceId: string): Promise<BoundaryCalibrationRequest[]> {

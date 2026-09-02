@@ -105,7 +105,7 @@ $NWH_HOME/
 └── workspaces/v1/<workspace-id>/
     ├── project.json
     ├── sources/<content-id>.json
-    └── world/v1/
+    └── world/v2/
         ├── compiler/batches/<source-id>.json
         ├── proposals/{pending,accepted,rejected}/
         ├── canon/

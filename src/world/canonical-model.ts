@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import type { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
+import { worldStorageRoot } from "./paths.js";
 import {
   artifactProposalSchema,
   attributionSchema,
@@ -66,7 +66,7 @@ async function atomicJson(filePath: string, value: unknown): Promise<void> {
 
 export class CanonicalModelStore {
   readonly root: string;
-  constructor(workspaceRoot: string) { this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "canon"); }
+  constructor(workspaceRoot: string) { this.root = path.join(worldStorageRoot(workspaceRoot), "canon"); }
   putEntity(entity: Entity): Promise<void> { const value = entitySchema.parse(entity); return this.put("entities", value.id, value); }
   putProposition(proposition: Proposition): Promise<void> { const value = propositionSchema.parse(proposition); return this.put("propositions", value.id, value); }
   putAttribution(attribution: Attribution): Promise<void> { const value = attributionSchema.parse(attribution); return this.put("attributions", value.id, value); }
@@ -224,7 +224,7 @@ export class CanonicalModelStore {
 
 export class ProposalStore {
   readonly root: string;
-  constructor(workspaceRoot: string) { this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "proposals"); }
+  constructor(workspaceRoot: string) { this.root = path.join(worldStorageRoot(workspaceRoot), "proposals"); }
   async writePending<T>(proposal: ArtifactProposal<T>, payloadSchema: z.ZodType<T>): Promise<void> {
     const parsed = artifactProposalSchema(payloadSchema).parse(proposal);
     const filePath = this.proposalPath("pending", parsed.id);

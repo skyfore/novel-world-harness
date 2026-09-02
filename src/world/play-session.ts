@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { idSchema } from "./model.js";
+import { worldStorageRoot } from "./paths.js";
 
 const timestampSchema = z.string().datetime({ offset: true });
 const playSessionStatusSchema = z.enum(["active", "idle", "archived", "detached"]);
@@ -52,7 +52,7 @@ export class PlaySessionStore {
   private readonly instancesDir: string;
 
   constructor(workspaceRoot: string) {
-    const root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "play");
+    const root = path.join(worldStorageRoot(workspaceRoot), "play");
     this.filePath = path.join(root, "active.json");
     this.instancesDir = path.join(root, "instances");
   }

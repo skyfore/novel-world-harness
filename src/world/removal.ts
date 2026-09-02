@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { CompilerBatchStore } from "../compiler/batches.js";
 import { BoundaryCalibrationStore } from "../compiler/boundary-calibration.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
@@ -16,6 +15,7 @@ import { ActorModelStore } from "./actors.js";
 import { CanonicalModelStore, ProposalStore } from "./canonical-model.js";
 import { InitialWorldStore } from "./initial.js";
 import { PlaySessionStore, type ActivePlaySession } from "./play-session.js";
+import { worldStorageRoot } from "./paths.js";
 import { PlayConversationStore } from "./play-conversation.js";
 import { inspectPlayExperience, resolveNovelSource } from "./play-experience.js";
 import { PossibilityTemplateStore } from "./possibility-model.js";
@@ -71,7 +71,7 @@ export async function removeWorldInstance(
     await Promise.all(instanceSessions.map((session) => conversations.remove(branchId, session.conversationId)));
     if (!instanceSessions.length) await conversations.remove(branchId);
   }
-  await fs.rm(path.join(workspaceStateDir(root), "world", "v1", "frontier", branchId), {
+  await fs.rm(path.join(worldStorageRoot(root), "frontier", branchId), {
     recursive: true,
     force: true,
   });

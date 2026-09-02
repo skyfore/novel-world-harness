@@ -12,7 +12,7 @@ import {
   performPlayTurn,
   selectPlayExperience,
 } from "../src/world/play-experience.js";
-import { workspaceStateDir } from "../src/agent/runtime-paths.js";
+import { worldStorageRoot } from "../src/world/paths.js";
 import { KnowledgeProjector } from "../src/world/knowledge.js";
 import { PlayConversationStore } from "../src/world/play-conversation.js";
 
@@ -159,7 +159,7 @@ describe("play experience catalog", () => {
     const responseEvent = await reopened.engine.objects.getEvent(outcome.worldResponseEvents[0]!.eventHash);
     expect(responseEvent.realizesCanonicalEventIds).toEqual(["lu-receives-interview-letter"]);
 
-    const auditDirectory = path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main");
+    const auditDirectory = path.join(worldStorageRoot(root), "play", "turns", "main");
     const [auditFile] = await fs.readdir(auditDirectory);
     const audit = JSON.parse(await fs.readFile(path.join(auditDirectory, auditFile!), "utf8")) as Record<string, unknown>;
     expect(audit).toMatchObject({
@@ -231,7 +231,7 @@ describe("play experience catalog", () => {
       },
     });
     expect(outcome.auditId).toMatch(/^turn-/);
-    const auditDirectory = path.join(workspaceStateDir(root), "world", "v1", "play", "turns", "main");
+    const auditDirectory = path.join(worldStorageRoot(root), "play", "turns", "main");
     const auditFiles = await fs.readdir(auditDirectory);
     expect(auditFiles).toHaveLength(1);
     const audit = JSON.parse(await fs.readFile(path.join(auditDirectory, auditFiles[0]!), "utf8")) as Record<string, unknown>;

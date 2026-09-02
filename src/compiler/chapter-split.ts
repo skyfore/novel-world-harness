@@ -2,11 +2,11 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
 import { idSchema } from "../world/model.js";
 import { promptJson } from "../util/prompt-data.js";
+import { worldStorageRoot } from "../world/paths.js";
 
 export const CHAPTER_SPLIT_DISCOVERY_VERSION = 1 as const;
 
@@ -102,7 +102,7 @@ export class ChapterSplitPlanStore {
   readonly root: string;
 
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "evidence", "chapter-splits");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "evidence", "chapter-splits");
   }
 
   async read(sourceId: string): Promise<ChapterSplitPlan | null> {

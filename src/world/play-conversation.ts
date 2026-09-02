@@ -2,9 +2,9 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import type { WorldEngine } from "./engine.js";
 import { idSchema } from "./model.js";
+import { worldStorageRoot } from "./paths.js";
 
 const MAX_BRANCH_MESSAGES = 50_000;
 const MAX_MESSAGE_CHARS = 50_000;
@@ -58,7 +58,7 @@ export class PlayConversationStore {
   readonly root: string;
 
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "play", "conversations");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "play", "conversations");
   }
 
   async list(branchIdValue: string, conversationIdValue?: string): Promise<PlayConversationMessage[]> {

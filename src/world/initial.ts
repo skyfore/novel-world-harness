@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
+import { worldStorageRoot } from "./paths.js";
 import {
   actorEventObservationSchema,
   evidenceRefSchema,
@@ -248,7 +248,7 @@ export class InitialWorldStore {
   readonly filePath: string;
   readonly root: string;
   constructor(workspaceRoot: string) {
-    const canonRoot = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "canon");
+    const canonRoot = path.join(worldStorageRoot(workspaceRoot), "canon");
     this.filePath = path.join(canonRoot, "initial-world.json");
     this.root = path.join(canonRoot, "initial-world");
   }

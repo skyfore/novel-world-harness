@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { worldStorageRoot } from "../world/paths.js";
 import { SEGMENTER_VERSION, SegmentStore, readSegmentText, segmentEvidenceRef, segmentSource, type SourceSegment } from "./segments.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import {
@@ -211,7 +211,7 @@ const STRUCTURE_DISCOVERY_MIN_SOURCE_BYTES = 24 * 1024;
 export class CompilerBatchStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "compiler", "batches");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "compiler", "batches");
   }
 
   async read(sourceId: string): Promise<BatchProgress> {

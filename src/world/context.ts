@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
 import { z } from "zod";
 import { ActorModelStore, type ActorArtifactKind } from "./actors.js";
 import { canonicalJson, contentHash } from "./canonical.js";
@@ -15,6 +14,7 @@ import { PossibilityTemplateStore, type PossibilityTemplate } from "./possibilit
 import type { CharacterGoal, CharacterModel } from "./actors.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "./state.js";
 import { BranchStore, WorldObjectStore } from "./store.js";
+import { worldStorageRoot } from "./paths.js";
 import { assertEvidenceExclusiveToSource, evidenceSourceIds } from "./source-scope.js";
 
 const revisionRefSchema = z.object({ id: z.string().min(1), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
@@ -96,7 +96,7 @@ export class WorldContextStore {
   private readonly actors: ActorModelStore;
   private readonly possibilities: PossibilityTemplateStore;
   constructor(workspaceRoot: string, private readonly canon = new CanonicalModelStore(workspaceRoot)) {
-    this.root = path.join(workspaceStateDir(workspaceRoot), "world", "v1", "canon", "snapshots");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "canon", "snapshots");
     this.actors = new ActorModelStore(workspaceRoot);
     this.possibilities = new PossibilityTemplateStore(workspaceRoot);
   }

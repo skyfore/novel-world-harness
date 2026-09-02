@@ -342,7 +342,7 @@ fails, NWH states that the action is already committed and tells the player to u
 but they no longer end the interaction: NWH renders/re-establishes the unchanged
 scene and offers another action. Candidate, proposal, validation, timing, and
 issue details are persisted in the workspace runtime state under
-`world/v1/play/turns/` for diagnosis rather than dumped into story prose.
+`world/v2/play/turns/` for diagnosis rather than dumped into story prose.
 
 `nwh compile` uses the same TUI with narrow `propose_*` tools and starts an evidence-backed batch. Supplying `nwh compile "<instruction>"` keeps the one-shot compiler path for automation. Neither form can accept proposals or mutate canonical/runtime truth.
 

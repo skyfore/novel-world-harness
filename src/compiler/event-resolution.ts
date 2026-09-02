@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { worldStorageRoot } from "../world/paths.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import {
@@ -140,9 +140,7 @@ export class EventResolutionStore {
 
   constructor(workspaceRoot: string) {
     this.root = path.join(
-      workspaceStateDir(workspaceRoot),
-      "world",
-      "v1",
+      worldStorageRoot(workspaceRoot),
       "compiler",
       "resolutions",
       "v1",

@@ -10,7 +10,7 @@ import { contentHash } from "../world/canonical.js";
 import { promptJson } from "../util/prompt-data.js";
 import type { EvidenceRef, StoryTime } from "../world/model.js";
 import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
-import { workspaceStateDir } from "../agent/runtime-paths.js";
+import { worldStorageRoot } from "../world/paths.js";
 import { COMPILER_TOOL_CALL_SAFETY_FUSE } from "./limits.js";
 
 export const MAX_RECONCILIATION_ITERATIONS = 10;
@@ -47,7 +47,7 @@ function reconciliationPlanPath(workspaceRoot: string, sourceId: string, mode: W
     : mode === "reparse-finalization"
       ? ".reparse-finalization"
       : ".graph-adjudication";
-  return path.join(workspaceStateDir(workspaceRoot), "world", "v1", "compiler", "reconciliation", `${sourceId}${suffix}.json`);
+  return path.join(worldStorageRoot(workspaceRoot), "compiler", "reconciliation", `${sourceId}${suffix}.json`);
 }
 
 async function writeReconciliationPlan(workspaceRoot: string, plan: ReconciliationPlan): Promise<void> {

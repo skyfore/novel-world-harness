@@ -2,7 +2,7 @@
 
 Date: 2026-09-02
 
-Verified baseline: `pnpm run check`; `pnpm test` (146 test files, 830 tests
+Verified baseline: `pnpm run check`; `pnpm test` (148 test files, 836 tests
 passing); `pnpm test:e2e` (production Fastify host + 2 Chromium journeys
 passing).
 
@@ -10,7 +10,7 @@ This document describes behavior verified from the code on `agent/local-first-no
 
 ## Overall assessment
 
-The branch now implements a constrained end-to-end path from a local novel through reviewed compilation to selecting a character and committing natural-language actions. The authority boundaries are connected; extraction quality across arbitrary novels and a rich literary runtime are not yet established.
+The branch now implements a constrained end-to-end path from a local novel through reviewed compilation to selecting a character and committing natural-language actions. The authority boundaries are connected and carry repeatable representative denominators plus long-horizon safety scenarios; provider extraction quality across arbitrary novels and broad literary-runtime quality are not yet established.
 
 The code citations, external primary sources, gap analysis, and phased acceptance
 plan behind this status are documented in
@@ -36,8 +36,8 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 | Reparse invalidation | Direct dependencies implemented | Whole/selected-chapter reparse uses byte/line containment for exact quote subspans and covers propositions, attributions, participation, event relations, scene/frame/action/constraint/norm/process artifacts, nested spatial/rule evidence, character ontology, and exact bindings; cross-chapter artifacts and pinned branches remain intact, while a general transitive impact planner is not yet implemented |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
-| World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
-| Canon replay and branching | Implemented vertical slice | Predicate checkpoints, fork, diff, divergent possibility eligibility |
+| World engine | Implemented vertical slice | Immutable commits/events/typed effect deltas, projection, branch CAS, rules, knowledge, frontier, and host-side per-candidate move decision traces |
+| Canon replay and branching | Implemented vertical slice | Shared-history typed reducers, versioned checkpoint-plus-tail replay, full-replay equivalence diagnostics, fork, diff, and divergent possibility eligibility |
 | Actor behavior | Implemented vertical slice | Direct interactions use the actor-scoped reactive NPC lane; unrelated initiative uses a bounded hybrid policy that prefers compiled actions, then calls an isolated Pi actor reasoner for host-ranked salient actors and revalidates multi-actor footprints at each new branch head |
 | Narrative | Implemented vertical slice | Actor-scoped Pi scene narrator receives a bounded actor-safe frame plus exact retrieval and authority-projected current/prior literary context when a move triggered consultation; choice and narrative channels remain isolated, and accepted prose cannot mutate world truth |
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
@@ -47,7 +47,7 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 | Runtime source consultation | Implemented vertical slice | Translation/adjudication may preserve a genuine missing-data result; a fresh isolated specialist can search and fully read only the branch-pinned immutable source units, while host admission excludes future/ambiguous evidence, projects separate translation/adjudication/choice/narrative authority, and records source-only gaps in a non-authoritative compiler inbox |
 | Character embodiment | Implemented vertical slice | Role-before-branch selection, spoiler-free opening setup, reader-only complete prior-event recaps, source-backed first-embodied-scene checkpoints for later roles, actor-scoped perception, sibling entry branches, and durable active resume |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
-| Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
+| Corpus quality | Evaluation denominator implemented; provider quality not established | Three original CC0 Chinese micro-novels pin exact bytes and selected explicit V2 gold across all 13 implemented evaluator layers; no live-provider result or independently reviewed release threshold is claimed |
 
 ## Verified architecture
 
@@ -342,16 +342,20 @@ genres—not connection or mutation authority.
 
 `NarrativeRenderer` still provides deterministic event-title rendering for low-level CLI/API inspection. The TUI player path now adds an isolated Pi narrator over a bounded committed actor frame, exact actor-frame and related-message retrieval, a capture-only choice tool, and a separately admitted current/prior literary-context channel when a player move exposes a sparse referent or relationship. Broader prose-quality, runtime-consultation precision/latency, parametric-canon recall, and epistemic-leakage evaluation across representative novels is still required.
 
-### 5. Compilation quality has no representative benchmark
+### 5. A representative denominator exists; provider quality is not frozen
 
 The repeatable semantic evaluator now scores mention detection, entity/event
 coreference, quotation attribution, typed participation and event relations
 including operationality, propositions, knowledge acquisition, state effects,
 scenes, action schemas/effect envelopes, executable policies, and character
-goal/appraisal/development/relationship/obligation evidence. A fully annotated
-synthetic slice reaches exact precision/recall, but there is still no checked-in
-representative multi-novel corpus. Full-source batching and internal source
-accounting prove bounded/closed processing, not extraction quality on real prose.
+goal/appraisal/development/relationship/obligation evidence. Three checked-in,
+original CC0 Chinese micro-novels now provide hash-pinned selected explicit V2
+gold with a non-empty denominator for every implemented evaluator layer. The
+corpus loader rejects source-byte drift, malformed UTF-8 boundaries, cross-source
+spans, and broken reference closure. This proves that scoring and regression
+denominators are real; it does not prove extraction quality on arbitrary novels.
+The first representative live-provider results still require independent human
+false-positive/false-negative review before a release threshold can be frozen.
 
 ### 6. General transitive repair planning is incomplete
 
@@ -362,7 +366,7 @@ containment, but it does not yet calculate a general mention-to-runtime
 transitive impact plan or offer `--dry-run`. Cross-chapter aggregate models
 cannot mark one nested semantic item stale without replacing the aggregate.
 
-### 7. Executable semantic induction remains unbenchmarked
+### 7. Executable semantic induction lacks a reviewed provider baseline
 
 Scene occurrences now join discourse, location, story interval, viewpoint,
 physical presence, and canonical event membership. Typed causal operationality
@@ -376,34 +380,39 @@ one-off events.
 
 Material-progress certification, stagnation-aware exits, and an explicit
 five-minute autonomous wait path are connected. The scheduler remains
-deterministic and explainable, but pressure scoring, expiry, actor relevance,
-background cadence, and conflict policy have only small-fixture coverage. Large
-branch histories and multi-actor scenes have not been profiled.
+deterministic and explainable. A 52-event post-genesis history now proves that a
+checkpoint after event 40 reduces only the 12-commit tail while matching a full
+replay across state, knowledge, branch semantics, processes, norms, scenes,
+causality, and history. Fork scenarios cover false belief, isolated knowledge,
+betrayal/alliance divergence, goals, relationships, obligations, process/norm
+state, future eligibility, and actor policy; a separate multi-actor scenario
+proves deterministic exclusive-resource conflict and new-head commitment.
+Full-book-scale latency, memory, pressure calibration, background cadence, and
+genre-diverse behavioral quality still need live profiling.
 
 Canonical scaffold recovery is implemented and covered by constrained fixtures,
 including dependency skipping, participant remapping, downstream causal
 continuation, locked-effect forgery rejection, scene-presence rejection, and
 future-entity rejection; opaque role-specific strings are also rejected rather
-than textually rewritten. What remains unestablished is compiler recall and
-precision on real novels: no representative benchmark yet measures whether the
-model identifies functional roles without incorrectly treating identity-bound
-roles as substitutable. Prepared revisions compiled before pipeline version 9
-remain playable but contain no newly inferred scaffolds until reparsed.
+than textually rewritten. What remains unestablished is live-provider compiler
+recall and precision: the checked-in denominator can measure functional-role
+errors, but no independently reviewed provider baseline yet shows whether models
+avoid treating identity-bound roles as substitutable across genres.
 
 ## Recommended next milestone
 
-T10 should harden the connected model before adding broader ontology:
+With T0–T10 complete, the next evidence-driven milestone should be:
 
-1. check in a small licensed/original representative corpus and freeze human
-   gold baselines only after annotation review;
-2. run the complete long-horizon scenario matrix across forks, hidden rules,
-   false beliefs, norms, due processes, autonomous actors, and resource conflict;
-3. profile checkpoint-plus-tail projection and verify bounded model-call counts;
-4. audit move traces for complete host decisions and actor-safe redaction;
-5. add a typed `reparse --dry-run` dependency-impact plan when corpus failures
-   show direct evidence containment is insufficient;
-6. add domain modules only when benchmark failures repeatedly demonstrate the
-   missing mechanic.
+1. run pinned live providers against the representative corpus, conduct
+   independent human false-positive/false-negative review, and freeze
+   model/version-specific baselines without turning them into universal scores;
+2. add a typed `reparse --dry-run` transitive dependency-impact plan and verify
+   it on the failures revealed by those baselines;
+3. profile full-book histories and sustained autonomous play for latency,
+   checkpoint cadence, memory, and bounded model-call behavior;
+4. expand licensed/original genre coverage and add domain modules only when
+   repeated benchmark failures demonstrate a missing mechanic rather than a
+   prompting or evidence-resolution error.
 
 This order tests reliability and observability while preserving
 [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md).

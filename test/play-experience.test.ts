@@ -241,6 +241,12 @@ describe("play experience catalog", () => {
       },
     });
     expect(outcome.auditId).toMatch(/^turn-/);
+    expect(outcome.runtimeMoveTrace).toMatchObject({
+      version: 1,
+      branchId: "main",
+      previousHead: outcome.result.newHead,
+      finalHead: outcome.finalHead,
+    });
     const auditDirectory = path.join(worldStorageRoot(root), "play", "turns", "main");
     const auditFiles = await fs.readdir(auditDirectory);
     expect(auditFiles).toHaveLength(1);
@@ -251,6 +257,12 @@ describe("play experience catalog", () => {
       stage: "committed",
       utterance: "I ask Rival to wait.",
       origin: "cli",
+      runtimeMoveTrace: {
+        version: 1,
+        branchId: "main",
+        previousHead: outcome.result.newHead,
+        finalHead: outcome.finalHead,
+      },
     });
     const rejected = await performPlayTurn({
       root,

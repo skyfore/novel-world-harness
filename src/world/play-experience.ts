@@ -29,7 +29,7 @@ import type {
   CanonicalAttachmentResolution,
   CanonicalAttachmentResolver,
 } from "./canonical-adaptation.js";
-import type { CanonicalRecoveryTrace } from "./runtime.js";
+import type { CanonicalRecoveryTrace, WorldMoveTrace } from "./runtime.js";
 import type { RuntimeContextConsultationObserver, RuntimeContextResolver } from "./runtime-context.js";
 import { RuntimeCompilerRepairHintStore } from "../compiler/runtime-repair-hints.js";
 import type { ActorReasoner } from "./model-actor-policy.js";
@@ -106,6 +106,7 @@ export type PlayTurnOutcome = {
   canonicalRecoveryResolution?: CanonicalAttachmentResolution;
   canonicalRecoveryError?: string;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
+  runtimeMoveTrace?: WorldMoveTrace;
   reactionEvents: Array<{
     eventHash: string;
     title: string;
@@ -444,6 +445,7 @@ export async function performPlayTurn(options: {
   let canonicalRecoveryError: string | undefined;
   let npcResponseError: string | undefined;
   let backgroundError: string | undefined;
+  let runtimeMoveTrace: WorldMoveTrace | undefined;
   if (result.accepted) {
     const explicitWait = result.candidate?.intent?.kind === "wait";
     const divergedFromCanonThisTurn = Boolean(result.proposal?.supersedesCanonicalEventIds?.length);
@@ -591,6 +593,7 @@ export async function performPlayTurn(options: {
         temporalMode: explicitWait ? "current-window" : effectiveAdvanceBackground > 0 ? "advance" : "current-window",
         ...(explicitWait ? { backgroundKinds: AUTONOMOUS_BACKGROUND_KINDS } : {}),
       });
+      runtimeMoveTrace = structuredClone(advanced.trace);
       finalHead = advanced.newHead;
       for (const eventHash of advanced.committedEvents) {
         const event = await engine.objects.getEvent(eventHash);
@@ -655,6 +658,7 @@ export async function performPlayTurn(options: {
       ...(npcResponseError ? { npcResponseError } : {}),
       reactionEvents: structuredClone(reactionEvents),
       backgroundEvents: structuredClone(backgroundEvents),
+      ...(runtimeMoveTrace ? { runtimeMoveTrace: structuredClone(runtimeMoveTrace) } : {}),
       ...(backgroundError ? { backgroundError } : {}),
       ...(conversationError ? { conversationError } : {}),
     });
@@ -677,6 +681,7 @@ export async function performPlayTurn(options: {
     ...(canonicalRecoveryError ? { canonicalRecoveryError } : {}),
     ...(npcResponseError ? { npcResponseError } : {}),
     backgroundEvents,
+    ...(runtimeMoveTrace ? { runtimeMoveTrace } : {}),
     reactionEvents,
     ...(backgroundError ? { backgroundError } : {}),
     ...(conversationError ? { conversationError } : {}),

@@ -9,19 +9,22 @@ import { PlayApplicationService } from "../src/application/play-service.js";
 import type { PlayerOpeningNarrator } from "../src/agent/pi-player-opening.js";
 import type { CompileSourceOptions } from "../src/commands/compile-source.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
+import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { textAnchorForByteRange } from "../src/compiler/text-anchors.js";
 import { SourceMaterialStore } from "../src/storage/source-material-store.js";
 import { WorkspaceStore, type SourceDocument } from "../src/storage/workspace-store.js";
 import { contextSnapshotSchema, type ContextPart } from "../src/trace/schema.js";
 import { TraceStore } from "../src/trace/store.js";
 import { InitialWorldStore } from "../src/world/initial.js";
+import { contentHash } from "../src/world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
 import {
   deterministicPlayerIntentCandidate,
   type PlayerActionTranslationInput,
   type PlayerActionTranslator,
 } from "../src/world/player-action.js";
-import type { EvidenceRef } from "../src/world/model.js";
+import type { EvidenceRef, WorldRule } from "../src/world/model.js";
 import { WebEventBroker } from "../src/web/event-stream.js";
 import { createWebHost, type NwhWebHost } from "../src/web/host.js";
 import { OperationManager } from "../src/web/operation-manager.js";
@@ -399,7 +402,27 @@ async function seedBrowserCompilation(options: CompileSourceOptions): Promise<vo
   const canonical = new CanonicalModelStore(options.root);
   await canonical.putEntity({ id: hallId, kind: "location", canonicalName: "Hall", aliases: [], evidence });
   await canonical.putEntity({ id: gardenId, kind: "location", canonicalName: "Garden", aliases: [], evidence });
-  await canonical.putRule({
+  const rulePhrase = Buffer.from("outer door must remain closed", "utf8");
+  const ruleStartByte = material.indexOf(rulePhrase);
+  if (ruleStartByte < 0) throw new Error("The browser compiler fixture is missing its rule evidence phrase.");
+  const ruleAnchor = textAnchorForByteRange(
+    source.id,
+    material,
+    ruleStartByte,
+    ruleStartByte + rulePhrase.byteLength,
+  );
+  const ruleEvidence: EvidenceRef[] = [{
+    span: {
+      sourceId: source.id,
+      startByte: ruleAnchor.startByte,
+      endByte: ruleAnchor.endByte,
+      startLine: ruleAnchor.startLine,
+      endLine: ruleAnchor.endLine,
+      quoteHash: ruleAnchor.exactHash,
+    },
+    strength: "explicit",
+  }];
+  const hallDoorRule: WorldRule = {
     ontologyVersion: "world-rule-v2",
     id: ruleId,
     name: "The Hall door remains closed",
@@ -419,14 +442,33 @@ async function seedBrowserCompilation(options: CompileSourceOptions): Promise<vo
       basis: "explicit",
       status: "supported",
       confidence: 1,
-      evidence,
+      evidence: ruleEvidence,
     }],
     exceptions: [],
     basis: "explicit",
     status: "supported",
     confidence: 1,
-    evidence,
-  });
+    evidence: ruleEvidence,
+  };
+  await canonical.putRule(hallDoorRule);
+  await new EvidenceAssertionStore(options.root).replaceForArtifact(
+    "world-rule",
+    ruleId,
+    contentHash(hallDoorRule),
+    ["/name", "/clauses/0/predicate"].map((jsonPointer, index) => ({
+      version: 1 as const,
+      id: `${ruleId}-evidence-${index}`,
+      target: { artifactKind: "world-rule", artifactId: ruleId, jsonPointer },
+      anchors: [ruleAnchor],
+      relation: "supports" as const,
+      strength: "explicit" as const,
+      derivation: {
+        runId: "playwright-browser-compiler",
+        worker: "playwright-browser-compiler",
+        ontologyVersion: "evidence-v1" as const,
+      },
+    })),
+  );
   await canonical.putEvent({
     id: eventId,
     title: "Mara considers the Garden",

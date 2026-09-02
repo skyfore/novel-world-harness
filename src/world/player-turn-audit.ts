@@ -7,6 +7,7 @@ import type { PlayerWorldResponseOption, PlayerWorldResponseResolution } from ".
 import type { NpcReactionEmotion, NpcReactionEvent, NpcResponseKind } from "./npc-reaction.js";
 import type { CanonicalAttachmentResolution } from "./canonical-adaptation.js";
 import type { CanonicalRecoveryTrace } from "./runtime.js";
+import type { WorldMoveTrace } from "./runtime.js";
 import type { RuntimeContextConsultationRecord } from "./runtime-context.js";
 import { worldStorageRoot } from "./paths.js";
 
@@ -67,6 +68,8 @@ export type PlayerTurnAudit = {
   }>;
   npcResponseError?: string;
   backgroundEvents: Array<{ eventHash: string; title: string }>;
+  /** Host-private deterministic actor/background selection and commit trace. */
+  runtimeMoveTrace?: WorldMoveTrace;
   backgroundError?: string;
   /** Presentation-memory failure; committed world truth remains unaffected. */
   conversationError?: string;

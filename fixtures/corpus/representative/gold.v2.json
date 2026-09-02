@@ -1,0 +1,161 @@
+{
+  "version": 2,
+  "name": "nwh-mvp-original-representative-gold",
+  "canonical": {},
+  "semantic": {
+    "mentions": [
+      { "id": "g-lian-1", "kind": "entity", "span": { "sourceId": "glass-ledger-zh", "startByte": 40, "endByte": 46 }, "type": "character" },
+      { "id": "g-lian-2", "kind": "entity", "span": { "sourceId": "glass-ledger-zh", "startByte": 221, "endByte": 227 }, "type": "character" },
+      { "id": "g-jizhou-1", "kind": "entity", "span": { "sourceId": "glass-ledger-zh", "startByte": 170, "endByte": 176 }, "type": "character" },
+      { "id": "g-jizhou-2", "kind": "entity", "span": { "sourceId": "glass-ledger-zh", "startByte": 291, "endByte": 297 }, "type": "character" },
+      { "id": "g-north-vault", "kind": "place", "span": { "sourceId": "glass-ledger-zh", "startByte": 58, "endByte": 64 }, "type": "location" },
+      { "id": "g-ledger", "kind": "entity", "span": { "sourceId": "glass-ledger-zh", "startByte": 88, "endByte": 97 }, "type": "artifact" },
+      { "id": "g-south-tower", "kind": "place", "span": { "sourceId": "glass-ledger-zh", "startByte": 336, "endByte": 342 }, "type": "location" },
+      { "id": "g-see", "kind": "event", "span": { "sourceId": "glass-ledger-zh", "startByte": 52, "endByte": 58 }, "type": "perception" },
+      { "id": "g-lie", "kind": "event", "span": { "sourceId": "glass-ledger-zh", "startByte": 233, "endByte": 236 }, "type": "communication" },
+      { "id": "g-believe", "kind": "event", "span": { "sourceId": "glass-ledger-zh", "startByte": 297, "endByte": 303 }, "type": "cognition" },
+      { "id": "g-leave", "kind": "event", "span": { "sourceId": "glass-ledger-zh", "startByte": 475, "endByte": 481 }, "type": "movement" },
+      { "id": "g-take", "kind": "event", "span": { "sourceId": "glass-ledger-zh", "startByte": 541, "endByte": 547 }, "type": "transfer" },
+      { "id": "g-quote", "kind": "quotation", "span": { "sourceId": "glass-ledger-zh", "startByte": 239, "endByte": 290 }, "type": "direct" },
+
+      { "id": "a-court", "kind": "place", "span": { "sourceId": "ash-court-zh", "startByte": 40, "endByte": 46 }, "type": "location" },
+      { "id": "a-ring", "kind": "entity", "span": { "sourceId": "ash-court-zh", "startByte": 127, "endByte": 136 }, "type": "artifact" },
+      { "id": "a-line", "kind": "place", "span": { "sourceId": "ash-court-zh", "startByte": 160, "endByte": 166 }, "type": "location" },
+      { "id": "a-miro", "kind": "entity", "span": { "sourceId": "ash-court-zh", "startByte": 221, "endByte": 227 }, "type": "character" },
+      { "id": "a-noya", "kind": "entity", "span": { "sourceId": "ash-court-zh", "startByte": 372, "endByte": 378 }, "type": "character" },
+      { "id": "a-seal", "kind": "entity", "span": { "sourceId": "ash-court-zh", "startByte": 547, "endByte": 553 }, "type": "artifact" },
+      { "id": "a-cross-1", "kind": "event", "span": { "sourceId": "ash-court-zh", "startByte": 242, "endByte": 248 }, "type": "movement" },
+      { "id": "a-cross-2", "kind": "event", "span": { "sourceId": "ash-court-zh", "startByte": 299, "endByte": 317 }, "type": "movement" },
+      { "id": "a-blocked", "kind": "event", "span": { "sourceId": "ash-court-zh", "startByte": 444, "endByte": 450 }, "type": "attempt" },
+      { "id": "a-steal", "kind": "event", "span": { "sourceId": "ash-court-zh", "startByte": 541, "endByte": 547 }, "type": "transfer" },
+      { "id": "a-trial-start", "kind": "event", "span": { "sourceId": "ash-court-zh", "startByte": 652, "endByte": 658 }, "type": "process-boundary" },
+      { "id": "a-hearing", "kind": "event", "span": { "sourceId": "ash-court-zh", "startByte": 725, "endByte": 743 }, "type": "institutional" },
+
+      { "id": "t-aihe-1", "kind": "entity", "span": { "sourceId": "tide-alliance-zh", "startByte": 88, "endByte": 94 }, "type": "character" },
+      { "id": "t-aihe-2", "kind": "entity", "span": { "sourceId": "tide-alliance-zh", "startByte": 224, "endByte": 230 }, "type": "character" },
+      { "id": "t-baichuan-1", "kind": "entity", "span": { "sourceId": "tide-alliance-zh", "startByte": 97, "endByte": 103 }, "type": "character" },
+      { "id": "t-baichuan-2", "kind": "entity", "span": { "sourceId": "tide-alliance-zh", "startByte": 233, "endByte": 239 }, "type": "character" },
+      { "id": "t-cenlan", "kind": "entity", "span": { "sourceId": "tide-alliance-zh", "startByte": 426, "endByte": 432 }, "type": "character" },
+      { "id": "t-cell", "kind": "entity", "span": { "sourceId": "tide-alliance-zh", "startByte": 73, "endByte": 85 }, "type": "artifact" },
+      { "id": "t-lowland", "kind": "place", "span": { "sourceId": "tide-alliance-zh", "startByte": 269, "endByte": 275 }, "type": "location" },
+      { "id": "t-promise", "kind": "event", "span": { "sourceId": "tide-alliance-zh", "startByte": 239, "endByte": 242 }, "type": "communication" },
+      { "id": "t-accept", "kind": "event", "span": { "sourceId": "tide-alliance-zh", "startByte": 302, "endByte": 308 }, "type": "agreement" },
+      { "id": "t-transfer", "kind": "event", "span": { "sourceId": "tide-alliance-zh", "startByte": 332, "endByte": 338 }, "type": "transfer" },
+      { "id": "t-betray", "kind": "event", "span": { "sourceId": "tide-alliance-zh", "startByte": 489, "endByte": 495 }, "type": "social" },
+      { "id": "t-trust-loss", "kind": "event", "span": { "sourceId": "tide-alliance-zh", "startByte": 510, "endByte": 522 }, "type": "relationship-change" },
+      { "id": "t-goal-change", "kind": "event", "span": { "sourceId": "tide-alliance-zh", "startByte": 541, "endByte": 577 }, "type": "decision" },
+      { "id": "t-obligation", "kind": "event", "span": { "sourceId": "tide-alliance-zh", "startByte": 607, "endByte": 613 }, "type": "obligation" },
+      { "id": "t-compete", "kind": "event", "span": { "sourceId": "tide-alliance-zh", "startByte": 719, "endByte": 725 }, "type": "conflict" },
+      { "id": "t-schedule", "kind": "event", "span": { "sourceId": "tide-alliance-zh", "startByte": 746, "endByte": 752 }, "type": "adjudication" },
+      { "id": "t-quote", "kind": "quotation", "span": { "sourceId": "tide-alliance-zh", "startByte": 245, "endByte": 296 }, "type": "direct" }
+    ],
+    "entityClusters": [
+      { "id": "ec-lian", "mentionIds": ["g-lian-1", "g-lian-2"] },
+      { "id": "ec-jizhou", "mentionIds": ["g-jizhou-1", "g-jizhou-2"] },
+      { "id": "ec-north-vault", "mentionIds": ["g-north-vault"] },
+      { "id": "ec-ledger", "mentionIds": ["g-ledger"] },
+      { "id": "ec-south-tower", "mentionIds": ["g-south-tower"] },
+      { "id": "ec-court", "mentionIds": ["a-court"] },
+      { "id": "ec-ring", "mentionIds": ["a-ring"] },
+      { "id": "ec-line", "mentionIds": ["a-line"] },
+      { "id": "ec-miro", "mentionIds": ["a-miro"] },
+      { "id": "ec-noya", "mentionIds": ["a-noya"] },
+      { "id": "ec-seal", "mentionIds": ["a-seal"] },
+      { "id": "ec-aihe", "mentionIds": ["t-aihe-1", "t-aihe-2"] },
+      { "id": "ec-baichuan", "mentionIds": ["t-baichuan-1", "t-baichuan-2"] },
+      { "id": "ec-cenlan", "mentionIds": ["t-cenlan"] },
+      { "id": "ec-cell", "mentionIds": ["t-cell"] },
+      { "id": "ec-lowland", "mentionIds": ["t-lowland"] }
+    ],
+    "eventClusters": [
+      { "id": "ev-see", "mentionIds": ["g-see"] },
+      { "id": "ev-lie", "mentionIds": ["g-lie"] },
+      { "id": "ev-believe", "mentionIds": ["g-believe"] },
+      { "id": "ev-leave", "mentionIds": ["g-leave"] },
+      { "id": "ev-take", "mentionIds": ["g-take"] },
+      { "id": "ev-cross-1", "mentionIds": ["a-cross-1"] },
+      { "id": "ev-cross-2", "mentionIds": ["a-cross-2"] },
+      { "id": "ev-blocked", "mentionIds": ["a-blocked"] },
+      { "id": "ev-steal", "mentionIds": ["a-steal"] },
+      { "id": "ev-trial-start", "mentionIds": ["a-trial-start"] },
+      { "id": "ev-hearing", "mentionIds": ["a-hearing"] },
+      { "id": "ev-promise", "mentionIds": ["t-promise"] },
+      { "id": "ev-accept", "mentionIds": ["t-accept"] },
+      { "id": "ev-transfer", "mentionIds": ["t-transfer"] },
+      { "id": "ev-betray", "mentionIds": ["t-betray"] },
+      { "id": "ev-trust-loss", "mentionIds": ["t-trust-loss"] },
+      { "id": "ev-goal-change", "mentionIds": ["t-goal-change"] },
+      { "id": "ev-obligation", "mentionIds": ["t-obligation"] },
+      { "id": "ev-compete", "mentionIds": ["t-compete"] },
+      { "id": "ev-schedule", "mentionIds": ["t-schedule"] }
+    ],
+    "quotations": [
+      { "id": "q-lie", "span": { "sourceId": "glass-ledger-zh", "startByte": 239, "endByte": 290 }, "speakerEntityClusterId": "ec-lian", "addresseeEntityClusterIds": ["ec-jizhou"] },
+      { "id": "q-alliance", "span": { "sourceId": "tide-alliance-zh", "startByte": 245, "endByte": 296 }, "speakerEntityClusterId": "ec-aihe", "addresseeEntityClusterIds": ["ec-baichuan"] }
+    ],
+    "eventParticipants": [
+      { "id": "ep-lie-speaker", "eventClusterId": "ev-lie", "entityClusterId": "ec-lian", "role": "speaker" },
+      { "id": "ep-lie-addressee", "eventClusterId": "ev-lie", "entityClusterId": "ec-jizhou", "role": "addressee" },
+      { "id": "ep-believe-experiencer", "eventClusterId": "ev-believe", "entityClusterId": "ec-jizhou", "role": "experiencer" },
+      { "id": "ep-take-agent", "eventClusterId": "ev-take", "entityClusterId": "ec-lian", "role": "agent" },
+      { "id": "ep-take-theme", "eventClusterId": "ev-take", "entityClusterId": "ec-ledger", "role": "theme" },
+      { "id": "ep-cross-agent-1", "eventClusterId": "ev-cross-1", "entityClusterId": "ec-miro", "role": "agent" },
+      { "id": "ep-cross-agent-2", "eventClusterId": "ev-cross-2", "entityClusterId": "ec-miro", "role": "agent" },
+      { "id": "ep-blocked-agent", "eventClusterId": "ev-blocked", "entityClusterId": "ec-noya", "role": "agent" },
+      { "id": "ep-steal-agent", "eventClusterId": "ev-steal", "entityClusterId": "ec-noya", "role": "agent" },
+      { "id": "ep-steal-theme", "eventClusterId": "ev-steal", "entityClusterId": "ec-seal", "role": "theme" },
+      { "id": "ep-promise-speaker", "eventClusterId": "ev-promise", "entityClusterId": "ec-aihe", "role": "speaker" },
+      { "id": "ep-promise-addressee", "eventClusterId": "ev-promise", "entityClusterId": "ec-baichuan", "role": "addressee" },
+      { "id": "ep-transfer-theme", "eventClusterId": "ev-transfer", "entityClusterId": "ec-cell", "role": "theme" },
+      { "id": "ep-betray-observer", "eventClusterId": "ev-betray", "entityClusterId": "ec-baichuan", "role": "observer" }
+    ],
+    "eventRelations": [
+      { "id": "er-lie-belief", "fromEventClusterId": "ev-lie", "toEventClusterId": "ev-believe", "type": "causes", "operationality": "contributory", "evidenceSpans": [{ "sourceId": "glass-ledger-zh", "startByte": 221, "endByte": 342 }] },
+      { "id": "er-belief-leave", "fromEventClusterId": "ev-believe", "toEventClusterId": "ev-leave", "type": "motivates", "operationality": "motivational", "evidenceSpans": [{ "sourceId": "glass-ledger-zh", "startByte": 436, "endByte": 508 }] },
+      { "id": "er-steal-trial", "fromEventClusterId": "ev-steal", "toEventClusterId": "ev-trial-start", "type": "causes", "operationality": "necessary", "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 508, "endByte": 661 }] },
+      { "id": "er-trial-hearing", "fromEventClusterId": "ev-trial-start", "toEventClusterId": "ev-hearing", "type": "before", "operationality": "non-operational", "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 683, "endByte": 797 }] },
+      { "id": "er-accept-transfer", "fromEventClusterId": "ev-accept", "toEventClusterId": "ev-transfer", "type": "enables", "operationality": "necessary", "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 296, "endByte": 338 }] },
+      { "id": "er-betray-trust", "fromEventClusterId": "ev-betray", "toEventClusterId": "ev-trust-loss", "type": "causes", "operationality": "necessary", "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 465, "endByte": 528 }] },
+      { "id": "er-trust-goal", "fromEventClusterId": "ev-trust-loss", "toEventClusterId": "ev-goal-change", "type": "motivates", "operationality": "motivational", "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 465, "endByte": 589 }] },
+      { "id": "er-compete-schedule", "fromEventClusterId": "ev-compete", "toEventClusterId": "ev-schedule", "type": "causes", "operationality": "contributory", "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 662, "endByte": 845 }] }
+    ],
+    "propositions": [
+      { "id": "p-ledger-north", "subjectEntityClusterId": "ec-ledger", "predicate": "located-at", "polarity": "positive", "modality": "asserted", "holderEntityClusterId": "ec-lian", "evidenceSpans": [{ "sourceId": "glass-ledger-zh", "startByte": 40, "endByte": 118 }] },
+      { "id": "p-ledger-south", "subjectEntityClusterId": "ec-ledger", "predicate": "located-at", "polarity": "positive", "modality": "asserted", "holderEntityClusterId": "ec-jizhou", "evidenceSpans": [{ "sourceId": "glass-ledger-zh", "startByte": 318, "endByte": 342 }] },
+      { "id": "p-alliance", "subjectEntityClusterId": "ec-aihe", "predicate": "allied-with", "polarity": "positive", "modality": "asserted", "holderEntityClusterId": "ec-aihe", "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 245, "endByte": 296 }] }
+    ],
+    "knowledge": [
+      { "id": "k-lian-ledger", "actorEntityClusterId": "ec-lian", "propositionId": "p-ledger-north", "status": "knows", "acquisition": "observed" },
+      { "id": "k-jizhou-false", "actorEntityClusterId": "ec-jizhou", "propositionId": "p-ledger-south", "status": "believes", "acquisition": "deceived" },
+      { "id": "k-baichuan-promise", "actorEntityClusterId": "ec-baichuan", "propositionId": "p-alliance", "status": "believes", "acquisition": "told" }
+    ],
+    "stateEffects": [
+      { "id": "se-ledger-owner", "eventClusterId": "ev-take", "op": "set", "entityClusterId": "ec-ledger", "field": "artifact.owner" },
+      { "id": "se-seal-owner", "eventClusterId": "ev-steal", "op": "set", "entityClusterId": "ec-seal", "field": "artifact.owner" },
+      { "id": "se-cell-owner", "eventClusterId": "ev-transfer", "op": "set", "entityClusterId": "ec-cell", "field": "artifact.owner" }
+    ],
+    "scenes": [
+      { "id": "scene-rain-window", "eventClusterIds": ["ev-see", "ev-lie", "ev-believe"], "locationEntityClusterId": "ec-north-vault", "viewpointEntityClusterIds": ["ec-lian"], "presentEntityClusterIds": ["ec-lian", "ec-jizhou"], "storyTimeKind": "ordinal", "evidenceSpans": [{ "sourceId": "glass-ledger-zh", "startByte": 40, "endByte": 411 }] },
+      { "id": "scene-ash-line", "eventClusterIds": ["ev-cross-1", "ev-cross-2"], "locationEntityClusterId": "ec-court", "viewpointEntityClusterIds": [], "presentEntityClusterIds": ["ec-miro"], "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 40, "endByte": 344 }] },
+      { "id": "scene-last-cell", "eventClusterIds": ["ev-promise", "ev-accept", "ev-transfer"], "viewpointEntityClusterIds": [], "presentEntityClusterIds": ["ec-aihe", "ec-baichuan"], "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 52, "endByte": 338 }] }
+    ],
+    "actionSchemas": [
+      { "id": "action-cross-ash-line", "actionSchemaId": "cross-ash-line", "name": "佩戒越过灰线", "supportingEventClusterIds": ["ev-cross-1", "ev-cross-2"], "roleIds": ["actor", "barrier", "token"], "allowedStateFields": ["character.location"], "maxStateOperations": 1, "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 115, "endByte": 344 }] }
+    ],
+    "executablePolicies": [
+      { "id": "policy-ash-magic", "kind": "world-rule", "artifactId": "ash-line-magic", "visibility": "engine", "supportingEventClusterIds": [], "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 115, "endByte": 214 }] },
+      { "id": "policy-ash-crossing", "kind": "action-constraint", "artifactId": "ash-line-requires-ring", "actionSchemaId": "cross-ash-line", "visibility": "engine", "supportingEventClusterIds": ["ev-cross-1", "ev-cross-2", "ev-blocked"], "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 115, "endByte": 450 }] },
+      { "id": "policy-seal-ban", "kind": "norm-template", "artifactId": "do-not-take-royal-seal", "modality": "prohibition", "visibility": "public", "supportingEventClusterIds": ["ev-steal"], "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 40, "endByte": 115 }] },
+      { "id": "policy-trial", "kind": "process-template", "artifactId": "three-day-trial", "visibility": "observable", "supportingEventClusterIds": ["ev-trial-start", "ev-hearing"], "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 508, "endByte": 797 }] }
+    ],
+    "characterAssertions": [
+      { "id": "ca-noya-goal", "actorEntityClusterId": "ec-noya", "kind": "goal", "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 508, "endByte": 553 }] },
+      { "id": "ca-noya-appraisal", "actorEntityClusterId": "ec-noya", "kind": "appraisal", "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 372, "endByte": 507 }] },
+      { "id": "ca-noya-development", "actorEntityClusterId": "ec-noya", "kind": "development", "evidenceSpans": [{ "sourceId": "ash-court-zh", "startByte": 372, "endByte": 661 }] },
+      { "id": "ca-baichuan-relationship", "actorEntityClusterId": "ec-baichuan", "kind": "relationship", "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 465, "endByte": 528 }] },
+      { "id": "ca-baichuan-goal", "actorEntityClusterId": "ec-baichuan", "kind": "goal", "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 529, "endByte": 589 }] },
+      { "id": "ca-baichuan-appraisal", "actorEntityClusterId": "ec-baichuan", "kind": "appraisal", "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 465, "endByte": 528 }] },
+      { "id": "ca-cenlan-obligation", "actorEntityClusterId": "ec-cenlan", "kind": "obligation", "evidenceSpans": [{ "sourceId": "tide-alliance-zh", "startByte": 598, "endByte": 640 }] }
+    ]
+  }
+}

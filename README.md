@@ -17,16 +17,17 @@ Implemented:
 - an explicit compiler-batch finish handshake, so failed or partial tool runs remain retryable instead of being checkpointed;
 - cryptographic evidence verification before canonical or possibility acceptance;
 - logical canonical IDs backed by immutable content-addressed revisions;
-- event-sourced branch history pinned to immutable canonical snapshots, deterministic state projection, temporal rules, knowledge isolation, snapshots, and integrity checks;
+- event-sourced branch history pinned to immutable canonical snapshots, shared typed-effect projection, checkpoint-plus-tail replay, temporal rules, knowledge isolation, snapshots, and integrity checks;
 - canonical and non-canonical possibilities, counterfactual branches, checkpoint replay, and deterministic actor-goal policies.
 - a derived `prepare` workflow that guides ingest, bounded compilation, explicit review, audit, and branch creation without automatically accepting model output;
 - a world-aware TUI and catalog commands (`novels`, `instances`, `characters`, `progress`, `resume`) that select a committed character and route play through an actor-scoped, capture-only model boundary before deterministic scope, knowledge, engine, and commit gates;
 - reader-only prior-story recaps, source-grounded per-character entry checkpoints, explicit physical-presence semantics, and material-progress exits that keep later roles and open-world play from collapsing into an opening-cast chat loop;
+- a hash-pinned original representative corpus, V2 semantic denominators, long-horizon fork/resource scenarios, projection diagnostics, and host-private move decision traces with an actor-safe projection;
 
 Still intentionally limited:
 
-- a Pi/LLM actor reasoner connected to the CLI runtime;
-- model-backed literary narration connected to `world render`;
+- live-provider actor behavior and literary-narration quality across genres;
+- model-backed literary narration in the low-level diagnostic `world render` path;
 - player actions can change the selected actor and currently owned artifacts, but broader physical/social simulation is not yet modeled;
 - corpus-backed proof that model extraction is reliable across full novels and genres.
 
@@ -36,7 +37,7 @@ The governing invariant is:
 proposal -> validate -> commit -> render
 ```
 
-See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [ADR 0004](docs/adr/0004-model-first-player-intent-and-world-adjudication.md) for model-first player intent and world consequences, [ADR 0006](docs/adr/0006-reader-context-character-entry-and-progress.md) for reader context, role entry, presence, and material progression, [ADR 0008](docs/adr/0008-frozen-base-isolated-play-and-third-person-narration.md) for frozen bases, isolated new play, and third-person prose, [ADR 0009](docs/adr/0009-runtime-source-context-consultation.md) for bounded runtime source consultation and authority-projected retry, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, [the cited semantic-compilation research report](docs/novel-semantic-compilation-plan.zh-CN.md) for the ontology audit, [the executable-world optimization plan](docs/executable-world-optimization-plan.zh-CN.md) for the active implementation contracts, task boundaries, and release gates, [the Web UI MVP design](docs/web-ui-mvp-design.zh-CN.md) for the browser, play-trace, and ontology workbench proposal, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
+See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [ADR 0004](docs/adr/0004-model-first-player-intent-and-world-adjudication.md) for model-first player intent and world consequences, [ADR 0006](docs/adr/0006-reader-context-character-entry-and-progress.md) for reader context, role entry, presence, and material progression, [ADR 0008](docs/adr/0008-frozen-base-isolated-play-and-third-person-narration.md) for frozen bases, isolated new play, and third-person prose, [ADR 0009](docs/adr/0009-runtime-source-context-consultation.md) for bounded runtime source consultation and authority-projected retry, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, [the cited semantic-compilation research report](docs/novel-semantic-compilation-plan.zh-CN.md) for the ontology audit, [the completed executable-world optimization plan](docs/executable-world-optimization-plan.zh-CN.md) for implementation contracts and release gates, [the executable-world release audit](docs/release-audit.zh-CN.md) for direct acceptance evidence, [the Web UI MVP design](docs/web-ui-mvp-design.zh-CN.md) for the browser, play-trace, and ontology workbench proposal, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
 
 For a standalone Chinese competition narrative covering the product thesis, end-to-end
 flows, technical highlights, demo plan, and honest limitations, see the

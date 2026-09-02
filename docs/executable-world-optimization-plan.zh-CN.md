@@ -1,6 +1,6 @@
 # Novel World Harness 可执行世界优化技术计划
 
-- **状态：** Active implementation plan
+- **状态：** complete（工程验收完成；真实 provider 的人工质量阈值另行冻结）
 - **日期：** 2026-09-02
 - **适用阶段：** MVP；不承担已有 world/prepared/branch 数据迁移
 - **上位决策：** [ADR 0001：世界真相是已提交历史，未来是可能性空间](adr/0001-world-truth-history-and-possibility-space.md)
@@ -863,12 +863,22 @@ CanonicalSnapshot V8 至少固定：
 
 ### T10 — Long-horizon hardening、docs 与 release audit
 
-- **状态：** pending
+- **状态：** complete
 - **依赖：** T1–T9
 - **主要文件：** tests、fixtures、docs、CLI/Web read-only projections
 - **交付：** representative corpus、runtime scenarios、checkpoints/performance、explain traces、status docs
 - **测试：** 第 14 节完整矩阵、`pnpm test`、`pnpm run check`、`pnpm test:e2e`
 - **建议提交：** `test: verify long-horizon executable worlds`
+- **完成说明：** 新增三篇仓库原创、CC0-1.0 中文微型小说及 selected-explicit
+  V2 gold，固定 UTF-8 bytes、SHA-256、source ownership、reference closure 和 13 个非空
+  semantic denominator；它们用于回归分母，不冒充真实 provider 的人工质量阈值。新增
+  52-event checkpoint-plus-tail 重放、五类 typed channel 的 fork 分化、错误信念/秘密/
+  背叛/结盟/目标/关系/义务/过程/规范及多 actor 独占资源冲突场景。Projection diagnostics
+  明确报告 ancestry、命中 checkpoint 与实际 tail reduction；WorldMoveTrace 记录候选、gate、
+  binding、footprint、scheduler、effect ref 和 atomic commit boundary，并有删除稳定 ID 与
+  engine-private detail 的 actor-safe projection。发布审计逐项映射第 14 节安全门、compiler
+  matrix 和 12 个 runtime scenario。最终验证：`pnpm run check` 通过，`pnpm test`
+  148 files / 836 tests 通过，production build + `pnpm test:e2e` 2/2 Chromium journeys 通过。
 
 ## 14. 最终验收矩阵
 

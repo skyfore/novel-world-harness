@@ -103,6 +103,19 @@ export type ProjectionOptions = {
   /** Set false for fsck/genesis replay; normal reads resume from the nearest valid checkpoint. */
   useCheckpoints?: boolean;
 };
+export type ProjectionReplayDiagnostics = {
+  version: 1;
+  requestedCommitId: CommitId;
+  ancestryCommitCount: number;
+  checkpointCommitId?: CommitId;
+  checkpointHistoryEventCount: number;
+  replayedCommitCount: number;
+  replayedEventCount: number;
+};
+export type ProjectionWithDiagnostics = {
+  projection: WorldProjectionBundle;
+  diagnostics: ProjectionReplayDiagnostics;
+};
 export type ProjectionContextResolver = (snapshotHash?: ObjectHash) => Promise<ResolvedWorldModelContext>;
 
 /** Reads and validates one immutable ancestry chain for all downstream reducers. */
@@ -160,16 +173,37 @@ export class ProjectionService {
     return pending;
   }
 
+  /**
+   * Produce one projection together with the exact checkpoint/tail reduction
+   * plan used for it. This deliberately bypasses the in-memory result cache so
+   * release audits and profiles observe real reducer work rather than a cache
+   * hit while all typed reducers still consume one shared history cursor.
+   */
+  async projectWithDiagnostics(
+    commitId: CommitId,
+    options: Pick<ProjectionOptions, "useCheckpoints"> = {},
+  ): Promise<ProjectionWithDiagnostics> {
+    return this.projectFreshWithDiagnostics(commitId, options.useCheckpoints !== false);
+  }
+
   clear(commitId?: CommitId): void {
     if (commitId) this.cache.delete(commitId);
     else this.cache.clear();
   }
 
   private async projectFresh(commitId: CommitId, useCheckpoints: boolean): Promise<WorldProjectionBundle> {
+    return (await this.projectFreshWithDiagnostics(commitId, useCheckpoints)).projection;
+  }
+
+  private async projectFreshWithDiagnostics(
+    commitId: CommitId,
+    useCheckpoints: boolean,
+  ): Promise<ProjectionWithDiagnostics> {
     const fullChain = await this.cursor.read(commitId);
     const checkpoint = useCheckpoints ? await this.nearestCheckpoint(fullChain) : undefined;
     const genesisId = fullChain[0]?.id ?? commitId;
     const restored = checkpoint ? structuredClone(checkpoint.projection) : undefined;
+    const checkpointHistoryEventCount = restored?.history.length ?? 0;
     const chain = checkpoint ? fullChain.slice(checkpoint.index + 1) : fullChain;
     let state = restored?.state ?? emptyWorldState(genesisId, 0);
     let knowledge = restored?.knowledge ?? emptyKnowledgeState(genesisId);
@@ -340,7 +374,7 @@ export class ProjectionService {
       previousTime = entry.commit.logicalTime;
     }
 
-    return deepFreeze({
+    const projection: WorldProjectionBundle = deepFreeze({
       version: 1,
       atCommit: commitId,
       state,
@@ -351,6 +385,18 @@ export class ProjectionService {
       scenes,
       causality,
       history,
+    });
+    return deepFreeze({
+      projection,
+      diagnostics: {
+        version: 1,
+        requestedCommitId: commitId,
+        ancestryCommitCount: fullChain.length,
+        ...(checkpoint ? { checkpointCommitId: fullChain[checkpoint.index]!.id } : {}),
+        checkpointHistoryEventCount,
+        replayedCommitCount: chain.length,
+        replayedEventCount: chain.reduce((count, entry) => count + entry.commit.eventHashes.length, 0),
+      },
     });
   }
 

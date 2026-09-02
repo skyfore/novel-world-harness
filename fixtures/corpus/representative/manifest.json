@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "name": "nwh-mvp-original-representative-corpus",
+  "license": "CC0-1.0",
+  "annotationPolicy": "selected-explicit-denominators",
+  "goldFile": "gold.v2.json",
+  "works": [
+    {
+      "sourceId": "glass-ledger-zh",
+      "file": "glass-ledger.zh-CN.txt",
+      "title": "玻璃账簿",
+      "language": "zh-CN",
+      "genreTags": ["mystery", "unreliable-testimony", "epistemic-asymmetry"],
+      "scenarioTags": ["false-belief", "secret-observation", "deception"],
+      "bytes": 563,
+      "sha256": "18313c5fdfcbe29f9ec5ff8ec107e95496aff401da88ab15e1f7d0c9132479f4"
+    },
+    {
+      "sourceId": "ash-court-zh",
+      "file": "ash-court.zh-CN.txt",
+      "title": "灰庭审判",
+      "language": "zh-CN",
+      "genreTags": ["legal-fantasy", "hidden-mechanics", "institutional-process"],
+      "scenarioTags": ["hidden-rule", "physical-vs-normative", "deadline-process"],
+      "bytes": 798,
+      "sha256": "51be99f60c89490157a82ad40be1fcf2219373ea2e4d10ac48b4f8ae24f09575"
+    },
+    {
+      "sourceId": "tide-alliance-zh",
+      "file": "tide-alliance.zh-CN.txt",
+      "title": "潮汐同盟",
+      "language": "zh-CN",
+      "genreTags": ["social-survival", "resource-conflict", "relationship-change"],
+      "scenarioTags": ["betrayal", "goal-change", "multi-actor-resource"],
+      "bytes": 846,
+      "sha256": "f44fc5925356040951274301086a3446e9150e6ad1dfc9f2daa9be3cc17ae332"
+    }
+  ],
+  "requiredSemanticLayers": [
+    "mentions",
+    "entityResolution",
+    "eventResolution",
+    "quotations",
+    "eventParticipants",
+    "eventRelations",
+    "propositions",
+    "knowledge",
+    "stateEffects",
+    "scenes",
+    "actionSchemas",
+    "executablePolicies",
+    "characterAssertions"
+  ]
+}

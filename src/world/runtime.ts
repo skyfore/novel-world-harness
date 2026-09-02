@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { actorProposalCandidateSchema, type ActorProposalCandidate, type ActorProposalSource } from "./actors.js";
+import { actorProposalCandidateSchema, type ActorCandidateSource, type ActorProposalCandidate, type ActorProposalSource } from "./actors.js";
 import {
   eventProposalSchema,
   idSchema,
@@ -9,14 +9,16 @@ import {
   type CommitId,
   type ActionResourceClaim,
   type EventProposal,
+  type EventEffectsRef,
   type EvidenceRef,
   type Possibility,
   type PossibilityKind,
   type Predicate,
   type StoryTime,
+  type ValidationReport,
   type WorldState,
 } from "./model.js";
-import { buildFrontier, deriveDuePossibilities, FrontierStore, possibilityToProposal, selectEligible, type Frontier, type FrontierTemporalMode } from "./frontier.js";
+import { buildFrontier, deriveDuePossibilities, FrontierStore, possibilityToProposal, selectEligible, type Frontier, type FrontierTemporalMode, type SchedulerTrace } from "./frontier.js";
 import { WorldEngine } from "./engine.js";
 import { committedHistory } from "./scene.js";
 import { immutableClone } from "../util/immutable.js";
@@ -88,7 +90,72 @@ export type MoveResult = {
   rejectedProposals: string[];
   adjudicationConflicts: AdjudicationConflict[];
   frontier: Frontier;
+  trace: WorldMoveTrace;
   renderedText?: string;
+};
+
+export type MoveDecisionGateTrace = {
+  gate: "materiality" | "conflict" | "validation" | "commit";
+  outcome: "pass" | "fail" | "info";
+  code: string;
+  detail: string;
+};
+
+export type ProposalFootprintTrace = {
+  reads: string[];
+  writes: string[];
+  resources: ActionResourceClaim[];
+  participantIds: string[];
+};
+
+export type ProposalBindingTrace = {
+  actionSchemaId?: string;
+  actionRoleBindings: Array<{ roleId: string; entityIds: string[] }>;
+  canonicalRoleBindings: Array<{
+    roleId: string;
+    canonicalEntityId: string;
+    boundEntityId: string;
+  }>;
+};
+
+export type MoveCandidateTrace = {
+  proposalId: string;
+  lane: "player" | "actor" | "background";
+  candidateSource: "player" | ActorCandidateSource | PossibilityKind;
+  status: "accepted" | "rejected" | "conflict";
+  gates: MoveDecisionGateTrace[];
+  bindings: ProposalBindingTrace;
+  footprint: ProposalFootprintTrace;
+  scheduler?: SchedulerTrace;
+  effectRefs?: EventEffectsRef;
+  commitBoundary: {
+    beforeHead: CommitId;
+    afterHead: CommitId;
+    moved: boolean;
+    eventHash?: string;
+  };
+};
+
+export type WorldMoveTrace = {
+  version: 1;
+  branchId: BranchId;
+  previousHead: CommitId;
+  finalHead: CommitId;
+  actorBudget: number;
+  backgroundBudget: number;
+  candidates: MoveCandidateTrace[];
+};
+
+export type ActorSafeWorldMoveTrace = {
+  version: 1;
+  advanced: boolean;
+  acceptedCount: number;
+  rejectedCount: number;
+  candidates: Array<{
+    lane: MoveCandidateTrace["lane"];
+    status: MoveCandidateTrace["status"];
+    committed: boolean;
+  }>;
 };
 
 export type CanonicalChoiceResolution = {
@@ -216,11 +283,20 @@ export class WorldRuntime {
     const committedEvents: string[] = [];
     const rejectedProposals: string[] = [];
     const adjudicationConflicts: AdjudicationConflict[] = [];
+    const candidateTraces: MoveCandidateTrace[] = [];
 
     if (input.playerProposal) {
       if (input.playerProposal.branchId !== input.branchId) throw new Error("Player proposal branch does not match Move branch");
       const playerProposal = { ...input.playerProposal, expectedParentCommit: currentHead };
+      const beforeHead = currentHead;
       const result = await this.engine.commitProposal(playerProposal);
+      candidateTraces.push(await committedMoveCandidateTrace(this.engine, {
+        proposal: playerProposal,
+        lane: "player",
+        candidateSource: "player",
+        beforeHead,
+        result,
+      }));
       if (result.report.accepted) {
         currentHead = result.newHead;
         if (result.eventHash) committedEvents.push(result.eventHash);
@@ -239,21 +315,64 @@ export class WorldRuntime {
       }));
       const parsedCandidates = actorProposalCandidateSchema.array().max(64)
         .parse(structuredClone(rawCandidates));
-      const candidates = parsedCandidates.filter((candidate) => {
-        if (actorProposalHasMaterialEffect(candidate.proposal)) return true;
+      const candidates: ActorProposalCandidate[] = [];
+      for (const candidate of parsedCandidates) {
+        if (actorProposalHasMaterialEffect(candidate.proposal)) {
+          candidates.push(candidate);
+          continue;
+        }
         rejectedProposals.push(candidate.proposal.proposalId);
-        return false;
-      });
+        candidateTraces.push(rejectedMoveCandidateTrace({
+          proposal: candidate.proposal,
+          lane: "actor",
+          candidateSource: candidate.candidateSource ?? "injected",
+          beforeHead: currentHead,
+          status: "rejected",
+          gate: {
+            gate: "materiality",
+            outcome: "fail",
+            code: "NO_MATERIAL_EFFECT",
+            detail: "Actor candidate has no material state, knowledge, semantic, process, norm, time, utterance, or scene effect.",
+          },
+          coordination: candidate.coordination,
+        }));
+      }
       const adjudicated = adjudicateActorCandidates(candidates, actorLimit);
       adjudicationConflicts.push(...adjudicated.conflicts);
       rejectedProposals.push(...adjudicated.conflicts.map((conflict) => conflict.loserProposalId));
+      for (const conflict of adjudicated.conflicts) {
+        const loser = candidates.find((candidate) => candidate.proposal.proposalId === conflict.loserProposalId)!;
+        candidateTraces.push(rejectedMoveCandidateTrace({
+          proposal: loser.proposal,
+          lane: "actor",
+          candidateSource: loser.candidateSource ?? "injected",
+          beforeHead: currentHead,
+          status: "conflict",
+          gate: {
+            gate: "conflict",
+            outcome: "fail",
+            code: `ACTOR_${conflict.conflictKinds.join("_").toUpperCase().replaceAll("-", "_")}_CONFLICT`,
+            detail: `Candidate conflicts with ${conflict.winnerProposalId} on ${conflict.keys.join(", ")}.`,
+          },
+          coordination: loser.coordination,
+        }));
+      }
       for (const candidate of adjudicated.selected) {
         const observedHead = await this.engine.branches.readHead(input.branchId);
         if (observedHead !== currentHead) {
           throw new Error(`Cannot revalidate actor candidate at stale head ${currentHead}; current branch head is ${observedHead}`);
         }
         const proposal = { ...candidate.proposal, branchId: input.branchId, expectedParentCommit: currentHead };
+        const beforeHead = currentHead;
         const result = await this.engine.commitProposal(proposal);
+        candidateTraces.push(await committedMoveCandidateTrace(this.engine, {
+          proposal,
+          lane: "actor",
+          candidateSource: candidate.candidateSource ?? "injected",
+          beforeHead,
+          result,
+          coordination: candidate.coordination,
+        }));
         if (!result.report.accepted) {
           rejectedProposals.push(proposal.proposalId);
           continue;
@@ -293,7 +412,16 @@ export class WorldRuntime {
       if (!candidate) break;
       const proposal = possibilityToProposal(candidate);
       if (!proposal) break;
+      const beforeHead = currentHead;
       const result = await this.engine.commitProposal(proposal);
+      candidateTraces.push(await committedMoveCandidateTrace(this.engine, {
+        proposal,
+        lane: "background",
+        candidateSource: candidate.possibility.kind,
+        beforeHead,
+        result,
+        scheduler: candidate.trace,
+      }));
       if (!result.report.accepted) {
         rejectedProposals.push(proposal.proposalId);
         break;
@@ -330,6 +458,15 @@ export class WorldRuntime {
       rejectedProposals: [...new Set(rejectedProposals)],
       adjudicationConflicts,
       frontier: latestFrontier,
+      trace: {
+        version: 1,
+        branchId: input.branchId,
+        previousHead,
+        finalHead: currentHead,
+        actorBudget: actorLimit,
+        backgroundBudget: backgroundLimit,
+        candidates: candidateTraces,
+      },
       ...(renderedText ? { renderedText } : {}),
     };
   }
@@ -1037,7 +1174,39 @@ export function adjudicateActorCandidates(candidates: readonly ActorProposalCand
 }
 
 export function actorCandidateFootprint(candidate: ActorProposalCandidate): ActorCandidateFootprint {
-  const proposal = candidate.proposal;
+  const footprint = proposalFootprint(candidate.proposal, candidate.coordination);
+  return {
+    reads: footprint.reads,
+    writes: footprint.writes,
+    resources: footprint.resources,
+    exclusiveParticipantIds: [...new Set([
+      ...(candidate.proposal.actorId ? [candidate.proposal.actorId] : []),
+      ...(candidate.coordination?.exclusiveParticipantIds ?? []),
+    ])].sort(),
+    consentActorIds: [...new Set(candidate.coordination?.consentActorIds ?? [])].sort(),
+    authorityEntityIds: [...new Set(candidate.coordination?.authorityEntityIds ?? [])].sort(),
+    temporalWindow: structuredClone(candidate.proposal.proposedTime),
+  };
+}
+
+export function actorSafeWorldMoveTrace(trace: WorldMoveTrace): ActorSafeWorldMoveTrace {
+  return {
+    version: 1,
+    advanced: trace.previousHead !== trace.finalHead,
+    acceptedCount: trace.candidates.filter((candidate) => candidate.status === "accepted").length,
+    rejectedCount: trace.candidates.filter((candidate) => candidate.status !== "accepted").length,
+    candidates: trace.candidates.map((candidate) => ({
+      lane: candidate.lane,
+      status: candidate.status,
+      committed: candidate.commitBoundary.moved,
+    })),
+  };
+}
+
+function proposalFootprint(
+  proposal: EventProposal,
+  coordination?: ActorProposalCandidate["coordination"],
+): ProposalFootprintTrace {
   const reads = new Set<string>();
   const writes = new Set<string>();
   proposal.preconditions.forEach((predicate) => predicateReadKeys(predicate).forEach((key) => reads.add(key)));
@@ -1054,18 +1223,126 @@ export function actorCandidateFootprint(candidate: ActorProposalCandidate): Acto
     for (const address of proposal.action.footprint.reads) reads.add(`state:${address.entityId}:${address.field}`);
     for (const address of proposal.action.footprint.writes) writes.add(`state:${address.entityId}:${address.field}`);
   }
-  const coordination = candidate.coordination;
   return {
     reads: [...reads].sort(),
     writes: [...writes].sort(),
     resources: resources.sort((left, right) => resourceKey(left).localeCompare(resourceKey(right)) || left.mode.localeCompare(right.mode)),
-    exclusiveParticipantIds: [...new Set([
-      ...(proposal.actorId ? [proposal.actorId] : []),
+    participantIds: [...new Set([
+      ...proposal.participants,
       ...(coordination?.exclusiveParticipantIds ?? []),
+      ...(coordination?.consentActorIds ?? []),
+      ...(coordination?.authorityEntityIds ?? []),
     ])].sort(),
-    consentActorIds: [...new Set(coordination?.consentActorIds ?? [])].sort(),
-    authorityEntityIds: [...new Set(coordination?.authorityEntityIds ?? [])].sort(),
-    temporalWindow: structuredClone(proposal.proposedTime),
+  };
+}
+
+async function committedMoveCandidateTrace(
+  engine: WorldEngine,
+  input: {
+    proposal: EventProposal;
+    lane: MoveCandidateTrace["lane"];
+    candidateSource: MoveCandidateTrace["candidateSource"];
+    beforeHead: CommitId;
+    result: { report: ValidationReport; newHead: CommitId; eventHash?: string };
+    coordination?: ActorProposalCandidate["coordination"];
+    scheduler?: SchedulerTrace;
+  },
+): Promise<MoveCandidateTrace> {
+  const accepted = input.result.report.accepted;
+  const gates: MoveDecisionGateTrace[] = [];
+  for (const issue of input.result.report.errors) gates.push({
+    gate: "validation",
+    outcome: "fail",
+    code: issue.code,
+    detail: issue.message,
+  });
+  for (const issue of input.result.report.warnings) gates.push({
+    gate: "validation",
+    outcome: "info",
+    code: issue.code,
+    detail: issue.message,
+  });
+  if (accepted) gates.unshift({
+    gate: "validation",
+    outcome: "pass",
+    code: "VALIDATION_ACCEPTED",
+    detail: "Deterministic proposal validation passed.",
+  });
+  else if (!gates.some((gate) => gate.outcome === "fail")) gates.push({
+    gate: "validation",
+    outcome: "fail",
+    code: "VALIDATION_REJECTED",
+    detail: "Deterministic proposal validation rejected the candidate.",
+  });
+  gates.push({
+    gate: "commit",
+    outcome: accepted && input.result.newHead !== input.beforeHead ? "pass" : "fail",
+    code: accepted && input.result.newHead !== input.beforeHead ? "COMMIT_ADVANCED_HEAD" : "COMMIT_DID_NOT_ADVANCE_HEAD",
+    detail: accepted && input.result.newHead !== input.beforeHead
+      ? "Validated effects crossed the atomic commit boundary."
+      : "No effects crossed the commit boundary.",
+  });
+  const event = accepted && input.result.eventHash
+    ? await engine.objects.getEvent(input.result.eventHash)
+    : undefined;
+  return {
+    proposalId: input.proposal.proposalId,
+    lane: input.lane,
+    candidateSource: input.candidateSource,
+    status: accepted ? "accepted" : "rejected",
+    gates,
+    bindings: proposalBindings(input.proposal),
+    footprint: proposalFootprint(input.proposal, input.coordination),
+    ...(input.scheduler ? { scheduler: structuredClone(input.scheduler) } : {}),
+    ...(event ? { effectRefs: structuredClone(event.effects) } : {}),
+    commitBoundary: {
+      beforeHead: input.beforeHead,
+      afterHead: input.result.newHead,
+      moved: input.result.newHead !== input.beforeHead,
+      ...(input.result.eventHash ? { eventHash: input.result.eventHash } : {}),
+    },
+  };
+}
+
+function rejectedMoveCandidateTrace(input: {
+  proposal: EventProposal;
+  lane: MoveCandidateTrace["lane"];
+  candidateSource: MoveCandidateTrace["candidateSource"];
+  beforeHead: CommitId;
+  status: "rejected" | "conflict";
+  gate: MoveDecisionGateTrace;
+  coordination?: ActorProposalCandidate["coordination"];
+}): MoveCandidateTrace {
+  return {
+    proposalId: input.proposal.proposalId,
+    lane: input.lane,
+    candidateSource: input.candidateSource,
+    status: input.status,
+    gates: [input.gate],
+    bindings: proposalBindings(input.proposal),
+    footprint: proposalFootprint(input.proposal, input.coordination),
+    commitBoundary: {
+      beforeHead: input.beforeHead,
+      afterHead: input.beforeHead,
+      moved: false,
+    },
+  };
+}
+
+function proposalBindings(proposal: EventProposal): ProposalBindingTrace {
+  return {
+    ...(proposal.action?.lane === "schema-bound" ? { actionSchemaId: proposal.action.schemaId } : {}),
+    actionRoleBindings: proposal.action?.lane === "schema-bound"
+      ? proposal.action.roleBindings.map((binding) => ({
+          roleId: binding.roleId,
+          entityIds: [...binding.entityIds],
+        }))
+      : [],
+    canonicalRoleBindings: (proposal.canonicalAdaptation?.roleBindings ?? []).map((binding) => ({
+      roleId: binding.roleId,
+      canonicalEntityId: binding.canonicalEntityId,
+      boundEntityId: binding.boundEntityId,
+    })),
   };
 }
 

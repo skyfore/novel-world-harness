@@ -16,6 +16,20 @@ project instructions, compiled world truth, or annotated semantic ground truth.
 Expected semantic anchors are recorded in `smoke-world.expected.json`. They are
 an evaluation denominator, not automatically committed world truth.
 
+## `representative/`
+
+- Provenance: three original synthetic micro-novels written for this repository
+  and released as CC0-1.0 fixtures
+- Coverage: epistemic asymmetry/deception; hidden mechanics plus normative and
+  due process; relationship/goal change plus exclusive-resource conflict
+- Integrity: a manifest pins every source by byte length and SHA-256
+- Gold: selected explicit V2 annotations cover every implemented semantic
+  evaluator layer with exact UTF-8 byte spans
+
+The suite supplies independent denominators and regression inputs. It does not
+establish a model quality threshold; that remains subject to human review after
+the first representative provider baseline.
+
 ## `三国演义.txt`
 
 - Title: `三国演义`

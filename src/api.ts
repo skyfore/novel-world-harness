@@ -140,6 +140,15 @@ export {
   type SemanticLayerName,
   type SetMetric,
 } from "./eval/compiler-eval.js";
+export {
+  BENCHMARK_SEMANTIC_LAYERS,
+  benchmarkCorpusManifestSchema,
+  benchmarkCorpusWorkSchema,
+  inspectBenchmarkCorpus,
+  type BenchmarkCorpusInspection,
+  type BenchmarkCorpusManifest,
+  type BenchmarkCorpusWork,
+} from "./eval/benchmark-corpus.js";
 export { inspectPreparation, type PreparationInspection, type PreparationStage } from "./workflow/prepare.js";
 export { ingestWorkspaceContent, ingestWorkspaceSource } from "./commands/ingest.js";
 export { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore, type SourceMaterialIdentity } from "./storage/source-material-store.js";
@@ -290,6 +299,8 @@ export {
   type ProjectedHistoryEntry,
   type ProjectionContextResolver,
   type ProjectionOptions,
+  type ProjectionReplayDiagnostics,
+  type ProjectionWithDiagnostics,
   type SceneIndex,
   type WorldProjectionBundle,
 } from "./world/projection-service.js";
@@ -426,7 +437,7 @@ export { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayN
 export { inspectPlayExperience, listPlayableCharacters, performPlayTurn, resolveCharacter, resolveNovelSource, selectPlayExperience, type PlayExperienceCatalog, type PlayableCharacter, type PlayInstanceSummary, type PlayTurnOutcome, type SelectedPlayExperience } from "./world/play-experience.js";
 export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type CanonReplayResult, type IsolatedCanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";
 export { committedHistory, experiencedCanonicalEvents, projectActorScene, realizedCanonicalEvents, type ActorSceneProjection, type CommittedHistoryEntry, type SceneEventProjection } from "./world/scene.js";
-export { WorldRuntime, actorCandidateFootprint, adjudicateActorCandidates, playerWorldResponseResolutionSchema, type ActorCandidateFootprint, type ActorConflictKind, type AdjudicationConflict, type CanonicalRecoveryResult, type CanonicalRecoveryTrace, type MoveInput, type MoveResult, type PlayerWorldResponseOption, type PlayerWorldResponseResolution, type PlayerWorldResponseResolver, type PlayerWorldResponseResolverInput, type PlayerWorldResponseResult } from "./world/runtime.js";
+export { WorldRuntime, actorCandidateFootprint, actorSafeWorldMoveTrace, adjudicateActorCandidates, playerWorldResponseResolutionSchema, type ActorCandidateFootprint, type ActorConflictKind, type ActorSafeWorldMoveTrace, type AdjudicationConflict, type CanonicalRecoveryResult, type CanonicalRecoveryTrace, type MoveCandidateTrace, type MoveDecisionGateTrace, type MoveInput, type MoveResult, type PlayerWorldResponseOption, type PlayerWorldResponseResolution, type PlayerWorldResponseResolver, type PlayerWorldResponseResolverInput, type PlayerWorldResponseResult, type ProposalBindingTrace, type ProposalFootprintTrace, type WorldMoveTrace } from "./world/runtime.js";
 export {
   PROJECTION_REDUCER_VERSIONS,
   WorldSnapshotStore,

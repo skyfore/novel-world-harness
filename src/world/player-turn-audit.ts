@@ -8,6 +8,7 @@ import type { PlayerWorldResponseOption, PlayerWorldResponseResolution } from ".
 import type { NpcReactionEmotion, NpcReactionEvent, NpcResponseKind } from "./npc-reaction.js";
 import type { CanonicalAttachmentResolution } from "./canonical-adaptation.js";
 import type { CanonicalRecoveryTrace } from "./runtime.js";
+import type { RuntimeContextConsultationRecord } from "./runtime-context.js";
 
 export type PlayerTurnOrigin = "freeform" | "scene-choice" | "host-safe-choice" | "cli" | "web";
 
@@ -37,6 +38,9 @@ export type PlayerTurnAudit = {
   validation?: ValidationReport;
   eventHash?: string;
   progressCertificate?: PlayerProgressCertificate;
+  contextConsultations?: RuntimeContextConsultationRecord[];
+  repairHintIds?: string[];
+  repairHintError?: string;
   worldResponseResolution?: PlayerWorldResponseResolution;
   /** Present on audits written by runtimes with immediate-response tracing. */
   worldResponseCandidates?: PlayerWorldResponseOption[];

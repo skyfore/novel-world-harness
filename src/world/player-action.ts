@@ -40,6 +40,22 @@ import { projectActorVisibleState } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { deepFreeze, immutableClone } from "../util/immutable.js";
 import {
+  materializeRuntimeContextNeed,
+  mergeRuntimeContextSupplements,
+  isRuntimeContextGapIssue,
+  runtimeContextConsultationResultSchema,
+  runtimeContextNeedForIssues,
+  runtimeContextRequestSchema,
+  runtimeContextSupplementHasMaterial,
+  type RuntimeCompilerRepairHint,
+  type RuntimeContextConsultationRecord,
+  type RuntimeContextConsultationObserver,
+  type RuntimeContextNeed,
+  type RuntimeContextRequest,
+  type RuntimeContextResolver,
+  type RuntimeContextSupplement,
+} from "./runtime-context.js";
+import {
   modelPlayConversation,
   playConversationAtCommit,
   recentPlayConversation,
@@ -177,6 +193,13 @@ export const playerActionModelCandidateSchema = playerActionCandidateSchema.exte
   }).strict(),
 }).strict();
 
+/** A translator may return a candidate or explicitly preserve a material data gap. */
+export const playerActionTranslationOutputSchema = z.union([
+  playerActionCandidateSchema,
+  runtimeContextRequestSchema,
+]);
+export type PlayerActionTranslationOutput = z.infer<typeof playerActionTranslationOutputSchema>;
+
 const playerWorldEventCopySchema = playerControlledActSchema;
 
 export const playerContradictionBasisSchema = z.discriminatedUnion("source", [
@@ -215,6 +238,7 @@ export const playerWorldResolutionSchema = z.discriminatedUnion("decision", [
     }).strict(),
     replacement: playerActionCandidateSchema,
   }).strict(),
+  runtimeContextRequestSchema,
 ]);
 export type PlayerWorldResolution = z.infer<typeof playerWorldResolutionSchema>;
 
@@ -249,6 +273,8 @@ export type PlayerWorldAdjudicationInput = Readonly<{
   recentMessages: readonly ModelPlayConversationMessage[];
   /** Complete safe archive for adapter-owned read-only retrieval. */
   relatedMessages: readonly ModelPlayConversationMessage[];
+  /** Host-admitted current-world facts from at most one frozen-source consultation. */
+  contextSupplement?: RuntimeContextSupplement["adjudication"];
 }>;
 
 /** A world model may resolve an intent, but it still returns only a proposal. */
@@ -333,6 +359,8 @@ export type PlayerActionTranslationInput = Readonly<{
   recentMessages: readonly ModelPlayConversationMessage[];
   /** Complete branch/commit-scoped archive, exposed to model adapters only through read-only retrieval. */
   relatedMessages: readonly ModelPlayConversationMessage[];
+  /** Host-admitted actor-visible facts from at most one frozen-source consultation. */
+  contextSupplement?: RuntimeContextSupplement["translation"];
 }>;
 
 export type SafePlayerIntent = "observe" | "reflect" | "wait";
@@ -709,6 +737,18 @@ export type PlayerTurnResult = {
   validation?: ValidationReport;
   eventHash?: string;
   progressCertificate?: PlayerProgressCertificate;
+  /** Safe audit records; exact source text remains in trace/tool blobs. */
+  contextConsultations?: RuntimeContextConsultationRecord[];
+  /** Transient, authority-labelled projections for downstream runtime consumers. */
+  contextSupplement?: RuntimeContextSupplement;
+  /** Non-authoritative compiler feedback persisted outside branch truth. */
+  repairHints?: RuntimeCompilerRepairHint[];
+};
+
+type PlayerTurnContextState = {
+  consultations: RuntimeContextConsultationRecord[];
+  supplement?: RuntimeContextSupplement;
+  repairHints: RuntimeCompilerRepairHint[];
 };
 
 export type PlayerProgressCertificate = {
@@ -1359,6 +1399,8 @@ export class PlayerTurnService {
     private readonly resolveCanon?: PlayerCanonResolver,
     private readonly beforeCommit?: () => Promise<void> | void,
     private readonly adjudicator?: PlayerWorldAdjudicator,
+    private readonly contextResolver?: RuntimeContextResolver,
+    private readonly contextObserver?: RuntimeContextConsultationObserver,
   ) {
     if (render) this.render = render;
     else {
@@ -1380,46 +1422,151 @@ export class PlayerTurnService {
     ]);
     const relatedMessages = modelPlayConversation(conversation);
     const recentMessages = modelPlayConversation(recentPlayConversation(conversation));
-    let translated: unknown;
-    try {
-      translated = await this.translator(deepFreeze({
-        utterance: input.utterance,
-        context: playerActionTranslationContext(contextBefore),
-        recentMessages,
-        relatedMessages,
-      }));
-    } catch (error) {
-      if (isAbortError(error)) throw error;
-      return this.rejected(input, previousHead, contextBefore, "translation", [
-        issue("PLAYER_ACTION_TRANSLATION_FAILED", error instanceof Error ? error.message : String(error)),
-      ]);
-    }
+    const authorizedKnowledgeClaimIds = new Set(authority.authorizedKnowledgeClaimIds ?? []);
+    const contextState: PlayerTurnContextState = { consultations: [], repairHints: [] };
+    let consultationUsed = false;
+    const consult = async (
+      need: RuntimeContextNeed,
+      candidate?: PlayerActionCandidate,
+      world?: PlayerWorldAdjudicationContext,
+    ): Promise<{ result?: ReturnType<typeof runtimeContextConsultationResultSchema.parse>; issue?: ValidationIssue }> => {
+      if (consultationUsed) {
+        return { issue: issue("PLAYER_CONTEXT_RETRY_EXHAUSTED", "The one permitted source-context consultation for this player move has already been used.") };
+      }
+      consultationUsed = true;
+      await this.contextObserver?.onGapDetected?.(structuredClone(need));
+      if (!this.contextResolver) {
+        return { issue: issue("PLAYER_CONTEXT_RESOLVER_UNAVAILABLE", "The action requires source context that is not available in this runtime.") };
+      }
+      const before = await this.engine.branches.readHead(input.branchId);
+      if (before !== previousHead) {
+        return { issue: issue("STALE_PARENT", `Player turn began at ${previousHead}, current head is ${before}`) };
+      }
+      try {
+        const result = runtimeContextConsultationResultSchema.parse(await this.contextResolver(deepFreeze({
+          need,
+          branchId: input.branchId,
+          actorId: input.actorId,
+          expectedHead: previousHead,
+          ...(input.sourceId ? { sourceId: input.sourceId } : {}),
+          utterance: input.utterance,
+          actorContext: structuredClone(contextBefore),
+          ...(candidate ? { candidate: structuredClone(candidate) } : {}),
+          ...(world ? { world: structuredClone(world) } : {}),
+        })));
+        const after = await this.engine.branches.readHead(input.branchId);
+        if (after !== previousHead) {
+          return { issue: issue("STALE_PARENT", `Source consultation began at ${previousHead}, current head is ${after}`) };
+        }
+        await this.contextObserver?.onSupplementValidated?.(structuredClone(result));
+        contextState.consultations.push(structuredClone(result.record));
+        contextState.supplement = mergeRuntimeContextSupplements(contextState.supplement, result.supplement);
+        contextState.repairHints.push(...structuredClone(result.repairHints));
+        return { result };
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        return {
+          issue: issue(
+            "PLAYER_CONTEXT_CONSULTATION_FAILED",
+            error instanceof Error ? error.message : String(error),
+          ),
+        };
+      }
+    };
+    const reject = (
+      stage: Exclude<PlayerTurnStage, "committed">,
+      issues: ValidationIssue[],
+      candidate?: PlayerActionCandidate,
+      proposal?: EventProposal,
+      validation?: ValidationReport,
+      evaluatedHead?: CommitId,
+    ) => this.rejected(
+      input,
+      previousHead,
+      contextBefore,
+      stage,
+      issues,
+      candidate,
+      proposal,
+      validation,
+      evaluatedHead,
+      contextState,
+    );
 
-    const parsedCandidate = playerActionCandidateSchema.safeParse(translated);
-    if (!parsedCandidate.success) {
-      return this.rejected(
-        input,
-        previousHead,
-        contextBefore,
-        "translation",
-        parsedCandidate.error.issues.map((entry) => issue(
+    let intendedCandidate: PlayerActionCandidate | undefined;
+    let groundingIssues: ValidationIssue[] = [];
+    let intentConsistencyIssues: ValidationIssue[] = [];
+    for (let attempt = 1; attempt <= 2 && !intendedCandidate; attempt += 1) {
+      let translated: unknown;
+      try {
+        translated = await this.translator(deepFreeze({
+          utterance: input.utterance,
+          context: playerActionTranslationContext(contextBefore),
+          recentMessages,
+          relatedMessages,
+          ...(contextState.supplement?.translation.length
+            ? { contextSupplement: structuredClone(contextState.supplement.translation) }
+            : {}),
+        }));
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        return reject("translation", [
+          issue("PLAYER_ACTION_TRANSLATION_FAILED", error instanceof Error ? error.message : String(error)),
+        ]);
+      }
+
+      const parsedOutput = playerActionTranslationOutputSchema.safeParse(translated);
+      if (!parsedOutput.success) {
+        return reject("translation", parsedOutput.error.issues.map((entry) => issue(
           "INVALID_PLAYER_ACTION_CANDIDATE",
           entry.message,
           entry.path.length ? entry.path.join(".") : undefined,
-        )),
-      );
+        )));
+      }
+      if ("decision" in parsedOutput.data) {
+        const need = materializeRuntimeContextNeed(parsedOutput.data, "translation");
+        const consulted = await consult(need);
+        if (
+          attempt === 1
+          && consulted.result?.record.retryRecommended
+          && contextState.supplement
+          && runtimeContextSupplementHasMaterial(contextState.supplement, "translation")
+        ) continue;
+        return reject("translation", [
+          ...(consulted.issue ? [consulted.issue] : []),
+          issue("PLAYER_CONTEXT_DATA_UNRESOLVED", "The requested action depends on context that could not be admitted into the actor-visible translation scope."),
+        ]);
+      }
+
+      const candidate = normalizeStructuredPlayerCandidate(parsedOutput.data, authority.intent);
+      const scopeIssues = validatePlayerActionScope(candidate, contextBefore, authorizedKnowledgeClaimIds);
+      if (scopeIssues.length) {
+        const need = attempt === 1 ? runtimeContextNeedForIssues("translation", input.utterance, scopeIssues) : undefined;
+        const consulted = need ? await consult(need, candidate) : undefined;
+        if (
+          consulted?.result?.record.retryRecommended
+          && contextState.supplement
+          && runtimeContextSupplementHasMaterial(contextState.supplement, "translation")
+        ) continue;
+        return reject("scope", [...scopeIssues, ...(consulted?.issue ? [consulted.issue] : [])], candidate);
+      }
+      groundingIssues = validatePlayerActionGrounding(candidate, contextBefore);
+      intentConsistencyIssues = validatePlayerIntentConsistency(candidate, input.actorId);
+      const ungroundedIssues = groundingIssues.filter((entry) => entry.code === "PLAYER_PRECONDITION_UNGROUNDED");
+      if (ungroundedIssues.length) {
+        const need = attempt === 1 ? runtimeContextNeedForIssues("translation", input.utterance, groundingIssues) : undefined;
+        const consulted = need ? await consult(need, candidate) : undefined;
+        if (
+          consulted?.result?.record.retryRecommended
+          && contextState.supplement
+          && runtimeContextSupplementHasMaterial(contextState.supplement, "translation")
+        ) continue;
+        return reject("scope", [...groundingIssues, ...(consulted?.issue ? [consulted.issue] : [])], candidate);
+      }
+      intendedCandidate = candidate;
     }
-    const intendedCandidate = normalizeStructuredPlayerCandidate(parsedCandidate.data, authority.intent);
-    const authorizedKnowledgeClaimIds = new Set(authority.authorizedKnowledgeClaimIds ?? []);
-    const scopeIssues = validatePlayerActionScope(intendedCandidate, contextBefore, authorizedKnowledgeClaimIds);
-    if (scopeIssues.length) {
-      return this.rejected(input, previousHead, contextBefore, "scope", scopeIssues, intendedCandidate);
-    }
-    const groundingIssues = validatePlayerActionGrounding(intendedCandidate, contextBefore);
-    const intentConsistencyIssues = validatePlayerIntentConsistency(intendedCandidate, input.actorId);
-    const ungroundedIssues = groundingIssues.filter((entry) => entry.code === "PLAYER_PRECONDITION_UNGROUNDED");
-    if (ungroundedIssues.length) {
-      return this.rejected(input, previousHead, contextBefore, "scope", groundingIssues, intendedCandidate);
+    if (!intendedCandidate) {
+      return reject("translation", [issue("PLAYER_CONTEXT_RETRY_EXHAUSTED", "Player action translation remained unresolved after one source-context retry.")]);
     }
 
     let candidate = intendedCandidate;
@@ -1472,24 +1619,28 @@ export class PlayerTurnService {
         worldState,
         deterministicIssues,
       );
-      let proposedResolution: unknown;
       let resolutionFailure: ValidationIssue[] | undefined;
-      try {
-        proposedResolution = await this.adjudicator(deepFreeze({
-          utterance: input.utterance,
-          candidate: structuredClone(intendedCandidate),
-          actorContext: playerActionTranslationContext(contextBefore),
-          world: adjudicationWorld,
-          recentMessages,
-          relatedMessages,
-        }));
-      } catch (error) {
-        if (isAbortError(error)) throw error;
-        resolutionFailure = [
-          issue("PLAYER_WORLD_ADJUDICATION_FAILED", error instanceof Error ? error.message : String(error)),
-        ];
-      }
-      if (!resolutionFailure) {
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        let proposedResolution: unknown;
+        try {
+          proposedResolution = await this.adjudicator(deepFreeze({
+            utterance: input.utterance,
+            candidate: structuredClone(intendedCandidate),
+            actorContext: playerActionTranslationContext(contextBefore),
+            world: adjudicationWorld,
+            recentMessages,
+            relatedMessages,
+            ...(contextState.supplement?.adjudication.length
+              ? { contextSupplement: structuredClone(contextState.supplement.adjudication) }
+              : {}),
+          }));
+        } catch (error) {
+          if (isAbortError(error)) throw error;
+          resolutionFailure = [
+            issue("PLAYER_WORLD_ADJUDICATION_FAILED", error instanceof Error ? error.message : String(error)),
+          ];
+          break;
+        }
         const parsedResolution = playerWorldResolutionSchema.safeParse(proposedResolution);
         if (!parsedResolution.success) {
           resolutionFailure = parsedResolution.error.issues.map((entry) => issue(
@@ -1497,57 +1648,85 @@ export class PlayerTurnService {
             entry.message,
             entry.path.length ? entry.path.join(".") : undefined,
           ));
+          break;
+        }
+        if (parsedResolution.data.decision === "needs-context") {
+          if (deterministicIssues.some((entry) => !isRuntimeContextGapIssue(entry))) {
+            return reject("adjudication", [
+              issue(
+                "PLAYER_CONTEXT_REQUEST_NOT_DATA_GAP",
+                "The adjudicator requested source context even though the supplied deterministic issues already contain a definitive contradiction or boundary failure.",
+              ),
+              ...deterministicIssues,
+            ], intendedCandidate, previewAction.proposal);
+          }
+          const need = materializeRuntimeContextNeed(parsedResolution.data, "adjudication", deterministicIssues.map((entry) => entry.code));
+          const consulted = await consult(need, intendedCandidate, adjudicationWorld);
+          if (
+            attempt === 1
+            && consulted.result?.record.retryRecommended
+            && contextState.supplement
+            && runtimeContextSupplementHasMaterial(contextState.supplement, "adjudication")
+          ) continue;
+          return reject("adjudication", [
+            ...deterministicIssues,
+            ...(consulted.issue ? [consulted.issue] : []),
+            issue("PLAYER_CONTEXT_DATA_UNRESOLVED", "The world outcome depends on source context that could not be admitted as current branch authority."),
+          ], intendedCandidate, previewAction.proposal);
+        }
+
+        adjudication = parsedResolution.data;
+        eventTitle = adjudication.eventTitle;
+        actorObservation = adjudication.actorObservation;
+        outcomeStatus = adjudication.status;
+        if (adjudication.decision === "realize") {
+          if (deterministicIssues.length) {
+            const need = attempt === 1
+              ? runtimeContextNeedForIssues("adjudication", input.utterance, deterministicIssues)
+              : undefined;
+            const consulted = need ? await consult(need, intendedCandidate, adjudicationWorld) : undefined;
+            if (
+              consulted?.result?.record.retryRecommended
+              && contextState.supplement
+              && runtimeContextSupplementHasMaterial(contextState.supplement, "adjudication")
+            ) continue;
+            return reject("adjudication", [
+              issue(
+                "PLAYER_WORLD_CONTRADICTION_UNRESOLVED",
+                "The world adjudicator tried to realize an intent that still contradicts committed state or active rules.",
+              ),
+              ...deterministicIssues,
+              ...(consulted?.issue ? [consulted.issue] : []),
+            ], intendedCandidate, previewAction.proposal);
+          }
         } else {
-          adjudication = parsedResolution.data;
-          eventTitle = adjudication.eventTitle;
-          actorObservation = adjudication.actorObservation;
-          outcomeStatus = adjudication.status;
-          if (adjudication.decision === "realize") {
-            if (deterministicIssues.length) {
-              return this.rejected(input, previousHead, contextBefore, "adjudication", [
-                issue(
-                  "PLAYER_WORLD_CONTRADICTION_UNRESOLVED",
-                  "The world adjudicator tried to realize an intent that still contradicts committed state or active rules.",
-                ),
-                ...deterministicIssues,
-              ], intendedCandidate, previewAction.proposal);
-            }
-          } else {
-            const contradictionIssues = validatePlayerWorldContradiction(adjudication, adjudicationWorld);
-            if (contradictionIssues.length) {
-              return this.rejected(input, previousHead, contextBefore, "adjudication", contradictionIssues, intendedCandidate);
-            }
-            candidate = normalizeStructuredPlayerCandidate(adjudication.replacement, undefined);
-            const replacementIssues = [
-              ...validatePlayerActionScope(candidate, contextBefore, authorizedKnowledgeClaimIds),
-              ...validatePlayerIntentConsistency(candidate, input.actorId),
-              ...validatePlayerActionGrounding(candidate, contextBefore),
-              ...await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead, input.sourceId),
-            ];
-            if (replacementIssues.length) {
-              return this.rejected(input, previousHead, contextBefore, "adjudication", [
-                issue(
-                  "PLAYER_WORLD_REPLACEMENT_INVALID",
-                  "The proposed in-world consequence did not satisfy the same capability and grounding boundary as every other event.",
-                ),
-                ...replacementIssues,
-              ], intendedCandidate);
-            }
+          const contradictionIssues = validatePlayerWorldContradiction(adjudication, adjudicationWorld);
+          if (contradictionIssues.length) {
+            return reject("adjudication", contradictionIssues, intendedCandidate);
+          }
+          candidate = normalizeStructuredPlayerCandidate(adjudication.replacement, undefined);
+          const replacementIssues = [
+            ...validatePlayerActionScope(candidate, contextBefore, authorizedKnowledgeClaimIds),
+            ...validatePlayerIntentConsistency(candidate, input.actorId),
+            ...validatePlayerActionGrounding(candidate, contextBefore),
+            ...await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead, input.sourceId),
+          ];
+          if (replacementIssues.length) {
+            return reject("adjudication", [
+              issue(
+                "PLAYER_WORLD_REPLACEMENT_INVALID",
+                "The proposed in-world consequence did not satisfy the same capability and grounding boundary as every other event.",
+              ),
+              ...replacementIssues,
+            ], intendedCandidate);
           }
         }
+        break;
       }
       if (resolutionFailure) {
         const fallback = controlledObservationFallback(intendedCandidate, deterministicIssues);
         if (!fallback) {
-          return this.rejected(
-            input,
-            previousHead,
-            contextBefore,
-            "adjudication",
-            resolutionFailure,
-            intendedCandidate,
-            previewAction.proposal,
-          );
+          return reject("adjudication", resolutionFailure, intendedCandidate, previewAction.proposal);
         }
         candidate = fallback.candidate;
         eventTitle = fallback.eventTitle;
@@ -1561,14 +1740,16 @@ export class PlayerTurnService {
       }
     } else {
       if (groundingIssues.length || intentConsistencyIssues.length) {
-        return this.rejected(input, previousHead, contextBefore, "scope", [
+        return reject("scope", [
           ...groundingIssues,
           ...intentConsistencyIssues,
         ], intendedCandidate);
       }
       const spatialIssues = await validatePlayerActionSpatialScope(this.engine, candidate, input.actorId, previousHead, input.sourceId);
       if (spatialIssues.length) {
-        return this.rejected(input, previousHead, contextBefore, "scope", spatialIssues, intendedCandidate);
+        const need = runtimeContextNeedForIssues("adjudication", input.utterance, spatialIssues);
+        const consulted = need ? await consult(need, intendedCandidate) : undefined;
+        return reject("scope", [...spatialIssues, ...(consulted?.issue ? [consulted.issue] : [])], intendedCandidate);
       }
     }
 
@@ -1608,11 +1789,22 @@ export class PlayerTurnService {
       }
     }
 
+    if (!consultationUsed && this.contextResolver) {
+      const literaryRequest = runtimeLiteraryContextRequest(candidate, input.utterance, contextBefore);
+      if (literaryRequest) {
+        const consulted = await consult(
+          materializeRuntimeContextNeed(literaryRequest, "narration"),
+          candidate,
+        );
+        if (consulted.issue) nonFatalIssues.push(consulted.issue);
+      }
+    }
+
     let progress: { value: NarrativeProgress; certificate: PlayerProgressCertificate };
     try {
       progress = await derivePlayerProgress(this.engine, input, candidate, contextBefore, resolution, authority, outcomeStatus);
     } catch (error) {
-      return this.rejected(input, previousHead, contextBefore, "scope", [
+      return reject("scope", [
         issue(
           "INVALID_PLAYER_PROGRESS_AUTHORITY",
           error instanceof Error ? error.message : String(error),
@@ -1627,10 +1819,7 @@ export class PlayerTurnService {
     await this.beforeCommit?.();
     const committed = await commitKnowledgeAwareAction(this.engine, action);
     if (!committed.gate.accepted) {
-      return this.rejected(
-        input,
-        previousHead,
-        contextBefore,
+      return reject(
         "knowledge",
         committed.gate.errors,
         candidate,
@@ -1640,10 +1829,7 @@ export class PlayerTurnService {
       );
     }
     if (!committed.result) {
-      return this.rejected(
-        input,
-        previousHead,
-        contextBefore,
+      return reject(
         "engine",
         [issue("PLAYER_ACTION_COMMIT_MISSING", "Player action passed its gate but produced no engine result")],
         candidate,
@@ -1651,10 +1837,7 @@ export class PlayerTurnService {
       );
     }
     if (!committed.result.report.accepted) {
-      return this.rejected(
-        input,
-        previousHead,
-        contextBefore,
+      return reject(
         "engine",
         committed.result.report.errors,
         candidate,
@@ -1685,6 +1868,11 @@ export class PlayerTurnService {
       validation: committed.result.report,
       progressCertificate: progress.certificate,
       ...(committed.result.eventHash ? { eventHash: committed.result.eventHash } : {}),
+      ...(contextState.consultations.length ? { contextConsultations: structuredClone(contextState.consultations) } : {}),
+      ...(contextState.supplement && runtimeContextSupplementHasMaterial(contextState.supplement)
+        ? { contextSupplement: structuredClone(contextState.supplement) }
+        : {}),
+      ...(contextState.repairHints.length ? { repairHints: structuredClone(contextState.repairHints) } : {}),
     };
   }
 
@@ -1698,6 +1886,7 @@ export class PlayerTurnService {
     proposal?: EventProposal,
     validation?: ValidationReport,
     evaluatedHead?: CommitId,
+    contextState?: PlayerTurnContextState,
   ): Promise<PlayerTurnResult> {
     const newHead = evaluatedHead ?? (await this.engine.branches.readHead(input.branchId));
     const issues = [...initialIssues];
@@ -1722,6 +1911,11 @@ export class PlayerTurnService {
       ...(candidate ? { candidate } : {}),
       ...(proposal ? { proposal } : {}),
       ...(validation ? { validation } : {}),
+      ...(contextState?.consultations.length ? { contextConsultations: structuredClone(contextState.consultations) } : {}),
+      ...(contextState?.supplement && runtimeContextSupplementHasMaterial(contextState.supplement)
+        ? { contextSupplement: structuredClone(contextState.supplement) }
+        : {}),
+      ...(contextState?.repairHints.length ? { repairHints: structuredClone(contextState.repairHints) } : {}),
     };
   }
 
@@ -1757,6 +1951,64 @@ function normalizeStructuredPlayerCandidate(
     candidate.intent.requestedTimeAdvance = { amount: 5, unit: "minute" };
   }
   return playerActionCandidateSchema.parse(candidate);
+}
+
+/**
+ * Bounded literary consultation is conditional, not a mandatory extra model
+ * call. Structured referents and context-sparse direct interactions are the points at which
+ * sparse executable data most often loses identity, provenance, or relationship
+ * context needed by a reader who has never seen the source novel.
+ */
+function runtimeLiteraryContextRequest(
+  candidate: PlayerActionCandidate,
+  utterance: string,
+  context: ActorScopedActionContext,
+): RuntimeContextRequest | undefined {
+  const intent = candidate.intent;
+  const described = intent?.targets.filter((target) => target.kind === "described") ?? [];
+  const addresseeIds = intent?.controlledAct?.interactionMode === "direct"
+    ? intent.controlledAct.interaction?.addresseeIds ?? []
+    : [];
+  const referenceable = new Map(context.referenceableEntities.map((entity) => [entity.id, entity]));
+  const sparseAddressees = [...new Set(addresseeIds)]
+    .filter((entityId) => entityId !== context.actorId)
+    .filter((entityId) => {
+      const entity = referenceable.get(entityId);
+      if (!entity || /^Unidentified\s/iu.test(entity.name)) return true;
+      return !context.knowledge.some((entry) => entry.claim && (
+        entry.claim.subject === entityId
+        || entry.claim.speaker === entityId
+        || valueContainsEntity(entry.claim.object, entityId)
+      ));
+    });
+  if (!described.length && !sparseAddressees.length) return undefined;
+  const searchTerms = [
+    ...described.map((target) => target.description),
+    ...sparseAddressees.flatMap((entityId) => {
+      const name = referenceable.get(entityId)?.name;
+      return name && !/^Unidentified\s/iu.test(name) ? [name] : [];
+    }),
+    Array.from(utterance.normalize("NFKC").trim()).slice(0, 240).join(""),
+  ].filter((value) => value.length > 0).slice(0, 8);
+  const hasUnidentifiedAddressee = sparseAddressees.some((entityId) =>
+    /^Unidentified\s/iu.test(referenceable.get(entityId)?.name ?? ""));
+  return runtimeContextRequestSchema.parse({
+    decision: "needs-context",
+    domain: described.length ? "artifact-provenance" : hasUnidentifiedAddressee ? "identity" : "relationship",
+    question: described.length
+      ? "Find current-or-prior source context that safely explains the named or described referent and why it matters in this immediate scene."
+      : "Find current-or-prior relationship context that helps render this direct interaction without inventing another character's response.",
+    audience: "reader",
+    searchTerms,
+  });
+}
+
+function valueContainsEntity(value: unknown, entityId: string, depth = 0): boolean {
+  if (value === entityId) return true;
+  if (depth >= 8 || value === null || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((item) => valueContainsEntity(item, entityId, depth + 1));
+  return Object.values(value as Record<string, unknown>)
+    .some((item) => valueContainsEntity(item, entityId, depth + 1));
 }
 
 /**

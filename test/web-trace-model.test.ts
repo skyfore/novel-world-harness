@@ -79,6 +79,36 @@ describe("Web trace projections", () => {
       terminal: true,
     });
   });
+
+  it("labels runtime context escalation and admission as explicit trace events", () => {
+    const gap = event(1, "context.gap.detected", "root", undefined, {
+      requestedBy: "translation",
+      domain: "identity",
+    });
+    const admitted = event(2, "context.supplement.validated", "root", undefined, {
+      status: "admitted",
+    });
+
+    expect(buildTraceLedger([gap, admitted], "root").map(({ category, label, detail, terminal }) => ({
+      category,
+      label,
+      detail,
+      terminal,
+    }))).toEqual([
+      {
+        category: "context",
+        label: "Runtime context gap detected",
+        detail: "translation · identity",
+        terminal: true,
+      },
+      {
+        category: "context",
+        label: "Runtime context supplement validated",
+        detail: "admitted",
+        terminal: true,
+      },
+    ]);
+  });
 });
 
 function event(

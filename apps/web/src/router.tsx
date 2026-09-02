@@ -8,6 +8,7 @@ import {
   createRouter,
   useNavigate,
   useParams,
+  useRouterState,
   useSearch,
 } from "@tanstack/react-router";
 import {
@@ -207,28 +208,14 @@ function RootLayout() {
         </Link>
         <nav aria-label={t("Workspace")} className="primary-nav" onClick={(event) => { if ((event.target as HTMLElement).closest("a")) setNavigationOpen(false); }}>
           <NavSection label={t("Workspace")}><Link to="/" activeOptions={{ exact: true }} className="nav-link">{t("Overview")}</Link></NavSection>
-          <NavSection label={t("Novels")} count={data?.catalog.novels.length}>
+          <NavSection label={t("Story worlds")} count={data?.catalog.novels.length}>
             <Link to="/novels/new" className="nav-link nav-link-new"><span>＋ {t("Register novel")}</span></Link>
-            {data?.catalog.novels.map((novel) => (
-              <Link key={novel.id} to="/novels/$sourceId" params={{ sourceId: novel.id }} className="nav-link nav-link-item">
-                <span>{novel.title}</span><small>{formatBytes(novel.bytes)}</small>
-              </Link>
-            ))}
-            {!data?.catalog.novels.length && <span className="nav-empty">{t("No registered novels")}</span>}
-          </NavSection>
-          <NavSection label={t("Instances")} count={data?.catalog.instances.length}>
-            {data?.catalog.instances.map((instance) => (
-              <Link key={instance.branchId} to="/instances/$branchId" params={{ branchId: instance.branchId }} className="nav-link nav-link-item">
-                <span>{instance.name}</span><small>{t("step")} {instance.logicalStep}</small>
-              </Link>
-            ))}
-          </NavSection>
-          <NavSection label={t("Play sessions")} count={visibleSessions.length}>
-            {visibleSessions.map((session) => (
-              <Link key={session.id} to="/play/$sessionId" params={{ sessionId: session.id }} className="nav-link nav-link-item">
-                <span>{session.title}</span><small>{t(session.status)}</small>
-              </Link>
-            ))}
+            <StoryWorldNavigation
+              novels={data?.catalog.novels ?? []}
+              instances={data?.catalog.instances ?? []}
+              sessions={visibleSessions}
+            />
+            {!data?.catalog.novels.length && !data?.catalog.instances.length && !visibleSessions.length && <span className="nav-empty">{t("No registered novels")}</span>}
             {archivedSessionCount > 0 && <button type="button" className="nav-archive-toggle" onClick={() => setShowArchivedSessions((value) => !value)}>{showArchivedSessions ? t("Hide archived") : t("Show archived ({count})", { count: archivedSessionCount })}</button>}
           </NavSection>
         </nav>
@@ -278,6 +265,178 @@ function OperationJump({ operation }: { operation: OperationSnapshot }) {
 
 function NavSection({ label, count, children }: { label: string; count?: number; children: ReactNode }) {
   return <section className="nav-section"><h2>{label}{count !== undefined && <span>{count}</span>}</h2>{children}</section>;
+}
+
+type StoryWorldNavigationProps = {
+  novels: NovelSummary[];
+  instances: InstanceSummary[];
+  sessions: PlaySessionSummary[];
+};
+
+function StoryWorldNavigation({ novels, instances, sessions }: StoryWorldNavigationProps) {
+  const { t } = useI18n();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const [collapsedNovelIds, setCollapsedNovelIds] = useState<Set<string>>(() => new Set());
+  const selectedSessionId = routeResourceId(pathname, "play");
+  const selectedSession = sessions.find((session) => session.id === selectedSessionId);
+  const selectedBranchId = routeResourceId(pathname, "instances") ?? selectedSession?.branchId;
+  const selectedInstance = instances.find((instance) => instance.branchId === selectedBranchId);
+  const selectedSourceId = routeResourceId(pathname, "novels")
+    ?? selectedInstance?.sourceId
+    ?? selectedSession?.sourceId;
+  const sessionsByBranch = new Map<string, PlaySessionSummary[]>();
+  for (const session of sessions) {
+    const branchSessions = sessionsByBranch.get(session.branchId) ?? [];
+    branchSessions.push(session);
+    sessionsByBranch.set(session.branchId, branchSessions);
+  }
+  const sourceForInstance = (instance: InstanceSummary) => instance.sourceId
+    ?? sessionsByBranch.get(instance.branchId)?.find((session) => session.sourceId)?.sourceId;
+  const knownSourceIds = new Set(novels.map((novel) => novel.id));
+  const assignedBranchIds = new Set(instances
+    .filter((instance) => {
+      const sourceId = sourceForInstance(instance);
+      return sourceId !== undefined && knownSourceIds.has(sourceId);
+    })
+    .map((instance) => instance.branchId));
+  const unassignedInstances = instances.filter((instance) => !assignedBranchIds.has(instance.branchId));
+  const knownBranchIds = new Set(instances.map((instance) => instance.branchId));
+  const detachedSessions = sessions.filter((session) => !knownBranchIds.has(session.branchId));
+  useEffect(() => {
+    if (!selectedSourceId) return;
+    setCollapsedNovelIds((current) => {
+      if (!current.has(selectedSourceId)) return current;
+      const next = new Set(current);
+      next.delete(selectedSourceId);
+      return next;
+    });
+  }, [selectedBranchId, selectedSessionId, selectedSourceId]);
+  const toggleNovel = (sourceId: string) => setCollapsedNovelIds((current) => {
+    const next = new Set(current);
+    if (next.has(sourceId)) next.delete(sourceId);
+    else next.add(sourceId);
+    return next;
+  });
+
+  return (
+    <div className="nav-world-tree" role="group" aria-label={t("Novel, world instance, and play session hierarchy")}>
+      <ul className="nav-tree-novel-list">
+        {novels.map((novel) => {
+          const novelInstances = instances.filter((instance) => sourceForInstance(instance) === novel.id);
+          const isExpanded = !collapsedNovelIds.has(novel.id);
+          const sessionCount = novelInstances.reduce((count, instance) => count + (sessionsByBranch.get(instance.branchId)?.length ?? 0), 0);
+          return (
+            <li className={selectedSourceId === novel.id ? "nav-tree-novel nav-tree-novel-context" : "nav-tree-novel"} key={novel.id}>
+              <div className="nav-tree-novel-row">
+                <button
+                  type="button"
+                  className="nav-tree-disclosure"
+                  aria-expanded={isExpanded}
+                  aria-controls={`nav-novel-${novel.id}`}
+                  aria-label={isExpanded ? t("Collapse {title}", { title: novel.title }) : t("Expand {title}", { title: novel.title })}
+                  onClick={() => toggleNovel(novel.id)}
+                >
+                  <span aria-hidden="true" />
+                </button>
+                <Link
+                  to="/novels/$sourceId"
+                  params={{ sourceId: novel.id }}
+                  className={selectedSourceId === novel.id ? "nav-tree-novel-link nav-tree-context-link" : "nav-tree-novel-link"}
+                >
+                  <span className="nav-tree-icon nav-tree-icon-novel" aria-hidden="true" />
+                  <span className="nav-tree-label">{novel.title}</span>
+                  <span className="nav-tree-meta" title={t("{count} worlds · {sessions} sessions", { count: novelInstances.length, sessions: sessionCount })}>{novelInstances.length}</span>
+                </Link>
+              </div>
+              <div id={`nav-novel-${novel.id}`} hidden={!isExpanded}>
+                {novelInstances.length > 0
+                  ? <InstanceNavigationList instances={novelInstances} sessionsByBranch={sessionsByBranch} selectedBranchId={selectedBranchId} selectedSessionId={selectedSessionId} />
+                  : <span className="nav-tree-empty">{t("No world instance yet")}</span>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {unassignedInstances.length > 0 && <NavigationOrphanGroup label={t("Unassigned worlds")} count={unassignedInstances.length}>
+        <InstanceNavigationList instances={unassignedInstances} sessionsByBranch={sessionsByBranch} selectedBranchId={selectedBranchId} selectedSessionId={selectedSessionId} />
+      </NavigationOrphanGroup>}
+      {detachedSessions.length > 0 && <NavigationOrphanGroup label={t("Detached history")} count={detachedSessions.length}>
+        <ul className="nav-tree-detached-list">
+          {detachedSessions.map((session) => <SessionNavigationItem key={session.id} session={session} selected={session.id === selectedSessionId} />)}
+        </ul>
+      </NavigationOrphanGroup>}
+    </div>
+  );
+}
+
+function InstanceNavigationList({
+  instances,
+  sessionsByBranch,
+  selectedBranchId,
+  selectedSessionId,
+}: {
+  instances: InstanceSummary[];
+  sessionsByBranch: Map<string, PlaySessionSummary[]>;
+  selectedBranchId?: string;
+  selectedSessionId?: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <ul className="nav-tree-instance-list">
+      {instances.map((instance) => {
+        const branchSessions = sessionsByBranch.get(instance.branchId) ?? [];
+        const inSelectedPath = selectedBranchId === instance.branchId;
+        return (
+          <li className={inSelectedPath ? "nav-tree-instance nav-tree-instance-context" : "nav-tree-instance"} key={instance.branchId}>
+            <Link
+              to="/instances/$branchId"
+              params={{ branchId: instance.branchId }}
+              className={inSelectedPath ? "nav-tree-instance-link nav-tree-context-link" : "nav-tree-instance-link"}
+            >
+              <span className="nav-tree-icon nav-tree-icon-instance" aria-hidden="true" />
+              <span className="nav-tree-label" title={`${instance.name} · ${instance.branchId}`}>{instance.name}</span>
+              <span className="nav-tree-meta">{t("step")} {instance.logicalStep}</span>
+              {branchSessions.length > 0 && <span className="nav-tree-count" title={t("{count} play sessions", { count: branchSessions.length })}>{branchSessions.length}</span>}
+            </Link>
+            {branchSessions.length > 0
+              ? <ul className="nav-tree-session-list">{branchSessions.map((session) => <SessionNavigationItem key={session.id} session={session} selected={session.id === selectedSessionId} />)}</ul>
+              : <span className="nav-tree-empty nav-tree-empty-session">{t("No play sessions")}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function SessionNavigationItem({ session, selected }: { session: PlaySessionSummary; selected: boolean }) {
+  const { t } = useI18n();
+  return (
+    <li className="nav-tree-session">
+      <Link
+        to="/play/$sessionId"
+        params={{ sessionId: session.id }}
+        className={selected ? "nav-tree-session-link nav-tree-context-link" : "nav-tree-session-link"}
+      >
+        <span className={`nav-tree-session-dot nav-tree-session-${session.status}`} aria-hidden="true" />
+        <span className="nav-tree-label" title={session.title}>{session.actorName ?? session.actorId}</span>
+        <span className="nav-tree-status">{t(session.status)}</span>
+      </Link>
+    </li>
+  );
+}
+
+function NavigationOrphanGroup({ label, count, children }: { label: string; count: number; children: ReactNode }) {
+  return <section className="nav-tree-orphan-group"><header><span>{label}</span><small>{count}</small></header>{children}</section>;
+}
+
+function routeResourceId(pathname: string, resource: "novels" | "instances" | "play"): string | undefined {
+  const match = pathname.match(new RegExp(`^/${resource}/([^/]+)`));
+  if (!match?.[1]) return undefined;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
 }
 
 function DashboardPage() {

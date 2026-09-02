@@ -306,12 +306,16 @@ export * from "./world/model.js";
 export { NarrativeRenderer, type ActorNarrativeEvent, type ActorNarrativeFrame, type ActorNarrativeView, type NarrativeAdapter, type NarrativeEvent, type NarrativeFrame, type NarrativeStyle, type OmniscientNarrativeFrame } from "./world/narrative.js";
 export { buildNarrativeDirection, publicNarrativeThread, publicPlayerAffordance, resolvePlayerAffordance, type ActorVisibleNarrativeThread, type NarrativeDirection, type NarrativeThreadView, type PlayerAffordance, type ResolvedPlayerAffordance } from "./world/narrative-director.js";
 export { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "./world/possibility-model.js";
-export { buildActorScopedActionContext, createPlayerActionModelBoundary, deterministicPlayerIntentCandidate, playerActionCandidateSchema, playerActionModelCandidateSchema, playerContradictionBasisSchema, playerControlledActSchema, playerInteractionSchema, playerIntentSchema, playerIntentSceneTransitionSchema, playerIntentTargetSchema, playerActionModelContext, playerActionToKnowledgeAwareAction, playerActionTranslationContext, playerTurnInputSchema, playerWorldResolutionSchema, PlayerTurnService, validatePlayerActionGrounding, validatePlayerActionScope, validatePlayerActionSpatialScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionModelBoundary, type PlayerActionTranslationContext, type PlayerActionTranslator, type PlayerContradictionBasis, type PlayerControlledAct, type PlayerInteraction, type PlayerIntent, type PlayerIntentSceneTransition, type PlayerIntentTarget, type PlayerProgressCertificate, type PlayerTurnAuthority, type PlayerTurnInput, type PlayerTurnResult, type PlayerWorldAdjudicationContext, type PlayerWorldAdjudicationInput, type PlayerWorldAdjudicator, type PlayerWorldResolution, type SafePlayerIntent } from "./world/player-action.js";
+export { buildActorScopedActionContext, createPlayerActionModelBoundary, deterministicPlayerIntentCandidate, playerActionCandidateSchema, playerActionModelCandidateSchema, playerActionTranslationOutputSchema, playerContradictionBasisSchema, playerControlledActSchema, playerInteractionSchema, playerIntentSchema, playerIntentSceneTransitionSchema, playerIntentTargetSchema, playerActionModelContext, playerActionToKnowledgeAwareAction, playerActionTranslationContext, playerTurnInputSchema, playerWorldResolutionSchema, PlayerTurnService, validatePlayerActionGrounding, validatePlayerActionScope, validatePlayerActionSpatialScope, type ActorScopedActionContext, type PlayerActionCandidate, type PlayerActionModelBoundary, type PlayerActionTranslationContext, type PlayerActionTranslationOutput, type PlayerActionTranslator, type PlayerContradictionBasis, type PlayerControlledAct, type PlayerInteraction, type PlayerIntent, type PlayerIntentSceneTransition, type PlayerIntentTarget, type PlayerProgressCertificate, type PlayerTurnAuthority, type PlayerTurnInput, type PlayerTurnResult, type PlayerWorldAdjudicationContext, type PlayerWorldAdjudicationInput, type PlayerWorldAdjudicator, type PlayerWorldResolution, type SafePlayerIntent } from "./world/player-action.js";
 export { PlayConversationStore, modelPlayConversation, playConversationAtCommit, recentPlayConversation, type ModelPlayConversationMessage, type PlayConversationMessage } from "./world/play-conversation.js";
 export { npcReactionCandidateSchema, npcReactionEmotionSchema, respondToNpcInteractions, type NpcPerceivedMessage, type NpcReactionBatchResult, type NpcReactionCandidate, type NpcReactionEmotion, type NpcReactionEvent, type NpcReactionReasoner, type NpcReactionReasoningInput, type NpcResponseKind } from "./world/npc-reaction.js";
 export { createPiNpcReactionReasoner, type PiNpcReactionReasonerOptions } from "./agent/pi-npc-reaction.js";
 export { createNpcReactionCaptureTool, type NpcReactionCaptureTool } from "./agent/npc-reaction-tool.js";
 export { createPiPlayerWorldAdjudicator, type PiPlayerWorldAdjudicatorOptions } from "./agent/pi-player-world-adjudicator.js";
+export { createPiRuntimeContextResolver, admitRuntimeContextProposal, type PiRuntimeContextResolverOptions } from "./agent/pi-runtime-context.js";
+export { createRuntimeSourceEvidenceAccess, loadRuntimeSourceCorpus, RUNTIME_SOURCE_EVIDENCE_TOOL_NAMES, type RuntimeSourceCorpus, type RuntimeSourceEvidenceAccess, type RuntimeSourcePassage } from "./agent/runtime-source-evidence.js";
+export { createRuntimeContextProposalCaptureTool, type RuntimeContextProposalCaptureTool } from "./agent/runtime-context-proposal-tool.js";
+export { createPlayerContextRequestCaptureTool, type PlayerContextRequestCaptureTool } from "./agent/player-context-request-tool.js";
 export { createPlayerWorldResolutionCaptureTool, type PlayerWorldResolutionCaptureTool } from "./agent/player-world-outcome-tool.js";
 export { createPiPlayerWorldResponseResolver, type PiPlayerWorldResponseResolverOptions } from "./agent/pi-player-world-response.js";
 export { createPlayerWorldResponseCaptureTool, playerWorldResponseSelectionSchema, type PlayerWorldResponseCaptureTool, type PlayerWorldResponseSelection } from "./agent/player-world-response-tool.js";
@@ -331,6 +335,8 @@ export {
 } from "./world/canonical-adaptation.js";
 export { classifyPlayerInput, renderPlayerMetaResponse, type PlayerInputRoute } from "./world/player-input-route.js";
 export { PlayerTurnAuditStore, type PlayerTurnAudit, type PlayerTurnAuditRecoveryLink, type PlayerTurnOrigin } from "./world/player-turn-audit.js";
+export { emptyRuntimeContextSupplement, isRuntimeContextGapIssue, materializeRuntimeContextNeed, mergeRuntimeContextSupplements, runtimeCompilerRepairHintSchema, runtimeContextAdmissionStatusSchema, runtimeContextArtifactRefSchema, runtimeContextConsultationRecordSchema, runtimeContextConsultationResultSchema, runtimeContextDomainSchema, runtimeContextFactSchema, runtimeContextFindingProposalSchema, runtimeContextNeedForIssues, runtimeContextNeedSchema, runtimeContextProposalSchema, runtimeContextRequestSchema, runtimeContextSupplementHasMaterial, runtimeContextSupplementSchema, runtimeNarrativeContextSchema, type RuntimeCompilerRepairHint, type RuntimeContextAdmissionStatus, type RuntimeContextArtifactRef, type RuntimeContextConsultationInput, type RuntimeContextConsultationObserver, type RuntimeContextConsultationRecord, type RuntimeContextConsultationResult, type RuntimeContextDomain, type RuntimeContextFact, type RuntimeContextFindingProposal, type RuntimeContextNeed, type RuntimeContextProposal, type RuntimeContextRequest, type RuntimeContextResolver, type RuntimeContextSupplement, type RuntimeNarrativeContext } from "./world/runtime-context.js";
+export { RuntimeCompilerRepairHintStore, type PersistedRuntimeCompilerRepairHint } from "./compiler/runtime-repair-hints.js";
 export {
   PlaySessionStore,
   activePlaySessionSchema,
@@ -348,6 +354,7 @@ export {
   readerNarrativePrelude,
   playSceneRequestForEntry,
   playSceneChoicePrompt,
+  playerRuntimeContextFrame,
   playerSceneModelFrame,
   playScenePrompt,
   renderPlaySceneFailure,
@@ -358,6 +365,7 @@ export {
   type PlayerNarrativePlayExcerpt,
   type PlayerNarrativeContract,
   type PlayerReaderNarrativePrelude,
+  type PlayerRuntimeContextFrame,
   type PlayerNarrativeResolvedAct,
   type PlayerNarrativeSourceExcerpt,
   type PlayerSceneDramaturgyAnalysis,

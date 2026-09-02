@@ -32,7 +32,8 @@ Truth and agency boundaries:
 - The candidate describes what the player is trying to do. It is not proof that the desired effect succeeds.
 - When present, intent.controlledAct is the actor-owned attempt and intent.desiredEffect is the result that still depends on world response or discovery. Adjudicate the desired effect; do not confuse merely performing controlledAct with proving that effect occurred.
 - The currentWorld object is the complete relevant present-time slice supplied by the host. It may include world facts and active rules the actor does not know. It contains no future canon.
-- Choose realize by default. Choose transform only when the intended immediate result directly contradicts a supplied committed fact, an applicable active rule, a deterministic issue, or unavoidable ordinary causality/capability. Mere uncertainty, missing detail, dramatic inconvenience, low probability, or departure from canon is not a contradiction.
+- contextSupplement, when present, contains host-admitted committed-world facts from one branch-pinned source consultation. It may clarify existing identity or prior/current context but never overrides currentWorld.
+- Choose realize by default. Choose transform only when the intended immediate result directly contradicts a supplied committed fact, an applicable active rule, a deterministic issue, or unavoidable ordinary causality/capability. When a material missing detail prevents either decision, choose needs-context and ask one concrete question instead of guessing or disguising uncertainty as a contradiction. Mere uncertainty, missing detail, dramatic inconvenience, low probability, or departure from canon is not a contradiction.
 - Every transform must carry contradiction.basis. Cite supplied opaque entity/field handles for state, an exact active-rule name, an exact deterministic issue code, or a concise ordinary causal/capability principle. The host verifies state/rule/issue citations; unsupported citations prevent commitment.
 - When supplied state/rules establish ordinary non-supernatural causality and the player demands an immediately supernatural result (for example making a dead person alive by ordinary effort), ordinary causality may be the direct contradiction. Absence of a detail alone is not such evidence. Resolve what the attempt actually causes; do not create the demanded power merely to comply.
 - A transform is not an error or refusal. replacement must describe the immediate in-world consequence that actually occurs. It may have an empty state delta and still carry a concrete act/consequence intent. Never put error, invalid, system, model, tool, schema, or commit language in eventTitle or actorObservation.
@@ -78,6 +79,13 @@ export function createPiPlayerWorldAdjudicator(
         ...(entry.path ? { path: entry.path } : {}),
       })),
     };
+    const contextSupplement = input.contextSupplement?.map((fact) => ({
+      summary: fact.summary,
+      authority: fact.authority,
+      basis: fact.basis.map((reference) => reference.kind === "entity"
+        ? { kind: reference.kind, id: boundary.encodeEntityId(reference.id) }
+        : { kind: reference.kind }),
+    })) ?? [];
     const actorCapabilities = {
       actorId: boundary.encodeEntityId(input.actorContext.actorId),
       selfState: boundary.encodeState(input.actorContext.selfState),
@@ -92,6 +100,7 @@ export function createPiPlayerWorldAdjudicator(
       intendedCandidate: boundary.encodeCandidate(input.candidate),
       actorCapabilities,
       currentWorld,
+      ...(contextSupplement.length ? { contextSupplement } : {}),
     };
 
     const runAttempt = async (attempt: 1 | 2): Promise<{
@@ -162,6 +171,14 @@ export function createPiPlayerWorldAdjudicator(
               authority: "committed-world" as const,
               content: currentWorld,
             },
+            ...(contextSupplement.length ? [{
+              id: `player-world-adjudication.${attempt}.runtime-context-supplement`,
+              label: "Host-admitted committed-world context supplement",
+              kind: "world.committed-state" as const,
+              role: "user" as const,
+              authority: "committed-world" as const,
+              content: contextSupplement,
+            }] : []),
             {
               id: `player-world-adjudication.${attempt}.recent-presentation`,
               label: "Recent presentation-only messages",

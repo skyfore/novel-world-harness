@@ -5,11 +5,13 @@ import { createPiPlayerWorldAdjudicator } from "../agent/pi-player-world-adjudic
 import { createPiPlayerWorldResponseResolver } from "../agent/pi-player-world-response.js";
 import { createPiNpcReactionReasoner } from "../agent/pi-npc-reaction.js";
 import { createPiCanonicalAttachmentResolver } from "../agent/pi-canonical-attachment.js";
+import { createPiRuntimeContextResolver } from "../agent/pi-runtime-context.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "../world/player-action.js";
 import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
 import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
+import type { RuntimeContextResolver } from "../world/runtime-context.js";
 import { PlayConversationStore } from "../world/play-conversation.js";
 import {
   inspectPlayExperience,
@@ -32,6 +34,7 @@ export type PlayWorldCommandOptions = {
   model?: string;
   translator?: PlayerActionTranslator;
   adjudicator?: PlayerWorldAdjudicator;
+  contextResolver?: RuntimeContextResolver;
   worldResponseResolver?: PlayerWorldResponseResolver;
   canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
@@ -90,6 +93,13 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
         ...(options.model ? { model: options.model } : {}),
       })
     : undefined);
+  const contextResolver = options.contextResolver ?? (!options.translator
+    ? createPiRuntimeContextResolver({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
   const npcResponseReasoner = options.npcResponseReasoner ?? (!options.translator
     ? createPiNpcReactionReasoner({
         root: options.root,
@@ -109,7 +119,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
     throw new Error("advanceBackground must be an integer between 0 and 100");
   }
   if (options.action !== undefined) {
-    return runAndPrintTurn(options.root, selection, translator, adjudicator, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, options.action, advanceBackground);
+    return runAndPrintTurn(options.root, selection, translator, adjudicator, contextResolver, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, options.action, advanceBackground);
   }
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error("Pass --action <text> for non-interactive play.");
@@ -122,7 +132,7 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
       const utterance = (await terminal.question(`${selection.actor.canonicalName}> `)).trim();
       if (!utterance) continue;
       if (utterance === "/exit" || utterance === "/quit") break;
-      await runAndPrintTurn(options.root, selection, translator, adjudicator, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, utterance, advanceBackground);
+      await runAndPrintTurn(options.root, selection, translator, adjudicator, contextResolver, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, utterance, advanceBackground);
     }
   } finally {
     terminal.close();
@@ -135,6 +145,7 @@ async function runAndPrintTurn(
   selection: SelectedPlayExperience,
   translator: PlayerActionTranslator,
   adjudicator: PlayerWorldAdjudicator | undefined,
+  contextResolver: RuntimeContextResolver | undefined,
   worldResponseResolver: PlayerWorldResponseResolver | undefined,
   canonicalAttachmentResolver: CanonicalAttachmentResolver | undefined,
   npcResponseReasoner: NpcReactionReasoner | undefined,
@@ -148,6 +159,7 @@ async function runAndPrintTurn(
     utterance,
     translator,
     ...(adjudicator ? { adjudicator } : {}),
+    ...(contextResolver ? { contextResolver } : {}),
     ...(worldResponseResolver ? { worldResponseResolver } : {}),
     ...(canonicalAttachmentResolver ? { canonicalAttachmentResolver } : {}),
     ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
@@ -158,6 +170,7 @@ async function runAndPrintTurn(
   if (!result.accepted) {
     stdout.write(`The requested effect was not committed (${result.stage}); the current scene and world head remain available (${result.previousHead}). Choose another immediate action to continue.\n`);
     for (const issue of result.issues) stdout.write(`- ${issue.code}: ${issue.message}\n`);
+    if (outcome.repairHintError) stdout.write(`Runtime compiler repair hint could not be persisted: ${outcome.repairHintError}\n`);
     return result;
   }
   stdout.write(`${result.renderedText}\n`);
@@ -183,5 +196,6 @@ async function runAndPrintTurn(
   if (outcome.canonicalRecoveryError) stdout.write(`Canonical scaffold recovery stopped: ${outcome.canonicalRecoveryError}\n`);
   if (outcome.npcResponseError) stdout.write(`NPC response stopped (not treated as in-world silence): ${outcome.npcResponseError}\n`);
   if (outcome.conversationError) stdout.write(`Conversation memory could not be persisted: ${outcome.conversationError}\n`);
+  if (outcome.repairHintError) stdout.write(`Runtime compiler repair hint could not be persisted: ${outcome.repairHintError}\n`);
   return result;
 }

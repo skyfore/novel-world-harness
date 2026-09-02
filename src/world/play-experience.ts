@@ -30,6 +30,8 @@ import type {
   CanonicalAttachmentResolver,
 } from "./canonical-adaptation.js";
 import type { CanonicalRecoveryTrace } from "./runtime.js";
+import type { RuntimeContextConsultationObserver, RuntimeContextResolver } from "./runtime-context.js";
+import { RuntimeCompilerRepairHintStore } from "../compiler/runtime-repair-hints.js";
 
 export type PlayableCharacter = {
   id: string;
@@ -117,6 +119,8 @@ export type PlayTurnOutcome = {
   playerMessage?: PlayConversationMessage;
   auditId?: string;
   auditError?: string;
+  repairHintIds: string[];
+  repairHintError?: string;
 };
 
 export async function inspectPlayExperience(root: string): Promise<PlayExperienceCatalog> {
@@ -293,6 +297,8 @@ export async function performPlayTurn(options: {
   utterance: string;
   translator: PlayerActionTranslator;
   adjudicator?: PlayerWorldAdjudicator;
+  contextResolver?: RuntimeContextResolver;
+  contextObserver?: RuntimeContextConsultationObserver;
   worldResponseResolver?: PlayerWorldResponseResolver;
   canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
@@ -368,6 +374,8 @@ export async function performPlayTurn(options: {
     (proposal) => runtime.resolveEligibleCanonicalEvents(proposal),
     options.beforeCommit,
     options.adjudicator,
+    options.contextResolver,
+    options.contextObserver,
   );
   const result = await turns.turn({
     branchId: options.branchId,
@@ -385,6 +393,16 @@ export async function performPlayTurn(options: {
         }
       : {}),
   });
+  const repairHintIds: string[] = [];
+  let repairHintError: string | undefined;
+  if (result.repairHints?.length) {
+    try {
+      const hints = new RuntimeCompilerRepairHintStore(options.root);
+      for (const hint of result.repairHints) repairHintIds.push((await hints.record(hint)).id);
+    } catch (error) {
+      repairHintError = error instanceof Error ? error.message : String(error);
+    }
+  }
   let conversationError: string | undefined;
   let playerMessage: PlayConversationMessage | undefined;
   try {
@@ -613,6 +631,9 @@ export async function performPlayTurn(options: {
       ...(result.validation ? { validation: structuredClone(result.validation) } : {}),
       ...(result.eventHash ? { eventHash: result.eventHash } : {}),
       ...(result.progressCertificate ? { progressCertificate: structuredClone(result.progressCertificate) } : {}),
+      ...(result.contextConsultations?.length ? { contextConsultations: structuredClone(result.contextConsultations) } : {}),
+      repairHintIds: [...repairHintIds],
+      ...(repairHintError ? { repairHintError } : {}),
       ...(worldResponseResolution ? { worldResponseResolution: structuredClone(worldResponseResolution) } : {}),
       worldResponseCandidates: structuredClone(worldResponseCandidates),
       worldResponseEvents: structuredClone(worldResponseEvents),
@@ -653,6 +674,8 @@ export async function performPlayTurn(options: {
     ...(playerMessage ? { playerMessage } : {}),
     ...(auditId ? { auditId } : {}),
     ...(auditError ? { auditError } : {}),
+    repairHintIds,
+    ...(repairHintError ? { repairHintError } : {}),
   };
 }
 

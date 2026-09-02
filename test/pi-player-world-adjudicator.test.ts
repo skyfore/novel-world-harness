@@ -182,4 +182,42 @@ describe("Pi player world adjudicator", () => {
     expect(disposed).toBe(2);
     expect(statuses).toContain("行动后果尚未收束，正在重新推演…");
   });
+
+  it("preserves an adjudication data gap and strips stable supplement identifiers", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-player-world-context-"));
+    roots.push(root);
+    let prompt = "";
+    vi.spyOn(PiAgentSession, "create").mockImplementation(async (options) => {
+      const tool = options.additionalTools!.find((candidate) => candidate.name === "propose_player_world_resolution")!;
+      return {
+        abort: async () => undefined,
+        dispose: async () => undefined,
+        promptWithReport: async (value: string) => {
+          prompt = value;
+          await tool.execute("resolution", {
+            decision: "needs-context",
+            domain: "causality",
+            question: "Did a prior committed event already establish the immediate cause?",
+            audience: "world",
+            searchTerms: ["promise"],
+          } as never, undefined, undefined, {} as never);
+          return { text: "" } as never;
+        },
+      } as unknown as PiAgentSession;
+    });
+    const value: PlayerWorldAdjudicationInput = {
+      ...input(),
+      contextSupplement: [{
+        summary: "A prior promise is already part of committed history.",
+        authority: "committed-world",
+        basis: [{ kind: "canonical-event", id: "stable-prior-event-id" }],
+      }],
+    };
+
+    const result = await createPiPlayerWorldAdjudicator({ root })(value);
+
+    expect(result).toMatchObject({ decision: "needs-context", domain: "causality" });
+    expect(prompt).toContain("A prior promise is already part of committed history");
+    expect(prompt).not.toContain("stable-prior-event-id");
+  });
 });

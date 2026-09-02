@@ -9,6 +9,7 @@ import {
 } from "../agent/pi-player-opening.js";
 import { createPiPlayerWorldAdjudicator } from "../agent/pi-player-world-adjudicator.js";
 import { createPiPlayerWorldResponseResolver } from "../agent/pi-player-world-response.js";
+import { createPiRuntimeContextResolver } from "../agent/pi-runtime-context.js";
 import { playerSceneChoicesSchema, type PlayerSceneChoice } from "../agent/player-scene-choice-tool.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
 import type { LlmProfile } from "../config/schema.js";
@@ -22,6 +23,7 @@ import {
   type PlayerActionTranslator,
   type PlayerWorldAdjudicator,
 } from "../world/player-action.js";
+import type { RuntimeContextResolver, RuntimeContextSupplement } from "../world/runtime-context.js";
 import {
   PlayConversationStore,
   modelPlayConversation,
@@ -38,6 +40,7 @@ import {
   assertPlaySceneNarration,
   buildPlayOpeningFrame,
   playSceneRequestForEntry,
+  playerRuntimeContextFrame,
   playerSceneModelFrame,
   resolvePlayScenePurpose,
   type PlayOpeningFrame,
@@ -108,6 +111,7 @@ export interface PlayApplicationServiceOptions {
   preparedCacheRoot?: string;
   translator?: PlayerActionTranslator;
   adjudicator?: PlayerWorldAdjudicator;
+  contextResolver?: RuntimeContextResolver;
   worldResponseResolver?: PlayerWorldResponseResolver;
   canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
@@ -802,6 +806,27 @@ export class PlayApplicationService {
           expectedHead: input.expectedHead,
           translator: adapters.translator,
           ...(adapters.adjudicator ? { adjudicator: adapters.adjudicator } : {}),
+          ...(adapters.contextResolver ? { contextResolver: adapters.contextResolver } : {}),
+          contextObserver: {
+            onGapDetected: async (need) => {
+              await recorder.record("context.gap.detected", {
+                needId: need.id,
+                requestedBy: need.requestedBy,
+                domain: need.domain,
+                issueCodes: need.issueCodes,
+              }, turnTrace);
+            },
+            onSupplementValidated: async (result) => {
+              await recorder.record("context.supplement.validated", {
+                needId: result.record.need.id,
+                status: result.record.status,
+                retryRecommended: result.record.retryRecommended,
+                evidenceCount: result.record.evidenceRefs.length,
+                artifactCount: result.record.artifactRefs.length,
+                repairHintCount: result.repairHints.length,
+              }, turnTrace);
+            },
+          },
           ...(adapters.worldResponseResolver ? { worldResponseResolver: adapters.worldResponseResolver } : {}),
           ...(adapters.canonicalAttachmentResolver ? { canonicalAttachmentResolver: adapters.canonicalAttachmentResolver } : {}),
           ...(adapters.npcResponseReasoner ? { npcResponseReasoner: adapters.npcResponseReasoner } : {}),
@@ -843,6 +868,9 @@ export class PlayApplicationService {
         adjudication: outcome.result.adjudication,
         proposal: outcome.result.proposal,
         validation: outcome.result.validation,
+        contextConsultations: outcome.result.contextConsultations,
+        repairHintIds: outcome.repairHintIds,
+        repairHintError: outcome.repairHintError,
       });
       await recorder.record("validation.completed", {
         accepted: outcome.result.accepted,
@@ -885,7 +913,17 @@ export class PlayApplicationService {
           actorVisibleSummary: "这项请求没有成为世界事件；角色没有执行它，当前世界仍处于请求之前的已提交时刻。",
         };
         try {
-          const rendered = await this.narrate(session, purpose, context, adapters.narrator, recorder, turnTrace, playerMoveId, turnResolution);
+          const rendered = await this.narrate(
+            session,
+            purpose,
+            context,
+            adapters.narrator,
+            recorder,
+            turnTrace,
+            playerMoveId,
+            turnResolution,
+            outcome.result.contextSupplement,
+          );
           narrationStatus = "rendered";
           narration = rendered.narration;
           narrationMessage = rendered.message;
@@ -1058,6 +1096,7 @@ export class PlayApplicationService {
     traceContext: TraceContext,
     playerMoveId?: string,
     turnResolution?: PlayerTurnResolution,
+    runtimeContext?: RuntimeContextSupplement,
   ): Promise<NarrationOutcome> {
     context.signal.throwIfAborted();
     context.update("building-scene", { purpose });
@@ -1070,6 +1109,13 @@ export class PlayApplicationService {
       this.options.preparedCacheRoot,
     );
     if (turnResolution) frame = { ...frame, turnResolution: structuredClone(turnResolution) };
+    const projectedRuntimeContext = playerRuntimeContextFrame(runtimeContext);
+    if (projectedRuntimeContext) {
+      frame = {
+        ...frame,
+        runtimeContext: projectedRuntimeContext,
+      };
+    }
     context.update("narrating", { purpose });
     try {
       const output = await narrator(
@@ -1144,6 +1190,7 @@ export class PlayApplicationService {
   private async adapters(context: OperationRunContext, trace: TraceContext): Promise<{
     translator: PlayerActionTranslator;
     adjudicator?: PlayerWorldAdjudicator;
+    contextResolver?: RuntimeContextResolver;
     worldResponseResolver?: PlayerWorldResponseResolver;
     canonicalAttachmentResolver?: CanonicalAttachmentResolver;
     npcResponseReasoner?: NpcReactionReasoner;
@@ -1165,6 +1212,14 @@ export class PlayApplicationService {
       ...(this.options.adjudicator
         ? { adjudicator: this.options.adjudicator }
         : usePiTurnAdapters ? { adjudicator: createPiPlayerWorldAdjudicator(common(profiles.get("adjudicator"))) } : {}),
+      ...(this.options.contextResolver
+        ? { contextResolver: this.options.contextResolver }
+        : usePiTurnAdapters ? {
+            contextResolver: createPiRuntimeContextResolver({
+              ...common(profiles.get("specialist")),
+              ...(this.options.preparedCacheRoot ? { preparedCacheRoot: this.options.preparedCacheRoot } : {}),
+            }),
+          } : {}),
       ...(this.options.worldResponseResolver
         ? { worldResponseResolver: this.options.worldResponseResolver }
         : usePiTurnAdapters ? { worldResponseResolver: createPiPlayerWorldResponseResolver(common(profiles.get("specialist"))) } : {}),
@@ -1410,6 +1465,7 @@ function playWarnings(outcome: PlayTurnOutcome): string[] {
     outcome.backgroundError,
     outcome.conversationError,
     outcome.auditError,
+    outcome.repairHintError,
   ].filter((value): value is string => Boolean(value));
 }
 

@@ -70,6 +70,11 @@ const LOOKUP_RECOVERY: Readonly<Record<string, LookupRecovery>> = Object.freeze(
     arguments: { query: "*", max_results: 20 },
     resultField: "ref",
   },
+  read_runtime_source_evidence: {
+    finder: "find_runtime_source_evidence",
+    arguments: { query: "*", max_results: 20 },
+    resultField: "ref",
+  },
   read_source_annotation: {
     finder: "find_source_annotations",
     arguments: { query: "*", max_results: 20 },
@@ -99,6 +104,8 @@ const CAPTURE_ONLY_TOOLS = new Set([
   "propose_player_action",
   "propose_player_choices",
   "propose_player_world_resolution",
+  "propose_runtime_context_supplement",
+  "request_player_context",
   "propose_scene_dramaturgy",
   "select_player_world_response",
 ]);

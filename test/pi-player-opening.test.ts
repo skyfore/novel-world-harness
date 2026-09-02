@@ -139,6 +139,14 @@ describe("Pi player scene narrator", () => {
       entrySetup: "NON_OPENING_PRELUDE_MUST_BE_DROPPED",
       storySoFar: [],
     };
+    turnFrame.runtimeContext = {
+      choice: [{ summary: "CHOICE_CONTEXT_SENTINEL：眼前的人可以被直接搭话。", authority: "actor-visible" }],
+      narrative: [{
+        summary: "NARRATIVE_CONTEXT_SENTINEL：她与福贵有一段早已建立的旧交。",
+        authority: "presentation-only",
+        safety: "frozen-current-or-prior-evidence",
+      }],
+    };
 
     const result = await createPiPlayerOpeningNarrator({ root })(turnFrame, "turn", {
       onAttempt: (attempt) => attempts.push(attempt),
@@ -149,15 +157,25 @@ describe("Pi player scene narrator", () => {
     expect(calls.filter((call) => call.streamed).map((call) => call.kind)).toEqual(["narrator"]);
     expect(attempts).toEqual([1]);
     const choice = calls.find((call) => call.kind === "choice")!;
+    const style = calls.find((call) => call.kind === "style")!;
+    const dramaturgy = calls.find((call) => call.kind === "dramaturgy")!;
     const final = calls.find((call) => call.kind === "narrator")!;
     expect(choice.prompt).toContain("call propose_player_choices exactly once");
     expect(choice.prompt).toContain("我刚才问过门外是谁");
     expect(choice.prompt).not.toContain("风贴着旧门走");
+    expect(choice.prompt).toContain("CHOICE_CONTEXT_SENTINEL");
+    expect(choice.prompt).not.toContain("NARRATIVE_CONTEXT_SENTINEL");
+    expect(style.prompt).not.toContain("CHOICE_CONTEXT_SENTINEL");
+    expect(style.prompt).not.toContain("NARRATIVE_CONTEXT_SENTINEL");
+    expect(dramaturgy.prompt).toContain("NARRATIVE_CONTEXT_SENTINEL");
+    expect(dramaturgy.prompt).not.toContain("CHOICE_CONTEXT_SENTINEL");
     expect(final.system).toContain("final literary narrator");
     expect(final.system).toContain("focalized third-person");
     expect(final.prompt).toContain("sourceReferences contains exact source-novel prose");
     expect(final.prompt).toContain("风贴着旧门走");
     expect(final.prompt).toContain("上一阵风停在门槛外");
+    expect(final.prompt).toContain("NARRATIVE_CONTEXT_SENTINEL");
+    expect(final.prompt).not.toContain("CHOICE_CONTEXT_SENTINEL");
     expect(final.prompt).not.toContain("private-source-id");
     expect(final.prompt).not.toContain("propose_player_choices");
     expect(calls.every((call) => !call.prompt.includes("NON_OPENING_PRELUDE_MUST_BE_DROPPED"))).toBe(true);

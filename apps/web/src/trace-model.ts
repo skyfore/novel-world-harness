@@ -143,9 +143,19 @@ function describeTraceEvent(event: TraceEvent, callOrdinal?: number): Omit<Trace
   };
   if (event.type.startsWith("context.")) return {
     category: "context",
-    label: `${call ?? "Context"} · ${event.type === "context.finalized" ? "final context" : "context assembled"}`,
-    detail: stringValue(data.invocationName),
-    terminal: event.type === "context.finalized",
+    label: event.type === "context.gap.detected"
+      ? "Runtime context gap detected"
+      : event.type === "context.supplement.validated"
+        ? "Runtime context supplement validated"
+        : `${call ?? "Context"} · ${event.type === "context.finalized" ? "final context" : "context assembled"}`,
+    detail: event.type === "context.gap.detected"
+      ? [stringValue(data.requestedBy), stringValue(data.domain)].filter(Boolean).join(" · ") || undefined
+      : event.type === "context.supplement.validated"
+        ? stringValue(data.status)
+        : stringValue(data.invocationName),
+    terminal: event.type === "context.finalized"
+      || event.type === "context.gap.detected"
+      || event.type === "context.supplement.validated",
   };
   if (event.type.startsWith("llm.")) return {
     category: "llm",

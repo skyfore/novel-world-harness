@@ -42,6 +42,7 @@ import { createPiPlayerWorldAdjudicator } from "./pi-player-world-adjudicator.js
 import { createPiPlayerWorldResponseResolver } from "./pi-player-world-response.js";
 import { createPiNpcReactionReasoner } from "./pi-npc-reaction.js";
 import { createPiCanonicalAttachmentResolver } from "./pi-canonical-attachment.js";
+import { createPiRuntimeContextResolver } from "./pi-runtime-context.js";
 import { withNwhToolRecovery } from "./tool-recovery.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
@@ -85,6 +86,7 @@ import {
   playSceneRequestForEntry,
   renderPlaySceneFailure,
   resolvePlayScenePurpose,
+  playerRuntimeContextFrame,
   playerSceneModelFrame,
   type PlayScenePurpose,
   type PlaySceneRequest,
@@ -98,6 +100,7 @@ import { playerSceneChoicesSchema, type PlayerSceneChoice } from "./player-scene
 import type { PlayerWorldResponseResolver } from "../world/runtime.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
 import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
+import type { RuntimeContextResolver, RuntimeContextSupplement } from "../world/runtime-context.js";
 import { formatElapsed } from "../util/elapsed-status.js";
 import { removeNovel, removeNovelAnalysis, removeWorldInstance } from "../world/removal.js";
 import { createRenameSessionTool, normalizeSessionTitle } from "./session-title.js";
@@ -166,6 +169,7 @@ export type NwhExtensionOptions = {
   profile?: LlmProfile;
   playerTranslator?: PlayerActionTranslator;
   playerWorldAdjudicator?: PlayerWorldAdjudicator;
+  runtimeContextResolver?: RuntimeContextResolver;
   playerWorldResponseResolver?: PlayerWorldResponseResolver;
   canonicalAttachmentResolver?: CanonicalAttachmentResolver;
   npcResponseReasoner?: NpcReactionReasoner;
@@ -903,7 +907,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       controller: AbortController,
       turnResolution?: Awaited<ReturnType<typeof buildPlayOpeningFrame>>["turnResolution"],
       fallbackChoices: readonly PresentedPlayerChoice[] = [],
+      runtimeContext?: RuntimeContextSupplement,
     ): Promise<PresentedPlayerChoice[]> => {
+      const projectedRuntimeContext = playerRuntimeContextFrame(runtimeContext);
       let frame: Awaited<ReturnType<typeof buildPlayOpeningFrame>> = {
         branchId: selection.session.branchId,
         commitId: selection.session.lastCommitId,
@@ -929,6 +935,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         messageHistory: [],
         recentMessages: [],
         ...(turnResolution ? { turnResolution } : {}),
+        ...(projectedRuntimeContext ? { runtimeContext: projectedRuntimeContext } : {}),
       };
       const stream = createPlayerSceneObserver(ctx, purpose, controller.signal);
       try {
@@ -944,6 +951,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           frame = {
             ...frame,
             turnResolution: structuredClone(turnResolution),
+          };
+        }
+        if (projectedRuntimeContext) {
+          frame = {
+            ...frame,
+            runtimeContext: projectedRuntimeContext,
           };
         }
         if (ctx.mode === "tui") {
@@ -1044,6 +1057,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       purpose: PlayScenePurpose,
       turnResolution?: Awaited<ReturnType<typeof buildPlayOpeningFrame>>["turnResolution"],
       fallbackChoices: readonly PresentedPlayerChoice[] = [],
+      runtimeContext?: RuntimeContextSupplement,
     ): Promise<void> => {
       const previous = activePlayerScene;
       if (previous) {
@@ -1051,7 +1065,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         await previous.promise;
       }
       const controller = new AbortController();
-      const promise = runPlayerScene(ctx, selection, purpose, controller, turnResolution, fallbackChoices);
+      const promise = runPlayerScene(ctx, selection, purpose, controller, turnResolution, fallbackChoices, runtimeContext);
       const active = { controller, promise };
       activePlayerScene = active;
       let choices: PresentedPlayerChoice[] = [];
@@ -1180,6 +1194,16 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             signal: controller.signal,
           })
         : undefined);
+      const contextResolver = options.runtimeContextResolver ?? (!options.playerTranslator
+        ? createPiRuntimeContextResolver({
+            root: workspace.root,
+            ...(options.profile ? { profile: options.profile } : {}),
+            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+            ...(options.preparedCacheRoot ? { preparedCacheRoot: options.preparedCacheRoot } : {}),
+            onStatus: showTurnActivity,
+            signal: controller.signal,
+          })
+        : undefined);
       const worldResponseResolver = options.playerWorldResponseResolver ?? (!options.playerTranslator
         ? createPiPlayerWorldResponseResolver({
             root: workspace.root,
@@ -1217,6 +1241,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           utterance,
           translator,
           ...(adjudicator ? { adjudicator } : {}),
+          ...(contextResolver ? { contextResolver } : {}),
           ...(worldResponseResolver ? { worldResponseResolver } : {}),
           ...(canonicalAttachmentResolver ? { canonicalAttachmentResolver } : {}),
           ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
@@ -1252,6 +1277,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       };
       setPlayerStatus(ctx, selectedPlay);
       if (outcome.auditError) ctx.ui.notify(`Player-turn audit could not be persisted: ${outcome.auditError}`, "warning");
+      if (outcome.repairHintError) ctx.ui.notify(`Runtime compiler repair hint could not be persisted: ${outcome.repairHintError}`, "warning");
       if (outcome.conversationError) ctx.ui.notify(`Conversation memory could not be persisted: ${outcome.conversationError}`, "warning");
       if (!outcome.result.accepted) {
         const issueCode = outcome.result.issues[0]?.code ?? "UNKNOWN";
@@ -1269,6 +1295,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             actorVisibleSummary: "这项请求没有成为世界事件；角色没有执行它，当前世界仍处于请求之前的已提交时刻。",
           },
           input.fallbackChoices?.length ? input.fallbackChoices : [],
+          outcome.result.contextSupplement,
         );
         return;
       }
@@ -1285,7 +1312,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         showPlayMessage("**场外提示：** 你对在场人物的互动已经发生，但至少一位 NPC 的即时回应未能通过生成或世界校验；系统没有把失败伪装成沉默。你可以用 **/scene** 查看当前已提交时刻，或继续行动。");
         ctx.ui.notify(`NPC response stopped: ${outcome.npcResponseError}`, "warning");
       }
-      await narratePlayerScene(ctx, selectedPlay, "turn");
+      await narratePlayerScene(ctx, selectedPlay, "turn", undefined, [], outcome.result.contextSupplement);
     };
 
     const offerPlayerChoices = async (

@@ -35,11 +35,12 @@ export function createPlayerWorldResolutionCaptureTool(
   const tool = defineTool({
     name: "propose_player_world_resolution",
     label: "Propose world resolution",
-    description: "Resolve one player intent as either its ordinary realization or a contradiction-grounded in-world consequence. This capture-only tool cannot commit world truth.",
+    description: "Resolve one player intent as its ordinary realization, a contradiction-grounded in-world consequence, or one bounded needs-context request. This capture-only tool cannot commit world truth.",
     promptSnippet: "Propose exactly one immediate world resolution",
     promptGuidelines: [
       "Distinguish intendedCandidate.intent.controlledAct from intent.desiredEffect; performing the former alone does not prove the latter.",
       "Choose transform only for a direct contradiction with committed state, an active rule, or unavoidable immediate causality/capability.",
+      "Choose needs-context when a material absent detail prevents a safe realization/transform decision; ask one concrete question and never use it for a known contradiction.",
       "Every transform must cite at least one supplied state field, active rule, deterministic issue code, or explicit ordinary causal/capability principle in contradiction.basis.",
       "A transformed replacement is the immediate event that actually occurs, not a system refusal and not the impossible desired effect.",
       "Use only supplied opaque handles and writable fields; the host revalidates every replacement before commit.",

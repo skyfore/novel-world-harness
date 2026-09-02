@@ -29,6 +29,24 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("Retry read_compiler_artifact once");
   });
 
+  it("keeps runtime source-ref recovery inside the frozen consultation scope", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "read_runtime_source_evidence",
+      "Frozen source ref 'source-unit:wrong' was not found in the current branch scope.",
+    );
+
+    expect(advice).toMatchObject({
+      category: "lookup-miss",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_runtime_source_evidence",
+        arguments: { query: "*", max_results: 20 },
+      },
+    });
+    expect(advice.steps.join(" ")).toContain("Copy the exact ref");
+    expect(advice.steps.join(" ")).toContain("Retry read_runtime_source_evidence once");
+  });
+
   it("keeps opaque player-handle recovery inside the isolated prompt", () => {
     const advice = buildNwhToolRecoveryAdvice(
       "select_player_world_response",

@@ -160,6 +160,16 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await playLauncher.getByRole("button", { name: "Start an independent instance as Mara" }).click();
   await expect(page).toHaveURL(/\/play\/play-[0-9a-f-]{36}$/);
   await expect(page.getByLabel("Play status")).toContainText("step 0");
+  const nestedSessionNavigation = page.locator(".nav-tree-session-link").filter({ hasText: "Mara" }).first();
+  await expect(nestedSessionNavigation).toBeVisible();
+  await expect(nestedSessionNavigation.locator("xpath=ancestor::li[contains(@class, 'nav-tree-instance')]").locator(":scope > .nav-tree-instance-link")).toBeVisible();
+  await expect(nestedSessionNavigation.locator("xpath=ancestor::li[contains(@class, 'nav-tree-novel')]").locator(".nav-tree-novel-link").first()).toContainText("browser-mvp");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(nestedSessionNavigation).toBeVisible();
+  await expect(page.locator(".sidebar")).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+  await page.getByRole("button", { name: "Close navigation" }).click();
+  await page.setViewportSize({ width: 1280, height: 720 });
 
   await expect(page.locator(".message-scene").last()).toContainText("斑驳的窗影");
   await expect(page.getByRole("button", { name: "Re-establish scene" })).toHaveCount(0);
@@ -231,10 +241,10 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await page.getByRole("link", { name: "Back to play" }).click();
   await page.getByRole("button", { name: "Archive" }).click();
   await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
-  const sessionNavigation = page.locator(".nav-section").filter({ hasText: "Play sessions" });
-  await expect(sessionNavigation.getByRole("link")).toHaveCount(0);
-  await sessionNavigation.getByRole("button", { name: /Show archived/ }).click();
-  await expect(sessionNavigation.getByRole("link")).toHaveCount(1);
+  const sessionNavigation = page.locator(".nav-world-tree");
+  await expect(sessionNavigation.locator(".nav-tree-session-link")).toHaveCount(0);
+  await page.getByRole("button", { name: /Show archived/ }).click();
+  await expect(sessionNavigation.locator(".nav-tree-session-link")).toHaveCount(1);
   await page.getByRole("button", { name: "Restore" }).click();
   await expect(page.getByRole("button", { name: "Make active" })).toBeVisible();
   await page.getByRole("button", { name: "Make active" }).click();

@@ -1,9 +1,10 @@
 # Implementation status
 
-Date: 2026-08-30
+Date: 2026-09-02
 
-Verified baseline: `pnpm run check`; `pnpm test` (130 test files, 734 tests
-passing); `pnpm test:e2e` (production Fastify host + Chromium journey passing).
+Verified baseline: `pnpm run check`; `pnpm test` (134 test files, 776 tests
+passing); `pnpm test:e2e` (production Fastify host + 2 Chromium journeys
+passing).
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
@@ -37,11 +38,12 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
 | Canon replay and branching | Implemented vertical slice | Predicate checkpoints, fork, diff, divergent possibility eligibility |
 | Actor behavior | Partial | Direct typed player interactions invoke a Pi-backed, actor-scoped NPC response lane with perceived-history retrieval, development/goals/affect context, and validated causal commits; unrelated proactive behavior still uses deterministic candidates |
-| Narrative | Implemented vertical slice | Actor-scoped Pi scene narrator receives a bounded actor-safe frame plus exact retrieval, streams native provider/model, thinking, text, retry, and capture-tool events; accepted prose cannot mutate world truth |
+| Narrative | Implemented vertical slice | Actor-scoped Pi scene narrator receives a bounded actor-safe frame plus exact retrieval and authority-projected current/prior literary context when a move triggered consultation; choice and narrative channels remain isolated, and accepted prose cannot mutate world truth |
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
 | Prepared revisions | Implemented with evidence-portability gap | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation; canonical `EvidenceRef`s travel, but exact assertion revisions/bindings are not yet serialized in the bundle |
 | Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
-| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, exact bounded continuity, reactive NPC responses, validated immediate developments, bounded post-divergence canonical scaffold recovery, merged model suggestions plus host-preflighted exits, stagnation detection, and an explicit material-progress wait route |
+| Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, typed data-gap escalation with at most one frozen-source consultation and one consumer retry, exact bounded continuity, reactive NPC responses, validated immediate developments, bounded post-divergence canonical scaffold recovery, merged model suggestions plus host-preflighted exits, stagnation detection, and an explicit material-progress wait route |
+| Runtime source consultation | Implemented vertical slice | Translation/adjudication may preserve a genuine missing-data result; a fresh isolated specialist can search and fully read only the branch-pinned immutable source units, while host admission excludes future/ambiguous evidence, projects separate translation/adjudication/choice/narrative authority, and records source-only gaps in a non-authoritative compiler inbox |
 | Character embodiment | Implemented vertical slice | Role-before-branch selection, spoiler-free opening setup, reader-only complete prior-event recaps, source-backed first-embodied-scene checkpoints for later roles, actor-scoped perception, sibling entry branches, and durable active resume |
 | Model token policy | User/provider controlled | NWH does not impose an application token or request-count budget; provider/model output metadata remains authoritative |
 | Corpus quality | Not established | No annotated multi-novel benchmark demonstrates semantic reliability |
@@ -198,6 +200,26 @@ Model interpretation is still probabilistic. These checks can reject unsupported
 - The engine independently reloads the pinned scaffold and compares all locked fields before commitment, then rechecks branch availability, scene presence, required knowledge, and causal parents at the current head. An exact candidate that fails only the stronger role gates is denied for that move and recorded in the turn audit. A committed analogue is tracked as `adapted`, not exact canon: it prevents duplicate canon and can satisfy downstream causal dependencies without writing `realizesCanonicalEventIds`.
 - Explicit waiting advances committed time by five minutes and may schedule at most one eligible autonomous non-canon process in the current temporal window. With no eligible process, time still advances; forward canon analogues are excluded.
 - Knowledge is reconstructed per actor and per commit.
+- A player move may invoke at most one fresh, non-persisted source-context
+  specialist after an explicit model request or a pure deterministic data-gap
+  failure. Retrieval is lexical, paged, tool-call bounded, and locked to the
+  branch's source SHA-256 and prepared revision; every cited source unit must be
+  completely read in that same attempt.
+- Source findings remain proposals. The host independently verifies passage-to-
+  artifact linkage, committed history, active rules, actor visibility, and the
+  unchanged branch head. Any cited passage linked to an unrealized canonical
+  event or uncommitted possibility is withheld even if the model omits that
+  future-bearing reference or calls it current. Ambiguous/source-only findings
+  cannot authorize a retry or commit.
+- Admitted material is split by consumer: actor-visible or one-turn referent
+  facts may help translation, committed-current facts may help adjudication,
+  actor-visible facts may help choices, and current/prior literary explanation
+  may help narration only as presentation. One-turn referents neither grant a
+  name to the character nor enter adjudication. Stable evidence/artifact IDs are
+  removed before presentation models.
+- Structural source-only findings are stored as immutable, idempotent compiler
+  repair hints outside branch truth. The inbox does not publish artifacts,
+  upgrade a frozen base, or migrate an existing branch.
 - A director-generated observation cannot learn a claim merely because its
   source citation overlaps a recent event; character knowledge changes require
   an explicit validated knowledge delta.
@@ -274,6 +296,14 @@ may be committed; its desired discovery remains audit-only. All wider intents
 remain uncommitted and recover out of character rather than masquerading as an
 in-world blockage. This fallback never writes knowledge or active rules.
 
+A genuine missing-data outcome now has a separate bounded path: the host may
+consult the exact frozen source once and retry only the translator or
+adjudicator that requested it. Known contradictions, capability failures,
+hidden character knowledge, mixed validation failures, future canon, and
+ambiguous evidence cannot use this path. A source-only explanation may enrich
+the current scene as presentation or become a compiler repair hint, but never a
+state/knowledge delta.
+
 ### 3. Proactive model actor policy is not connected to the product CLI
 
 The product now connects a separate reactive Pi lane for NPCs directly
@@ -294,7 +324,7 @@ candidates only.
 
 ### 4. The low-level renderer remains diagnostic
 
-`NarrativeRenderer` still provides deterministic event-title rendering for low-level CLI/API inspection. The TUI player path now adds an isolated Pi narrator over a bounded committed actor frame, exact actor-frame and related-message retrieval, and a capture-only choice tool. Broader prose-quality, parametric-canon recall, and epistemic-leakage evaluation across representative novels is still required.
+`NarrativeRenderer` still provides deterministic event-title rendering for low-level CLI/API inspection. The TUI player path now adds an isolated Pi narrator over a bounded committed actor frame, exact actor-frame and related-message retrieval, a capture-only choice tool, and a separately admitted current/prior literary-context channel when a player move exposes a sparse referent or relationship. Broader prose-quality, runtime-consultation precision/latency, parametric-canon recall, and epistemic-leakage evaluation across representative novels is still required.
 
 ### 5. Compilation quality has no representative benchmark
 

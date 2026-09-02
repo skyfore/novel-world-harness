@@ -26,6 +26,256 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
+describe("runtime context consultation", () => {
+  it("preserves an explicit translation data gap, consults once, and retries before one commit", async () => {
+    const { engine } = await fixture();
+    let translationCalls = 0;
+    let consultationCalls = 0;
+    let commits = 0;
+    const consultationLifecycle: string[] = [];
+    const service = new PlayerTurnService(
+      engine,
+      (input) => {
+        translationCalls += 1;
+        if (translationCalls === 1) return {
+          decision: "needs-context",
+          domain: "identity",
+          question: "Who does the player's name refer to in the current actor-visible context?",
+          audience: "actor",
+          searchTerms: ["墨砚"],
+        };
+        expect(input.contextSupplement).toEqual([
+          expect.objectContaining({ authority: "actor-visible", summary: expect.stringContaining("墨砚") }),
+        ]);
+        return deterministicPlayerIntentCandidate("observe", input);
+      },
+      undefined,
+      undefined,
+      () => { commits += 1; },
+      undefined,
+      (input) => {
+        consultationCalls += 1;
+        consultationLifecycle.push("resolver");
+        return {
+          record: {
+            version: 1,
+            need: input.need,
+            status: "admitted",
+            proposalSummary: "The frozen source maps the actor-visible identity.",
+            evidenceRefs: ["source-unit:identity-1"],
+            artifactRefs: [{ kind: "entity", id: "mo-yan" }],
+            retryRecommended: true,
+          },
+          supplement: {
+            version: 1,
+            translation: [{
+              summary: "墨砚是当前角色可指认的人物。",
+              authority: "actor-visible",
+              basis: [{ kind: "entity", id: "mo-yan" }],
+            }],
+            adjudication: [],
+            choice: [],
+            narrative: [],
+          },
+          repairHints: [],
+        };
+      },
+      {
+        onGapDetected: () => { consultationLifecycle.push("gap"); },
+        onSupplementValidated: () => { consultationLifecycle.push("validated"); },
+      },
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "我看看墨砚的反应。" });
+
+    expect(result.accepted).toBe(true);
+    expect(translationCalls).toBe(2);
+    expect(consultationCalls).toBe(1);
+    expect(consultationLifecycle).toEqual(["gap", "resolver", "validated"]);
+    expect(commits).toBe(1);
+    expect(result.contextConsultations).toEqual([
+      expect.objectContaining({ status: "admitted", retryRecommended: true }),
+    ]);
+  });
+
+  it("lets adjudication request evidence once and never treats known contradictions as data gaps", async () => {
+    const first = await fixture();
+    let adjudicationCalls = 0;
+    let consultationCalls = 0;
+    const observe = (input: Parameters<typeof deterministicPlayerIntentCandidate>[1]) =>
+      deterministicPlayerIntentCandidate("observe", input);
+    const recovered = await new PlayerTurnService(
+      first.engine,
+      observe,
+      undefined,
+      undefined,
+      undefined,
+      (input) => {
+        adjudicationCalls += 1;
+        if (adjudicationCalls === 1) return {
+          decision: "needs-context",
+          domain: "causality",
+          question: "Is this observation tied to an already committed prior event?",
+          audience: "world",
+          searchTerms: [],
+        };
+        expect(input.contextSupplement).toHaveLength(1);
+        return {
+          decision: "realize",
+          status: "succeeded",
+          eventTitle: "Hero studies the hall",
+          actorObservation: "You study the hall without assuming a hidden result.",
+        };
+      },
+      (input) => {
+        consultationCalls += 1;
+        return {
+          record: {
+            version: 1,
+            need: input.need,
+            status: "admitted",
+            proposalSummary: "A committed prior event supplies the missing causal frame.",
+            evidenceRefs: ["source-unit:event-1"],
+            artifactRefs: [{ kind: "canonical-event", id: "prior-event" }],
+            retryRecommended: true,
+          },
+          supplement: {
+            version: 1,
+            translation: [],
+            adjudication: [{
+              summary: "A prior event involving the actor is already committed.",
+              authority: "committed-world",
+              basis: [{ kind: "canonical-event", id: "prior-event" }],
+            }],
+            choice: [],
+            narrative: [],
+          },
+          repairHints: [],
+        };
+      },
+    ).turn({ branchId: "main", actorId: "hero", utterance: "仔细观察大厅。" });
+    expect(recovered.accepted).toBe(true);
+    expect(adjudicationCalls).toBe(2);
+    expect(consultationCalls).toBe(1);
+
+    const second = await fixture();
+    let forbiddenConsultations = 0;
+    const contradicted = await new PlayerTurnService(
+      second.engine,
+      () => ({
+        ...moveToCamp(),
+        preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.alive", value: false }],
+      }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => {
+        forbiddenConsultations += 1;
+        throw new Error("must not run");
+      },
+    ).turn({ branchId: "main", actorId: "hero", utterance: "在自己已经死亡的前提下行动。" });
+    expect(contradicted.accepted).toBe(false);
+    expect(contradicted.issues.map((entry) => entry.code)).toContain("PLAYER_PRECONDITION_UNSATISFIED");
+    expect(forbiddenConsultations).toBe(0);
+
+    const third = await fixture();
+    let adjudicatorBypassConsultations = 0;
+    const invalidGapRequest = await new PlayerTurnService(
+      third.engine,
+      () => ({
+        ...moveToCamp(),
+        preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.alive", value: false }],
+      }),
+      undefined,
+      undefined,
+      undefined,
+      () => ({
+        decision: "needs-context",
+        domain: "current-state",
+        question: "Can source context override the current state?",
+        audience: "world",
+        searchTerms: [],
+      }),
+      () => {
+        adjudicatorBypassConsultations += 1;
+        throw new Error("must not run");
+      },
+    ).turn({ branchId: "main", actorId: "hero", utterance: "在自己已经死亡的前提下去营地。" });
+    expect(invalidGapRequest.accepted).toBe(false);
+    expect(invalidGapRequest.issues.map((entry) => entry.code)).toContain("PLAYER_CONTEXT_REQUEST_NOT_DATA_GAP");
+    expect(adjudicatorBypassConsultations).toBe(0);
+  });
+
+  it("discards a consultation result when the branch head moves during the isolated turn", async () => {
+    const { engine } = await fixture();
+    let translationCalls = 0;
+    const result = await new PlayerTurnService(
+      engine,
+      () => {
+        translationCalls += 1;
+        return {
+          decision: "needs-context",
+          domain: "identity",
+          question: "Who is the named person?",
+          audience: "actor",
+          searchTerms: ["墨砚"],
+        };
+      },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async (input) => {
+        await engine.commitProposal({
+          proposalId: "concurrent-context-change",
+          branchId: "main",
+          expectedParentCommit: input.expectedHead,
+          source: "background",
+          title: "A concurrent world event",
+          participants: ["hero"],
+          proposedTime: { kind: "unknown" },
+          preconditions: [],
+          proposedDelta: {
+            version: 1,
+            operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "Respond to the interruption" }],
+          },
+          causalParents: [],
+          evidence: [],
+        });
+        return {
+          record: {
+            version: 1,
+            need: input.need,
+            status: "admitted",
+            proposalSummary: "This result belongs to the old head.",
+            evidenceRefs: ["source-unit:identity-1"],
+            artifactRefs: [{ kind: "entity", id: "mo-yan" }],
+            retryRecommended: true,
+          },
+          supplement: {
+            version: 1,
+            translation: [{
+              summary: "墨砚是当前角色可指认的人物。",
+              authority: "actor-visible",
+              basis: [{ kind: "entity", id: "mo-yan" }],
+            }],
+            adjudication: [],
+            choice: [],
+            narrative: [],
+          },
+          repairHints: [],
+        };
+      },
+    ).turn({ branchId: "main", actorId: "hero", utterance: "我看看墨砚。" });
+
+    expect(result.accepted).toBe(false);
+    expect(result.issues.map((entry) => entry.code)).toContain("STALE_PARENT");
+    expect(result.contextConsultations).toBeUndefined();
+    expect(translationCalls).toBe(1);
+  });
+});
+
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-player-action-"));
   roots.push(root);

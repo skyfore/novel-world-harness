@@ -35,7 +35,7 @@ import {
 import type { PossibilityTemplate } from "./possibility-model.js";
 import { StateSchemaRegistry, advanceTemporalState, applyStateDelta, emptyWorldState, evaluatePredicate, validateEngineInvariants } from "./state.js";
 import { BranchStore, WorldObjectStore } from "./store.js";
-import { assertMonotonicLogicalTime, nextLogicalTime } from "./time.js";
+import { nextLogicalTime } from "./time.js";
 import { assertEvidenceExclusiveToSource } from "./source-scope.js";
 import {
   canonicalAdaptationRoleRequirements,
@@ -50,6 +50,7 @@ import {
   resolveEffectiveWorldRules,
   type EffectiveWorldRule,
 } from "./world-rule-ontology.js";
+import { ProjectionService, type ProjectionOptions } from "./projection-service.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -75,66 +76,29 @@ export type ResolvedWorldModelContext = WorldModelContext & { canonicalSnapshotH
 export type WorldContextResolver = (snapshotHash: ObjectHash) => Promise<WorldModelContext>;
 
 export class WorldProjector {
-  private readonly contextForSnapshot: (snapshotHash?: ObjectHash) => Promise<ResolvedWorldModelContext>;
+  private readonly projections: ProjectionService;
+  constructor(projections: ProjectionService);
   constructor(objects: WorldObjectStore, context: WorldModelContext);
   constructor(objects: WorldObjectStore, contextForSnapshot: (snapshotHash?: ObjectHash) => Promise<ResolvedWorldModelContext>);
-  constructor(private readonly objects: WorldObjectStore, source: WorldModelContext | ((snapshotHash?: ObjectHash) => Promise<ResolvedWorldModelContext>)) {
-    if (typeof source === "function") {
-      this.contextForSnapshot = source;
+  constructor(
+    sourceOrObjects: ProjectionService | WorldObjectStore,
+    source?: WorldModelContext | ((snapshotHash?: ObjectHash) => Promise<ResolvedWorldModelContext>),
+  ) {
+    if (sourceOrObjects instanceof ProjectionService) {
+      this.projections = sourceOrObjects;
+    } else if (typeof source === "function") {
+      this.projections = new ProjectionService(sourceOrObjects, source);
     } else {
+      if (!source) throw new Error("WorldProjector requires a model context");
       const context = resolveContext(source);
-      this.contextForSnapshot = async (snapshotHash) => {
+      this.projections = new ProjectionService(sourceOrObjects, async (snapshotHash) => {
         if (snapshotHash && snapshotHash !== context.canonicalSnapshotHash) throw new Error(`Canonical snapshot is not available: ${snapshotHash}`);
         return context;
-      };
+      });
     }
   }
-  async project(commitId: CommitId): Promise<WorldState> {
-    const chain: { id: CommitId; commit: Awaited<ReturnType<WorldObjectStore["getCommit"]>> }[] = [];
-    const seen = new Set<string>();
-    let cursor: CommitId | undefined = commitId;
-    while (cursor) {
-      if (seen.has(cursor)) throw new Error(`Commit ancestry cycle detected at ${cursor}`);
-      seen.add(cursor);
-      const commit = await this.objects.getCommit(cursor);
-      if (commit.schemaVersion !== WORLD_SCHEMA_VERSION) throw new Error(`Unsupported world schema version ${commit.schemaVersion} at ${cursor}`);
-      if (commit.engineVersion !== WORLD_ENGINE_VERSION) throw new Error(`Unsupported engine version ${commit.engineVersion} at ${cursor}`);
-      chain.push({ id: cursor, commit });
-      cursor = commit.parentCommitId;
-      if (chain.length > 100_000) throw new Error("Commit ancestry exceeds safety limit");
-    }
-    chain.reverse();
-    let state = emptyWorldState(chain[0]?.id ?? commitId, 0);
-    let previousTime: LogicalTime | undefined;
-    for (const entry of chain) {
-      const context = await this.contextForSnapshot(entry.commit.canonicalSnapshotHash);
-      if (previousTime) {
-        try {
-          assertMonotonicLogicalTime(previousTime, entry.commit.logicalTime);
-        } catch (error) {
-          throw new Error(`Non-monotonic world time at commit ${entry.id}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      state = advanceTemporalState(state, entry.commit.logicalTime, context.stateSchema, context.entities);
-      for (const eventHash of entry.commit.eventHashes) {
-        const event = await this.objects.getEvent(eventHash);
-        if (event.logicalTime.step !== entry.commit.logicalTime.step) throw new Error(`Event/commit logical time mismatch for ${eventHash}`);
-        if (event.effects.stateDeltaHash) {
-          state = applyStateDelta(
-            state,
-            await this.objects.getDelta(event.effects.stateDeltaHash),
-            context.stateSchema,
-            context.entities,
-            context.rules,
-          );
-        }
-      }
-      state = { ...state, atCommit: entry.id, logicalTime: entry.commit.logicalTime };
-      const invariantErrors = validateEngineInvariants(state, context.stateSchema, context.entities, context.rules);
-      if (invariantErrors.length) throw new Error(`Projected state violates invariants: ${invariantErrors.join("; ")}`);
-      previousTime = entry.commit.logicalTime;
-    }
-    return state;
+  async project(commitId: CommitId, options: ProjectionOptions = {}): Promise<WorldState> {
+    return (await this.projections.project(commitId, options)).state;
   }
 }
 
@@ -343,6 +307,7 @@ export class WorldEngine {
   readonly workspaceRoot: string;
   readonly objects: WorldObjectStore;
   readonly branches: BranchStore;
+  readonly projections: ProjectionService;
   readonly projector: WorldProjector;
   readonly context: ResolvedWorldModelContext;
   private readonly contextCache = new Map<ObjectHash, ResolvedWorldModelContext>();
@@ -352,7 +317,8 @@ export class WorldEngine {
     this.branches = new BranchStore(this.workspaceRoot);
     this.context = resolveContext(context);
     this.contextCache.set(this.context.canonicalSnapshotHash, this.context);
-    this.projector = new WorldProjector(this.objects, (snapshotHash) => this.contextForSnapshot(snapshotHash));
+    this.projections = new ProjectionService(this.objects, (snapshotHash) => this.contextForSnapshot(snapshotHash));
+    this.projector = new WorldProjector(this.projections);
   }
   async contextForCommit(commitId: CommitId): Promise<ResolvedWorldModelContext> {
     const commit = await this.objects.getCommit(commitId);

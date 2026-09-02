@@ -274,7 +274,37 @@ export {
   type ReaderContextBeat,
   type ReaderEntryContext,
 } from "./world/entry-context.js";
-export { KnowledgeProjector, type ActorWorldView } from "./world/knowledge.js";
+export {
+  KnowledgeProjector,
+  applyKnowledgeDelta,
+  emptyKnowledgeState,
+  type ActorWorldView,
+  type KnowledgeReducerContext,
+  type KnowledgeState,
+} from "./world/knowledge.js";
+export {
+  ProjectionService,
+  SharedHistoryCursor,
+  type CausalIndex,
+  type HistoryCommit,
+  type ProjectedHistoryEntry,
+  type ProjectionContextResolver,
+  type ProjectionOptions,
+  type SceneIndex,
+  type WorldProjectionBundle,
+} from "./world/projection-service.js";
+export {
+  applyBranchSemanticDelta,
+  emptyBranchSemanticState,
+  type BranchGoal,
+  type BranchObligation,
+  type BranchRelationship,
+  type BranchSemanticState,
+  type EffectProvenance,
+  type SemanticReducerContext,
+} from "./world/semantic-effects.js";
+export { applyProcessDelta, emptyProcessState, type ProcessInstance, type ProcessState } from "./world/process-effects.js";
+export { applyNormDelta, emptyNormState, type NormInstance, type NormState } from "./world/norm-effects.js";
 export {
   EVENT_PARTICIPATION_PROJECTION_VERSION,
   eventParticipationsByEvent,

@@ -1,7 +1,19 @@
-import type { Attribution, Claim, CommitId, EntityId, KnowledgeFact, Proposition, WorldState } from "./model.js";
+import type {
+  Attribution,
+  Claim,
+  CommitId,
+  Entity,
+  EntityId,
+  KnowledgeDelta,
+  KnowledgeFact,
+  Proposition,
+  WorldState,
+} from "./model.js";
 import type { WorldEngine } from "./engine.js";
 import { knownStateFieldKeys, projectActorVisibleState } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
+import { isCommunicatingKnowledgeSource } from "./knowledge-semantics.js";
+import type { BranchSemanticState } from "./semantic-effects.js";
 
 export type KnowledgeState = {
   atCommit: CommitId;
@@ -14,6 +26,84 @@ export type ActorWorldView = {
   selfState: Record<string, unknown>;
   knowledge: Array<{ fact: KnowledgeFact; claim?: Claim; proposition?: Proposition; attribution?: Attribution }>;
 };
+
+export type KnowledgeReducerContext = {
+  entities: ReadonlyMap<EntityId, Entity>;
+  claims?: ReadonlyMap<string, Claim>;
+  propositions?: ReadonlyMap<string, Proposition>;
+  attributions?: ReadonlyMap<string, Attribution>;
+  branchSemantics: BranchSemanticState;
+};
+
+export function emptyKnowledgeState(atCommit: CommitId): KnowledgeState {
+  return { atCommit, actors: {} };
+}
+
+/**
+ * Knowledge is reduced after semantic effects in the same event. This makes a
+ * local proposition/attribution/claim reference legal without promoting it to
+ * canonical evidence or leaking it to another actor.
+ */
+export function applyKnowledgeDelta(
+  input: KnowledgeState,
+  delta: KnowledgeDelta,
+  commitId: CommitId,
+  context: KnowledgeReducerContext,
+): KnowledgeState {
+  const actors = structuredClone(input.actors);
+  const hasClaim = (id: string) => Boolean(context.branchSemantics.claims[id]) || Boolean(context.claims?.has(id));
+  const hasProposition = (id: string) => Boolean(context.branchSemantics.propositions[id]) || Boolean(context.propositions?.has(id));
+  const hasAttribution = (id: string) => Boolean(context.branchSemantics.attributions[id]) || Boolean(context.attributions?.has(id));
+
+  for (const operation of delta.operations) {
+    const actorEntity = context.entities.get(operation.actorId);
+    if (!actorEntity || actorEntity.kind !== "character") {
+      throw new Error(`Knowledge actor ${operation.actorId} must be a character`);
+    }
+    const actor = (actors[operation.actorId] ??= {});
+    if (operation.op === "forget") {
+      delete actor[operation.claimId];
+      continue;
+    }
+    if ((context.claims || operation.propositionId || operation.attributionId) && !hasClaim(operation.claimId)) {
+      throw new Error(`Knowledge acquisition references unknown claim ${operation.claimId}`);
+    }
+    if (operation.propositionId && !hasProposition(operation.propositionId)) {
+      throw new Error(`Knowledge acquisition references unknown proposition ${operation.propositionId}`);
+    }
+    if (operation.attributionId && !hasAttribution(operation.attributionId)) {
+      throw new Error(`Knowledge acquisition references unknown attribution ${operation.attributionId}`);
+    }
+    const claim = context.branchSemantics.claims[operation.claimId];
+    if (claim && operation.propositionId && claim.propositionId !== operation.propositionId) {
+      throw new Error(`Knowledge claim ${operation.claimId} does not describe proposition ${operation.propositionId}`);
+    }
+    const attribution = operation.attributionId
+      ? context.branchSemantics.attributions[operation.attributionId] ?? context.attributions?.get(operation.attributionId)
+      : undefined;
+    if (attribution && operation.propositionId && attribution.propositionId !== operation.propositionId) {
+      throw new Error(`Knowledge attribution ${operation.attributionId} does not describe proposition ${operation.propositionId}`);
+    }
+    if (operation.sourceActorId) {
+      const source = context.entities.get(operation.sourceActorId);
+      if (!isCommunicatingKnowledgeSource(source)) {
+        throw new Error(`Knowledge source ${operation.sourceActorId} is not a character or communication system`);
+      }
+    }
+    actor[operation.claimId] = {
+      actorId: operation.actorId,
+      claimId: operation.claimId,
+      ...(operation.propositionId ? { propositionId: operation.propositionId } : {}),
+      ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
+      ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
+      status: operation.status,
+      confidence: operation.confidence,
+      acquiredAtCommit: commitId,
+      ...(operation.sourceActorId ? { sourceActorId: operation.sourceActorId } : {}),
+    };
+  }
+  return { atCommit: commitId, actors };
+}
 
 export function isActionableKnowledge(fact: KnowledgeFact): boolean {
   return fact.status !== "disbelieves";
@@ -37,44 +127,7 @@ export class KnowledgeProjector {
   constructor(private readonly engine: WorldEngine) {}
 
   async project(commitId: CommitId): Promise<KnowledgeState> {
-    const chain: { id: CommitId; eventHashes: string[] }[] = [];
-    const seen = new Set<string>();
-    let cursor: CommitId | undefined = commitId;
-    while (cursor) {
-      if (seen.has(cursor)) throw new Error(`Commit ancestry cycle detected at ${cursor}`);
-      seen.add(cursor);
-      const commit = await this.engine.objects.getCommit(cursor);
-      chain.push({ id: cursor, eventHashes: commit.eventHashes });
-      cursor = commit.parentCommitId;
-    }
-    chain.reverse();
-    const actors: KnowledgeState["actors"] = {};
-    for (const entry of chain) {
-      for (const eventHash of entry.eventHashes) {
-        const event = await this.engine.objects.getEvent(eventHash);
-        if (!event.effects.knowledgeDeltaHash) continue;
-        const delta = await this.engine.objects.getKnowledgeDelta(event.effects.knowledgeDeltaHash);
-        for (const operation of delta.operations) {
-          const actor = (actors[operation.actorId] ??= {});
-          if (operation.op === "forget") {
-            delete actor[operation.claimId];
-            continue;
-          }
-          actor[operation.claimId] = {
-            actorId: operation.actorId,
-            claimId: operation.claimId,
-            ...(operation.propositionId ? { propositionId: operation.propositionId } : {}),
-            ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
-            ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
-            status: operation.status,
-            confidence: operation.confidence,
-            acquiredAtCommit: entry.id,
-            ...(operation.sourceActorId ? { sourceActorId: operation.sourceActorId } : {}),
-          };
-        }
-      }
-    }
-    return { atCommit: commitId, actors };
+    return (await this.engine.projections.project(commitId)).knowledge;
   }
 
   async view(actorId: EntityId, commitId: CommitId, worldState?: WorldState): Promise<ActorWorldView> {

@@ -3,6 +3,7 @@ import type { WorldEngine } from "./engine.js";
 import type { CanonicalEvent, CommitId, CommittedEvent, Entity, EntityId, NarrativeProgress, StateDelta, StateValue } from "./model.js";
 import { observeCommittedEvent, projectActorVisibleState } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
+import type { ProjectedHistoryEntry } from "./projection-service.js";
 
 export type SceneEventProjection = {
   eventId: string;
@@ -30,12 +31,7 @@ export type ActorSceneProjection = {
   signature: string;
 };
 
-export type CommittedHistoryEntry = {
-  commitId: CommitId;
-  eventHash: string;
-  event: CommittedEvent;
-  delta: StateDelta;
-};
+export type CommittedHistoryEntry = ProjectedHistoryEntry;
 
 /**
  * Project the persistent scene from committed history.  Presence is not tied
@@ -226,29 +222,10 @@ function physicallyPresentCharacters(event: CommittedEvent): ReadonlySet<string>
 }
 
 export async function committedHistory(engine: WorldEngine, commitId: CommitId): Promise<CommittedHistoryEntry[]> {
-  const commits: Array<{ id: CommitId; eventHashes: string[]; parentCommitId?: CommitId }> = [];
-  const seen = new Set<string>();
-  let cursor: CommitId | undefined = commitId;
-  while (cursor) {
-    if (seen.has(cursor)) throw new Error(`Commit ancestry cycle detected at ${cursor}`);
-    seen.add(cursor);
-    const commit = await engine.objects.getCommit(cursor);
-    commits.push({ id: cursor, eventHashes: [...commit.eventHashes], ...(commit.parentCommitId ? { parentCommitId: commit.parentCommitId } : {}) });
-    cursor = commit.parentCommitId;
-    if (commits.length > 100_000) throw new Error("Commit ancestry exceeds safety limit");
-  }
-  commits.reverse();
-  const result: CommittedHistoryEntry[] = [];
-  for (const commit of commits) {
-    for (const eventHash of commit.eventHashes) {
-      const event = await engine.objects.getEvent(eventHash);
-      const delta = event.effects.stateDeltaHash
-        ? await engine.objects.getDelta(event.effects.stateDeltaHash)
-        : { version: 1 as const, operations: [] };
-      result.push({ commitId: commit.id, eventHash, event, delta });
-    }
-  }
-  return result;
+  // Preserve the legacy caller contract that the list itself may be sorted or
+  // reversed. Entries remain frozen because they are authoritative cached
+  // projections and must never be rewritten by a consumer.
+  return [...(await engine.projections.project(commitId)).history];
 }
 
 export function realizedCanonicalEvents(history: readonly CommittedHistoryEntry[]): ReadonlySet<string> {

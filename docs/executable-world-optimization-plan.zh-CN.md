@@ -684,7 +684,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T3 — ProgressCertificate 与正确性闭环
 
-- **状态：** pending
+- **状态：** complete
 - **依赖：** T2
 - **主要文件：**
   - `src/world/engine.ts`
@@ -694,6 +694,13 @@ CanonicalSnapshot V8 至少固定：
 - **交付：** host-derived certificate、empty-event rejection、utterance semantics、opaque constraint tokens
 - **测试：** false progress、empty actor reaction、speech vs knowledge、token spoof/reuse、hidden disclosure
 - **建议提交：** `feat: derive material progress at the commit boundary`
+- **完成说明：** 非 genesis 事件必须携带由宿主在 commit boundary 根据实际持久化
+  effect operation、utterance、有效时间推进和已验证 scene transition 派生的
+  ProgressCertificate；NarrativeProgress 不再证明 materiality。重复知识写入、结果文本冒充
+  进展和 generic empty reaction 均被拒绝，speech 与 knowledge 成为独立 channel。世界裁决
+  依据改为与 parent commit 和候选 hash 绑定的一次性随机 capability token，并验证 spoof、
+  跨 scope 使用、reuse 及 engine-private 信息进入 actor-facing 文本。全量验证：
+  `pnpm run check` 通过，`pnpm test` 136 files / 792 tests 通过。
 
 ### T4 — SceneOccurrence、EventFrame、ActionSchema
 

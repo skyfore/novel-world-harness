@@ -385,6 +385,17 @@ async function preflightPlayerAffordance(
     // testing a concrete attempted action rather than a metadata-only event.
     outcome: "succeeded",
   };
+  if (affordance.intent === "act" && !action.proposal.progress.scene) {
+    action.proposal.progress.scene = {
+      kind: "stay",
+      ...(scoped.scene.label ? { label: scoped.scene.label } : {}),
+      beat: scoped.scene.beat + 1,
+    };
+    action.proposal.progress.channels = [...new Set([...action.proposal.progress.channels, "scene"])] as ProgressChannel[];
+  }
+  const requestedTimeAdvance = affordance.candidate.intent?.requestedTimeAdvance
+    ?? (affordance.intent === "wait" ? { amount: 5 as const, unit: "minute" as const } : undefined);
+  if (requestedTimeAdvance) action.proposal.timeAdvance = structuredClone(requestedTimeAdvance);
   const gate = await validateActionKnowledge(engine, action);
   if (!gate.accepted) return gate.errors;
   const state = await engine.projector.project(commitId);
@@ -840,7 +851,10 @@ function trailingStagnationDepth(
     const { event, delta } = entry;
     if (event.title === "Genesis") break;
     if (!event.participants.includes(actorId) && event.actorId !== actorId) continue;
-    const sceneMoved = Boolean(event.progress?.scene && event.progress.scene.kind !== "stay");
+    const sceneMoved = Boolean(
+      event.progressCertificate.sceneTransition
+      && event.progressCertificate.sceneTransition.kind !== "stay",
+    );
     const materiallyAdvanced = delta.operations.length > 0
       || Boolean(event.effects.knowledgeDeltaHash)
       || Boolean(event.timeAdvance)

@@ -24,6 +24,7 @@ import {
   type NarrativeProgress,
   type ProgressChannel,
   type Predicate,
+  type ProgressCertificate,
   type StoryTime,
   type TimeAdvance,
   type StateFieldSpec,
@@ -39,6 +40,11 @@ import { advanceStoryTime, timeAdvanceInDays } from "./time.js";
 import { projectActorVisibleState } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { deepFreeze, immutableClone } from "../util/immutable.js";
+import {
+  ConstraintTokenLedger,
+  type ConstraintTokenBinding,
+  type OpaqueConstraint,
+} from "./constraint-token.js";
 import {
   materializeRuntimeContextNeed,
   mergeRuntimeContextSupplements,
@@ -204,17 +210,8 @@ const playerWorldEventCopySchema = playerControlledActSchema;
 
 export const playerContradictionBasisSchema = z.discriminatedUnion("source", [
   z.object({
-    source: z.literal("state"),
-    entityId: idSchema,
-    field: z.string().trim().min(1).max(240),
-  }).strict(),
-  z.object({
-    source: z.literal("active-rule"),
-    name: z.string().trim().min(1).max(500),
-  }).strict(),
-  z.object({
-    source: z.literal("deterministic-issue"),
-    code: z.string().trim().min(1).max(240),
+    source: z.literal("constraint-token"),
+    token: z.string().regex(/^ct1-[a-f0-9]{48}$/),
   }).strict(),
   z.object({
     source: z.literal("causal-principle"),
@@ -262,6 +259,8 @@ export type PlayerWorldAdjudicationContext = Readonly<{
     presentEntityIds: EntityId[];
   };
   deterministicIssues: ValidationIssue[];
+  /** One-turn capabilities; raw state/rule/issue identifiers are not accepted as proof. */
+  constraintTokens: readonly OpaqueConstraint[];
 }>;
 
 export type PlayerWorldAdjudicationInput = Readonly<{
@@ -736,7 +735,10 @@ export type PlayerTurnResult = {
   proposal?: EventProposal;
   validation?: ValidationReport;
   eventHash?: string;
-  progressCertificate?: PlayerProgressCertificate;
+  /** Commit-boundary certificate read from the immutable committed event. */
+  progressCertificate?: ProgressCertificate;
+  /** Pre-commit UX diagnostics; never an authority for event materiality. */
+  progressPreview?: PlayerProgressPreview;
   /** Safe audit records; exact source text remains in trace/tool blobs. */
   contextConsultations?: RuntimeContextConsultationRecord[];
   /** Transient, authority-labelled projections for downstream runtime consumers. */
@@ -751,7 +753,7 @@ type PlayerTurnContextState = {
   repairHints: RuntimeCompilerRepairHint[];
 };
 
-export type PlayerProgressCertificate = {
+export type PlayerProgressPreview = {
   channels: ProgressChannel[];
   threadIds: string[];
   noveltyKey: string;
@@ -1612,13 +1614,22 @@ export class PlayerTurnService {
         ...knowledgePreview.errors,
         ...enginePreview.errors,
       ]);
-      const adjudicationWorld = buildPlayerWorldAdjudicationContext(
+      const adjudicationContext = buildPlayerWorldAdjudicationContext(
         contextBefore,
         intendedCandidate,
         worldContext,
         worldState,
         deterministicIssues,
       );
+      const constraintLedger = new ConstraintTokenLedger(
+        previousHead,
+        intendedCandidate,
+        adjudicationContext.constraintBindings,
+      );
+      const adjudicationWorld: PlayerWorldAdjudicationContext = {
+        ...adjudicationContext.world,
+        constraintTokens: constraintLedger.constraints,
+      };
       let resolutionFailure: ValidationIssue[] | undefined;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         let proposedResolution: unknown;
@@ -1676,6 +1687,13 @@ export class PlayerTurnService {
         }
 
         adjudication = parsedResolution.data;
+        const disclosureIssues = validatePlayerWorldDisclosure(
+          adjudication,
+          adjudicationContext.privateDisclosureTerms,
+        );
+        if (disclosureIssues.length) {
+          return reject("adjudication", disclosureIssues, intendedCandidate);
+        }
         eventTitle = adjudication.eventTitle;
         actorObservation = adjudication.actorObservation;
         outcomeStatus = adjudication.status;
@@ -1700,7 +1718,12 @@ export class PlayerTurnService {
             ], intendedCandidate, previewAction.proposal);
           }
         } else {
-          const contradictionIssues = validatePlayerWorldContradiction(adjudication, adjudicationWorld);
+          const contradictionIssues = validatePlayerWorldContradiction(
+            adjudication,
+            constraintLedger,
+            previousHead,
+            intendedCandidate,
+          );
           if (contradictionIssues.length) {
             return reject("adjudication", contradictionIssues, intendedCandidate);
           }
@@ -1800,7 +1823,7 @@ export class PlayerTurnService {
       }
     }
 
-    let progress: { value: NarrativeProgress; certificate: PlayerProgressCertificate };
+    let progress: { value: NarrativeProgress; preview: PlayerProgressPreview };
     try {
       progress = await derivePlayerProgress(this.engine, input, candidate, contextBefore, resolution, authority, outcomeStatus);
     } catch (error) {
@@ -1866,7 +1889,8 @@ export class PlayerTurnService {
       ...(adjudication ? { adjudication } : {}),
       proposal: action.proposal,
       validation: committed.result.report,
-      progressCertificate: progress.certificate,
+      ...(committed.result.progressCertificate ? { progressCertificate: committed.result.progressCertificate } : {}),
+      progressPreview: progress.preview,
       ...(committed.result.eventHash ? { eventHash: committed.result.eventHash } : {}),
       ...(contextState.consultations.length ? { contextConsultations: structuredClone(contextState.consultations) } : {}),
       ...(contextState.supplement && runtimeContextSupplementHasMaterial(contextState.supplement)
@@ -2090,7 +2114,7 @@ async function derivePlayerProgress(
   resolution: CanonicalChoiceResolution,
   authority: PlayerTurnAuthority,
   outcomeStatus: EventOutcomeStatus,
-): Promise<{ value: NarrativeProgress; certificate: PlayerProgressCertificate }> {
+): Promise<{ value: NarrativeProgress; preview: PlayerProgressPreview }> {
   const [state, scene, worldContext] = await Promise.all([
     engine.projector.project(context.atCommit),
     projectActorScene(engine, input.actorId, context.atCommit, input.sourceId),
@@ -2229,13 +2253,32 @@ async function derivePlayerProgress(
       ...(sceneTransition ? { scene: sceneTransition } : {}),
     });
   }
+  const hasCommittedSpeech = intent.controlledAct?.interaction?.kind === "speech";
+  if (
+    !progress.scene
+    && intent.kind === "act"
+    && effectiveOperations.length === 0
+    && knowledgeOperations === 0
+    && !intent.requestedTimeAdvance
+    && !hasCommittedSpeech
+  ) {
+    progress = narrativeProgressSchema.parse({
+      ...progress,
+      channels: [...new Set([...progress.channels, "scene"])],
+      scene: {
+        kind: "stay",
+        ...(scene.label ? { label: scene.label } : {}),
+        beat: scene.beat + 1,
+      },
+    });
+  }
   const sceneChanged = Boolean(progress.scene && (
     progress.scene.kind !== "stay"
     || (progress.scene.destinationEntityId !== undefined && progress.scene.destinationEntityId !== scene.locationId)
     || (progress.scene.sceneId !== undefined && progress.scene.sceneId !== scene.key.replace(/^scene:/, ""))
   ));
   const timeAdvanced = Boolean(intent.requestedTimeAdvance);
-  const certificate: PlayerProgressCertificate = {
+  const preview: PlayerProgressPreview = {
     channels: [...progress.channels],
     threadIds: [...progress.threadIds],
     noveltyKey: progress.noveltyKey,
@@ -2248,7 +2291,7 @@ async function derivePlayerProgress(
       || sceneChanged
       || timeAdvanced,
   };
-  return { value: progress, certificate };
+  return { value: progress, preview };
 }
 
 function stateOperationChangesState(
@@ -2279,13 +2322,19 @@ function operationKey(operation: PlayerActionCandidate["proposedDelta"]["operati
 }
 
 
+type PlayerWorldAdjudicationBuild = {
+  world: Omit<PlayerWorldAdjudicationContext, "constraintTokens">;
+  constraintBindings: ConstraintTokenBinding[];
+  privateDisclosureTerms: string[];
+};
+
 function buildPlayerWorldAdjudicationContext(
   actorContext: ActorScopedActionContext,
   candidate: PlayerActionCandidate,
   worldContext: WorldModelContext,
   worldState: WorldState,
   deterministicIssues: ValidationIssue[],
-): PlayerWorldAdjudicationContext {
+): PlayerWorldAdjudicationBuild {
   const relevantEntityIds = new Set<EntityId>([
     actorContext.actorId,
     ...actorContext.scene.presentEntityIds,
@@ -2325,17 +2374,17 @@ function buildPlayerWorldAdjudicationContext(
     }
     return result;
   };
-  return {
-    entities: actorContext.referenceableEntities
+  const entities = actorContext.referenceableEntities
       .filter((entity) => relevantEntityIds.has(entity.id))
       .map((entity) => ({
         id: entity.id,
         kind: entity.kind,
         name: entity.name,
         state: safeState(entity.id),
-      })),
-    activeRules: modelVisibleWorldRules(
-      resolveEffectiveWorldRules(worldContext.rules, worldState).effective,
+      }));
+  const effectiveRules = resolveEffectiveWorldRules(worldContext.rules, worldState).effective;
+  const actorVisibleRules = modelVisibleWorldRules(
+      effectiveRules,
       {
         knownClaimIds: new Set(actorContext.knowledge
           .filter((item) => item.status !== "disbelieves")
@@ -2347,13 +2396,41 @@ function buildPlayerWorldAdjudicationContext(
         ]),
         entities: worldContext.entities,
       },
-    ),
-    scene: {
-      ...(actorContext.scene.label ? { label: actorContext.scene.label } : {}),
-      ...(actorContext.scene.locationId ? { locationId: actorContext.scene.locationId } : {}),
-      presentEntityIds: [...actorContext.scene.presentEntityIds],
+    );
+  const actorVisibleRuleNames = new Set(actorVisibleRules.map((rule) => rule.name));
+  const activeRules = effectiveRules.map((effective) => ({
+    name: effective.name,
+    scope: effective.rule.scope,
+    appliesWhen: structuredClone(effective.rule.appliesWhen),
+    requires: structuredClone(effective.requires),
+    forbids: structuredClone(effective.forbids),
+  }));
+  const constraintBindings: ConstraintTokenBinding[] = [
+    ...entities.flatMap((entity) => Object.keys(entity.state)
+      .sort()
+      .map((field) => ({ kind: "state" as const, entityId: entity.id, field }))),
+    ...activeRules.map((rule) => ({ kind: "active-rule" as const, ruleName: rule.name })),
+    ...deterministicIssues.map((entry) => ({ kind: "deterministic-issue" as const, issueCode: entry.code })),
+  ];
+  const privateDisclosureTerms = [
+    ...effectiveRules.flatMap((effective) => actorVisibleRuleNames.has(effective.name)
+      ? []
+      : [effective.id, effective.name]),
+    ...deterministicIssues.flatMap((entry) => [entry.code, entry.message]),
+  ];
+  return {
+    world: {
+      entities,
+      activeRules,
+      scene: {
+        ...(actorContext.scene.label ? { label: actorContext.scene.label } : {}),
+        ...(actorContext.scene.locationId ? { locationId: actorContext.scene.locationId } : {}),
+        presentEntityIds: [...actorContext.scene.presentEntityIds],
+      },
+      deterministicIssues: structuredClone(deterministicIssues),
     },
-    deterministicIssues: structuredClone(deterministicIssues),
+    constraintBindings,
+    privateDisclosureTerms,
   };
 }
 
@@ -2369,45 +2446,30 @@ function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
 
 function validatePlayerWorldContradiction(
   resolution: Extract<PlayerWorldResolution, { decision: "transform" }>,
-  world: PlayerWorldAdjudicationContext,
+  ledger: ConstraintTokenLedger<PlayerActionCandidate>,
+  parentCommitId: CommitId,
+  candidate: PlayerActionCandidate,
 ): ValidationIssue[] {
-  const entities = new Map(world.entities.map((entity) => [entity.id, entity]));
-  const activeRuleNames = new Set(world.activeRules.map((rule) => rule.name));
-  const deterministicCodes = new Set(world.deterministicIssues.map((entry) => entry.code));
   const issues: ValidationIssue[] = [];
+  const tokenBases = resolution.contradiction.basis
+    .filter((basis): basis is Extract<PlayerContradictionBasis, { source: "constraint-token" }> =>
+      basis.source === "constraint-token");
+  let bindings: ConstraintTokenBinding[] = [];
+  if (tokenBases.length) {
+    try {
+      bindings = ledger.consume(tokenBases.map((basis) => basis.token), parentCommitId, candidate);
+    } catch (error) {
+      issues.push(issue(
+        "PLAYER_WORLD_CONSTRAINT_TOKEN_INVALID",
+        error instanceof Error ? error.message : String(error),
+        "contradiction.basis",
+      ));
+      return issues;
+    }
+  }
   resolution.contradiction.basis.forEach((basis, index) => {
+    if (basis.source === "constraint-token") return;
     const path = `contradiction.basis.${index}`;
-    if (basis.source === "state") {
-      const entity = entities.get(basis.entityId);
-      if (!entity || !Object.hasOwn(entity.state, basis.field)) {
-        issues.push(issue(
-          "PLAYER_WORLD_CONTRADICTION_UNGROUNDED",
-          "A state contradiction basis must name a supplied entity field that exists in committed world state.",
-          path,
-        ));
-      }
-      return;
-    }
-    if (basis.source === "active-rule") {
-      if (!activeRuleNames.has(basis.name)) {
-        issues.push(issue(
-          "PLAYER_WORLD_CONTRADICTION_UNGROUNDED",
-          "A rule contradiction basis must name a rule active in the supplied world slice.",
-          path,
-        ));
-      }
-      return;
-    }
-    if (basis.source === "deterministic-issue") {
-      if (!deterministicCodes.has(basis.code)) {
-        issues.push(issue(
-          "PLAYER_WORLD_CONTRADICTION_UNGROUNDED",
-          "A deterministic contradiction basis must cite an issue produced for this exact candidate.",
-          path,
-        ));
-      }
-      return;
-    }
     if (resolution.contradiction.kind !== "causality" && resolution.contradiction.kind !== "capability") {
       issues.push(issue(
         "PLAYER_WORLD_CONTRADICTION_UNGROUNDED",
@@ -2416,11 +2478,16 @@ function validatePlayerWorldContradiction(
       ));
     }
   });
-  const sources = new Set(resolution.contradiction.basis.map((basis) => basis.source));
+  const sources = new Set([
+    ...bindings.map((binding) => binding.kind),
+    ...resolution.contradiction.basis.flatMap((basis) => basis.source === "causal-principle"
+      ? [basis.source]
+      : []),
+  ]);
   const kindIsGrounded = resolution.contradiction.kind === "state"
     ? sources.has("state")
     : resolution.contradiction.kind === "world-rule"
-      ? sources.has("active-rule")
+      ? sources.has("active-rule") || sources.has("deterministic-issue")
       : resolution.contradiction.kind === "spatial" || resolution.contradiction.kind === "knowledge"
         ? sources.has("deterministic-issue") || sources.has("state")
         : sources.has("causal-principle") || sources.has("state") || sources.has("active-rule");
@@ -2432,6 +2499,24 @@ function validatePlayerWorldContradiction(
     ));
   }
   return issues;
+}
+
+function validatePlayerWorldDisclosure(
+  resolution: Exclude<PlayerWorldResolution, { decision: "needs-context" }>,
+  privateTerms: readonly string[],
+): ValidationIssue[] {
+  const actorFacingText = `${resolution.eventTitle}\n${resolution.actorObservation}`.normalize("NFKC").toLocaleLowerCase();
+  const leakedToken = actorFacingText.match(/ct1-[a-f0-9]{48}/u)?.[0];
+  const leakedTerm = privateTerms.find((term) => {
+    const normalized = term.trim().normalize("NFKC").toLocaleLowerCase();
+    return normalized.length >= 4 && actorFacingText.includes(normalized);
+  });
+  if (!leakedToken && !leakedTerm) return [];
+  return [issue(
+    "PLAYER_WORLD_PRIVATE_CONSTRAINT_DISCLOSURE",
+    "Actor-facing event text disclosed an engine-private constraint or capability token.",
+    "actorObservation",
+  )];
 }
 
 function validatePredicateScope(

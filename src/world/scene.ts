@@ -70,7 +70,9 @@ export async function projectActorScene(
     if (entry.event.evidence.length
       && !evidenceBelongsExclusivelyToSource(entry.event.evidence, effectiveSourceId)) continue;
     const actorLocationWrite = finalLocationWrite(entry.delta, actorId);
-    const progressScene = entry.event.participants.includes(actorId) ? entry.event.progress?.scene : undefined;
+    const progressScene = entry.event.participants.includes(actorId)
+      ? entry.event.progressCertificate.sceneTransition
+      : undefined;
     const boundary = actorLocationWrite !== undefined
       || Boolean(progressScene && progressScene.kind !== "stay");
 

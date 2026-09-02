@@ -273,9 +273,10 @@ describe("narrative scene director", () => {
       evidence: [],
       progress: {
         version: 1,
-        channels: ["relationship", "thread", "consequence"],
+        channels: ["relationship", "thread", "consequence", "scene"],
         threadIds: ["rivalry"],
         noveltyKey: "rivalry:confront",
+        scene: { kind: "stay", beat: 2 },
       },
     });
     const plan = await engine.commitProposal({
@@ -319,7 +320,7 @@ describe("narrative scene director", () => {
         channels: ["state", "scene", "thread"],
         threadIds: ["rivalry"],
         noveltyKey: "rivalry:leave",
-        scene: { kind: "arrive", destinationEntityId: "camp", label: "Camp", beat: 1 },
+        scene: { kind: "arrive", destinationEntityId: "camp", label: "Camp", beat: 3 },
       },
     });
     const scene = await projectActorScene(engine, "hero", moved.newHead);

@@ -437,7 +437,10 @@ function npcExchangeStagnationDepth(
   for (const { event, delta } of [...history].reverse()) {
     if (event.title === "Genesis") break;
     if (!event.participants.includes(playerId) || !event.participants.includes(npcId)) continue;
-    const sceneMoved = Boolean(event.progress?.scene && event.progress.scene.kind !== "stay");
+    const sceneMoved = Boolean(
+      event.progressCertificate.sceneTransition
+      && event.progressCertificate.sceneTransition.kind !== "stay",
+    );
     if (delta.operations.length || event.effects.knowledgeDeltaHash || event.timeAdvance || sceneMoved) break;
     depth += 1;
   }

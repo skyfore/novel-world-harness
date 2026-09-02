@@ -106,10 +106,11 @@ describe("play conversation memory", () => {
       evidence: [],
       progress: {
         version: 1,
-        channels: ["consequence"],
+        channels: ["consequence", "scene"],
         threadIds: [],
         noveltyKey: "main-only-step",
         outcome: "succeeded",
+        scene: { kind: "stay", beat: 1 },
       },
     });
     expect(advanced.report.accepted).toBe(true);

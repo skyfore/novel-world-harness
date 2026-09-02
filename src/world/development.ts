@@ -111,7 +111,7 @@ export async function projectCharacterDevelopment(
         title: observation.summary,
         logicalTime: structuredClone(entry.event.logicalTime),
         participantIds: [actorId],
-        progressChannels: [...(entry.event.progress?.channels ?? [])],
+        progressChannels: [...entry.event.progressCertificate.channels],
       }];
     });
   const candidateModel = overrides.model === undefined ? context.actorModels?.get(actorId) : overrides.model;

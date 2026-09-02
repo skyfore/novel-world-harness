@@ -58,6 +58,12 @@ describe("WorldEngine", () => {
     const result = await engine.commitProposal(proposal);
     expect(result.report.accepted).toBe(true);
     expect(result.newHead).not.toBe(genesis);
+    expect(result.progressCertificate).toMatchObject({
+      stateOperations: [{ operationIndex: 0 }],
+      knowledgeOperations: [],
+      channels: expect.arrayContaining(["state", "consequence"]),
+    });
+    expect(result.progressCertificate?.stateOperations[0]?.effectHash).toBe(result.report.derivedDeltaHash);
 
     const first = await engine.projector.project(result.newHead);
     const second = await engine.projector.project(result.newHead);
@@ -128,7 +134,79 @@ describe("WorldEngine", () => {
       },
     });
     expect(falseState.report.errors).toContainEqual(expect.objectContaining({ code: "FALSE_STATE_PROGRESS" }));
+    const outcomeOnly = await engine.commitProposal({
+      ...proposal,
+      proposalId: "outcome-only-progress",
+      progress: {
+        version: 1,
+        channels: ["consequence"],
+        threadIds: [],
+        noveltyKey: "outcome-only",
+        outcome: "succeeded",
+      },
+    });
+    expect(outcomeOnly.report.errors).toContainEqual(expect.objectContaining({ code: "EVENT_MATERIALITY_REQUIRED" }));
     expect(await engine.branches.readHead("main")).toBe(genesis);
+  });
+
+  it("does not certify or persist a repeated knowledge no-op", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "cao-cao", field: "character.alive", value: true }],
+    });
+    const proposal = {
+      branchId: "main",
+      source: "background" as const,
+      title: "Cao Cao remembers a report",
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" as const },
+      preconditions: [],
+      proposedDelta: { version: 1 as const, operations: [] },
+      proposedKnowledge: {
+        version: 1 as const,
+        operations: [{ op: "learn" as const, actorId: "cao-cao", claimId: "same-report", status: "heard" as const, confidence: 0.5 }],
+      },
+      causalParents: [],
+      evidence: [],
+    };
+    const first = await engine.commitProposal({ ...proposal, proposalId: "first-report", expectedParentCommit: genesis });
+    expect(first.report.accepted).toBe(true);
+    expect(first.progressCertificate?.knowledgeOperations).toHaveLength(1);
+    const repeated = await engine.commitProposal({ ...proposal, proposalId: "same-report-again", expectedParentCommit: first.newHead });
+    expect(repeated.report.accepted).toBe(false);
+    expect(repeated.report.errors).toContainEqual(expect.objectContaining({ code: "EVENT_MATERIALITY_REQUIRED" }));
+    expect(repeated.newHead).toBe(first.newHead);
+  });
+
+  it("certifies speech without automatically granting knowledge", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "cao-cao", field: "character.alive", value: true }],
+    });
+    const spoken = await engine.commitProposal({
+      proposalId: "spoken-without-belief",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "player",
+      actorId: "cao-cao",
+      title: "Cao Cao speaks aloud",
+      spokenUtterances: [{ speakerId: "cao-cao", addresseeIds: ["cao-cao"], content: "The gate is open.", channel: "audible" }],
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(spoken.report.accepted).toBe(true);
+    expect(spoken.progressCertificate).toMatchObject({
+      utteranceCount: 1,
+      knowledgeOperations: [],
+      channels: ["speech"],
+    });
+    expect((await engine.projections.project(spoken.newHead)).knowledge.actors["cao-cao"]).toBeUndefined();
   });
 
   it("rejects activation of an unknown world rule", async () => {
@@ -176,6 +254,11 @@ describe("WorldEngine", () => {
     if (!result.eventHash) throw new Error("accepted event must have a hash");
     const event = await engine.objects.getEvent(result.eventHash);
     expect(event.effects).toEqual({ version: 1 });
+    expect(event.progressCertificate).toMatchObject({
+      stateOperations: [],
+      timeAdvanced: true,
+      channels: expect.arrayContaining(["time", "time-pressure", "consequence"]),
+    });
     expect((await engine.projector.project(result.newHead)).logicalTime.elapsedDays).toBeCloseTo(1 / 1_440);
   });
 

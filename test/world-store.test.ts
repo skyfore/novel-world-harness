@@ -40,6 +40,17 @@ describe("canonical world objects", () => {
       title: "A witness learns the password",
       participants: ["witness"],
       effects: { version: 1, knowledgeDeltaHash },
+      progressCertificate: {
+        version: 1,
+        stateOperations: [],
+        knowledgeOperations: [{ effectHash: knowledgeDeltaHash, operationIndex: 0 }],
+        semanticOperations: [],
+        processOperations: [],
+        normOperations: [],
+        utteranceCount: 0,
+        timeAdvanced: false,
+        channels: ["knowledge"],
+      },
       evidence: [],
       causalParents: [],
     } as const;

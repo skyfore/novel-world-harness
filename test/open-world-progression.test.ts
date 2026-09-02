@@ -244,8 +244,8 @@ describe("open-world progression", () => {
     expect(outcome.result.accepted).toBe(true);
     expect(outcome.result.progressCertificate).toMatchObject({
       timeAdvanced: true,
-      materiallyAdvanced: true,
     });
+    expect(outcome.result.progressPreview?.materiallyAdvanced).toBe(true);
     expect(outcome.backgroundEvents).toHaveLength(1);
     expect(outcome.backgroundEvents[0]?.title).toBe("The approaching storm reaches the settlement");
     const state = await engine.projector.project(outcome.finalHead);
@@ -285,8 +285,8 @@ describe("open-world progression", () => {
 
     expect(outcome.result.progressCertificate).toMatchObject({
       timeAdvanced: true,
-      materiallyAdvanced: true,
     });
+    expect(outcome.result.progressPreview?.materiallyAdvanced).toBe(true);
     expect(outcome.backgroundEvents).toEqual([]);
     const state = await engine.projector.project(outcome.finalHead);
     expect(state.logicalTime.elapsedDays).toBeCloseTo(5 / (24 * 60));

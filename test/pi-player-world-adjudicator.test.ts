@@ -7,6 +7,7 @@ import { createPiPlayerWorldAdjudicator } from "../src/agent/pi-player-world-adj
 import type { PlayerWorldAdjudicationInput } from "../src/world/player-action.js";
 
 const roots: string[] = [];
+const DEATH_CONSTRAINT_TOKEN = `ct1-${"a".repeat(48)}`;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -69,6 +70,12 @@ function input(): PlayerWorldAdjudicationInput {
       activeRules: [],
       scene: { presentEntityIds: ["hero-stable-id", "fallen-friend"] },
       deterministicIssues: [],
+      constraintTokens: [{
+        kind: "state",
+        entityId: "fallen-friend",
+        field: "character.alive",
+        token: DEATH_CONSTRAINT_TOKEN,
+      }],
     },
   };
 }
@@ -101,7 +108,7 @@ describe("Pi player world adjudicator", () => {
               kind: "capability",
               summary: "Ordinary action cannot reverse the committed death.",
               basis: [
-                { source: "state", entityId: "entity-001", field: "character.alive" },
+                { source: "constraint-token", token: DEATH_CONSTRAINT_TOKEN },
                 { source: "causal-principle", principle: "Ordinary action cannot reverse death." },
               ],
             },
@@ -133,7 +140,7 @@ describe("Pi player world adjudicator", () => {
       replacement: { intent: { targets: [{ kind: "entity", entityId: "fallen-friend" }] } },
     });
     expect((result as { contradiction: { basis: unknown[] } }).contradiction.basis).toEqual(expect.arrayContaining([
-      { source: "state", entityId: "fallen-friend", field: "character.alive" },
+      { source: "constraint-token", token: DEATH_CONSTRAINT_TOKEN },
     ]));
     expect(prompt).toContain("character.alive");
     expect(prompt).toContain("The friend lies motionless before you");

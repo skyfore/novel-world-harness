@@ -898,7 +898,8 @@ describe("PlayerTurnService", () => {
     expect(result.accepted).toBe(true);
     expect(result.issues).toEqual([]);
     expect(result.proposal?.proposedDelta.operations).toEqual([]);
-    expect(result.progressCertificate).toMatchObject({ sceneChanged: true, effectiveStateOperations: 0 });
+    expect(result.progressCertificate).toMatchObject({ sceneTransition: { kind: "depart" }, stateOperations: [] });
+    expect(result.progressPreview).toMatchObject({ sceneChanged: true, effectiveStateOperations: 0 });
     expect(result.proposal?.progress?.scene).toMatchObject({ kind: "depart", label: "街上", sceneId: expect.stringMatching(/^open-/) });
     const scene = await projectActorScene(engine, "hero", result.newHead);
     expect(scene.locationId).toBeUndefined();
@@ -975,6 +976,11 @@ describe("PlayerTurnService", () => {
         adjudicated = true;
         expect(input.world.entities.find((entity) => entity.id === "mo-yan")?.state["character.alive"]).toBe(false);
         expect(JSON.stringify(input.world)).not.toContain("future-ambush");
+        const aliveConstraint = input.world.constraintTokens.find((constraint) =>
+          constraint.kind === "state"
+          && constraint.entityId === "mo-yan"
+          && constraint.field === "character.alive");
+        expect(aliveConstraint).toBeDefined();
         return {
           decision: "transform",
           status: "blocked",
@@ -982,7 +988,7 @@ describe("PlayerTurnService", () => {
             kind: "capability",
             summary: "当前世界没有能以普通行动逆转死亡的能力。",
             basis: [
-              { source: "state", entityId: "mo-yan", field: "character.alive" },
+              { source: "constraint-token", token: aliveConstraint!.token },
               { source: "causal-principle", principle: "普通人的即时行动不能让死亡者恢复生命。" },
             ],
           },
@@ -1034,7 +1040,7 @@ describe("PlayerTurnService", () => {
         contradiction: {
           kind: "state",
           summary: "Invented blocker",
-          basis: [{ source: "state", entityId: "hero", field: "character.nonexistent" }],
+          basis: [{ source: "constraint-token", token: `ct1-${"0".repeat(48)}` }],
         },
         replacement: {
           title: "Nothing happens",
@@ -1054,7 +1060,54 @@ describe("PlayerTurnService", () => {
 
     expect(result.accepted).toBe(false);
     expect(result.stage).toBe("adjudication");
-    expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_WORLD_CONTRADICTION_UNGROUNDED" }));
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_WORLD_CONSTRAINT_TOKEN_INVALID" }));
+    expect(await engine.branches.readHead("main")).toBe(head);
+  });
+
+  it("rejects engine-private constraint details in actor-facing adjudication text", async () => {
+    const { engine, head } = await fixture();
+    const service = new PlayerTurnService(
+      engine,
+      () => ({
+        ...moveToCamp(),
+        preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.alive", value: false }],
+      }),
+      undefined,
+      undefined,
+      undefined,
+      (input) => {
+        const constraint = input.world.constraintTokens.find((entry) =>
+          entry.kind === "deterministic-issue"
+          && entry.issueCode === "PLAYER_PRECONDITION_UNSATISFIED");
+        expect(constraint).toBeDefined();
+        return {
+          decision: "transform",
+          status: "blocked",
+          contradiction: {
+            kind: "state",
+            summary: "The proposed prerequisite is false.",
+            basis: [{ source: "constraint-token", token: constraint!.token }],
+          },
+          replacement: {
+            title: "Hero remains in place",
+            intent: { kind: "act", summary: "Remain in place", targets: [] },
+            participants: [],
+            preconditions: [],
+            proposedDelta: { version: 1, operations: [] },
+            requiresKnowledge: [],
+            forbidsKnowledge: [],
+          },
+          eventTitle: "The attempt stops",
+          actorObservation: "PLAYER_PRECONDITION_UNSATISFIED",
+        };
+      },
+    );
+
+    const result = await service.turn({ branchId: "main", actorId: "hero", utterance: "Walk to Camp." });
+
+    expect(result.accepted).toBe(false);
+    expect(result.stage).toBe("adjudication");
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_WORLD_PRIVATE_CONSTRAINT_DISCLOSURE" }));
     expect(await engine.branches.readHead("main")).toBe(head);
   });
 

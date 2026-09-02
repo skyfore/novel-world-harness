@@ -26,6 +26,7 @@ import {
   type ObjectHash,
   type ParticipantPresence,
   type Proposition,
+  type ProgressCertificate,
   type StateDelta,
   type ValidationIssue,
   type ValidationReport,
@@ -41,7 +42,7 @@ import {
   canonicalAdaptationRoleRequirements,
   validateCanonicalAdaptationContract,
 } from "./canonical-adaptation.js";
-import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { emptyKnowledgeState, isActionableKnowledge, KnowledgeProjector, type KnowledgeState } from "./knowledge.js";
 import { isCommunicatingKnowledgeSource, validateKnowledgeSemanticReferences } from "./knowledge-semantics.js";
 import { committedHistory, projectActorScene } from "./scene.js";
 import type { SpatialRelation } from "./spatial-ontology.js";
@@ -52,6 +53,7 @@ import {
 } from "./world-rule-ontology.js";
 import { ProjectionService, type ProjectionOptions } from "./projection-service.js";
 import { WorldSnapshotStore } from "./snapshot.js";
+import { deriveProgressCertificate, hasMaterialProgress } from "./progress.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -112,11 +114,7 @@ function hasNonStateMateriality(proposal: EventProposal, timeChanged: boolean): 
   return timeChanged
     || Boolean(proposal.proposedKnowledge?.operations.length)
     || Boolean(proposal.spokenUtterances?.length)
-    || Boolean(proposal.progress?.scene)
-    // Progress outcome is host-derived from adjudication and records a real
-    // attempted action (including a blocked or failed one). T3 will move this
-    // authority into ActionInstance/AdHocActionRecord proper.
-    || Boolean(proposal.progress?.outcome);
+    || Boolean(proposal.progress?.scene);
 }
 
 export function validateEventProposal(proposalInput: EventProposal, head: CommitId, state: WorldState, context: WorldModelContext): { report: ValidationReport; postState?: WorldState } {
@@ -271,7 +269,7 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
           errors.push({ code: "RULE_FORBIDS", message: `Rule ${rule.id} forbids the proposed post-state` });
         }
       }
-      stateChanged = stateFactsChanged(state, postState);
+      stateChanged = stateFactsChanged(evaluationState, postState);
       const timeChanged = (postState.logicalTime.elapsedDays ?? 0) > (state.logicalTime.elapsedDays ?? 0)
         || JSON.stringify(postState.logicalTime.storyTime) !== JSON.stringify(state.logicalTime.storyTime);
       const hasKnowledgeEffect = Boolean(proposal.proposedKnowledge?.operations.length);
@@ -302,7 +300,13 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   return { report, postState: report.accepted ? postState : undefined };
 }
 
-export type CommitProposalResult = { report: ValidationReport; previousHead: CommitId; newHead: CommitId; eventHash?: string };
+export type CommitProposalResult = {
+  report: ValidationReport;
+  previousHead: CommitId;
+  newHead: CommitId;
+  eventHash?: string;
+  progressCertificate?: ProgressCertificate;
+};
 
 export class WorldEngine {
   readonly workspaceRoot: string;
@@ -421,7 +425,10 @@ export class WorldEngine {
     const deltaHash = stateFactsChanged(emptyInitialState, initialState)
       ? await this.objects.putDelta(initialDelta)
       : undefined;
-    const knowledgeDeltaHash = knowledge?.operations.length
+    const effectiveInitialKnowledgeIndexes = knowledge
+      ? effectiveKnowledgeOperationIndexes(emptyKnowledgeState("genesis"), knowledge)
+      : [];
+    const knowledgeDeltaHash = knowledge && effectiveInitialKnowledgeIndexes.length
       ? await this.objects.putKnowledgeDelta(knowledge)
       : undefined;
     const effects: CommittedEvent["effects"] = {
@@ -429,6 +436,19 @@ export class WorldEngine {
       ...(deltaHash ? { stateDeltaHash: deltaHash } : {}),
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
     };
+    const progressCertificate = deriveProgressCertificate({
+      effects,
+      loaded: {
+        ...(deltaHash ? { stateDelta: initialDelta } : {}),
+        ...(knowledgeDeltaHash && knowledge ? { knowledgeDelta: knowledge } : {}),
+      },
+      effectiveStateOperationIndexes: deltaHash
+        ? effectiveStateOperationIndexes(emptyInitialState, initialDelta, this.context)
+        : [],
+      effectiveKnowledgeOperationIndexes: effectiveInitialKnowledgeIndexes,
+      utteranceCount: 0,
+      timeAdvanced: false,
+    });
     const inferredRealizations = [...(this.context.events?.values() ?? [])]
       .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge))
       .map((event) => event.id);
@@ -445,6 +465,7 @@ export class WorldEngine {
       branchId,
       logicalTime,
       effects,
+      progressCertificate,
       realizesCanonicalEventIds,
       evidence,
       entryActorId: genesisOptions.entryActorId,
@@ -468,6 +489,7 @@ export class WorldEngine {
       participants,
       ...(participantPresence.length ? { participantPresence } : {}),
       effects,
+      progressCertificate,
       evidence,
       causalParents: [],
       ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
@@ -508,7 +530,8 @@ export class WorldEngine {
     if (sourceId && parsed.evidence.length) {
       assertEvidenceExclusiveToSource(parsed.evidence, sourceId, `Event proposal ${parsed.proposalId}`);
     }
-    const state = await this.projector.project(head);
+    const projection = await this.projections.project(head);
+    const state = projection.state;
     const { report: baseReport, postState } = validateEventProposal(parsed, head, state, context);
     let report = baseReport;
     if (report.accepted && parsed.canonicalAdaptation) {
@@ -593,12 +616,66 @@ export class WorldEngine {
         report = { ...withoutDerivedHash, accepted: false, errors: [...report.errors, ...runtimeErrors] };
       }
     }
+    if (report.accepted && parsed.progress?.scene && parsed.actorId) {
+      try {
+        const actorScene = await projectActorScene(this, parsed.actorId, head, sourceId);
+        if (parsed.progress.scene.beat !== actorScene.beat + 1) {
+          const { derivedDeltaHash: _derivedDeltaHash, ...withoutDerivedHash } = report;
+          report = {
+            ...withoutDerivedHash,
+            accepted: false,
+            errors: [...report.errors, {
+              code: "INVALID_SCENE_PROGRESS",
+              message: `Scene transition beat ${parsed.progress.scene.beat} must follow committed beat ${actorScene.beat}`,
+              path: "progress.scene.beat",
+            }],
+          };
+        }
+      } catch (error) {
+        const { derivedDeltaHash: _derivedDeltaHash, ...withoutDerivedHash } = report;
+        report = {
+          ...withoutDerivedHash,
+          accepted: false,
+          errors: [...report.errors, {
+            code: "INVALID_SCENE_PROGRESS",
+            message: error instanceof Error ? error.message : String(error),
+            path: "progress.scene",
+          }],
+        };
+      }
+    }
     if (!report.accepted) return { report, previousHead: head, newHead: head };
     if (!postState) throw new Error("Accepted event proposal did not produce a projected post-state");
-    const deltaHash = report.derivedDeltaHash
+    const stateBeforeDelta = advanceTemporalState(state, postState.logicalTime, context.stateSchema, context.entities);
+    const effectiveStateIndexes = report.derivedDeltaHash
+      ? effectiveStateOperationIndexes(stateBeforeDelta, parsed.proposedDelta, context)
+      : [];
+    const effectiveKnowledgeIndexes = parsed.proposedKnowledge
+      ? effectiveKnowledgeOperationIndexes(projection.knowledge, parsed.proposedKnowledge)
+      : [];
+    const timeAdvanced = (postState.logicalTime.elapsedDays ?? 0) > (state.logicalTime.elapsedDays ?? 0)
+      || JSON.stringify(postState.logicalTime.storyTime) !== JSON.stringify(state.logicalTime.storyTime);
+    const hasMaterialCandidate = effectiveStateIndexes.length > 0
+      || effectiveKnowledgeIndexes.length > 0
+      || Boolean(parsed.spokenUtterances?.length)
+      || Boolean(parsed.progress?.scene)
+      || timeAdvanced;
+    if (!hasMaterialCandidate) {
+      const { derivedDeltaHash: _derivedDeltaHash, ...withoutDerivedHash } = report;
+      report = {
+        ...withoutDerivedHash,
+        accepted: false,
+        errors: [...report.errors, {
+          code: "EVENT_MATERIALITY_REQUIRED",
+          message: "Commit-boundary reduction found no effective state, knowledge, utterance, scene, or time effect.",
+        }],
+      };
+      return { report, previousHead: head, newHead: head };
+    }
+    const deltaHash = effectiveStateIndexes.length
       ? await this.objects.putDelta(parsed.proposedDelta)
       : undefined;
-    const knowledgeDeltaHash = parsed.proposedKnowledge?.operations.length
+    const knowledgeDeltaHash = parsed.proposedKnowledge && effectiveKnowledgeIndexes.length
       ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge)
       : undefined;
     const effects: CommittedEvent["effects"] = {
@@ -606,6 +683,19 @@ export class WorldEngine {
       ...(deltaHash ? { stateDeltaHash: deltaHash } : {}),
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
     };
+    const progressCertificate = deriveProgressCertificate({
+      effects,
+      loaded: {
+        ...(deltaHash ? { stateDelta: parsed.proposedDelta } : {}),
+        ...(knowledgeDeltaHash && parsed.proposedKnowledge ? { knowledgeDelta: parsed.proposedKnowledge } : {}),
+      },
+      effectiveStateOperationIndexes: effectiveStateIndexes,
+      effectiveKnowledgeOperationIndexes: effectiveKnowledgeIndexes,
+      utteranceCount: parsed.spokenUtterances?.length ?? 0,
+      timeAdvanced,
+      ...(parsed.progress?.scene ? { sceneTransition: parsed.progress.scene } : {}),
+    });
+    if (!hasMaterialProgress(progressCertificate)) throw new Error("Accepted event has no host-certified progress");
     const logicalTime = postState.logicalTime;
     const canonicalPossibilityId = !parsed.canonicalAdaptation && parsed.possibilityId?.startsWith("canon-")
       ? parsed.possibilityId.slice("canon-".length)
@@ -626,6 +716,7 @@ export class WorldEngine {
       canonicalAdaptation: parsed.canonicalAdaptation,
       realizesCanonicalEventIds,
       progress: parsed.progress,
+      progressCertificate,
       participantPresence: parsed.participantPresence,
       actorObservations: parsed.actorObservations,
       actorAffects: parsed.actorAffects,
@@ -646,6 +737,7 @@ export class WorldEngine {
       participants: parsed.participants,
       ...(parsed.participantPresence ? { participantPresence: structuredClone(parsed.participantPresence) } : {}),
       effects,
+      progressCertificate,
       evidence: parsed.evidence,
       causalParents: parsed.causalParents,
       ...(parsed.supersedesCanonicalEventIds ? { supersedesCanonicalEventIds: parsed.supersedesCanonicalEventIds } : {}),
@@ -657,7 +749,7 @@ export class WorldEngine {
     const eventHash = await this.objects.putEvent(event);
     const commitHash = await this.objects.putCommit({ version: 1, parentCommitId: head, branchId: parsed.branchId, logicalTime, eventHashes: [eventHash], canonicalSnapshotHash: context.canonicalSnapshotHash, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION });
     await this.branches.updateHead(parsed.branchId, head, commitHash);
-    return { report, previousHead: head, newHead: commitHash, eventHash };
+    return { report, previousHead: head, newHead: commitHash, eventHash, progressCertificate };
   }
 
   private async contextForSnapshot(snapshotHash?: ObjectHash): Promise<ResolvedWorldModelContext> {
@@ -722,6 +814,72 @@ function touchedKnowledgeEntities(knowledge?: KnowledgeDelta): EntityId[] {
   return knowledge.operations.flatMap((operation) => operation.op === "learn" && operation.sourceActorId
     ? [operation.actorId, operation.sourceActorId]
     : [operation.actorId]);
+}
+
+function effectiveStateOperationIndexes(
+  input: WorldState,
+  delta: StateDelta,
+  context: Pick<WorldModelContext, "stateSchema" | "entities" | "rules">,
+): number[] {
+  let current = input;
+  const effective: number[] = [];
+  for (let index = 0; index < delta.operations.length; index += 1) {
+    const next = applyStateDelta(
+      current,
+      { version: 1, operations: [delta.operations[index]!] },
+      context.stateSchema,
+      context.entities,
+      context.rules,
+    );
+    if (stateFactsChanged(current, next)) effective.push(index);
+    current = next;
+  }
+  return stateFactsChanged(input, current) ? effective : [];
+}
+
+function effectiveKnowledgeOperationIndexes(input: KnowledgeState, delta: KnowledgeDelta): number[] {
+  const actors = structuredClone(input.actors);
+  const before = knowledgeFactsHash(actors);
+  const effective: number[] = [];
+  for (let index = 0; index < delta.operations.length; index += 1) {
+    const operation = delta.operations[index]!;
+    const actor = (actors[operation.actorId] ??= {});
+    if (operation.op === "forget") {
+      if (actor[operation.claimId]) {
+        delete actor[operation.claimId];
+        effective.push(index);
+      }
+      continue;
+    }
+    const desired = {
+      actorId: operation.actorId,
+      claimId: operation.claimId,
+      ...(operation.propositionId ? { propositionId: operation.propositionId } : {}),
+      ...(operation.attributionId ? { attributionId: operation.attributionId } : {}),
+      ...(operation.acquisitionMode ? { acquisitionMode: operation.acquisitionMode } : {}),
+      status: operation.status,
+      confidence: operation.confidence,
+      ...(operation.sourceActorId ? { sourceActorId: operation.sourceActorId } : {}),
+    };
+    const existing = actor[operation.claimId];
+    if (!existing || contentHash(withoutAcquisitionCommit(existing)) !== contentHash(desired)) {
+      effective.push(index);
+    }
+    actor[operation.claimId] = { ...desired, acquiredAtCommit: "pending" };
+  }
+  return knowledgeFactsHash(actors) === before ? [] : effective;
+}
+
+function knowledgeFactsHash(actors: KnowledgeState["actors"]): string {
+  return contentHash(Object.fromEntries(Object.entries(actors).map(([actorId, facts]) => [
+    actorId,
+    Object.fromEntries(Object.entries(facts).map(([claimId, fact]) => [claimId, withoutAcquisitionCommit(fact)])),
+  ])));
+}
+
+function withoutAcquisitionCommit<T extends { acquiredAtCommit?: string }>(fact: T): Omit<T, "acquiredAtCommit"> {
+  const { acquiredAtCommit: _acquiredAtCommit, ...semanticFact } = fact;
+  return semanticFact;
 }
 
 function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {

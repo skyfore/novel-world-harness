@@ -5,6 +5,7 @@ import { contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
 import type { Branch, CommitId } from "./model.js";
 import { WorldSnapshotStore } from "./snapshot.js";
+import { hasMaterialProgress } from "./progress.js";
 
 export type FsckIssue = {
   severity: "error" | "warning";
@@ -156,10 +157,7 @@ async function auditBranch(engine: WorldEngine, branch: Branch, reachable: Reach
       if (event.logicalTime.step !== commit.logicalTime.step) {
         issues.push(error("EVENT_TIME_MISMATCH", `Event ${eventHash} step ${event.logicalTime.step} differs from commit step ${commit.logicalTime.step}`, branch.id, eventHash));
       }
-      let material = Boolean(event.timeAdvance)
-        || Boolean(event.spokenUtterances?.length)
-        || Boolean(event.progress?.scene)
-        || Boolean(event.progress?.outcome);
+      let material = hasMaterialProgress(event.progressCertificate);
       if (event.effects.stateDeltaHash) {
         reachable.deltas.add(event.effects.stateDeltaHash);
         const delta = await engine.objects.getDelta(event.effects.stateDeltaHash);

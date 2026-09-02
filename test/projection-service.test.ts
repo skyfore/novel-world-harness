@@ -10,9 +10,11 @@ import {
   type CommittedEvent,
   type Entity,
   type EventEffectsRef,
+  type ProgressCertificate,
 } from "../src/world/model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 import { WorldSnapshotStore } from "../src/world/snapshot.js";
+import { deriveProgressCertificate } from "../src/world/progress.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -50,9 +52,18 @@ async function appendEvent(
   eventId: string,
   effects: EventEffectsRef,
   causalParents: string[] = [],
+  suppliedCertificate?: ProgressCertificate,
 ): Promise<string> {
   const parent = await engine.objects.getCommit(parentCommitId);
   const logicalTime = { step: parent.logicalTime.step + 1, elapsedDays: parent.logicalTime.elapsedDays ?? 0 };
+  const loaded = suppliedCertificate ? {} : {
+    ...(effects.stateDeltaHash ? { stateDelta: await engine.objects.getDelta(effects.stateDeltaHash) } : {}),
+    ...(effects.knowledgeDeltaHash ? { knowledgeDelta: await engine.objects.getKnowledgeDelta(effects.knowledgeDeltaHash) } : {}),
+    ...(effects.semanticDeltaHash ? { semanticDelta: await engine.objects.getSemanticDelta(effects.semanticDeltaHash) } : {}),
+    ...(effects.processDeltaHash ? { processDelta: await engine.objects.getProcessDelta(effects.processDeltaHash) } : {}),
+    ...(effects.normDeltaHash ? { normDelta: await engine.objects.getNormDelta(effects.normDeltaHash) } : {}),
+  };
+  const scene = { kind: "stay" as const, beat: logicalTime.step };
   const event: CommittedEvent = {
     version: 2,
     eventId,
@@ -61,6 +72,8 @@ async function appendEvent(
     title: eventId,
     participants: ["hero", "witness"],
     effects,
+    progressCertificate: suppliedCertificate
+      ?? deriveProgressCertificate({ effects, loaded, utteranceCount: 0, timeAdvanced: false, sceneTransition: scene }),
     evidence: [],
     causalParents,
     progress: {
@@ -68,7 +81,7 @@ async function appendEvent(
       channels: ["scene"],
       threadIds: [],
       noveltyKey: eventId,
-      scene: { kind: "stay", beat: logicalTime.step },
+      scene,
     },
   };
   const eventHash = await engine.objects.putEvent(event);
@@ -225,10 +238,47 @@ describe("ProjectionService", () => {
     const head = await appendEvent(engine, genesis, "main", "dangling-effect", {
       version: 1,
       processDeltaHash: missing,
+    }, [], {
+      version: 1,
+      stateOperations: [],
+      knowledgeOperations: [],
+      semanticOperations: [],
+      processOperations: [{ effectHash: missing, operationIndex: 0 }],
+      normOperations: [],
+      utteranceCount: 0,
+      timeAdvanced: false,
+      sceneTransition: { kind: "stay", beat: 1 },
+      channels: ["process", "scene", "time-pressure", "consequence"],
     });
 
     await expect(engine.projections.project(head)).rejects.toThrow(/Cannot project event dangling-effect.*ENOENT/s);
     expect(() => engine.projections.clear(head)).not.toThrow();
+  });
+
+  it("rejects a forged progress pointer even when the referenced effect object exists", async () => {
+    const { engine, genesis } = await fixture();
+    const deltaHash = await engine.objects.putDelta({
+      version: 1,
+      operations: [{ op: "set", entityId: "hero", field: "character.alive", value: false }],
+    });
+    const head = await appendEvent(engine, genesis, "main", "forged-progress", {
+      version: 1,
+      stateDeltaHash: deltaHash,
+    }, [], {
+      version: 1,
+      stateOperations: [{ effectHash: deltaHash, operationIndex: 99 }],
+      knowledgeOperations: [],
+      semanticOperations: [],
+      processOperations: [],
+      normOperations: [],
+      utteranceCount: 0,
+      timeAdvanced: false,
+      sceneTransition: { kind: "stay", beat: 1 },
+      channels: ["state", "scene", "consequence"],
+    });
+
+    await expect(engine.projections.project(head, { fresh: true, useCheckpoints: false }))
+      .rejects.toThrow("state progress pointer 99 is outside the effect delta");
   });
 
   it("resumes every reducer from the nearest checkpoint and replays only the shared tail", async () => {

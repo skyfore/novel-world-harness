@@ -631,6 +631,7 @@ export async function performPlayTurn(options: {
       ...(result.validation ? { validation: structuredClone(result.validation) } : {}),
       ...(result.eventHash ? { eventHash: result.eventHash } : {}),
       ...(result.progressCertificate ? { progressCertificate: structuredClone(result.progressCertificate) } : {}),
+      ...(result.progressPreview ? { progressPreview: structuredClone(result.progressPreview) } : {}),
       ...(result.contextConsultations?.length ? { contextConsultations: structuredClone(result.contextConsultations) } : {}),
       repairHintIds: [...repairHintIds],
       ...(repairHintError ? { repairHintError } : {}),

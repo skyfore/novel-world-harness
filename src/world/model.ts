@@ -783,6 +783,11 @@ export type CharacterEntryCheckpoint = z.infer<typeof characterEntryCheckpointSc
 export const progressChannelSchema = z.enum([
   "state",
   "knowledge",
+  "semantic",
+  "process",
+  "norm",
+  "speech",
+  "time",
   "scene",
   "relationship",
   "resource",
@@ -820,6 +825,11 @@ export const sceneTransitionSchema = z
   });
 export type SceneTransition = z.infer<typeof sceneTransitionSchema>;
 
+/**
+ * Non-authoritative presentation/scheduling hint. It may be proposed by a
+ * host policy or model, but none of its fields prove that an event is material.
+ * Committed materiality is represented only by ProgressCertificate below.
+ */
 export const narrativeProgressSchema = z
   .object({
     version: z.literal(1),
@@ -842,6 +852,56 @@ export const narrativeProgressSchema = z
     }
   });
 export type NarrativeProgress = z.infer<typeof narrativeProgressSchema>;
+
+export const effectPointerSchema = z.object({
+  effectHash: objectHashSchema,
+  operationIndex: z.number().int().nonnegative(),
+}).strict();
+export type EffectPointer = z.infer<typeof effectPointerSchema>;
+
+export const progressCertificateSchema = z.object({
+  version: z.literal(1),
+  stateOperations: z.array(effectPointerSchema).max(1_024),
+  knowledgeOperations: z.array(effectPointerSchema).max(1_024),
+  semanticOperations: z.array(effectPointerSchema).max(1_024),
+  processOperations: z.array(effectPointerSchema).max(1_024),
+  normOperations: z.array(effectPointerSchema).max(1_024),
+  utteranceCount: z.number().int().nonnegative(),
+  timeAdvanced: z.boolean(),
+  sceneTransition: sceneTransitionSchema.optional(),
+  channels: z.array(progressChannelSchema),
+}).strict().superRefine((certificate, ctx) => {
+  const uniqueChannels = new Set(certificate.channels);
+  if (uniqueChannels.size !== certificate.channels.length) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "Progress certificate channels must be unique" });
+  }
+  for (const [field, channel] of [
+    ["stateOperations", "state"],
+    ["knowledgeOperations", "knowledge"],
+    ["semanticOperations", "semantic"],
+    ["processOperations", "process"],
+    ["normOperations", "norm"],
+  ] as const) {
+    const pointers = certificate[field];
+    const keys = pointers.map((pointer) => `${pointer.effectHash}:${pointer.operationIndex}`);
+    if (new Set(keys).size !== keys.length) {
+      ctx.addIssue({ code: "custom", path: [field], message: `${field} must not repeat an effect operation` });
+    }
+    if (Boolean(pointers.length) !== uniqueChannels.has(channel)) {
+      ctx.addIssue({ code: "custom", path: ["channels"], message: `${channel} channel must exactly match ${field}` });
+    }
+  }
+  if (Boolean(certificate.utteranceCount) !== uniqueChannels.has("speech")) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "speech channel must exactly match utteranceCount" });
+  }
+  if (certificate.timeAdvanced !== uniqueChannels.has("time")) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "time channel must exactly match timeAdvanced" });
+  }
+  if (Boolean(certificate.sceneTransition) !== uniqueChannels.has("scene")) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "scene channel must exactly match sceneTransition" });
+  }
+});
+export type ProgressCertificate = z.infer<typeof progressCertificateSchema>;
 
 export const canonicalEventSchema = z.object({
   id: idSchema,
@@ -1099,6 +1159,7 @@ export const committedEventSchema = z
     participants: z.array(idSchema),
     participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     effects: eventEffectsRefSchema,
+    progressCertificate: progressCertificateSchema,
     evidence: z.array(evidenceRefSchema),
     causalParents: z.array(idSchema),
     supersedesCanonicalEventIds: z.array(idSchema).optional(),

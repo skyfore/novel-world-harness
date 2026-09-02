@@ -34,7 +34,7 @@ Truth and agency boundaries:
 - The currentWorld object is the complete relevant present-time slice supplied by the host. It may include world facts and active rules the actor does not know. It contains no future canon.
 - contextSupplement, when present, contains host-admitted committed-world facts from one branch-pinned source consultation. It may clarify existing identity or prior/current context but never overrides currentWorld.
 - Choose realize by default. Choose transform only when the intended immediate result directly contradicts a supplied committed fact, an applicable active rule, a deterministic issue, or unavoidable ordinary causality/capability. When a material missing detail prevents either decision, choose needs-context and ask one concrete question instead of guessing or disguising uncertainty as a contradiction. Mere uncertainty, missing detail, dramatic inconvenience, low probability, or departure from canon is not a contradiction.
-- Every transform must carry contradiction.basis. Cite supplied opaque entity/field handles for state, an exact active-rule name, an exact deterministic issue code, or a concise ordinary causal/capability principle. The host verifies state/rule/issue citations; unsupported citations prevent commitment.
+- Every transform must carry contradiction.basis. For supplied state, active rules, or deterministic issues, copy the exact matching constraintTokens[].token and use source=constraint-token. A concise ordinary causal/capability principle is allowed only for causality/capability. Tokens are bound to this candidate and branch head, single-use, and unguessable: never invent, edit, or reuse one.
 - When supplied state/rules establish ordinary non-supernatural causality and the player demands an immediately supernatural result (for example making a dead person alive by ordinary effort), ordinary causality may be the direct contradiction. Absence of a detail alone is not such evidence. Resolve what the attempt actually causes; do not create the demanded power merely to comply.
 - A transform is not an error or refusal. replacement must describe the immediate in-world consequence that actually occurs. It may have an empty state delta and still carry a concrete act/consequence intent. Never put error, invalid, system, model, tool, schema, or commit language in eventTitle or actorObservation.
 - eventTitle is concise event fact. actorObservation is only what the acting character can immediately perceive; do not reveal hidden state, hidden rules, or the contradiction rationale through it.
@@ -78,6 +78,9 @@ export function createPiPlayerWorldAdjudicator(
         code: entry.code,
         ...(entry.path ? { path: entry.path } : {}),
       })),
+      constraintTokens: input.world.constraintTokens.map((constraint) => constraint.kind === "state"
+        ? { ...constraint, entityId: boundary.encodeEntityId(constraint.entityId) }
+        : structuredClone(constraint)),
     };
     const contextSupplement = input.contextSupplement?.map((fact) => ({
       summary: fact.summary,
@@ -231,12 +234,6 @@ export function createPiPlayerWorldAdjudicator(
     const resolution: PlayerWorldResolution = captured.decision === "transform"
       ? {
           ...captured,
-          contradiction: {
-            ...captured.contradiction,
-            basis: captured.contradiction.basis.map((basis) => basis.source === "state"
-              ? { ...basis, entityId: boundary.decodeEntityId(basis.entityId) }
-              : basis),
-          },
           replacement: boundary.decodeCandidate(captured.replacement),
         }
       : captured;

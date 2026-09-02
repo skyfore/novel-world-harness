@@ -37,6 +37,7 @@ import {
 import type { WorldObjectStore } from "./store.js";
 import type { WorldSnapshotStore } from "./snapshot.js";
 import { assertMonotonicLogicalTime } from "./time.js";
+import { hasMaterialProgress, validateCommittedProgress } from "./progress.js";
 
 export type HistoryCommit = {
   id: CommitId;
@@ -187,8 +188,13 @@ export class ProjectionService {
       }
       state = advanceTemporalState(state, entry.commit.logicalTime, context.stateSchema, context.entities);
       const eventHashes = new Set<string>();
+      const commitTimeAdvanced = previousTime !== undefined && (
+        (entry.commit.logicalTime.elapsedDays ?? 0) > (previousTime.elapsedDays ?? 0)
+        || JSON.stringify(entry.commit.logicalTime.storyTime) !== JSON.stringify(previousTime.storyTime)
+      );
 
-      for (const eventHash of entry.commit.eventHashes) {
+      for (let eventIndex = 0; eventIndex < entry.commit.eventHashes.length; eventIndex += 1) {
+        const eventHash = entry.commit.eventHashes[eventIndex]!;
         if (eventHashes.has(eventHash)) throw new Error(`Commit ${entry.id} repeats event hash ${eventHash}`);
         eventHashes.add(eventHash);
         const event = await this.objects.getEvent(eventHash);
@@ -202,6 +208,16 @@ export class ProjectionService {
 
         try {
           const effects = await this.loadEffects(event);
+          validateCommittedProgress(event, {
+            ...(event.effects.stateDeltaHash ? { stateDelta: effects.delta } : {}),
+            ...(effects.knowledgeDelta ? { knowledgeDelta: effects.knowledgeDelta } : {}),
+            ...(effects.semanticDelta ? { semanticDelta: effects.semanticDelta } : {}),
+            ...(effects.processDelta ? { processDelta: effects.processDelta } : {}),
+            ...(effects.normDelta ? { normDelta: effects.normDelta } : {}),
+          }, commitTimeAdvanced && eventIndex === 0);
+          if (entry.commit.parentCommitId && !hasMaterialProgress(event.progressCertificate)) {
+            throw new Error("Non-genesis committed event has no certified material progress");
+          }
           const provenance: EffectProvenance = { commitId: entry.id, eventId: event.eventId, eventHash };
           if (effects.delta.operations.length) {
             state = applyStateDelta(state, effects.delta, context.stateSchema, context.entities, context.rules);
@@ -263,13 +279,13 @@ export class ProjectionService {
           if (!children.includes(event.eventId)) children.push(event.eventId);
           children.sort();
         }
-        if (event.progress?.scene) {
+        if (event.progressCertificate.sceneTransition) {
           scenes.transitions.push({
             commitId: entry.id,
             eventId: event.eventId,
             eventHash,
             participantIds: [...event.participants],
-            scene: structuredClone(event.progress.scene),
+            scene: structuredClone(event.progressCertificate.sceneTransition),
           });
         }
         knownCommittedEventIds.add(event.eventId);

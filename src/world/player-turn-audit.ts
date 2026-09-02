@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentHash } from "./canonical.js";
-import type { PlayerActionCandidate, PlayerProgressCertificate, PlayerTurnStage, PlayerWorldResolution } from "./player-action.js";
-import { idSchema, type EventProposal, type ValidationIssue, type ValidationReport } from "./model.js";
+import type { PlayerActionCandidate, PlayerProgressPreview, PlayerTurnStage, PlayerWorldResolution } from "./player-action.js";
+import { idSchema, type EventProposal, type ProgressCertificate, type ValidationIssue, type ValidationReport } from "./model.js";
 import type { PlayerWorldResponseOption, PlayerWorldResponseResolution } from "./runtime.js";
 import type { NpcReactionEmotion, NpcReactionEvent, NpcResponseKind } from "./npc-reaction.js";
 import type { CanonicalAttachmentResolution } from "./canonical-adaptation.js";
@@ -37,7 +37,8 @@ export type PlayerTurnAudit = {
   proposal?: EventProposal;
   validation?: ValidationReport;
   eventHash?: string;
-  progressCertificate?: PlayerProgressCertificate;
+  progressCertificate?: ProgressCertificate;
+  progressPreview?: PlayerProgressPreview;
   contextConsultations?: RuntimeContextConsultationRecord[];
   repairHintIds?: string[];
   repairHintError?: string;

@@ -8,6 +8,7 @@ import { fsckWorld } from "../src/world/fsck.js";
 import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, type Entity } from "../src/world/model.js";
 import { WorldSnapshotStore } from "../src/world/snapshot.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
+import { deriveProgressCertificate } from "../src/world/progress.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -126,6 +127,12 @@ describe("world fsck", () => {
       title: "The vow becomes branch truth",
       participants: ["hero"],
       effects: { version: 1, semanticDeltaHash },
+      progressCertificate: deriveProgressCertificate({
+        effects: { version: 1, semanticDeltaHash },
+        loaded: { semanticDelta: await engine.objects.getSemanticDelta(semanticDeltaHash) },
+        utteranceCount: 0,
+        timeAdvanced: false,
+      }),
       evidence: [],
       causalParents: [],
     });

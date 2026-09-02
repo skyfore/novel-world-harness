@@ -216,10 +216,11 @@ describe("actor policy", () => {
       evidence: [],
       progress: {
         version: 1,
-        channels: ["relationship", "thread", "consequence"],
+        channels: ["relationship", "thread", "consequence", "scene"],
         threadIds: ["rivalry"],
         noveltyKey: "rivalry:confront",
         outcome: "succeeded",
+        scene: { kind: "stay", beat: 2 },
       },
     });
     expect(player.report.accepted).toBe(true);

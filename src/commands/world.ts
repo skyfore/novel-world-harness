@@ -152,8 +152,8 @@ export async function worldReplayCommand(root: string, branchId: string, checkpo
 export async function worldSnapshotCommand(root: string, branchId: string): Promise<void> {
   const { engine } = await openWorld(root);
   const head = await engine.branches.readHead(branchId);
-  const state = await engine.projector.project(head);
-  const snapshot = await new WorldSnapshotStore(root).write(head, state);
+  const projection = await engine.projections.project(head);
+  const snapshot = await new WorldSnapshotStore(root).write(projection);
   stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
 }
 

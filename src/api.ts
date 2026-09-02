@@ -410,7 +410,13 @@ export { inspectPlayExperience, listPlayableCharacters, performPlayTurn, resolve
 export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type CanonReplayResult, type IsolatedCanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";
 export { committedHistory, experiencedCanonicalEvents, projectActorScene, realizedCanonicalEvents, type ActorSceneProjection, type CommittedHistoryEntry, type SceneEventProjection } from "./world/scene.js";
 export { WorldRuntime, adjudicateActorCandidates, playerWorldResponseResolutionSchema, type CanonicalRecoveryResult, type CanonicalRecoveryTrace, type MoveInput, type MoveResult, type PlayerWorldResponseOption, type PlayerWorldResponseResolution, type PlayerWorldResponseResolver, type PlayerWorldResponseResolverInput, type PlayerWorldResponseResult } from "./world/runtime.js";
-export { WorldSnapshotStore, type WorldSnapshot } from "./world/snapshot.js";
+export {
+  PROJECTION_REDUCER_VERSIONS,
+  WorldSnapshotStore,
+  type ProjectionReducerVersions,
+  type WorldSnapshot,
+  type WorldSnapshotInspection,
+} from "./world/snapshot.js";
 export { StateSchemaRegistry, DEFAULT_STATE_FIELDS, advanceTemporalState, applyStateDelta, evaluatePredicate, validateEngineInvariants } from "./world/state.js";
 export {
   advanceStoryTime,

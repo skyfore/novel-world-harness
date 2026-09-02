@@ -51,6 +51,7 @@ import {
   type EffectiveWorldRule,
 } from "./world-rule-ontology.js";
 import { ProjectionService, type ProjectionOptions } from "./projection-service.js";
+import { WorldSnapshotStore } from "./snapshot.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -317,7 +318,11 @@ export class WorldEngine {
     this.branches = new BranchStore(this.workspaceRoot);
     this.context = resolveContext(context);
     this.contextCache.set(this.context.canonicalSnapshotHash, this.context);
-    this.projections = new ProjectionService(this.objects, (snapshotHash) => this.contextForSnapshot(snapshotHash));
+    this.projections = new ProjectionService(
+      this.objects,
+      (snapshotHash) => this.contextForSnapshot(snapshotHash),
+      new WorldSnapshotStore(this.workspaceRoot),
+    );
     this.projector = new WorldProjector(this.projections);
   }
   async contextForCommit(commitId: CommitId): Promise<ResolvedWorldModelContext> {

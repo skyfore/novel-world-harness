@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { contentHash } from "../src/world/canonical.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import { fsckWorld } from "../src/world/fsck.js";
 import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, type Entity } from "../src/world/model.js";
@@ -50,14 +51,32 @@ async function fixture() {
 describe("derived snapshots", () => {
   it("can be created and deleted without changing authoritative projection", async () => {
     const { root, engine, head } = await fixture();
-    const authoritative = await engine.projector.project(head);
+    const authoritative = await engine.projections.project(head, { fresh: true });
     const snapshots = new WorldSnapshotStore(root);
-    const snapshot = await snapshots.write(head, authoritative);
-    expect((await snapshots.read(head))?.state).toEqual(authoritative);
+    const snapshot = await snapshots.write(authoritative);
+    expect((await snapshots.read(head))?.projection).toEqual(authoritative);
     await snapshots.remove(head);
     expect(await snapshots.read(head)).toBeNull();
-    expect(await engine.projector.project(head)).toEqual(authoritative);
-    expect(snapshot.stateHash).toBeTruthy();
+    expect(await engine.projections.project(head, { fresh: true })).toEqual(authoritative);
+    expect(snapshot.version).toBe(2);
+    expect(snapshot.projectionHash).toBeTruthy();
+  });
+
+  it("rejects state-only V1 snapshots instead of migrating them implicitly", async () => {
+    const { root, head } = await fixture();
+    const snapshots = new WorldSnapshotStore(root);
+    await fs.mkdir(snapshots.root, { recursive: true });
+    await fs.writeFile(path.join(snapshots.root, `${head}.json`), JSON.stringify({
+      version: 1,
+      commitId: head,
+      state: { atCommit: head, logicalTime: { step: 1 }, values: {}, activeRuleIds: [] },
+    }), "utf8");
+
+    await expect(snapshots.read(head)).resolves.toBeNull();
+    await expect(snapshots.inspect(head)).resolves.toMatchObject({
+      status: "invalid",
+      reason: expect.stringContaining("Unsupported projection checkpoint version"),
+    });
   });
 });
 
@@ -125,6 +144,41 @@ describe("world fsck", () => {
     expect(report.ok).toBe(true);
     expect(report.reachableSemanticDeltas).toBe(1);
     expect(report.orphanObjects.semantics).toEqual([]);
+  });
+
+  it("reports a self-consistent checkpoint that drifts from genesis replay", async () => {
+    const { root, engine, head } = await fixture();
+    const snapshots = new WorldSnapshotStore(root);
+    const checkpoint = await snapshots.write(await engine.projections.project(head, { fresh: true, useCheckpoints: false }));
+    checkpoint.projection.state.values.hero!["character.title"] = "False Commander";
+    checkpoint.projectionHash = contentHash(checkpoint.projection);
+    await fs.writeFile(
+      path.join(snapshots.root, `${head}.json`),
+      `${JSON.stringify(checkpoint, null, 2)}\n`,
+      "utf8",
+    );
+
+    const report = await fsckWorld(engine);
+    expect(report.ok).toBe(true);
+    expect(report.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ severity: "warning", code: "CHECKPOINT_DRIFT", objectId: head }),
+    ]));
+  });
+
+  it("reports and ignores a corrupt checkpoint cache", async () => {
+    const { root, engine, head } = await fixture();
+    const snapshots = new WorldSnapshotStore(root);
+    await snapshots.write(await engine.projections.project(head, { fresh: true, useCheckpoints: false }));
+    const checkpointPath = path.join(snapshots.root, `${head}.json`);
+    const raw = JSON.parse(await fs.readFile(checkpointPath, "utf8")) as { projectionHash: string };
+    raw.projectionHash = "0".repeat(64);
+    await fs.writeFile(checkpointPath, `${JSON.stringify(raw)}\n`, "utf8");
+
+    const report = await fsckWorld(engine);
+    expect(report.ok).toBe(true);
+    expect(report.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ severity: "warning", code: "INVALID_CHECKPOINT", objectId: head }),
+    ]));
   });
 
   it("isolates an incomplete branch and continues checking healthy branches", async () => {

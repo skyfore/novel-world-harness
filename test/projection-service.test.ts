@@ -12,6 +12,7 @@ import {
   type EventEffectsRef,
 } from "../src/world/model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
+import { WorldSnapshotStore } from "../src/world/snapshot.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -228,5 +229,54 @@ describe("ProjectionService", () => {
 
     await expect(engine.projections.project(head)).rejects.toThrow(/Cannot project event dangling-effect.*ENOENT/s);
     expect(() => engine.projections.clear(head)).not.toThrow();
+  });
+
+  it("resumes every reducer from the nearest checkpoint and replays only the shared tail", async () => {
+    const { root, engine, genesis } = await fixture();
+    const semanticStart = await engine.objects.putSemanticDelta({
+      version: 1,
+      operations: [{
+        op: "open-goal",
+        goal: { id: "cross-hall", actorId: "hero", description: "Cross the hall", priority: 0.7, targetEntityIds: ["hall"] },
+      }],
+    });
+    const processStart = await engine.objects.putProcessDelta({
+      version: 1,
+      operations: [{
+        op: "start-process",
+        process: { id: "crossing", ownerEntityIds: ["hero"], phaseId: "started", progress: 0.2 },
+      }],
+    });
+    const checkpointCommit = await appendEvent(engine, genesis, "main", "crossing-started", {
+      version: 1,
+      semanticDeltaHash: semanticStart,
+      processDeltaHash: processStart,
+    });
+    await new WorldSnapshotStore(root).write(await engine.projections.project(checkpointCommit, {
+      fresh: true,
+      useCheckpoints: false,
+    }));
+
+    const semanticFinish = await engine.objects.putSemanticDelta({
+      version: 1,
+      operations: [{ op: "close-goal", goalId: "cross-hall", outcome: "achieved" }],
+    });
+    const processFinish = await engine.objects.putProcessDelta({
+      version: 1,
+      operations: [{ op: "advance-process", processId: "crossing", amount: 0.8, phaseId: "arrived" }],
+    });
+    const finalCommit = await appendEvent(engine, checkpointCommit, "main", "crossing-finished", {
+      version: 1,
+      semanticDeltaHash: semanticFinish,
+      processDeltaHash: processFinish,
+    });
+    engine.projections.clear();
+
+    const resumed = await engine.projections.project(finalCommit, { fresh: true });
+    const replayed = await engine.projections.project(finalCommit, { fresh: true, useCheckpoints: false });
+    expect(resumed.semantics.goals["cross-hall"]?.status).toBe("achieved");
+    expect(resumed.processes.instances.crossing).toMatchObject({ phaseId: "arrived", progress: 1 });
+    expect(resumed.history.map(({ event }) => event.eventId)).toEqual(replayed.history.map(({ event }) => event.eventId));
+    expect(contentHash(resumed)).toBe(contentHash(replayed));
   });
 });

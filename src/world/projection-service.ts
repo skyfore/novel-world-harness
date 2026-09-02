@@ -35,6 +35,7 @@ import {
   validateEngineInvariants,
 } from "./state.js";
 import type { WorldObjectStore } from "./store.js";
+import type { WorldSnapshotStore } from "./snapshot.js";
 import { assertMonotonicLogicalTime } from "./time.js";
 
 export type HistoryCommit = {
@@ -90,7 +91,12 @@ export type WorldProjectionBundle = {
   history: ProjectedHistoryEntry[];
 };
 
-export type ProjectionOptions = { fresh?: boolean };
+export type ProjectionOptions = {
+  /** Bypass the in-memory immutable projection cache. */
+  fresh?: boolean;
+  /** Set false for fsck/genesis replay; normal reads resume from the nearest valid checkpoint. */
+  useCheckpoints?: boolean;
+};
 export type ProjectionContextResolver = (snapshotHash?: ObjectHash) => Promise<ResolvedWorldModelContext>;
 
 /** Reads and validates one immutable ancestry chain for all downstream reducers. */
@@ -131,15 +137,16 @@ export class ProjectionService {
   constructor(
     private readonly objects: WorldObjectStore,
     private readonly contextForSnapshot: ProjectionContextResolver,
+    private readonly checkpoints?: WorldSnapshotStore,
   ) {
     this.cursor = new SharedHistoryCursor(objects);
   }
 
   async project(commitId: CommitId, options: ProjectionOptions = {}): Promise<WorldProjectionBundle> {
-    if (options.fresh) return this.projectFresh(commitId);
+    if (options.fresh) return this.projectFresh(commitId, options.useCheckpoints !== false);
     const cached = this.cache.get(commitId);
     if (cached) return cached;
-    const pending = this.projectFresh(commitId).catch((error) => {
+    const pending = this.projectFresh(commitId, options.useCheckpoints !== false).catch((error) => {
       this.cache.delete(commitId);
       throw error;
     });
@@ -152,19 +159,22 @@ export class ProjectionService {
     else this.cache.clear();
   }
 
-  private async projectFresh(commitId: CommitId): Promise<WorldProjectionBundle> {
-    const chain = await this.cursor.read(commitId);
-    const genesisId = chain[0]?.id ?? commitId;
-    let state = emptyWorldState(genesisId, 0);
-    let knowledge = emptyKnowledgeState(genesisId);
-    let semantics = emptyBranchSemanticState(genesisId);
-    let processes = emptyProcessState(genesisId);
-    let norms = emptyNormState(genesisId);
-    const scenes: SceneIndex = { version: 1, atCommit: genesisId, transitions: [] };
-    const causality: CausalIndex = { version: 1, atCommit: genesisId, events: {}, childrenByParent: {} };
-    const history: ProjectedHistoryEntry[] = [];
-    const knownCommittedEventIds = new Set<string>();
-    let previousTime: LogicalTime | undefined;
+  private async projectFresh(commitId: CommitId, useCheckpoints: boolean): Promise<WorldProjectionBundle> {
+    const fullChain = await this.cursor.read(commitId);
+    const checkpoint = useCheckpoints ? await this.nearestCheckpoint(fullChain) : undefined;
+    const genesisId = fullChain[0]?.id ?? commitId;
+    const restored = checkpoint ? structuredClone(checkpoint.projection) : undefined;
+    const chain = checkpoint ? fullChain.slice(checkpoint.index + 1) : fullChain;
+    let state = restored?.state ?? emptyWorldState(genesisId, 0);
+    let knowledge = restored?.knowledge ?? emptyKnowledgeState(genesisId);
+    let semantics = restored?.semantics ?? emptyBranchSemanticState(genesisId);
+    let processes = restored?.processes ?? emptyProcessState(genesisId);
+    let norms = restored?.norms ?? emptyNormState(genesisId);
+    let scenes: SceneIndex = restored?.scenes ?? { version: 1, atCommit: genesisId, transitions: [] };
+    let causality: CausalIndex = restored?.causality ?? { version: 1, atCommit: genesisId, events: {}, childrenByParent: {} };
+    const history: ProjectedHistoryEntry[] = restored?.history ?? [];
+    const knownCommittedEventIds = new Set<string>(Object.keys(causality.events));
+    let previousTime: LogicalTime | undefined = restored?.state.logicalTime;
 
     for (const entry of chain) {
       const context = await this.contextForSnapshot(entry.commit.canonicalSnapshotHash);
@@ -289,6 +299,18 @@ export class ProjectionService {
       causality,
       history,
     });
+  }
+
+  private async nearestCheckpoint(chain: readonly HistoryCommit[]): Promise<{
+    index: number;
+    projection: WorldProjectionBundle;
+  } | undefined> {
+    if (!this.checkpoints) return undefined;
+    for (let index = chain.length - 1; index >= 0; index -= 1) {
+      const snapshot = await this.checkpoints.read(chain[index]!.id);
+      if (snapshot) return { index, projection: snapshot.projection };
+    }
+    return undefined;
   }
 
   private async loadEffects(event: CommittedEvent): Promise<{

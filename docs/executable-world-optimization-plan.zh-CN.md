@@ -661,7 +661,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T2 — Shared projection 与 typed effect channels
 
-- **状态：** in progress
+- **状态：** complete
 - **依赖：** T1
 - **主要文件：**
   - 新建 `src/world/projection-service.ts`
@@ -675,6 +675,12 @@ CanonicalSnapshot V8 至少固定：
 - **交付：** shared history cursor、typed reducers、projection bundle、checkpoint、fsck reachability
 - **测试：** deterministic replay、fork isolation、missing/corrupt effect、checkpoint drift、cross-channel refs
 - **建议提交：** `feat: project typed branch effects from shared history`
+- **完成说明：** EventEffectsRef 已接入 semantic/process/norm 三个内容寻址 channel；
+  State、Knowledge、BranchSemantic、Process、Norm、Scene、Causality 由同一个
+  SharedHistoryCursor/ProjectionService 按固定顺序归约；同事件 semantic→knowledge
+  local ref、fork isolation、悬空 effect fail-closed 均有测试。ProjectionCheckpoint V2
+  保存 reducer version 与整包 hash，可从最近 checkpoint 回放 tail；fsck 始终绕过缓存从
+  genesis 双重重放，并报告 invalid checkpoint 与 self-consistent checkpoint drift。
 
 ### T3 — ProgressCertificate 与正确性闭环
 

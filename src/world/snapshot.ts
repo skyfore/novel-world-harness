@@ -1,39 +1,69 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentHash } from "./canonical.js";
-import { WORLD_ENGINE_VERSION, WORLD_SCHEMA_VERSION, worldStateSchema, type CommitId, type WorldState } from "./model.js";
+import {
+  WORLD_ENGINE_VERSION,
+  WORLD_SCHEMA_VERSION,
+  branchSemanticDeltaSchema,
+  committedEventSchema,
+  knowledgeDeltaSchema,
+  normDeltaSchema,
+  processDeltaSchema,
+  stateDeltaSchema,
+  worldStateSchema,
+  type CommitId,
+} from "./model.js";
 import { worldStorageRoot } from "./paths.js";
+import type { WorldProjectionBundle } from "./projection-service.js";
+
+export const PROJECTION_REDUCER_VERSIONS = {
+  state: 1,
+  knowledge: 1,
+  semantics: 1,
+  processes: 1,
+  norms: 1,
+  scenes: 1,
+  causality: 1,
+} as const;
+
+export type ProjectionReducerVersions = typeof PROJECTION_REDUCER_VERSIONS;
 
 export type WorldSnapshot = {
-  version: 1;
+  version: 2;
   commitId: CommitId;
   engineVersion: string;
   schemaVersion: number;
-  stateHash: string;
-  state: WorldState;
+  reducerVersions: ProjectionReducerVersions;
+  projectionHash: string;
+  projection: WorldProjectionBundle;
   createdAt: string;
 };
+
+export type WorldSnapshotInspection =
+  | { status: "missing" }
+  | { status: "valid"; snapshot: WorldSnapshot }
+  | { status: "invalid"; reason: string };
 
 export class WorldSnapshotStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(worldStorageRoot(workspaceRoot), "cache", "snapshots");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "cache", "projection-checkpoints-v2");
   }
 
-  async write(commitId: CommitId, state: WorldState): Promise<WorldSnapshot> {
-    if (state.atCommit !== commitId) throw new Error(`Snapshot state ${state.atCommit} does not match commit ${commitId}`);
-    const parsed = worldStateSchema.parse(state);
+  async write(projectionInput: WorldProjectionBundle): Promise<WorldSnapshot> {
+    const projection = validateProjection(structuredClone(projectionInput), projectionInput.atCommit);
     const snapshot: WorldSnapshot = {
-      version: 1,
-      commitId,
+      version: 2,
+      commitId: projection.atCommit,
       engineVersion: WORLD_ENGINE_VERSION,
       schemaVersion: WORLD_SCHEMA_VERSION,
-      stateHash: contentHash(parsed),
-      state: parsed,
+      reducerVersions: PROJECTION_REDUCER_VERSIONS,
+      projectionHash: contentHash(projection),
+      projection,
       createdAt: new Date().toISOString(),
     };
     await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
-    const filePath = this.filePath(commitId);
+    const filePath = this.filePath(projection.atCommit);
     const temporary = `${filePath}.${process.pid}.tmp`;
     await fs.writeFile(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     await fs.rename(temporary, filePath);
@@ -41,16 +71,17 @@ export class WorldSnapshotStore {
   }
 
   async read(commitId: CommitId): Promise<WorldSnapshot | null> {
+    const inspection = await this.inspect(commitId);
+    return inspection.status === "valid" ? inspection.snapshot : null;
+  }
+
+  async inspect(commitId: CommitId): Promise<WorldSnapshotInspection> {
     try {
-      const value = JSON.parse(await fs.readFile(this.filePath(commitId), "utf8")) as WorldSnapshot;
-      if (value.version !== 1 || value.commitId !== commitId) return null;
-      if (value.engineVersion !== WORLD_ENGINE_VERSION || value.schemaVersion !== WORLD_SCHEMA_VERSION) return null;
-      const state = worldStateSchema.parse(value.state);
-      if (state.atCommit !== commitId || contentHash(state) !== value.stateHash) return null;
-      return { ...value, state };
+      const value = JSON.parse(await fs.readFile(this.filePath(commitId), "utf8")) as unknown;
+      return { status: "valid", snapshot: validateSnapshot(value, commitId) };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      return null;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "missing" };
+      return { status: "invalid", reason: error instanceof Error ? error.message : String(error) };
     }
   }
 
@@ -62,4 +93,75 @@ export class WorldSnapshotStore {
     if (!/^[a-f0-9]{64}$/.test(commitId)) throw new Error(`Invalid commit id: ${commitId}`);
     return path.join(this.root, `${commitId}.json`);
   }
+}
+
+function validateSnapshot(input: unknown, commitId: CommitId): WorldSnapshot {
+  if (!isRecord(input)) throw new Error("Projection checkpoint must be an object");
+  if (input.version !== 2) throw new Error(`Unsupported projection checkpoint version ${String(input.version)}`);
+  if (input.commitId !== commitId) throw new Error(`Projection checkpoint targets ${String(input.commitId)}, expected ${commitId}`);
+  if (input.engineVersion !== WORLD_ENGINE_VERSION || input.schemaVersion !== WORLD_SCHEMA_VERSION) {
+    throw new Error("Projection checkpoint engine/schema version is stale");
+  }
+  if (!sameReducerVersions(input.reducerVersions)) throw new Error("Projection checkpoint reducer versions are stale");
+  if (typeof input.projectionHash !== "string" || !/^[a-f0-9]{64}$/.test(input.projectionHash)) {
+    throw new Error("Projection checkpoint hash is invalid");
+  }
+  if (typeof input.createdAt !== "string" || !Number.isFinite(Date.parse(input.createdAt))) {
+    throw new Error("Projection checkpoint creation time is invalid");
+  }
+  const projection = validateProjection(input.projection, commitId);
+  if (contentHash(projection) !== input.projectionHash) throw new Error("Projection checkpoint content hash does not match payload");
+  return {
+    version: 2,
+    commitId,
+    engineVersion: WORLD_ENGINE_VERSION,
+    schemaVersion: WORLD_SCHEMA_VERSION,
+    reducerVersions: PROJECTION_REDUCER_VERSIONS,
+    projectionHash: input.projectionHash,
+    projection,
+    createdAt: input.createdAt,
+  };
+}
+
+function validateProjection(input: unknown, commitId: CommitId): WorldProjectionBundle {
+  if (!isRecord(input) || input.version !== 1 || input.atCommit !== commitId) {
+    throw new Error(`Projection bundle does not target commit ${commitId}`);
+  }
+  const state = worldStateSchema.parse(input.state);
+  if (state.atCommit !== commitId) throw new Error("State reducer checkpoint is at a different commit");
+  assertReducerState(input.knowledge, commitId, "knowledge", false);
+  assertReducerState(input.semantics, commitId, "semantics", true);
+  assertReducerState(input.processes, commitId, "processes", true);
+  assertReducerState(input.norms, commitId, "norms", true);
+  assertReducerState(input.scenes, commitId, "scenes", true);
+  assertReducerState(input.causality, commitId, "causality", true);
+  if (!Array.isArray(input.history)) throw new Error("Projection checkpoint history must be an array");
+  for (const [index, raw] of input.history.entries()) {
+    if (!isRecord(raw) || typeof raw.commitId !== "string" || typeof raw.eventHash !== "string") {
+      throw new Error(`Projection history entry ${index} is invalid`);
+    }
+    committedEventSchema.parse(raw.event);
+    stateDeltaSchema.parse(raw.delta);
+    if (raw.knowledgeDelta !== undefined) knowledgeDeltaSchema.parse(raw.knowledgeDelta);
+    if (raw.semanticDelta !== undefined) branchSemanticDeltaSchema.parse(raw.semanticDelta);
+    if (raw.processDelta !== undefined) processDeltaSchema.parse(raw.processDelta);
+    if (raw.normDelta !== undefined) normDeltaSchema.parse(raw.normDelta);
+  }
+  return input as WorldProjectionBundle;
+}
+
+function assertReducerState(input: unknown, commitId: CommitId, name: string, requiresVersion: boolean): void {
+  if (!isRecord(input) || input.atCommit !== commitId) throw new Error(`${name} reducer checkpoint is at a different commit`);
+  if (requiresVersion && input.version !== 1) throw new Error(`${name} reducer checkpoint version is unsupported`);
+}
+
+function sameReducerVersions(input: unknown): input is ProjectionReducerVersions {
+  if (!isRecord(input)) return false;
+  return Object.entries(PROJECTION_REDUCER_VERSIONS)
+    .every(([key, version]) => input[key] === version)
+    && Object.keys(input).length === Object.keys(PROJECTION_REDUCER_VERSIONS).length;
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return Boolean(input) && typeof input === "object" && !Array.isArray(input);
 }

@@ -50,7 +50,7 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
     norms: new Set(),
   };
   const branches = await listBranches(engine, issues);
-  const snapshots = new WorldSnapshotStore(path.resolve(engine.objects.root, "../../.."));
+  const snapshots = new WorldSnapshotStore(engine.workspaceRoot);
 
   for (const branch of branches) {
     const lock = await engine.branches.inspectLock(branch.id);
@@ -63,14 +63,26 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
     }
     try {
       await auditBranch(engine, branch, reachable, issues);
-      const first = await engine.projector.project(branch.headCommitId);
-      const second = await engine.projector.project(branch.headCommitId);
+      const first = await engine.projections.project(branch.headCommitId, { fresh: true, useCheckpoints: false });
+      const second = await engine.projections.project(branch.headCommitId, { fresh: true, useCheckpoints: false });
       if (contentHash(first) !== contentHash(second)) {
-        issues.push(error("NON_DETERMINISTIC_REPLAY", `Branch ${branch.id} projected to different states`, branch.id));
+        issues.push(error("NON_DETERMINISTIC_REPLAY", `Branch ${branch.id} projected to different bundles`, branch.id));
       }
-      const snapshot = await snapshots.read(branch.headCommitId);
-      if (snapshot && contentHash(snapshot.state) !== contentHash(first)) {
-        issues.push(warning("STALE_SNAPSHOT", `Snapshot for ${branch.headCommitId} differs from authoritative replay`, branch.id, branch.headCommitId));
+      const checkpoint = await snapshots.inspect(branch.headCommitId);
+      if (checkpoint.status === "invalid") {
+        issues.push(warning(
+          "INVALID_CHECKPOINT",
+          `Projection checkpoint for ${branch.headCommitId} is invalid and will be ignored: ${checkpoint.reason}`,
+          branch.id,
+          branch.headCommitId,
+        ));
+      } else if (checkpoint.status === "valid" && checkpoint.snapshot.projectionHash !== contentHash(first)) {
+        issues.push(warning(
+          "CHECKPOINT_DRIFT",
+          `Projection checkpoint for ${branch.headCommitId} differs from authoritative genesis replay`,
+          branch.id,
+          branch.headCommitId,
+        ));
       }
     } catch (cause) {
       issues.push(error("BRANCH_REPLAY_FAILED", cause instanceof Error ? cause.message : String(cause), branch.id));

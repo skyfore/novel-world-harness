@@ -170,7 +170,7 @@ describe("actor policy", () => {
     expect((await engine.projector.project(result.newHead)).values.alice?.["character.location"]).toBe("home");
   });
 
-  it("commits one bounded co-present NPC reaction after a player event", async () => {
+  it("does not turn a model profile alone into a generic NPC reaction event", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-actor-reaction-"));
     roots.push(root);
     const entities: Entity[] = [
@@ -219,19 +219,16 @@ describe("actor policy", () => {
         channels: ["relationship", "thread", "consequence"],
         threadIds: ["rivalry"],
         noveltyKey: "rivalry:confront",
+        outcome: "succeeded",
       },
     });
-    const playerEvent = await engine.objects.getEvent(player.eventHash!);
+    expect(player.report.accepted).toBe(true);
     const runtime = new WorldRuntime(engine, () => [], undefined, deterministicActorProposalSource(engine, store));
 
     const result = await runtime.move({ branchId: "main", maxActorCandidates: 1, maxBackgroundCandidates: 0 });
 
-    expect(result.committedEvents).toHaveLength(1);
-    const reaction = await engine.objects.getEvent(result.committedEvents[0]!);
-    expect(reaction.actorId).toBe("rival");
-    expect(reaction.participants).toEqual(["rival", "hero"]);
-    expect(reaction.causalParents).toEqual([playerEvent.eventId]);
-    expect(reaction.progress?.channels).toEqual(expect.arrayContaining(["relationship", "consequence"]));
+    expect(result.committedEvents).toEqual([]);
+    expect(result.newHead).toBe(player.newHead);
   });
 });
 

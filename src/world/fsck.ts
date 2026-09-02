@@ -132,13 +132,27 @@ async function auditBranch(engine: WorldEngine, branch: Branch, reachable: Reach
       if (event.logicalTime.step !== commit.logicalTime.step) {
         issues.push(error("EVENT_TIME_MISMATCH", `Event ${eventHash} step ${event.logicalTime.step} differs from commit step ${commit.logicalTime.step}`, branch.id, eventHash));
       }
+      let material = Boolean(event.timeAdvance)
+        || Boolean(event.spokenUtterances?.length)
+        || Boolean(event.progress?.scene)
+        || Boolean(event.progress?.outcome);
       if (event.effects.stateDeltaHash) {
         reachable.deltas.add(event.effects.stateDeltaHash);
-        await engine.objects.getDelta(event.effects.stateDeltaHash);
+        const delta = await engine.objects.getDelta(event.effects.stateDeltaHash);
+        material ||= delta.operations.length > 0;
       }
       if (event.effects.knowledgeDeltaHash) {
         reachable.knowledge.add(event.effects.knowledgeDeltaHash);
-        await engine.objects.getKnowledgeDelta(event.effects.knowledgeDeltaHash);
+        const delta = await engine.objects.getKnowledgeDelta(event.effects.knowledgeDeltaHash);
+        material ||= delta.operations.length > 0;
+      }
+      if (commit.parentCommitId && !material) {
+        issues.push(error(
+          "EMPTY_EVENT",
+          `Event ${eventHash} has no material effect, utterance, adjudicated outcome, time advancement, or scene beat`,
+          branch.id,
+          eventHash,
+        ));
       }
     }
     cursor = commit.parentCommitId;

@@ -53,6 +53,7 @@ describe("world branch diff", () => {
       proposalId: "right-waits",
       branchId: "right",
       title: "Waits",
+      timeAdvance: { amount: 1, unit: "minute" },
       progress: { version: 1, channels: ["time-pressure"], threadIds: ["thread-wait"], noveltyKey: "wait-once" },
     };
     expect((await engine.commitProposal(left)).report.accepted).toBe(true);

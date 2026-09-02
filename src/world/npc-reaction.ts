@@ -182,6 +182,7 @@ export async function respondToNpcInteractions(input: {
         continue;
       }
       const response = await respondOneNpc({ ...input, npcId, interaction, atCommit: currentHead });
+      if (!response) continue;
       currentHead = response.newHead;
       responses.push(response.event);
     } catch (error) {
@@ -203,7 +204,7 @@ async function respondOneNpc(input: {
   interaction: PlayerInteraction;
   atCommit: string;
   reasoner: NpcReactionReasoner;
-}): Promise<{ newHead: string; event: NpcReactionEvent }> {
+}): Promise<{ newHead: string; event: NpcReactionEvent } | null> {
   const [worldContext, state, history, actorContext, development] = await Promise.all([
     input.engine.contextForCommit(input.atCommit),
     input.engine.projector.project(input.atCommit),
@@ -312,6 +313,14 @@ async function respondOneNpc(input: {
       throw new Error("An NPC reaction may directly address only the triggering player in this response lane.");
     }
   }
+  if (
+    !reaction.interaction
+    && reaction.proposedDelta.operations.length === 0
+    && !reaction.proposedKnowledge?.operations.length
+    && reaction.communicatedClaimIds.length === 0
+  ) {
+    return null;
+  }
 
   const scopedCandidate = reactionAsPlayerCandidate(reaction, input.playerId);
   const issues = [
@@ -387,6 +396,7 @@ async function respondOneNpc(input: {
       channels: [...new Set(channels)],
       threadIds: [],
       noveltyKey: npcReactionNoveltyKey(input.triggerEvent.eventId, input.npcId, reaction.responseKind),
+      outcome: "succeeded",
     },
   });
   const gate = await validateActionKnowledge(input.engine, {

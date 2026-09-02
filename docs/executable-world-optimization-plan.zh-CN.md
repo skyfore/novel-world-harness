@@ -640,7 +640,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T1 — 新 schema 核心与干净存储边界
 
-- **状态：** in progress（已完成 `world/v2` 干净命名空间；Event V2 正在落地）
+- **状态：** complete
 - **依赖：** T0
 - **主要文件：**
   - `src/world/model.ts`
@@ -657,6 +657,7 @@ CanonicalSnapshot V8 至少固定：
   - 空 effect materiality contract。
 - **测试：** schema round-trip、hash、store corruption、new-context publication、old-format rejection
 - **建议提交：** `refactor: establish executable world v2 schemas`
+- **完成说明：** 已启用 `world/v2`、Event V2/EventEffectsRef V1、CanonicalSnapshot V8、PreparedNovelBundle V3；旧格式无迁移读取路径；空 delta 不再作为 effect 占位，非 genesis 事件由 deterministic materiality gate 与 fsck 双重校验。
 
 ### T2 — Shared projection 与 typed effect channels
 

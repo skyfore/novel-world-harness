@@ -164,8 +164,9 @@ describe("reactive NPC response lane", () => {
     });
   });
 
-  it("commits explicit silence instead of returning an empty reaction", async () => {
+  it("does not commit an otherwise effect-free silence reaction", async () => {
     const { engine, candidate, trigger } = await fixture();
+    const before = await engine.branches.readHead("main");
     const result = await respondToNpcInteractions({
       engine,
       branchId: "main",
@@ -186,11 +187,10 @@ describe("reactive NPC response lane", () => {
       }),
     });
 
-    expect(result.responses).toHaveLength(1);
-    const event = await engine.objects.getEvent(result.responses[0]!.eventHash);
-    expect(event.actorObservations?.find((entry) => entry.actorId === "hero")?.summary)
-      .toContain("选择不回答");
-    expect(event.progress?.noveltyKey).toMatch(/^npc-reaction:[a-f0-9]{32}:ignore$/);
+    expect(result.responses).toEqual([]);
+    expect(result.failures).toEqual([]);
+    expect(result.newHead).toBe(before);
+    expect(await engine.branches.readHead("main")).toBe(before);
   });
 
   it("does not invoke the reactive lane without a typed perceptible interaction", async () => {

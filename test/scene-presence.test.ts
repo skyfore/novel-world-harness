@@ -64,7 +64,10 @@ describe("participant presence", () => {
       ],
       proposedTime: { kind: "unknown" },
       preconditions: [],
-      proposedDelta: { version: 1, operations: [] },
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "letter", field: "artifact.custodian", value: "reader" }],
+      },
       causalParents: [],
       evidence: [],
     });

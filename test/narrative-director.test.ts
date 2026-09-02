@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { canonicalEventToPossibility } from "../src/world/canon-runtime.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
+import { KnowledgeProjector } from "../src/world/knowledge.js";
 import type { CanonicalEvent, Claim, Entity } from "../src/world/model.js";
 import { buildNarrativeDirection, publicNarrativeThread, publicPlayerAffordance } from "../src/world/narrative-director.js";
 import { PlayerTurnService } from "../src/world/player-action.js";
@@ -116,29 +117,20 @@ describe("narrative scene director", () => {
       participants: ["hero"],
       proposedTime: { kind: "unknown" },
       preconditions: [],
-      proposedDelta: { version: 1, operations: [] },
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hall", field: "location.condition", value: 0.99 }],
+      },
       causalParents: [],
       evidence: overlappingEvidence,
     });
     expect(perceived.report.accepted).toBe(true);
     const direction = await buildNarrativeDirection(engine, runtime, "hero", perceived.newHead);
-    const observe = direction.affordances.find((choice) => choice.intent === "observe")!;
-    expect(observe).toBeDefined();
-    expect(observe.authorizedKnowledgeClaimIds).toEqual([]);
-    expect(observe.candidate.proposedKnowledge).toBeUndefined();
-
-    const result = await new PlayerTurnService(engine, () => structuredClone(observe.candidate)).turn({
-      branchId: "main",
-      actorId: "hero",
-      utterance: observe.action,
-    }, {
-      intent: observe.intent,
-      affordanceId: observe.id,
-      progress: observe.progress,
-      authorizedKnowledgeClaimIds: observe.authorizedKnowledgeClaimIds,
-    });
-    expect(result.accepted).toBe(true);
-    expect(result.contextAfter.knowledge.map((entry) => entry.claimId)).not.toContain(concealedClaim.id);
+    expect(direction.affordances.flatMap((choice) => choice.authorizedKnowledgeClaimIds)).not.toContain(concealedClaim.id);
+    expect(direction.affordances.flatMap((choice) => choice.candidate.proposedKnowledge?.operations ?? [])
+      .map((operation) => operation.claimId)).not.toContain(concealedClaim.id);
+    expect((await new KnowledgeProjector(engine).view("hero", perceived.newHead)).knowledge.map((entry) => entry.fact.claimId))
+      .not.toContain(concealedClaim.id);
   });
 
   it("returns executable choices without materializing a future canon delta", async () => {

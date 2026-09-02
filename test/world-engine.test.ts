@@ -116,7 +116,7 @@ describe("WorldEngine", () => {
     };
 
     const empty = await engine.commitProposal(proposal);
-    expect(empty.report.errors).toContainEqual(expect.objectContaining({ code: "PLAYER_PROGRESS_REQUIRED" }));
+    expect(empty.report.errors).toContainEqual(expect.objectContaining({ code: "EVENT_MATERIALITY_REQUIRED" }));
     const falseState = await engine.commitProposal({
       ...proposal,
       proposalId: "false-state-progress",
@@ -150,6 +150,33 @@ describe("WorldEngine", () => {
     expect(result.report.accepted).toBe(false);
     expect(result.report.errors.some((error) => error.code === "INVALID_DELTA" && error.message.includes("Unknown world rule"))).toBe(true);
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
+  });
+
+  it("commits material time without persisting an empty state effect", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main");
+    const result = await engine.commitProposal({
+      proposalId: "wait-one-minute",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "player",
+      actorId: "cao-cao",
+      title: "曹操等待片刻",
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" },
+      timeAdvance: { amount: 1, unit: "minute" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence: [],
+    });
+
+    expect(result.report).toMatchObject({ accepted: true });
+    expect(result.report.derivedDeltaHash).toBeUndefined();
+    if (!result.eventHash) throw new Error("accepted event must have a hash");
+    const event = await engine.objects.getEvent(result.eventHash);
+    expect(event.effects).toEqual({ version: 1 });
+    expect((await engine.projector.project(result.newHead)).logicalTime.elapsedDays).toBeCloseTo(1 / 1_440);
   });
 
   it("requires actor-visible event summaries to name unique participating characters", async () => {

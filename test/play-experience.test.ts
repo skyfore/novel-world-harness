@@ -111,6 +111,7 @@ describe("play experience catalog", () => {
             eventTitle: "路明非拆开信封",
             actorObservation: "你拿起信封，拆开封口，准备阅读里面的文字。",
           },
+          requestedTimeAdvance: { amount: 1, unit: "minute" },
           desiredEffect: "看清信里的内容并知道寄信方的来意",
           targets: [{ kind: "described", description: "那个信封" }],
         },
@@ -222,6 +223,15 @@ describe("play experience catalog", () => {
         expect(input.context.referenceableEntities.map((entity) => entity.id)).not.toContain("rival");
         return {
           title: "Hero waits",
+          intent: {
+            kind: "wait",
+            summary: "Hero waits and watches the scene.",
+            controlledAct: {
+              eventTitle: "Hero waits",
+              actorObservation: "You wait and watch the scene.",
+            },
+            targets: [],
+          },
           participants: [],
           preconditions: [],
           proposedDelta: { version: 1, operations: [] },

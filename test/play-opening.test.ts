@@ -81,6 +81,7 @@ describe("player opening narration", () => {
       actorObservations: [{ actorId: "hero", summary: "福贵在前厅等待" }],
       participants: ["hero"],
       proposedTime: { kind: "unknown" },
+      timeAdvance: { amount: 1, unit: "minute" },
       preconditions: [],
       proposedDelta: { version: 1, operations: [] },
       causalParents: [],

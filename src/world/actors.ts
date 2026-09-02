@@ -590,6 +590,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
               channels: action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["thread", "consequence"],
               threadIds: [`goal-${goal.id}`],
               noveltyKey: `standalone-goal:${goal.id}:${commitId}`,
+              outcome: "succeeded",
             },
           },
         });
@@ -603,7 +604,6 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
     if (!localActors.size) return candidates;
     const goals = (context.actorGoals ?? await actors.listGoals())
       .filter((goal) => belongsToActiveWorld(goal.evidence));
-    const goalActors = new Set<string>();
     for (const goal of goals) {
       const entity = context.entities.get(goal.actorId);
       if (!entity || entity.kind !== "character" || !localActors.has(goal.actorId)) continue;
@@ -641,6 +641,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
         channels: action && action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["relationship", "thread", "consequence"],
         threadIds: [`goal-${goal.id}`],
         noveltyKey: `actor-goal:${goal.id}:${latestPlayerEvent.event.eventId}`,
+        outcome: "succeeded",
       };
       candidates.push({
         goalId: goal.id,
@@ -663,43 +664,6 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           causalParents: [latestPlayerEvent.event.eventId],
           evidence: goal.evidence,
           progress,
-        },
-      });
-      goalActors.add(goal.actorId);
-    }
-
-    for (const actorId of [...localActors].sort()) {
-      if (goalActors.has(actorId)) continue;
-      const entity = context.entities.get(actorId);
-      const model = context.actorModels
-        ? context.actorModels.get(actorId)
-        : await actors.getModel(actorId);
-      if (!entity || entity.kind !== "character" || !model
-        || !belongsToActiveWorld(entity.evidence)
-        || !belongsToActiveWorld(model.evidence)) continue;
-      candidates.push({
-        goalId: `model-${actorId}`,
-        priority: 0.2,
-        proposal: {
-          proposalId: `reaction-${contentHash({ actorId, branchId, commitId }).slice(0, 24)}`,
-          branchId,
-          expectedParentCommit: commitId,
-          source: "actor",
-          actorId,
-          title: `${entity.canonicalName}对当前变化作出回应`,
-          participants: [actorId, initiatingActorId],
-          participantPresence: [actorId, initiatingActorId].map((entityId) => ({ entityId, mode: "physical" as const })),
-          proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
-          preconditions: [],
-          proposedDelta: { version: 1, operations: [] },
-          causalParents: [latestPlayerEvent.event.eventId],
-          evidence: model.evidence,
-          progress: {
-            version: 1,
-            channels: ["relationship", "consequence"],
-            threadIds: [],
-            noveltyKey: `actor-reaction:${actorId}:${latestPlayerEvent.event.eventId}`,
-          },
         },
       });
     }

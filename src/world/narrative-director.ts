@@ -378,7 +378,13 @@ async function preflightPlayerAffordance(
     utterance: affordance.action,
     candidate: affordance.candidate,
   });
-  action.proposal.progress = structuredClone(affordance.progress);
+  action.proposal.progress = {
+    ...structuredClone(affordance.progress),
+    // Preflight mirrors the host adjudication envelope used at execution.
+    // The eventual turn may revise this status, but the affordance itself is
+    // testing a concrete attempted action rather than a metadata-only event.
+    outcome: "succeeded",
+  };
   const gate = await validateActionKnowledge(engine, action);
   if (!gate.accepted) return gate.errors;
   const state = await engine.projector.project(commitId);

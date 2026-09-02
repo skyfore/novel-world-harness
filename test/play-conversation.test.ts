@@ -109,6 +109,7 @@ describe("play conversation memory", () => {
         channels: ["consequence"],
         threadIds: [],
         noveltyKey: "main-only-step",
+        outcome: "succeeded",
       },
     });
     expect(advanced.report.accepted).toBe(true);

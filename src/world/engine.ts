@@ -138,6 +138,22 @@ export class WorldProjector {
   }
 }
 
+function stateFactsChanged(before: WorldState, after: WorldState): boolean {
+  return contentHash({ values: before.values, activeRuleIds: before.activeRuleIds })
+    !== contentHash({ values: after.values, activeRuleIds: after.activeRuleIds });
+}
+
+function hasNonStateMateriality(proposal: EventProposal, timeChanged: boolean): boolean {
+  return timeChanged
+    || Boolean(proposal.proposedKnowledge?.operations.length)
+    || Boolean(proposal.spokenUtterances?.length)
+    || Boolean(proposal.progress?.scene)
+    // Progress outcome is host-derived from adjudication and records a real
+    // attempted action (including a blocked or failed one). T3 will move this
+    // authority into ActionInstance/AdHocActionRecord proper.
+    || Boolean(proposal.progress?.outcome);
+}
+
 export function validateEventProposal(proposalInput: EventProposal, head: CommitId, state: WorldState, context: WorldModelContext): { report: ValidationReport; postState?: WorldState } {
   const proposal = eventProposalSchema.parse(proposalInput);
   const errors: ValidationIssue[] = [];
@@ -276,6 +292,7 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   }
 
   let postState: WorldState | undefined;
+  let stateChanged = false;
   if (!errors.length) {
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
@@ -289,15 +306,14 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
           errors.push({ code: "RULE_FORBIDS", message: `Rule ${rule.id} forbids the proposed post-state` });
         }
       }
-      const stateChanged = contentHash({ values: state.values, activeRuleIds: state.activeRuleIds })
-        !== contentHash({ values: postState.values, activeRuleIds: postState.activeRuleIds });
+      stateChanged = stateFactsChanged(state, postState);
       const timeChanged = (postState.logicalTime.elapsedDays ?? 0) > (state.logicalTime.elapsedDays ?? 0)
         || JSON.stringify(postState.logicalTime.storyTime) !== JSON.stringify(state.logicalTime.storyTime);
       const hasKnowledgeEffect = Boolean(proposal.proposedKnowledge?.operations.length);
-      if (proposal.source === "player" && !stateChanged && !timeChanged && !hasKnowledgeEffect && !proposal.progress) {
+      if (!stateChanged && !hasNonStateMateriality(proposal, timeChanged)) {
         errors.push({
-          code: "PLAYER_PROGRESS_REQUIRED",
-          message: "An otherwise empty player event requires host-derived narrative progress metadata; raw no-op player commits are forbidden.",
+          code: "EVENT_MATERIALITY_REQUIRED",
+          message: "A committed event requires a net state or knowledge effect, an utterance, an adjudicated action outcome, effective time advancement, or a validated scene beat.",
         });
       }
       if (proposal.progress?.channels.includes("state") && !stateChanged) {
@@ -310,7 +326,14 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
       errors.push({ code: "INVALID_DELTA", message: error instanceof Error ? error.message : String(error) });
     }
   }
-  const report: ValidationReport = { proposalId: proposal.proposalId, evaluatedAtCommit: head, accepted: errors.length === 0, errors, warnings, ...(errors.length === 0 ? { derivedDeltaHash: contentHash(proposal.proposedDelta) } : {}) };
+  const report: ValidationReport = {
+    proposalId: proposal.proposalId,
+    evaluatedAtCommit: head,
+    accepted: errors.length === 0,
+    errors,
+    warnings,
+    ...(errors.length === 0 && stateChanged ? { derivedDeltaHash: contentHash(proposal.proposedDelta) } : {}),
+  };
   return { report, postState: report.accepted ? postState : undefined };
 }
 
@@ -414,8 +437,9 @@ export class WorldEngine {
       }
       observationActors.add(observation.actorId);
     }
+    const emptyInitialState = { ...emptyWorldState("genesis", 0), logicalTime };
     const initialState = applyStateDelta(
-      { ...emptyWorldState("genesis", 0), logicalTime },
+      emptyInitialState,
       initialDelta,
       this.context.stateSchema,
       this.context.entities,
@@ -423,11 +447,15 @@ export class WorldEngine {
     );
     const invariantErrors = validateEngineInvariants(initialState, this.context.stateSchema, this.context.entities, this.context.rules);
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
-    const deltaHash = await this.objects.putDelta(initialDelta);
-    const knowledgeDeltaHash = knowledge ? await this.objects.putKnowledgeDelta(knowledge) : undefined;
+    const deltaHash = stateFactsChanged(emptyInitialState, initialState)
+      ? await this.objects.putDelta(initialDelta)
+      : undefined;
+    const knowledgeDeltaHash = knowledge?.operations.length
+      ? await this.objects.putKnowledgeDelta(knowledge)
+      : undefined;
     const effects: CommittedEvent["effects"] = {
       version: 1,
-      stateDeltaHash: deltaHash,
+      ...(deltaHash ? { stateDeltaHash: deltaHash } : {}),
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
     };
     const inferredRealizations = [...(this.context.events?.values() ?? [])]
@@ -596,11 +624,15 @@ export class WorldEngine {
     }
     if (!report.accepted) return { report, previousHead: head, newHead: head };
     if (!postState) throw new Error("Accepted event proposal did not produce a projected post-state");
-    const deltaHash = await this.objects.putDelta(parsed.proposedDelta);
-    const knowledgeDeltaHash = parsed.proposedKnowledge ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge) : undefined;
+    const deltaHash = report.derivedDeltaHash
+      ? await this.objects.putDelta(parsed.proposedDelta)
+      : undefined;
+    const knowledgeDeltaHash = parsed.proposedKnowledge?.operations.length
+      ? await this.objects.putKnowledgeDelta(parsed.proposedKnowledge)
+      : undefined;
     const effects: CommittedEvent["effects"] = {
       version: 1,
-      stateDeltaHash: deltaHash,
+      ...(deltaHash ? { stateDeltaHash: deltaHash } : {}),
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
     };
     const logicalTime = postState.logicalTime;

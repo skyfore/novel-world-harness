@@ -27,6 +27,9 @@ export const COMPILER_ARTIFACT_KINDS = [
   "canonical-event",
   "event-participation",
   "event-relation",
+  "scene-occurrence",
+  "event-frame",
+  "action-schema",
   "spatial-relation",
   "world-rule",
   "initial-world",
@@ -132,7 +135,7 @@ export async function loadCompilerArtifactRecords(
   const initial = new InitialWorldStore(workspaceRoot);
   const proposals = new ProposalStore(workspaceRoot);
   const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
-  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
+  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, sceneOccurrences, eventFrames, actionSchemas, spatialRelations, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -140,6 +143,9 @@ export async function loadCompilerArtifactRecords(
     canon.listEvents(),
     canon.listEventParticipations(),
     canon.listEventRelations(),
+    canon.listSceneOccurrences(),
+    canon.listEventFrames(),
+    canon.listActionSchemas(),
     canon.listSpatialRelations(),
     canon.listRules(),
     actors.listGoals(),
@@ -169,6 +175,12 @@ export async function loadCompilerArtifactRecords(
   addCanonical(events, "canonical-event", (value) => ({ id: value.id, label: value.title }));
   addCanonical(eventParticipations, "event-participation", (value) => ({ id: value.id, label: `${value.eventId} ${value.role} ${value.entityId}` }));
   addCanonical(eventRelations, "event-relation", (value) => ({ id: value.id, label: `${value.fromEventId} ${value.type} ${value.toEventId}` }));
+  addCanonical(sceneOccurrences, "scene-occurrence", (value) => ({ id: value.id, label: `Scene ${value.id}` }));
+  addCanonical(eventFrames, "event-frame", (value) => ({ id: value.id, label: value.name }));
+  addCanonical(actionSchemas.filter((value) => value.induction.kind === "source-pattern"), "action-schema", (value) => ({ id: value.id, label: value.name }));
+  for (const action of actionSchemas.filter((value) => value.induction.kind === "domain-module")) {
+    records.push(canonicalRecord("action-schema", action.id, action.name, structuredClone(action), []));
+  }
   for (const relation of spatialRelations) {
     const evidence = spatialRelationEvidence(relation);
     if (!evidence.some((reference) => reference.span.sourceId === sourceId)) continue;

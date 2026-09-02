@@ -214,6 +214,7 @@ export function possibilityToProposal(entry: EvaluatedPossibility, actorId?: str
     preconditions: possibility.preconditions,
     proposedDelta,
     ...(possibility.proposedKnowledge ? { proposedKnowledge: possibility.proposedKnowledge } : {}),
+    ...(possibility.action ? { action: structuredClone(possibility.action) } : {}),
     causalParents: possibility.causalParents,
     evidence: possibility.evidence,
     possibilityId: possibility.id,

@@ -54,6 +54,9 @@ import {
 import { ProjectionService, type ProjectionOptions } from "./projection-service.js";
 import { WorldSnapshotStore } from "./snapshot.js";
 import { deriveProgressCertificate, hasMaterialProgress } from "./progress.js";
+import { resolveActionInvocation, type ActionSchema } from "./action-ontology.js";
+import type { EventFrame } from "./event-frame.js";
+import type { SceneOccurrence } from "./scene-occurrence.js";
 
 export type WorldModelContext = {
   canonicalSnapshotHash?: ObjectHash;
@@ -70,6 +73,9 @@ export type WorldModelContext = {
   eventRelations?: readonly EventRelation[];
   spatialOntologyVersion?: "spatial-v1";
   spatialRelations?: readonly SpatialRelation[];
+  sceneOccurrences?: readonly SceneOccurrence[];
+  eventFrames?: ReadonlyMap<string, EventFrame>;
+  actionSchemas?: ReadonlyMap<string, ActionSchema>;
   actorGoals?: readonly CharacterGoal[];
   actorModels?: ReadonlyMap<string, CharacterModel>;
   possibilityTemplates?: readonly PossibilityTemplate[];
@@ -217,6 +223,30 @@ export function validateEventProposal(proposalInput: EventProposal, head: Commit
   errors.push(...validateCanonicalAdaptationContract(proposal, context));
   for (let index = 0; index < proposal.preconditions.length; index += 1) {
     if (!evaluatePredicate(evaluationState, proposal.preconditions[index]!)) errors.push({ code: "PRECONDITION_FAILED", message: `Precondition ${index} is false`, path: `preconditions.${index}` });
+  }
+  if (proposal.action) {
+    const resolvedAction = resolveActionInvocation(
+      proposal.action,
+      context.actionSchemas ?? new Map(),
+      context.entities,
+      {
+        participants: proposal.participants,
+        proposedDelta: proposal.proposedDelta,
+        hasKnowledge: Boolean(proposal.proposedKnowledge?.operations.length),
+        hasTimeAdvance: Boolean(proposal.timeAdvance),
+        hasSceneTransition: Boolean(proposal.progress?.scene),
+      },
+    );
+    errors.push(...resolvedAction.issues);
+    resolvedAction.preconditions.forEach((predicate, index) => {
+      if (!evaluatePredicate(evaluationState, predicate)) {
+        errors.push({
+          code: "ACTION_SCHEMA_PRECONDITION_FAILED",
+          message: `Action schema precondition ${index} is false`,
+          path: `action.preconditions.${index}`,
+        });
+      }
+    });
   }
   if (proposal.proposedKnowledge) {
     const knowledge = knowledgeDeltaSchema.parse(proposal.proposedKnowledge);
@@ -721,6 +751,7 @@ export class WorldEngine {
       actorObservations: parsed.actorObservations,
       actorAffects: parsed.actorAffects,
       spokenUtterances: parsed.spokenUtterances,
+      action: parsed.action,
     });
     const event: CommittedEvent = {
       version: 2,
@@ -744,6 +775,7 @@ export class WorldEngine {
       ...(realizesCanonicalEventIds.length ? { realizesCanonicalEventIds } : {}),
       ...(parsed.possibilityId ? { possibilityId: parsed.possibilityId } : {}),
       ...(parsed.canonicalAdaptation ? { canonicalAdaptation: structuredClone(parsed.canonicalAdaptation) } : {}),
+      ...(parsed.action ? { action: structuredClone(parsed.action) } : {}),
       ...(parsed.progress ? { progress: parsed.progress } : {}),
     };
     const eventHash = await this.objects.putEvent(event);

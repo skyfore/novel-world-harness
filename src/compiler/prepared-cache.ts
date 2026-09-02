@@ -67,11 +67,14 @@ import { EntityResolutionStore, identityResolutionSchema } from "./entity-resolu
 import { EventResolutionStore, eventResolutionSchema } from "./event-resolution.js";
 import { SourceStructureStore, sourceStructureManifestSchema } from "./structure.js";
 import { SourceAccountingStore, sourceAccountingManifestSchema } from "./source-accounting.js";
+import { sceneOccurrenceSchema } from "../world/scene-occurrence.js";
+import { eventFrameSchema } from "../world/event-frame.js";
+import { actionSchemaSchema } from "../world/action-ontology.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 2;
-export const COMPILER_PROMPT_VERSION = 25;
+export const COMPILER_PROMPT_VERSION = 26;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -105,6 +108,9 @@ const preparedCanonicalSchema = z.object({
   eventParticipations: z.array(eventParticipationSchema),
   eventRelations: z.array(eventRelationSchema),
   spatialRelations: z.array(spatialRelationSchema),
+  sceneOccurrences: z.array(sceneOccurrenceSchema),
+  eventFrames: z.array(eventFrameSchema),
+  actionSchemas: z.array(actionSchemaSchema),
   rules: z.array(worldRuleSchema),
   initialWorld: initialWorldSchema,
   goals: z.array(characterGoalSchema),
@@ -203,6 +209,9 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     bundle.canonical.eventParticipations,
     bundle.canonical.eventRelations,
     bundle.canonical.spatialRelations,
+    bundle.canonical.sceneOccurrences,
+    bundle.canonical.eventFrames,
+    bundle.canonical.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
     bundle.canonical.rules,
     bundle.canonical.goals,
     bundle.canonical.models,
@@ -690,7 +699,7 @@ export class PreparedNovelCache {
         if (matches) assertEvidenceExclusiveToSource(item.evidence, source.id, `Prepared artifact ${item.id ?? item.actorId ?? "unknown"}`);
         return matches;
       });
-    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, rules, goals, models, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, rules, goals, models, possibilities] = await Promise.all([
       canonical.listEntities(),
       canonical.listPropositions(),
       canonical.listAttributions(),
@@ -699,6 +708,9 @@ export class PreparedNovelCache {
       canonical.listEventParticipations(),
       canonical.listEventRelations(),
       canonical.listSpatialRelations(),
+      canonical.listSceneOccurrences(),
+      canonical.listEventFrames(),
+      canonical.listActionSchemas(),
       canonical.listRules(),
       actors.listGoals(),
       actors.listModels(),
@@ -714,6 +726,10 @@ export class PreparedNovelCache {
       eventParticipations: fromSource(eventParticipations),
       eventRelations: fromSource(eventRelations),
       spatialRelations: fromSource(spatialRelations),
+      sceneOccurrences: fromSource(sceneOccurrences),
+      eventFrames: fromSource(eventFrames),
+      actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module")
+        .concat(fromSource(actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"))),
       rules: fromSource(rules),
       initialWorld,
       goals: fromSource(goals),
@@ -816,6 +832,9 @@ export class PreparedNovelCache {
       ["event participation", current.eventParticipations, expected.eventParticipations, (item: { id: string }) => item.id],
       ["event relation", current.eventRelations, expected.eventRelations, (item: { id: string }) => item.id],
       ["spatial relation", current.spatialRelations, expected.spatialRelations, (item: { id: string }) => item.id],
+      ["scene occurrence", current.sceneOccurrences, expected.sceneOccurrences, (item: { id: string }) => item.id],
+      ["event frame", current.eventFrames, expected.eventFrames, (item: { id: string }) => item.id],
+      ["action schema", current.actionSchemas, expected.actionSchemas, (item: { id: string }) => item.id],
       ["rule", current.rules, expected.rules, (item: { id: string }) => item.id],
       ["goal", current.goals, expected.goals, (item: { id: string }) => item.id],
       ["model", current.models, expected.models, (item: { actorId: string }) => item.actorId],
@@ -878,6 +897,9 @@ export class PreparedNovelCache {
       ["event participations", fromSource(current.eventParticipations), bundle.canonical.eventParticipations, (item: { id: string }) => item.id],
       ["event relations", fromSource(current.eventRelations), bundle.canonical.eventRelations, (item: { id: string }) => item.id],
       ["spatial relations", fromSource(current.spatialRelations), bundle.canonical.spatialRelations, (item: { id: string }) => item.id],
+      ["scene occurrences", fromSource(current.sceneOccurrences), bundle.canonical.sceneOccurrences, (item: { id: string }) => item.id],
+      ["event frames", fromSource(current.eventFrames), bundle.canonical.eventFrames, (item: { id: string }) => item.id],
+      ["action schemas", current.actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || schema.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionSchemas, (item: { id: string }) => item.id],
       ["rules", fromSource(current.rules), bundle.canonical.rules, (item: { id: string }) => item.id],
       ["goals", fromSource(current.goals), bundle.canonical.goals, (item: { id: string }) => item.id],
       ["models", fromSource(current.models), bundle.canonical.models, (item: { actorId: string }) => item.actorId],
@@ -996,6 +1018,9 @@ export class PreparedNovelCache {
       await removeMissing(current.eventParticipations, new Set(bundle.canonical.eventParticipations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-participations", id));
       await removeMissing(current.eventRelations, new Set(bundle.canonical.eventRelations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-relations", id));
       await removeMissing(current.spatialRelations, new Set(bundle.canonical.spatialRelations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("spatial-relations", id));
+      await removeMissing(current.sceneOccurrences, new Set(bundle.canonical.sceneOccurrences.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("scene-occurrences", id));
+      await removeMissing(current.eventFrames, new Set(bundle.canonical.eventFrames.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-frames", id));
+      await removeMissing(current.actionSchemas, new Set(bundle.canonical.actionSchemas.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-schemas", id));
       await removeMissing(current.rules, new Set(bundle.canonical.rules.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("rules", id));
       await removeMissing(current.goals, new Set(bundle.canonical.goals.map((item) => item.id)), (item) => item.id, (id) => actors.removeGoal(id));
       await removeMissing(current.models, new Set(bundle.canonical.models.map((item) => item.actorId)), (item) => item.actorId, (id) => actors.removeModel(id));
@@ -1010,6 +1035,9 @@ export class PreparedNovelCache {
     for (const participation of bundle.canonical.eventParticipations) await canonical.putEventParticipation(participation);
     for (const relation of bundle.canonical.eventRelations) await canonical.putEventRelation(relation);
     for (const relation of bundle.canonical.spatialRelations) await canonical.putSpatialRelation(relation);
+    for (const scene of bundle.canonical.sceneOccurrences) await canonical.putSceneOccurrence(scene);
+    for (const frame of bundle.canonical.eventFrames) await canonical.putEventFrame(frame);
+    for (const schema of bundle.canonical.actionSchemas) await canonical.putActionSchema(schema);
     await new InitialWorldStore(this.workspaceRoot).put(bundle.canonical.initialWorld);
     for (const goal of bundle.canonical.goals) await actors.putGoal(goal);
     for (const model of bundle.canonical.models) await actors.putModel(model);
@@ -1184,6 +1212,9 @@ function preparedArtifactDescriptors(canonical: {
   eventParticipations: PreparedCanonical["eventParticipations"];
   eventRelations: PreparedCanonical["eventRelations"];
   spatialRelations: PreparedCanonical["spatialRelations"];
+  sceneOccurrences: PreparedCanonical["sceneOccurrences"];
+  eventFrames: PreparedCanonical["eventFrames"];
+  actionSchemas: PreparedCanonical["actionSchemas"];
   rules: PreparedCanonical["rules"];
   initialWorld: PreparedCanonical["initialWorld"] | null;
   goals: PreparedCanonical["goals"];
@@ -1199,6 +1230,9 @@ function preparedArtifactDescriptors(canonical: {
     ...canonical.eventParticipations.map((payload) => ({ kind: "event-participation", id: payload.id, payload })),
     ...canonical.eventRelations.map((payload) => ({ kind: "event-relation", id: payload.id, payload })),
     ...canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation", id: payload.id, payload })),
+    ...canonical.sceneOccurrences.map((payload) => ({ kind: "scene-occurrence", id: payload.id, payload })),
+    ...canonical.eventFrames.map((payload) => ({ kind: "event-frame", id: payload.id, payload })),
+    ...canonical.actionSchemas.map((payload) => ({ kind: "action-schema", id: payload.id, payload })),
     ...canonical.rules.map((payload) => ({ kind: "world-rule", id: payload.id, payload })),
     ...(canonical.initialWorld ? [{ kind: "initial-world", id: "initial-world", payload: canonical.initialWorld }] : []),
     ...canonical.goals.map((payload) => ({ kind: "character-goal", id: payload.id, payload })),
@@ -1239,6 +1273,9 @@ async function currentCanonical(workspaceRoot: string) {
     eventParticipations: await canonical.listEventParticipations(),
     eventRelations: await canonical.listEventRelations(),
     spatialRelations: await canonical.listSpatialRelations(),
+    sceneOccurrences: await canonical.listSceneOccurrences(),
+    eventFrames: await canonical.listEventFrames(),
+    actionSchemas: await canonical.listActionSchemas(),
     rules: await canonical.listRules(),
     initialWorld: await new InitialWorldStore(workspaceRoot).get(),
     goals: await actors.listGoals(),
@@ -1417,6 +1454,9 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     eventParticipations: new Map(bundle.canonical.eventParticipations.map((item) => [item.id, item])),
     eventRelations: new Map(bundle.canonical.eventRelations.map((item) => [item.id, item])),
     spatialRelations: new Map(bundle.canonical.spatialRelations.map((item) => [item.id, item])),
+    sceneOccurrences: new Map(bundle.canonical.sceneOccurrences.map((item) => [item.id, item])),
+    eventFrames: new Map(bundle.canonical.eventFrames.map((item) => [item.id, item])),
+    actionSchemas: new Map(bundle.canonical.actionSchemas.map((item) => [item.id, item])),
     rules: new Map(bundle.canonical.rules.map((item) => [item.id, item])),
     goals: new Map(bundle.canonical.goals.map((item) => [item.id, item])),
   };
@@ -1431,6 +1471,9 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     ...bundle.canonical.eventParticipations.map((payload) => ({ kind: "event-participation" as const, label: payload.id, payload })),
     ...bundle.canonical.eventRelations.map((payload) => ({ kind: "event-relation" as const, label: payload.id, payload })),
     ...bundle.canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation" as const, label: payload.id, payload })),
+    ...bundle.canonical.eventFrames.map((payload) => ({ kind: "event-frame" as const, label: payload.id, payload })),
+    ...bundle.canonical.actionSchemas.map((payload) => ({ kind: "action-schema" as const, label: payload.id, payload })),
+    ...bundle.canonical.sceneOccurrences.map((payload) => ({ kind: "scene-occurrence" as const, label: payload.id, payload })),
     { kind: "initial-world", label: "initial-world", payload: bundle.canonical.initialWorld },
     ...bundle.canonical.models.map((payload) => ({ kind: "character-model" as const, label: payload.actorId, payload })),
     ...bundle.canonical.goals.map((payload) => ({ kind: "character-goal" as const, label: payload.id, payload })),

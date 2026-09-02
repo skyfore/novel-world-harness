@@ -75,6 +75,9 @@ import { SourceAccountingStore } from "./source-accounting.js";
 import { EntityResolutionStore } from "./entity-resolution.js";
 import { EventResolutionStore } from "./event-resolution.js";
 import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../world/knowledge-semantics.js";
+import { sceneOccurrenceSchema, type SceneOccurrence } from "../world/scene-occurrence.js";
+import { eventFrameSchema, type EventFrame } from "../world/event-frame.js";
+import { actionSchemaSchema, type ActionSchema } from "../world/action-ontology.js";
 
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
@@ -135,6 +138,11 @@ const compilerPropositionSchema = propositionSchema.safeExtend({ evidence: evide
 const compilerAttributionSchema = attributionSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerEventParticipationSchema = eventParticipationSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
 const compilerEventRelationSchema = eventRelationSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
+const compilerEventFrameSchema = eventFrameSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) });
+const compilerActionSchema = actionSchemaSchema.refine(
+  (value) => value.induction.kind === "source-pattern",
+  { path: ["induction", "kind"], message: "Novel compilation may only induce source-pattern actions; domain modules are host-managed" },
+);
 const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
   validateParticipantPresence(possibility, ctx);
   if (possibility.kind === "player-choice" && !hasExecutablePossibilityEffect(possibility)) {
@@ -145,7 +153,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -161,6 +169,9 @@ export const compilerProposalSchemas = {
     .superRefine(validateParticipantPresence),
   "event-participation": compilerEventParticipationSchema,
   "event-relation": compilerEventRelationSchema,
+  "scene-occurrence": sceneOccurrenceSchema,
+  "event-frame": compilerEventFrameSchema,
+  "action-schema": compilerActionSchema,
   "spatial-relation": spatialRelationSchema,
   "world-rule": compilerWorldRuleSchema,
   "initial-world": initialWorldSchema,
@@ -390,6 +401,9 @@ type ProposalClosureCatalog = {
   attributions: Set<string>;
   claims: Set<string>;
   events: Set<string>;
+  scenes: Set<string>;
+  frames: Set<string>;
+  actions: Set<string>;
   rules: Set<string>;
   goals: Set<string>;
   possibilities: Set<string>;
@@ -419,7 +433,7 @@ export async function validateCompilerProposalClosure(
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
   const actors = new ActorModelStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalSpatialRelations, canonicalRules, canonicalGoals, canonicalPossibilities, pending] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalSpatialRelations, canonicalScenes, canonicalFrames, canonicalActions, canonicalRules, canonicalGoals, canonicalPossibilities, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -428,6 +442,9 @@ export async function validateCompilerProposalClosure(
     canon.listEventParticipations(),
     canon.listEventRelations(),
     canon.listSpatialRelations(),
+    canon.listSceneOccurrences(),
+    canon.listEventFrames(),
+    canon.listActionSchemas(),
     canon.listRules(),
     actors.listGoals(),
     possibilities.list(),
@@ -447,6 +464,9 @@ export async function validateCompilerProposalClosure(
     attributions: new Set(canonicalAttributions.filter(fromActiveSource).map((item) => item.id)),
     claims: new Set(canonicalClaims.filter(fromActiveSource).map((item) => item.id)),
     events: new Set(canonicalEvents.filter(fromActiveSource).map((item) => item.id)),
+    scenes: new Set(canonicalScenes.filter(fromActiveSource).map((item) => item.id)),
+    frames: new Set(canonicalFrames.filter(fromActiveSource).map((item) => item.id)),
+    actions: new Set(canonicalActions.filter((item) => item.induction.kind === "domain-module" || fromActiveSource(item)).map((item) => item.id)),
     rules: new Set(canonicalRules.filter(fromActiveSource).map((item) => item.id)),
     goals: new Set(canonicalGoals.filter(fromActiveSource).map((item) => item.id)),
     possibilities: new Set(canonicalPossibilities.filter(fromActiveSource).map((item) => item.id)),
@@ -478,6 +498,9 @@ export async function validateCompilerProposalClosure(
     if (summary.kind === "attribution") catalog.attributions.add((payload as { id: string }).id);
     if (summary.kind === "claim") catalog.claims.add((payload as { id: string }).id);
     if (summary.kind === "canonical-event") catalog.events.add((payload as { id: string }).id);
+    if (summary.kind === "scene-occurrence") catalog.scenes.add((payload as { id: string }).id);
+    if (summary.kind === "event-frame") catalog.frames.add((payload as { id: string }).id);
+    if (summary.kind === "action-schema") catalog.actions.add((payload as { id: string }).id);
     if (summary.kind === "world-rule") catalog.rules.add((payload as { id: string }).id);
     if (summary.kind === "character-goal") catalog.goals.add((payload as { id: string }).id);
     if (summary.kind === "possibility") catalog.possibilities.add((payload as { id: string }).id);
@@ -768,6 +791,9 @@ function collectProposalClosureIssues(
     event.preconditions.forEach((predicate, index) => collectPredicateIssues(predicate, `preconditions.${index}`, missing, fieldReference));
     collectStateDeltaIssues(event.observedOutcome, "observedOutcome", missing, fieldReference);
     if (event.observedKnowledge) collectKnowledgeDeltaIssues(event.observedKnowledge, "observedKnowledge", missing);
+    event.sceneOccurrenceIds?.forEach((id, index) => missing("scenes", id, `sceneOccurrenceIds.${index}`));
+    if (event.frameInstance) missing("frames", event.frameInstance.frameId, "frameInstance.frameId");
+    if (event.action?.lane === "schema-bound") missing("actions", event.action.schemaId, "action.schemaId");
     for (let index = 0; index < (event.characterEntryCheckpoints?.length ?? 0); index += 1) {
       const checkpoint = event.characterEntryCheckpoints![index]!;
       const prefix = `characterEntryCheckpoints.${index}`;
@@ -782,6 +808,28 @@ function collectProposalClosureIssues(
       presence(event.participants, checkpoint.participantPresence, `${prefix}.participantPresence`, false);
       collectStateDeltaIssues(checkpoint.delta, `${prefix}.delta`, missing, fieldReference);
       if (checkpoint.knowledge) collectKnowledgeDeltaIssues(checkpoint.knowledge, `${prefix}.knowledge`, missing);
+    }
+    return;
+  }
+  if (proposal.kind === "scene-occurrence") {
+    const scene = payload as SceneOccurrence;
+    if (scene.locationId) missing("entities", scene.locationId, "locationId");
+    scene.viewpointActorIds.forEach((id, index) => missing("entities", id, `viewpointActorIds.${index}`));
+    scene.presentActorIds.forEach((id, index) => missing("entities", id, `presentActorIds.${index}`));
+    scene.eventIds.forEach((id, index) => missing("events", id, `eventIds.${index}`));
+    [...scene.entryConditions, ...scene.exitConditions].forEach((predicate, index) =>
+      collectPredicateIssues(predicate, `conditions.${index}`, missing, fieldReference));
+    if (scene.storyInterval) {
+      collectStoryTimeIssues(scene.storyInterval.start, "storyInterval.start", missing);
+      if (scene.storyInterval.end) collectStoryTimeIssues(scene.storyInterval.end, "storyInterval.end", missing);
+    }
+    return;
+  }
+  if (proposal.kind === "event-frame") return;
+  if (proposal.kind === "action-schema") {
+    const action = payload as ActionSchema;
+    if (action.induction.kind === "source-pattern") {
+      action.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
     }
     return;
   }
@@ -897,6 +945,7 @@ function collectProposalClosureIssues(
     .forEach((predicate, index) => collectPredicateIssues(predicate, `predicates.${index}`, missing, fieldReference));
   if (possibility.proposedDelta) collectStateDeltaIssues(possibility.proposedDelta, "proposedDelta", missing, fieldReference);
   if (possibility.proposedKnowledge) collectKnowledgeDeltaIssues(possibility.proposedKnowledge, "proposedKnowledge", missing);
+  if (possibility.action?.lane === "schema-bound") missing("actions", possibility.action.schemaId, "action.schemaId");
   possibility.canonicalScaffold?.roles.forEach((role, roleIndex) => {
     missing("entities", role.canonicalEntityId, `canonicalScaffold.roles.${roleIndex}.canonicalEntityId`);
     const canonicalKind = catalog.entityKinds.get(role.canonicalEntityId);

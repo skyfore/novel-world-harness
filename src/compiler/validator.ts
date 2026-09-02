@@ -79,8 +79,24 @@ import {
   validateCommittedAttributionTrace,
   validateCommittedKnowledgeAcquisitionTrace,
 } from "./attribution-trace.js";
+import {
+  sceneOccurrenceSchema,
+  validateSceneOccurrenceCatalog,
+  type SceneOccurrence,
+} from "../world/scene-occurrence.js";
+import {
+  eventFrameSchema,
+  validateEventFrameInstance,
+  type EventFrame,
+} from "../world/event-frame.js";
+import {
+  actionSchemaSchema,
+  resolveActionInvocation,
+  validateActionSchemaCatalog,
+  type ActionSchema,
+} from "../world/action-ontology.js";
 
-export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
+export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type CompilerCatalogValidationScope = "catalog" | "record";
 export type CompilerValidationCatalog = {
@@ -92,6 +108,9 @@ export type CompilerValidationCatalog = {
   eventParticipations: Map<string, EventParticipation>;
   eventRelations: Map<string, EventRelation>;
   spatialRelations: Map<string, SpatialRelation>;
+  sceneOccurrences: Map<string, SceneOccurrence>;
+  eventFrames: Map<string, EventFrame>;
+  actionSchemas: Map<string, ActionSchema>;
   rules: Map<string, WorldRule>;
   goals: Map<string, CharacterGoal>;
 };
@@ -121,7 +140,7 @@ export class CompilerValidator {
   }
 
   async loadCatalog(): Promise<CompilerValidationCatalog> {
-    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, eventRelationList, spatialRelationList, ruleList, goalList] = await Promise.all([
+    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, eventRelationList, spatialRelationList, sceneOccurrenceList, eventFrameList, actionSchemaList, ruleList, goalList] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listPropositions(),
       this.canon.listAttributions(),
@@ -130,6 +149,9 @@ export class CompilerValidator {
       this.canon.listEventParticipations(),
       this.canon.listEventRelations(),
       this.canon.listSpatialRelations(),
+      this.canon.listSceneOccurrences(),
+      this.canon.listEventFrames(),
+      this.canon.listActionSchemas(),
       this.canon.listRules(),
       this.actors?.listGoals() ?? [],
     ]);
@@ -142,6 +164,9 @@ export class CompilerValidator {
       eventParticipations: new Map(eventParticipationList.map((item) => [item.id, item])),
       eventRelations: new Map(eventRelationList.map((item) => [item.id, item])),
       spatialRelations: new Map(spatialRelationList.map((item) => [item.id, item])),
+      sceneOccurrences: new Map(sceneOccurrenceList.map((item) => [item.id, item])),
+      eventFrames: new Map(eventFrameList.map((item) => [item.id, item])),
+      actionSchemas: new Map(actionSchemaList.map((item) => [item.id, item])),
       rules: new Map(ruleList.map((rule) => [rule.id, rule])),
       goals: new Map(goalList.map((goal) => [goal.id, goal])),
     };
@@ -153,7 +178,7 @@ export class CompilerValidator {
     catalog: CompilerValidationCatalog,
     options: { graphScope?: CompilerCatalogValidationScope } = {},
   ): CompilerValidation {
-    const { entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, rules, goals } = catalog;
+    const { entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, rules, goals } = catalog;
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
@@ -161,7 +186,7 @@ export class CompilerValidator {
     if (kind === "proposition") this.validateProposition(propositionSchema.parse(payload), entities, propositions, events, errors);
     if (kind === "attribution") this.validateAttribution(attributionSchema.parse(payload), entities, propositions, attributions, errors);
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
-    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
+    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, propositions, attributions, claims, events, eventFrames, actionSchemas, rules, errors);
     if (kind === "event-participation") this.validateEventParticipation(eventParticipationSchema.parse(payload), entities, events, eventParticipations, errors);
     if (kind === "event-relation") {
       const relation = eventRelationSchema.parse(payload);
@@ -176,6 +201,19 @@ export class CompilerValidator {
           relations: prospectiveRelations.values(),
         }));
       }
+    }
+    if (kind === "scene-occurrence") {
+      const scene = sceneOccurrenceSchema.parse(payload);
+      const prospectiveScenes = new Map(sceneOccurrences).set(scene.id, scene);
+      errors.push(...validateSceneOccurrenceCatalog({ entities, events, scenes: prospectiveScenes.values() }));
+    }
+    if (kind === "event-frame") {
+      const frame = eventFrameSchema.parse(payload);
+      if (!frame.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event frame ${frame.id} has no source evidence`, "evidence"));
+    }
+    if (kind === "action-schema") {
+      const action = actionSchemaSchema.parse(payload);
+      errors.push(...validateActionSchemaCatalog(action, entities, new Set(events.keys())));
     }
     if (kind === "spatial-relation") {
       const relation = spatialRelationSchema.parse(payload);
@@ -293,6 +331,8 @@ export class CompilerValidator {
     attributions: ReadonlyMap<string, Attribution>,
     claims: ReadonlyMap<string, Claim>,
     events: ReadonlyMap<string, CanonicalEvent>,
+    eventFrames: ReadonlyMap<string, EventFrame>,
+    actionSchemas: ReadonlyMap<string, ActionSchema>,
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
   ): void {
@@ -340,6 +380,25 @@ export class CompilerValidator {
     }
     if (event.storyTime.kind === "relative" && !events.has(event.storyTime.anchorEventId)) {
       errors.push(issue("UNKNOWN_TIME_ANCHOR", `Unknown story-time anchor ${event.storyTime.anchorEventId}`, "storyTime.anchorEventId"));
+    }
+    if (event.frameInstance) {
+      const frame = eventFrames.get(event.frameInstance.frameId);
+      if (!frame) {
+        errors.push(issue("UNKNOWN_EVENT_FRAME", `Event ${event.id} references unknown frame ${event.frameInstance.frameId}`, "frameInstance.frameId"));
+      } else {
+        errors.push(...validateEventFrameInstance(event.frameInstance, frame, entities, event));
+      }
+    }
+    if (event.action) {
+      const resolved = resolveActionInvocation(event.action, actionSchemas, entities, {
+        participants: event.participants,
+        proposedDelta: event.observedOutcome,
+        hasKnowledge: Boolean(event.observedKnowledge?.operations.length),
+        hasTimeAdvance: Boolean(event.timeAdvance),
+        hasSceneTransition: false,
+      });
+      errors.push(...resolved.issues);
+      for (const predicate of resolved.preconditions) this.validatePredicate(predicate, entities, rules, errors);
     }
     for (const predicate of event.preconditions) this.validatePredicate(predicate, entities, rules, errors);
     this.validateOperations(event.observedOutcome.operations, entities, rules, errors, "observedOutcome.operations");
@@ -1037,6 +1096,7 @@ export class CompilerCommitService {
       },
       "ATTRIBUTION_DEPENDENCY_CYCLE",
     );
+    for (const candidate of eligible.filter((item) => item.kind === "event-frame")) await processCandidate(candidate);
     await processDependencyKind(
       eligible.filter((item) => item.kind === "canonical-event"),
       catalog.events,
@@ -1049,6 +1109,8 @@ export class CompilerCommitService {
       },
       "CAUSAL_CYCLE",
     );
+    for (const candidate of eligible.filter((item) => item.kind === "action-schema")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "scene-occurrence")) await processCandidate(candidate);
     for (const candidate of eligible.filter((item) => item.kind === "event-participation")) await processCandidate(candidate);
     const relationCandidates: PendingCanonicalProposal[] = [];
     for (const candidate of eligible.filter((item) => item.kind === "event-relation")) {
@@ -1183,6 +1245,7 @@ export class CompilerCommitService {
       () => undefined,
       "ATTRIBUTION_DEPENDENCY_CYCLE",
     );
+    for (const candidate of eligible.filter((item) => item.kind === "event-frame")) await processCandidate(candidate);
     await processDependencyKind(
       eligible.filter((item) => item.kind === "canonical-event"),
       catalog.events,
@@ -1192,6 +1255,8 @@ export class CompilerCommitService {
       () => undefined,
       "CAUSAL_CYCLE",
     );
+    for (const candidate of eligible.filter((item) => item.kind === "action-schema")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "scene-occurrence")) await processCandidate(candidate);
     for (const candidate of eligible.filter((item) => item.kind === "event-participation")) await processCandidate(candidate);
 
     const relationCandidates: PendingCanonicalProposal[] = [];
@@ -1350,6 +1415,9 @@ export class CompilerCommitService {
     else if (kind === "canonical-event") await this.canon.putEvent(canonicalEventSchema.parse(payload));
     else if (kind === "event-participation") await this.canon.putEventParticipation(eventParticipationSchema.parse(payload));
     else if (kind === "event-relation") await this.canon.putEventRelation(eventRelationSchema.parse(payload));
+    else if (kind === "scene-occurrence") await this.canon.putSceneOccurrence(sceneOccurrenceSchema.parse(payload));
+    else if (kind === "event-frame") await this.canon.putEventFrame(eventFrameSchema.parse(payload));
+    else if (kind === "action-schema") await this.canon.putActionSchema(actionSchemaSchema.parse(payload));
     else if (kind === "spatial-relation") await this.canon.putSpatialRelation(spatialRelationSchema.parse(payload));
     else if (kind === "world-rule") await this.canon.putRule(worldRuleSchema.parse(payload));
     else if (kind === "initial-world") await this.initialWorld.put(initialWorldSchema.parse(payload));
@@ -1473,6 +1541,9 @@ function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposa
   if (kind === "canonical-event") { const value = canonicalEventSchema.parse(payload); catalog.events.set(value.id, value); }
   if (kind === "event-participation") { const value = eventParticipationSchema.parse(payload); catalog.eventParticipations.set(value.id, value); }
   if (kind === "event-relation") { const value = eventRelationSchema.parse(payload); catalog.eventRelations.set(value.id, value); }
+  if (kind === "scene-occurrence") { const value = sceneOccurrenceSchema.parse(payload); catalog.sceneOccurrences.set(value.id, value); }
+  if (kind === "event-frame") { const value = eventFrameSchema.parse(payload); catalog.eventFrames.set(value.id, value); }
+  if (kind === "action-schema") { const value = actionSchemaSchema.parse(payload); catalog.actionSchemas.set(value.id, value); }
   if (kind === "spatial-relation") { const value = spatialRelationSchema.parse(payload); catalog.spatialRelations.set(value.id, value); }
   if (kind === "world-rule") { const value = worldRuleSchema.parse(payload); catalog.rules.set(value.id, value); }
   if (kind === "character-goal") { const value = characterGoalSchema.parse(payload); catalog.goals.set(value.id, value); }
@@ -1488,6 +1559,9 @@ function cloneValidationCatalog(catalog: CompilerValidationCatalog): CompilerVal
     eventParticipations: new Map(catalog.eventParticipations),
     eventRelations: new Map(catalog.eventRelations),
     spatialRelations: new Map(catalog.spatialRelations),
+    sceneOccurrences: new Map(catalog.sceneOccurrences),
+    eventFrames: new Map(catalog.eventFrames),
+    actionSchemas: new Map(catalog.actionSchemas),
     rules: new Map(catalog.rules),
     goals: new Map(catalog.goals),
   };
@@ -1498,7 +1572,7 @@ function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
-  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "action-schema" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
 }
 function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "entity") return entitySchema;
@@ -1508,6 +1582,9 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "canonical-event") return canonicalEventSchema;
   if (kind === "event-participation") return eventParticipationSchema;
   if (kind === "event-relation") return eventRelationSchema;
+  if (kind === "scene-occurrence") return sceneOccurrenceSchema;
+  if (kind === "event-frame") return eventFrameSchema;
+  if (kind === "action-schema") return actionSchemaSchema;
   if (kind === "spatial-relation") return spatialRelationSchema;
   if (kind === "initial-world") return initialWorldSchema;
   if (kind === "character-goal") return characterGoalSchema;

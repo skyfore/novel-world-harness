@@ -903,6 +903,65 @@ export const progressCertificateSchema = z.object({
 });
 export type ProgressCertificate = z.infer<typeof progressCertificateSchema>;
 
+export const eventFrameRoleBindingSchema = z.object({
+  roleId: idSchema,
+  entityIds: z.array(idSchema).min(1).max(32),
+}).strict().superRefine((value, ctx) => {
+  if (new Set(value.entityIds).size !== value.entityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["entityIds"], message: "Frame role bindings must contain unique entity IDs" });
+  }
+});
+export type EventFrameRoleBinding = z.infer<typeof eventFrameRoleBindingSchema>;
+
+export const eventFrameInstanceSchema = z.object({
+  frameId: idSchema,
+  roleBindings: z.array(eventFrameRoleBindingSchema).max(64),
+  parameters: z.record(idSchema, stateValueSchema).default({}),
+}).strict().superRefine((value, ctx) => {
+  const roles = new Set<string>();
+  value.roleBindings.forEach((binding, index) => {
+    if (roles.has(binding.roleId)) {
+      ctx.addIssue({ code: "custom", path: ["roleBindings", index, "roleId"], message: `Duplicate frame role binding ${binding.roleId}` });
+    }
+    roles.add(binding.roleId);
+  });
+});
+export type EventFrameInstance = z.infer<typeof eventFrameInstanceSchema>;
+
+export const actionRoleBindingSchema = z.object({
+  roleId: idSchema,
+  entityIds: z.array(idSchema).min(1).max(32),
+}).strict().superRefine((value, ctx) => {
+  if (new Set(value.entityIds).size !== value.entityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["entityIds"], message: "Action role bindings must contain unique entity IDs" });
+  }
+});
+export type ActionRoleBinding = z.infer<typeof actionRoleBindingSchema>;
+
+const schemaBoundActionInvocationSchema = z.object({
+  lane: z.literal("schema-bound"),
+  schemaId: idSchema,
+  roleBindings: z.array(actionRoleBindingSchema).max(64),
+  parameters: z.record(idSchema, stateValueSchema).default({}),
+}).strict().superRefine((value, ctx) => {
+  const roles = new Set<string>();
+  value.roleBindings.forEach((binding, index) => {
+    if (roles.has(binding.roleId)) {
+      ctx.addIssue({ code: "custom", path: ["roleBindings", index, "roleId"], message: `Duplicate action role binding ${binding.roleId}` });
+    }
+    roles.add(binding.roleId);
+  });
+});
+
+export const actionInvocationSchema = z.discriminatedUnion("lane", [
+  schemaBoundActionInvocationSchema,
+  z.object({
+    lane: z.literal("ad-hoc"),
+    description: z.string().trim().min(1).max(1_000),
+  }).strict(),
+]);
+export type ActionInvocation = z.infer<typeof actionInvocationSchema>;
+
 export const canonicalEventSchema = z.object({
   id: idSchema,
   title: z.string().min(1),
@@ -918,6 +977,9 @@ export const canonicalEventSchema = z.object({
   preconditions: z.array(predicateSchema),
   observedOutcome: stateDeltaSchema,
   observedKnowledge: knowledgeDeltaSchema.optional(),
+  sceneOccurrenceIds: z.array(idSchema).max(16).optional(),
+  frameInstance: eventFrameInstanceSchema.optional(),
+  action: actionInvocationSchema.optional(),
   evidence: z.array(evidenceRefSchema),
   causalParents: z.array(idSchema),
   confidence: z.number().min(0).max(1),
@@ -1103,6 +1165,7 @@ export const eventProposalBaseSchema = z
     evidence: z.array(evidenceRefSchema),
     possibilityId: idSchema.optional(),
     canonicalAdaptation: canonicalAdaptationSchema.optional(),
+    action: actionInvocationSchema.optional(),
     progress: narrativeProgressSchema.optional(),
   })
   .strict();
@@ -1166,6 +1229,7 @@ export const committedEventSchema = z
     realizesCanonicalEventIds: z.array(idSchema).optional(),
     possibilityId: idSchema.optional(),
     canonicalAdaptation: canonicalAdaptationSchema.optional(),
+    action: actionInvocationSchema.optional(),
     actorId: idSchema.optional(),
     progress: narrativeProgressSchema.optional(),
   })
@@ -1286,6 +1350,7 @@ export const possibilityBaseSchema = z
     relevance: z.number().min(0),
     proposedDelta: stateDeltaSchema.optional(),
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    action: actionInvocationSchema.optional(),
     canonicalScaffold: canonicalScaffoldSchema.optional(),
     evidence: z.array(evidenceRefSchema),
   })

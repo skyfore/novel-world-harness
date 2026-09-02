@@ -21,6 +21,7 @@ export function canonicalEventToPossibility(event: CanonicalEvent, branchId: str
     relevance: 1,
     proposedDelta: event.observedOutcome,
     ...(event.observedKnowledge ? { proposedKnowledge: event.observedKnowledge } : {}),
+    ...(event.action ? { action: structuredClone(event.action) } : {}),
     evidence: event.evidence,
   };
 }

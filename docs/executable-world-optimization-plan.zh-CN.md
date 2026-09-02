@@ -704,7 +704,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T4 — SceneOccurrence、EventFrame、ActionSchema
 
-- **状态：** pending
+- **状态：** complete
 - **依赖：** T1、T2
 - **主要文件：**
   - 新建 `src/world/scene-occurrence.ts`
@@ -718,6 +718,15 @@ CanonicalSnapshot V8 至少固定：
 - **交付：** canonical revisions、role binding、PredicateTemplate、schema-bound/ad-hoc lanes
 - **测试：** role cardinality/kind、binding、effect envelope、unknown action fallback、scene closure/evidence
 - **建议提交：** `feat: compile scene event and action semantics`
+- **完成说明：** CanonicalSnapshot V8 / PreparedNovelBundle V3 已原生携带
+  SceneOccurrence、EventFrame 与 ActionSchema revisions；canonical event 保存完整 frame/action
+  instance（含 role binding 与 parameter），而非不可执行的裸 schema ID。Source-induced action
+  必须由至少两个不同 canonical event 支撑，domain-module action 只能由 host 注册；schema-bound
+  与显式 ad-hoc lane 共用事件验证和提交路径。编译闭包、artifact retrieval、source-scoped
+  context、runtime canonical possibility 与 audit 均已贯通；scene 双向 membership/physical
+  presence、frame kind/cardinality/presence、action precondition/effect envelope/required effect 和
+  unknown-schema fail-closed 均有独立测试。全量验证：`pnpm run check` 通过，`pnpm test`
+  140 files / 798 tests 通过。
 
 ### T5 — Branch semantic character evolution
 

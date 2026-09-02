@@ -27,9 +27,12 @@ import {
 } from "./model.js";
 import { characterOntologyEvidence } from "./character-ontology.js";
 import { spatialRelationSchema, type SpatialRelation } from "./spatial-ontology.js";
+import { sceneOccurrenceSchema, type SceneOccurrence } from "./scene-occurrence.js";
+import { eventFrameSchema, type EventFrame } from "./event-frame.js";
+import { actionSchemaSchema, type ActionSchema } from "./action-ontology.js";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "event-participations" | "event-relations" | "spatial-relations" | "rules";
+export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "event-participations" | "event-relations" | "spatial-relations" | "scene-occurrences" | "event-frames" | "action-schemas" | "rules";
 export type CanonicalRevisionRef = { id: string; hash: string };
 type StoredCanonicalRef = { version: 1; id: string; hash: string };
 export type ProposalStatus = "pending" | "accepted" | "rejected";
@@ -75,6 +78,9 @@ export class CanonicalModelStore {
   putEventParticipation(participation: EventParticipation): Promise<void> { const value = eventParticipationSchema.parse(participation); return this.put("event-participations", value.id, value); }
   putEventRelation(relation: EventRelation): Promise<void> { const value = eventRelationSchema.parse(relation); return this.put("event-relations", value.id, value); }
   putSpatialRelation(relation: SpatialRelation): Promise<void> { const value = spatialRelationSchema.parse(relation); return this.put("spatial-relations", value.id, value); }
+  putSceneOccurrence(scene: SceneOccurrence): Promise<void> { const value = sceneOccurrenceSchema.parse(scene); return this.put("scene-occurrences", value.id, value); }
+  putEventFrame(frame: EventFrame): Promise<void> { const value = eventFrameSchema.parse(frame); return this.put("event-frames", value.id, value); }
+  putActionSchema(schema: ActionSchema): Promise<void> { const value = actionSchemaSchema.parse(schema); return this.put("action-schemas", value.id, value); }
   putRule(rule: WorldRule): Promise<void> { const value = worldRuleSchema.parse(rule); return this.put("rules", value.id, value); }
   ensureEntityRevision(entity: Entity): Promise<void> { const value = entitySchema.parse(entity); return this.ensureRevision("entities", value.id, value); }
   ensurePropositionRevision(proposition: Proposition): Promise<void> { const value = propositionSchema.parse(proposition); return this.ensureRevision("propositions", value.id, value); }
@@ -84,6 +90,9 @@ export class CanonicalModelStore {
   ensureEventParticipationRevision(participation: EventParticipation): Promise<void> { const value = eventParticipationSchema.parse(participation); return this.ensureRevision("event-participations", value.id, value); }
   ensureEventRelationRevision(relation: EventRelation): Promise<void> { const value = eventRelationSchema.parse(relation); return this.ensureRevision("event-relations", value.id, value); }
   ensureSpatialRelationRevision(relation: SpatialRelation): Promise<void> { const value = spatialRelationSchema.parse(relation); return this.ensureRevision("spatial-relations", value.id, value); }
+  ensureSceneOccurrenceRevision(scene: SceneOccurrence): Promise<void> { const value = sceneOccurrenceSchema.parse(scene); return this.ensureRevision("scene-occurrences", value.id, value); }
+  ensureEventFrameRevision(frame: EventFrame): Promise<void> { const value = eventFrameSchema.parse(frame); return this.ensureRevision("event-frames", value.id, value); }
+  ensureActionSchemaRevision(schema: ActionSchema): Promise<void> { const value = actionSchemaSchema.parse(schema); return this.ensureRevision("action-schemas", value.id, value); }
   ensureRuleRevision(rule: WorldRule): Promise<void> { const value = worldRuleSchema.parse(rule); return this.ensureRevision("rules", value.id, value); }
   getEntity(id: string): Promise<Entity> { return this.get("entities", id, entitySchema); }
   getProposition(id: string): Promise<Proposition> { return this.get("propositions", id, propositionSchema); }
@@ -93,6 +102,9 @@ export class CanonicalModelStore {
   getEventParticipation(id: string): Promise<EventParticipation> { return this.get("event-participations", id, eventParticipationSchema); }
   getEventRelation(id: string): Promise<EventRelation> { return this.get("event-relations", id, eventRelationSchema); }
   getSpatialRelation(id: string): Promise<SpatialRelation> { return this.get("spatial-relations", id, spatialRelationSchema); }
+  getSceneOccurrence(id: string): Promise<SceneOccurrence> { return this.get("scene-occurrences", id, sceneOccurrenceSchema); }
+  getEventFrame(id: string): Promise<EventFrame> { return this.get("event-frames", id, eventFrameSchema); }
+  getActionSchema(id: string): Promise<ActionSchema> { return this.get("action-schemas", id, actionSchemaSchema); }
   getRule(id: string): Promise<WorldRule> { return this.get("rules", id, worldRuleSchema); }
   getEntityRevision(id: string, hash: string): Promise<Entity> { return this.getRevision("entities", id, hash, entitySchema); }
   getPropositionRevision(id: string, hash: string): Promise<Proposition> { return this.getRevision("propositions", id, hash, propositionSchema); }
@@ -102,6 +114,9 @@ export class CanonicalModelStore {
   getEventParticipationRevision(id: string, hash: string): Promise<EventParticipation> { return this.getRevision("event-participations", id, hash, eventParticipationSchema); }
   getEventRelationRevision(id: string, hash: string): Promise<EventRelation> { return this.getRevision("event-relations", id, hash, eventRelationSchema); }
   getSpatialRelationRevision(id: string, hash: string): Promise<SpatialRelation> { return this.getRevision("spatial-relations", id, hash, spatialRelationSchema); }
+  getSceneOccurrenceRevision(id: string, hash: string): Promise<SceneOccurrence> { return this.getRevision("scene-occurrences", id, hash, sceneOccurrenceSchema); }
+  getEventFrameRevision(id: string, hash: string): Promise<EventFrame> { return this.getRevision("event-frames", id, hash, eventFrameSchema); }
+  getActionSchemaRevision(id: string, hash: string): Promise<ActionSchema> { return this.getRevision("action-schemas", id, hash, actionSchemaSchema); }
   getRuleRevision(id: string, hash: string): Promise<WorldRule> { return this.getRevision("rules", id, hash, worldRuleSchema); }
   listEntities(): Promise<Entity[]> { return this.list("entities", entitySchema); }
   listPropositions(): Promise<Proposition[]> { return this.list("propositions", propositionSchema); }
@@ -111,6 +126,9 @@ export class CanonicalModelStore {
   listEventParticipations(): Promise<EventParticipation[]> { return this.list("event-participations", eventParticipationSchema); }
   listEventRelations(): Promise<EventRelation[]> { return this.list("event-relations", eventRelationSchema); }
   listSpatialRelations(): Promise<SpatialRelation[]> { return this.list("spatial-relations", spatialRelationSchema); }
+  listSceneOccurrences(): Promise<SceneOccurrence[]> { return this.list("scene-occurrences", sceneOccurrenceSchema); }
+  listEventFrames(): Promise<EventFrame[]> { return this.list("event-frames", eventFrameSchema); }
+  listActionSchemas(): Promise<ActionSchema[]> { return this.list("action-schemas", actionSchemaSchema); }
   listRules(): Promise<WorldRule[]> { return this.list("rules", worldRuleSchema); }
   async currentRevision(kind: CanonicalKind, idInput: string): Promise<CanonicalRevisionRef | null> {
     const id = safeId(idInput);
@@ -435,6 +453,9 @@ export class CanonicalCompiler {
   async acceptEvent(id: string): Promise<CanonicalEvent> { const proposal = await this.proposals.read("pending", id, canonicalEventSchema); await this.canon.putEvent(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptEventParticipation(id: string): Promise<EventParticipation> { const proposal = await this.proposals.read("pending", id, eventParticipationSchema); await this.canon.putEventParticipation(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptEventRelation(id: string): Promise<EventRelation> { const proposal = await this.proposals.read("pending", id, eventRelationSchema); await this.canon.putEventRelation(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
+  async acceptSceneOccurrence(id: string): Promise<SceneOccurrence> { const proposal = await this.proposals.read("pending", id, sceneOccurrenceSchema); await this.canon.putSceneOccurrence(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
+  async acceptEventFrame(id: string): Promise<EventFrame> { const proposal = await this.proposals.read("pending", id, eventFrameSchema); await this.canon.putEventFrame(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
+  async acceptActionSchema(id: string): Promise<ActionSchema> { const proposal = await this.proposals.read("pending", id, actionSchemaSchema); await this.canon.putActionSchema(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async acceptRule(id: string): Promise<WorldRule> { const proposal = await this.proposals.read("pending", id, worldRuleSchema); await this.canon.putRule(proposal.payload); await this.proposals.transition(id, "pending", "accepted"); return proposal.payload; }
   async reject(id: string): Promise<void> {
     await this.proposals.reject(id, [{ code: "CANONICAL_COMPILER_REJECTION", message: "Proposal was explicitly rejected by the canonical compiler." }]);

@@ -60,6 +60,9 @@ import {
 } from "../world/world-rule-ontology.js";
 import { compareStoryTime } from "../world/time.js";
 import { isNovelScaleCompilation } from "./scale.js";
+import { validateSceneOccurrenceCatalog } from "../world/scene-occurrence.js";
+import { validateEventFrameInstance } from "../world/event-frame.js";
+import { resolveActionInvocation, validateActionSchemaCatalog } from "../world/action-ontology.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
 export { NOVEL_SCALE_EVENT_THRESHOLD } from "./scale.js";
@@ -155,6 +158,16 @@ export type CompilerAuditReport = {
     typedCausalEdges: number;
     relationValidationIssues: number;
     relationErrors: Array<{ code: string; message: string; path?: string }>;
+    sceneOccurrences: number;
+    eventFrames: number;
+    framedEvents: number;
+    actionSchemas: number;
+    schemaBoundEvents: number;
+    adHocEvents: number;
+    sceneValidationIssues: number;
+    frameValidationIssues: number;
+    actionValidationIssues: number;
+    executableSemanticErrors: Array<{ code: string; message: string; path?: string }>;
   };
   characterSemantics: {
     ontologyVersion: typeof CHARACTER_ONTOLOGY_VERSION;
@@ -250,6 +263,9 @@ export type CompilerAuditReport = {
     events: number;
     eventParticipations: number;
     eventRelations: number;
+    sceneOccurrences: number;
+    eventFrames: number;
+    actionSchemas: number;
     spatialRelations: number;
     rules: number;
     initialWorld: boolean;
@@ -522,7 +538,7 @@ export async function auditCompiler(
 
   const canon = new CanonicalModelStore(workspaceRoot);
   const actorStore = new ActorModelStore(workspaceRoot);
-  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allEventParticipations, allEventRelations, allSpatialRelations, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
+  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allEventParticipations, allEventRelations, allSceneOccurrences, allEventFrames, allActionSchemas, allSpatialRelations, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -530,6 +546,9 @@ export async function auditCompiler(
     canon.listEvents(),
     canon.listEventParticipations(),
     canon.listEventRelations(),
+    canon.listSceneOccurrences(),
+    canon.listEventFrames(),
+    canon.listActionSchemas(),
     canon.listSpatialRelations(),
     canon.listRules(),
     new InitialWorldStore(workspaceRoot).get(),
@@ -553,6 +572,9 @@ export async function auditCompiler(
   const events = allEvents.filter(belongsToSelectedSource);
   const eventParticipations = allEventParticipations.filter(belongsToSelectedSource);
   const eventRelations = allEventRelations.filter(belongsToSelectedSource);
+  const sceneOccurrences = allSceneOccurrences.filter(belongsToSelectedSource);
+  const eventFrames = allEventFrames.filter(belongsToSelectedSource);
+  const actionSchemas = allActionSchemas.filter((item) => item.induction.kind === "domain-module" || belongsToSelectedSource(item));
   const spatialRelations = allSpatialRelations.filter((item) => belongsToSelectedSource({
     evidence: item.evidence,
     counterEvidence: item.counterEvidence,
@@ -573,6 +595,9 @@ export async function auditCompiler(
     ...events.map((item) => ({ name: `event:${item.id}`, kind: "canonical-event", id: item.id, payload: item, evidence: item.evidence })),
     ...eventParticipations.map((item) => ({ name: `event-participation:${item.id}`, kind: "event-participation", id: item.id, payload: item, evidence: item.evidence })),
     ...eventRelations.map((item) => ({ name: `event-relation:${item.id}`, kind: "event-relation", id: item.id, payload: item, evidence: artifactEvidence(item) })),
+    ...sceneOccurrences.map((item) => ({ name: `scene-occurrence:${item.id}`, kind: "scene-occurrence", id: item.id, payload: item, evidence: item.evidence })),
+    ...eventFrames.map((item) => ({ name: `event-frame:${item.id}`, kind: "event-frame", id: item.id, payload: item, evidence: item.evidence })),
+    ...actionSchemas.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `action-schema:${item.id}`, kind: "action-schema", id: item.id, payload: item, evidence: item.evidence })),
     ...spatialRelations.map((item) => ({ name: `spatial-relation:${item.id}`, kind: "spatial-relation", id: item.id, payload: item, evidence: spatialRelationEvidence(item) })),
     ...rules.map((item) => ({ name: `rule:${item.id}`, kind: "world-rule", id: item.id, payload: item, evidence: worldRuleEvidence(item) })),
     ...(initialWorld ? [{ name: "initial-world", kind: "initial-world", id: "initial-world", payload: initialWorld, evidence: initialWorld.evidence }] : []),
@@ -781,9 +806,38 @@ export async function auditCompiler(
   const typedCausalRelations = legacyCausalKeys.size
     ? typedCausalKeys.size / legacyCausalKeys.size
     : null;
+  const entityCatalog = new Map(entities.map((entity) => [entity.id, entity]));
+  const eventCatalog = new Map(events.map((event) => [event.id, event]));
+  const eventFrameCatalog = new Map(eventFrames.map((frame) => [frame.id, frame]));
+  const actionSchemaCatalog = new Map(actionSchemas.map((schema) => [schema.id, schema]));
+  const sceneValidation = validateSceneOccurrenceCatalog({
+    entities: entityCatalog,
+    events: eventCatalog,
+    scenes: sceneOccurrences,
+  });
+  const frameValidation = events.flatMap((event) => {
+    if (!event.frameInstance) return [];
+    const frame = eventFrameCatalog.get(event.frameInstance.frameId);
+    return frame
+      ? validateEventFrameInstance(event.frameInstance, frame, entityCatalog, event)
+      : [{ code: "UNKNOWN_EVENT_FRAME", message: `Event ${event.id} references unknown frame ${event.frameInstance.frameId}`, path: `events.${event.id}.frameInstance.frameId` }];
+  });
+  const actionValidation = [
+    ...actionSchemas.flatMap((schema) => validateActionSchemaCatalog(schema, entityCatalog, new Set(eventCatalog.keys()))),
+    ...events.flatMap((event) => event.action
+      ? resolveActionInvocation(event.action, actionSchemaCatalog, entityCatalog, {
+          participants: event.participants,
+          proposedDelta: event.observedOutcome,
+          hasKnowledge: Boolean(event.observedKnowledge?.operations.length),
+          hasTimeAdvance: Boolean(event.timeAdvance),
+          hasSceneTransition: false,
+        }).issues
+      : []),
+  ];
+  const executableSemanticValidation = [...sceneValidation, ...frameValidation, ...actionValidation];
   const spatialValidation = validateSpatialRelationCatalog(spatialRelations, {
-    entities: new Map(entities.map((entity) => [entity.id, entity])),
-    events: new Map(events.map((event) => [event.id, event])),
+    entities: entityCatalog,
+    events: eventCatalog,
     claims: new Set(claims.map((claim) => claim.id)),
     rules: new Set(rules.map((rule) => rule.id)),
   });
@@ -1141,6 +1195,7 @@ export async function auditCompiler(
   const semanticReadiness: CompilerReadinessState = epistemicErrors.length
     || participationValidation.length
     || relationValidation.length
+    || executableSemanticValidation.length
     || spatialValidation.length
     || worldRuleValidation.length
     || characterOntologyValidation.length
@@ -1210,6 +1265,7 @@ export async function auditCompiler(
     ...epistemicErrors.map((error) => `${error.artifact}: ${error.message}`),
     ...participationValidation.map((error) => `Event participation ${error.code}: ${error.message}`),
     ...relationValidation.map((error) => `Event relation ${error.code}: ${error.message}`),
+    ...executableSemanticValidation.map((error) => `Executable event semantics ${error.code}: ${error.message}`),
     ...worldRuleValidation.map((error) =>
       `World rule ${error.code}${error.path ? ` at ${error.path}` : ""}: ${error.message}`),
     ...characterOntologyValidation.map((error) =>
@@ -1308,6 +1364,16 @@ export async function auditCompiler(
       typedCausalEdges: typedCausalKeys.size,
       relationValidationIssues: relationValidation.length,
       relationErrors: relationValidation,
+      sceneOccurrences: sceneOccurrences.length,
+      eventFrames: eventFrames.length,
+      framedEvents: events.filter((event) => event.frameInstance !== undefined).length,
+      actionSchemas: actionSchemas.length,
+      schemaBoundEvents: events.filter((event) => event.action?.lane === "schema-bound").length,
+      adHocEvents: events.filter((event) => event.action?.lane === "ad-hoc").length,
+      sceneValidationIssues: sceneValidation.length,
+      frameValidationIssues: frameValidation.length,
+      actionValidationIssues: actionValidation.length,
+      executableSemanticErrors: executableSemanticValidation,
     },
     characterSemantics: {
       ontologyVersion: CHARACTER_ONTOLOGY_VERSION,
@@ -1400,6 +1466,9 @@ export async function auditCompiler(
       events: events.length,
       eventParticipations: eventParticipations.length,
       eventRelations: eventRelations.length,
+      sceneOccurrences: sceneOccurrences.length,
+      eventFrames: eventFrames.length,
+      actionSchemas: actionSchemas.length,
       spatialRelations: spatialRelations.length,
       rules: rules.length,
       initialWorld: Boolean(initialWorld),
@@ -1432,6 +1501,7 @@ export async function auditCompiler(
         ? semanticIssues.length === 0
           && participationValidation.length === 0
           && relationValidation.length === 0
+          && executableSemanticValidation.length === 0
           && spatialValidation.length === 0
           && worldRuleValidation.length === 0
           && characterOntologyValidation.length === 0

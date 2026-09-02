@@ -230,7 +230,7 @@ export {
   type ProposalRejectionReport,
 } from "./world/canonical-model.js";
 export { canonicalEventToPossibility } from "./world/canon-runtime.js";
-export { loadWorldContext, pinBranchPreparationContexts, WorldContextStore, type CanonicalSnapshot, type ScopedWorldArtifacts } from "./world/context.js";
+export { canonicalSnapshotSchema, loadWorldContext, WorldContextStore, type CanonicalSnapshot, type ScopedWorldArtifacts } from "./world/context.js";
 export { diffWorldBranches, diffWorldStates, type HistoryDifference, type KnowledgeDifference, type StateDifference, type WorldBranchDiff } from "./world/diff.js";
 export { WorldEngine, WorldProjector, validateEventProposal, type ResolvedWorldModelContext, type WorldContextResolver, type WorldModelContext } from "./world/engine.js";
 export { fsckWorld, type FsckIssue, type WorldFsckReport } from "./world/fsck.js";

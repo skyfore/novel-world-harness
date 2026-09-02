@@ -16,7 +16,6 @@ import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.
 import { ActorModelStore } from "../world/actors.js";
 import { CanonicalModelStore } from "../world/canonical-model.js";
 import { characterOntologyEvidence } from "../world/character-ontology.js";
-import { pinBranchPreparationContexts } from "../world/context.js";
 import { InitialWorldStore } from "../world/initial.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { spatialRelationEvidence } from "../world/spatial-ontology.js";
@@ -107,7 +106,6 @@ export async function reparseCommand(
   }
   if (!baseline.bundleHash) throw new Error("Current prepared revision was not published.");
   const previousBundleHash = baseline.bundleHash;
-  await pinBranchPreparationContexts(root);
   const runId = `reparse-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`;
   report(
     `Starting ${options.all ? "whole-novel" : "chapter"} reparse ${runId} for ${source.id}: `

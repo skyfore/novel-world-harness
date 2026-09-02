@@ -39,7 +39,6 @@ import {
 } from "../world/world-rule-ontology.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema } from "../world/possibility-model.js";
 import { BranchStore } from "../world/store.js";
-import { pinBranchPreparationContexts } from "../world/context.js";
 import {
   COMPILER_PIPELINE_VERSION,
   CompilerBatchStore,
@@ -640,7 +639,6 @@ export class PreparedNovelCache {
     }
     const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
     if (layoutIssue && !options.allowIncompatibleRollback) throw new Error(layoutIssue);
-    await pinBranchPreparationContexts(this.workspaceRoot);
     try {
       await this.materialize(cached.bundle, true);
     } catch (error) {

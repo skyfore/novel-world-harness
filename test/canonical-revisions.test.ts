@@ -3,9 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
-import { pinBranchPreparationContexts, WorldContextStore } from "../src/world/context.js";
+import { WorldContextStore } from "../src/world/context.js";
 import { WorldEngine } from "../src/world/engine.js";
-import { ActorModelStore } from "../src/world/actors.js";
 import { canonicalJson, contentHash } from "../src/world/canonical.js";
 import { DEFAULT_STATE_FIELDS } from "../src/world/state.js";
 
@@ -169,7 +168,7 @@ describe("CanonicalModelStore revisions", () => {
 
     const first = await contexts.captureCurrent();
     const stored = JSON.parse(await fs.readFile(path.join(contexts.root, `${first.canonicalSnapshotHash}.json`), "utf8")) as { version: number };
-    expect(stored.version).toBe(7);
+    expect(stored.version).toBe(8);
     expect(first.events?.get("hero-enters-gate")?.participants).toEqual(["hero", "gate"]);
     expect(first.eventParticipations).toContainEqual(expect.objectContaining({ id: "hero-enters-gate-hero", role: "agent" }));
     expect(first.eventRelations).toContainEqual(expect.objectContaining({ id: "gate-opens-enables-entry", type: "enables" }));
@@ -257,22 +256,15 @@ describe("CanonicalModelStore revisions", () => {
     })).rejects.toThrow("does not apply to artifact");
   });
 
-  it("pins actor policy for legacy version-1 branch snapshots before current policy changes", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-legacy-context-snapshot-"));
+  it("rejects pre-V8 snapshots instead of supplementing or migrating them", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-old-context-rejected-"));
     roots.push(root);
     const canon = new CanonicalModelStore(root);
-    const actors = new ActorModelStore(root);
     const contexts = new WorldContextStore(root, canon);
-    const evidence = [{
-      span: { sourceId: "source", startLine: 1, endLine: 1, startByte: 0, endByte: 4, quoteHash: "a".repeat(64) },
-      strength: "explicit" as const,
-    }];
     await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] });
-    await actors.putGoal({ id: "hero-goal", actorId: "hero", description: "Old policy", priority: 0.5, requiresKnowledge: [], evidence });
-    await actors.putGoal({ id: "foreign-goal", actorId: "foreign-actor", description: "Foreign policy", priority: 1, requiresKnowledge: [], evidence });
     const heroRef = await canon.currentRevision("entities", "hero");
     if (!heroRef) throw new Error("missing hero revision");
-    const legacySnapshot = {
+    const oldSnapshot = {
       version: 1 as const,
       entities: [heroRef],
       claims: [],
@@ -280,51 +272,11 @@ describe("CanonicalModelStore revisions", () => {
       rules: [],
       stateFields: DEFAULT_STATE_FIELDS,
     };
-    const legacyHash = contentHash(legacySnapshot);
+    const oldHash = contentHash(oldSnapshot);
     await fs.mkdir(contexts.root, { recursive: true });
-    await fs.writeFile(path.join(contexts.root, `${legacyHash}.json`), `${canonicalJson(legacySnapshot)}\n`);
-    const engine = new WorldEngine(root, await contexts.load(legacyHash), (hash) => contexts.load(hash));
-    const head = await engine.createBranch("legacy", "Legacy");
+    await fs.writeFile(path.join(contexts.root, `${oldHash}.json`), `${canonicalJson(oldSnapshot)}\n`);
 
-    expect(await pinBranchPreparationContexts(root)).toBe(1);
-    await actors.putGoal({ id: "hero-goal", actorId: "hero", description: "New policy", priority: 0.8, requiresKnowledge: [], evidence });
-    const reopened = new WorldEngine(root, await contexts.captureCurrent(), (hash) => contexts.load(hash));
-    expect((await reopened.contextForCommit(head)).actorGoals?.[0]?.description).toBe("Old policy");
-    expect((await reopened.contextForCommit(head)).actorGoals?.map((goal) => goal.id)).toEqual(["hero-goal"]);
-    expect(reopened.context.actorGoals?.find((goal) => goal.id === "hero-goal")?.description).toBe("New policy");
-  });
-
-  it("loads an unpinned legacy snapshot without injecting current global policy", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-legacy-context-fail-closed-"));
-    roots.push(root);
-    const canon = new CanonicalModelStore(root);
-    const actors = new ActorModelStore(root);
-    const contexts = new WorldContextStore(root, canon);
-    const evidence = [{
-      span: { sourceId: "current-source", startLine: 1, endLine: 1, startByte: 0, endByte: 4, quoteHash: "b".repeat(64) },
-      strength: "explicit" as const,
-    }];
-    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: [] });
-    await actors.putGoal({ id: "current-goal", actorId: "hero", description: "Must not enter legacy context", priority: 1, requiresKnowledge: [], evidence });
-    await actors.putModel({ actorId: "hero", traits: { mustNotEnter: 1 }, decisionBiases: {}, evidence });
-    const heroRef = await canon.currentRevision("entities", "hero");
-    if (!heroRef) throw new Error("missing hero revision");
-    const legacySnapshot = {
-      version: 1 as const,
-      entities: [heroRef],
-      claims: [],
-      events: [],
-      rules: [],
-      stateFields: DEFAULT_STATE_FIELDS,
-    };
-    const legacyHash = contentHash(legacySnapshot);
-    await fs.mkdir(contexts.root, { recursive: true });
-    await fs.writeFile(path.join(contexts.root, `${legacyHash}.json`), `${canonicalJson(legacySnapshot)}\n`);
-
-    const loaded = await contexts.load(legacyHash);
-    expect(loaded.actorGoals).toEqual([]);
-    expect(loaded.actorModels?.size).toBe(0);
-    expect(loaded.possibilityTemplates).toEqual([]);
+    await expect(contexts.load(oldHash)).rejects.toThrow();
   });
 
   it("rejects a hash-valid source-scoped snapshot that references a foreign-source artifact", async () => {
@@ -346,11 +298,16 @@ describe("CanonicalModelStore revisions", () => {
     const foreignRef = await canon.currentRevision("entities", "foreign-hero");
     if (!foreignRef) throw new Error("missing foreign entity revision");
     const invalidScopedSnapshot = {
-      version: 3 as const,
+      version: 8 as const,
       sourceId: "novel-a",
       entities: [foreignRef],
+      propositions: [],
+      attributions: [],
       claims: [],
       events: [],
+      eventParticipations: [],
+      eventRelations: [],
+      spatialRelations: [],
       rules: [],
       actorGoals: [],
       actorModels: [],

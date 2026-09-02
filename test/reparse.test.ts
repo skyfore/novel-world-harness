@@ -40,22 +40,27 @@ describe("explicit prepared-novel reparsing", () => {
     const cacheRoot = await temporaryRoot("nwh-reparse-cache-");
     const fixture = await createEvidenceFixture(root, "# One\nHero waits.\n# Two\nVillain waits.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
-    expect(batches.map((batch) => batch.chapterOrdinal)).toEqual([1, 2]);
+    expect(batches.map((batch) => batch.chapterOrdinal)).toEqual([1, 2, 1, 2, 1, 2]);
+    const chapterOneBatches = batches.filter((batch) => batch.chapterOrdinal === 1);
+    const chapterTwoBatches = batches.filter((batch) => batch.chapterOrdinal === 2);
+    const chapterOneSemantic = chapterOneBatches.find((batch) => batch.semanticStage === "semantic")!;
+    const chapterTwoSemantic = chapterTwoBatches.find((batch) => batch.semanticStage === "semantic")!;
+    const chapterTwoExecutable = chapterTwoBatches.find((batch) => batch.semanticStage === "executable")!;
     const proposals = new CompilerProposalService(root);
     await proposals.submit("entity", {
       proposalId: "hero-v1",
-      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: batches[0]!.evidence },
-      generatedBy: { worker: "test", compilerBatchId: batches[0]!.id },
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: chapterOneSemantic.evidence },
+      generatedBy: { worker: "test", compilerBatchId: chapterOneSemantic.id },
     });
     await proposals.submit("entity", {
       proposalId: "villain-v1",
-      payload: { id: "villain", kind: "character", canonicalName: "Villain", aliases: [], evidence: batches[1]!.evidence },
-      generatedBy: { worker: "test", compilerBatchId: batches[1]!.id },
+      payload: { id: "villain", kind: "character", canonicalName: "Villain", aliases: [], evidence: chapterTwoSemantic.evidence },
+      generatedBy: { worker: "test", compilerBatchId: chapterTwoSemantic.id },
     });
     await proposals.submit("character-goal", {
       proposalId: "villain-goal-v1",
-      payload: { id: "villain-goal", actorId: "villain", description: "Wait", priority: 0.5, requiresKnowledge: [], evidence: batches[1]!.evidence },
-      generatedBy: { worker: "test", compilerBatchId: batches[1]!.id },
+      payload: { id: "villain-goal", actorId: "villain", description: "Wait", priority: 0.5, requiresKnowledge: [], evidence: chapterTwoExecutable.evidence },
+      generatedBy: { worker: "test", compilerBatchId: chapterTwoExecutable.id },
     });
     await proposals.submit("initial-world", {
       proposalId: "opening-v1",
@@ -69,9 +74,9 @@ describe("explicit prepared-novel reparsing", () => {
             { op: "set", entityId: "hero", field: "character.plan", value: "wait" },
           ],
         },
-        evidence: batches[0]!.evidence,
+        evidence: chapterOneSemantic.evidence,
       },
-      generatedBy: { worker: "test", compilerBatchId: `opening-${batches[0]!.id}` },
+      generatedBy: { worker: "test", compilerBatchId: `opening-${chapterOneSemantic.id}` },
     });
     await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
     await convergeWorldProposals(root, fixture.source.id);
@@ -84,7 +89,7 @@ describe("explicit prepared-novel reparsing", () => {
     await fs.rm(path.join(root, fixture.source.sourcePath));
     await new CanonicalModelStore(root).removeCurrent("entities", "villain");
     await new ActorModelStore(root).removeGoal("villain-goal");
-    await new CompilerBatchStore(root).markIncomplete(fixture.source.id, [batches[1]!.id]);
+    await new CompilerBatchStore(root).markIncomplete(fixture.source.id, chapterTwoBatches.map((batch) => batch.id));
     const progressMessages: string[] = [];
 
     const result = await reparseCommand({
@@ -96,19 +101,19 @@ describe("explicit prepared-novel reparsing", () => {
       onProgress: (message) => progressMessages.push(message),
     }, {
       async compileSource(options) {
-        expect(options.batchIds).toEqual([batches[1]!.id]);
-        expect(options.promptTransform?.("evidence", batches[1]!)).toContain("detected chapter 2");
+        expect(options.batchIds).toEqual(chapterTwoBatches.map((batch) => batch.id));
+        expect(options.promptTransform?.("evidence", chapterTwoSemantic)).toContain("detected chapter 2");
         await proposals.submit("entity", {
           proposalId: "villain-v2-reparse-test",
-          payload: { id: "villain", kind: "character", canonicalName: "Villain", aliases: ["Villain"], evidence: batches[1]!.evidence },
-          generatedBy: { worker: "test", compilerBatchId: batches[1]!.id },
+          payload: { id: "villain", kind: "character", canonicalName: "Villain", aliases: ["Villain"], evidence: chapterTwoSemantic.evidence },
+          generatedBy: { worker: "test", compilerBatchId: chapterTwoSemantic.id },
         });
         await proposals.submit("character-goal", {
           proposalId: "villain-goal-v2-reparse-test",
-          payload: { id: "villain-goal", actorId: "villain", description: "Act", priority: 0.8, requiresKnowledge: [], evidence: batches[1]!.evidence },
-          generatedBy: { worker: "test", compilerBatchId: batches[1]!.id },
+          payload: { id: "villain-goal", actorId: "villain", description: "Act", priority: 0.8, requiresKnowledge: [], evidence: chapterTwoExecutable.evidence },
+          generatedBy: { worker: "test", compilerBatchId: chapterTwoExecutable.id },
         });
-        await new CompilerBatchStore(root).markComplete(fixture.source.id, batches[1]!.id);
+        for (const batch of chapterTwoBatches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
       },
     });
 
@@ -134,7 +139,7 @@ describe("explicit prepared-novel reparsing", () => {
     await expect(new CanonicalModelStore(root).getEntity("villain")).resolves.toMatchObject({ aliases: [] });
     await expect(new ActorModelStore(root).listGoals("villain")).resolves.toEqual([expect.objectContaining({ description: "Wait" })]);
 
-    await new CompilerBatchStore(root).markIncomplete(fixture.source.id, [batches[0]!.id]);
+    await new CompilerBatchStore(root).markIncomplete(fixture.source.id, [chapterOneBatches[0]!.id]);
     await expect(reparseCommand({
       root,
       configPath: path.join(root, "missing.yaml"),
@@ -207,9 +212,8 @@ describe("explicit prepared-novel reparsing", () => {
     });
     const bundle = JSON.parse(await fs.readFile(path.join(revisions[0]!.cachePath, "bundle.json"), "utf8")) as Record<string, unknown>;
     expect(bundle).not.toHaveProperty("compilerFingerprint");
-    await expect(batchStore.read(fixture.source.id)).resolves.toMatchObject({
-      completedBatchIds: batches.map((candidate) => candidate.id),
-    });
+    const restoredProgress = await batchStore.read(fixture.source.id);
+    expect(restoredProgress.completedBatchIds.toSorted()).toEqual(batches.map((candidate) => candidate.id).toSorted());
     await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ canonicalName: "Hero" });
   });
 
@@ -294,6 +298,103 @@ describe("explicit prepared-novel reparsing", () => {
       confidence: 1,
       evidence: exactChapterTwoEvidence,
     });
+    await canon.putSceneOccurrence({
+      ontologyVersion: "scene-occurrence-v1",
+      id: "villain-action-scene",
+      discourseSegmentIds: ["chapter-two-discourse"],
+      eventIds: ["villain-decides", "villain-acts-event"],
+      viewpointActorIds: ["villain"],
+      presentActorIds: ["villain"],
+      entryConditions: [],
+      exitConditions: [],
+      evidence: exactChapterTwoEvidence,
+    });
+    await canon.putEventFrame({
+      ontologyVersion: "event-frame-v1",
+      id: "villain-action-frame",
+      name: "Villain acts",
+      temporalShape: "instant",
+      roles: [{
+        id: "agent",
+        label: "agent",
+        semanticRole: "agent",
+        allowedEntityKinds: ["character"],
+        minCardinality: 1,
+        maxCardinality: 1,
+        presence: "physical",
+      }],
+      evidence: exactChapterTwoEvidence,
+    });
+    await canon.putActionSchema({
+      ontologyVersion: "action-schema-v1",
+      id: "villain-action-schema",
+      name: "Villain action",
+      roles: [{ id: "agent", label: "agent", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      parameters: [],
+      preconditions: [],
+      stateEffects: [],
+      effectEnvelope: {
+        maxStateOperations: 1,
+        allowedStateFields: ["character.plan"],
+        allowsKnowledge: false,
+        allowsTimeAdvance: false,
+        allowsSceneTransition: false,
+      },
+      induction: { kind: "source-pattern", supportingEventIds: ["villain-decides", "villain-acts-event"] },
+      evidence: exactChapterTwoEvidence,
+    });
+    await canon.putActionConstraint({
+      ontologyVersion: "action-constraint-v1",
+      id: "villain-action-constraint",
+      name: "Villain must be alive before acting",
+      actionPattern: { kind: "schema", schemaId: "villain-action-schema" },
+      appliesWhen: [],
+      clauses: [{
+        id: "villain-alive",
+        timing: "before",
+        modality: "require",
+        predicate: { op: "fact-equals", entity: { kind: "actor" }, field: "character.alive", value: true },
+      }],
+      exceptions: [],
+      priority: 1,
+      defeasible: true,
+      overridesConstraintIds: [],
+      status: "supported",
+      visibility: "public",
+      induction: { kind: "source-pattern", supportingEventIds: ["villain-acts-event"] },
+      evidence: exactChapterTwoEvidence,
+    });
+    await canon.putNormTemplate({
+      ontologyVersion: "norm-template-v1",
+      id: "villain-action-norm",
+      name: "Villain is obliged to act",
+      modality: "obligation",
+      actionPattern: { kind: "schema", schemaId: "villain-action-schema" },
+      appliesWhen: [],
+      exceptions: [],
+      reparations: [],
+      priority: 1,
+      defeasible: true,
+      overridesTemplateIds: [],
+      status: "supported",
+      visibility: "public",
+      knownByClaimIds: [],
+      induction: { kind: "source-pattern", supportingEventIds: ["villain-decides", "villain-acts-event"] },
+      evidence: exactChapterTwoEvidence,
+    });
+    await canon.putProcessTemplate({
+      ontologyVersion: "process-template-v1",
+      id: "villain-action-process",
+      name: "Villain decision to action",
+      ownerRoles: [{ id: "agent", label: "agent", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      phases: [{ id: "decided", label: "Decided", terminal: false }, { id: "acted", label: "Acted", terminal: true }],
+      initialPhaseId: "decided",
+      transitions: [{ fromPhaseId: "decided", toPhaseId: "acted", minimumProgress: 1 }],
+      outcomeIds: ["acted"],
+      visibility: "observable",
+      induction: { kind: "source-pattern", supportingEventIds: ["villain-decides", "villain-acts-event"] },
+      evidence: exactChapterTwoEvidence,
+    });
     await actors.putModel({
       actorId: "villain",
       traits: {},
@@ -325,13 +426,19 @@ describe("explicit prepared-novel reparsing", () => {
 
     const invalidated = await invalidatePreparationArtifacts(root, fixture.source.id, [batches[1]!], false);
 
-    expect(invalidated).toBe(7);
+    expect(invalidated).toBe(13);
     await expect(canon.getProposition("villain-acts")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(canon.getAttribution("narrator-villain-acts")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(canon.getEvent("villain-decides")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(canon.getEvent("villain-acts-event")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(canon.getEventParticipation("villain-acts-agent")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(canon.getEventRelation("decision-causes-action")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getSceneOccurrence("villain-action-scene")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getEventFrame("villain-action-frame")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getActionSchema("villain-action-schema")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getActionConstraint("villain-action-constraint")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getNormTemplate("villain-action-norm")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(canon.getProcessTemplate("villain-action-process")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(actors.listModels()).resolves.toEqual([]);
     await expect(canon.getProposition("cross-chapter-proposition")).resolves.toMatchObject({ id: "cross-chapter-proposition" });
   });
@@ -435,7 +542,8 @@ describe("explicit prepared-novel reparsing", () => {
     const root = await temporaryRoot("nwh-reparse-all-");
     const cacheRoot = await temporaryRoot("nwh-reparse-all-cache-");
     const fixture = await createEvidenceFixture(root, "# Opening\nHero waits.\n");
-    const batch = (await prepareCompilerBatches(root, fixture.source))[0]!;
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    const batch = batches.find((candidate) => candidate.semanticStage === "semantic")!;
     const proposals = new CompilerProposalService(root);
     await proposals.submit("entity", {
       proposalId: "hero-all-v1",
@@ -447,7 +555,7 @@ describe("explicit prepared-novel reparsing", () => {
       payload: { version: 1, delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] }, evidence: batch.evidence },
       generatedBy: { worker: "test", compilerBatchId: `opening-${batch.id}` },
     });
-    await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((candidate) => candidate.id));
     await convergeWorldProposals(root, fixture.source.id);
     const cache = new PreparedNovelCache(root, cacheRoot);
     const first = await cache.publish(fixture.source);
@@ -460,13 +568,13 @@ describe("explicit prepared-novel reparsing", () => {
       cacheRoot,
     }, {
       async compileSource(options) {
-        expect(options.batchIds).toEqual([batch.id]);
+        expect(options.batchIds).toEqual(batches.map((candidate) => candidate.id));
         await proposals.submit("entity", {
           proposalId: "hero-all-v2-reparse-test",
           payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: ["Hero"], evidence: batch.evidence },
           generatedBy: { worker: "test", compilerBatchId: batch.id },
         });
-        await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+        await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((candidate) => candidate.id));
       },
       async finishPreparation(options) {
         expect(options.reparseBaselineBundleHash).toBe(first.bundleHash);
@@ -520,7 +628,8 @@ describe("explicit prepared-novel reparsing", () => {
     const root = await temporaryRoot("nwh-reparse-legacy-rollback-");
     const cacheRoot = await temporaryRoot("nwh-reparse-legacy-rollback-cache-");
     const fixture = await createEvidenceFixture(root, "# Opening\nHero waits.\n");
-    const batch = (await prepareCompilerBatches(root, fixture.source))[0]!;
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    const batch = batches.find((candidate) => candidate.semanticStage === "semantic")!;
     const proposals = new CompilerProposalService(root);
     await proposals.submit("entity", {
       proposalId: "legacy-rollback-hero",
@@ -536,7 +645,7 @@ describe("explicit prepared-novel reparsing", () => {
       },
       generatedBy: { worker: "test", compilerBatchId: `opening-${batch.id}` },
     });
-    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, [batch.id]);
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((candidate) => candidate.id));
     await convergeWorldProposals(root, fixture.source.id);
     const cache = new PreparedNovelCache(root, cacheRoot);
     const current = await cache.publish(fixture.source);

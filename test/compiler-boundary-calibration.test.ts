@@ -119,7 +119,9 @@ describe("compiler boundary calibration", () => {
       source: evidence.source,
       async runner(batch) {
         seen.push({ id: batch.id, purpose: batch.purpose });
-        if (batch.purpose === "source-review" && batch.segmentIds[0] === segments[0]!.id) {
+        if (batch.purpose === "source-review"
+          && batch.semanticStage === "observation"
+          && batch.segmentIds[0] === segments[0]!.id) {
           await new BoundaryCalibrationStore(root).request({
             sourceId: evidence.source.id,
             leftSegmentId: segments[0]!.id,
@@ -136,14 +138,19 @@ describe("compiler boundary calibration", () => {
     expect(seen.map((item) => item.purpose)).toEqual([
       "source-review",
       "source-review",
+      "source-review",
+      "source-review",
+      "source-review",
+      "source-review",
       "boundary-calibration",
     ]);
-    expect(result).toEqual({ total: 3, completed: 3, skipped: 0, remaining: 0 });
+    expect(result).toEqual({ total: 7, completed: 7, skipped: 0, remaining: 0 });
   });
 
   it("replaces only a same-identity adjacent draft from inside the pair calibration", async () => {
     const { root, evidence, segments } = await fixture();
-    const regular = (await prepareCompilerBatches(root, evidence.source))[0]!;
+    const regular = (await prepareCompilerBatches(root, evidence.source))
+      .find((batch) => batch.semanticStage === "semantic" && batch.segmentIds[0] === segments[0]!.id)!;
     const sourceTools = createCompilerProposalToolset(root);
     await sourceTools.beginBatch([segments[0]!.id], regular.id, evidence.source.id);
     const proposeSourceEntity = sourceTools.tools.find((tool) => tool.name === "propose_entity")!;

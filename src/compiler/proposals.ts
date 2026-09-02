@@ -77,6 +77,22 @@ import { findKnowledgeDeltas, validateKnowledgeSemanticReferences } from "../wor
 import { sceneOccurrenceSchema, type SceneOccurrence } from "../world/scene-occurrence.js";
 import { eventFrameSchema, type EventFrame } from "../world/event-frame.js";
 import { actionSchemaSchema, type ActionSchema } from "../world/action-ontology.js";
+import {
+  actionConstraintSchema,
+  validateActionConstraintCatalog,
+  type ActionConstraint,
+  type ConstraintPredicate,
+} from "../world/action-constraint.js";
+import {
+  normTemplateSchema,
+  validateNormTemplateCatalog,
+  type NormTemplate,
+} from "../world/norm-ontology.js";
+import {
+  processTemplateSchema,
+  validateProcessTemplateCatalog,
+  type ProcessTemplate,
+} from "../world/process-ontology.js";
 
 const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
@@ -136,6 +152,18 @@ const compilerActionSchema = actionSchemaSchema.refine(
   (value) => value.induction.kind === "source-pattern",
   { path: ["induction", "kind"], message: "Novel compilation may only induce source-pattern actions; domain modules are host-managed" },
 );
+const compilerActionConstraintSchema = actionConstraintSchema.refine(
+  (value) => value.induction.kind === "source-pattern",
+  { path: ["induction", "kind"], message: "Novel compilation may only induce source-pattern action constraints; domain modules are host-managed" },
+);
+const compilerNormTemplateSchema = normTemplateSchema.refine(
+  (value) => value.induction.kind === "source-pattern",
+  { path: ["induction", "kind"], message: "Novel compilation may only induce source-pattern norm templates; domain modules are host-managed" },
+);
+const compilerProcessTemplateSchema = processTemplateSchema.refine(
+  (value) => value.induction.kind === "source-pattern",
+  { path: ["induction", "kind"], message: "Novel compilation may only induce source-pattern process templates; domain modules are host-managed" },
+);
 const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidence: evidenceRefSchema.array().min(1) }).superRefine((possibility, ctx) => {
   validateParticipantPresence(possibility, ctx);
   if (possibility.kind === "player-choice" && !hasExecutablePossibilityEffect(possibility)) {
@@ -146,7 +174,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -165,6 +193,9 @@ export const compilerProposalSchemas = {
   "scene-occurrence": sceneOccurrenceSchema,
   "event-frame": compilerEventFrameSchema,
   "action-schema": compilerActionSchema,
+  "action-constraint": compilerActionConstraintSchema,
+  "norm-template": compilerNormTemplateSchema,
+  "process-template": compilerProcessTemplateSchema,
   "spatial-relation": spatialRelationSchema,
   "world-rule": compilerWorldRuleSchema,
   "initial-world": initialWorldSchema,
@@ -397,6 +428,9 @@ type ProposalClosureCatalog = {
   scenes: Set<string>;
   frames: Set<string>;
   actions: Set<string>;
+  actionConstraints: Set<string>;
+  norms: Set<string>;
+  processes: Set<string>;
   rules: Set<string>;
   goals: Set<string>;
   possibilities: Set<string>;
@@ -426,7 +460,7 @@ export async function validateCompilerProposalClosure(
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
   const actors = new ActorModelStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalSpatialRelations, canonicalScenes, canonicalFrames, canonicalActions, canonicalRules, canonicalGoals, canonicalPossibilities, pending] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalSpatialRelations, canonicalScenes, canonicalFrames, canonicalActions, canonicalActionConstraints, canonicalNorms, canonicalProcesses, canonicalRules, canonicalGoals, canonicalPossibilities, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -438,6 +472,9 @@ export async function validateCompilerProposalClosure(
     canon.listSceneOccurrences(),
     canon.listEventFrames(),
     canon.listActionSchemas(),
+    canon.listActionConstraints(),
+    canon.listNormTemplates(),
+    canon.listProcessTemplates(),
     canon.listRules(),
     actors.listGoals(),
     possibilities.list(),
@@ -460,6 +497,9 @@ export async function validateCompilerProposalClosure(
     scenes: new Set(canonicalScenes.filter(fromActiveSource).map((item) => item.id)),
     frames: new Set(canonicalFrames.filter(fromActiveSource).map((item) => item.id)),
     actions: new Set(canonicalActions.filter((item) => item.induction.kind === "domain-module" || fromActiveSource(item)).map((item) => item.id)),
+    actionConstraints: new Set(canonicalActionConstraints.filter((item) => item.induction.kind === "domain-module" || fromActiveSource(item)).map((item) => item.id)),
+    norms: new Set(canonicalNorms.filter((item) => item.induction.kind === "domain-module" || fromActiveSource(item)).map((item) => item.id)),
+    processes: new Set(canonicalProcesses.filter((item) => item.induction.kind === "domain-module" || fromActiveSource(item)).map((item) => item.id)),
     rules: new Set(canonicalRules.filter(fromActiveSource).map((item) => item.id)),
     goals: new Set(canonicalGoals.filter(fromActiveSource).map((item) => item.id)),
     possibilities: new Set(canonicalPossibilities.filter(fromActiveSource).map((item) => item.id)),
@@ -494,6 +534,9 @@ export async function validateCompilerProposalClosure(
     if (summary.kind === "scene-occurrence") catalog.scenes.add((payload as { id: string }).id);
     if (summary.kind === "event-frame") catalog.frames.add((payload as { id: string }).id);
     if (summary.kind === "action-schema") catalog.actions.add((payload as { id: string }).id);
+    if (summary.kind === "action-constraint") catalog.actionConstraints.add((payload as { id: string }).id);
+    if (summary.kind === "norm-template") catalog.norms.add((payload as { id: string }).id);
+    if (summary.kind === "process-template") catalog.processes.add((payload as { id: string }).id);
     if (summary.kind === "world-rule") catalog.rules.add((payload as { id: string }).id);
     if (summary.kind === "character-goal") catalog.goals.add((payload as { id: string }).id);
     if (summary.kind === "possibility") catalog.possibilities.add((payload as { id: string }).id);
@@ -527,6 +570,19 @@ export async function validateCompilerProposalClosure(
     claims: new Set(canonicalClaims.filter(fromActiveSource).map((claim) => claim.id)),
     rules: new Map(canonicalRules.filter(fromActiveSource).map((rule) => [rule.id, rule])),
   };
+  const executableEntityCatalog = new Map(canonicalEntities.filter(fromActiveSource).map((entity) => [entity.id, entity]));
+  const executableActionCatalog = new Map(canonicalActions
+    .filter((item) => item.induction.kind === "domain-module" || fromActiveSource(item))
+    .map((item) => [item.id, item]));
+  const actionConstraintCatalog = new Map(canonicalActionConstraints
+    .filter((item) => item.induction.kind === "domain-module" || fromActiveSource(item))
+    .map((item) => [item.id, item]));
+  const normTemplateCatalog = new Map(canonicalNorms
+    .filter((item) => item.induction.kind === "domain-module" || fromActiveSource(item))
+    .map((item) => [item.id, item]));
+  const processTemplateCatalog = new Map(canonicalProcesses
+    .filter((item) => item.induction.kind === "domain-module" || fromActiveSource(item))
+    .map((item) => [item.id, item]));
   const characterOntologyCatalog = {
     entities: new Map(canonicalEntities.filter(fromActiveSource).map((entity) => [entity.id, { kind: entity.kind }])),
     propositions: new Set(canonicalPropositions.filter(fromActiveSource).map((proposition) => proposition.id)),
@@ -540,6 +596,7 @@ export async function validateCompilerProposalClosure(
   for (const proposal of staged.values()) {
     if (proposal.kind === "entity") {
       const value = entitySchema.parse(proposal.payload);
+      executableEntityCatalog.set(value.id, value);
       participationCatalog.entities.set(value.id, value);
       characterOntologyCatalog.entities.set(value.id, { kind: value.kind });
       spatialCatalog.entities.set(value.id, { kind: value.kind });
@@ -582,6 +639,18 @@ export async function validateCompilerProposalClosure(
       const value = worldRuleSchema.parse(proposal.payload);
       spatialCatalog.rules.add(value.id);
       worldRuleCatalog.rules.set(value.id, value);
+    } else if (proposal.kind === "action-schema") {
+      const value = actionSchemaSchema.parse(proposal.payload);
+      executableActionCatalog.set(value.id, value);
+    } else if (proposal.kind === "action-constraint") {
+      const value = actionConstraintSchema.parse(proposal.payload);
+      actionConstraintCatalog.set(value.id, value);
+    } else if (proposal.kind === "norm-template") {
+      const value = normTemplateSchema.parse(proposal.payload);
+      normTemplateCatalog.set(value.id, value);
+    } else if (proposal.kind === "process-template") {
+      const value = processTemplateSchema.parse(proposal.payload);
+      processTemplateCatalog.set(value.id, value);
     }
     if (proposal.kind === "canonical-event") {
       const event = canonicalEventSchema.parse(proposal.payload);
@@ -681,6 +750,25 @@ export async function validateCompilerProposalClosure(
   }
   for (const ruleIssue of validateWorldRuleCatalog(worldRuleCatalog.rules.values(), worldRuleCatalog)) {
     issues.add(`world-rule: ${ruleIssue.code} at ${ruleIssue.path ?? "payload"}: ${ruleIssue.message}`);
+  }
+  for (const constraintIssue of validateActionConstraintCatalog(actionConstraintCatalog.values(), {
+    entities: executableEntityCatalog,
+    actionSchemas: executableActionCatalog,
+  })) {
+    issues.add(`action-constraint: ${constraintIssue.code} at ${constraintIssue.path ?? "payload"}: ${constraintIssue.message}`);
+  }
+  for (const normIssue of validateNormTemplateCatalog(normTemplateCatalog.values(), {
+    entities: executableEntityCatalog,
+    claimIds: new Set(semanticCatalog.claims.keys()),
+    canonicalEventIds: new Set(participationCatalog.events.keys()),
+  })) {
+    issues.add(`norm-template: ${normIssue.code} at ${normIssue.path ?? "payload"}: ${normIssue.message}`);
+  }
+  for (const processIssue of validateProcessTemplateCatalog(
+    processTemplateCatalog.values(),
+    new Set(participationCatalog.events.keys()),
+  )) {
+    issues.add(`process-template: ${processIssue.code} at ${processIssue.path ?? "payload"}: ${processIssue.message}`);
   }
   for (const [proposalId, proposal] of staged) {
     if (proposal.kind !== "character-model") continue;
@@ -826,6 +914,48 @@ function collectProposalClosureIssues(
     }
     return;
   }
+  if (proposal.kind === "action-constraint") {
+    const constraint = payload as ActionConstraint;
+    if (constraint.actionPattern.kind === "schema") missing("actions", constraint.actionPattern.schemaId, "actionPattern.schemaId");
+    constraint.induction.kind === "source-pattern"
+      && constraint.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
+    constraint.overridesConstraintIds.forEach((id, index) => missing("actionConstraints", id, `overridesConstraintIds.${index}`));
+    constraint.appliesWhen.forEach((predicate, index) =>
+      collectConstraintPredicateIssues(predicate, `appliesWhen.${index}`, missing));
+    constraint.clauses.forEach((clause, index) =>
+      collectConstraintPredicateIssues(clause.predicate, `clauses.${index}.predicate`, missing));
+    constraint.exceptions.forEach((exception, exceptionIndex) => exception.appliesWhen.forEach((predicate, index) =>
+      collectConstraintPredicateIssues(predicate, `exceptions.${exceptionIndex}.appliesWhen.${index}`, missing)));
+    return;
+  }
+  if (proposal.kind === "norm-template") {
+    const norm = payload as NormTemplate;
+    if (norm.actionPattern.kind === "schema") missing("actions", norm.actionPattern.schemaId, "actionPattern.schemaId");
+    if (norm.authorityEntityId) missing("entities", norm.authorityEntityId, "authorityEntityId");
+    norm.appliesWhen.forEach((predicate, index) => collectPredicateIssues(predicate, `appliesWhen.${index}`, missing, fieldReference));
+    norm.exceptions.forEach((exception, exceptionIndex) => exception.appliesWhen.forEach((predicate, index) =>
+      collectPredicateIssues(predicate, `exceptions.${exceptionIndex}.appliesWhen.${index}`, missing, fieldReference)));
+    norm.reparations.forEach((reparation, reparationIndex) => {
+      if (reparation.actionPattern?.kind === "schema") {
+        missing("actions", reparation.actionPattern.schemaId, `reparations.${reparationIndex}.actionPattern.schemaId`);
+      }
+      reparation.requiresAfter.forEach((predicate, index) =>
+        collectPredicateIssues(predicate, `reparations.${reparationIndex}.requiresAfter.${index}`, missing, fieldReference));
+    });
+    norm.knownByClaimIds.forEach((id, index) => missing("claims", id, `knownByClaimIds.${index}`));
+    norm.overridesTemplateIds.forEach((id, index) => missing("norms", id, `overridesTemplateIds.${index}`));
+    if (norm.induction.kind === "source-pattern") {
+      norm.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
+    }
+    return;
+  }
+  if (proposal.kind === "process-template") {
+    const process = payload as ProcessTemplate;
+    if (process.induction.kind === "source-pattern") {
+      process.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
+    }
+    return;
+  }
   if (proposal.kind === "event-participation") {
     const participation = payload as EventParticipation;
     missing("events", participation.eventId, "eventId");
@@ -959,6 +1089,23 @@ function collectProposalClosureIssues(
 
 type MissingReference = (kind: Exclude<keyof ProposalClosureCatalog, "entityKinds">, id: string, path: string) => void;
 type FieldReference = (entityId: string, field: string, path: string) => void;
+
+function collectConstraintPredicateIssues(
+  predicate: ConstraintPredicate,
+  path: string,
+  missing: MissingReference,
+): void {
+  if (predicate.op === "all" || predicate.op === "any") {
+    predicate.items.forEach((item, index) => collectConstraintPredicateIssues(item, `${path}.items.${index}`, missing));
+    return;
+  }
+  if (predicate.op === "not") {
+    collectConstraintPredicateIssues(predicate.item, `${path}.item`, missing);
+    return;
+  }
+  if (predicate.entity.kind === "entity") missing("entities", predicate.entity.entityId, `${path}.entity.entityId`);
+  if (predicate.op === "fact-equals") collectStateValueReferences(predicate.field, predicate.value, `${path}.value`, missing);
+}
 
 function collectStoryTimeIssues(storyTime: StoryTime, path: string, missing: MissingReference): void {
   if (storyTime.kind === "relative") missing("events", storyTime.anchorEventId, `${path}.anchorEventId`);
@@ -1116,6 +1263,7 @@ function isCompilerProposalKind(kind: string): kind is CompilerProposalKind {
 
 function singular(kind: Exclude<keyof ProposalClosureCatalog, "entityKinds">): string {
   if (kind === "entities") return "entity";
+  if (kind === "processes") return "process";
   if (kind === "possibilities") return "possibility";
   return kind.slice(0, -1);
 }
@@ -1133,7 +1281,8 @@ function assertCompilerStateFields(value: unknown): void {
   if (typeof record.op === "string" && stateFieldOperations.has(record.op) && typeof record.field === "string") {
     const spec = compilerStateFieldMap.get(record.field);
     if (spec && (record.op === "set" || record.op === "fact-equals")) {
-      assertCompilerStateValueShape(spec, record.value);
+      const templateValue = actionTemplateValue(record.value);
+      if (templateValue.known) assertCompilerStateValueShape(spec, templateValue.value);
     }
     if (spec && (record.op === "adjust-number" || record.op === "fact-gte" || record.op === "fact-lte") && spec.valueType !== "number") {
       throw new Error(`${record.op} requires a numeric field; '${record.field}' is ${spec.valueType}.`);
@@ -1143,6 +1292,20 @@ function assertCompilerStateFields(value: unknown): void {
     }
   }
   for (const nested of Object.values(record)) assertCompilerStateFields(nested);
+}
+
+/**
+ * Action-schema predicates/effects carry a typed value template instead of a
+ * concrete state value. Literal templates can still be checked now; role and
+ * parameter templates are checked against their bindings by action ontology
+ * validation and again when an invocation is materialized.
+ */
+function actionTemplateValue(value: unknown): { known: true; value: unknown } | { known: false } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { known: true, value };
+  const template = value as Record<string, unknown>;
+  if (template.source === "literal") return { known: true, value: template.value };
+  if (template.source === "parameter" || template.source === "role") return { known: false };
+  return { known: true, value };
 }
 
 function assertCompilerStateValueShape(

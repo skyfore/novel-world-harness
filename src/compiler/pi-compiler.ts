@@ -5,7 +5,9 @@ import {
   BOUNDARY_CALIBRATION_TOOL_NAMES,
   COMPILER_TOOL_NAMES,
   SOURCE_ACCOUNTING_TOOL_NAMES,
+  compilerToolAllowedInSemanticStage,
   createCompilerProposalToolset,
+  semanticStageFromCompilerBatchId,
 } from "./proposal-tools.js";
 import { SOURCE_EVIDENCE_TOOL_NAMES } from "./source-evidence-retrieval.js";
 import { CHAPTER_SPLIT_DISCOVERY_VERSION } from "./chapter-split.js";
@@ -99,6 +101,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     && options.sourceId
     && options.compilerBatchId?.startsWith(`batch-${options.sourceId}-`),
   );
+  const semanticStage = semanticStageFromCompilerBatchId(options.compilerBatchId, options.sourceId);
   const wholeSourceEvidencePass = Boolean(
     options.compilerBatchId?.startsWith("opening-batch-")
     || options.compilerBatchId?.startsWith("reconcile-"),
@@ -111,6 +114,9 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     ...(options.segmentIds?.length && !wholeSourceEvidencePass ? BOUNDED_SLICE_DISABLED_TOOLS : []),
     ...(options.enableBoundaryCalibration ? [] : BOUNDARY_CALIBRATION_TOOL_NAMES),
     ...(ordinarySourceReview ? [] : SOURCE_ACCOUNTING_TOOL_NAMES),
+    ...(semanticStage
+      ? COMPILER_TOOL_NAMES.filter((name) => !compilerToolAllowedInSemanticStage(name, semanticStage))
+      : []),
     ...(
       options.sourceId
       && options.compilerBatchId?.startsWith(`batch-${options.sourceId}-`)

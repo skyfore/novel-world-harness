@@ -37,6 +37,176 @@ async function temporaryRoot(prefix: string): Promise<string> {
 }
 
 describe("versioned prepared novel cache", () => {
+  it("round-trips executable policy artifacts through a portable prepared revision", async () => {
+    const cacheRoot = await temporaryRoot("nwh-prepared-executable-policy-cache-");
+    const sourceRoot = await temporaryRoot("nwh-prepared-executable-policy-source-");
+    const content = "Hero receives an order. Hero leaves for the Gate.\n";
+    const fixture = await createEvidenceFixture(sourceRoot, content, "publisher-copy.txt");
+    const canon = new CanonicalModelStore(sourceRoot);
+    await canon.putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("Hero"),
+    });
+    for (const [id, title, orderHint, exact] of [
+      ["order-received", "Hero receives an order", 1, "Hero receives an order"],
+      ["hero-leaves", "Hero leaves for the Gate", 2, "Hero leaves for the Gate"],
+    ] as const) {
+      await canon.putEvent({
+        id,
+        title,
+        participants: ["hero"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        storyTime: { kind: "ordinal", label: title, orderHint },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: fixture.evidence(exact),
+        causalParents: id === "hero-leaves" ? ["order-received"] : [],
+        confidence: 1,
+      });
+    }
+    await canon.putActionSchema({
+      ontologyVersion: "action-schema-v1",
+      id: "depart-after-order",
+      name: "Depart after an order",
+      roles: [{ id: "actor", label: "departing actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      parameters: [],
+      preconditions: [],
+      stateEffects: [],
+      effectEnvelope: {
+        maxStateOperations: 1,
+        allowedStateFields: ["character.location"],
+        allowsKnowledge: false,
+        allowsTimeAdvance: true,
+        allowsSceneTransition: true,
+      },
+      induction: { kind: "source-pattern", supportingEventIds: ["order-received", "hero-leaves"] },
+      evidence: fixture.evidence(content.trim()),
+    });
+    await canon.putActionConstraint({
+      ontologyVersion: "action-constraint-v1",
+      id: "living-actor-departs",
+      name: "A departing actor must be alive",
+      actionPattern: { kind: "schema", schemaId: "depart-after-order" },
+      appliesWhen: [],
+      clauses: [{
+        id: "actor-alive",
+        timing: "before",
+        modality: "require",
+        predicate: { op: "fact-equals", entity: { kind: "actor" }, field: "character.alive", value: true },
+      }],
+      exceptions: [],
+      priority: 10,
+      defeasible: true,
+      overridesConstraintIds: [],
+      status: "supported",
+      visibility: "public",
+      induction: { kind: "source-pattern", supportingEventIds: ["hero-leaves"] },
+      evidence: fixture.evidence("Hero leaves for the Gate"),
+    });
+    await canon.putNormTemplate({
+      ontologyVersion: "norm-template-v1",
+      id: "obey-departure-order",
+      name: "Obey the departure order",
+      modality: "obligation",
+      actionPattern: { kind: "schema", schemaId: "depart-after-order" },
+      appliesWhen: [],
+      exceptions: [],
+      reparations: [],
+      priority: 10,
+      defeasible: true,
+      overridesTemplateIds: [],
+      status: "supported",
+      visibility: "public",
+      knownByClaimIds: [],
+      induction: { kind: "source-pattern", supportingEventIds: ["order-received", "hero-leaves"] },
+      evidence: fixture.evidence(content.trim()),
+    });
+    await canon.putProcessTemplate({
+      ontologyVersion: "process-template-v1",
+      id: "ordered-departure",
+      name: "Ordered departure",
+      ownerRoles: [{ id: "actor", label: "departing actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      phases: [{ id: "ordered", label: "Ordered", terminal: false }, { id: "departed", label: "Departed", terminal: true }],
+      initialPhaseId: "ordered",
+      transitions: [{ fromPhaseId: "ordered", toPhaseId: "departed", minimumProgress: 1 }],
+      outcomeIds: ["departed"],
+      visibility: "observable",
+      induction: { kind: "source-pattern", supportingEventIds: ["order-received", "hero-leaves"] },
+      evidence: fixture.evidence(content.trim()),
+    });
+    const sourceBytes = Buffer.from(content, "utf8");
+    const policyExact = "Hero receives an order. Hero leaves for the Gate.";
+    const policyStart = sourceBytes.indexOf(Buffer.from(policyExact, "utf8"));
+    const policyAnchor = textAnchorForByteRange(
+      fixture.source.id,
+      sourceBytes,
+      policyStart,
+      policyStart + Buffer.byteLength(policyExact),
+    );
+    const exactEvidence = new EvidenceAssertionStore(sourceRoot);
+    for (const [kind, id, payload] of [
+      ["action-constraint", "living-actor-departs", await canon.getActionConstraint("living-actor-departs")],
+      ["norm-template", "obey-departure-order", await canon.getNormTemplate("obey-departure-order")],
+      ["process-template", "ordered-departure", await canon.getProcessTemplate("ordered-departure")],
+    ] as const) {
+      await exactEvidence.replaceForArtifact(kind, id, contentHash(payload), [{
+        version: 1,
+        id: `${id}-name-evidence`,
+        target: { artifactKind: kind, artifactId: id, jsonPointer: "/name" },
+        anchors: [policyAnchor],
+        relation: "supports",
+        strength: "explicit",
+        derivation: { runId: "prepared-policy-test", worker: "test", ontologyVersion: "evidence-v1" },
+      }]);
+    }
+    await new InitialWorldStore(sourceRoot).put({
+      version: 1,
+      delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+      evidence: fixture.evidence("Hero receives an order"),
+    });
+    const batches = await prepareCompilerBatches(sourceRoot, fixture.source);
+    await new CompilerBatchStore(sourceRoot).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+
+    const published = await new PreparedNovelCache(sourceRoot, cacheRoot).publish(fixture.source, {
+      allowSemanticDebtForRollback: true,
+    });
+    const rawBundle = JSON.parse(await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8")) as {
+      canonical: {
+        actionConstraints: Array<{ id: string }>;
+        normTemplates: Array<{ id: string }>;
+        processTemplates: Array<{ id: string }>;
+      };
+    };
+    expect(rawBundle.canonical).toMatchObject({
+      actionConstraints: [{ id: "living-actor-departs" }],
+      normTemplates: [{ id: "obey-departure-order" }],
+      processTemplates: [{ id: "ordered-departure" }],
+    });
+
+    const restoredRoot = await temporaryRoot("nwh-prepared-executable-policy-restored-");
+    const restoredFixture = await createEvidenceFixture(restoredRoot, content, "renamed-copy.md");
+    await expect(new PreparedNovelCache(restoredRoot, cacheRoot).restore(restoredFixture.source)).resolves.toMatchObject({
+      status: "restored",
+      bundleHash: published.bundleHash,
+    });
+    const restoredCanon = new CanonicalModelStore(restoredRoot);
+    await expect(restoredCanon.getActionConstraint("living-actor-departs")).resolves.toMatchObject({
+      actionPattern: { kind: "schema", schemaId: "depart-after-order" },
+    });
+    await expect(restoredCanon.getNormTemplate("obey-departure-order")).resolves.toMatchObject({ modality: "obligation" });
+    await expect(restoredCanon.getProcessTemplate("ordered-departure")).resolves.toMatchObject({ initialPhaseId: "ordered" });
+    await expect(new EvidenceAssertionStore(restoredRoot).bindingForArtifact(
+      "action-constraint",
+      "living-actor-departs",
+    )).resolves.toMatchObject({
+      artifactHash: contentHash(await restoredCanon.getActionConstraint("living-actor-departs")),
+      assertions: [expect.objectContaining({ id: "living-actor-departs-name-evidence" })],
+    });
+  });
+
   it("refuses to publish controlled character semantics without exact per-item evidence", async () => {
     const cacheRoot = await temporaryRoot("nwh-prepared-character-evidence-cache-");
     const sourceRoot = await temporaryRoot("nwh-prepared-character-evidence-source-");
@@ -226,10 +396,10 @@ describe("versioned prepared novel cache", () => {
       generatedBy: { worker: "test" },
     });
     const sourceBatches = await prepareCompilerBatches(sourceRoot, fixture.source);
-    expect(sourceBatches.map((batch) => batch.purpose)).toEqual([
-      "structure-discovery",
-      "source-review",
-      "source-review",
+    expect(sourceBatches.filter((batch) => batch.purpose === "structure-discovery")).toHaveLength(1);
+    expect(sourceBatches.filter((batch) => batch.purpose === "source-review")).toHaveLength(6);
+    expect(sourceBatches.filter((batch) => batch.purpose === "source-review").map((batch) => batch.semanticStage)).toEqual([
+      "observation", "observation", "semantic", "semantic", "executable", "executable",
     ]);
     await new CompilerBatchStore(sourceRoot).replaceCompleted(fixture.source.id, sourceBatches.map((batch) => batch.id));
     await convergeWorldProposals(sourceRoot, fixture.source.id);
@@ -467,7 +637,7 @@ describe("versioned prepared novel cache", () => {
     const content = "Chapter 1\nAlice raises the key and\n\nChapter 2\nopens the gate.\n";
     const fixture = await createEvidenceFixture(sourceRoot, content);
     const regular = await prepareCompilerBatches(sourceRoot, fixture.source);
-    expect(regular).toHaveLength(2);
+    expect(regular).toHaveLength(6);
     await new BoundaryCalibrationStore(sourceRoot).request({
       sourceId: fixture.source.id,
       leftSegmentId: regular[0]!.segmentIds[0]!,
@@ -478,11 +648,8 @@ describe("versioned prepared novel cache", () => {
       reason: "The action crosses the split.",
     });
     const withCalibration = await prepareCompilerBatches(sourceRoot, fixture.source);
-    expect(withCalibration.map((batch) => batch.purpose)).toEqual([
-      "source-review",
-      "source-review",
-      "boundary-calibration",
-    ]);
+    expect(withCalibration.filter((batch) => batch.purpose === "source-review")).toHaveLength(6);
+    expect(withCalibration.at(-1)?.purpose).toBe("boundary-calibration");
 
     const proposals = new CompilerProposalService(sourceRoot);
     await proposals.submit("entity", {

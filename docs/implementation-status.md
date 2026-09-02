@@ -2,7 +2,7 @@
 
 Date: 2026-09-02
 
-Verified baseline: `pnpm run check`; `pnpm test` (146 test files, 825 tests
+Verified baseline: `pnpm run check`; `pnpm test` (146 test files, 830 tests
 passing); `pnpm test:e2e` (production Fastify host + 2 Chromium journeys
 passing).
 
@@ -22,17 +22,18 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 | Terminal hub | Implemented | Claude Code-style TUI, workspace catalogs, committed progress, durable world resume, local lexical discovery, and bounded reads; general model tools remain read-only |
 | Local Web UI | MVP implemented | Loopback-first React/Fastify workbench for source ingest, preparation/review, instance lifecycle, Pi-backed play/resume, append-only run/LLM/tool/context traces, and branch/time-scoped model/event/place/rule/provenance graphs; long operations and short mutations retain idempotency/recovery state across restart, and interrupted moves are reconciled against verified audits/commit ancestry without replaying world truth; no product login or remote multi-user deployment |
 | Source ingest | Implemented | Exact file/stdin/inline bytes archived globally by SHA-256, source manifest, widened deterministic evidence segments, plus finish-gated declarative chapter discovery when built-in headings are insufficient |
-| Model compilation | Implemented as a mechanism | Bounded/resumable Pi batches produce source-exclusive typed pending proposals, recover drafts across retries, allow narrow withdrawal, and use host-owned finish and total-tool-call circuit breakers |
+| Model compilation | Implemented as a mechanism | Host-scheduled phase-major observation → semantic → executable Pi batches produce source-exclusive typed pending proposals; prompt/tool activation and execution-time checks enforce stage authority, while recovery, narrow withdrawal, finish handshakes, and total-tool-call circuit breakers remain bounded |
 | Source observations | M2 + M3b-1 implemented | Immutable-source paragraph/sentence partition, exact entity/event mention, quotation, and discourse annotations, source-local closure, accounting, audit, batch recovery, and paged retrieval; event mentions carry no truth or canonical-event authority |
 | Entity resolution | M3a implemented | Deterministic source-scoped lexical candidates, explicit resolved/new/ambiguous/unresolved decisions, immutable superseding revisions, unresolved audit queues, and canonical name/alias trace gates |
 | Event resolution | M3b implemented | Source-scoped evidence/title/participant candidates, explicit coreference vs subevent clusters, resolved/new/ambiguous/unresolved decisions, merge/split revisions, major-event coverage, participant trace, and canonical-event commit gates |
 | Proposition, attribution, and knowledge acquisition | M4a implemented | Reusable proposition content is separated from narrator/character/document attitudes; quotation IDs trace holders to resolved speakers, and additive knowledge provenance records proposition, attribution, and acquisition mode without breaking legacy claim-keyed replay |
 | Event participation semantics | M4b-1 implemented | Versioned event/entity/semantic-role records keep character presence independent from agency, require a complete lossless projection to legacy `participants`/`participantPresence`, participate in compiler closure and prepared-publication gates, and are pinned in runtime snapshot V5 |
 | Event relation semantics | M4b-2 implemented | Independently evidenced temporal, causal, explanatory, identity/subevent, and narrative-continuation records have deterministic closure, contradiction, cycle, and legacy-projection validation; only non-contested `causes`/`enables` relations project to `causalParents`, and runtime snapshot V6 pins their revisions |
+| Scene/action/executable policy semantics | T4 + T6 + T9 implemented | Canonical scene occurrences, event frames, source-induced action schemas, action constraints, norm templates, and process templates pass source closure, dependency-ordered validation/commit, artifact retrieval, audit, gold evaluation, prepared-revision portability, and selected-reparse invalidation; host domain modules remain a separate provenance lane |
 | Character semantics | M5a implemented | Versioned behavioral dimensions separate contextual dispositions, event appraisals, and event-gated development episodes; stable inference and counter-evidence rules fail closed, legacy free-form keys are explicitly namespaced, and actor-facing projections remain future-canon and visibility safe |
 | Spatial semantics | M5b-2a implemented | Exact-evidence-backed containment, adjacency, and route artifacts are source-scoped, graph-validated, revision-pinned in snapshot V7, and actor-safe; compiled travel requires an active direction/mode-compatible route and respects known minimum duration, while adjacency never proves passage |
 | World-rule semantics | M5b-2b implemented | Controlled kind/scope, authority, jurisdiction, applicability, per-clause requirements/prohibitions, exceptions, visibility, defeasibility, and explicit superiority are exact-evidence-backed and catalog-validated; contested semantics never execute, priority alone never resolves conflict, and hidden rules enforce without actor leakage |
-| Reparse invalidation | Direct dependencies implemented | Whole/selected-chapter reparse uses byte/line containment for exact quote subspans and covers propositions, attributions, participation, event relations, nested spatial/rule evidence, and character ontology; cross-chapter artifacts and pinned branches remain intact, while transitive impact closure is not yet implemented |
+| Reparse invalidation | Direct dependencies implemented | Whole/selected-chapter reparse uses byte/line containment for exact quote subspans and covers propositions, attributions, participation, event relations, scene/frame/action/constraint/norm/process artifacts, nested spatial/rule evidence, character ontology, and exact bindings; cross-chapter artifacts and pinned branches remain intact, while a general transitive impact planner is not yet implemented |
 | Canonical acceptance | Implemented | Structural and cryptographic evidence validation, evidence-grounded entity names/aliases, and dependency-ordered acceptance |
 | Canonical revisions | Implemented | Logical IDs point to immutable content-addressed revisions |
 | World engine | Implemented vertical slice | Immutable commits/events/deltas, projection, branch CAS, rules, knowledge, frontier |
@@ -40,7 +41,7 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 | Actor behavior | Implemented vertical slice | Direct interactions use the actor-scoped reactive NPC lane; unrelated initiative uses a bounded hybrid policy that prefers compiled actions, then calls an isolated Pi actor reasoner for host-ranked salient actors and revalidates multi-actor footprints at each new branch head |
 | Narrative | Implemented vertical slice | Actor-scoped Pi scene narrator receives a bounded actor-safe frame plus exact retrieval and authority-projected current/prior literary context when a move triggered consultation; choice and narrative channels remain isolated, and accepted prose cannot mutate world truth |
 | Preparation workflow | Implemented vertical slice | `prepare` remains one-batch/review-first; authorized `prepare-all` compiles all, accepts valid artifacts, quarantines invalid drafts, seeds an opening, and creates a branch |
-| Prepared revisions | Implemented with evidence-portability gap | MD5 lookup with SHA-256 verification, immutable bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation; canonical `EvidenceRef`s travel, but exact assertion revisions/bindings are not yet serialized in the bundle |
+| Prepared revisions | Implemented | MD5 lookup with SHA-256 verification, immutable V3 bundle revisions, atomic active pointer, origin-independent whole/selected-chapter reparse, rollback and explicit activation; canonical artifacts plus exact assertion bindings and compiler observation/resolution/accounting snapshots round-trip across workspaces |
 | Local persistence | Implemented | Source, compiler, branch, and session data live below `$NWH_HOME`; new runs do not create workspace `.novel-harness/`, and legacy state is copied without deletion |
 | Player experience | Implemented vertical slice | Restricted Pi translation into a host-owned player event, typed data-gap escalation with at most one frozen-source consultation and one consumer retry, exact bounded continuity, reactive NPC responses, validated immediate developments, bounded post-divergence canonical scaffold recovery, merged model suggestions plus host-preflighted exits, stagnation detection, and an explicit material-progress wait route |
 | Runtime source consultation | Implemented vertical slice | Translation/adjudication may preserve a genuine missing-data result; a fresh isolated specialist can search and fully read only the branch-pinned immutable source units, while host admission excludes future/ambiguous evidence, projects separate translation/adjudication/choice/narrative authority, and records source-only gaps in a non-authoritative compiler inbox |
@@ -78,7 +79,7 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
 - Built-in author headings are preferred. A longer heading-free source first gets a bounded, non-citable structure sample; the model may choose a literal prefix/number-style/suffix rule through `configure_chapter_split`, but cannot submit executable code or regex. The host requires exact sampled examples, validates all source-line matches, and persists the plan only inside a successful finish handshake. Prepared revisions retain that plan.
 - Evidence segments are bounded at 96 KiB / 1,000 lines. Up to eight continuation segments from the same detected chapter may share a compiler batch, subject to 128 KiB serialized-source and byte limits; batches never merge different chapters.
 - The full segment manifest is rederived from immutable source bytes and deep-compared before model context is built; a scoped compiler turn captures its selected slice before inference, so stale or mid-turn metadata cannot widen the evidence boundary.
-- `compile-source` processes bounded batches and checkpoints only after active proposal calls form a closed graph, the model stops cleanly, and `finish_compiler_batch` succeeds. Stable batch provenance supplies exact active proposal IDs to recovery turns; ordinary source passes defer genesis to the dedicated opening pass. The host owns the active proposal set, executes proposal writes sequentially, hides capacity counters from the model, forbids budget-driven semantic deletion, keeps only high runaway safety fuses (800 proposals / 1,000 calls), reserves the final finish handshake, rejects concurrent CLI compiler writers, and terminates finish failures or pathological compiler tool loops without checkpointing.
+- `compile-source` processes bounded batches in whole-source phase-major order: observation inventory first, entity/event resolution and canonical semantics second, and executable induction/accounting third. Prompt contracts, activated tools, and the tool execution boundary independently enforce the same stage authority. A batch checkpoints only after its active proposal graph closes, the model stops cleanly, and `finish_compiler_batch` succeeds. Stable batch provenance supplies exact active proposal IDs to recovery turns; ordinary source passes defer genesis to the dedicated opening pass. The host owns the active proposal set, executes proposal writes sequentially, hides capacity counters from the model, forbids budget-driven semantic deletion, keeps only high runaway safety fuses (800 proposals / 1,000 calls), reserves the final finish handshake, rejects concurrent CLI compiler writers, and terminates finish failures or pathological compiler tool loops without checkpointing.
 - Automated source/opening compiler sessions expose no generic workspace file
   tools. Reconciliation receives exact read-only raw-evidence tools bound to one
   active source; explicit manual compiler sessions may opt into local reads.
@@ -160,12 +161,19 @@ and its [Chinese research report](novel-semantic-compilation-plan.zh-CN.md).
   post-state, and omits hidden or actor-unknown rules from prompts without
   weakening engine enforcement. Audit reports controlled/legacy inventory,
   exact evidence, reference failures, and potential cross-rule conflicts.
+- Canonical scene/action policy uses separate occurrence, reusable mechanism,
+  and branch-instance layers. Source-induced `action-schema-v1`,
+  `action-constraint-v1`, `norm-template-v1`, and `process-template-v1`
+  proposals must cite supporting canonical events and pass deterministic
+  entity/action/event/claim/override closure before commit. Novel compilation
+  cannot submit `domain-module` provenance. Audit and gold evaluation expose
+  these artifacts instead of treating extraction coverage as runtime fitness.
 - Exact evidence assertions are immutable and artifact-hash-bound in the
-  compiling workspace and are exposed by artifact retrieval. The prepared
-  bundle currently serializes canonical artifacts but not assertion revisions
-  or bindings; restoring that bundle elsewhere therefore retains embedded
-  `EvidenceRef`s but loses field-level provenance. This is a P0 portability gap,
-  not evidence that the original local assertions were invalid.
+  compiling workspace and are exposed by artifact retrieval. Prepared V3
+  bundles serialize hash-bound assertion bindings together with source
+  annotations, entity/event resolutions, source structure, and accounting;
+  restore verifies source identity and materializes the same compiler snapshot
+  without relying on an upload filename or the originating workspace.
 - Canonical entities, propositions, attributions, claims, events, event
   participations, event relations, spatial relations, and rules use
   logical refs over immutable revisions.
@@ -336,34 +344,33 @@ genres—not connection or mutation authority.
 
 ### 5. Compilation quality has no representative benchmark
 
-The repository includes a rich semantic gold schema, but not a checked-in
-annotated multi-novel corpus or a complete repeatable semantic evaluator. The
-current scorer reads only canonical entity/claim/event/rule/goal/model IDs and
-legacy causal-parent pairs; every annotated mention, cluster, quotation,
-participation, typed relation, proposition, knowledge, state-effect, and
-character layer is reported as `not-implemented`. Full-source batching and
-internal source accounting prove bounded/closed processing, not complete or
-correct world extraction.
+The repeatable semantic evaluator now scores mention detection, entity/event
+coreference, quotation attribution, typed participation and event relations
+including operationality, propositions, knowledge acquisition, state effects,
+scenes, action schemas/effect envelopes, executable policies, and character
+goal/appraisal/development/relationship/obligation evidence. A fully annotated
+synthetic slice reaches exact precision/recall, but there is still no checked-in
+representative multi-novel corpus. Full-source batching and internal source
+accounting prove bounded/closed processing, not extraction quality on real prose.
 
-### 6. Exact evidence portability and transitive repair are incomplete
+### 6. General transitive repair planning is incomplete
 
-Field-level exact assertions are available and hash-bound in the compiling
-workspace, but prepared bundles carry only canonical artifacts. A restored
-revision therefore loses assertion bindings. Selected-chapter reparse now
-correctly invalidates every directly supported semantic collection using exact
-subspan containment, but it does not calculate mention-to-runtime transitive
-impact. Cross-chapter aggregate models cannot yet mark one nested semantic item
-stale without replacing the aggregate.
+Prepared revisions now retain exact field-level assertion bindings and compiler
+metadata. Selected-chapter reparse invalidates every directly supported semantic
+collection—including scene/action/policy artifacts—using exact subspan
+containment, but it does not yet calculate a general mention-to-runtime
+transitive impact plan or offer `--dry-run`. Cross-chapter aggregate models
+cannot mark one nested semantic item stale without replacing the aggregate.
 
-### 7. Scene, conditional causality, and actor salience remain partial
+### 7. Executable semantic induction remains unbenchmarked
 
-Scene/flashback/summary observations exist, but there is no accepted
-cross-chapter scene occurrence joining location, story interval, participants,
-viewpoint, and canonical event membership. Typed event relations carry
-mechanism and required conditions, but the frontier still consumes the legacy
-causal-parent projection. Actor lived-experience context still selects the most
-recent twelve qualifying events rather than a deterministic goal/obligation/
-relationship-aware salience policy.
+Scene occurrences now join discourse, location, story interval, viewpoint,
+physical presence, and canonical event membership. Typed causal operationality
+drives the frontier, while hybrid actors use deterministic goal/obligation/
+relationship-aware salience before any bounded model call. What remains
+unestablished is whether a model reliably induces the right reusable action,
+constraint, norm, and process abstractions across genres without overgeneralizing
+one-off events.
 
 ### 8. Long-running evolution still needs broader evaluation
 
@@ -385,19 +392,18 @@ remain playable but contain no newly inferred scaffolds until reparsed.
 
 ## Recommended next milestone
 
-Close publication trust before adding broader ontology:
+T10 should harden the connected model before adding broader ontology:
 
-1. serialize and restore exact assertion revisions/bindings with prepared
-   bundles, dual-reading old bundles in explicit legacy-evidence mode;
-2. implement each semantic gold scorer and check in a constrained annotated
-   slice before expanding to multiple licensed/user-provided genres;
-3. add a typed artifact dependency graph and `reparse --dry-run` impact plan,
-   preserving immutable revisions and pinned old branches;
-4. resolve cross-chapter scene occurrences and event membership;
-5. move causal required conditions into deterministic frontier eligibility and
-   replace fixed recency with actor-safe deterministic salience;
-6. add institution, faction, artifact, or economy modules only when benchmark
-   failures repeatedly demonstrate the need.
+1. check in a small licensed/original representative corpus and freeze human
+   gold baselines only after annotation review;
+2. run the complete long-horizon scenario matrix across forks, hidden rules,
+   false beliefs, norms, due processes, autonomous actors, and resource conflict;
+3. profile checkpoint-plus-tail projection and verify bounded model-call counts;
+4. audit move traces for complete host decisions and actor-safe redaction;
+5. add a typed `reparse --dry-run` dependency-impact plan when corpus failures
+   show direct evidence containment is insufficient;
+6. add domain modules only when benchmark failures repeatedly demonstrate the
+   missing mechanic.
 
-This order tests portability, measurement, and safe repair first while
-preserving [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md).
+This order tests reliability and observability while preserving
+[ADR 0001](adr/0001-world-truth-history-and-possibility-space.md).

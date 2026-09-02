@@ -95,7 +95,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
         ? `Chapter structure discovery ${batch.ordinal + 1}/${context.totalBatches}`
         : batch.purpose === "boundary-calibration"
           ? `Boundary calibration ${batch.ordinal + 1}/${context.totalBatches}`
-          : `Compiler batch ${batch.ordinal + 1}/${context.totalBatches}`;
+          : `Compiler ${batch.semanticStage ?? "integrated"} batch ${batch.ordinal + 1}/${context.totalBatches}`;
       let activeBatch = batch;
       for (let attempt = 0; ; attempt += 1) {
         options.onStatus?.(`${label} · creating model session${attempt ? ` · recovery ${attempt}/${MAX_COMPILER_BATCH_RECOVERY_RETRIES}` : ""}`);
@@ -256,12 +256,13 @@ export function compilerBatchTraceInvocation(
 ): PiTraceInvocationInput {
   return {
     parent,
-    invocationName: `${batch.purpose} · batch ${batch.ordinal + 1}`,
+    invocationName: `${batch.purpose}${batch.semanticStage ? ` · ${batch.semanticStage}` : ""} · batch ${batch.ordinal + 1}`,
     attempt,
     metadata: {
       sourceId: batch.sourceId,
       compilerBatchId: batch.id,
       purpose: batch.purpose,
+      semanticStage: batch.semanticStage,
       ordinal: batch.ordinal,
       chapterOrdinal: batch.chapterOrdinal,
       startLine: batch.startLine,
@@ -270,7 +271,7 @@ export function compilerBatchTraceInvocation(
     },
     parts: [{
       id: `compiler.batch.${batch.id}.prompt.attempt-${attempt + 1}`,
-      label: `${batch.purpose} evidence batch ${batch.ordinal + 1}`,
+      label: `${batch.purpose}${batch.semanticStage ? ` ${batch.semanticStage}` : ""} evidence batch ${batch.ordinal + 1}`,
       kind: "compiler.batch",
       role: "user",
       authority: "untrusted-source",

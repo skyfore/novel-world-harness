@@ -25,7 +25,7 @@ describe("source-unit accounting tools", () => {
     ).join("\n");
     const fixture = await createEvidenceFixture(root, content);
     const batch = (await prepareCompilerBatches(root, fixture.source))
-      .find((candidate) => candidate.purpose === "source-review");
+      .find((candidate) => candidate.purpose === "source-review" && candidate.semanticStage === "executable");
     if (!batch) throw new Error("Missing ordinary source batch");
     const structure = await ensureSourceStructure(root, fixture.source);
     const segmentIds = new Set(batch.segmentIds);
@@ -145,7 +145,7 @@ describe("source-unit accounting tools", () => {
     ).join("\n");
     const fixture = await createEvidenceFixture(root, content);
     const batch = (await prepareCompilerBatches(root, fixture.source))
-      .find((candidate) => candidate.purpose === "source-review");
+      .find((candidate) => candidate.purpose === "source-review" && candidate.semanticStage === "executable");
     if (!batch) throw new Error("Missing ordinary source batch");
     const toolset = createCompilerProposalToolset(root, { provider: "test", model: "accounting-model" });
     await toolset.beginBatch(batch.segmentIds, batch.id, fixture.source.id);

@@ -341,6 +341,12 @@ export async function invalidatePreparationArtifacts(
     events,
     eventParticipations,
     eventRelations,
+    sceneOccurrences,
+    eventFrames,
+    actionSchemas,
+    actionConstraints,
+    normTemplates,
+    processTemplates,
     spatialRelations,
     rules,
     goals,
@@ -355,6 +361,12 @@ export async function invalidatePreparationArtifacts(
     canon.listEvents(),
     canon.listEventParticipations(),
     canon.listEventRelations(),
+    canon.listSceneOccurrences(),
+    canon.listEventFrames(),
+    canon.listActionSchemas(),
+    canon.listActionConstraints(),
+    canon.listNormTemplates(),
+    canon.listProcessTemplates(),
     canon.listSpatialRelations(),
     canon.listRules(),
     actors.listGoals(), actors.listModels(), possibilities.list(), initial.get(),
@@ -375,6 +387,12 @@ export async function invalidatePreparationArtifacts(
       await invalidate("event-relation", item.id, () => canon.removeCurrent("event-relations", item.id));
     }
   }
+  for (const item of sceneOccurrences) if (shouldInvalidate(item)) await invalidate("scene-occurrence", item.id, () => canon.removeCurrent("scene-occurrences", item.id));
+  for (const item of eventFrames) if (shouldInvalidate(item)) await invalidate("event-frame", item.id, () => canon.removeCurrent("event-frames", item.id));
+  for (const item of actionSchemas) if (shouldInvalidate(item)) await invalidate("action-schema", item.id, () => canon.removeCurrent("action-schemas", item.id));
+  for (const item of actionConstraints) if (shouldInvalidate(item)) await invalidate("action-constraint", item.id, () => canon.removeCurrent("action-constraints", item.id));
+  for (const item of normTemplates) if (shouldInvalidate(item)) await invalidate("norm-template", item.id, () => canon.removeCurrent("norm-templates", item.id));
+  for (const item of processTemplates) if (shouldInvalidate(item)) await invalidate("process-template", item.id, () => canon.removeCurrent("process-templates", item.id));
   for (const item of spatialRelations) if (shouldInvalidate({ evidence: spatialRelationEvidence(item) })) await invalidate("spatial-relation", item.id, () => canon.removeCurrent("spatial-relations", item.id));
   for (const item of rules) if (shouldInvalidate({ evidence: worldRuleEvidence(item) })) await invalidate("world-rule", item.id, () => canon.removeCurrent("rules", item.id));
   for (const item of goals) if (shouldInvalidate(item)) await invalidate("character-goal", item.id, () => actors.removeGoal(item.id));

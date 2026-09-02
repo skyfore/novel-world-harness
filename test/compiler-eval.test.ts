@@ -138,6 +138,11 @@ describe("compiler gold evaluation", () => {
         confidence: 1, derivation,
       },
       {
+        version: 1, annotationType: "entity-mention", id: "mention-road", sourceId: fixture.source.id,
+        anchor: anchor("Road"), surface: "Road", form: "proper", kindCandidates: ["location"],
+        confidence: 1, derivation,
+      },
+      {
         version: 1, annotationType: "event-mention", id: "mention-tell", sourceId: fixture.source.id,
         triggerAnchor: anchor("tells"), trigger: "tells", extentAnchors: [anchor("Hero tells Friend to run.")],
         eventTypeCandidates: ["communication"], participantMentionIds: ["mention-hero", "mention-friend"],
@@ -182,6 +187,7 @@ describe("compiler gold evaluation", () => {
     await new EntityResolutionStore(root).replaceCurrent(fixture.source.id, [
       identity("resolve-hero", "mention-hero", "hero"),
       identity("resolve-friend", "mention-friend", "friend"),
+      identity("resolve-road", "mention-road", "road"),
     ]);
     const eventDerivation = {
       runId: "eval-run",
@@ -235,12 +241,14 @@ describe("compiler gold evaluation", () => {
         attributionId: "attr-run", acquisitionMode: "told", status: "heard", confidence: 1,
         sourceActorId: "hero",
       }] },
+      sceneOccurrenceIds: ["scene-main"],
       evidence: fixture.evidence("Hero tells Friend to run."), causalParents: [], confidence: 1,
     });
     await canon.putEvent({
       id: "leave", title: "Friend leaves", participants: ["friend"],
       storyTime: { kind: "ordinal", label: "second", orderHint: 2 }, preconditions: [],
       observedOutcome: { version: 1, operations: [{ op: "set", entityId: "friend", field: "character.location", value: "road" }] },
+      sceneOccurrenceIds: ["scene-main"],
       evidence: fixture.evidence("Friend leaves for Road."), causalParents: ["tell"], confidence: 1,
     });
     await canon.putEventParticipation({
@@ -256,6 +264,123 @@ describe("compiler gold evaluation", () => {
       id: "goal-leave", actorId: "friend", description: "Friend leaves for Road.", priority: 1,
       requiresKnowledge: [], evidence: fixture.evidence("Friend leaves"),
     });
+    await new ActorModelStore(root).putModel({
+      actorId: "friend",
+      traits: {},
+      decisionBiases: {},
+      relationshipOntologyVersion: "relationship-v1",
+      relationshipStances: [{
+        id: "friend-trusts-hero",
+        actorId: "friend",
+        relationshipEntityId: "friend-to-hero",
+        targetEntityId: "hero",
+        dimensionId: "trust",
+        value: 0.8,
+        stability: "situational",
+        basis: "explicit-characterization",
+        status: "supported",
+        confidence: 1,
+        evidence: fixture.evidence("Hero tells Friend"),
+      }],
+      relationshipObligations: [{
+        id: "friend-cooperates-with-hero",
+        actorId: "friend",
+        relationshipEntityId: "friend-to-hero",
+        targetEntityId: "hero",
+        typeId: "cooperate",
+        contentPropositionId: "prop-run",
+        priority: 1,
+        basis: "explicit-promise",
+        status: "supported",
+        confidence: 1,
+        evidence: fixture.evidence("Friend leaves"),
+      }],
+      evidence: fixture.evidence("Hero tells Friend to run. Friend leaves for Road."),
+    });
+    await canon.putSceneOccurrence({
+      ontologyVersion: "scene-occurrence-v1",
+      id: "scene-main",
+      discourseSegmentIds: ["discourse-main"],
+      eventIds: ["tell", "leave"],
+      locationId: "road",
+      storyInterval: { start: { kind: "ordinal", label: "first scene", orderHint: 1 } },
+      viewpointActorIds: ["hero"],
+      presentActorIds: ["hero", "friend"],
+      entryConditions: [],
+      exitConditions: [],
+      evidence: fixture.evidence("Hero tells Friend to run. Friend leaves for Road."),
+    });
+    await canon.putActionSchema({
+      ontologyVersion: "action-schema-v1",
+      id: "action-depart",
+      name: "Depart after instruction",
+      roles: [{ id: "actor", label: "departing actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      parameters: [],
+      preconditions: [],
+      stateEffects: [],
+      effectEnvelope: {
+        maxStateOperations: 1,
+        allowedStateFields: ["character.location"],
+        allowsKnowledge: false,
+        allowsTimeAdvance: false,
+        allowsSceneTransition: false,
+      },
+      induction: { kind: "source-pattern", supportingEventIds: ["tell", "leave"] },
+      evidence: fixture.evidence("Hero tells Friend to run. Friend leaves for Road."),
+    });
+    await canon.putActionConstraint({
+      ontologyVersion: "action-constraint-v1",
+      id: "constraint-depart-alive",
+      name: "Only a living actor can depart",
+      actionPattern: { kind: "schema", schemaId: "action-depart" },
+      appliesWhen: [],
+      clauses: [{
+        id: "must-be-alive",
+        timing: "before",
+        modality: "require",
+        predicate: { op: "fact-equals", entity: { kind: "actor" }, field: "character.alive", value: true },
+      }],
+      exceptions: [],
+      priority: 10,
+      defeasible: true,
+      overridesConstraintIds: [],
+      status: "supported",
+      visibility: "public",
+      induction: { kind: "source-pattern", supportingEventIds: ["tell", "leave"] },
+      evidence: fixture.evidence("Hero tells Friend to run. Friend leaves for Road."),
+    });
+    await canon.putNormTemplate({
+      ontologyVersion: "norm-template-v1",
+      id: "norm-follow-instruction",
+      name: "Follow the instruction",
+      modality: "obligation",
+      actionPattern: { kind: "schema", schemaId: "action-depart" },
+      authorityEntityId: "hero",
+      appliesWhen: [],
+      exceptions: [],
+      reparations: [],
+      priority: 10,
+      defeasible: true,
+      overridesTemplateIds: [],
+      status: "supported",
+      visibility: "public",
+      knownByClaimIds: [],
+      induction: { kind: "source-pattern", supportingEventIds: ["tell", "leave"] },
+      evidence: fixture.evidence("Hero tells Friend to run. Friend leaves for Road."),
+    });
+    await canon.putProcessTemplate({
+      ontologyVersion: "process-template-v1",
+      id: "process-departure",
+      name: "Instruction to departure",
+      ownerRoles: [{ id: "traveler", label: "traveler", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      phases: [{ id: "instructed", label: "Instructed", terminal: false }, { id: "departed", label: "Departed", terminal: true }],
+      initialPhaseId: "instructed",
+      transitions: [{ fromPhaseId: "instructed", toPhaseId: "departed", minimumProgress: 1 }],
+      outcomeIds: ["departed"],
+      visibility: "observable",
+      induction: { kind: "source-pattern", supportingEventIds: ["tell", "leave"] },
+      evidence: fixture.evidence("Hero tells Friend to run. Friend leaves for Road."),
+    });
 
     const report = await evaluateCompilerAgainstGold(root, {
       version: 2,
@@ -270,6 +395,7 @@ describe("compiler gold evaluation", () => {
         mentions: [
           { id: "g-hero", kind: "entity", type: "character", span: span("Hero") },
           { id: "g-friend", kind: "entity", type: "character", span: span("Friend") },
+          { id: "g-road", kind: "place", type: "location", span: span("Road") },
           { id: "g-tell", kind: "event", type: "communication", span: span("tells") },
           { id: "g-leave", kind: "event", type: "movement", span: span("leaves") },
           { id: "g-quote", kind: "quotation", type: "indirect", span: span("to run") },
@@ -277,6 +403,7 @@ describe("compiler gold evaluation", () => {
         entityClusters: [
           { id: "g-hero-cluster", mentionIds: ["g-hero"], canonicalEntityId: "hero" },
           { id: "g-friend-cluster", mentionIds: ["g-friend"], canonicalEntityId: "friend" },
+          { id: "g-road-cluster", mentionIds: ["g-road"], canonicalEntityId: "road" },
         ],
         eventClusters: [
           { id: "g-tell-cluster", mentionIds: ["g-tell"], canonicalEventId: "tell" },
@@ -293,6 +420,7 @@ describe("compiler gold evaluation", () => {
         eventRelations: [{
           id: "g-relation", fromEventClusterId: "g-tell-cluster", toEventClusterId: "g-leave-cluster",
           type: "causes", evidenceSpans: [span("Hero tells Friend to run. Friend leaves")],
+          operationality: "necessary",
         }],
         propositions: [{
           id: "g-prop", subjectEntityClusterId: "g-friend-cluster", predicate: "should-run",
@@ -307,10 +435,59 @@ describe("compiler gold evaluation", () => {
           id: "g-effect", eventClusterId: "g-leave-cluster", op: "set",
           entityClusterId: "g-friend-cluster", field: "character.location",
         }],
-        characterAssertions: [{
-          id: "g-goal", actorEntityClusterId: "g-friend-cluster", kind: "goal",
-          evidenceSpans: [span("Friend leaves")],
+        scenes: [{
+          id: "g-scene",
+          sceneOccurrenceId: "scene-main",
+          eventClusterIds: ["g-tell-cluster", "g-leave-cluster"],
+          locationEntityClusterId: "g-road-cluster",
+          viewpointEntityClusterIds: ["g-hero-cluster"],
+          presentEntityClusterIds: ["g-hero-cluster", "g-friend-cluster"],
+          storyTimeKind: "ordinal",
+          evidenceSpans: [span("Hero tells Friend to run. Friend leaves for Road.")],
         }],
+        actionSchemas: [{
+          id: "g-action",
+          actionSchemaId: "action-depart",
+          name: "Depart after instruction",
+          supportingEventClusterIds: ["g-tell-cluster", "g-leave-cluster"],
+          roleIds: ["actor"],
+          allowedStateFields: ["character.location"],
+          maxStateOperations: 1,
+          evidenceSpans: [span("Hero tells Friend to run. Friend leaves for Road.")],
+        }],
+        executablePolicies: [
+          {
+            id: "g-constraint", kind: "action-constraint", artifactId: "constraint-depart-alive",
+            actionSchemaId: "action-depart", visibility: "public",
+            supportingEventClusterIds: ["g-tell-cluster", "g-leave-cluster"],
+            evidenceSpans: [span("Hero tells Friend to run. Friend leaves for Road.")],
+          },
+          {
+            id: "g-norm", kind: "norm-template", artifactId: "norm-follow-instruction",
+            actionSchemaId: "action-depart", modality: "obligation", visibility: "public",
+            supportingEventClusterIds: ["g-tell-cluster", "g-leave-cluster"],
+            evidenceSpans: [span("Hero tells Friend to run. Friend leaves for Road.")],
+          },
+          {
+            id: "g-process", kind: "process-template", artifactId: "process-departure",
+            visibility: "observable", supportingEventClusterIds: ["g-tell-cluster", "g-leave-cluster"],
+            evidenceSpans: [span("Hero tells Friend to run. Friend leaves for Road.")],
+          },
+        ],
+        characterAssertions: [
+          {
+            id: "g-goal", actorEntityClusterId: "g-friend-cluster", kind: "goal",
+            evidenceSpans: [span("Friend leaves")],
+          },
+          {
+            id: "g-relationship", actorEntityClusterId: "g-friend-cluster", kind: "relationship",
+            evidenceSpans: [span("Hero tells Friend")],
+          },
+          {
+            id: "g-obligation", actorEntityClusterId: "g-friend-cluster", kind: "obligation",
+            evidenceSpans: [span("Friend leaves")],
+          },
+        ],
       },
     });
 

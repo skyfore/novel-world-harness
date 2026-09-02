@@ -25,6 +25,7 @@ import {
   type IdentityResolution,
 } from "./entity-resolution.js";
 import { EvidenceAssertionStore, evidenceAssertionSourceIds } from "./evidence-assertions.js";
+import { CompilerBatchStore } from "./batches.js";
 
 export const EVENT_RESOLUTION_ONTOLOGY_VERSION = "event-resolution-v1" as const;
 
@@ -641,15 +642,19 @@ export async function validateEventResolutionClosure(
         validateResolvedEventParticipants(issues, proposal.id, mentions, identities, event);
       }
     }
-    if (resolution.status === "resolved" && resolution.canonicalEventId && !events.canonical.has(resolution.canonicalEventId)) {
-      issues.add(`${proposal.id}: resolved event '${resolution.canonicalEventId}' must already be canonical; use new-event for a same-finish proposal`);
+    if (resolution.status === "resolved" && resolution.canonicalEventId
+      && !events.canonical.has(resolution.canonicalEventId)
+      && !events.checkpointedPending.has(resolution.canonicalEventId)) {
+      issues.add(`${proposal.id}: resolved event '${resolution.canonicalEventId}' must be canonical or an active canonical-event proposal from a previously checkpointed source batch; use new-event for a same-finish proposal`);
     }
     if (resolution.status === "new-event" && resolution.canonicalEventId && !events.selectedPending.has(resolution.canonicalEventId)) {
       issues.add(`${proposal.id}: new-event '${resolution.canonicalEventId}' requires a same-finish canonical-event proposal`);
     }
     if ((resolution.status === "ambiguous" || resolution.status === "unresolved")
-      && resolution.candidates.some((candidate) => !events.canonical.has(candidate.canonicalEventId))) {
-      issues.add(`${proposal.id}: ${resolution.status} candidates must refer to existing canonical events`);
+      && resolution.candidates.some((candidate) =>
+        !events.canonical.has(candidate.canonicalEventId)
+        && !events.checkpointedPending.has(candidate.canonicalEventId))) {
+      issues.add(`${proposal.id}: ${resolution.status} candidates must refer to canonical events or active proposals from previously checkpointed source batches`);
     }
   }
   for (const [supersededId, coveredMentionIds] of replacementCoverage) {
@@ -931,12 +936,21 @@ async function loadResolutionEventCatalog(
   worldProposalIds: readonly string[],
 ): Promise<{
   canonical: Map<string, CanonicalEvent>;
+  checkpointedPending: Map<string, CanonicalEvent>;
   selectedPending: Map<string, CanonicalEvent>;
   all: Map<string, CanonicalEvent>;
   evidenceAssertionIds: Map<string, Set<string>>;
 }> {
-  const canonical = new Map((await sourceCanonicalEvents(workspaceRoot, sourceId)).map((event) => [event.id, event]));
-  const selectedPending = await loadSelectedEventProposals(workspaceRoot, sourceId, worldProposalIds);
+  const proposals = new ProposalStore(workspaceRoot);
+  const [canonicalEvents, selectedPending, pendingSummaries, progress] = await Promise.all([
+    sourceCanonicalEvents(workspaceRoot, sourceId),
+    loadSelectedEventProposals(workspaceRoot, sourceId, worldProposalIds),
+    proposals.list("pending", sourceId),
+    new CompilerBatchStore(workspaceRoot).read(sourceId),
+  ]);
+  const canonical = new Map(canonicalEvents.map((event) => [event.id, event]));
+  const completedBatchIds = new Set(progress.completedBatchIds);
+  const checkpointedPending = new Map<string, CanonicalEvent>();
   const evidenceAssertionIds = new Map<string, Set<string>>();
   const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
   for (const eventId of canonical.keys()) {
@@ -944,7 +958,22 @@ async function loadResolutionEventCatalog(
     assertAssertionSource(assertions, sourceId, `Canonical event ${eventId}`);
     evidenceAssertionIds.set(eventId, new Set(assertions.map((assertion) => assertion.id)));
   }
-  const proposals = new ProposalStore(workspaceRoot);
+  for (const summary of pendingSummaries) {
+    if (summary.kind !== "canonical-event") continue;
+    const envelope = await proposals.readEnvelope("pending", summary.id);
+    const generatedBy = envelope.generatedBy;
+    const batchId = generatedBy && typeof generatedBy === "object" && !Array.isArray(generatedBy)
+      && typeof (generatedBy as Record<string, unknown>).compilerBatchId === "string"
+      ? (generatedBy as Record<string, unknown>).compilerBatchId as string
+      : undefined;
+    if (!batchId || !completedBatchIds.has(batchId)) continue;
+    const event = canonicalEventSchema.parse(envelope.payload);
+    assertEvidenceExclusiveToSource(event.evidence, sourceId, `Canonical-event proposal ${summary.id}`);
+    checkpointedPending.set(event.id, event);
+    const assertions = evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []);
+    assertAssertionSource(assertions, sourceId, `Canonical-event proposal ${summary.id}`);
+    evidenceAssertionIds.set(event.id, new Set(assertions.map((assertion) => assertion.id)));
+  }
   for (const proposalId of uniqueParsedIds(worldProposalIds)) {
     let envelope: Record<string, unknown>;
     try {
@@ -959,7 +988,13 @@ async function loadResolutionEventCatalog(
     assertAssertionSource(assertions, sourceId, `Canonical-event proposal ${proposalId}`);
     evidenceAssertionIds.set(event.id, new Set(assertions.map((assertion) => assertion.id)));
   }
-  return { canonical, selectedPending, all: new Map([...canonical, ...selectedPending]), evidenceAssertionIds };
+  return {
+    canonical,
+    checkpointedPending,
+    selectedPending,
+    all: new Map([...canonical, ...checkpointedPending, ...selectedPending]),
+    evidenceAssertionIds,
+  };
 }
 
 async function loadSelectedEventProposals(

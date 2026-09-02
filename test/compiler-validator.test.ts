@@ -45,6 +45,215 @@ function ruleEvidenceAssertions(artifactId: string, reference: ReturnType<Awaite
 }
 
 describe("CompilerCommitService", () => {
+  it("commits source-induced action constraints, norms, and processes after their typed dependencies", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-compiler-executable-policy-"));
+    roots.push(root);
+    const source = await createEvidenceFixture(
+      root,
+      "Hero hears the warning. Hero departs for the Gate. Hero arrives at the Gate.\n",
+    );
+    const proposals = new CompilerProposalService(root);
+    const evidence = source.evidence("Hero hears the warning. Hero departs for the Gate. Hero arrives at the Gate.");
+
+    for (const [proposalId, id, kind, canonicalName, quote] of [
+      ["policy-hero-proposal", "hero", "character", "Hero", "Hero"],
+      ["policy-gate-proposal", "gate", "location", "Gate", "Gate"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind, canonicalName, aliases: [], evidence: source.evidence(quote) },
+        generatedBy: { worker: "test" },
+      });
+    }
+    await proposals.submit("canonical-event", {
+      proposalId: "policy-depart-event-proposal",
+      payload: {
+        id: "hero-departs",
+        title: "Hero departs for the Gate",
+        participants: ["hero"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        storyTime: { kind: "ordinal", label: "departure", orderHint: 1 },
+        preconditions: [],
+        observedOutcome: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "reach-gate" }],
+        },
+        evidence: source.evidence("Hero departs for the Gate"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "policy-arrive-event-proposal",
+      payload: {
+        id: "hero-arrives",
+        title: "Hero arrives at the Gate",
+        participants: ["hero"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        storyTime: { kind: "ordinal", label: "arrival", orderHint: 2 },
+        preconditions: [],
+        observedOutcome: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.location", value: "gate" }],
+        },
+        evidence: source.evidence("Hero arrives at the Gate"),
+        causalParents: ["hero-departs"],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("action-schema", {
+      proposalId: "policy-travel-action-proposal",
+      payload: {
+        ontologyVersion: "action-schema-v1",
+        id: "travel-to-gate",
+        name: "Travel to the Gate",
+        roles: [{
+          id: "traveler",
+          label: "traveler",
+          allowedEntityKinds: ["character"],
+          minCardinality: 1,
+          maxCardinality: 1,
+        }],
+        parameters: [],
+        preconditions: [],
+        stateEffects: [{
+          op: "set",
+          entity: { kind: "role", roleId: "traveler" },
+          field: "character.location",
+          value: { source: "literal", value: "gate" },
+          required: true,
+        }],
+        effectEnvelope: {
+          maxStateOperations: 1,
+          allowedStateFields: ["character.location"],
+          allowsKnowledge: false,
+          allowsTimeAdvance: true,
+          allowsSceneTransition: true,
+        },
+        induction: { kind: "source-pattern", supportingEventIds: ["hero-departs", "hero-arrives"] },
+        evidence,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("action-constraint", {
+      proposalId: "policy-living-traveler-constraint-proposal",
+      payload: {
+        ontologyVersion: "action-constraint-v1",
+        id: "living-traveler-only",
+        name: "A traveler must be alive",
+        actionPattern: { kind: "schema", schemaId: "travel-to-gate" },
+        appliesWhen: [],
+        clauses: [{
+          id: "traveler-alive",
+          timing: "before",
+          modality: "require",
+          predicate: { op: "fact-equals", entity: { kind: "role", roleId: "traveler" }, field: "character.alive", value: true },
+        }],
+        exceptions: [],
+        priority: 10,
+        defeasible: true,
+        overridesConstraintIds: [],
+        status: "supported",
+        visibility: "public",
+        induction: { kind: "source-pattern", supportingEventIds: ["hero-departs"] },
+        evidence,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("norm-template", {
+      proposalId: "policy-warning-obligation-proposal",
+      payload: {
+        ontologyVersion: "norm-template-v1",
+        id: "heed-warning",
+        name: "Heed the warning by departing",
+        modality: "obligation",
+        actionPattern: { kind: "schema", schemaId: "travel-to-gate" },
+        authorityEntityId: "hero",
+        appliesWhen: [],
+        exceptions: [],
+        reparations: [],
+        priority: 10,
+        defeasible: true,
+        overridesTemplateIds: [],
+        status: "supported",
+        visibility: "public",
+        knownByClaimIds: [],
+        induction: { kind: "source-pattern", supportingEventIds: ["hero-departs"] },
+        evidence,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("process-template", {
+      proposalId: "policy-journey-process-proposal",
+      payload: {
+        ontologyVersion: "process-template-v1",
+        id: "journey-to-gate",
+        name: "Journey to the Gate",
+        ownerRoles: [{
+          id: "traveler",
+          label: "traveler",
+          allowedEntityKinds: ["character"],
+          minCardinality: 1,
+          maxCardinality: 1,
+        }],
+        phases: [
+          { id: "departed", label: "Departed", terminal: false },
+          { id: "arrived", label: "Arrived", terminal: true },
+        ],
+        initialPhaseId: "departed",
+        transitions: [{ fromPhaseId: "departed", toPhaseId: "arrived", minimumProgress: 1 }],
+        outcomeIds: ["arrived"],
+        visibility: "observable",
+        induction: { kind: "source-pattern", supportingEventIds: ["hero-departs", "hero-arrives"] },
+        evidence,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await convergeWorldProposals(root, source.source.id);
+    expect(result.canonical.blocked).toEqual([]);
+    expect(result.canonical.accepted).toEqual(expect.arrayContaining([
+      { id: "policy-travel-action-proposal", kind: "action-schema" },
+      { id: "policy-living-traveler-constraint-proposal", kind: "action-constraint" },
+      { id: "policy-warning-obligation-proposal", kind: "norm-template" },
+      { id: "policy-journey-process-proposal", kind: "process-template" },
+    ]));
+    const canon = new CompilerCommitService(root).canon;
+    await expect(canon.getActionConstraint("living-traveler-only")).resolves.toMatchObject({
+      actionPattern: { kind: "schema", schemaId: "travel-to-gate" },
+    });
+    await expect(canon.getNormTemplate("heed-warning")).resolves.toMatchObject({ modality: "obligation" });
+    await expect(canon.getProcessTemplate("journey-to-gate")).resolves.toMatchObject({ initialPhaseId: "departed" });
+
+    await expect(proposals.submit("action-constraint", {
+      proposalId: "forged-domain-module",
+      payload: {
+        ontologyVersion: "action-constraint-v1",
+        id: "forged-domain-module",
+        name: "Forged domain mechanic",
+        actionPattern: { kind: "any" },
+        appliesWhen: [],
+        clauses: [{
+          id: "always-alive",
+          timing: "before",
+          modality: "require",
+          predicate: { op: "fact-equals", entity: { kind: "entity", entityId: "hero" }, field: "character.alive", value: true },
+        }],
+        exceptions: [],
+        priority: 1,
+        defeasible: true,
+        overridesConstraintIds: [],
+        status: "supported",
+        visibility: "engine",
+        induction: { kind: "domain-module", moduleId: "forged", moduleVersion: "1" },
+        evidence: [],
+      },
+      generatedBy: { worker: "test" },
+    })).rejects.toThrow();
+  });
+
   it("commits an evidence-backed entity after deterministic validation", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {

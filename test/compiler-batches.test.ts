@@ -250,7 +250,12 @@ describe("compiler batches", () => {
     const { root, source } = await fixture();
     const batches = await prepareCompilerBatches(root, source);
     expect(batches.length).toBeGreaterThan(1);
-    expect(batches).toHaveLength(12);
+    expect(batches).toHaveLength(36);
+    expect(batches.map((batch) => batch.semanticStage)).toEqual([
+      ...Array.from({ length: 12 }, () => "observation"),
+      ...Array.from({ length: 12 }, () => "semantic"),
+      ...Array.from({ length: 12 }, () => "executable"),
+    ]);
     expect(batches.every((batch) => batch.segmentIds.length === 1)).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("evidence_segment_ids"))).toBe(true);
     expect(batches.every((batch) => !batch.prompt.includes("quoteHash"))).toBe(true);
@@ -306,10 +311,17 @@ describe("compiler batches", () => {
     const manifest = await new SegmentStore(root).list(source.id);
     expect(manifest.filter((segment) => segment.title?.startsWith("Chapter 1"))).toHaveLength(2);
     const batches = await prepareCompilerBatches(root, source);
-    expect(batches.map((batch) => batch.purpose)).toEqual(["source-review", "source-review"]);
-    expect(batches[0]!.segmentIds).toHaveLength(2);
-    expect(batches[0]).toMatchObject({ chapterOrdinal: 1, chapterTitle: "Chapter 1" });
-    expect(batches[1]).toMatchObject({ chapterOrdinal: 2, chapterTitle: "Chapter 2" });
+    expect(batches).toHaveLength(6);
+    expect(batches.map((batch) => batch.semanticStage)).toEqual([
+      "observation", "observation", "semantic", "semantic", "executable", "executable",
+    ]);
+    for (const stage of ["observation", "semantic", "executable"] as const) {
+      const stageBatches = batches.filter((batch) => batch.semanticStage === stage);
+      expect(stageBatches.map((batch) => batch.purpose)).toEqual(["source-review", "source-review"]);
+      expect(stageBatches[0]!.segmentIds).toHaveLength(2);
+      expect(stageBatches[0]).toMatchObject({ chapterOrdinal: 1, chapterTitle: "Chapter 1" });
+      expect(stageBatches[1]).toMatchObject({ chapterOrdinal: 2, chapterTitle: "Chapter 2" });
+    }
   });
 
   it("keeps source delimiters structural when novel text imitates them", async () => {

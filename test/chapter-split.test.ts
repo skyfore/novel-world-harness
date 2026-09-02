@@ -91,16 +91,19 @@ describe("agentic chapter split discovery", () => {
     expect(regenerated[0]!.prompt).toContain("checkpoint-recovery turn");
     expect(regenerated[0]!.prompt).toContain("<current-chapter-split-plan>");
     const sourceBatches = regenerated.filter((batch) => batch.purpose === "source-review");
-    expect(sourceBatches).toHaveLength(6);
-    expect(sourceBatches.map((batch) => batch.chapterOrdinal)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(sourceBatches.map((batch) => batch.chapterTitle)).toEqual([
-      ":: 1 :: Author title 1",
-      ":: 2 :: Author title 2",
-      ":: 3 :: Author title 3",
-      ":: 4 :: Author title 4",
-      ":: 5 :: Author title 5",
-      ":: 6 :: Author title 6",
-    ]);
+    expect(sourceBatches).toHaveLength(18);
+    for (const stage of ["observation", "semantic", "executable"] as const) {
+      const stageBatches = sourceBatches.filter((batch) => batch.semanticStage === stage);
+      expect(stageBatches.map((batch) => batch.chapterOrdinal)).toEqual([1, 2, 3, 4, 5, 6]);
+      expect(stageBatches.map((batch) => batch.chapterTitle)).toEqual([
+        ":: 1 :: Author title 1",
+        ":: 2 :: Author title 2",
+        ":: 3 :: Author title 3",
+        ":: 4 :: Author title 4",
+        ":: 5 :: Author title 5",
+        ":: 6 :: Author title 6",
+      ]);
+    }
 
     const recovery = createCompilerProposalToolset(root);
     await recovery.beginBatch([], regenerated[0]!.id, source.id);
@@ -169,6 +172,8 @@ describe("agentic chapter split discovery", () => {
       chapterTitle: ":: 1 :: Author title 1",
       authorChapterHeading: true,
     });
-    expect(selectOpeningCompilerBatch(batches)?.id).toBe(sourceBatches[1]!.id);
+    expect(selectOpeningCompilerBatch(batches)?.id).toBe(
+      sourceBatches.find((batch) => batch.semanticStage === "executable" && batch.authorChapterHeading)?.id,
+    );
   });
 });

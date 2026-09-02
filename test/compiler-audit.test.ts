@@ -22,6 +22,132 @@ const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
 describe("compiler audit", () => {
+  it("reports source-induced executable policy ontology inventory and reference validity", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-executable-policy-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      "Hero receives the order. Hero leaves for the Gate.\n",
+    );
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("Hero"),
+    });
+    for (const [id, title, orderHint, quote] of [
+      ["order-received", "Hero receives the order", 1, "Hero receives the order"],
+      ["hero-leaves", "Hero leaves for the Gate", 2, "Hero leaves for the Gate"],
+    ] as const) {
+      await canon.putEvent({
+        id,
+        title,
+        participants: ["hero"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        storyTime: { kind: "ordinal", label: title, orderHint },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: fixture.evidence(quote),
+        causalParents: id === "hero-leaves" ? ["order-received"] : [],
+        confidence: 1,
+      });
+    }
+    await canon.putActionSchema({
+      ontologyVersion: "action-schema-v1",
+      id: "depart",
+      name: "Depart",
+      roles: [{ id: "actor", label: "departing actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      parameters: [],
+      preconditions: [],
+      stateEffects: [],
+      effectEnvelope: {
+        maxStateOperations: 1,
+        allowedStateFields: ["character.location"],
+        allowsKnowledge: false,
+        allowsTimeAdvance: true,
+        allowsSceneTransition: true,
+      },
+      induction: { kind: "source-pattern", supportingEventIds: ["order-received", "hero-leaves"] },
+      evidence: fixture.evidence("Hero receives the order. Hero leaves for the Gate."),
+    });
+    await canon.putActionConstraint({
+      ontologyVersion: "action-constraint-v1",
+      id: "living-actors-depart",
+      name: "Only living actors depart",
+      actionPattern: { kind: "schema", schemaId: "depart" },
+      appliesWhen: [],
+      clauses: [{
+        id: "actor-alive",
+        timing: "before",
+        modality: "require",
+        predicate: { op: "fact-equals", entity: { kind: "actor" }, field: "character.alive", value: true },
+      }],
+      exceptions: [],
+      priority: 10,
+      defeasible: true,
+      overridesConstraintIds: [],
+      status: "supported",
+      visibility: "public",
+      induction: { kind: "source-pattern", supportingEventIds: ["hero-leaves"] },
+      evidence: fixture.evidence("Hero leaves for the Gate"),
+    });
+    await canon.putNormTemplate({
+      ontologyVersion: "norm-template-v1",
+      id: "obey-order",
+      name: "Obey the departure order",
+      modality: "obligation",
+      actionPattern: { kind: "schema", schemaId: "depart" },
+      authorityEntityId: "hero",
+      appliesWhen: [],
+      exceptions: [],
+      reparations: [],
+      priority: 10,
+      defeasible: true,
+      overridesTemplateIds: [],
+      status: "supported",
+      visibility: "public",
+      knownByClaimIds: [],
+      induction: { kind: "source-pattern", supportingEventIds: ["order-received", "hero-leaves"] },
+      evidence: fixture.evidence("Hero receives the order. Hero leaves for the Gate."),
+    });
+    await canon.putProcessTemplate({
+      ontologyVersion: "process-template-v1",
+      id: "ordered-departure",
+      name: "Ordered departure",
+      ownerRoles: [{ id: "actor", label: "departing actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      phases: [{ id: "ordered", label: "Ordered", terminal: false }, { id: "departed", label: "Departed", terminal: true }],
+      initialPhaseId: "ordered",
+      transitions: [{ fromPhaseId: "ordered", toPhaseId: "departed", minimumProgress: 1 }],
+      outcomeIds: ["departed"],
+      visibility: "observable",
+      induction: { kind: "source-pattern", supportingEventIds: ["order-received", "hero-leaves"] },
+      evidence: fixture.evidence("Hero receives the order. Hero leaves for the Gate."),
+    });
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.executablePolicySemantics).toEqual({
+      actionConstraintOntologyVersion: "action-constraint-v1",
+      normOntologyVersion: "norm-template-v1",
+      processOntologyVersion: "process-template-v1",
+      actionConstraints: 1,
+      normTemplates: 1,
+      processTemplates: 1,
+      sourceInduced: 3,
+      domainModules: 0,
+      contested: 0,
+      validationIssues: 0,
+      errors: [],
+    });
+    expect(report.canonical).toMatchObject({
+      actionSchemas: 1,
+      actionConstraints: 1,
+      normTemplates: 1,
+      processTemplates: 1,
+    });
+  });
+
   it("reports verified inventory without inventing unknown semantic coverage", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-"));
     roots.push(root);

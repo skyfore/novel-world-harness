@@ -830,7 +830,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T9 — Full compiler integration、audit 与 eval
 
-- **状态：** pending
+- **状态：** complete
 - **依赖：** T4、T5、T6、T7
 - **主要文件：**
   - `src/compiler/structure.ts`
@@ -843,6 +843,23 @@ CanonicalSnapshot V8 至少固定：
 - **交付：** multi-stage proposal pipeline、new prepared artifacts/assertion bindings、gold layers
 - **测试：** source closure、restore portability、semantic precision/recall、selected reparse dependencies
 - **建议提交：** `feat: compile and evaluate executable novel semantics`
+- **完成说明：** 普通 source-review 现在由宿主按全书 phase-major 顺序拆成
+  observation → semantic → executable 三个阶段；每阶段不仅在 prompt 和 Pi tool
+  activation 上收窄权限，工具执行入口也再次校验 batch ID，因而模型无法越权跨层写入。
+  observation checkpoint 后的 mention/quotation/discourse inventory 会被 semantic 阶段
+  读取；semantic checkpoint 后的 entity/event resolution 与 canonical graph 再供 executable
+  阶段诱导 scene、action、constraint、norm、process、actor policy 与 possibility。编译器新增
+  `action-constraint`、`norm-template`、`process-template` 的 source-only proposal schema、closure
+  catalog、引用/override 校验、依赖排序、canonical commit、检索 catalog 与 exact artifact read；
+  小说证据不能伪装成 host-owned domain module。跨 slice 的 event resolution 可以安全复用已完成
+  batch 中尚待 convergence 的 canonical-event proposal。
+  Prepared V3 的 canonical/assertion snapshot、source-isolated baseline 校验与恢复路径已覆盖三类
+  新 artifact；选章 reparse 同步清理 scene/frame/action/constraint/norm/process 及其 exact binding。
+  Audit 新增 executable-policy ontology/count/source-vs-module/contested/reference diagnostics，并把
+  invalid policy 纳入 semantic/publication blocker。Gold evaluator 已覆盖 scene、action applicability/
+  effect envelope、policy kind/visibility/modality/support events、causal operationality，以及
+  relationship/obligation assertion；完整 synthetic gold 的所有已标注层 precision/recall 均为 1。
+  验证结果：`pnpm run check` 通过，`pnpm test` 146 files / 830 tests 通过。
 
 ### T10 — Long-horizon hardening、docs 与 release audit
 

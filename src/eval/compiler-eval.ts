@@ -16,6 +16,7 @@ import { EntityResolutionStore, type IdentityResolution } from "../compiler/enti
 import { EventResolutionStore, type EventResolution } from "../compiler/event-resolution.js";
 import { EvidenceAssertionStore } from "../compiler/evidence-assertions.js";
 import type { EvidenceRef, StateOperation } from "../world/model.js";
+import { worldRuleEvidence } from "../world/world-rule-ontology.js";
 
 const edgeSchema = z.object({ from: z.string().min(1), to: z.string().min(1) }).strict();
 
@@ -93,6 +94,7 @@ const eventRelationSchema = z
       "explains",
       "narrative-continuation",
     ]),
+    operationality: z.enum(["necessary", "contributory", "blocking", "motivational", "explanatory", "non-operational"]).optional(),
     evidenceSpans: z.array(byteSpanSchema).default([]),
   })
   .strict();
@@ -129,11 +131,44 @@ const stateEffectSchema = z
   })
   .strict();
 
+const sceneSchema = z.object({
+  id: z.string().min(1),
+  sceneOccurrenceId: z.string().min(1).optional(),
+  eventClusterIds: z.array(z.string().min(1)).default([]),
+  locationEntityClusterId: z.string().min(1).optional(),
+  viewpointEntityClusterIds: z.array(z.string().min(1)).default([]),
+  presentEntityClusterIds: z.array(z.string().min(1)).default([]),
+  storyTimeKind: z.enum(["exact", "range", "relative", "ordinal", "unknown"]).optional(),
+  evidenceSpans: z.array(byteSpanSchema).min(1),
+}).strict();
+
+const actionSchemaGoldSchema = z.object({
+  id: z.string().min(1),
+  actionSchemaId: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
+  supportingEventClusterIds: z.array(z.string().min(1)).default([]),
+  roleIds: z.array(z.string().min(1)).default([]),
+  allowedStateFields: z.array(z.string().min(1)).default([]),
+  maxStateOperations: z.number().int().nonnegative().optional(),
+  evidenceSpans: z.array(byteSpanSchema).min(1),
+}).strict();
+
+const executablePolicySchema = z.object({
+  id: z.string().min(1),
+  kind: z.enum(["world-rule", "action-constraint", "norm-template", "process-template"]),
+  artifactId: z.string().min(1).optional(),
+  actionSchemaId: z.string().min(1).optional(),
+  modality: z.enum(["obligation", "prohibition", "permission"]).optional(),
+  visibility: z.enum(["public", "observable", "knowledge", "engine"]).optional(),
+  supportingEventClusterIds: z.array(z.string().min(1)).default([]),
+  evidenceSpans: z.array(byteSpanSchema).min(1),
+}).strict();
+
 const characterAssertionSchema = z
   .object({
     id: z.string().min(1),
     actorEntityClusterId: z.string().min(1),
-    kind: z.enum(["disposition", "goal", "appraisal", "development"]),
+    kind: z.enum(["disposition", "goal", "appraisal", "development", "relationship", "obligation"]),
     evidenceSpans: z.array(byteSpanSchema).min(1),
   })
   .strict();
@@ -187,6 +222,9 @@ export const compilerSemanticGoldSchema = z
         propositions: z.array(propositionSchema).default([]),
         knowledge: z.array(knowledgeSchema).default([]),
         stateEffects: z.array(stateEffectSchema).default([]),
+        scenes: z.array(sceneSchema).default([]),
+        actionSchemas: z.array(actionSchemaGoldSchema).default([]),
+        executablePolicies: z.array(executablePolicySchema).default([]),
         characterAssertions: z.array(characterAssertionSchema).default([]),
       })
       .strict()
@@ -200,6 +238,9 @@ export const compilerSemanticGoldSchema = z
         propositions: [],
         knowledge: [],
         stateEffects: [],
+        scenes: [],
+        actionSchemas: [],
+        executablePolicies: [],
         characterAssertions: [],
       }),
   })
@@ -214,6 +255,9 @@ export const compilerSemanticGoldSchema = z
     uniqueIds(gold.semantic.eventRelations, "semantic.eventRelations", ctx);
     uniqueIds(gold.semantic.knowledge, "semantic.knowledge", ctx);
     uniqueIds(gold.semantic.stateEffects, "semantic.stateEffects", ctx);
+    uniqueIds(gold.semantic.scenes, "semantic.scenes", ctx);
+    uniqueIds(gold.semantic.actionSchemas, "semantic.actionSchemas", ctx);
+    uniqueIds(gold.semantic.executablePolicies, "semantic.executablePolicies", ctx);
     uniqueIds(gold.semantic.characterAssertions, "semantic.characterAssertions", ctx);
 
     for (let index = 0; index < gold.semantic.entityClusters.length; index += 1) {
@@ -337,6 +381,29 @@ export const compilerSemanticGoldSchema = z
         });
       }
     }
+    for (let index = 0; index < gold.semantic.scenes.length; index += 1) {
+      const scene = gold.semantic.scenes[index]!;
+      for (const eventClusterId of scene.eventClusterIds) {
+        if (!eventClusterIds.has(eventClusterId)) ctx.addIssue({ code: "custom", message: `Unknown event cluster '${eventClusterId}'`, path: ["semantic", "scenes", index, "eventClusterIds"] });
+      }
+      for (const clusterId of [
+        ...(scene.locationEntityClusterId ? [scene.locationEntityClusterId] : []),
+        ...scene.viewpointEntityClusterIds,
+        ...scene.presentEntityClusterIds,
+      ]) {
+        if (!entityClusterIds.has(clusterId)) ctx.addIssue({ code: "custom", message: `Unknown entity cluster '${clusterId}'`, path: ["semantic", "scenes", index] });
+      }
+    }
+    for (let index = 0; index < gold.semantic.actionSchemas.length; index += 1) {
+      for (const eventClusterId of gold.semantic.actionSchemas[index]!.supportingEventClusterIds) {
+        if (!eventClusterIds.has(eventClusterId)) ctx.addIssue({ code: "custom", message: `Unknown event cluster '${eventClusterId}'`, path: ["semantic", "actionSchemas", index, "supportingEventClusterIds"] });
+      }
+    }
+    for (let index = 0; index < gold.semantic.executablePolicies.length; index += 1) {
+      for (const eventClusterId of gold.semantic.executablePolicies[index]!.supportingEventClusterIds) {
+        if (!eventClusterIds.has(eventClusterId)) ctx.addIssue({ code: "custom", message: `Unknown event cluster '${eventClusterId}'`, path: ["semantic", "executablePolicies", index, "supportingEventClusterIds"] });
+      }
+    }
     for (let index = 0; index < gold.semantic.characterAssertions.length; index += 1) {
       const assertion = gold.semantic.characterAssertions[index]!;
       if (!entityClusterIds.has(assertion.actorEntityClusterId)) {
@@ -390,6 +457,9 @@ export type SemanticLayerName =
   | "propositions"
   | "knowledge"
   | "stateEffects"
+  | "scenes"
+  | "actionSchemas"
+  | "executablePolicies"
   | "characterAssertions";
 
 export type CompilerEvaluationReport = {
@@ -424,6 +494,11 @@ export async function evaluateCompilerAgainstGold(
     events,
     eventParticipations,
     eventRelations,
+    sceneOccurrences,
+    actionSchemas,
+    actionConstraints,
+    normTemplates,
+    processTemplates,
     rules,
     goals,
     models,
@@ -437,6 +512,11 @@ export async function evaluateCompilerAgainstGold(
     canon.listEvents(),
     canon.listEventParticipations(),
     canon.listEventRelations(),
+    canon.listSceneOccurrences(),
+    canon.listActionSchemas(),
+    canon.listActionConstraints(),
+    canon.listNormTemplates(),
+    canon.listProcessTemplates(),
     canon.listRules(),
     actors.listGoals(),
     actors.listModels(),
@@ -454,6 +534,12 @@ export async function evaluateCompilerAgainstGold(
       events,
       eventParticipations,
       eventRelations,
+      sceneOccurrences,
+      actionSchemas,
+      actionConstraints,
+      normTemplates,
+      processTemplates,
+      rules,
       goals,
       models,
       initialWorld,
@@ -516,6 +602,9 @@ function semanticLayerNotAnnotated(): Record<SemanticLayerName, SemanticLayerMet
       propositions: 0,
       knowledge: 0,
       stateEffects: 0,
+      scenes: 0,
+      actionSchemas: 0,
+      executablePolicies: 0,
       characterAssertions: 0,
     };
   return Object.fromEntries(
@@ -542,6 +631,12 @@ type SemanticCatalog = {
   events: Awaited<ReturnType<CanonicalModelStore["listEvents"]>>;
   eventParticipations: Awaited<ReturnType<CanonicalModelStore["listEventParticipations"]>>;
   eventRelations: Awaited<ReturnType<CanonicalModelStore["listEventRelations"]>>;
+  sceneOccurrences: Awaited<ReturnType<CanonicalModelStore["listSceneOccurrences"]>>;
+  actionSchemas: Awaited<ReturnType<CanonicalModelStore["listActionSchemas"]>>;
+  actionConstraints: Awaited<ReturnType<CanonicalModelStore["listActionConstraints"]>>;
+  normTemplates: Awaited<ReturnType<CanonicalModelStore["listNormTemplates"]>>;
+  processTemplates: Awaited<ReturnType<CanonicalModelStore["listProcessTemplates"]>>;
+  rules: Awaited<ReturnType<CanonicalModelStore["listRules"]>>;
   goals: Awaited<ReturnType<ActorModelStore["listGoals"]>>;
   models: Awaited<ReturnType<ActorModelStore["listModels"]>>;
   initialWorld: Awaited<ReturnType<InitialWorldStore["get"]>>;
@@ -664,6 +759,41 @@ async function evaluateSemanticLayers(
     sourceEventIds.has(participation.eventId) || sourceEntityIds.has(participation.entityId));
   const sourceRelations = catalog.eventRelations.filter((relation) =>
     sourceEventIds.has(relation.fromEventId) || sourceEventIds.has(relation.toEventId));
+  const sourceScenes = catalog.sceneOccurrences.filter((scene) => evidenceTouchesSources(scene.evidence, sourceIds));
+  const sourceActionSchemas = catalog.actionSchemas.filter((schema) => evidenceTouchesSources(schema.evidence, sourceIds));
+  const sourceExecutablePolicies = [
+    ...catalog.rules.filter((rule) => evidenceTouchesSources(worldRuleEvidence(rule), sourceIds)).map((rule) => ({
+      kind: "world-rule" as const,
+      artifactId: rule.id,
+      visibility: rule.visibility,
+      supportingEventIds: [] as string[],
+      evidence: worldRuleEvidence(rule),
+    })),
+    ...catalog.actionConstraints.filter((constraint) => evidenceTouchesSources(constraint.evidence, sourceIds)).map((constraint) => ({
+      kind: "action-constraint" as const,
+      artifactId: constraint.id,
+      visibility: constraint.visibility,
+      ...(constraint.actionPattern.kind === "schema" ? { actionSchemaId: constraint.actionPattern.schemaId } : {}),
+      supportingEventIds: constraint.induction.kind === "source-pattern" ? constraint.induction.supportingEventIds : [],
+      evidence: constraint.evidence,
+    })),
+    ...catalog.normTemplates.filter((template) => evidenceTouchesSources(template.evidence, sourceIds)).map((template) => ({
+      kind: "norm-template" as const,
+      artifactId: template.id,
+      visibility: template.visibility,
+      modality: template.modality,
+      ...(template.actionPattern.kind === "schema" ? { actionSchemaId: template.actionPattern.schemaId } : {}),
+      supportingEventIds: template.induction.kind === "source-pattern" ? template.induction.supportingEventIds : [],
+      evidence: template.evidence,
+    })),
+    ...catalog.processTemplates.filter((template) => evidenceTouchesSources(template.evidence, sourceIds)).map((template) => ({
+      kind: "process-template" as const,
+      artifactId: template.id,
+      visibility: template.visibility,
+      supportingEventIds: template.induction.kind === "source-pattern" ? template.induction.supportingEventIds : [],
+      evidence: template.evidence,
+    })),
+  ];
 
   const propositionMatches = (
     expected: CompilerSemanticGold["semantic"]["propositions"][number],
@@ -728,6 +858,7 @@ async function evaluateSemanticLayers(
       && entityReferenceMatches(expected.entityClusterId, actual.entityId)),
     eventRelations: evaluatedLayer(gold.semantic.eventRelations, sourceRelations, (expected, actual) =>
       expected.type === actual.type
+      && (!expected.operationality || expected.operationality === actual.operationality)
       && eventReferenceMatches(expected.fromEventClusterId, actual.fromEventId)
       && eventReferenceMatches(expected.toEventClusterId, actual.toEventId)
       && expected.evidenceSpans.every((span) => evidenceContainsSpan(actual.evidence, span))),
@@ -747,6 +878,36 @@ async function evaluateSemanticLayers(
     stateEffects: evaluatedLayer(gold.semantic.stateEffects, actualStateEffects, (expected, actual) =>
       eventReferenceMatches(expected.eventClusterId, actual.eventId)
       && stateEffectMatches(expected, actual.operation, entityReferenceMatches)),
+    scenes: evaluatedLayer(gold.semantic.scenes, sourceScenes, (expected, actual) =>
+      (!expected.sceneOccurrenceId || expected.sceneOccurrenceId === actual.id)
+      && referencesMatch(expected.eventClusterIds, actual.eventIds, eventReferenceMatches)
+      && (expected.locationEntityClusterId
+        ? Boolean(actual.locationId && entityReferenceMatches(expected.locationEntityClusterId, actual.locationId))
+        : actual.locationId === undefined)
+      && referencesMatch(expected.viewpointEntityClusterIds, actual.viewpointActorIds, entityReferenceMatches)
+      && referencesMatch(expected.presentEntityClusterIds, actual.presentActorIds, entityReferenceMatches)
+      && (!expected.storyTimeKind || expected.storyTimeKind === actual.storyInterval?.start.kind)
+      && expected.evidenceSpans.every((span) => evidenceContainsSpan(actual.evidence, span))),
+    actionSchemas: evaluatedLayer(gold.semantic.actionSchemas, sourceActionSchemas, (expected, actual) =>
+      (!expected.actionSchemaId || expected.actionSchemaId === actual.id)
+      && (!expected.name || expected.name === actual.name)
+      && referencesMatch(
+        expected.supportingEventClusterIds,
+        actual.induction.kind === "source-pattern" ? actual.induction.supportingEventIds : [],
+        eventReferenceMatches,
+      )
+      && sameStrings([...expected.roleIds].sort(), actual.roles.map((role) => role.id).sort())
+      && sameStrings([...expected.allowedStateFields].sort(), [...actual.effectEnvelope.allowedStateFields].sort())
+      && (expected.maxStateOperations === undefined || expected.maxStateOperations === actual.effectEnvelope.maxStateOperations)
+      && expected.evidenceSpans.every((span) => evidenceContainsSpan(actual.evidence, span))),
+    executablePolicies: evaluatedLayer(gold.semantic.executablePolicies, sourceExecutablePolicies, (expected, actual) =>
+      expected.kind === actual.kind
+      && (!expected.artifactId || expected.artifactId === actual.artifactId)
+      && (!expected.actionSchemaId || expected.actionSchemaId === ("actionSchemaId" in actual ? actual.actionSchemaId : undefined))
+      && (!expected.modality || expected.modality === ("modality" in actual ? actual.modality : undefined))
+      && (!expected.visibility || expected.visibility === actual.visibility)
+      && referencesMatch(expected.supportingEventClusterIds, actual.supportingEventIds, eventReferenceMatches)
+      && expected.evidenceSpans.every((span) => evidenceContainsSpan(actual.evidence, span))),
     characterAssertions: evaluatedLayer(gold.semantic.characterAssertions, actualCharacterAssertions, (expected, actual) =>
       expected.kind === actual.kind
       && entityReferenceMatches(expected.actorEntityClusterId, actual.actorId)
@@ -761,6 +922,9 @@ function semanticGoldSourceIds(gold: CompilerSemanticGold): Set<string> {
     ...gold.semantic.quotations.map((quotation) => quotation.span.sourceId),
     ...gold.semantic.eventRelations.flatMap((relation) => relation.evidenceSpans.map((span) => span.sourceId)),
     ...gold.semantic.propositions.flatMap((proposition) => proposition.evidenceSpans.map((span) => span.sourceId)),
+    ...gold.semantic.scenes.flatMap((scene) => scene.evidenceSpans.map((span) => span.sourceId)),
+    ...gold.semantic.actionSchemas.flatMap((schema) => schema.evidenceSpans.map((span) => span.sourceId)),
+    ...gold.semantic.executablePolicies.flatMap((policy) => policy.evidenceSpans.map((span) => span.sourceId)),
     ...gold.semantic.characterAssertions.flatMap((assertion) => assertion.evidenceSpans.map((span) => span.sourceId)),
   ]);
 }
@@ -982,6 +1146,14 @@ async function collectCharacterAssertions(
     for (let index = 0; index < (model.developmentPhases?.length ?? 0); index += 1) {
       const item = model.developmentPhases![index]!;
       result.push({ actorId: model.actorId, kind: "development", evidenceSpans: await spansFor("character-model", model.actorId, `/developmentPhases/${index}`, item.evidence) });
+    }
+    for (let index = 0; index < (model.relationshipStances?.length ?? 0); index += 1) {
+      const item = model.relationshipStances![index]!;
+      result.push({ actorId: model.actorId, kind: "relationship", evidenceSpans: await spansFor("character-model", model.actorId, `/relationshipStances/${index}`, item.evidence) });
+    }
+    for (let index = 0; index < (model.relationshipObligations?.length ?? 0); index += 1) {
+      const item = model.relationshipObligations![index]!;
+      result.push({ actorId: model.actorId, kind: "obligation", evidenceSpans: await spansFor("character-model", model.actorId, `/relationshipObligations/${index}`, item.evidence) });
     }
   }
   return result;

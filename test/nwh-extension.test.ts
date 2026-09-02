@@ -766,7 +766,8 @@ describe("NWH TUI extension", () => {
       ctx,
     );
 
-    expect(getActiveTools()).toContain("propose_entity");
+    expect(getActiveTools()).toContain("propose_entity_mention");
+    expect(getActiveTools()).not.toContain("propose_entity");
     expect(getActiveTools()).toContain("find_compiler_artifacts");
     expect(getActiveTools()).not.toContain("find_source_evidence");
     expect(getActiveTools()).not.toContain("propose_initial_world");

@@ -29,7 +29,8 @@ describe("historical prepared-revision repair", () => {
     const cacheRoot = await temporaryRoot("nwh-repair-existing-cache-");
     const fixture = await createEvidenceFixture(root, "# Opening\nHero waits.\n");
     const batches = await prepareCompilerBatches(root, fixture.source);
-    const batch = batches.find((candidate) => candidate.purpose === "source-review")!;
+    const sourceBatches = batches.filter((candidate) => candidate.purpose === "source-review");
+    const batch = sourceBatches.find((candidate) => candidate.semanticStage === "semantic")!;
     const proposals = new CompilerProposalService(root);
     await proposals.submit("entity", {
       proposalId: "hero-v24",
@@ -95,7 +96,10 @@ describe("historical prepared-revision repair", () => {
           payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: ["Hero"], evidence: batch.evidence },
           generatedBy: { worker: "test", compilerBatchId: batch.id },
         });
-        await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+        await new CompilerBatchStore(root).replaceCompleted(
+          fixture.source.id,
+          sourceBatches.map((candidate) => candidate.id),
+        );
       },
       async finishPreparation(options) {
         if (!options.reparseBaselineBundleHash || !options.reparseRunId) {
@@ -139,8 +143,12 @@ describe("historical prepared-revision repair", () => {
     const root = await temporaryRoot("nwh-repair-resume-");
     const cacheRoot = await temporaryRoot("nwh-repair-resume-cache-");
     const fixture = await createEvidenceFixture(root, "# One\nHero waits.\n# Two\nVillain waits.\n");
-    const batches = (await prepareCompilerBatches(root, fixture.source))
+    const allBatches = (await prepareCompilerBatches(root, fixture.source))
       .filter((candidate) => candidate.purpose === "source-review");
+    const batches = allBatches.filter((candidate) => candidate.semanticStage === "semantic");
+    const chapterOneBatches = allBatches.filter((candidate) => candidate.chapterOrdinal === 1);
+    const chapterTwoBatches = allBatches.filter((candidate) => candidate.chapterOrdinal === 2);
+    expect(allBatches).toHaveLength(6);
     expect(batches).toHaveLength(2);
     const proposals = new CompilerProposalService(root);
     for (const [index, entity] of ["hero", "villain"].entries()) {
@@ -166,7 +174,6 @@ describe("historical prepared-revision repair", () => {
       },
       generatedBy: { worker: "test", compilerBatchId: `opening-${batches[0]!.id}` },
     });
-    const allBatches = await prepareCompilerBatches(root, fixture.source);
     await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, allBatches.map((candidate) => candidate.id));
     const baselineConvergence = await convergeWorldProposals(root, fixture.source.id);
     expect(baselineConvergence.canonical.blocked).toEqual([]);
@@ -197,7 +204,10 @@ describe("historical prepared-revision repair", () => {
           payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: ["Hero"], evidence: batches[0]!.evidence },
           generatedBy: { worker: "test", compilerBatchId: batches[0]!.id },
         });
-        await new CompilerBatchStore(root).markComplete(fixture.source.id, batches[0]!.id);
+        await new CompilerBatchStore(root).replaceCompleted(
+          fixture.source.id,
+          chapterOneBatches.map((candidate) => candidate.id),
+        );
         throw new Error("simulated interruption");
       },
     })).rejects.toThrow("paused without discarding completed work");
@@ -206,8 +216,9 @@ describe("historical prepared-revision repair", () => {
       runId,
       phase: "compiling",
     });
+    const completedChapterOneIds = chapterOneBatches.map((candidate) => candidate.id).toSorted();
     await expect(new CompilerBatchStore(root).read(fixture.source.id)).resolves.toMatchObject({
-      completedBatchIds: [batches[0]!.id],
+      completedBatchIds: completedChapterOneIds,
     });
 
     const result = await repairExistingCommand({
@@ -222,9 +233,11 @@ describe("historical prepared-revision repair", () => {
           expect.objectContaining({ id: `hero-resume-${runId}` }),
         );
         await expect(new CompilerBatchStore(root).read(fixture.source.id)).resolves.toMatchObject({
-          completedBatchIds: [batches[0]!.id],
+          completedBatchIds: completedChapterOneIds,
         });
-        await new CompilerBatchStore(root).markComplete(fixture.source.id, batches[1]!.id);
+        for (const candidate of chapterTwoBatches) {
+          await new CompilerBatchStore(root).markComplete(fixture.source.id, candidate.id);
+        }
       },
       async finishPreparation(options) {
         if (!options.reparseBaselineBundleHash || !options.reparseRunId) {

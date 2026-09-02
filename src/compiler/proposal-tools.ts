@@ -128,6 +128,9 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "scene-occurrence": { name: "propose_scene_occurrence", label: "Propose scene occurrence", description: "Submit one evidence-backed canonical scene occurrence with discourse segments, event membership, location, viewpoint, physical presence, story interval, and entry/exit conditions. It describes source canon and never activates a future runtime scene." },
   "event-frame": { name: "propose_event_frame", label: "Propose event frame", description: "Submit one reusable evidence-backed event frame with typed semantic roles, kind/cardinality constraints, and temporal shape. A frame classifies occurrences; it is not itself an event or world change." },
   "action-schema": { name: "propose_action_schema", label: "Propose action schema", description: "Submit a source-induced reusable action schema only when at least two canonical events support the pattern. Declare role and parameter binding, preconditions, typed effects, and a strict effect envelope; a single occurrence must remain ad hoc, and domain modules are host-managed." },
+  "action-constraint": { name: "propose_action_constraint", label: "Propose action constraint", description: "Submit a source-induced capability or action restriction with explicit before/after clauses, exceptions, priority, visibility, and override edges. It constrains matching actions only after validation; domain constraints are host-managed." },
+  "norm-template": { name: "propose_norm_template", label: "Propose norm template", description: "Submit an evidence-backed obligation, prohibition, or permission template with authority, applicability, exceptions, deadlines, reparations, visibility, and defeasible overrides. A template does not instantiate a branch norm by itself." },
+  "process-template": { name: "propose_process_template", label: "Propose process template", description: "Submit an evidence-backed multi-phase process pattern with owner roles, legal transitions, cadence, outcomes, visibility, and supporting canonical events. A template does not start a branch process by itself." },
   "spatial-relation": { name: "propose_spatial_relation", label: "Propose spatial relation", description: "Submit one exact-evidence-backed contains, adjacency, or traversable-route relation. Adjacency never implies passage; route activation, visibility, direction, and duration remain explicit." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a world-rule-v2 candidate with typed kind/scope, explicit authority and jurisdiction, per-clause modality/evidence, exceptions, visibility, defeasibility, and explicit priority overrides. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed plus structured unread-reader context and physically present actors' direct Genesis observations." },
@@ -185,6 +188,67 @@ export const SOURCE_ACCOUNTING_TOOL_NAMES = [
 ] as const;
 
 export const SOURCE_ACCOUNTING_PROPOSAL_TOOL_NAMES = ["account_source_units"] as const;
+
+export type CompilerSemanticStage = "observation" | "semantic" | "executable";
+
+const SEMANTIC_STAGE_PROPOSAL_TOOLS: Record<CompilerSemanticStage, ReadonlySet<string>> = {
+  observation: new Set([
+    "propose_novel_title",
+    ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
+  ]),
+  semantic: new Set([
+    "propose_entity_resolution",
+    "propose_event_resolution",
+    "propose_entity",
+    "propose_proposition",
+    "propose_attribution",
+    "propose_claim",
+    "propose_canonical_event",
+    "propose_event_participation",
+    "propose_event_relation",
+    "propose_event_frame",
+  ]),
+  executable: new Set([
+    "propose_scene_occurrence",
+    "propose_action_schema",
+    "propose_action_constraint",
+    "propose_norm_template",
+    "propose_process_template",
+    "propose_spatial_relation",
+    "propose_world_rule",
+    "propose_character_goal",
+    "propose_character_model",
+    "propose_state_delta",
+    "propose_possibility",
+    ...SOURCE_ACCOUNTING_TOOL_NAMES,
+  ]),
+};
+
+const ALL_SEMANTIC_STAGE_RESTRICTED_TOOLS = new Set([
+  "propose_novel_title",
+  ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
+  ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
+  ...EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
+  ...SOURCE_ACCOUNTING_TOOL_NAMES,
+  ...Object.values(labels).map(({ name }) => name),
+]);
+
+/** Restrict stage-owned tools while keeping general recovery and artifact reads usable. */
+export function compilerToolAllowedInSemanticStage(name: string, stage: CompilerSemanticStage): boolean {
+  return !ALL_SEMANTIC_STAGE_RESTRICTED_TOOLS.has(name) || SEMANTIC_STAGE_PROPOSAL_TOOLS[stage].has(name);
+}
+
+export function semanticStageFromCompilerBatchId(
+  compilerBatchId: string | undefined,
+  sourceId: string | undefined,
+): CompilerSemanticStage | undefined {
+  if (!compilerBatchId || !sourceId) return undefined;
+  const prefix = `batch-${sourceId}-`;
+  if (!compilerBatchId.startsWith(prefix)) return undefined;
+  const suffix = compilerBatchId.slice(prefix.length);
+  const match = /^\d{5}-(observation|semantic|executable)-/u.exec(suffix);
+  return match?.[1] as CompilerSemanticStage | undefined;
+}
 
 /**
  * Small fixtures remain ergonomic; novel-scale batches must explicitly
@@ -930,6 +994,13 @@ export function createCompilerProposalToolset(
     activeSourceId
     && compilerBatchId === `structure-${activeSourceId}-v${CHAPTER_SPLIT_DISCOVERY_VERSION}`,
   );
+  const activeSemanticStage = () => semanticStageFromCompilerBatchId(compilerBatchId, activeSourceId);
+  const assertSemanticStageAuthority = (toolName: string) => {
+    const stage = activeSemanticStage();
+    if (stage && !compilerToolAllowedInSemanticStage(toolName, stage)) {
+      throw new Error(`Compiler stage '${stage}' does not authorize ${toolName}; finish this stage and use the host-scheduled next stage instead.`);
+    }
+  };
   const isWholeSourceEvidencePass = () => Boolean(
     compilerBatchId?.startsWith("opening-batch-")
     || compilerBatchId?.startsWith("reconcile-"),
@@ -1038,6 +1109,7 @@ export function createCompilerProposalToolset(
     annotation: SourceAnnotation,
     worker: string,
   ): Promise<void> => {
+    assertSemanticStageAuthority(worker);
     if (!activeSourceId) throw new Error("Source annotations require an active source-scoped compiler batch.");
     assertAnnotationProposalSlot(proposalId);
     await annotationStore.stage(activeSourceId, {
@@ -1318,6 +1390,7 @@ export function createCompilerProposalToolset(
       const blocked = beginToolCall("mutation");
       if (blocked) return blocked;
       assertBatchWritable();
+      assertSemanticStageAuthority("propose_novel_title");
       if (!activeSourceId || !compilerBatchId?.startsWith(`batch-${activeSourceId}-`)) {
         throw new Error("Novel-title inference is available only in an ordinary source-review batch.");
       }
@@ -1555,6 +1628,7 @@ export function createCompilerProposalToolset(
       const blocked = beginToolCall("retrieval");
       if (blocked) return blocked;
       assertBatchWritable();
+      assertSemanticStageAuthority("find_source_accounting_units");
       assertOrdinaryAccountingBatch();
       if (input.segment_id && !expectedSegmentIds.includes(input.segment_id)) {
         throw new Error(`Accounting segment ${input.segment_id} is outside the active compiler slice (${expectedSegmentIds.join(", ")}).`);
@@ -1668,6 +1742,7 @@ export function createCompilerProposalToolset(
       const blocked = beginToolCall("mutation");
       if (blocked) return blocked;
       assertBatchWritable();
+      assertSemanticStageAuthority("account_source_units");
       assertOrdinaryAccountingBatch();
       if (successfulProposalIds.has(input.proposal_id)
         || successfulAnnotationProposalIds.has(input.proposal_id)
@@ -1818,6 +1893,7 @@ export function createCompilerProposalToolset(
         const blocked = beginToolCall("mutation");
         if (blocked) return blocked;
         assertBatchWritable();
+        assertSemanticStageAuthority(metadata.name);
         if (isStructureDiscoveryBatch()) {
           throw new Error("World-artifact proposals are unavailable during chapter structure discovery.");
         }
@@ -2059,6 +2135,7 @@ export function createCompilerProposalToolset(
       const blocked = beginToolCall("mutation");
       if (blocked) return blocked;
       assertBatchWritable();
+      assertSemanticStageAuthority("propose_entity_resolution");
       if (isStructureDiscoveryBatch()) throw new Error("Identity resolution is unavailable during chapter structure discovery.");
       if (!activeSourceId) throw new Error("Identity resolution requires an active source-scoped compiler batch.");
       if (successfulProposalIds.has(input.proposal_id)
@@ -2143,6 +2220,7 @@ export function createCompilerProposalToolset(
       const blocked = beginToolCall("mutation");
       if (blocked) return blocked;
       assertBatchWritable();
+      assertSemanticStageAuthority("propose_event_resolution");
       if (isStructureDiscoveryBatch()) throw new Error("Event resolution is unavailable during chapter structure discovery.");
       if (!activeSourceId) throw new Error("Event resolution requires an active source-scoped compiler batch.");
       if (successfulProposalIds.has(input.proposal_id)
@@ -2484,7 +2562,9 @@ export function createCompilerProposalToolset(
       let activeAccountingProposals: SourceAccountingProposal[] = [];
       let accountingSource: Awaited<ReturnType<WorkspaceStore["getSource"]>> | undefined;
       let accountingStructure: Awaited<ReturnType<typeof ensureSourceStructure>> | undefined;
-      if (activeSourceId && compilerBatchId && input.reviewed_segments.length) {
+      const stage = activeSemanticStage();
+      const recordsSourceAccounting = !stage || stage === "executable";
+      if (recordsSourceAccounting && activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const workspace = await WorkspaceStore.create(workspaceRoot);
         accountingSource = await workspace.getSource(activeSourceId) ?? undefined;
         if (!accountingSource) return failFinish(`Unknown active compiler source: ${activeSourceId}`);
@@ -2633,7 +2713,7 @@ export function createCompilerProposalToolset(
       if (activeSourceId && listedEventResolutions.length) {
         await eventResolutionStore.commitProposals(activeSourceId, listedEventResolutions);
       }
-      if (activeSourceId && compilerBatchId && input.reviewed_segments.length) {
+      if (recordsSourceAccounting && activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const source = accountingSource;
         if (!source || !accountingStructure) return failFinish(`Source-accounting validation state was unavailable for ${activeSourceId}.`);
         const segmentsById = new Map(validatedSourceSegments.map((segment) => [segment.id, segment]));

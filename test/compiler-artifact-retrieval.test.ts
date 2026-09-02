@@ -74,6 +74,76 @@ describe("compiler artifact retrieval", () => {
       mechanism: "The opened Hall permits the Hero to enter.",
       evidence: fixture.evidence("The Hall opens. Hero enters the Hall."),
     });
+    await canon.putActionSchema({
+      ontologyVersion: "action-schema-v1",
+      id: "enter-hall",
+      name: "Enter the Hall",
+      roles: [{ id: "entrant", label: "entrant", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      parameters: [],
+      preconditions: [],
+      stateEffects: [],
+      effectEnvelope: {
+        maxStateOperations: 1,
+        allowedStateFields: ["character.location"],
+        allowsKnowledge: false,
+        allowsTimeAdvance: false,
+        allowsSceneTransition: true,
+      },
+      induction: { kind: "source-pattern", supportingEventIds: ["hall-opens", "hero-enters"] },
+      evidence: fixture.evidence("The Hall opens. Hero enters the Hall."),
+    });
+    await canon.putActionConstraint({
+      ontologyVersion: "action-constraint-v1",
+      id: "hall-must-be-open",
+      name: "The Hall must be open before entry",
+      actionPattern: { kind: "schema", schemaId: "enter-hall" },
+      appliesWhen: [],
+      clauses: [{
+        id: "open-before-entry",
+        timing: "before",
+        modality: "require",
+        predicate: { op: "fact-equals", entity: { kind: "actor" }, field: "character.alive", value: true },
+      }],
+      exceptions: [],
+      priority: 10,
+      defeasible: true,
+      overridesConstraintIds: [],
+      status: "supported",
+      visibility: "public",
+      induction: { kind: "source-pattern", supportingEventIds: ["hero-enters"] },
+      evidence: fixture.evidence("Hero enters the Hall."),
+    });
+    await canon.putNormTemplate({
+      ontologyVersion: "norm-template-v1",
+      id: "enter-only-when-open",
+      name: "Enter only when the Hall is open",
+      modality: "obligation",
+      actionPattern: { kind: "schema", schemaId: "enter-hall" },
+      appliesWhen: [],
+      exceptions: [],
+      reparations: [],
+      priority: 10,
+      defeasible: true,
+      overridesTemplateIds: [],
+      status: "supported",
+      visibility: "public",
+      knownByClaimIds: [],
+      induction: { kind: "source-pattern", supportingEventIds: ["hall-opens", "hero-enters"] },
+      evidence: fixture.evidence("The Hall opens. Hero enters the Hall."),
+    });
+    await canon.putProcessTemplate({
+      ontologyVersion: "process-template-v1",
+      id: "hall-entry",
+      name: "Hall entry",
+      ownerRoles: [{ id: "entrant", label: "entrant", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      phases: [{ id: "outside", label: "Outside", terminal: false }, { id: "inside", label: "Inside", terminal: true }],
+      initialPhaseId: "outside",
+      transitions: [{ fromPhaseId: "outside", toPhaseId: "inside", minimumProgress: 1 }],
+      outcomeIds: ["inside"],
+      visibility: "observable",
+      induction: { kind: "source-pattern", supportingEventIds: ["hall-opens", "hero-enters"] },
+      evidence: fixture.evidence("The Hall opens. Hero enters the Hall."),
+    });
     const toolset = createCompilerProposalToolset(root);
     await toolset.beginBatch([], "batch-kind", fixture.source.id);
     const find = toolset.tools.find((tool) => tool.name === "find_compiler_artifacts")!;
@@ -115,6 +185,20 @@ describe("compiler artifact retrieval", () => {
         kind: "event-relation",
       }),
     ]);
+    for (const [kind, ref] of [
+      ["action-constraint", "canonical:action-constraint:hall-must-be-open"],
+      ["norm-template", "canonical:norm-template:enter-only-when-open"],
+      ["process-template", "canonical:process-template:hall-entry"],
+    ] as const) {
+      const found = JSON.parse(resultText(await find.execute(
+        `find-${kind}`,
+        { query: "*", kind } as never,
+        undefined,
+        undefined,
+        {} as ExtensionContext,
+      ))) as { results: Array<{ ref: string; kind: string }> };
+      expect(found.results).toEqual([expect.objectContaining({ ref, kind })]);
+    }
     await expect(find.execute(
       "bad-kind",
       { query: "*", kind: "eventuality" } as never,

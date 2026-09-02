@@ -30,6 +30,9 @@ export const COMPILER_ARTIFACT_KINDS = [
   "scene-occurrence",
   "event-frame",
   "action-schema",
+  "action-constraint",
+  "norm-template",
+  "process-template",
   "spatial-relation",
   "world-rule",
   "initial-world",
@@ -135,7 +138,7 @@ export async function loadCompilerArtifactRecords(
   const initial = new InitialWorldStore(workspaceRoot);
   const proposals = new ProposalStore(workspaceRoot);
   const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
-  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, sceneOccurrences, eventFrames, actionSchemas, spatialRelations, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
+  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, sceneOccurrences, eventFrames, actionSchemas, actionConstraints, normTemplates, processTemplates, spatialRelations, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -146,6 +149,9 @@ export async function loadCompilerArtifactRecords(
     canon.listSceneOccurrences(),
     canon.listEventFrames(),
     canon.listActionSchemas(),
+    canon.listActionConstraints(),
+    canon.listNormTemplates(),
+    canon.listProcessTemplates(),
     canon.listSpatialRelations(),
     canon.listRules(),
     actors.listGoals(),
@@ -180,6 +186,16 @@ export async function loadCompilerArtifactRecords(
   addCanonical(actionSchemas.filter((value) => value.induction.kind === "source-pattern"), "action-schema", (value) => ({ id: value.id, label: value.name }));
   for (const action of actionSchemas.filter((value) => value.induction.kind === "domain-module")) {
     records.push(canonicalRecord("action-schema", action.id, action.name, structuredClone(action), []));
+  }
+  for (const [kind, values] of [
+    ["action-constraint", actionConstraints],
+    ["norm-template", normTemplates],
+    ["process-template", processTemplates],
+  ] as const) {
+    addCanonical(values.filter((value) => value.induction.kind === "source-pattern"), kind, (value) => ({ id: value.id, label: value.name }));
+    for (const value of values.filter((candidate) => candidate.induction.kind === "domain-module")) {
+      records.push(canonicalRecord(kind, value.id, value.name, structuredClone(value), []));
+    }
   }
   for (const relation of spatialRelations) {
     const evidence = spatialRelationEvidence(relation);

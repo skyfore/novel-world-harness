@@ -9,7 +9,9 @@ import {
   COMPILER_TOOL_NAMES,
   ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
   EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
+  compilerToolAllowedInSemanticStage,
   createCompilerProposalToolset,
+  type CompilerSemanticStage,
   type CompilerProposalToolset,
 } from "../compiler/proposal-tools.js";
 import {
@@ -129,11 +131,13 @@ export function compilerToolNamesForScope(
   availableNames: readonly string[],
   scope: "source" | "opening" | "reconciliation",
   sourcePurpose: "structure-discovery" | "source-review" | "boundary-calibration" = "source-review",
+  semanticStage?: CompilerSemanticStage,
 ): string[] {
   const known = new Set(COMPILER_TOOL_NAMES);
   return [...new Set(availableNames)]
     .filter((name) => known.has(name))
     .filter((name) => !SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(name))
+    .filter((name) => !semanticStage || compilerToolAllowedInSemanticStage(name, semanticStage))
     .filter((name) => scope === "source" && sourcePurpose === "structure-discovery"
       ? name === "configure_chapter_split" || name === "finish_compiler_batch"
       : name !== "configure_chapter_split")
@@ -1458,6 +1462,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       ctx: ExtensionContext,
       scope: "source" | "opening" | "reconciliation" = "source",
       sourcePurpose: "structure-discovery" | "source-review" | "boundary-calibration" = "source-review",
+      semanticStage?: CompilerSemanticStage,
     ) => {
       if (!compilerToolsRegistered) {
         const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
@@ -1470,7 +1475,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const knownCompilerNames = new Set(COMPILER_TOOL_NAMES);
       const availableCompilerTools = registeredCompilerToolset?.tools ?? pi.getAllTools()
         .filter((tool) => knownCompilerNames.has(tool.name));
-      const compilerNames = compilerToolNamesForScope(availableCompilerTools.map((tool) => tool.name), scope, sourcePurpose);
+      const compilerNames = compilerToolNamesForScope(availableCompilerTools.map((tool) => tool.name), scope, sourcePurpose, semanticStage);
       pi.setActiveTools([...new Set(compilerNames)]);
       compilerToolScope = scope;
       if (ctx.mode === "tui") ctx.ui.setStatus("nwh-mode", ctx.ui.theme.fg("dim", "NWH · world compiler loop"));
@@ -1628,7 +1633,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           return;
         }
         activeSourceId = preparation.source.id;
-        activateCompilerTools(ctx, "source", preparation.batch.purpose);
+        activateCompilerTools(ctx, "source", preparation.batch.purpose, preparation.batch.semanticStage);
         await beginTurn(preparation);
         const retryAttempt = state.recoveryRetryCounts.get(preparation.batch.id) ?? 0;
         ctx.ui.setStatus("nwh-prepare-all", ctx.ui.theme.fg("dim", `Preparing · batch ${preparation.completedBatches + 1}/${preparation.totalBatches}`));
@@ -1957,7 +1962,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             return { action: "handled" };
           }
           sourceActivity?.update("Preparing the foreground compiler turn");
-          activateCompilerTools(ctx, "source", preparation.batch.purpose);
+          activateCompilerTools(ctx, "source", preparation.batch.purpose, preparation.batch.semanticStage);
           await beginTurn(preparation, true);
           keepInputCompilerLock = true;
           ctx.ui.notify(
@@ -2022,6 +2027,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       const compilerTurnContract = compilerActive
         ? `<nwh-compiler-turn-contract>\n${promptJson({
             mode: "compiler",
+            semanticStage: pendingTurn?.batch.semanticStage ?? "integrated",
             evidence: pendingTurn?.batch.purpose === "structure-discovery"
               ? "supplied non-citable bounded source-structure sample"
               : pendingTurn
@@ -2792,7 +2798,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             return;
           }
           activity.update("Preparing the foreground compiler turn");
-          activateCompilerTools(ctx, "source", preparation.batch.purpose);
+          activateCompilerTools(ctx, "source", preparation.batch.purpose, preparation.batch.semanticStage);
           await beginTurn(preparation);
           keepCompilerLock = true;
           ctx.ui.notify(`Archived pasted content as ${preparation.source.id} · starting batch 1/${preparation.totalBatches}.`, "info");
@@ -2828,7 +2834,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
             return;
           }
           activity.update("Preparing the foreground compiler turn");
-          activateCompilerTools(ctx, "source", preparation.batch.purpose);
+          activateCompilerTools(ctx, "source", preparation.batch.purpose, preparation.batch.semanticStage);
           await beginTurn(preparation);
           keepCompilerLock = true;
           ctx.ui.notify(`Starting compiler batch ${preparation.completedBatches + 1}/${preparation.totalBatches} for ${preparation.source.title}.`, "info");

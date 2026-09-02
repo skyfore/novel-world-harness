@@ -4,7 +4,11 @@ import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Compile } from "typebox/compile";
 import { afterEach, describe, expect, it } from "vitest";
-import { createCompilerProposalTools, createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
+import {
+  compilerToolAllowedInSemanticStage,
+  createCompilerProposalTools,
+  createCompilerProposalToolset,
+} from "../src/compiler/proposal-tools.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { EvidenceAssertionStore } from "../src/compiler/evidence-assertions.js";
@@ -16,6 +20,8 @@ import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { SourceStructureStore } from "../src/compiler/structure.js";
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
+import { SourceAnnotationStore } from "../src/compiler/annotations.js";
+import { EntityResolutionStore } from "../src/compiler/entity-resolution.js";
 import { characterModelSchema } from "../src/world/actors.js";
 import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
 import { initialWorldSchema } from "../src/world/initial.js";
@@ -271,7 +277,7 @@ describe("compiler proposal tools", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-tool-all-schemas-"));
     roots.push(root);
     const tools = createCompilerProposalTools(root);
-    expect(tools).toHaveLength(44);
+    expect(tools).toHaveLength(47);
     expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "propose_proposition",
       "propose_attribution",
@@ -280,6 +286,9 @@ describe("compiler proposal tools", () => {
       "propose_scene_occurrence",
       "propose_event_frame",
       "propose_action_schema",
+      "propose_action_constraint",
+      "propose_norm_template",
+      "propose_process_template",
       "propose_spatial_relation",
       "find_source_accounting_units",
       "account_source_units",
@@ -299,6 +308,202 @@ describe("compiler proposal tools", () => {
       expect(schema, name).not.toContain("exactHash");
       expect(schema, name).not.toContain("entityId");
     }
+  });
+
+  it("enforces observation, semantic, and executable mutation authority in the host", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-stage-authority-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero leaves after the warning.\n");
+    const toolset = createCompilerProposalToolset(root);
+    const tool = (name: string) => toolset.tools.find((candidate) => candidate.name === name)!;
+    const context = {} as ExtensionContext;
+
+    expect(compilerToolAllowedInSemanticStage("find_compiler_artifacts", "observation")).toBe(true);
+    expect(compilerToolAllowedInSemanticStage("propose_entity_mention", "observation")).toBe(true);
+    expect(compilerToolAllowedInSemanticStage("propose_entity", "observation")).toBe(false);
+    expect(compilerToolAllowedInSemanticStage("propose_entity", "semantic")).toBe(true);
+    expect(compilerToolAllowedInSemanticStage("propose_action_constraint", "semantic")).toBe(false);
+    expect(compilerToolAllowedInSemanticStage("propose_action_constraint", "executable")).toBe(true);
+    expect(compilerToolAllowedInSemanticStage("find_source_accounting_units", "semantic")).toBe(false);
+    expect(compilerToolAllowedInSemanticStage("find_source_accounting_units", "executable")).toBe(true);
+    expect(compilerToolAllowedInSemanticStage("account_source_units", "executable")).toBe(true);
+
+    await toolset.beginBatch(
+      [fixture.segmentId],
+      `batch-${fixture.source.id}-00001-observation-stage-test`,
+      fixture.source.id,
+    );
+    await expect(tool("propose_entity").execute("observation-overreach", {
+      proposal_id: "observation-overreach",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context)).rejects.toThrow(
+      "Compiler stage 'observation' does not authorize propose_entity",
+    );
+    await expect(tool("propose_entity_mention").execute("observation-mention", {
+      proposal_id: "observation-mention-proposal",
+      annotation_id: "observation-mention",
+      selector: { segment_id: fixture.segmentId, exact: "Hero" },
+      surface: "Hero",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 1,
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: {
+        proposalId: "observation-mention-proposal",
+        kind: "entity-mention",
+        annotationId: "observation-mention",
+      },
+    });
+
+    await toolset.beginBatch(
+      [fixture.segmentId],
+      `batch-${fixture.source.id}-00001-semantic-stage-test`,
+      fixture.source.id,
+    );
+    await expect(tool("propose_entity_mention").execute("semantic-overreach", {
+      proposal_id: "semantic-overreach",
+      annotation_id: "semantic-overreach",
+      selector: { segment_id: fixture.segmentId, exact: "Hero" },
+      surface: "Hero",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 1,
+    } as never, undefined, undefined, context)).rejects.toThrow(
+      "Compiler stage 'semantic' does not authorize propose_entity_mention",
+    );
+
+    await toolset.beginBatch(
+      [fixture.segmentId],
+      `batch-${fixture.source.id}-00001-executable-stage-test`,
+      fixture.source.id,
+    );
+    await expect(tool("propose_entity").execute("executable-overreach", {
+      proposal_id: "executable-overreach",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context)).rejects.toThrow(
+      "Compiler stage 'executable' does not authorize propose_entity",
+    );
+  });
+
+  it("checkpoints source closure across observation, semantic, and executable stages", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-stage-closure-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero leaves after the warning.\n");
+    const toolset = createCompilerProposalToolset(root);
+    const tool = (name: string) => toolset.tools.find((candidate) => candidate.name === name)!;
+    const context = {} as ExtensionContext;
+    const reviewed = [{
+      segment_id: fixture.segmentId,
+      disposition: "proposed",
+      summary: "The stage represented its source-backed semantic unit.",
+    }];
+
+    await toolset.beginBatch(
+      [fixture.segmentId],
+      `batch-${fixture.source.id}-00001-observation-closure`,
+      fixture.source.id,
+    );
+    await tool("propose_entity_mention").execute("closure-mention", {
+      proposal_id: "closure-mention-proposal",
+      annotation_id: "closure-mention",
+      selector: { segment_id: fixture.segmentId, exact: "Hero" },
+      surface: "Hero",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 1,
+    } as never, undefined, undefined, context);
+    await expect(tool("finish_compiler_batch").execute("finish-observation", {
+      outcome: "complete",
+      reviewed_segments: reviewed,
+      summary: "Observation inventory is closed for this slice.",
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true },
+    });
+    await expect(new SourceAnnotationStore(root).list(fixture.source.id)).resolves.toHaveLength(1);
+    await expect(new SourceAccountingStore(root).read(fixture.source.id)).resolves.toBeNull();
+
+    await toolset.beginBatch(
+      [fixture.segmentId],
+      `batch-${fixture.source.id}-00001-semantic-closure`,
+      fixture.source.id,
+    );
+    await tool("propose_entity").execute("closure-entity", {
+      proposal_id: "closure-entity-proposal",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "Hero",
+        target_path: "/canonicalName",
+        relation: "supports",
+        strength: "explicit",
+      }],
+    } as never, undefined, undefined, context);
+    await tool("propose_entity_resolution").execute("closure-resolution", {
+      proposal_id: "closure-resolution-proposal",
+      resolution_id: "closure-resolution",
+      mention_id: "closure-mention",
+      status: "new-entity",
+      entity_id: "hero",
+      candidates: [{
+        entity_id: "hero",
+        confidence: 1,
+        basis_mention_ids: ["closure-mention"],
+        evidence_assertion_ids: [],
+        rationale: "The proper-name mention introduces Hero.",
+      }],
+      rationale: "The mention introduces the source-backed character entity.",
+    } as never, undefined, undefined, context);
+    await expect(tool("finish_compiler_batch").execute("finish-semantic", {
+      outcome: "complete",
+      reviewed_segments: reviewed,
+      summary: "Identity and canonical semantics are closed for this slice.",
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true },
+    });
+    await expect(new EntityResolutionStore(root).list(fixture.source.id)).resolves.toEqual([
+      expect.objectContaining({ mentionId: "closure-mention", entityId: "hero", status: "new-entity" }),
+    ]);
+    await expect(new SourceAccountingStore(root).read(fixture.source.id)).resolves.toBeNull();
+
+    await toolset.beginBatch(
+      [fixture.segmentId],
+      `batch-${fixture.source.id}-00001-executable-closure`,
+      fixture.source.id,
+    );
+    await tool("propose_character_goal").execute("closure-goal", {
+      proposal_id: "closure-goal-proposal",
+      payload: {
+        id: "closure-goal",
+        actorId: "hero",
+        description: "Hero leaves after the warning.",
+        priority: 1,
+        requiresKnowledge: [],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "Hero leaves after the warning.",
+        target_path: "/description",
+        relation: "supports",
+        strength: "explicit",
+      }],
+    } as never, undefined, undefined, context);
+    await expect(tool("finish_compiler_batch").execute("finish-executable", {
+      outcome: "complete",
+      reviewed_segments: reviewed,
+      summary: "Executable semantics and source accounting are closed for this slice.",
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true },
+    });
+    await expect(new SourceAccountingStore(root).read(fixture.source.id)).resolves.toMatchObject({
+      sourceId: fixture.source.id,
+      batchReviews: [expect.objectContaining({
+        batchId: `batch-${fixture.source.id}-00001-executable-closure`,
+      })],
+    });
   });
 
   it("resolves contested event-relation counter-evidence without exposing trusted spans to the model", async () => {

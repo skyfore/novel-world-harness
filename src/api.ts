@@ -309,8 +309,8 @@ export {
   type SemanticLocalBinding,
   type SemanticReducerContext,
 } from "./world/semantic-effects.js";
-export { applyProcessDelta, emptyProcessState, type ProcessInstance, type ProcessState } from "./world/process-effects.js";
-export { applyNormDelta, emptyNormState, type NormInstance, type NormState } from "./world/norm-effects.js";
+export { applyProcessDelta, emptyProcessState, type ProcessInstance, type ProcessReducerContext, type ProcessState } from "./world/process-effects.js";
+export { applyNormDelta, emptyNormState, type NormInstance, type NormReducerContext, type NormState } from "./world/norm-effects.js";
 export {
   EVENT_PARTICIPATION_PROJECTION_VERSION,
   eventParticipationsByEvent,
@@ -343,6 +343,9 @@ export { ConstraintTokenLedger, type ConstraintTokenBinding, type OpaqueConstrai
 export { SCENE_OCCURRENCE_ONTOLOGY_VERSION, sceneOccurrenceSchema, validateSceneOccurrenceCatalog, type SceneOccurrence, type SceneOccurrenceCatalog } from "./world/scene-occurrence.js";
 export { EVENT_FRAME_ONTOLOGY_VERSION, eventFrameRoleSpecSchema, eventFrameSchema, validateEventFrameInstance, type EventFrame, type EventFrameRoleSpec } from "./world/event-frame.js";
 export { ACTION_ONTOLOGY_VERSION, actionRoleSpecSchema, actionParameterSpecSchema, actionSchemaSchema, predicateTemplateSchema, resolveActionInvocation, templateEntityRefSchema, templateValueSchema, validateActionSchemaCatalog, type ActionParameterSpec, type ActionRoleSpec, type ActionSchema, type ActionStateEffectTemplate, type PredicateTemplate, type ResolvedActionInvocation, type TemplateEntityRef, type TemplateValue } from "./world/action-ontology.js";
+export { ACTION_CONSTRAINT_ONTOLOGY_VERSION, actionConstraintClauseSchema, actionConstraintExceptionSchema, actionConstraintSchema, actionPatternMatches, actionPatternSchema, constraintEntityRefSchema, constraintPredicateSchema, resolveActionConstraints, validateActionConstraintCatalog, type ActionConstraint, type ActionConstraintClause, type ActionConstraintException, type ActionConstraintResolution, type ActionPattern, type ConstraintEntityRef, type ConstraintPredicate } from "./world/action-constraint.js";
+export { NORM_ONTOLOGY_VERSION, deriveAutomaticNormDelta, dueNormInstances, materializeNormProposal, nextNormDueAt, normReparationSchema, normTemplateExceptionSchema, normTemplateForInstance, normTemplateSchema, resolveEffectiveNormTemplates, validateNormReparation, validateNormTemplateCatalog, type EffectiveNormTemplate, type MaterializedNormProposal, type NormReparation, type NormTemplate, type NormTemplateException } from "./world/norm-ontology.js";
+export { PROCESS_ONTOLOGY_VERSION, dueProcessInstances, materializeProcessProposal, nextProcessDueAt, processOwnerEntityIds, processPhaseSchema, processTemplateSchema, processTransitionSchema, requireProcessOwnerEntities, validateProcessTemplateCatalog, type MaterializedProcessProposal, type ProcessPhase, type ProcessTemplate, type ProcessTransition } from "./world/process-ontology.js";
 export * from "./world/model.js";
 export { NarrativeRenderer, type ActorNarrativeEvent, type ActorNarrativeFrame, type ActorNarrativeView, type NarrativeAdapter, type NarrativeEvent, type NarrativeFrame, type NarrativeStyle, type OmniscientNarrativeFrame } from "./world/narrative.js";
 export { buildNarrativeDirection, publicNarrativeThread, publicPlayerAffordance, resolvePlayerAffordance, type ActorVisibleNarrativeThread, type NarrativeDirection, type NarrativeThreadView, type PlayerAffordance, type ResolvedPlayerAffordance } from "./world/narrative-director.js";
@@ -428,7 +431,7 @@ export {
   type WorldSnapshot,
   type WorldSnapshotInspection,
 } from "./world/snapshot.js";
-export { StateSchemaRegistry, DEFAULT_STATE_FIELDS, advanceTemporalState, applyStateDelta, evaluatePredicate, validateEngineInvariants } from "./world/state.js";
+export { StateSchemaRegistry, DEFAULT_STATE_FIELDS, advanceTemporalState, applyStateDelta, evaluatePredicate, validateEngineInvariants, validateResourceConservation, validateResourcePolicyCatalog, type ResourceAccount, type ResourceConservationPolicy } from "./world/state.js";
 export {
   advanceStoryTime,
   assertMonotonicLogicalTime,

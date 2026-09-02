@@ -71,6 +71,12 @@ describe("controlled world-rule ontology", () => {
       scope: "location",
       jurisdictionEntityIds: ["garden"],
       appliesWhen: [locationIs("garden")],
+      clauses: [supportedClause("garden-custom-clause", "require", {
+        op: "fact-equals",
+        entityId: "hero",
+        field: "character.alive",
+        value: true,
+      })],
     });
     const catalog = referenceCatalog([lower, upper, scoped]);
 

@@ -15,9 +15,58 @@ import {
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 import { WorldSnapshotStore } from "../src/world/snapshot.js";
 import { deriveProgressCertificate } from "../src/world/progress.js";
+import type { NormTemplate } from "../src/world/norm-ontology.js";
+import type { ProcessTemplate } from "../src/world/process-ontology.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
+
+const promiseDuty: NormTemplate = {
+  ontologyVersion: "norm-template-v1",
+  id: "promise-duty",
+  name: "Keep a promise",
+  modality: "obligation",
+  actionPattern: { kind: "any" },
+  appliesWhen: [],
+  exceptions: [],
+  reparations: [],
+  priority: 0,
+  defeasible: false,
+  overridesTemplateIds: [],
+  status: "supported",
+  visibility: "public",
+  knownByClaimIds: [],
+  induction: { kind: "domain-module", moduleId: "test-norms", moduleVersion: "1" },
+  evidence: [],
+};
+
+const stormProcess: ProcessTemplate = {
+  ontologyVersion: "process-template-v1",
+  id: "storm-cycle",
+  name: "Storm cycle",
+  ownerRoles: [{ id: "region", label: "Region", allowedEntityKinds: ["location"], minCardinality: 1, maxCardinality: 1 }],
+  phases: [{ id: "forming", label: "Forming", terminal: false }, { id: "spent", label: "Spent", terminal: true }],
+  initialPhaseId: "forming",
+  transitions: [{ fromPhaseId: "forming", toPhaseId: "spent", minimumProgress: 1 }],
+  outcomeIds: ["passed"],
+  visibility: "observable",
+  induction: { kind: "domain-module", moduleId: "test-weather", moduleVersion: "1" },
+  evidence: [],
+};
+
+const crossingProcess: ProcessTemplate = {
+  ontologyVersion: "process-template-v1",
+  id: "crossing-process",
+  name: "Crossing",
+  ownerRoles: [{ id: "traveler", label: "Traveler", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+  phases: [{ id: "started", label: "Started", terminal: false }, { id: "arrived", label: "Arrived", terminal: true }],
+  initialPhaseId: "started",
+  transitions: [{ fromPhaseId: "started", toPhaseId: "arrived", minimumProgress: 1 }],
+  outcomeIds: ["arrived"],
+  visibility: "observable",
+  induction: { kind: "domain-module", moduleId: "test-travel", moduleVersion: "1" },
+  evidence: [],
+};
 
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-projection-"));
@@ -30,6 +79,8 @@ async function fixture() {
   const context: WorldModelContext = {
     entities: new Map(entities.map((entity) => [entity.id, entity])),
     rules: new Map(),
+    normTemplates: new Map([[promiseDuty.id, promiseDuty]]),
+    processTemplates: new Map([[stormProcess.id, stormProcess], [crossingProcess.id, crossingProcess]]),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
   };
   const engine = new WorldEngine(root, context);
@@ -170,7 +221,14 @@ describe("ProjectionService", () => {
       version: 1,
       operations: [{
         op: "start-process",
-        process: { id: "storm", ownerEntityIds: ["hall"], phaseId: "forming", progress: 0.1, dueAtElapsedDays: 2 },
+        process: {
+          id: "storm",
+          templateId: "storm-cycle",
+          ownerBindings: [{ roleId: "region", entityIds: ["hall"] }],
+          phaseId: "forming",
+          progress: 0.1,
+          dueAtElapsedDays: 2,
+        },
       }],
     });
     const normDeltaHash = await engine.objects.putNormDelta({
@@ -294,7 +352,13 @@ describe("ProjectionService", () => {
       version: 1,
       operations: [{
         op: "start-process",
-        process: { id: "crossing", ownerEntityIds: ["hero"], phaseId: "started", progress: 0.2 },
+        process: {
+          id: "crossing",
+          templateId: "crossing-process",
+          ownerBindings: [{ roleId: "traveler", entityIds: ["hero"] }],
+          phaseId: "started",
+          progress: 0.2,
+        },
       }],
     });
     const checkpointCommit = await appendEvent(engine, genesis, "main", "crossing-started", {

@@ -752,7 +752,7 @@ CanonicalSnapshot V8 至少固定：
 
 ### T6 — StateRule、ActionConstraint、Norm、Process
 
-- **状态：** pending
+- **状态：** complete
 - **依赖：** T2、T4、T5
 - **主要文件：**
   - 重构 `src/world/world-rule-ontology.ts`
@@ -764,6 +764,17 @@ CanonicalSnapshot V8 至少固定：
 - **交付：** rule layer split、norm lifecycle、process lifecycle、resource/conservation hooks
 - **测试：** physical rejection、legal violation allowed、exception/override、deadline/reparation、due process
 - **建议提交：** `feat: execute constraints norms and world processes`
+- **完成说明：** legacy world-rule union 已删除，唯一受支持的受控规则按
+  physical/magical hard-state 与 social/legal/institutional normative enforcement 分流；
+  ActionConstraint 对 schema-bound/ad-hoc action 执行 before/after 条件、显式 exception、
+  defeasible override 与环检测。Ad-hoc action 必须声明精确 state/resource footprint，资源账户
+  支持 conserved/non-increasing 校验。NormTemplate/NormInstance 已实现实例化、履行、违反、
+  deadline 自动违约和受验证 reparation；法律/社会违规不会回滚物理动作，而会生成 committed
+  NormDelta。ProcessTemplate/ProcessInstance 已实现受角色约束的启动、阶段推进、暂停、恢复、
+  terminal outcome 与 meaningful due time。三类 artifact 均进入 content-addressed canonical
+  revision、CanonicalSnapshot V8、PreparedNovelBundle V3、context hydration、event proposal、
+  commit/replay/checkpoint 和公开 API。全量验证：`pnpm run check` 通过，`pnpm test`
+  142 files / 808 tests 通过。
 
 ### T7 — Typed causal frontier 与 scheduler v2
 

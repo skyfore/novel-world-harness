@@ -6,6 +6,7 @@ import {
   actorEventObservationSchema,
   eventProposalSchema,
   knowledgeDeltaSchema,
+  normDeltaSchema,
   participantPresenceSchema,
   stateDeltaSchema,
   type ActorEventObservation,
@@ -23,10 +24,12 @@ import {
   type EventRelation,
   type KnowledgeDelta,
   type LogicalTime,
+  type NormDelta,
   type ObjectHash,
   type ParticipantPresence,
   type Proposition,
   type ProgressCertificate,
+  type ProcessDelta,
   type StateDelta,
   type ValidationIssue,
   type ValidationReport,
@@ -34,7 +37,17 @@ import {
   type WorldState,
 } from "./model.js";
 import type { PossibilityTemplate } from "./possibility-model.js";
-import { StateSchemaRegistry, advanceTemporalState, applyStateDelta, emptyWorldState, evaluatePredicate, validateEngineInvariants } from "./state.js";
+import {
+  StateSchemaRegistry,
+  advanceTemporalState,
+  applyStateDelta,
+  emptyWorldState,
+  evaluatePredicate,
+  validateEngineInvariants,
+  validateResourceConservation,
+  validateResourcePolicyCatalog,
+  type ResourceConservationPolicy,
+} from "./state.js";
 import { BranchStore, WorldObjectStore } from "./store.js";
 import { nextLogicalTime } from "./time.js";
 import { assertEvidenceExclusiveToSource } from "./source-scope.js";
@@ -47,7 +60,8 @@ import { isCommunicatingKnowledgeSource, validateKnowledgeSemanticReferences } f
 import { committedHistory, projectActorScene } from "./scene.js";
 import type { SpatialRelation } from "./spatial-ontology.js";
 import {
-  isControlledWorldRule,
+  isHardStateRule,
+  isNormativeWorldRule,
   resolveEffectiveWorldRules,
   type EffectiveWorldRule,
 } from "./world-rule-ontology.js";
@@ -57,6 +71,14 @@ import { deriveProgressCertificate, hasMaterialProgress } from "./progress.js";
 import { resolveActionInvocation, type ActionSchema } from "./action-ontology.js";
 import type { EventFrame } from "./event-frame.js";
 import type { SceneOccurrence } from "./scene-occurrence.js";
+import type { ActionConstraint } from "./action-constraint.js";
+import { resolveActionConstraints, validateActionConstraintCatalog } from "./action-constraint.js";
+import type { NormTemplate } from "./norm-ontology.js";
+import type { ProcessTemplate } from "./process-ontology.js";
+import { materializeProcessProposal, validateProcessTemplateCatalog } from "./process-ontology.js";
+import { applyProcessDelta } from "./process-effects.js";
+import { deriveAutomaticNormDelta, materializeNormProposal, validateNormTemplateCatalog } from "./norm-ontology.js";
+import { applyNormDelta } from "./norm-effects.js";
 import {
   applyBranchSemanticDelta,
   materializeBranchSemanticProposal,
@@ -83,6 +105,10 @@ export type WorldModelContext = {
   sceneOccurrences?: readonly SceneOccurrence[];
   eventFrames?: ReadonlyMap<string, EventFrame>;
   actionSchemas?: ReadonlyMap<string, ActionSchema>;
+  actionConstraints?: ReadonlyMap<string, ActionConstraint>;
+  normTemplates?: ReadonlyMap<string, NormTemplate>;
+  processTemplates?: ReadonlyMap<string, ProcessTemplate>;
+  resourcePolicies?: readonly ResourceConservationPolicy[];
   actorGoals?: readonly CharacterGoal[];
   actorModels?: ReadonlyMap<string, CharacterModel>;
   possibilityTemplates?: readonly PossibilityTemplate[];
@@ -127,6 +153,8 @@ function hasNonStateMateriality(proposal: EventProposal, timeChanged: boolean): 
   return timeChanged
     || Boolean(proposal.proposedKnowledge?.operations.length)
     || Boolean(proposal.proposedSemantics?.operations.length)
+    || Boolean(proposal.proposedProcesses?.operations.length)
+    || Boolean(proposal.proposedNorms?.operations.length)
     || Boolean(proposal.spokenUtterances?.length)
     || Boolean(proposal.progress?.scene);
 }
@@ -136,7 +164,7 @@ export function validateEventProposal(
   head: CommitId,
   state: WorldState,
   context: WorldModelContext,
-  options: { branchSemantics?: BranchSemanticState } = {},
+  options: { branchSemantics?: BranchSemanticState; deferMateriality?: boolean } = {},
 ): { report: ValidationReport; postState?: WorldState } {
   const proposal = eventProposalSchema.parse(proposalInput);
   const errors: ValidationIssue[] = [];
@@ -249,6 +277,7 @@ export function validateEventProposal(
         hasKnowledge: Boolean(proposal.proposedKnowledge?.operations.length),
         hasTimeAdvance: Boolean(proposal.timeAdvance),
         hasSceneTransition: Boolean(proposal.progress?.scene),
+        proposalPreconditions: proposal.preconditions,
       },
     );
     errors.push(...resolvedAction.issues);
@@ -299,9 +328,9 @@ export function validateEventProposal(
   }
   if (!errors.some((error) => error.code === "UNKNOWN_ACTIVE_RULE")) {
     applicableRules.push(...resolveEffectiveWorldRules(context.rules, evaluationState).effective);
-    for (const rule of applicableRules) {
+    for (const rule of applicableRules.filter((candidate) => isHardStateRule(candidate.rule))) {
       if (rule.requires.some((predicate) => !evaluatePredicate(evaluationState, predicate))) {
-        errors.push({ code: "RULE_REQUIREMENT_FAILED", message: `Rule ${rule.id} requirement is not satisfied` });
+        errors.push({ code: "STATE_RULE_REQUIREMENT_FAILED", message: `State rule ${rule.id} requirement is not satisfied` });
       }
     }
   }
@@ -313,19 +342,26 @@ export function validateEventProposal(
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
       postState = applyStateDelta(evaluationState, delta, context.stateSchema, context.entities, context.rules);
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
-      for (const rule of applicableRules) {
-        const forbidden = isControlledWorldRule(rule.rule)
-          ? rule.forbids.some((predicate) => evaluatePredicate(postState!, predicate))
-          : rule.forbids.length > 0 && rule.forbids.every((predicate) => evaluatePredicate(postState!, predicate));
+      for (const rule of applicableRules.filter((candidate) => isHardStateRule(candidate.rule))) {
+        const forbidden = rule.forbids.some((predicate) => evaluatePredicate(postState!, predicate));
         if (forbidden) {
-          errors.push({ code: "RULE_FORBIDS", message: `Rule ${rule.id} forbids the proposed post-state` });
+          errors.push({ code: "STATE_RULE_FORBIDS", message: `State rule ${rule.id} forbids the proposed post-state` });
         }
+      }
+      errors.push(...resolveActionConstraints(context.actionConstraints?.values() ?? [], {
+        invocation: proposal.action,
+        actorId: proposal.actorId,
+        before: evaluationState,
+        after: postState,
+      }).issues);
+      for (const message of validateResourceConservation(evaluationState, postState, context.resourcePolicies ?? [])) {
+        errors.push({ code: "RESOURCE_CONSERVATION_FAILED", message });
       }
       stateChanged = stateFactsChanged(evaluationState, postState);
       const timeChanged = (postState.logicalTime.elapsedDays ?? 0) > (state.logicalTime.elapsedDays ?? 0)
         || JSON.stringify(postState.logicalTime.storyTime) !== JSON.stringify(state.logicalTime.storyTime);
       const hasKnowledgeEffect = Boolean(proposal.proposedKnowledge?.operations.length);
-      if (!stateChanged && !hasNonStateMateriality(proposal, timeChanged)) {
+      if (!stateChanged && !hasNonStateMateriality(proposal, timeChanged) && !options.deferMateriality) {
         errors.push({
           code: "EVENT_MATERIALITY_REQUIRED",
           message: "A committed event requires a net state or knowledge effect, an utterance, an adjudicated action outcome, effective time advancement, or a validated scene beat.",
@@ -637,11 +673,119 @@ export class WorldEngine {
         });
       }
     }
-    const { report: baseReport, postState } = validateEventProposal(parsed, head, state, context, { branchSemantics: stagedSemantics });
+    const { report: baseReport, postState } = validateEventProposal(parsed, head, state, context, {
+      branchSemantics: stagedSemantics,
+      deferMateriality: true,
+    });
     let report = baseReport;
     if (semanticErrors.length) {
       const { derivedDeltaHash: _derivedDeltaHash, ...withoutDerivedHash } = report;
       report = { ...withoutDerivedHash, accepted: false, errors: [...report.errors, ...semanticErrors] };
+    }
+    let processDelta: ProcessDelta | undefined;
+    let normDelta: NormDelta | undefined;
+    if (report.accepted && postState) {
+      const effectErrors: ValidationIssue[] = [];
+      const provisionalProvenance: EffectProvenance = {
+        commitId: head,
+        eventId: "pending-event",
+        eventHash: "0".repeat(64),
+      };
+      try {
+        if (parsed.proposedProcesses) {
+          processDelta = materializeProcessProposal(parsed.proposedProcesses, {
+            branchId: parsed.branchId,
+            parentCommitId: head,
+            elapsedDays: postState.logicalTime.elapsedDays ?? 0,
+            templates: context.processTemplates ?? new Map(),
+            proposalHash: contentHash({
+              proposalId: parsed.proposalId,
+              branchId: parsed.branchId,
+              parentCommitId: head,
+              proposedProcesses: parsed.proposedProcesses,
+            }),
+          }).delta;
+          applyProcessDelta(
+            projection.processes,
+            processDelta,
+            { entities: context.entities, templates: context.processTemplates ?? new Map() },
+            provisionalProvenance,
+            postState.logicalTime.elapsedDays ?? 0,
+          );
+        }
+      } catch (error) {
+        effectErrors.push({
+          code: "INVALID_PROCESS_DELTA",
+          message: error instanceof Error ? error.message : String(error),
+          path: "proposedProcesses",
+        });
+      }
+      try {
+        let stagedNorms = projection.norms;
+        let proposedNormDelta: NormDelta | undefined;
+        if (parsed.proposedNorms) {
+          proposedNormDelta = materializeNormProposal(parsed.proposedNorms, {
+            branchId: parsed.branchId,
+            parentCommitId: head,
+            elapsedDays: postState.logicalTime.elapsedDays ?? 0,
+            templates: context.normTemplates ?? new Map(),
+            proposalHash: contentHash({
+              proposalId: parsed.proposalId,
+              branchId: parsed.branchId,
+              parentCommitId: head,
+              proposedNorms: parsed.proposedNorms,
+            }),
+          }).delta;
+          stagedNorms = applyNormDelta(stagedNorms, proposedNormDelta, {
+            entities: context.entities,
+            templates: context.normTemplates ?? new Map(),
+            normativeRuleIds: new Set([...context.rules.values()].filter(isNormativeWorldRule).map((rule) => rule.id)),
+            ...(parsed.action ? { action: parsed.action } : {}),
+            postState,
+          }, provisionalProvenance);
+        }
+        const stateBeforeDelta = advanceTemporalState(state, postState.logicalTime, context.stateSchema, context.entities);
+        const automatic = deriveAutomaticNormDelta({
+          branchId: parsed.branchId,
+          parentCommitId: head,
+          ...(parsed.actorId ? { actorId: parsed.actorId } : {}),
+          ...(parsed.action ? { action: parsed.action } : {}),
+          before: stateBeforeDelta,
+          after: postState,
+          state: stagedNorms,
+          templates: context.normTemplates ?? new Map(),
+          normativeRules: resolveEffectiveWorldRules(context.rules, stateBeforeDelta).effective
+            .filter((rule) => isNormativeWorldRule(rule.rule)),
+        });
+        normDelta = proposedNormDelta || automatic
+          ? normDeltaSchema.parse({
+            version: 1,
+            operations: [
+              ...(proposedNormDelta?.operations ?? []),
+              ...(automatic?.operations ?? []),
+            ],
+          })
+          : undefined;
+        if (automatic) {
+          applyNormDelta(stagedNorms, automatic, {
+            entities: context.entities,
+            templates: context.normTemplates ?? new Map(),
+            normativeRuleIds: new Set([...context.rules.values()].filter(isNormativeWorldRule).map((rule) => rule.id)),
+            ...(parsed.action ? { action: parsed.action } : {}),
+            postState,
+          }, provisionalProvenance);
+        }
+      } catch (error) {
+        effectErrors.push({
+          code: "INVALID_NORM_DELTA",
+          message: error instanceof Error ? error.message : String(error),
+          path: "proposedNorms",
+        });
+      }
+      if (effectErrors.length) {
+        const { derivedDeltaHash: _derivedDeltaHash, ...withoutDerivedHash } = report;
+        report = { ...withoutDerivedHash, accepted: false, errors: [...report.errors, ...effectErrors] };
+      }
     }
     if (report.accepted && parsed.canonicalAdaptation) {
       const runtimeErrors: ValidationIssue[] = [];
@@ -767,6 +911,8 @@ export class WorldEngine {
     const hasMaterialCandidate = effectiveStateIndexes.length > 0
       || effectiveKnowledgeIndexes.length > 0
       || Boolean(semanticDelta?.operations.length)
+      || Boolean(processDelta?.operations.length)
+      || Boolean(normDelta?.operations.length)
       || Boolean(parsed.spokenUtterances?.length)
       || Boolean(parsed.progress?.scene)
       || timeAdvanced;
@@ -791,11 +937,19 @@ export class WorldEngine {
     const semanticDeltaHash = semanticDelta?.operations.length
       ? await this.objects.putSemanticDelta(semanticDelta)
       : undefined;
+    const processDeltaHash = processDelta?.operations.length
+      ? await this.objects.putProcessDelta(processDelta)
+      : undefined;
+    const normDeltaHash = normDelta?.operations.length
+      ? await this.objects.putNormDelta(normDelta)
+      : undefined;
     const effects: CommittedEvent["effects"] = {
       version: 1,
       ...(deltaHash ? { stateDeltaHash: deltaHash } : {}),
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
       ...(semanticDeltaHash ? { semanticDeltaHash } : {}),
+      ...(processDeltaHash ? { processDeltaHash } : {}),
+      ...(normDeltaHash ? { normDeltaHash } : {}),
     };
     const progressCertificate = deriveProgressCertificate({
       effects,
@@ -803,6 +957,8 @@ export class WorldEngine {
         ...(deltaHash ? { stateDelta: parsed.proposedDelta } : {}),
         ...(knowledgeDeltaHash && parsed.proposedKnowledge ? { knowledgeDelta: parsed.proposedKnowledge } : {}),
         ...(semanticDeltaHash && semanticDelta ? { semanticDelta } : {}),
+        ...(processDeltaHash && processDelta ? { processDelta } : {}),
+        ...(normDeltaHash && normDelta ? { normDelta } : {}),
       },
       effectiveStateOperationIndexes: effectiveStateIndexes,
       effectiveKnowledgeOperationIndexes: effectiveKnowledgeIndexes,
@@ -1000,12 +1156,42 @@ function withoutAcquisitionCommit<T extends { acquiredAtCommit?: string }>(fact:
 }
 
 function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
+  const ontologyIssues = [
+    ...validateActionConstraintCatalog(context.actionConstraints?.values() ?? [], {
+      entities: context.entities,
+      actionSchemas: context.actionSchemas ?? new Map(),
+    }),
+    ...validateNormTemplateCatalog(context.normTemplates?.values() ?? [], {
+      entities: context.entities,
+      claimIds: new Set(context.claims?.keys() ?? []),
+      canonicalEventIds: new Set(context.events?.keys() ?? []),
+    }),
+    ...validateProcessTemplateCatalog(
+      context.processTemplates?.values() ?? [],
+      new Set(context.events?.keys() ?? []),
+    ),
+  ];
+  const resourceIssues = validateResourcePolicyCatalog(
+    context.resourcePolicies ?? [],
+    context.stateSchema,
+    context.entities,
+  );
+  if (ontologyIssues.length || resourceIssues.length) {
+    throw new Error(`Invalid executable world context: ${[
+      ...ontologyIssues.map((item) => `${item.code}: ${item.message}`),
+      ...resourceIssues,
+    ].join("; ")}`);
+  }
   const canonicalSnapshotHash = context.canonicalSnapshotHash ?? contentHash({
     entities: [...context.entities.entries()].sort(([left], [right]) => left.localeCompare(right)),
     claims: [...(context.claims?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     events: [...(context.events?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
     spatialOntologyVersion: context.spatialOntologyVersion,
     spatialRelations: [...(context.spatialRelations ?? [])].sort((left, right) => left.id.localeCompare(right.id)),
+    actionConstraints: [...(context.actionConstraints?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    normTemplates: [...(context.normTemplates?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    processTemplates: [...(context.processTemplates?.entries() ?? [])].sort(([left], [right]) => left.localeCompare(right)),
+    resourcePolicies: [...(context.resourcePolicies ?? [])].sort((left, right) => left.id.localeCompare(right.id)),
     rules: [...context.rules.entries()].sort(([left], [right]) => left.localeCompare(right)),
     stateFields: context.stateSchema.list(),
   });

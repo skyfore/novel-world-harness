@@ -23,7 +23,7 @@ import { PossibilityTemplateStore, type PossibilityTemplate } from "../world/pos
 import { committedHistory, realizedCanonicalEvents, type CommittedHistoryEntry } from "../world/scene.js";
 import { resolveActiveSpatialRelations, spatialEndpoints, spatialRelationEvidence, type SpatialRelation } from "../world/spatial-ontology.js";
 import { BranchStore } from "../world/store.js";
-import { isControlledWorldRule, resolveEffectiveWorldRules, worldRuleEvidence } from "../world/world-rule-ontology.js";
+import { resolveEffectiveWorldRules, worldRuleEvidence } from "../world/world-rule-ontology.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import type { WorldModelContext } from "../world/engine.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
@@ -506,36 +506,32 @@ export class OntologyProjectionService {
     const neededEntityIds = new Set<string>();
     const neededClaimIds = new Set<string>();
     for (const rule of frame.artifacts.rules) {
-      if (isControlledWorldRule(rule)) {
-        if (rule.authorityEntityId) neededEntityIds.add(rule.authorityEntityId);
-        rule.jurisdictionEntityIds.forEach((id) => neededEntityIds.add(id));
-        rule.knownByClaimIds.forEach((id) => neededClaimIds.add(id));
-      }
+      if (rule.authorityEntityId) neededEntityIds.add(rule.authorityEntityId);
+      rule.jurisdictionEntityIds.forEach((id) => neededEntityIds.add(id));
+      rule.knownByClaimIds.forEach((id) => neededClaimIds.add(id));
       for (const predicate of rulePredicates(rule)) collectPredicateReferences(predicate, neededEntityIds, new Set());
     }
     for (const entity of frame.artifacts.entities.filter((item) => neededEntityIds.has(item.id))) builder.artifact(entityNode(entity, frame));
     for (const claim of frame.artifacts.claims.filter((item) => neededClaimIds.has(item.id))) builder.artifact(claimNode(claim, frame));
     for (const rule of frame.artifacts.rules) {
-      const status: OntologyStatus = isControlledWorldRule(rule) && rule.status === "contested"
+      const status: OntologyStatus = rule.status === "contested"
         ? "contested"
         : frame.scope.branchId
           ? frame.effectiveRuleIds.has(rule.id) ? "active" : "inactive"
           : "canonical";
       const node = artifactNode(ruleId(rule.id), rule.id, "world-rule", rule.name, status, "canonical", rule, worldRuleEvidence(rule), frame, {
         scope: rule.scope,
-        kind: isControlledWorldRule(rule) ? rule.kind : "legacy",
-        visibility: isControlledWorldRule(rule) ? rule.visibility : "legacy",
-        priority: isControlledWorldRule(rule) ? rule.priority : undefined,
+        kind: rule.kind,
+        visibility: rule.visibility,
+        priority: rule.priority,
         inactiveReason: frame.inactiveRules.get(rule.id),
-        clauses: isControlledWorldRule(rule) ? rule.clauses.length : (rule.requires?.length ?? 0) + (rule.forbids?.length ?? 0),
-      }, isControlledWorldRule(rule) ? rule.validStoryTime : undefined);
+        clauses: rule.clauses.length,
+      }, rule.validStoryTime);
       builder.artifact(node);
-      if (isControlledWorldRule(rule)) {
-        if (rule.authorityEntityId) builder.edge(link("rule-authority", entityId(rule.authorityEntityId), node.node.id, "authority", status, "canonical", rule.evidence));
-        for (const id of rule.jurisdictionEntityIds) builder.edge(link("rule-jurisdiction", node.node.id, entityId(id), "jurisdiction", status, "canonical", rule.evidence));
-        for (const id of rule.knownByClaimIds) builder.edge(link("rule-known-by", claimId(id), node.node.id, "grounds visibility", status, "canonical", rule.evidence));
-        for (const id of rule.overridesRuleIds) builder.edge(link("rule-overrides", node.node.id, ruleId(id), "overrides", status, "canonical", rule.evidence));
-      }
+      if (rule.authorityEntityId) builder.edge(link("rule-authority", entityId(rule.authorityEntityId), node.node.id, "authority", status, "canonical", rule.evidence));
+      for (const id of rule.jurisdictionEntityIds) builder.edge(link("rule-jurisdiction", node.node.id, entityId(id), "jurisdiction", status, "canonical", rule.evidence));
+      for (const id of rule.knownByClaimIds) builder.edge(link("rule-known-by", claimId(id), node.node.id, "grounds visibility", status, "canonical", rule.evidence));
+      for (const id of rule.overridesRuleIds) builder.edge(link("rule-overrides", node.node.id, ruleId(id), "overrides", status, "canonical", rule.evidence));
       const entityRefs = new Set<string>();
       const ruleRefs = new Set<string>();
       for (const predicate of rulePredicates(rule)) collectPredicateReferences(predicate, entityRefs, ruleRefs);
@@ -1402,7 +1398,6 @@ function artifactLabel(envelope: Record<string, unknown>): string {
 }
 
 function rulePredicates(rule: WorldRule): Predicate[] {
-  if (!isControlledWorldRule(rule)) return [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])];
   return [...rule.appliesWhen, ...rule.clauses.map((item) => item.predicate), ...rule.exceptions.flatMap((item) => item.appliesWhen)];
 }
 

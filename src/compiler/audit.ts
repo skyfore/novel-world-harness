@@ -53,7 +53,6 @@ import {
 } from "../world/spatial-ontology.js";
 import {
   WORLD_RULE_ONTOLOGY_VERSION,
-  isControlledWorldRule,
   validateWorldRuleCatalog,
   validateWorldRuleEvidenceAssertions,
   worldRuleEvidence,
@@ -650,9 +649,7 @@ export async function auditCompiler(
           message: `Spatial relation ${artifact.id} has no exact evidence binding.`,
         });
       }
-      if (artifact.kind === "world-rule" && isControlledWorldRule(
-        rules.find((rule) => rule.id === artifact.id)!,
-      )) {
+      if (artifact.kind === "world-rule") {
         invalidAssertions += 1;
         worldRuleExactEvidenceIssues += 1;
         evidenceErrors.push({
@@ -855,7 +852,7 @@ export async function auditCompiler(
     claims: new Set(claims.map((claim) => claim.id)),
     rules: new Map(rules.map((rule) => [rule.id, rule])),
   });
-  const controlledWorldRules = rules.filter(isControlledWorldRule);
+  const controlledWorldRules = rules;
   const controlledWorldRuleCoverage = rules.length
     ? controlledWorldRules.length / rules.length
     : null;
@@ -1166,8 +1163,6 @@ export async function auditCompiler(
     }
     if (rules.length && controlledWorldRuleCoverage !== 1) {
       semanticIssues.push(`Only ${formatRatio(controlledWorldRuleCoverage)} of world rules use the controlled ${WORLD_RULE_ONTOLOGY_VERSION} vocabulary (required 100% for novel-scale publication).`);
-      rules.filter((rule) => !isControlledWorldRule(rule))
-        .forEach((rule) => semanticRepairRuleIds.add(rule.id));
       semanticRepairRequiresFullReparse = true;
     }
   }

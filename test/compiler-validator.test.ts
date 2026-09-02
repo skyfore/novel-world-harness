@@ -19,6 +19,31 @@ async function fixture() {
   return { root, proposals: new CompilerProposalService(root), commits: new CompilerCommitService(root), evidence: source.evidence };
 }
 
+function ruleEvidenceAssertions(artifactId: string, reference: ReturnType<Awaited<ReturnType<typeof createEvidenceFixture>>["evidence"]>[number]) {
+  const anchor = {
+    version: 1 as const,
+    sourceId: reference.span.sourceId,
+    startByte: reference.span.startByte!,
+    endByte: reference.span.endByte!,
+    startLine: reference.span.startLine,
+    endLine: reference.span.endLine,
+    exactHash: reference.span.quoteHash,
+    prefixHash: "0".repeat(64),
+    suffixHash: "0".repeat(64),
+    contextBytes: 64 as const,
+    normalization: "source-bytes-v1" as const,
+  };
+  return ["/name", "/clauses/0/predicate"].map((jsonPointer, index) => ({
+    version: 1 as const,
+    id: `${artifactId}-evidence-${index}`,
+    target: { artifactKind: "world-rule", artifactId, jsonPointer },
+    anchors: [anchor],
+    relation: "supports" as const,
+    strength: reference.strength,
+    derivation: { runId: "compiler-validator-test", worker: "test", ontologyVersion: "evidence-v1" as const },
+  }));
+}
+
 describe("CompilerCommitService", () => {
   it("commits an evidence-backed entity after deterministic validation", async () => {
     const { proposals, commits, evidence } = await fixture();
@@ -441,22 +466,44 @@ describe("CompilerCommitService", () => {
       payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("北门") },
       generatedBy: { worker: "test" },
     });
+    const badRuleEvidence = evidence("曹操");
     await proposals.submit("world-rule", {
       proposalId: "bad-rule",
       payload: {
+        ontologyVersion: "world-rule-v2",
         id: "bad-rule",
         name: "Location uses a character-only field",
+        kind: "physical",
         scope: "location",
+        jurisdictionEntityIds: ["north-gate"],
         appliesWhen: [{ op: "fact-exists", entityId: "north-gate", field: "character.alive" }],
-        evidence: evidence("曹操"),
+        visibility: "public",
+        knownByClaimIds: [],
+        priority: 0,
+        defeasible: false,
+        overridesRuleIds: [],
+        clauses: [{
+          id: "bad-rule-clause",
+          modality: "require",
+          predicate: { op: "fact-exists", entityId: "north-gate", field: "character.alive" },
+          basis: "explicit",
+          status: "supported",
+          confidence: 1,
+          evidence: badRuleEvidence,
+        }],
+        exceptions: [],
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence: badRuleEvidence,
       },
+      evidenceAssertions: ruleEvidenceAssertions("bad-rule", badRuleEvidence[0]!),
       generatedBy: { worker: "test" },
     });
 
     const result = await convergeWorldProposals(roots.at(-1)!);
     expect(result.canonical.blocked).toMatchObject([{ id: "bad-rule", kind: "world-rule" }]);
     expect(result.canonical.blocked[0]?.errors).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "INERT_WORLD_RULE" }),
       expect.objectContaining({ code: "INVALID_PREDICATE_FIELD" }),
     ]));
     expect(result.staging).not.toContainEqual({ id: "bad-rule", kind: "world-rule" });
@@ -471,16 +518,38 @@ describe("CompilerCommitService", () => {
     });
     expect((await commits.accept("entity", "gate")).accepted).toBe(true);
     const condition = { op: "fact-equals" as const, entityId: "north-gate", field: "location.open", value: true };
+    const selfRuleEvidence = evidence("曹操");
     await proposals.submit("world-rule", {
       proposalId: "self-forbidding-rule",
       payload: {
+        ontologyVersion: "world-rule-v2",
         id: "self-forbidding-rule",
         name: "门开时禁止门开",
-        scope: "location",
+        kind: "physical",
+        scope: "global",
+        jurisdictionEntityIds: [],
         appliesWhen: [condition],
-        forbids: [condition],
-        evidence: evidence("曹操"),
+        visibility: "public",
+        knownByClaimIds: [],
+        priority: 0,
+        defeasible: false,
+        overridesRuleIds: [],
+        clauses: [{
+          id: "self-forbidding-clause",
+          modality: "forbid",
+          predicate: condition,
+          basis: "explicit",
+          status: "supported",
+          confidence: 1,
+          evidence: selfRuleEvidence,
+        }],
+        exceptions: [],
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence: selfRuleEvidence,
       },
+      evidenceAssertions: ruleEvidenceAssertions("self-forbidding-rule", selfRuleEvidence[0]!),
       generatedBy: { worker: "test" },
     });
 

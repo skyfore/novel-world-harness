@@ -732,13 +732,23 @@ export const branchSemanticProposalDeltaSchema = z.object({
 });
 export type BranchSemanticProposalDelta = z.infer<typeof branchSemanticProposalDeltaSchema>;
 
+export const processOwnerBindingSchema = z.object({
+  roleId: idSchema,
+  entityIds: z.array(idSchema).min(1).max(32),
+}).strict().superRefine((value, ctx) => {
+  if (new Set(value.entityIds).size !== value.entityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["entityIds"], message: "Process owner bindings must contain unique entity IDs" });
+  }
+});
+export type ProcessOwnerBinding = z.infer<typeof processOwnerBindingSchema>;
+
 export const processOperationSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("start-process"),
     process: z.object({
       id: idSchema,
-      templateId: idSchema.optional(),
-      ownerEntityIds: z.array(idSchema).min(1).max(32),
+      templateId: idSchema,
+      ownerBindings: z.array(processOwnerBindingSchema).min(1).max(32),
       phaseId: idSchema,
       progress: z.number().finite().min(0).max(1).default(0),
       dueAtElapsedDays: z.number().finite().nonnegative().optional(),
@@ -759,6 +769,41 @@ export type ProcessOperation = z.infer<typeof processOperationSchema>;
 export const processDeltaSchema = z.object({ version: z.literal(1), operations: z.array(processOperationSchema).max(256) }).strict();
 export type ProcessDelta = z.infer<typeof processDeltaSchema>;
 
+export const processProposalOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("start-process"),
+    localRef: localSemanticRefSchema,
+    process: z.object({
+      templateId: idSchema,
+      ownerBindings: z.array(processOwnerBindingSchema).min(1).max(32),
+      phaseId: idSchema.optional(),
+      progress: z.number().finite().min(0).max(1).default(0),
+      dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("advance-process"),
+    processRef: idSchema,
+    amount: z.number().finite().positive().max(1),
+    phaseId: idSchema.optional(),
+    dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+  }).strict(),
+  z.object({ op: z.literal("pause-process"), processRef: idSchema, reasonId: idSchema }).strict(),
+  z.object({ op: z.literal("resume-process"), processRef: idSchema, dueAtElapsedDays: z.number().finite().nonnegative().optional() }).strict(),
+  z.object({ op: z.literal("finish-process"), processRef: idSchema, outcomeId: idSchema }).strict(),
+]);
+export type ProcessProposalOperation = z.infer<typeof processProposalOperationSchema>;
+export const processProposalDeltaSchema = z.object({
+  version: z.literal(1),
+  operations: z.array(processProposalOperationSchema).min(1).max(256),
+}).strict().superRefine((value, ctx) => {
+  const refs = value.operations.flatMap((operation) => operation.op === "start-process" ? [operation.localRef] : []);
+  if (new Set(refs).size !== refs.length) {
+    ctx.addIssue({ code: "custom", path: ["operations"], message: "Each turn-local process ref must be introduced exactly once" });
+  }
+});
+export type ProcessProposalDelta = z.infer<typeof processProposalDeltaSchema>;
+
 export const normOperationSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("instantiate-norm"),
@@ -769,6 +814,7 @@ export const normOperationSchema = z.discriminatedUnion("op", [
       beneficiaryActorId: idSchema.optional(),
       description: z.string().trim().min(1).max(1_000),
       dueStoryTime: storyTimeSchema.optional(),
+      dueAtElapsedDays: z.number().finite().nonnegative().optional(),
     }).strict(),
   }).strict(),
   z.object({ op: z.literal("satisfy-norm"), normId: idSchema, byActorId: idSchema.optional() }).strict(),
@@ -778,6 +824,35 @@ export const normOperationSchema = z.discriminatedUnion("op", [
 export type NormOperation = z.infer<typeof normOperationSchema>;
 export const normDeltaSchema = z.object({ version: z.literal(1), operations: z.array(normOperationSchema).max(256) }).strict();
 export type NormDelta = z.infer<typeof normDeltaSchema>;
+
+export const normProposalOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("instantiate-norm"),
+    localRef: localSemanticRefSchema,
+    norm: z.object({
+      templateId: idSchema,
+      subjectActorId: idSchema,
+      beneficiaryActorId: idSchema.optional(),
+      description: z.string().trim().min(1).max(1_000),
+      dueStoryTime: storyTimeSchema.optional(),
+      dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+    }).strict(),
+  }).strict(),
+  z.object({ op: z.literal("satisfy-norm"), normRef: idSchema, byActorId: idSchema.optional() }).strict(),
+  z.object({ op: z.literal("violate-norm"), normRef: idSchema, byActorId: idSchema.optional(), reasonId: idSchema.optional() }).strict(),
+  z.object({ op: z.literal("repair-norm"), normRef: idSchema, byActorId: idSchema.optional(), reparationId: idSchema }).strict(),
+]);
+export type NormProposalOperation = z.infer<typeof normProposalOperationSchema>;
+export const normProposalDeltaSchema = z.object({
+  version: z.literal(1),
+  operations: z.array(normProposalOperationSchema).min(1).max(256),
+}).strict().superRefine((value, ctx) => {
+  const refs = value.operations.flatMap((operation) => operation.op === "instantiate-norm" ? [operation.localRef] : []);
+  if (new Set(refs).size !== refs.length) {
+    ctx.addIssue({ code: "custom", path: ["operations"], message: "Each turn-local norm ref must be introduced exactly once" });
+  }
+});
+export type NormProposalDelta = z.infer<typeof normProposalDeltaSchema>;
 
 /**
  * A source-backed canonical possibility may expose a small number of semantic
@@ -1080,11 +1155,46 @@ const schemaBoundActionInvocationSchema = z.object({
   });
 });
 
+export const actionStateAddressSchema = z.object({
+  entityId: idSchema,
+  field: z.string().trim().min(1).max(240),
+}).strict();
+export type ActionStateAddress = z.infer<typeof actionStateAddressSchema>;
+
+export const actionResourceClaimSchema = actionStateAddressSchema.extend({
+  mode: z.enum(["read", "reserve", "consume", "produce", "transfer-in", "transfer-out"]),
+  amount: z.number().finite().positive().optional(),
+}).strict().superRefine((value, ctx) => {
+  if (["consume", "produce", "transfer-in", "transfer-out"].includes(value.mode) && value.amount === undefined) {
+    ctx.addIssue({ code: "custom", path: ["amount"], message: `${value.mode} resource claims require a positive amount` });
+  }
+  if (["read", "reserve"].includes(value.mode) && value.amount !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["amount"], message: `${value.mode} resource claims cannot declare an amount` });
+  }
+});
+export type ActionResourceClaim = z.infer<typeof actionResourceClaimSchema>;
+
+export const actionFootprintSchema = z.object({
+  reads: z.array(actionStateAddressSchema).max(128),
+  writes: z.array(actionStateAddressSchema).max(128),
+  resources: z.array(actionResourceClaimSchema).max(64),
+}).strict().superRefine((value, ctx) => {
+  for (const field of ["reads", "writes", "resources"] as const) {
+    const keys = value[field].map((item) => `${item.entityId}\u0000${item.field}`);
+    if (new Set(keys).size !== keys.length) {
+      ctx.addIssue({ code: "custom", path: [field], message: `${field} must not repeat a state address` });
+    }
+  }
+});
+export type ActionFootprint = z.infer<typeof actionFootprintSchema>;
+
 export const actionInvocationSchema = z.discriminatedUnion("lane", [
   schemaBoundActionInvocationSchema,
   z.object({
     lane: z.literal("ad-hoc"),
+    actionKindId: idSchema,
     description: z.string().trim().min(1).max(1_000),
+    footprint: actionFootprintSchema,
   }).strict(),
 ]);
 export type ActionInvocation = z.infer<typeof actionInvocationSchema>;
@@ -1145,17 +1255,6 @@ export const worldRuleExceptionSchema = z.object({
 }).strict().superRefine(validateWorldRuleEvidenceShape);
 export type WorldRuleException = z.infer<typeof worldRuleExceptionSchema>;
 
-export const legacyWorldRuleSchema = z.object({
-  id: idSchema,
-  name: z.string().min(1),
-  scope: worldRuleScopeSchema,
-  appliesWhen: z.array(predicateSchema),
-  forbids: z.array(predicateSchema).optional(),
-  requires: z.array(predicateSchema).optional(),
-  evidence: z.array(evidenceRefSchema),
-}).strict();
-export type LegacyWorldRule = z.infer<typeof legacyWorldRuleSchema>;
-
 export const controlledWorldRuleSchema = z.object({
   ontologyVersion: z.literal("world-rule-v2"),
   id: idSchema,
@@ -1210,8 +1309,8 @@ export const controlledWorldRuleSchema = z.object({
 });
 export type ControlledWorldRule = z.infer<typeof controlledWorldRuleSchema>;
 
-export const worldRuleSchema = z.union([controlledWorldRuleSchema, legacyWorldRuleSchema]);
-export type WorldRule = z.infer<typeof worldRuleSchema>;
+export const worldRuleSchema = controlledWorldRuleSchema;
+export type WorldRule = ControlledWorldRule;
 
 function validateWorldRuleEvidenceShape(
   value: { basis: "explicit" | "inferred"; status: "supported" | "contested"; evidence: EvidenceRef[]; counterEvidence?: EvidenceRef[] },
@@ -1288,6 +1387,8 @@ export const eventProposalBaseSchema = z
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
     proposedSemantics: branchSemanticProposalDeltaSchema.optional(),
+    proposedProcesses: processProposalDeltaSchema.optional(),
+    proposedNorms: normProposalDeltaSchema.optional(),
     causalParents: z.array(idSchema),
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     evidence: z.array(evidenceRefSchema),

@@ -113,7 +113,13 @@ describe("WorldObjectStore", () => {
       version: 1 as const,
       operations: [{
         op: "start-process" as const,
-        process: { id: "storm-1", ownerEntityIds: ["valley"], phaseId: "forming", progress: 0.1 },
+        process: {
+          id: "storm-1",
+          templateId: "storm-cycle",
+          ownerBindings: [{ roleId: "region", entityIds: ["valley"] }],
+          phaseId: "forming",
+          progress: 0.1,
+        },
       }],
     };
     const norms = {

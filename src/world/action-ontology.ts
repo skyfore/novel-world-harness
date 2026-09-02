@@ -8,6 +8,7 @@ import {
   stateValueSchema,
   valueTypeSchema,
   type ActionInvocation,
+  type ActionStateAddress,
   type Entity,
   type Predicate,
   type StateDelta,
@@ -154,10 +155,17 @@ export function resolveActionInvocation(
     hasKnowledge: boolean;
     hasTimeAdvance: boolean;
     hasSceneTransition: boolean;
+    proposalPreconditions?: readonly Predicate[];
   },
 ): ResolvedActionInvocation {
   const invocation = actionInvocationSchema.parse(invocationInput);
-  if (invocation.lane === "ad-hoc") return { issues: [], preconditions: [], stateEffects: [] };
+  if (invocation.lane === "ad-hoc") {
+    return {
+      issues: validateAdHocActionFootprint(invocation, input.proposedDelta, input.proposalPreconditions ?? [], entities),
+      preconditions: [],
+      stateEffects: [],
+    };
+  }
   const schema = schemas.get(invocation.schemaId);
   if (!schema) return {
     issues: [issue("UNKNOWN_ACTION_SCHEMA", `Unknown action schema ${invocation.schemaId}`, "action.schemaId")],
@@ -197,6 +205,76 @@ export function resolveActionInvocation(
   }
   if (!issues.length) validateInstantiatedEffects(input.proposedDelta, stateEffects, schema.id, issues);
   return { issues, preconditions, stateEffects };
+}
+
+/** Validate that an unknown action still declares an exact, inspectable footprint. */
+export function validateAdHocActionFootprint(
+  invocation: Extract<ActionInvocation, { lane: "ad-hoc" }>,
+  delta: StateDelta,
+  preconditions: readonly Predicate[],
+  entities: ReadonlyMap<string, Entity>,
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const addressKey = (address: ActionStateAddress) => `${address.entityId}\u0000${address.field}`;
+  const reads = new Set(invocation.footprint.reads.map(addressKey));
+  const writes = new Set(invocation.footprint.writes.map(addressKey));
+  const actualWrites = new Set(delta.operations.flatMap((operation) =>
+    "entityId" in operation && "field" in operation
+      ? [`${operation.entityId}\u0000${operation.field}`]
+      : []));
+  for (const [field, addresses] of [["reads", invocation.footprint.reads], ["writes", invocation.footprint.writes]] as const) {
+    addresses.forEach((address, index) => {
+      if (!entities.has(address.entityId)) {
+        issues.push(issue("UNKNOWN_ACTION_FOOTPRINT_ENTITY", `Ad-hoc action footprint references unknown entity ${address.entityId}`, `action.footprint.${field}.${index}.entityId`));
+      }
+    });
+  }
+  for (const key of actualWrites) {
+    if (!writes.has(key)) issues.push(issue("AD_HOC_ACTION_WRITE_UNDECLARED", `Ad-hoc action writes undeclared state address ${printAddress(key)}`, "action.footprint.writes"));
+  }
+  for (const key of writes) {
+    if (!actualWrites.has(key)) issues.push(issue("AD_HOC_ACTION_WRITE_UNUSED", `Ad-hoc action declares unused write ${printAddress(key)}`, "action.footprint.writes"));
+  }
+  for (const predicate of preconditions) {
+    for (const address of predicateStateAddresses(predicate)) {
+      const key = addressKey(address);
+      if (!reads.has(key)) issues.push(issue("AD_HOC_ACTION_READ_UNDECLARED", `Ad-hoc action precondition reads undeclared state address ${printAddress(key)}`, "action.footprint.reads"));
+    }
+  }
+  invocation.footprint.resources.forEach((claim, index) => {
+    const key = addressKey(claim);
+    if (!entities.has(claim.entityId)) {
+      issues.push(issue("UNKNOWN_ACTION_RESOURCE_ENTITY", `Resource claim references unknown entity ${claim.entityId}`, `action.footprint.resources.${index}.entityId`));
+    }
+    if (!reads.has(key)) {
+      issues.push(issue("ACTION_RESOURCE_READ_REQUIRED", `Resource claim ${printAddress(key)} must be declared as a read`, `action.footprint.resources.${index}`));
+    }
+    const mutates = ["consume", "produce", "transfer-in", "transfer-out"].includes(claim.mode);
+    if (mutates && !writes.has(key)) {
+      issues.push(issue("ACTION_RESOURCE_WRITE_REQUIRED", `Mutating resource claim ${printAddress(key)} must be declared as a write`, `action.footprint.resources.${index}`));
+    }
+    if (!mutates) return;
+    const expected = ["consume", "transfer-out"].includes(claim.mode) ? -claim.amount! : claim.amount!;
+    const matching = delta.operations.some((operation) => operation.op === "adjust-number"
+      && operation.entityId === claim.entityId
+      && operation.field === claim.field
+      && operation.amount === expected);
+    if (!matching) {
+      issues.push(issue("ACTION_RESOURCE_CLAIM_MISMATCH", `Resource claim ${claim.mode} ${claim.amount} does not match a numeric state adjustment`, `action.footprint.resources.${index}`));
+    }
+  });
+  return issues;
+}
+
+function predicateStateAddresses(predicate: Predicate): ActionStateAddress[] {
+  if (predicate.op === "all" || predicate.op === "any") return predicate.items.flatMap(predicateStateAddresses);
+  if (predicate.op === "not") return predicateStateAddresses(predicate.item);
+  if ("entityId" in predicate && "field" in predicate) return [{ entityId: predicate.entityId, field: predicate.field }];
+  return [];
+}
+
+function printAddress(key: string): string {
+  return key.replace("\u0000", ".");
 }
 
 export function validateActionSchemaCatalog(

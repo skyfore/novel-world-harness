@@ -18,13 +18,37 @@ describe("dynamic in-world rules", () => {
       { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: [] },
       { id: "garden", kind: "location", canonicalName: "Garden", aliases: [], evidence: [] },
     ];
+    const evidence = [{
+      span: { sourceId: "novel", startByte: 0, endByte: 6, startLine: 1, endLine: 1, quoteHash: "a".repeat(64) },
+      strength: "explicit" as const,
+    }];
     const rule: WorldRule = {
+      ontologyVersion: "world-rule-v2",
       id: "garden-closed",
       name: "Garden is closed",
+      kind: "physical",
       scope: "global",
+      jurisdictionEntityIds: [],
       appliesWhen: [],
-      forbids: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "garden" }],
-      evidence: [],
+      visibility: "public",
+      knownByClaimIds: [],
+      priority: 0,
+      defeasible: false,
+      overridesRuleIds: [],
+      clauses: [{
+        id: "garden-closed-clause",
+        modality: "forbid",
+        predicate: { op: "fact-equals", entityId: "hero", field: "character.location", value: "garden" },
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence,
+      }],
+      exceptions: [],
+      basis: "explicit",
+      status: "supported",
+      confidence: 1,
+      evidence,
     };
     const engine = new WorldEngine(root, {
       entities: new Map(entities.map((entity) => [entity.id, entity])),
@@ -55,7 +79,7 @@ describe("dynamic in-world rules", () => {
       evidence: [],
     });
     expect(enterBefore.report.accepted).toBe(false);
-    expect(enterBefore.report.errors.some((error) => error.code === "RULE_FORBIDS")).toBe(true);
+    expect(enterBefore.report.errors.some((error) => error.code === "STATE_RULE_FORBIDS")).toBe(true);
 
     const reopen = await engine.commitProposal({
       proposalId: "reopen-garden",
@@ -91,4 +115,3 @@ describe("dynamic in-world rules", () => {
     expect((await engine.projector.project(enterAfter.newHead)).values.hero?.["character.location"]).toBe("garden");
   });
 });
-

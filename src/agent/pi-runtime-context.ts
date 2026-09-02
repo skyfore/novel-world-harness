@@ -19,7 +19,7 @@ import {
 } from "../world/runtime-context.js";
 import type { ActorScopedActionContext } from "../world/player-action.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
-import { resolveEffectiveWorldRules, isControlledWorldRule } from "../world/world-rule-ontology.js";
+import { resolveEffectiveWorldRules } from "../world/world-rule-ontology.js";
 import type { CanonicalEvent, Claim, Entity, EvidenceRef, WorldRule } from "../world/model.js";
 import type { TraceContext } from "../trace/recorder.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
@@ -446,9 +446,7 @@ function admittedArtifactFacts(input: {
   if (input.artifact.kind === "world-rule") {
     const rule = input.artifact.payload as WorldRule;
     if (!input.effectiveRuleIds.has(rule.id)) return [];
-    const actorVisible = isControlledWorldRule(rule)
-      ? rule.visibility === "public" || rule.visibility === "observable"
-      : false;
+    const actorVisible = rule.visibility === "public" || rule.visibility === "observable";
     return [{
       fact: {
         summary: `当前生效的世界规则：${rule.name}。`,

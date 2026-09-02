@@ -176,6 +176,98 @@ export const DEFAULT_STATE_FIELDS: StateFieldSpec[] = [
   { key: "relationship.obligations", appliesTo: ["relationship"], valueType: "entity-ref-set", cardinality: "many", visibility: "owner" },
 ];
 
+export type ResourceAccount = { entityId: EntityId; field: string };
+export type ResourceConservationPolicy = {
+  id: string;
+  accounts: readonly ResourceAccount[];
+  mode: "conserved" | "non-increasing";
+  tolerance?: number;
+};
+
+/**
+ * Deterministic hook for closed or depleting resource systems. Production is
+ * represented by a separate policy/process, never smuggled in as an arbitrary
+ * state write.
+ */
+export function validateResourceConservation(
+  before: WorldState,
+  after: WorldState,
+  policies: readonly ResourceConservationPolicy[],
+): string[] {
+  const issues: string[] = [];
+  for (const policy of policies) {
+    if (!policy.accounts.length) {
+      issues.push(`Resource policy ${policy.id} has no accounts`);
+      continue;
+    }
+    const keys = policy.accounts.map((account) => `${account.entityId}\u0000${account.field}`);
+    if (new Set(keys).size !== keys.length) {
+      issues.push(`Resource policy ${policy.id} repeats an account`);
+      continue;
+    }
+    const readTotal = (state: WorldState): number | undefined => {
+      let total = 0;
+      for (const account of policy.accounts) {
+        const value = state.values[account.entityId]?.[account.field];
+        if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+        total += value;
+      }
+      return total;
+    };
+    const beforeTotal = readTotal(before);
+    const afterTotal = readTotal(after);
+    if (beforeTotal === undefined || afterTotal === undefined) {
+      issues.push(`Resource policy ${policy.id} requires every account to have a finite numeric value`);
+      continue;
+    }
+    const tolerance = policy.tolerance ?? 1e-9;
+    if (!Number.isFinite(tolerance) || tolerance < 0) {
+      issues.push(`Resource policy ${policy.id} has invalid tolerance ${String(tolerance)}`);
+      continue;
+    }
+    const delta = afterTotal - beforeTotal;
+    if (policy.mode === "conserved" && Math.abs(delta) > tolerance) {
+      issues.push(`Resource policy ${policy.id} requires total ${beforeTotal} to remain conserved; proposed total is ${afterTotal}`);
+    }
+    if (policy.mode === "non-increasing" && delta > tolerance) {
+      issues.push(`Resource policy ${policy.id} forbids unmodeled production; total rises from ${beforeTotal} to ${afterTotal}`);
+    }
+  }
+  return issues;
+}
+
+export function validateResourcePolicyCatalog(
+  policies: readonly ResourceConservationPolicy[],
+  registry: StateSchemaRegistry,
+  entities: ReadonlyMap<EntityId, Entity>,
+): string[] {
+  const issues: string[] = [];
+  const ids = new Set<string>();
+  for (const policy of policies) {
+    if (ids.has(policy.id)) issues.push(`Duplicate resource policy ${policy.id}`);
+    ids.add(policy.id);
+    for (const account of policy.accounts) {
+      const entity = entities.get(account.entityId);
+      if (!entity) {
+        issues.push(`Resource policy ${policy.id} references unknown entity ${account.entityId}`);
+        continue;
+      }
+      try {
+        const field = registry.get(account.field);
+        if (field.valueType !== "number" || field.cardinality !== "one") {
+          issues.push(`Resource policy ${policy.id} account ${account.entityId}.${account.field} must be a single numeric field`);
+        }
+        if (!field.appliesTo.includes(entity.kind)) {
+          issues.push(`Resource policy ${policy.id} field ${account.field} does not apply to ${entity.kind}`);
+        }
+      } catch (error) {
+        issues.push(`Resource policy ${policy.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+  return issues;
+}
+
 export function emptyWorldState(atCommit: string, step = 0): WorldState {
   return { atCommit, logicalTime: { step }, values: {}, activeRuleIds: [] };
 }

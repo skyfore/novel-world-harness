@@ -246,13 +246,21 @@ export class ProjectionService {
             processes = applyProcessDelta(
               processes,
               effects.processDelta,
-              context.entities,
+              { entities: context.entities, templates: context.processTemplates ?? new Map() },
               provenance,
               entry.commit.logicalTime.elapsedDays ?? 0,
             );
           }
           if (effects.normDelta) {
-            norms = applyNormDelta(norms, effects.normDelta, context.entities, provenance);
+            norms = applyNormDelta(norms, effects.normDelta, {
+              entities: context.entities,
+              templates: context.normTemplates ?? new Map(),
+              normativeRuleIds: new Set([...context.rules.values()]
+                .filter((rule) => ["social", "legal", "institutional"].includes("kind" in rule ? rule.kind : ""))
+                .map((rule) => rule.id)),
+              ...(event.action ? { action: event.action } : {}),
+              postState: state,
+            }, provenance);
           }
 
           history.push({

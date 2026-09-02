@@ -25,6 +25,7 @@ export type EffectiveWorldRule = {
   id: string;
   name: string;
   rule: WorldRule;
+  enforcement: "hard-state" | "normative";
   requires: Predicate[];
   forbids: Predicate[];
 };
@@ -42,6 +43,7 @@ export type WorldRuleResolution = {
 export type ModelVisibleWorldRule = {
   name: string;
   scope: WorldRule["scope"];
+  enforcement: "hard-state" | "normative";
   appliesWhen: Predicate[];
   requires: Predicate[];
   forbids: Predicate[];
@@ -51,24 +53,28 @@ export function isControlledWorldRule(rule: WorldRule): rule is ControlledWorldR
   return "ontologyVersion" in rule && rule.ontologyVersion === WORLD_RULE_ONTOLOGY_VERSION;
 }
 
+/** Physical/magical mechanics define valid world states; social/legal rules do not erase agency. */
+export function isHardStateRule(rule: WorldRule): boolean {
+  return rule.kind === "physical" || rule.kind === "magical";
+}
+
+export function isNormativeWorldRule(rule: WorldRule): rule is ControlledWorldRule {
+  return ["social", "legal", "institutional"].includes(rule.kind);
+}
+
 export function worldRuleRequires(rule: WorldRule): Predicate[] {
-  if (!isControlledWorldRule(rule)) return structuredClone(rule.requires ?? []);
   return rule.clauses
     .filter((clause) => clause.status === "supported" && clause.modality === "require")
     .map((clause) => structuredClone(clause.predicate));
 }
 
 export function worldRuleForbids(rule: WorldRule): Predicate[] {
-  if (!isControlledWorldRule(rule)) return structuredClone(rule.forbids ?? []);
   return rule.clauses
     .filter((clause) => clause.status === "supported" && clause.modality === "forbid")
     .map((clause) => structuredClone(clause.predicate));
 }
 
 export function worldRulePredicates(rule: WorldRule): Predicate[] {
-  if (!isControlledWorldRule(rule)) {
-    return [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])];
-  }
   return [
     ...rule.appliesWhen,
     ...rule.clauses.map((clause) => clause.predicate),
@@ -78,7 +84,6 @@ export function worldRulePredicates(rule: WorldRule): Predicate[] {
 
 /** All portable evidence, including per-clause and per-exception evidence. */
 export function worldRuleEvidence(rule: WorldRule): EvidenceRef[] {
-  if (!isControlledWorldRule(rule)) return [...rule.evidence];
   return [
     ...rule.evidence,
     ...(rule.counterEvidence ?? []),
@@ -110,11 +115,6 @@ export function validateWorldRuleCatalog(
     ids.add(rule.id);
     worldRulePredicates(rule).forEach((predicate, predicateIndex) =>
       validateRulePredicate(predicate, { ...catalog, rules: visibleRules }, `${prefix}.predicates.${predicateIndex}`, issues));
-    if (!isControlledWorldRule(rule)) {
-      validateLegacyRule(rule, prefix, issues);
-      continue;
-    }
-
     if (rule.kind === "physical" && rule.authorityEntityId) {
       issues.push(issue("PHYSICAL_RULE_HAS_AUTHORITY", `Physical rule ${rule.id} cannot be issued by an authority`, `${prefix}.authorityEntityId`));
     }
@@ -162,6 +162,12 @@ export function validateWorldRuleCatalog(
     const required = new Set(rule.clauses
       .filter((clause) => clause.status === "supported" && clause.modality === "require")
       .map((clause) => canonicalJson(clause.predicate)));
+    const forbidden = new Set(rule.clauses
+      .filter((clause) => clause.status === "supported" && clause.modality === "forbid")
+      .map((clause) => canonicalJson(clause.predicate)));
+    if (rule.appliesWhen.some((predicate) => forbidden.has(canonicalJson(predicate)))) {
+      issues.push(issue("SELF_FORBIDDING_WORLD_RULE", `Rule ${rule.id} forbids the same condition that makes it applicable`, `${prefix}.clauses`));
+    }
     for (const [clauseIndex, clause] of rule.clauses.entries()) {
       if (clause.status === "supported" && clause.modality === "forbid" && required.has(canonicalJson(clause.predicate))) {
         issues.push(issue("CONTRADICTORY_WORLD_RULE", `Rule ${rule.id} both requires and forbids the same predicate`, `${prefix}.clauses.${clauseIndex}.predicate`));
@@ -172,8 +178,6 @@ export function validateWorldRuleCatalog(
       const path = `${prefix}.overridesRuleIds.${overrideIndex}`;
       if (!target) {
         issues.push(issue("UNKNOWN_OVERRIDDEN_RULE", `Rule ${rule.id} overrides unknown rule ${targetId}`, path));
-      } else if (!isControlledWorldRule(target)) {
-        issues.push(issue("LEGACY_RULE_OVERRIDE_UNSUPPORTED", `Rule ${rule.id} cannot override legacy rule ${targetId} without explicit priority/defeasibility metadata`, path));
       } else {
         if (!target.defeasible) {
           issues.push(issue("INDEFEASIBLE_RULE_OVERRIDE", `Rule ${rule.id} cannot override indefeasible rule ${targetId}`, path));
@@ -187,7 +191,6 @@ export function validateWorldRuleCatalog(
 
   const overrideGraph = new Map<string, Set<string>>();
   for (const rule of values) {
-    if (!isControlledWorldRule(rule)) continue;
     overrideGraph.set(rule.id, new Set(rule.overridesRuleIds.filter((id) => visibleRules.has(id))));
   }
   for (const cycle of directedCycles(overrideGraph)) {
@@ -201,7 +204,6 @@ export function validateWorldRuleEvidenceAssertions(
   rule: WorldRule,
   assertions: readonly EvidenceAssertion[],
 ): ValidationIssue[] {
-  if (!isControlledWorldRule(rule)) return [];
   const selected = assertions.filter((assertion) => assertion.target.artifactKind === "world-rule"
     && assertion.target.artifactId === rule.id);
   const issues: ValidationIssue[] = [];
@@ -237,41 +239,34 @@ export function resolveEffectiveWorldRules(
   for (const ruleId of [...state.activeRuleIds].sort()) {
     const rule = rules.get(ruleId);
     if (!rule) continue;
-    if (isControlledWorldRule(rule)) {
-      if (rule.status === "contested") {
-        inactive.push({ ruleId, reason: "contested" });
-        continue;
-      }
-      if (!policyStoryScopeActive(state.logicalTime.storyTime, rule.validStoryTime, new Set())) {
-        inactive.push({ ruleId, reason: "outside-time" });
-        continue;
-      }
+    if (rule.status === "contested") {
+      inactive.push({ ruleId, reason: "contested" });
+      continue;
+    }
+    if (!policyStoryScopeActive(state.logicalTime.storyTime, rule.validStoryTime, new Set())) {
+      inactive.push({ ruleId, reason: "outside-time" });
+      continue;
     }
     if (!rule.appliesWhen.every((predicate) => evaluatePredicate(state, predicate))) {
       inactive.push({ ruleId, reason: "not-applicable" });
       continue;
     }
-    if (isControlledWorldRule(rule)) {
-      const matchedException = rule.exceptions
-        .filter((exception) => exception.status === "supported")
-        .find((exception) => exception.appliesWhen.every((predicate) => evaluatePredicate(state, predicate)));
-      if (matchedException) {
-        inactive.push({ ruleId, reason: "exception", exceptionId: matchedException.id });
-        continue;
-      }
+    const matchedException = rule.exceptions
+      .filter((exception) => exception.status === "supported")
+      .find((exception) => exception.appliesWhen.every((predicate) => evaluatePredicate(state, predicate)));
+    if (matchedException) {
+      inactive.push({ ruleId, reason: "exception", exceptionId: matchedException.id });
+      continue;
     }
     candidates.push(rule);
   }
 
   candidates.sort((left, right) => {
-    const leftPriority = isControlledWorldRule(left) ? left.priority : -1;
-    const rightPriority = isControlledWorldRule(right) ? right.priority : -1;
-    return rightPriority - leftPriority || left.id.localeCompare(right.id);
+    return right.priority - left.priority || left.id.localeCompare(right.id);
   });
   const effectiveRules: WorldRule[] = [];
   for (const candidate of candidates) {
-    const overriding = effectiveRules.find((rule) => isControlledWorldRule(rule)
-      && rule.overridesRuleIds.includes(candidate.id));
+    const overriding = effectiveRules.find((rule) => rule.overridesRuleIds.includes(candidate.id));
     if (overriding) {
       inactive.push({ ruleId: candidate.id, reason: "overridden", overridingRuleId: overriding.id });
       continue;
@@ -284,6 +279,7 @@ export function resolveEffectiveWorldRules(
         id: rule.id,
         name: rule.name,
         rule,
+        enforcement: isHardStateRule(rule) ? "hard-state" as const : "normative" as const,
         requires: worldRuleRequires(rule),
         forbids: worldRuleForbids(rule),
       }))
@@ -307,19 +303,18 @@ export function modelVisibleWorldRules(
 ): ModelVisibleWorldRule[] {
   return rules.flatMap((effective): ModelVisibleWorldRule[] => {
     const rule = effective.rule;
-    if (isControlledWorldRule(rule)) {
-      if (rule.visibility === "engine") return [];
-      if (rule.visibility === "knowledge"
-        && !rule.knownByClaimIds.some((claimId) => input.knownClaimIds.has(claimId))) return [];
-      if (rule.visibility === "observable" && rule.scope !== "global"
-        && !rule.jurisdictionEntityIds.some((entityId) => input.observableEntityIds.has(entityId))) return [];
-    }
+    if (rule.visibility === "engine") return [];
+    if (rule.visibility === "knowledge"
+      && !rule.knownByClaimIds.some((claimId) => input.knownClaimIds.has(claimId))) return [];
+    if (rule.visibility === "observable" && rule.scope !== "global"
+      && !rule.jurisdictionEntityIds.some((entityId) => input.observableEntityIds.has(entityId))) return [];
     const predicates = [...rule.appliesWhen, ...effective.requires, ...effective.forbids];
     if (!predicates.every((predicate) => predicateEntityReferences(predicate, input.entities)
       .every((entityId) => input.visibleEntityIds.has(entityId)))) return [];
     return [{
       name: rule.name,
       scope: rule.scope,
+      enforcement: effective.enforcement,
       appliesWhen: structuredClone(rule.appliesWhen),
       requires: structuredClone(effective.requires),
       forbids: structuredClone(effective.forbids),
@@ -358,19 +353,6 @@ function validateEvidenceBinding(
   }
   if (semantic.basis === "explicit" && !supports.some((assertion) => assertion.strength === "explicit")) {
     issues.push(issue("MISSING_EXACT_EXPLICIT_WORLD_RULE_SUPPORT", `Explicit world-rule semantic ${semantic.id} requires exact explicit support`, `${path}.basis`));
-  }
-}
-
-function validateLegacyRule(rule: Exclude<WorldRule, ControlledWorldRule>, prefix: string, issues: ValidationIssue[]): void {
-  if (!(rule.requires?.length || rule.forbids?.length)) {
-    issues.push(issue("INERT_WORLD_RULE", `Rule ${rule.id} has neither requires nor forbids constraints`, prefix));
-  }
-  const forbidden = new Set((rule.forbids ?? []).map(canonicalJson));
-  if (rule.appliesWhen.some((predicate) => forbidden.has(canonicalJson(predicate)))) {
-    issues.push(issue("SELF_FORBIDDING_WORLD_RULE", `Rule ${rule.id} forbids the same condition that makes it applicable`, `${prefix}.forbids`));
-  }
-  if ((rule.requires ?? []).some((predicate) => forbidden.has(canonicalJson(predicate)))) {
-    issues.push(issue("CONTRADICTORY_WORLD_RULE", `Rule ${rule.id} both requires and forbids the same predicate`, `${prefix}.forbids`));
   }
 }
 

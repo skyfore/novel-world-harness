@@ -23,6 +23,9 @@ export function contextEvidenceSourceIds(context: WorldModelContext): string[] {
     ...[...(context.events?.values() ?? [])].flatMap((artifact) => artifact.evidence),
     ...[...context.rules.values()].flatMap(worldRuleEvidence),
     ...(context.spatialRelations ?? []).flatMap(spatialRelationEvidence),
+    ...[...(context.actionConstraints?.values() ?? [])].flatMap((artifact) => artifact.evidence),
+    ...[...(context.normTemplates?.values() ?? [])].flatMap((artifact) => artifact.evidence),
+    ...[...(context.processTemplates?.values() ?? [])].flatMap((artifact) => artifact.evidence),
     ...(context.actorGoals ?? []).flatMap((artifact) => artifact.evidence),
     ...[...(context.actorModels?.values() ?? [])].flatMap((artifact) => [
       ...artifact.evidence,

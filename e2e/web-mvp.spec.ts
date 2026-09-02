@@ -400,11 +400,31 @@ async function seedBrowserCompilation(options: CompileSourceOptions): Promise<vo
   await canonical.putEntity({ id: hallId, kind: "location", canonicalName: "Hall", aliases: [], evidence });
   await canonical.putEntity({ id: gardenId, kind: "location", canonicalName: "Garden", aliases: [], evidence });
   await canonical.putRule({
+    ontologyVersion: "world-rule-v2",
     id: ruleId,
     name: "The Hall door remains closed",
-    scope: "location",
+    kind: "physical",
+    scope: "global",
+    jurisdictionEntityIds: [],
     appliesWhen: [],
-    forbids: [{ op: "fact-equals", entityId: hallId, field: "location.open", value: true }],
+    visibility: "public",
+    knownByClaimIds: [],
+    priority: 0,
+    defeasible: false,
+    overridesRuleIds: [],
+    clauses: [{
+      id: `${ruleId}-clause`,
+      modality: "forbid",
+      predicate: { op: "fact-equals", entityId: hallId, field: "location.open", value: true },
+      basis: "explicit",
+      status: "supported",
+      confidence: 1,
+      evidence,
+    }],
+    exceptions: [],
+    basis: "explicit",
+    status: "supported",
+    confidence: 1,
     evidence,
   });
   await canonical.putEvent({

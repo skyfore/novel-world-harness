@@ -18,13 +18,37 @@ describe("temporal world rules", () => {
       { id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: [] },
       { id: "forbidden", kind: "location", canonicalName: "Forbidden", aliases: [], evidence: [] },
     ];
+    const support = [{
+      span: { sourceId: "novel", startByte: 0, endByte: 4, startLine: 1, endLine: 1, quoteHash: "a".repeat(64) },
+      strength: "explicit" as const,
+    }];
     const rule: WorldRule = {
+      ontologyVersion: "world-rule-v2",
       id: "ban-entry",
       name: "Ban entry",
+      kind: "physical",
       scope: "global",
+      jurisdictionEntityIds: [],
       appliesWhen: [],
-      forbids: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "forbidden" }],
-      evidence: [],
+      visibility: "public",
+      knownByClaimIds: [],
+      priority: 0,
+      defeasible: false,
+      overridesRuleIds: [],
+      clauses: [{
+        id: "ban-entry-clause",
+        modality: "forbid",
+        predicate: { op: "fact-equals", entityId: "hero", field: "character.location", value: "forbidden" },
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence: support,
+      }],
+      exceptions: [],
+      basis: "explicit",
+      status: "supported",
+      confidence: 1,
+      evidence: support,
     };
     const context: WorldModelContext = {
       entities: new Map(entities.map((entity) => [entity.id, entity])),
@@ -55,12 +79,12 @@ describe("temporal world rules", () => {
       evidence: [],
     });
     expect(result.report.accepted).toBe(false);
-    expect(result.report.errors.some((error) => error.code === "RULE_FORBIDS")).toBe(true);
+    expect(result.report.errors.some((error) => error.code === "STATE_RULE_FORBIDS")).toBe(true);
     expect(result.newHead).toBe(genesis);
     expect((await engine.projector.project(genesis)).values.hero?.["character.location"]).toBe("hall");
   });
 
-  it("enforces controlled clauses and suspends them only while a supported exception holds", async () => {
+  it("records social violations without erasing agency and honors supported exceptions", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-controlled-rules-"));
     roots.push(root);
     const entities: Entity[] = [
@@ -121,7 +145,7 @@ describe("temporal world rules", () => {
         { op: "activate-rule", ruleId: rule.id },
       ],
     });
-    const blocked = await engine.commitProposal({
+    const violated = await engine.commitProposal({
       proposalId: "enter-without-permit",
       branchId: "main",
       expectedParentCommit: genesis,
@@ -135,18 +159,23 @@ describe("temporal world rules", () => {
       causalParents: [],
       evidence: [],
     });
-    expect(blocked.report.errors).toContainEqual(expect.objectContaining({ code: "RULE_FORBIDS" }));
+    expect(violated.report.accepted).toBe(true);
+    expect(violated.progressCertificate?.channels).toContain("norm");
+    expect(Object.values((await engine.projections.project(violated.newHead)).norms.instances)[0]?.status).toBe("violated");
 
     const permit = await engine.commitProposal({
       proposalId: "receive-permit",
       branchId: "main",
-      expectedParentCommit: genesis,
+      expectedParentCommit: violated.newHead,
       source: "background",
       title: "Receive a permit",
       participants: ["hero"],
       proposedTime: { kind: "unknown" },
       preconditions: [],
-      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "permit" }] },
+      proposedDelta: { version: 1, operations: [
+        { op: "set", entityId: "hero", field: "character.plan", value: "permit" },
+        { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+      ] },
       causalParents: [],
       evidence: [],
     });
@@ -166,5 +195,6 @@ describe("temporal world rules", () => {
       evidence: [],
     });
     expect(allowed.report.accepted).toBe(true);
+    expect(Object.values((await engine.projections.project(allowed.newHead)).norms.instances)).toHaveLength(1);
   });
 });

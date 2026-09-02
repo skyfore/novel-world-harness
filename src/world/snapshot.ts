@@ -20,8 +20,8 @@ export const PROJECTION_REDUCER_VERSIONS = {
   state: 1,
   knowledge: 1,
   semantics: 2,
-  processes: 1,
-  norms: 1,
+  processes: 2,
+  norms: 2,
   scenes: 1,
   causality: 1,
 } as const;

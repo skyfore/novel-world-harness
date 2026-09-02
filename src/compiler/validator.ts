@@ -53,7 +53,6 @@ import {
   type SpatialRelation,
 } from "../world/spatial-ontology.js";
 import {
-  isControlledWorldRule,
   validateWorldRuleCatalog,
   validateWorldRuleEvidenceAssertions,
   worldRulePredicates,
@@ -1510,7 +1509,7 @@ async function processDependencyKind<T extends { id: string }>(
 }
 
 function ruleDependencies(rule: WorldRule): string[] {
-  const dependencies = isControlledWorldRule(rule) ? [...rule.overridesRuleIds] : [];
+  const dependencies = [...rule.overridesRuleIds];
   for (const predicate of worldRulePredicates(rule)) collectRuleDependencies(predicate, dependencies);
   return dependencies;
 }

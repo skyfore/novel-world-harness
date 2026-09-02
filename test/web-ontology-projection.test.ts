@@ -113,11 +113,31 @@ async function ontologyFixture() {
     evidence: first.evidence("The Hall contains the Vault"),
   });
   await canon.putRule({
+    ontologyVersion: "world-rule-v2",
     id: "no-flame",
     name: "No flame in the Hall",
-    scope: "location",
+    kind: "physical",
+    scope: "global",
+    jurisdictionEntityIds: [],
     appliesWhen: [],
-    forbids: [{ op: "fact-equals", entityId: "hall", field: "location.flame", value: true }],
+    visibility: "public",
+    knownByClaimIds: [],
+    priority: 0,
+    defeasible: false,
+    overridesRuleIds: [],
+    clauses: [{
+      id: "no-flame-clause",
+      modality: "forbid",
+      predicate: { op: "fact-equals", entityId: "hall", field: "location.flame", value: true },
+      basis: "explicit",
+      status: "supported",
+      confidence: 1,
+      evidence: first.evidence("The Hall permits no flame"),
+    }],
+    exceptions: [],
+    basis: "explicit",
+    status: "supported",
+    confidence: 1,
     evidence: first.evidence("The Hall permits no flame"),
   });
   await new CompilerProposalService(root).submit("entity", {

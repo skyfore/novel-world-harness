@@ -19,7 +19,6 @@ import {
   stateValueSchema,
   storyTimeSchema,
   controlledWorldRuleSchema,
-  legacyWorldRuleSchema,
   worldRuleClauseSchema,
   worldRuleExceptionSchema,
   worldRuleSchema,
@@ -96,12 +95,6 @@ const compilerRulePredicateSchema: z.ZodType<Predicate> = z.lazy(() =>
     z.object({ op: z.literal("not"), item: compilerRulePredicateSchema }).strict(),
   ]),
 );
-const compilerLegacyWorldRuleSchema = legacyWorldRuleSchema.extend({
-  appliesWhen: z.array(compilerRulePredicateSchema),
-  forbids: z.array(compilerRulePredicateSchema).optional(),
-  requires: z.array(compilerRulePredicateSchema).optional(),
-  evidence: evidenceRefSchema.array().min(1),
-});
 const compilerWorldRuleClauseSchema = worldRuleClauseSchema.safeExtend({ predicate: compilerRulePredicateSchema });
 const compilerWorldRuleExceptionSchema = worldRuleExceptionSchema.safeExtend({
   appliesWhen: z.array(compilerRulePredicateSchema).min(1).max(32),
@@ -111,7 +104,7 @@ const compilerControlledWorldRuleSchema = controlledWorldRuleSchema.safeExtend({
   clauses: z.array(compilerWorldRuleClauseSchema).min(1).max(64),
   exceptions: z.array(compilerWorldRuleExceptionSchema).max(32).default([]),
 });
-const compilerWorldRuleSchema = z.union([compilerControlledWorldRuleSchema, compilerLegacyWorldRuleSchema]);
+const compilerWorldRuleSchema = compilerControlledWorldRuleSchema;
 const compilerCanonicalEventSchema = canonicalEventSchema.extend({
   observedOutcome: stateDeltaSchema.extend({
     operations: z.array(stateOperationSchema).max(16, "A single atomic canonical event may contain at most 16 typed world-state effects."),

@@ -142,7 +142,16 @@ describe("ActionSchema", () => {
       ...base,
       proposalId: "explicit-ad-hoc",
       expectedParentCommit: adHocGenesis,
-      action: { lane: "ad-hoc", description: "An uncompiled but bounded transfer" },
+      action: {
+        lane: "ad-hoc",
+        actionKindId: "transfer-artifact",
+        description: "An uncompiled but bounded transfer",
+        footprint: {
+          reads: [],
+          writes: [{ entityId: "key", field: "artifact.owner" }],
+          resources: [],
+        },
+      },
     });
     expect(adHoc.report.accepted).toBe(true);
   });

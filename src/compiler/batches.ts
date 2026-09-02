@@ -45,7 +45,6 @@ import {
 } from "../world/spatial-ontology.js";
 import {
   WORLD_RULE_ONTOLOGY_VERSION,
-  isControlledWorldRule,
   worldRuleEvidence,
 } from "../world/world-rule-ontology.js";
 import type { SceneOccurrence } from "../world/scene-occurrence.js";
@@ -1134,7 +1133,6 @@ function actionSchemaIdentity(schema: ActionSchema, status: CompilerActionSchema
 }
 
 function ruleIdentity(rule: WorldRule, status: CompilerRuleIdentity["status"]): CompilerRuleIdentity {
-  if (!isControlledWorldRule(rule)) return { id: rule.id, name: catalogText(rule.name), scope: rule.scope, status };
   return {
     id: rule.id,
     name: catalogText(rule.name),

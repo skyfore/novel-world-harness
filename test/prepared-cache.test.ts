@@ -416,7 +416,7 @@ describe("versioned prepared novel cache", () => {
       version: number;
       compilerSnapshot?: unknown;
     };
-    expect(rawBundle).toMatchObject({ version: 2, compilerSnapshot: expect.any(Object) });
+    expect(rawBundle).toMatchObject({ version: 3, compilerSnapshot: expect.any(Object) });
 
     const restoredRoot = await temporaryRoot("nwh-prepared-compiler-snapshot-restored-");
     const restoredFixture = await createEvidenceFixture(restoredRoot, content, "renamed-copy.md");
@@ -435,43 +435,30 @@ describe("versioned prepared novel cache", () => {
     expect(canonicalJson(await new EvidenceAssertionStore(restoredRoot).bindingForArtifact("entity", "hero")))
       .toBe(canonicalJson(bindingSnapshot));
 
-    // A legacy revision cannot reproduce metadata it never stored. Activating
-    // it must clear newer compiler metadata rather than silently mixing eras.
-    const legacyBundle = JSON.parse(
+    // MVP storage has one bundle schema. A hash-valid V1 bundle is rejected
+    // rather than being supplemented with state from the current workspace.
+    const oldBundle = JSON.parse(
       await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8"),
     ) as Record<string, unknown>;
-    legacyBundle.version = 1;
-    delete legacyBundle.compilerSnapshot;
-    const legacyHash = contentHash(legacyBundle);
-    const legacyDirectory = path.join(path.dirname(published.cachePath), legacyHash);
-    await fs.mkdir(legacyDirectory, { recursive: true, mode: 0o700 });
-    await fs.writeFile(path.join(legacyDirectory, "bundle.json"), `${canonicalJson(legacyBundle)}\n`);
-    await fs.writeFile(path.join(legacyDirectory, "manifest.json"), `${canonicalJson({
+    oldBundle.version = 1;
+    delete oldBundle.compilerSnapshot;
+    const oldHash = contentHash(oldBundle);
+    const oldDirectory = path.join(path.dirname(published.cachePath), oldHash);
+    await fs.mkdir(oldDirectory, { recursive: true, mode: 0o700 });
+    await fs.writeFile(path.join(oldDirectory, "bundle.json"), `${canonicalJson(oldBundle)}\n`);
+    await fs.writeFile(path.join(oldDirectory, "manifest.json"), `${canonicalJson({
       version: 1,
       contentMd5: fixture.source.contentMd5,
       contentSha256: fixture.source.contentSha256,
       sourceId: fixture.source.id,
-      bundleHash: legacyHash,
+      bundleHash: oldHash,
       createdAt: new Date().toISOString(),
     })}\n`);
-    await (await WorkspaceStore.create(sourceRoot)).restoreSourceTitleInference(fixture.source.id, {
-      version: 1,
-      sourceId: fixture.source.id,
-      title: "Temporary Newer Title",
-      evidence: fixture.evidence("Hero")[0]!,
-      generatedBy: { worker: "propose_novel_title", compilerBatchId: "snapshot-title-batch" },
-      inferredAt: new Date().toISOString(),
-    });
-    await expect(new PreparedNovelCache(sourceRoot, cacheRoot).activate(fixture.source, legacyHash))
-      .resolves.toMatchObject({ status: "activated", bundleHash: legacyHash });
-    await expect(annotationStore.list(fixture.source.id)).resolves.toEqual([]);
-    await expect(new EntityResolutionStore(sourceRoot).list(fixture.source.id)).resolves.toEqual([]);
-    await expect(new EventResolutionStore(sourceRoot).list(fixture.source.id)).resolves.toEqual([]);
-    await expect(new SourceAccountingStore(sourceRoot).read(fixture.source.id)).resolves.toBeNull();
-    await expect(new EvidenceAssertionStore(sourceRoot).bindingForArtifact("entity", "hero")).resolves.toBeNull();
-    const legacyRestoredSource = await (await WorkspaceStore.create(sourceRoot)).getSource(fixture.source.id);
-    expect(legacyRestoredSource).toMatchObject({ title: "novel.txt" });
-    expect(legacyRestoredSource).not.toHaveProperty("titleInference");
+    await expect(new PreparedNovelCache(sourceRoot, cacheRoot).activate(fixture.source, oldHash))
+      .rejects.toThrow();
+    expect(canonicalJson(await annotationStore.list(fixture.source.id))).toBe(canonicalJson(annotationSnapshot));
+    expect(canonicalJson(await new EvidenceAssertionStore(sourceRoot).bindingForArtifact("entity", "hero")))
+      .toBe(canonicalJson(bindingSnapshot));
   });
 
   it("stores only deterministic source batches after a transient boundary calibration", async () => {
@@ -703,16 +690,16 @@ describe("versioned prepared novel cache", () => {
     await expect(new PreparedNovelCache(fourthRoot, cacheRoot).restore(fourthFixture.source)).resolves.toMatchObject({ status: "restored" });
     await expect(new CanonicalModelStore(fourthRoot).getEntity("hero")).resolves.toMatchObject({ aliases: [] });
 
-    const legacyCacheRoot = await temporaryRoot("nwh-prepared-legacy-");
-    const legacyDirectory = path.join(legacyCacheRoot, published.contentMd5);
-    await fs.mkdir(legacyDirectory, { mode: 0o700 });
-    await fs.copyFile(path.join(published.cachePath, "bundle.json"), path.join(legacyDirectory, "bundle.json"));
-    await fs.copyFile(path.join(published.cachePath, "manifest.json"), path.join(legacyDirectory, "manifest.json"));
-    await fs.chmod(legacyDirectory, 0o500);
-    const legacyCache = new PreparedNovelCache(sourceRoot, legacyCacheRoot);
-    await expect(legacyCache.lookup(fixture.source)).resolves.toMatchObject({ status: "already-cached", cachePath: legacyDirectory });
-    await expect(legacyCache.publish(fixture.source)).resolves.toMatchObject({ status: "already-cached", bundleHash: published.bundleHash });
-    await expect(legacyCache.listRevisions(fixture.source)).resolves.toEqual([
+    const flatCacheRoot = await temporaryRoot("nwh-prepared-flat-layout-");
+    const flatDirectory = path.join(flatCacheRoot, published.contentMd5);
+    await fs.mkdir(flatDirectory, { mode: 0o700 });
+    await fs.copyFile(path.join(published.cachePath, "bundle.json"), path.join(flatDirectory, "bundle.json"));
+    await fs.copyFile(path.join(published.cachePath, "manifest.json"), path.join(flatDirectory, "manifest.json"));
+    await fs.chmod(flatDirectory, 0o500);
+    const flatCache = new PreparedNovelCache(sourceRoot, flatCacheRoot);
+    await expect(flatCache.lookup(fixture.source)).resolves.toMatchObject({ status: "miss" });
+    await expect(flatCache.publish(fixture.source)).resolves.toMatchObject({ status: "published", bundleHash: published.bundleHash });
+    await expect(flatCache.listRevisions(fixture.source)).resolves.toEqual([
       expect.objectContaining({ bundleHash: published.bundleHash, active: true }),
     ]);
 
@@ -743,11 +730,6 @@ describe("versioned prepared novel cache", () => {
       bundleHash: legacyHash,
       updatedAt: new Date(0).toISOString(),
     })}\n`);
-    await expect(new PreparedNovelCache(sourceRoot, semanticLegacyRoot).lookup(fixture.source)).resolves.toMatchObject({
-      status: "miss",
-      bundleHash: legacyHash,
-      requiresReparse: true,
-      reason: expect.stringContaining("incompatible semantic pipeline"),
-    });
+    await expect(new PreparedNovelCache(sourceRoot, semanticLegacyRoot).lookup(fixture.source)).rejects.toThrow();
   });
 });

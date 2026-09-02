@@ -108,7 +108,7 @@ export {
   type SourceAccountingSummary,
 } from "./compiler/source-accounting.js";
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
-export { PreparedNovelCache, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
+export { PreparedNovelCache, preparedNovelBundleSchema, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
 export { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "./compiler/reconcile-world.js";
 export {
   backfillLegacyProposalRejectionDiagnostics,

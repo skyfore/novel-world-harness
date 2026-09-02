@@ -67,9 +67,6 @@ export async function loadRuntimeSourceCorpus(
   if (!prepared || prepared.bundleHash !== base.preparedRevisionHash) {
     throw new Error(`Frozen prepared revision '${base.preparedRevisionHash}' is unavailable for runtime consultation.`);
   }
-  if (prepared.bundle.version !== 2) {
-    throw new Error(`Frozen prepared revision '${base.preparedRevisionHash}' has no compiler evidence snapshot.`);
-  }
   const structure = prepared.bundle.compilerSnapshot.structure;
   if (
     structure.sourceId !== base.sourceId

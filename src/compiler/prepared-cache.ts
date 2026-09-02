@@ -70,7 +70,7 @@ import { SourceAccountingStore, sourceAccountingManifestSchema } from "./source-
 
 export { COMPILER_PIPELINE_VERSION };
 
-const CACHE_FORMAT_VERSION = 1;
+const CACHE_FORMAT_VERSION = 2;
 export const COMPILER_PROMPT_VERSION = 25;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
@@ -98,13 +98,13 @@ export type PreparedRevisionLineage = z.infer<typeof preparedRevisionLineageSche
 
 const preparedCanonicalSchema = z.object({
   entities: z.array(entitySchema),
-  propositions: z.array(propositionSchema).default([]),
-  attributions: z.array(attributionSchema).default([]),
+  propositions: z.array(propositionSchema),
+  attributions: z.array(attributionSchema),
   claims: z.array(claimSchema),
   events: z.array(canonicalEventSchema),
-  eventParticipations: z.array(eventParticipationSchema).default([]),
-  eventRelations: z.array(eventRelationSchema).default([]),
-  spatialRelations: z.array(spatialRelationSchema).default([]),
+  eventParticipations: z.array(eventParticipationSchema),
+  eventRelations: z.array(eventRelationSchema),
+  spatialRelations: z.array(spatialRelationSchema),
   rules: z.array(worldRuleSchema),
   initialWorld: initialWorldSchema,
   goals: z.array(characterGoalSchema),
@@ -130,22 +130,12 @@ const preparedBundleCommonShape = {
   canonical: preparedCanonicalSchema,
 };
 
-const preparedNovelBundleV1Schema = z.object({
-  version: z.literal(1),
-  ...preparedBundleCommonShape,
-}).strict();
-
-const preparedNovelBundleV2Schema = z.object({
-  version: z.literal(2),
+export const preparedNovelBundleSchema = z.object({
+  version: z.literal(3),
   ...preparedBundleCommonShape,
   lineage: preparedRevisionLineageSchema.optional(),
   compilerSnapshot: preparedCompilerSnapshotSchema,
 }).strict();
-
-const preparedNovelBundleSchema = z.discriminatedUnion("version", [
-  preparedNovelBundleV1Schema,
-  preparedNovelBundleV2Schema,
-]);
 
 export type PreparedNovelBundle = z.infer<typeof preparedNovelBundleSchema>;
 
@@ -163,46 +153,44 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
   )) {
     throw new Error("Prepared bundle chapter split plan does not match its source identity.");
   }
-  if (bundle.version === 2) {
-    const snapshot = bundle.compilerSnapshot;
-    if (snapshot.structure.sourceId !== sourceId
-      || snapshot.structure.sourceSha256 !== bundle.source.contentSha256) {
-      throw new Error("Prepared compiler structure snapshot does not match its source identity.");
+  const snapshot = bundle.compilerSnapshot;
+  if (snapshot.structure.sourceId !== sourceId
+    || snapshot.structure.sourceSha256 !== bundle.source.contentSha256) {
+    throw new Error("Prepared compiler structure snapshot does not match its source identity.");
+  }
+  for (const annotation of snapshot.annotations) {
+    if (annotation.sourceId !== sourceId
+      || annotationAnchors(annotation).some((anchor) => anchor.sourceId !== sourceId)) {
+      throw new Error(`Prepared source annotation ${annotation.id} escapes source ${sourceId}.`);
     }
-    for (const annotation of snapshot.annotations) {
-      if (annotation.sourceId !== sourceId
-        || annotationAnchors(annotation).some((anchor) => anchor.sourceId !== sourceId)) {
-        throw new Error(`Prepared source annotation ${annotation.id} escapes source ${sourceId}.`);
-      }
+  }
+  for (const resolution of [...snapshot.entityResolutions, ...snapshot.eventResolutions]) {
+    if (resolution.sourceId !== sourceId) {
+      throw new Error(`Prepared resolution ${resolution.id} escapes source ${sourceId}.`);
     }
-    for (const resolution of [...snapshot.entityResolutions, ...snapshot.eventResolutions]) {
-      if (resolution.sourceId !== sourceId) {
-        throw new Error(`Prepared resolution ${resolution.id} escapes source ${sourceId}.`);
-      }
+  }
+  if (snapshot.accounting && (
+    snapshot.accounting.sourceId !== sourceId
+    || snapshot.accounting.sourceSha256 !== bundle.source.contentSha256
+  )) {
+    throw new Error("Prepared source-accounting snapshot does not match its source identity.");
+  }
+  const bindingKeys = new Set<string>();
+  const artifactsByKey = new Map<string, { kind: string; id: string; payload: unknown }>(preparedArtifactDescriptors(bundle.canonical)
+    .map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const));
+  for (const binding of snapshot.evidenceBindings) {
+    const key = `${binding.artifactKind}/${binding.artifactId}`;
+    if (bindingKeys.has(key)) throw new Error(`Prepared compiler snapshot repeats exact-evidence binding ${key}.`);
+    bindingKeys.add(key);
+    const artifact = artifactsByKey.get(key);
+    if (!artifact || contentHash(artifact.payload) !== binding.artifactHash) {
+      throw new Error(`Prepared exact-evidence binding ${key} is missing its artifact or has a stale artifact hash.`);
     }
-    if (snapshot.accounting && (
-      snapshot.accounting.sourceId !== sourceId
-      || snapshot.accounting.sourceSha256 !== bundle.source.contentSha256
-    )) {
-      throw new Error("Prepared source-accounting snapshot does not match its source identity.");
-    }
-    const bindingKeys = new Set<string>();
-    const artifactsByKey = new Map<string, { kind: string; id: string; payload: unknown }>(preparedArtifactDescriptors(bundle.canonical)
-      .map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const));
-    for (const binding of snapshot.evidenceBindings) {
-      const key = `${binding.artifactKind}/${binding.artifactId}`;
-      if (bindingKeys.has(key)) throw new Error(`Prepared compiler snapshot repeats exact-evidence binding ${key}.`);
-      bindingKeys.add(key);
-      const artifact = artifactsByKey.get(key);
-      if (!artifact || contentHash(artifact.payload) !== binding.artifactHash) {
-        throw new Error(`Prepared exact-evidence binding ${key} is missing its artifact or has a stale artifact hash.`);
-      }
-      for (const assertion of binding.assertions) {
-        if (assertion.target.artifactKind !== binding.artifactKind
-          || assertion.target.artifactId !== binding.artifactId
-          || assertion.anchors.some((anchor) => anchor.sourceId !== sourceId)) {
-          throw new Error(`Prepared exact-evidence assertion ${assertion.id} has an invalid source or artifact target.`);
-        }
+    for (const assertion of binding.assertions) {
+      if (assertion.target.artifactKind !== binding.artifactKind
+        || assertion.target.artifactId !== binding.artifactId
+        || assertion.anchors.some((anchor) => anchor.sourceId !== sourceId)) {
+        throw new Error(`Prepared exact-evidence assertion ${assertion.id} has an invalid source or artifact target.`);
       }
     }
   }
@@ -484,7 +472,7 @@ export class PreparedNovelCache {
     bundle: PreparedNovelBundle,
   ): Promise<PreparedCacheResult> {
     const bundleHash = contentHash(bundle);
-    if (bundle.version === 2 && bundle.lineage?.parentBundleHash === bundleHash) {
+    if (bundle.lineage?.parentBundleHash === bundleHash) {
       throw new Error(`Prepared revision ${bundleHash} cannot name itself as its lineage parent.`);
     }
     await this.ensureRevisionLayout(identity.contentMd5);
@@ -561,7 +549,7 @@ export class PreparedNovelCache {
         createdAt: cached.manifest.createdAt,
         active: active?.bundleHash === bundleHash,
         cachePath: cached.cachePath,
-        ...(cached.bundle.version === 2 && cached.bundle.lineage ? { lineage: cached.bundle.lineage } : {}),
+        ...(cached.bundle.lineage ? { lineage: cached.bundle.lineage } : {}),
       });
     }
     return revisions.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.bundleHash.localeCompare(right.bundleHash));
@@ -759,7 +747,7 @@ export class PreparedNovelCache {
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
     const bundle = preparedNovelBundleSchema.parse({
-      version: 2,
+      version: 3,
       source: {
         id: source.id,
         ...identity,
@@ -847,24 +835,21 @@ export class PreparedNovelCache {
       return { compatible: false, empty: false, reason: "Workspace initial world differs from the active prepared revision." };
     }
     const canonicalEmpty = !current.initialWorld && groups.every(([, actual]) => actual.length === 0);
-    if (bundle.version === 2) {
-      const snapshot = await this.readCompilerSnapshot(bundle);
-      const compilerEmpty = snapshot.annotations.length === 0
-        && snapshot.entityResolutions.length === 0
-        && snapshot.eventResolutions.length === 0
-        && snapshot.evidenceBindings.length === 0
-        && snapshot.accounting === null;
-      if ((!canonicalEmpty || !compilerEmpty)
-        && canonicalJson(snapshot) !== canonicalJson(bundle.compilerSnapshot)) {
-        return {
-          compatible: false,
-          empty: false,
-          reason: "Workspace compiler evidence/observation state differs from the active prepared revision.",
-        };
-      }
-      return { compatible: true, empty: canonicalEmpty && compilerEmpty };
+    const snapshot = await this.readCompilerSnapshot(bundle);
+    const compilerEmpty = snapshot.annotations.length === 0
+      && snapshot.entityResolutions.length === 0
+      && snapshot.eventResolutions.length === 0
+      && snapshot.evidenceBindings.length === 0
+      && snapshot.accounting === null;
+    if ((!canonicalEmpty || !compilerEmpty)
+      && canonicalJson(snapshot) !== canonicalJson(bundle.compilerSnapshot)) {
+      return {
+        compatible: false,
+        empty: false,
+        reason: "Workspace compiler evidence/observation state differs from the active prepared revision.",
+      };
     }
-    return { compatible: true, empty: canonicalEmpty };
+    return { compatible: true, empty: canonicalEmpty && compilerEmpty };
   }
 
   private async freshnessIssue(bundle: PreparedNovelBundle): Promise<string | null> {
@@ -911,14 +896,14 @@ export class PreparedNovelCache {
     // Once any accepted artifact for this source is present, however, require
     // the complete source-scoped snapshot to match so newer partial revisions
     // cannot be silently ignored.
-    const currentCompilerSnapshot = bundle.version === 2 ? await this.readCompilerSnapshot(bundle) : undefined;
-    const hasCompilerMaterialized = Boolean(currentCompilerSnapshot && (
+    const currentCompilerSnapshot = await this.readCompilerSnapshot(bundle);
+    const hasCompilerMaterialized = Boolean(
       currentCompilerSnapshot.annotations.length
       || currentCompilerSnapshot.entityResolutions.length
       || currentCompilerSnapshot.eventResolutions.length
       || currentCompilerSnapshot.evidenceBindings.length
       || currentCompilerSnapshot.accounting
-    ));
+    );
     const hasMaterializedSource = groups.some(([, actual]) => actual.length > 0)
       || Boolean(currentInitialForSource)
       || hasCompilerMaterialized;
@@ -932,10 +917,8 @@ export class PreparedNovelCache {
     if (!currentInitialForSource || canonicalJson(currentInitialForSource) !== canonicalJson(bundle.canonical.initialWorld)) {
       return "initial world differs";
     }
-    if (bundle.version === 2) {
-      if (canonicalJson(currentCompilerSnapshot) !== canonicalJson(bundle.compilerSnapshot)) {
-        return "source observations, identity resolutions, accounting, or exact evidence bindings differ";
-      }
+    if (canonicalJson(currentCompilerSnapshot) !== canonicalJson(bundle.compilerSnapshot)) {
+      return "source observations, identity resolutions, accounting, or exact evidence bindings differ";
     }
     return null;
   }
@@ -991,9 +974,7 @@ export class PreparedNovelCache {
     const canonical = new CanonicalModelStore(this.workspaceRoot);
     const actors = new ActorModelStore(this.workspaceRoot);
     const possibilities = new PossibilityTemplateStore(this.workspaceRoot);
-    const currentBefore = exact || bundle.version === 2
-      ? await currentCanonical(this.workspaceRoot)
-      : undefined;
+    const currentBefore = await currentCanonical(this.workspaceRoot);
     if (exact) {
       const current = currentBefore!;
       const removeMissing = async <T extends { evidence: readonly { span: { sourceId: string } }[] }>(
@@ -1033,47 +1014,23 @@ export class PreparedNovelCache {
     for (const goal of bundle.canonical.goals) await actors.putGoal(goal);
     for (const model of bundle.canonical.models) await actors.putModel(model);
     for (const possibility of bundle.canonical.possibilities) await possibilities.put(possibility);
-    if (bundle.version === 2) {
-      const snapshot = bundle.compilerSnapshot;
-      await new SourceStructureStore(this.workspaceRoot).write(snapshot.structure);
-      await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.annotations);
-      await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.entityResolutions);
-      await new EventResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.eventResolutions);
-      await new SourceAccountingStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.accounting);
-      const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
-      const currentDescriptors = currentBefore
-        ? preparedArtifactDescriptors(currentBefore)
-          .filter((artifact) => artifactBelongsToSource(artifact.payload, sourceId))
-        : [];
-      const bindingKeys = new Map([
-        ...currentDescriptors.map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
-        ...preparedArtifactDescriptors(bundle.canonical).map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
-      ]);
-      for (const artifact of bindingKeys.values()) {
-        await exactEvidence.removeForArtifact(artifact.kind, artifact.id);
-      }
-      await exactEvidence.restoreBindings(snapshot.evidenceBindings);
-    } else {
-      // Legacy bundles did not carry compiler observations or exact evidence.
-      // Exact activation must materialize that honest absence instead of
-      // retaining metadata from a newer, potentially failed compilation.
-      await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, []);
-      await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, []);
-      await new EventResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, []);
-      await new SourceAccountingStore(this.workspaceRoot).replaceCurrent(sourceId, null);
-      const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
-      const currentDescriptors = currentBefore
-        ? preparedArtifactDescriptors(currentBefore)
-          .filter((artifact) => artifactBelongsToSource(artifact.payload, sourceId))
-        : [];
-      const bindingKeys = new Map([
-        ...currentDescriptors.map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
-        ...preparedArtifactDescriptors(bundle.canonical).map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
-      ]);
-      for (const artifact of bindingKeys.values()) {
-        await exactEvidence.removeForArtifact(artifact.kind, artifact.id);
-      }
+    const snapshot = bundle.compilerSnapshot;
+    await new SourceStructureStore(this.workspaceRoot).write(snapshot.structure);
+    await new SourceAnnotationStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.annotations);
+    await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.entityResolutions);
+    await new EventResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.eventResolutions);
+    await new SourceAccountingStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.accounting);
+    const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
+    const currentDescriptors = preparedArtifactDescriptors(currentBefore)
+      .filter((artifact) => artifactBelongsToSource(artifact.payload, sourceId));
+    const bindingKeys = new Map([
+      ...currentDescriptors.map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
+      ...preparedArtifactDescriptors(bundle.canonical).map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const),
+    ]);
+    for (const artifact of bindingKeys.values()) {
+      await exactEvidence.removeForArtifact(artifact.kind, artifact.id);
     }
+    await exactEvidence.restoreBindings(snapshot.evidenceBindings);
     const chapterSplits = new ChapterSplitPlanStore(this.workspaceRoot);
     if (bundle.chapterSplitPlan) await chapterSplits.write(bundle.chapterSplitPlan);
     else await chapterSplits.remove(sourceId);
@@ -1124,48 +1081,7 @@ export class PreparedNovelCache {
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
     }
     await fs.chmod(container, 0o700);
-    const legacy = await this.readDirectory(contentMd5, container);
-    if (!legacy) {
-      await fs.mkdir(path.join(container, "revisions"), { recursive: true, mode: 0o700 });
-      return;
-    }
-    const revisionDirectory = this.revisionPath(contentMd5, legacy.manifest.bundleHash);
-    try {
-      await fs.access(revisionDirectory);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      await this.writeRevisionDirectory(contentMd5, legacy.manifest, legacy.rawBundle);
-    }
-    if (!await this.readActive(contentMd5)) await this.writeActive(contentMd5, legacy.manifest.bundleHash);
-  }
-
-  private async writeRevisionDirectory(
-    contentMd5: string,
-    manifest: z.infer<typeof preparedNovelManifestSchema>,
-    rawBundle: unknown,
-  ): Promise<void> {
-    if (contentHash(rawBundle) !== manifest.bundleHash) {
-      throw new Error(`Prepared cache migration payload does not match immutable bundle hash ${manifest.bundleHash}.`);
-    }
-    const revisionsRoot = path.join(this.cachePath(contentMd5), "revisions");
-    await fs.mkdir(revisionsRoot, { recursive: true, mode: 0o700 });
-    const target = this.revisionPath(contentMd5, manifest.bundleHash);
-    const staging = path.join(revisionsRoot, `.${manifest.bundleHash}.${process.pid}.${crypto.randomUUID()}.tmp`);
-    await fs.mkdir(staging, { mode: 0o700 });
-    try {
-      await fs.writeFile(path.join(staging, "bundle.json"), `${canonicalJson(rawBundle)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
-      await fs.writeFile(path.join(staging, "manifest.json"), `${canonicalJson(manifest)}\n`, { encoding: "utf8", mode: 0o400, flag: "wx" });
-      await fs.chmod(staging, 0o700);
-      try { await fs.rename(staging, target); }
-      catch (error) {
-        if (!isAlreadyExists(error)) throw error;
-        await fs.chmod(staging, 0o700);
-        await fs.rm(staging, { recursive: true, force: true });
-      }
-    } catch (error) {
-      try { await fs.chmod(staging, 0o700); await fs.rm(staging, { recursive: true, force: true }); } catch { /* keep original error */ }
-      throw error;
-    }
+    if (create) await fs.mkdir(path.join(container, "revisions"), { recursive: true, mode: 0o700 });
   }
 
   private async readCached(contentMd5: string, requestedHash?: string): Promise<{
@@ -1181,7 +1097,7 @@ export class PreparedNovelCache {
       if (!cached) throw new Error(`Prepared cache active revision is missing: ${contentMd5}@${active.bundleHash}`);
       return cached;
     }
-    return this.readDirectory(contentMd5, this.cachePath(contentMd5));
+    return null;
   }
 
   private async readDirectory(contentMd5: string, directory: string): Promise<{
@@ -1388,10 +1304,8 @@ async function assertPreparedInitialWorldEvidence(
 ): Promise<void> {
   const initialWorld = bundle.canonical.initialWorld;
   if (!initialWorld.readerContext && !initialWorld.actorObservations?.length) return;
-  const snapshotBinding = bundle.version === 2
-    ? bundle.compilerSnapshot.evidenceBindings.find((candidate) =>
-        candidate.artifactKind === "initial-world" && candidate.artifactId === "initial-world")
-    : undefined;
+  const snapshotBinding = bundle.compilerSnapshot.evidenceBindings.find((candidate) =>
+    candidate.artifactKind === "initial-world" && candidate.artifactId === "initial-world");
   const binding = snapshotBinding
     ?? await new EvidenceAssertionStore(workspaceRoot).bindingForArtifact("initial-world", "initial-world");
   if (!binding?.assertions.length) {
@@ -1415,7 +1329,6 @@ async function assertPreparedCompilerSnapshotEvidence(
   workspaceRoot: string,
   bundle: PreparedNovelBundle,
 ): Promise<void> {
-  if (bundle.version !== 2) return;
   const artifacts = new Map(preparedArtifactDescriptors(bundle.canonical)
     .map((artifact) => [`${artifact.kind}/${artifact.id}`, artifact] as const));
   const verifier = new EvidenceVerifier(workspaceRoot);

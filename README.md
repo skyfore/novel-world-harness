@@ -586,7 +586,7 @@ the CLI reports retry progress and only returns a failure after retries are
 exhausted.
 
 Successful full preparation publishes an immutable reusable revision under
-`$NWH_HOME/prepared-novels/v1/<content-md5>/revisions/<bundle-hash>/` (default
+`$NWH_HOME/prepared-novels/v2/<content-md5>/revisions/<bundle-hash>/` (default
 `~/.novel-harness/prepared-novels/`). The MD5 is the lookup key for the exact
 novel bytes; SHA-256 and a canonical bundle hash are verified before reuse, so
 an MD5 collision cannot select another source. Reusing the same bytes in a new

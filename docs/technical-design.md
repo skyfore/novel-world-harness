@@ -634,13 +634,13 @@ into a monolith.
 ```text
 $NWH_HOME/
 ├── sources/v1/<sha256>/{manifest.json,source.utf8}
-├── prepared-novels/v1/<md5>/
+├── prepared-novels/v2/<md5>/
 ├── sessions/<workspace-id>/
 └── workspaces/v1/<workspace-id>/
     ├── project.json
     ├── sources/
     └── world/
-      └── v1/
+      └── v2/
         ├── compiler/batches/
         ├── canon/
         │   ├── entities/{refs,revisions}/

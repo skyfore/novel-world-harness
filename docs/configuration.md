@@ -100,7 +100,7 @@ There is no database configuration. Current state is stored in the private user 
 ```text
 $NWH_HOME/
 ├── sources/v1/<sha256>/{manifest.json,source.utf8}
-├── prepared-novels/v1/<content-md5>/
+├── prepared-novels/v2/<content-md5>/
 ├── sessions/<workspace-id>/
 └── workspaces/v1/<workspace-id>/
     ├── project.json

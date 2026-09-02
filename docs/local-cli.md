@@ -137,7 +137,7 @@ history; destructive world/source actions require an exact effect preview and
 confirmation.
 
 Completed novel preparation is reusable across workspaces. NWH writes immutable
-bundles below `$NWH_HOME/prepared-novels/v1/<content-md5>/revisions/<bundle-hash>/`;
+bundles below `$NWH_HOME/prepared-novels/v2/<content-md5>/revisions/<bundle-hash>/`;
 the manifest also binds the full SHA-256 source digest. `active.json` is an atomic
 pointer to the revision restored by default. An existing revision is verified and
 never updated in place. Restore is allowed only before the target workspace has

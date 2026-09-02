@@ -99,12 +99,16 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     && options.sourceId
     && options.compilerBatchId?.startsWith(`batch-${options.sourceId}-`),
   );
+  const wholeSourceEvidencePass = Boolean(
+    options.compilerBatchId?.startsWith("opening-batch-")
+    || options.compilerBatchId?.startsWith("reconcile-"),
+  );
   const disabledProposalTools = new Set([
     ...(structureDiscovery
       ? COMPILER_TOOL_NAMES.filter((name) => !["configure_chapter_split", "finish_compiler_batch"].includes(name))
       : ["configure_chapter_split"]),
     ...(options.segmentIds ? SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS : []),
-    ...(options.segmentIds ? BOUNDED_SLICE_DISABLED_TOOLS : []),
+    ...(options.segmentIds?.length && !wholeSourceEvidencePass ? BOUNDED_SLICE_DISABLED_TOOLS : []),
     ...(options.enableBoundaryCalibration ? [] : BOUNDARY_CALIBRATION_TOOL_NAMES),
     ...(ordinarySourceReview ? [] : SOURCE_ACCOUNTING_TOOL_NAMES),
     ...(

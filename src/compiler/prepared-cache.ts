@@ -8,7 +8,11 @@ import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.
 import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
-import { InitialWorldStore, initialWorldSchema } from "../world/initial.js";
+import {
+  InitialWorldStore,
+  initialWorldSchema,
+  validateInitialWorldEvidenceAssertions,
+} from "../world/initial.js";
 import { WORLD_ENGINE_VERSION, attributionSchema, canonicalEventSchema, claimSchema, entitySchema, eventParticipationSchema, eventRelationSchema, propositionSchema, worldRuleSchema, type EvidenceRef } from "../world/model.js";
 import { validateEventParticipationCatalog } from "../world/event-semantics.js";
 import { validateEventRelationCatalog } from "../world/event-relations.js";
@@ -68,7 +72,7 @@ import { SourceAccountingStore, sourceAccountingManifestSchema } from "./source-
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 1;
-export const COMPILER_PROMPT_VERSION = 24;
+export const COMPILER_PROMPT_VERSION = 25;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -789,6 +793,7 @@ export class PreparedNovelCache {
     await this.assertTitleInferenceEvidence(bundle);
     assertPreparedBundleSourceScope(bundle);
     await assertPreparedCompilerSnapshotEvidence(this.workspaceRoot, bundle);
+    await assertPreparedInitialWorldEvidence(this.workspaceRoot, bundle);
     await assertPreparedCharacterEvidence(this.workspaceRoot, bundle);
     await assertPreparedSpatialEvidence(this.workspaceRoot, bundle);
     await assertPreparedWorldRuleEvidence(this.workspaceRoot, bundle);
@@ -980,6 +985,7 @@ export class PreparedNovelCache {
     const sourceId = bundle.source.id;
     const workspace = await WorkspaceStore.create(this.workspaceRoot);
     await assertPreparedCompilerSnapshotEvidence(this.workspaceRoot, bundle);
+    await assertPreparedInitialWorldEvidence(this.workspaceRoot, bundle);
     if (bundle.source.titleInference) {
       await this.assertTitleInferenceEvidence(bundle);
     }
@@ -1375,6 +1381,35 @@ async function assertPreparedCharacterEvidence(
         .map((issue) => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)
         .join("; ")}`);
     }
+  }
+}
+
+async function assertPreparedInitialWorldEvidence(
+  workspaceRoot: string,
+  bundle: PreparedNovelBundle,
+): Promise<void> {
+  const initialWorld = bundle.canonical.initialWorld;
+  if (!initialWorld.readerContext && !initialWorld.actorObservations?.length) return;
+  const snapshotBinding = bundle.version === 2
+    ? bundle.compilerSnapshot.evidenceBindings.find((candidate) =>
+        candidate.artifactKind === "initial-world" && candidate.artifactId === "initial-world")
+    : undefined;
+  const binding = snapshotBinding
+    ?? await new EvidenceAssertionStore(workspaceRoot).bindingForArtifact("initial-world", "initial-world");
+  if (!binding?.assertions.length) {
+    throw new Error("Prepared structured opening context has no exact evidence binding.");
+  }
+  if (binding.artifactHash !== contentHash(initialWorld)) {
+    throw new Error("Prepared structured opening context has a stale exact evidence binding.");
+  }
+  const issues = [
+    ...validateInitialWorldEvidenceAssertions(initialWorld, binding.assertions),
+    ...(await new EvidenceVerifier(workspaceRoot).verifyAssertions(binding.assertions)).issues,
+  ];
+  if (issues.length) {
+    throw new Error(`Prepared structured opening context has invalid exact evidence: ${issues
+      .map((issue) => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`)
+      .join("; ")}`);
   }
 }
 

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
-import { initialWorldSchema } from "../world/initial.js";
+import { initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
 import {
   canonicalEventSchema,
   claimSchema,
@@ -252,8 +252,23 @@ export class CompilerProposalService {
     const worldRuleEvidenceIssues = kind === "world-rule"
       ? validateWorldRuleEvidenceAssertions(worldRuleSchema.parse(payload), evidenceAssertions)
       : [];
-    if (targetIssues.length || characterEvidenceIssues.length || spatialEvidenceIssues.length || worldRuleEvidenceIssues.length) {
-      throw new Error([...targetIssues, ...characterEvidenceIssues, ...spatialEvidenceIssues, ...worldRuleEvidenceIssues]
+    const initialWorldEvidenceIssues = kind === "initial-world"
+      ? validateInitialWorldEvidenceAssertions(initialWorldSchema.parse(payload), evidenceAssertions)
+      : [];
+    if (
+      targetIssues.length
+      || characterEvidenceIssues.length
+      || spatialEvidenceIssues.length
+      || worldRuleEvidenceIssues.length
+      || initialWorldEvidenceIssues.length
+    ) {
+      throw new Error([
+        ...targetIssues,
+        ...characterEvidenceIssues,
+        ...spatialEvidenceIssues,
+        ...worldRuleEvidenceIssues,
+        ...initialWorldEvidenceIssues,
+      ]
         .map((item) => `${item.code}${item.path ? ` at ${item.path}` : ""}: ${item.message}`).join("; "));
     }
     const proposal: ArtifactProposal<unknown> = {
@@ -825,6 +840,8 @@ function collectProposalClosureIssues(
       collectPredicateIssues(predicate, `activation.preconditions.${index}`, missing, fieldReference));
     goal.activation?.afterCanonicalEventIds.forEach((id, index) =>
       missing("events", id, `activation.afterCanonicalEventIds.${index}`));
+    goal.activation?.afterExperiencedCanonicalEventIds?.forEach((id, index) =>
+      missing("events", id, `activation.afterExperiencedCanonicalEventIds.${index}`));
     if (goal.activation?.storyWindow) collectStoryTimeIssues(goal.activation.storyWindow, "activation.storyWindow", missing);
     goal.completion?.forEach((predicate, index) =>
       collectPredicateIssues(predicate, `completion.${index}`, missing, fieldReference));

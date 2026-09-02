@@ -13,6 +13,7 @@ import { BranchStore } from "../src/world/store.js";
 import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { SourceMaterialStore } from "../src/storage/source-material-store.js";
+import { NOVEL_SCALE_SOURCE_BYTE_THRESHOLD } from "../src/compiler/scale.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -49,6 +50,14 @@ describe("preparation workflow inspection", () => {
       resolutions: { missing: 0, ambiguous: 0, unresolved: 0 },
       eventResolutions: { missing: 0, ambiguous: 0, unresolved: 0 },
     })).toEqual([]);
+    expect(novelScalePublicationRepairReasons({
+      sources: { bytes: NOVEL_SCALE_SOURCE_BYTE_THRESHOLD },
+      canonical: { events: 1 },
+      readiness: { evidence: "unknown", accounting: "unknown", resolution: "unknown", blockingIssues: [] },
+      observations: { unaccountedUnits: 999, blockingUnits: 999 },
+      resolutions: { missing: 0, ambiguous: 0, unresolved: 0 },
+      eventResolutions: { missing: 0, ambiguous: 0, unresolved: 0 },
+    })).toEqual([expect.stringContaining("Novel-scale publication requires")]);
     expect(novelScalePublicationRepairReasons({
       canonical: { events: 20 },
       readiness: { evidence: "ready", accounting: "ready", resolution: "ready", blockingIssues: [] },

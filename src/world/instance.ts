@@ -86,6 +86,11 @@ export async function createWorldBranch(
     : canonicalInitial?.participantPresence?.length
       ? canonicalInitial.participantPresence
       : undefined;
+  const checkpointActorObservations = seedPath
+    ? []
+    : entrySeed?.actorObservations?.length
+      ? entrySeed.actorObservations
+      : canonicalInitial?.actorObservations ?? [];
   if (!seedPath) {
     const represented = new Set(seed.operations.flatMap((operation) => "entityId" in operation ? [operation.entityId] : []));
     const explicitlyDead = new Set<string>();
@@ -125,8 +130,8 @@ export async function createWorldBranch(
         ? { realizesCanonicalEventIds: entrySeed.realizesCanonicalEventIds }
         : {}),
       ...(checkpointPresence ? { participantPresence: checkpointPresence } : {}),
-      ...(entryActorId && entrySeed?.actorObservation
-        ? { actorObservations: [{ actorId: entryActorId, summary: entrySeed.actorObservation }] }
+      ...(checkpointActorObservations.length
+        ? { actorObservations: checkpointActorObservations }
         : {}),
     },
   );

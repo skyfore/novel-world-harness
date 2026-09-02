@@ -33,7 +33,32 @@ function bundle(): PreparedNovelBundle {
       initialWorld: {
         version: 1,
         readerSetup: "At the opening tower, Opening Actor is preparing to leave while an unresolved threshold makes the departure urgent.",
+        readerContext: {
+          version: 1,
+          focalActorId: "opening-actor",
+          facts: [
+            { id: "focal", kind: "focal-identity", summary: "Opening Actor is preparing to leave the tower.", temporalClass: "at-checkpoint", basis: "checkpoint-state", entityIds: ["opening-actor"], focalKnowledgeClaimIds: [], dependsOnFactIds: [] },
+            { id: "place", kind: "time-place", summary: "The opening takes place at the tower threshold.", temporalClass: "at-checkpoint", basis: "checkpoint-state", entityIds: ["opening-actor"], focalKnowledgeClaimIds: [], dependsOnFactIds: [] },
+            { id: "cause", kind: "causal-premise", summary: "Letter Signer sent the summons that made departure urgent.", temporalClass: "later-discourse-preexisting", basis: "source-narrator-established", entityIds: ["opening-actor", "letter-signer"], focalKnowledgeClaimIds: [], dependsOnFactIds: [] },
+            { id: "stance", kind: "actor-stance", summary: "Opening Actor remains ambivalent about answering it.", temporalClass: "at-checkpoint", basis: "checkpoint-state", entityIds: ["opening-actor"], holderEntityId: "opening-actor", stance: "ambivalent", focalKnowledgeClaimIds: [], dependsOnFactIds: ["cause"] },
+            { id: "pressure", kind: "immediate-pressure", summary: "The unanswered summons makes the threshold urgent.", temporalClass: "at-checkpoint", basis: "checkpoint-state", entityIds: ["opening-actor"], focalKnowledgeClaimIds: [], dependsOnFactIds: ["cause"] },
+          ],
+          entityGlosses: [{
+            entityId: "letter-signer",
+            relationshipToFocal: "the person who summoned Opening Actor",
+            whyRelevantNow: "their summons created the present decision",
+            factIds: ["cause"],
+          }],
+          immediateSituation: {
+            summary: "Opening Actor must decide whether to cross the threshold in answer to the summons.",
+            causalFactIds: ["cause"],
+            pressureFactIds: ["pressure"],
+            unresolvedFactIds: ["stance", "pressure"],
+            outcomePolicy: "withhold-post-checkpoint-outcomes",
+          },
+        },
         participantPresence: [{ entityId: "opening-actor", mode: "physical" }],
+        actorObservations: [{ actorId: "opening-actor", summary: "The tower threshold is directly ahead." }],
         delta: {
           version: 1,
           operations: [{ op: "set", entityId: "opening-actor", field: "character.plan", value: "leave the tower" }],
@@ -121,7 +146,23 @@ describe("character entry context", () => {
     const rendered = formatReaderEntryContext(seed.readerContext, "Opening Actor");
     expect(seed.readerContext.storySoFar).toEqual([]);
     expect(seed.readerContext.entrySetup).toContain("opening tower");
+    expect(seed.actorObservation).toBe("The tower threshold is directly ahead.");
+    expect(seed.actorObservations).toEqual([
+      { actorId: "opening-actor", summary: "The tower threshold is directly ahead." },
+    ]);
+    expect(seed.readerContext.orientation).toMatchObject({
+      entityGlosses: [{
+        name: "Letter Signer",
+        relationshipToFocal: "the person who summoned Opening Actor",
+      }],
+      immediateSituation: { summary: expect.stringContaining("decide whether") },
+    });
+    expect(seed.readerContext.orientation?.facts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "causal-premise", summary: expect.stringContaining("Letter Signer") }),
+      expect.objectContaining({ kind: "actor-stance", holderName: "Opening Actor", stance: "ambivalent" }),
+    ]));
     expect(rendered).toContain("departure urgent");
+    expect(rendered).toContain("Letter Signer：");
     expect(rendered).not.toContain("故事前情");
     expect(rendered).not.toMatch(/角色知识|committed state|claim|正史事件|编译记录/u);
   });

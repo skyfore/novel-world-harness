@@ -262,7 +262,9 @@ export async function buildWorldReconciliationPrompt(
   const initialWorldNeedsRepair = mode !== "graph-adjudication" && Boolean(sourceInitialWorld && (
     !sourceInitialWorld.checkpoint
     || !sourceInitialWorld.readerSetup?.trim()
+    || !sourceInitialWorld.readerContext
     || !sourceInitialWorld.participantPresence?.some((presence) => presence.mode === "physical")
+    || audit.coverage.openingActorObservation !== 1
     || audit.coverage.openingActionability !== 1
   ));
   const totalEventCapacity = eventTargetsPerIteration * maxIterations;
@@ -393,6 +395,10 @@ export async function buildWorldReconciliationPrompt(
             ref: "canonical:initial-world:singleton",
             semanticHash: contentHash(sourceInitialWorld),
             readerSetupPresent: Boolean(sourceInitialWorld.readerSetup?.trim()),
+            readerContextPresent: Boolean(sourceInitialWorld.readerContext),
+            readerContextFactKinds: sourceInitialWorld.readerContext?.facts.map((fact) => fact.kind) ?? [],
+            entityGlossCount: sourceInitialWorld.readerContext?.entityGlosses.length ?? 0,
+            actorObservationCount: sourceInitialWorld.actorObservations?.length ?? 0,
             physicalOpeningRoles: sourceInitialWorld.participantPresence?.filter((presence) => presence.mode === "physical").length ?? 0,
             stateOperations: sourceInitialWorld.delta.operations.length,
             knowledgeOperations: sourceInitialWorld.knowledge?.operations.length ?? 0,
@@ -436,7 +442,7 @@ ${graphAdjudicationPolicy}
 - Match field meaning exactly. Never encode illness as alive=true, closure as location.open=true, conscription as character.location, employment as artifact.owner, or work points as character.title.
 - For each recurring character target, propose exactly one evidence-backed character-model with a real developmentPhase or one phase-bounded character-goal. Preserve the baseline. Activate later phases/goals only through cited world predicates, personally experienced events, acquired knowledge, or story time. Use afterExperiencedCanonicalEventIds when an experience is personal; use afterCanonicalEventIds only for an objective social/world transition. A future phase or goal must not affect the opening self.
 - When a weakCharacterCandidate has needsExecutableDriver=true, propose a character-goal rather than only a model. It must have a development boundary and at least one concrete candidateAction/actionPattern whose proposedDelta or proposedKnowledge is executable under source-grounded activation/precondition gates. Do not invent an action merely to pass the audit; leave the target unchanged if the source cannot support one.
-- If the initial world appears below and lacks a checkpoint, readerSetup, or explicit physical participantPresence for its actionable opening role, replace it only when its existing evidence supports one coherent chronological or textual-frame checkpoint, a concise spoiler-free reader orientation, and bodily co-presence. readerSetup is display-only, never actor knowledge. Never merge narrator-frame and flashback selves.
+- If the initial world appears below and lacks a checkpoint, readerSetup, structured readerContext, one direct actorObservation per physical opening role, or explicit physical participantPresence for its actionable opening role, replace it only when exact source evidence supports one coherent chronological or textual-frame checkpoint. Treat the player as an unread reader: readerContext must establish focal identity, time/place, every needed first-use character gloss, causal premises, the actual holder/direction of relevant stance or pressure, completed pre-checkpoint beats, and the unresolved immediate situation. Give readerSetup and every fact/gloss/situation/observation field an exact explicit or strong-inference evidence selector; weak inference is insufficient. Later discourse may supply only facts already true by the checkpoint; mark them later-discourse-preexisting and never import a later outcome or acquired knowledge. readerSetup/readerContext are presentation-only, never actor knowledge. Never merge narrator-frame and flashback selves.
 - Submit at most ${repairTargetCount} high-value replacements, one per listed target. It is valid to leave an unsupported target unchanged; deterministic quality gates will report what remains.
 - Do not use propose_state_delta. Finish with reviewed_segments=[] and outcome=complete if proposals were recorded, otherwise outcome=no-artifacts.
 
@@ -520,6 +526,8 @@ export function semanticRepairIsIsolated(audit: CompilerAuditReport): boolean {
   ];
   const openingRepair = audit.coverage.openingCheckpointDeclared === 0
     || audit.coverage.openingReaderSetup === 0
+    || audit.coverage.openingReaderContext === 0
+    || audit.coverage.openingActorObservation === 0
     || audit.coverage.openingPhysicalPresence === 0
     || audit.coverage.openingActionability === 0;
   const characterRepair = (audit.coverage.characterDevelopmentCoverage ?? 1) < 0.5;

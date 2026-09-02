@@ -1,6 +1,6 @@
 import { contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
-import type { CommitId, CommittedEvent, Entity, EntityId, NarrativeProgress, StateDelta, StateValue } from "./model.js";
+import type { CanonicalEvent, CommitId, CommittedEvent, Entity, EntityId, NarrativeProgress, StateDelta, StateValue } from "./model.js";
 import { observeCommittedEvent, projectActorVisibleState } from "./actor-visible.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 
@@ -255,6 +255,31 @@ export function realizedCanonicalEvents(history: readonly CommittedHistoryEntry[
     if (event.possibilityId?.startsWith("canon-")) realized.add(event.possibilityId.slice("canon-".length));
   }
   return realized;
+}
+
+/** Canonical knowledge is compiler-wide; an actor experiences only committed realizations they actually participate in. */
+export function experiencedCanonicalEvents(
+  history: readonly CommittedHistoryEntry[],
+  actorId: string,
+  canonicalEvents?: ReadonlyMap<string, Pick<CanonicalEvent, "participants" | "participantPresence">>,
+): ReadonlySet<string> {
+  const experienced = new Set<string>();
+  const actorParticipates = (participants: readonly string[], presence: readonly { entityId: string; mode: string }[] | undefined) => {
+    if (!participants.includes(actorId)) return false;
+    const mode = presence?.find((item) => item.entityId === actorId)?.mode;
+    return mode ? mode !== "mentioned" && mode !== "represented" : true;
+  };
+  for (const { event } of history) {
+    for (const canonicalEventId of event.realizesCanonicalEventIds ?? []) {
+      const canonical = canonicalEvents?.get(canonicalEventId);
+      if (canonical
+        ? actorParticipates(canonical.participants, canonical.participantPresence)
+        : actorParticipates(event.participants, event.participantPresence)) {
+        experienced.add(canonicalEventId);
+      }
+    }
+  }
+  return experienced;
 }
 
 function finalLocationWrite(delta: StateDelta, actorId: string): string | null | undefined {

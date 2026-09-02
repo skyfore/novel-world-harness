@@ -21,7 +21,7 @@ import {
   type WorldState,
 } from "./model.js";
 import { evaluatePredicate } from "./state.js";
-import { committedHistory, projectActorScene, realizedCanonicalEvents } from "./scene.js";
+import { committedHistory, experiencedCanonicalEvents, projectActorScene, realizedCanonicalEvents } from "./scene.js";
 import { AmbiguousLegacySourceError, evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { storyTimesOverlap } from "./time.js";
 import {
@@ -70,6 +70,8 @@ export const characterGoalSchema = z
       .object({
         preconditions: z.array(predicateSchema).default([]),
         afterCanonicalEventIds: z.array(idSchema).default([]),
+        /** Personal development gate; unlike world realization, the actor must have lived through the event. */
+        afterExperiencedCanonicalEventIds: z.array(idSchema).optional(),
         storyWindow: storyTimeSchema.optional(),
       })
       .strict()
@@ -281,6 +283,7 @@ export function characterGoalHasDevelopmentBoundary(goal: CharacterGoal): boolea
     || goal.blockedByKnowledge?.length
     || goal.activation?.preconditions.length
     || goal.activation?.afterCanonicalEventIds.length
+    || goal.activation?.afterExperiencedCanonicalEventIds?.length
     || goal.activation?.storyWindow
     || goal.completion?.length
     || goal.expiry?.length
@@ -294,6 +297,7 @@ export function evaluateCharacterGoal(
     state: WorldState;
     knownClaimIds: ReadonlySet<string>;
     realizedCanonicalEventIds?: ReadonlySet<string>;
+    experiencedCanonicalEventIds?: ReadonlySet<string>;
     storyTime?: StoryTime;
   },
 ): GoalActivation {
@@ -312,6 +316,9 @@ export function evaluateCharacterGoal(
   const missingParents = (goal.activation?.afterCanonicalEventIds ?? []).filter((eventId) =>
     !input.realizedCanonicalEventIds?.has(eventId));
   if (missingParents.length) reasons.push(`waiting for canonical anchor(s): ${missingParents.join(", ")}`);
+  const missingExperiences = (goal.activation?.afterExperiencedCanonicalEventIds ?? []).filter((eventId) =>
+    !input.experiencedCanonicalEventIds?.has(eventId));
+  if (missingExperiences.length) reasons.push(`waiting for personally experienced canonical anchor(s): ${missingExperiences.join(", ")}`);
   const storyWindowActive = !goal.activation?.storyWindow || goalStoryWindowActive(
     input.storyTime,
     goal.activation.storyWindow,
@@ -323,6 +330,7 @@ export function evaluateCharacterGoal(
   return {
     active: !complete && !expired && !missingKnowledge.length && !blockedKnowledge.length
       && !failedActivation.length && !missingParents.length
+      && !missingExperiences.length
       && storyWindowActive,
     complete,
     expired,
@@ -546,6 +554,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
         const actorHistory = history.filter((entry) => !entry.event.evidence.length
           || belongsToActiveWorld(entry.event.evidence));
         const realizedCanonicalEventIds = realizedCanonicalEvents(actorHistory);
+        const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
         const action = goal.candidateAction ?? goal.actionPatterns?.find((pattern) =>
           pattern.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
         if (!action) continue;
@@ -555,6 +564,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           state,
           knownClaimIds: known,
           realizedCanonicalEventIds,
+          experiencedCanonicalEventIds,
           storyTime: state.logicalTime.storyTime,
         }).active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;
         candidates.push({
@@ -601,12 +611,14 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
       const actorHistory = history.filter((entry) => !entry.event.evidence.length
         || belongsToActiveWorld(entry.event.evidence));
       const realizedCanonicalEventIds = realizedCanonicalEvents(actorHistory);
+      const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
       const view = await knowledge.view(goal.actorId, commitId);
       const known = actionableKnowledgeClaimIds(view, activeSourceId);
       const activation = evaluateCharacterGoal(goal, {
         state,
         knownClaimIds: known,
         realizedCanonicalEventIds,
+        experiencedCanonicalEventIds,
         storyTime: state.logicalTime.storyTime,
       });
       if (!activation.active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;

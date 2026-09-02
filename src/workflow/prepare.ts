@@ -1,4 +1,5 @@
-import { NOVEL_SCALE_EVENT_THRESHOLD, auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
+import { auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
+import { isNovelScaleCompilation } from "../compiler/scale.js";
 import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatches } from "../compiler/batches.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { CanonicalModelStore, ProposalStore, type ProposalSummary } from "../world/canonical-model.js";
@@ -32,6 +33,7 @@ export type PreparationInspection = {
 };
 
 type NovelScalePublicationAudit = {
+  sources?: Pick<CompilerAuditReport["sources"], "bytes">;
   canonical: Pick<CompilerAuditReport["canonical"], "events">;
   readiness: Pick<CompilerAuditReport["readiness"], "evidence" | "accounting" | "resolution" | "blockingIssues">;
   observations: Pick<CompilerAuditReport["observations"], "unaccountedUnits" | "blockingUnits">;
@@ -41,7 +43,7 @@ type NovelScalePublicationAudit = {
 
 /** A novel-scale branch cannot be published while core traceability is merely unknown or partial. */
 export function novelScalePublicationRepairReasons(audit: NovelScalePublicationAudit): string[] {
-  if (audit.canonical.events < NOVEL_SCALE_EVENT_THRESHOLD) return [];
+  if (!isNovelScaleCompilation(audit.sources?.bytes ?? 0, audit.canonical.events)) return [];
   const required = (["evidence", "accounting", "resolution"] as const)
     .filter((dimension) => audit.readiness[dimension] !== "ready");
   if (!required.length) return [];

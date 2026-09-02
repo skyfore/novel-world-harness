@@ -146,6 +146,11 @@ describe("player opening narration", () => {
     expect(literaryPrompt).toContain("prompt-size boundary rather than proof of ignorance");
     expect(literaryPrompt).toContain("sourceReferences contains exact source-novel prose");
     expect(literaryPrompt).toContain("playContinuity contains exact prior player and rendered-scene prose");
+    expect(literaryPrompt).toContain("mandatory narrative obligation");
+    expect(literaryPrompt).toContain("first-use entity gloss");
+    expect(literaryPrompt).toContain("actor-versus-social stance distinctions");
+    expect(literaryPrompt).toContain("never transfer another person's or institution's pressure/desire");
+    expect(literaryPrompt).toContain("separate narrator-only authority to introduce those named identities");
     expect(literaryPrompt).toContain("there is no fixed short target");
     expect(literaryPrompt).toContain("current scene, not an agency handoff");
     expect(literaryPrompt).toContain("Never mention or explain character-knowledge boundaries");

@@ -28,7 +28,7 @@ import {
   type ActorScopedActionContext,
   type PlayerActionTranslationContext,
 } from "./player-action.js";
-import { committedHistory, realizedCanonicalEvents } from "./scene.js";
+import { committedHistory, experiencedCanonicalEvents, realizedCanonicalEvents } from "./scene.js";
 import { AmbiguousLegacySourceError, evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 import { immutableClone } from "../util/immutable.js";
 import { modelVisibleCharacterOntology, type ModelVisibleCharacterOntology } from "./character-ontology.js";
@@ -142,12 +142,14 @@ export function modelActorProposalSource(
       const actorHistory = history.filter((entry) => !entry.event.evidence.length
         || belongsToActiveWorld(entry.event.evidence));
       const realizedCanonicalEventIds = realizedCanonicalEvents(actorHistory);
+      const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
       const rawActor = await knowledge.view(goal.actorId, commitId);
       const known = actionableKnowledgeClaimIds(rawActor, activeSourceId);
       if (!evaluateCharacterGoal(goal, {
         state,
         knownClaimIds: known,
         realizedCanonicalEventIds,
+        experiencedCanonicalEventIds,
         storyTime: state.logicalTime.storyTime,
       }).active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;
 

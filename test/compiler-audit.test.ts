@@ -16,6 +16,7 @@ import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { controlledWorldRuleSchema } from "../src/world/model.js";
 import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { InitialWorldStore } from "../src/world/initial.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -888,5 +889,47 @@ describe("compiler audit", () => {
     expect(report.readiness.blockingIssues).toEqual(expect.arrayContaining([
       expect.stringContaining("typed state or knowledge effect"),
     ]));
+  });
+
+  it("uses source size to catch under-extracted long-form openings", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-under-extracted-long-form-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(
+      root,
+      `Hero waits at home.\n${"Long-form narrative evidence continues here. ".repeat(900)}\n`,
+    );
+    const evidence = fixture.evidence("Hero waits at home.");
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence,
+    });
+    await new InitialWorldStore(root).put({
+      version: 1,
+      readerSetup: "Hero waits at home before an unresolved opening development.",
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      delta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "wait" }],
+      },
+      checkpoint: { mode: "chronological", rationale: "Before the opening development" },
+      evidence,
+    });
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.sources.bytes).toBeGreaterThanOrEqual(24 * 1024);
+    expect(report.canonical.events).toBe(0);
+    expect(report.consistency.semanticReady).toBe(false);
+    expect(report.coverage).toMatchObject({
+      openingReaderContext: 0,
+      openingActorObservation: 0,
+    });
+    expect(report.consistency.semanticIssues).toEqual(expect.arrayContaining([
+      expect.stringContaining("structured unread-reader context"),
+      expect.stringContaining("direct-perception Genesis observation"),
+    ]));
+    expect(report.semanticRepairTargets.initialWorld).toBe(true);
   });
 });

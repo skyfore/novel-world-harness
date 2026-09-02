@@ -241,7 +241,27 @@ export {
   type CharacterLifeStage,
   type CharacterLivedExperience,
 } from "./world/development.js";
-export { InitialWorldStore, initialWorldSchema, openingCheckpointSchema, type InitialWorld, type OpeningCheckpoint } from "./world/initial.js";
+export {
+  InitialWorldStore,
+  initialWorldSchema,
+  openingCheckpointSchema,
+  openingEntityGlossSchema,
+  openingReaderContextSchema,
+  openingReaderFactKindSchema,
+  openingReaderFactSchema,
+  validateInitialWorldEvidenceAssertions,
+  type InitialWorld,
+  type OpeningCheckpoint,
+  type OpeningEntityGloss,
+  type OpeningReaderContext,
+  type OpeningReaderFact,
+  type OpeningReaderFactKind,
+} from "./world/initial.js";
+export {
+  isNovelScaleCompilation,
+  NOVEL_SCALE_EVENT_THRESHOLD,
+  NOVEL_SCALE_SOURCE_BYTE_THRESHOLD,
+} from "./compiler/scale.js";
 export { createWorldBranch, type CreatedWorldBranch } from "./world/instance.js";
 export {
   deriveCharacterEntryOptions,
@@ -350,7 +370,7 @@ export {
 export { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayNovel, createSourcePlayInstance, resolvePlayInstance, resolvePlayNovel, type AskPlayQuestion, type PlayInstanceLifecycleEvent, type PlayInstanceMode } from "./world/play-choice.js";
 export { inspectPlayExperience, listPlayableCharacters, performPlayTurn, resolveCharacter, resolveNovelSource, selectPlayExperience, type PlayExperienceCatalog, type PlayableCharacter, type PlayInstanceSummary, type PlayTurnOutcome, type SelectedPlayExperience } from "./world/play-experience.js";
 export { runCanonReplay, runIsolatedCanonReplay, verifyHistoryReplay, type CanonReplayResult, type IsolatedCanonReplayResult, type ReplayDiagnostic } from "./world/replay.js";
-export { committedHistory, projectActorScene, realizedCanonicalEvents, type ActorSceneProjection, type CommittedHistoryEntry, type SceneEventProjection } from "./world/scene.js";
+export { committedHistory, experiencedCanonicalEvents, projectActorScene, realizedCanonicalEvents, type ActorSceneProjection, type CommittedHistoryEntry, type SceneEventProjection } from "./world/scene.js";
 export { WorldRuntime, adjudicateActorCandidates, playerWorldResponseResolutionSchema, type CanonicalRecoveryResult, type CanonicalRecoveryTrace, type MoveInput, type MoveResult, type PlayerWorldResponseOption, type PlayerWorldResponseResolution, type PlayerWorldResponseResolver, type PlayerWorldResponseResolverInput, type PlayerWorldResponseResult } from "./world/runtime.js";
 export { WorldSnapshotStore, type WorldSnapshot } from "./world/snapshot.js";
 export { StateSchemaRegistry, DEFAULT_STATE_FIELDS, advanceTemporalState, applyStateDelta, evaluatePredicate, validateEngineInvariants } from "./world/state.js";

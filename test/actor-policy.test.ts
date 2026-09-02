@@ -96,6 +96,30 @@ describe("actor policy", () => {
       knownClaimIds: new Set(),
       realizedCanonicalEventIds: new Set(["phase-anchor"]),
     }).active).toBe(true);
+
+    const personal: CharacterGoal = {
+      ...base,
+      activation: {
+        preconditions: [],
+        afterCanonicalEventIds: [],
+        afterExperiencedCanonicalEventIds: ["betrayal"],
+      },
+    };
+    expect(evaluateCharacterGoal(personal, {
+      state,
+      knownClaimIds: new Set(),
+      realizedCanonicalEventIds: new Set(["betrayal"]),
+      experiencedCanonicalEventIds: new Set(),
+    })).toMatchObject({
+      active: false,
+      reasons: [expect.stringContaining("personally experienced")],
+    });
+    expect(evaluateCharacterGoal(personal, {
+      state,
+      knownClaimIds: new Set(),
+      realizedCanonicalEventIds: new Set(["betrayal"]),
+      experiencedCanonicalEventIds: new Set(["betrayal"]),
+    }).active).toBe(true);
   });
 
   it("does not act on compiler knowledge the actor has not acquired", async () => {

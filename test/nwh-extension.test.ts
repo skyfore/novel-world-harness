@@ -318,7 +318,8 @@ describe("NWH TUI extension", () => {
 
     const opening = compilerToolNamesForScope(COMPILER_TOOL_NAMES, "opening");
     expect(opening).toContain("propose_initial_world");
-    expect(opening).not.toContain("find_source_evidence");
+    expect(opening).toContain("find_source_evidence");
+    expect(opening).toContain("read_source_evidence");
     expect(opening).not.toContain("propose_canonical_event");
     expect(opening).not.toContain("peek_adjacent_evidence");
     expect(opening).not.toContain("propose_novel_title");

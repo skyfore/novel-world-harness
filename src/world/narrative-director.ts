@@ -22,7 +22,13 @@ import {
   type PlayerActionCandidate,
 } from "./player-action.js";
 import type { WorldRuntime } from "./runtime.js";
-import { committedHistory, projectActorScene, realizedCanonicalEvents, type ActorSceneProjection } from "./scene.js";
+import {
+  committedHistory,
+  experiencedCanonicalEvents,
+  projectActorScene,
+  realizedCanonicalEvents,
+  type ActorSceneProjection,
+} from "./scene.js";
 import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
 
 export type NarrativeThreadView = {
@@ -104,6 +110,14 @@ export async function buildNarrativeDirection(
     || evidenceBelongsExclusivelyToSource(entry.event.evidence, effectiveSourceId));
   const knownClaimIds = new Set(scoped.knowledge.filter((entry) => entry.status !== "disbelieves").map((entry) => entry.claimId));
   const realizedCanonicalEventIds = realizedCanonicalEvents(scopedHistory);
+  const experiencedByActor = new Map<string, ReadonlySet<string>>();
+  const actorExperiences = (goalActorId: string) => {
+    const existing = experiencedByActor.get(goalActorId);
+    if (existing) return existing;
+    const derived = experiencedCanonicalEvents(scopedHistory, goalActorId, context.events);
+    experiencedByActor.set(goalActorId, derived);
+    return derived;
+  };
   const knownClaimsByActor = new Map<string, ReadonlySet<string>>([[actorId, knownClaimIds]]);
   const scopedGoals = (context.actorGoals ?? [])
     .filter((goal) => evidenceBelongsExclusivelyToSource(goal.evidence, effectiveSourceId));
@@ -143,6 +157,7 @@ export async function buildNarrativeDirection(
       state,
       knownClaimIds: knownClaimsByActor.get(goal.actorId) ?? new Set(),
       realizedCanonicalEventIds,
+      experiencedCanonicalEventIds: actorExperiences(goal.actorId),
       storyTime: state.logicalTime.storyTime,
     });
     if (!activation.active || !goalVisibleInCurrentPhase(goal, scopedHistory, scene.presentEntityIds)) continue;

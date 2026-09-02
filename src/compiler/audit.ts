@@ -1,6 +1,6 @@
 import { ActorModelStore, characterGoalHasDevelopmentBoundary, characterModelSchema } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
-import { InitialWorldStore } from "../world/initial.js";
+import { InitialWorldStore, initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
 import type { CanonicalEvent, ControlledWorldRule, EvidenceRef, Predicate, StoryTime } from "../world/model.js";
 import { SegmentStore } from "./segments.js";
 import { EvidenceVerifier } from "./evidence.js";
@@ -59,9 +59,10 @@ import {
   worldRuleEvidence,
 } from "../world/world-rule-ontology.js";
 import { compareStoryTime } from "../world/time.js";
+import { isNovelScaleCompilation } from "./scale.js";
 
 export type CompilerReadinessState = "ready" | "not-ready" | "unknown";
-export const NOVEL_SCALE_EVENT_THRESHOLD = 20;
+export { NOVEL_SCALE_EVENT_THRESHOLD } from "./scale.js";
 
 export type CompilerAuditReport = {
   version: 1;
@@ -69,6 +70,7 @@ export type CompilerAuditReport = {
     registered: number;
     segmented: number;
     segments: number;
+    bytes: number;
     changedSinceIngest: string[];
   };
   proposals: {
@@ -311,6 +313,8 @@ export type CompilerAuditReport = {
     readerSummaryCoverage: number | null;
     characterEntryCheckpointCoverage: number | null;
     openingReaderSetup: number | null;
+    openingReaderContext: number | null;
+    openingActorObservation: number | null;
     openingPhysicalPresence: number | null;
     openingActionability: number | null;
     autonomousDriverCoverage: number | null;
@@ -592,6 +596,17 @@ export async function auditCompiler(
     for (const issue of result.issues) evidenceErrors.push({ artifact: artifact.name, code: issue.code, message: issue.message });
     const binding = await exactEvidence.bindingForArtifact(artifact.kind, artifact.id);
     if (!binding?.assertions.length) {
+      if (artifact.kind === "initial-world") {
+        const parsedInitialWorld = initialWorldSchema.parse(artifact.payload);
+        if (parsedInitialWorld.readerContext || parsedInitialWorld.actorObservations?.length) {
+          invalidAssertions += 1;
+          evidenceErrors.push({
+            artifact: artifact.name,
+            code: "MISSING_EXACT_OPENING_CONTEXT_BINDING",
+            message: "Structured unread-reader context and Genesis actor observations require exact field-level evidence.",
+          });
+        }
+      }
       if (artifact.kind === "character-model"
         && (characterModelSchema.parse(artifact.payload).ontologyVersion === CHARACTER_ONTOLOGY_VERSION
           || characterModelSchema.parse(artifact.payload).relationshipOntologyVersion === RELATIONSHIP_ONTOLOGY_VERSION)) {
@@ -650,6 +665,9 @@ export async function auditCompiler(
             rules.find((rule) => rule.id === artifact.id)!,
             binding.assertions,
           )
+        : []),
+      ...(artifact.kind === "initial-world"
+        ? validateInitialWorldEvidenceAssertions(initialWorldSchema.parse(artifact.payload), binding.assertions)
         : []),
       ...(await evidenceVerifier.verifyAssertions(binding.assertions)).issues,
     ];
@@ -924,8 +942,16 @@ export async function auditCompiler(
   const openingReaderSetup = initialWorld
     ? (initialWorld.readerSetup?.trim() ? 1 : 0)
     : null;
+  const openingReaderContext = initialWorld
+    ? (initialWorld.readerContext ? 1 : 0)
+    : null;
   const openingPhysicalPresence = initialWorld
     ? (physicalOpeningActorIds.size ? 1 : 0)
+    : null;
+  const openingObservationActorIds = new Set(initialWorld?.actorObservations?.map((observation) => observation.actorId) ?? []);
+  const openingActorObservation = initialWorld
+    ? (physicalOpeningActorIds.size > 0
+        && [...physicalOpeningActorIds].every((actorId) => openingObservationActorIds.has(actorId)) ? 1 : 0)
     : null;
   // discourseOrder is local to one compiler evidence batch. Source evidence
   // lines are the cross-batch textual-order authority; the model-proposed
@@ -979,6 +1005,7 @@ export async function auditCompiler(
   const semanticRepairRuleIds = new Set<string>();
   let semanticRepairInitialWorld = false;
   let semanticRepairRequiresFullReparse = worldRuleValidation.length > 0;
+  const novelScale = isNovelScaleCompilation(sourceBytes, events.length);
   for (const issue of worldRuleValidation) {
     const index = issue.path?.match(/^worldRules\.(\d+)(?:\.|$)/u)?.[1];
     const rule = index === undefined ? undefined : rules[Number(index)];
@@ -989,7 +1016,7 @@ export async function auditCompiler(
   }
   // Small fixtures and short stories may intentionally be sparse. The hard
   // semantic gate targets novel-scale compilations where omissions compound.
-  if (events.length >= NOVEL_SCALE_EVENT_THRESHOLD) {
+  if (novelScale) {
     if ((eventEffectExplicitness ?? 0) < 0.65) {
       semanticIssues.push(`Only ${formatRatio(eventEffectExplicitness)} of canonical events have a typed state or knowledge effect (minimum 65%).`);
       events.filter((event) => event.observedOutcome.operations.length === 0 && (event.observedKnowledge?.operations.length ?? 0) === 0)
@@ -1045,12 +1072,20 @@ export async function auditCompiler(
       semanticIssues.push("The initial world has no source-grounded spoiler-free readerSetup, so an unread player cannot orient before the opening scene.");
       semanticRepairInitialWorld = true;
     }
+    if (initialWorld && openingReaderContext !== 1) {
+      semanticIssues.push("The initial world has no structured unread-reader context for first-use identities, causal premises, actor stance, and the unresolved opening situation.");
+      semanticRepairInitialWorld = true;
+    }
     if (initialWorld && openingPhysicalPresence !== 1) {
       semanticIssues.push("The initial world does not explicitly identify a physically present opening role; identity or state alone is not bodily presence.");
       semanticRepairInitialWorld = true;
     }
     if (initialWorld && openingActionability !== 1) {
       semanticIssues.push("The initial world has no grounded opening character location, plan, or momentum; it is not an actionable lived checkpoint.");
+      semanticRepairInitialWorld = true;
+    }
+    if (initialWorld && openingActorObservation !== 1) {
+      semanticIssues.push("One or more physically present opening characters lack a direct-perception Genesis observation.");
       semanticRepairInitialWorld = true;
     }
     if (autonomousWorldDrivers === 0) {
@@ -1111,7 +1146,7 @@ export async function auditCompiler(
     || characterOntologyValidation.length
     || relationshipOntologyValidation.length
     ? "not-ready"
-    : events.length < NOVEL_SCALE_EVENT_THRESHOLD
+    : !novelScale
     ? "unknown"
     : semanticIssues.length
       ? "not-ready"
@@ -1121,6 +1156,7 @@ export async function auditCompiler(
     openingPhysicalPresence,
     openingActionability,
     autonomousDriverCoverage,
+    ...(novelScale ? [openingReaderContext, openingActorObservation] : []),
   ];
   const runtimeReadiness: CompilerReadinessState = !initialWorld
     ? "not-ready"
@@ -1189,7 +1225,7 @@ export async function auditCompiler(
 
   return {
     version: 1,
-    sources: { registered: sources.length, segmented, segments: segmentCount, changedSinceIngest },
+    sources: { registered: sources.length, segmented, segments: segmentCount, bytes: sourceBytes, changedSinceIngest },
     proposals: {
       pending: pending.length,
       accepted: accepted.length,
@@ -1392,7 +1428,7 @@ export async function auditCompiler(
       causalComponents: graph.components.length,
       largestCausalComponent: Math.max(0, ...graph.components.map((component) => component.length)),
       unconditionalRootEvents: graph.unconditionalRoots,
-      semanticReady: events.length >= NOVEL_SCALE_EVENT_THRESHOLD
+      semanticReady: novelScale
         ? semanticIssues.length === 0
           && participationValidation.length === 0
           && relationValidation.length === 0
@@ -1441,6 +1477,8 @@ export async function auditCompiler(
       readerSummaryCoverage,
       characterEntryCheckpointCoverage,
       openingReaderSetup,
+      openingReaderContext,
+      openingActorObservation,
       openingPhysicalPresence,
       openingActionability,
       autonomousDriverCoverage,

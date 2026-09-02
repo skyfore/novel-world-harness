@@ -127,7 +127,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Only non-contested causes/enables can project to legacy causalParents; narrative sequence never implies causation." },
   "spatial-relation": { name: "propose_spatial_relation", label: "Propose spatial relation", description: "Submit one exact-evidence-backed contains, adjacency, or traversable-route relation. Adjacency never implies passage; route activation, visibility, direction, and duration remain explicit." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a world-rule-v2 candidate with typed kind/scope, explicit authority and jurisdiction, per-clause modality/evidence, exceptions, visibility, defeasibility, and explicit priority overrides. Engine invariants cannot be modified through this tool." },
-  "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed StateDelta used to create a runtime genesis branch." },
+  "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed plus structured unread-reader context and physically present actors' direct Genesis observations." },
   "character-goal": { name: "propose_character_goal", label: "Propose character goal", description: "Submit an evidence-backed actor goal and optional candidate action. Goals are policy inputs, not world facts." },
   "character-model": { name: "propose_character_model", label: "Propose character model", description: "Submit an evidence-backed actor policy with registered dispositions, appraisals, development, directed relationship stances, typed obligations, and relationship changes. It never grants omniscient knowledge or makes policy world truth." },
   "state-delta": { name: "propose_state_delta", label: "Propose state delta", description: "Submit a deterministic state-delta candidate for later validation. This never moves a branch head." },
@@ -927,8 +927,12 @@ export function createCompilerProposalToolset(
     activeSourceId
     && compilerBatchId === `structure-${activeSourceId}-v${CHAPTER_SPLIT_DISCOVERY_VERSION}`,
   );
+  const isWholeSourceEvidencePass = () => Boolean(
+    compilerBatchId?.startsWith("opening-batch-")
+    || compilerBatchId?.startsWith("reconcile-"),
+  );
   const assertEvidenceWithinBoundedSlice = async (payload: unknown, envelopeEvidence: unknown): Promise<void> => {
-    if (expectedSegmentIds.length === 0) return;
+    if (expectedSegmentIds.length === 0 || isWholeSourceEvidencePass()) return;
     if (!activeSourceId || boundedSliceSegments.length !== expectedSegmentIds.length) {
       throw new Error("Bounded compiler evidence is unavailable for this batch.");
     }
@@ -972,7 +976,7 @@ export function createCompilerProposalToolset(
     if (unknown.length) {
       throw new Error(`Unknown evidence_segment_ids for active source '${activeSourceId}': ${unknown.join(", ")}.`);
     }
-    if (expectedSegmentIds.length) {
+    if (expectedSegmentIds.length && !isWholeSourceEvidencePass()) {
       const allowed = new Set(expectedSegmentIds);
       const outside = segmentIds.filter((id) => !allowed.has(id));
       if (outside.length) {

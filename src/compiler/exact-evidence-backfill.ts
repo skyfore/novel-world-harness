@@ -199,7 +199,8 @@ export async function backfillLegacyExactEvidence(
   for (const goal of sourceGoals) {
     const candidateEvents = sourceEvents.filter((event) =>
       (event.participants.includes(goal.actorId)
-        || goal.activation?.afterCanonicalEventIds.includes(event.id))
+        || goal.activation?.afterCanonicalEventIds.includes(event.id)
+        || goal.activation?.afterExperiencedCanonicalEventIds?.includes(event.id))
       && evidenceOverlaps(goal.evidence, event.evidence));
     const anchors = (await Promise.all(candidateEvents.map((event) =>
       boundAnchors(bindings, "canonical-event", event.id, goal.evidence)))).flat();

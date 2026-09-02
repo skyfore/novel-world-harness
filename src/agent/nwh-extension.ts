@@ -132,7 +132,8 @@ export function compilerToolNamesForScope(
     .filter((name) => scope === "source" && sourcePurpose === "structure-discovery"
       ? name === "configure_chapter_split" || name === "finish_compiler_batch"
       : name !== "configure_chapter_split")
-    .filter((name) => scope === "reconciliation" || !SOURCE_EVIDENCE_TOOL_NAMES.includes(name as typeof SOURCE_EVIDENCE_TOOL_NAMES[number]))
+    .filter((name) => scope === "reconciliation" || scope === "opening"
+      || !SOURCE_EVIDENCE_TOOL_NAMES.includes(name as typeof SOURCE_EVIDENCE_TOOL_NAMES[number]))
     .filter((name) => scope === "source" || !BOUNDARY_CALIBRATION_TOOL_NAMES.includes(name as typeof BOUNDARY_CALIBRATION_TOOL_NAMES[number]))
     .filter((name) => scope === "source" || !ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES.includes(name as typeof ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES[number]))
     .filter((name) => scope === "source" || !EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES.includes(name as typeof EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES[number]))
@@ -148,6 +149,8 @@ export function compilerToolNamesForScope(
     .filter((name) => scope !== "opening" || [
       "find_compiler_artifacts",
       "read_compiler_artifact",
+      "find_source_evidence",
+      "read_source_evidence",
       "propose_entity",
       "propose_claim",
       "propose_initial_world",
@@ -218,7 +221,7 @@ TUI shortcuts:
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
 const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
-const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Establish an actionable lived state only for characters bodily present at the opening, with location, plan, or momentum whenever supported; a catalog-wide alive list is not a scene. Later characters receive separate source-backed entry checkpoints on their first embodied canonical events. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.`;
+const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence, whole-source evidence retrieval, and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Treat the human player as an unread reader: in addition to concise readerSetup, populate readerContext with the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, the actual holder and direction of each relevant attitude or social pressure, completed pre-checkpoint beats, and the immediate unresolved situation. These are presentation facts, not actor knowledge. Add an actorObservation for every physically present opening character using only what that actor directly perceives. readerSetup, every readerContext summary/gloss, and every actorObservation summary requires an exact explicit or strong-inference field-level evidence selector; weak inference is insufficient. Use find_source_evidence/read_source_evidence only to recover missing identity, causation, stance, or other preexisting context from later discourse; classify it as later-discourse-preexisting and never import an outcome or development after the checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Establish an actionable lived state only for characters bodily present at the opening, with location, plan, or momentum whenever supported; a catalog-wide alive list is not a scene. Later characters receive separate source-backed entry checkpoints on their first embodied canonical events. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.`;
 
 type TuiPrepareAllState = {
   sourceId: string;
@@ -1639,7 +1642,17 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (inspection.stage === "needs-initial-world") {
         prepareAllHostActivity?.update("Preparing the opening world state");
         if (state.initialWorldAttempted) {
-          const fallbackId = await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
+          let fallbackId: string;
+          try {
+            fallbackId = await proposeMinimalOpeningWorld(workspace.root, inspection.source!);
+          } catch (error) {
+            await stopPrepareAll(
+              ctx,
+              error instanceof Error ? error.message : String(error),
+              "error",
+            );
+            return;
+          }
           const result = await convergeWorldProposals(workspace.root, state.sourceId);
           await quarantineUncommittableProposals(workspace.root, result);
           ctx.ui.notify(`The model did not leave a valid opening state; accepted the restricted single-character opening fallback ${fallbackId}.`, "warning");

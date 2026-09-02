@@ -68,6 +68,8 @@ export type PlayerReaderNarrativePrelude = {
   authority: "reader-orientation-only";
   entryTitle: string;
   entrySetup?: string;
+  /** Mandatory opening facts, already stripped of stable IDs and semantic authority outside presentation. */
+  orientation?: ReaderEntryContext["orientation"];
   storySoFar: Array<{
     title: string;
     summary: string;
@@ -431,6 +433,7 @@ export function readerNarrativePrelude(
     authority: "reader-orientation-only",
     entryTitle: context.entryTitle,
     ...(context.entrySetup ? { entrySetup: context.entrySetup } : {}),
+    ...(context.orientation ? { orientation: structuredClone(context.orientation) } : {}),
     storySoFar: context.storySoFar.map((beat) => ({
       title: beat.title,
       summary: beat.summary,
@@ -657,7 +660,7 @@ ${direction}
 
 Authority and context channels, in descending order:
 1. The committed actor frame is the sole factual authority for the immediate playable present. It contains only host-provided information visible to the character at the committed branch head; it is not global world truth.
-2. readerPrelude, when present for an opening, is source-grounded orientation for the human reader. It may establish only its listed completed prior beats and entry setup in the opening prose. It is not actor knowledge, current scene state, or permission to import any later canon. Never use it for an orientation, turn, choice, or action consequence.
+2. readerPrelude, when present for an opening, is source-grounded orientation for the human reader. It may establish only its listed completed prior beats, structured orientation facts/entity glosses/immediate situation, and entry setup in the opening prose. Every structured orientation fact and first-use entity gloss is a mandatory narrative obligation: realize it naturally once before relying on that person, pressure, or causal premise. It is not actor knowledge, current scene state, or permission to import any later canon. Never use it for a turn, choice, or action consequence.
 3. resolvedAct preserves the player's exact act wording and the actor-visible committed result. rawUtterance records what the player asked for and never proves that it happened. actualOutcomes records what did happen. When they differ, actualOutcomes wins. For a turn rendering, include every lockedUtterance once in causal order and preserve its text verbatim; attribution and surrounding punctuation may be literary, but the spoken words may not be summarized, corrected, or replaced. For an opening or orientation, do not replay an old locked utterance merely because it remains in context.
 4. sourceReferences contains exact source-novel prose admitted only from evidence already attached to actor-visible committed history. It is a long-term literary reference for grammar, diction, cadence, tone, and narrative distance only. It proves no current fact, does not activate future canon, and cannot introduce a person, object, place, event, or outcome. Absorb patterns rather than copying sentences, distinctive metaphors, or extended phrases.
 5. playContinuity contains exact prior player and rendered-scene prose. Use it for local voice, spatial phrasing, unresolved gestures, pronouns, and dialogue continuity. It is presentation memory, not world truth, and must yield to the committed actor frame and actualOutcomes.
@@ -672,9 +675,10 @@ Rules:
 - Never mention or explain character-knowledge boundaries, reader-versus-character knowledge, committed state/history/frames, claims, actor-visible context, canon status, or any other engine or compilation terminology. Resolve those constraints silently and remain inside the fiction.
 - Do not compress the beat into a status report, event summary, or utilitarian bridge. Develop image, rhythm, embodied response, dialogue, and dramatic pressure as the material warrants. A normal beat may take several fully shaped paragraphs; there is no fixed short target. Remain inside one immediate playable beat rather than rushing across subsequent events.
 - Follow narrativeContract: write focalized third-person novel prose centered on actor.name. Name the focal character early in an opening, then use natural third-person pronouns. The narrator must never address the player as "you" or speak as "I/we"; first- or second-person pronouns are allowed only inside verbatim dialogue or clearly quoted thought.
-- Never emit a recap heading, list, identity card, command tutorial, or greeting. When readerPrelude exists in an opening, absorb it into continuous prose and transition naturally into the actor's immediate sensory present without implying the actor knows reader-only facts.
+- Never emit a recap heading, list, identity card, command tutorial, or greeting. When readerPrelude exists in an opening, absorb its facts, entity introductions, causal premises, actor-versus-social stance distinctions, and unresolved situation into continuous prose. Preserve each stance fact's holderName and stance direction; never transfer another person's or institution's pressure/desire onto the focal character. Do not repeat the same setup in summary form; transition naturally into the actor's immediate sensory present without implying the actor knows reader-only facts.
 - Render the character's immediate sensory moment, embodied response, emotional pressure, and unresolved in-world tension using committed state, knowledge, present entities, actor-visible spatialRelations, visible events, activeThreads, and the admitted continuity channels.
 - presentEntities proves current scene presence. referenceableEntities proves only that an identity may be named; never describe a referenceable-only character as physically present.
+- In an opening only, readerPrelude.orientation.entityGlosses is separate narrator-only authority to introduce those named identities while orienting the unread reader. It never makes them present, known to the focal actor, or available for action unless the committed actor frame independently says so.
 - Establish persistent or actionable facts only when present in the frame. Do not import remembered source-novel canon, hidden state, or future events.
 - Host story time, elapsed duration, commit steps, and event dates are withheld unless they appear in selfState, acquired knowledge, or the opening-only readerPrelude. Never infer or announce a calendar date from genre or remembered canon.
 - You may add non-persistent sensory texture, figurative language, pacing, and interior immediacy, but they must not introduce a new named person, place, object, relationship, possession, obligation, event, or outcome.

@@ -142,6 +142,7 @@ export async function projectCharacterDevelopment(
       state,
       knownClaimIds,
       realizedCanonicalEventIds: realized,
+      experiencedCanonicalEventIds: experiencedCanonical,
       storyTime: state.logicalTime.storyTime,
     });
     if (activation.active) activeGoalIds.push(goal.id);

@@ -97,6 +97,11 @@ A development phase may activate through:
 
 Every development phase must name at least one such activation boundary; an always-on phase is rejected because the baseline model already represents the opening self. Phase modifiers are cumulative and bounded to `[-1, 1]`. They change effective traits and decision biases used by actor reasoning; they do not rewrite prior history. A canonical future phase cannot activate merely because the compiler knows the character's complete arc.
 
+Character goals use the same distinction: `afterCanonicalEventIds` gates on an
+objective transition committed anywhere in the branch, while
+`afterExperiencedCanonicalEventIds` gates on that actor's personal participation.
+Realizing an event for somebody else never activates a personal aftermath goal.
+
 Actor reasoning also receives a bounded summary of that actor's recent committed lived experiences. This includes divergent player and background events, not only canonical event IDs, so branch-specific experience can influence later choices without exposing uncommitted canon or other actors' private knowledge.
 
 Generic age bands are presentation-only derived hints. Culturally meaningful adulthood, office, kinship, mourning, marriageability, or legal capacity must be explicit world state/rules because societies differ.

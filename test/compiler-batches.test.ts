@@ -9,6 +9,7 @@ import {
   hydrateCompilerBatch,
   prepareCompilerBatches,
   prepareOpeningWorldCompilerBatch,
+  proposeMinimalOpeningWorld,
   runCompilerBatches,
   selectOpeningCompilerBatches,
 } from "../src/compiler/batches.js";
@@ -357,6 +358,12 @@ describe("compiler batches", () => {
     expect(opening.prompt).toContain("may propose exactly one initial-world");
     expect(opening.prompt).toContain("one world-time cut");
     expect(opening.prompt).toContain("readerSetup");
+    expect(opening.prompt).toContain("structured readerContext");
+    expect(opening.prompt).toContain("first-use character");
+    expect(opening.prompt).toContain("actual holder and direction");
+    expect(opening.prompt).toContain("actorObservation");
+    expect(opening.prompt).toContain("find_source_evidence/read_source_evidence");
+    expect(opening.prompt).toContain("later-discourse-preexisting");
     expect(opening.prompt).toContain("human who has never read the novel");
     expect(opening.prompt).toContain("participantPresence");
     expect(opening.prompt).toContain("later discourse is not automatically future world truth");
@@ -364,6 +371,16 @@ describe("compiler batches", () => {
     expect(opening.prompt).not.toContain("peek_adjacent_evidence");
     expect(opening.prompt).not.toContain("defer_boundary_artifact");
     expect(opening.prompt).not.toContain("Ordinary source-review batches must not propose an initial-world");
+  });
+
+  it("never hides a failed long-form opening compilation behind an alive-only fallback", async () => {
+    const { root, source } = await fixtureWithContent(
+      `第一章\nHero waits.\n${"Long-form source material continues. ".repeat(1_000)}\n`,
+    );
+
+    await expect(proposeMinimalOpeningWorld(root, source)).rejects.toThrow(
+      "Cannot synthesize a deterministic alive-only opening for long-form source",
+    );
   });
 
   it("uses the first narrative chapter instead of publication front matter for the opening world", async () => {

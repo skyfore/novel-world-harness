@@ -2,7 +2,12 @@ import type { z } from "zod";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
 import { CanonicalCompiler, CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
-import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
+import {
+  InitialWorldStore,
+  initialWorldSchema,
+  validateInitialWorldEvidenceAssertions,
+  type InitialWorld,
+} from "../world/initial.js";
 import {
   canonicalEventSchema,
   claimSchema,
@@ -492,6 +497,134 @@ export class CompilerValidator {
       openingPresenceIds.add(presence.entityId);
       if (presence.mode === "physical") physicalOpeningIds.add(presence.entityId);
     }
+    const observationActorIds = new Set<string>();
+    for (let index = 0; index < (initial.actorObservations?.length ?? 0); index += 1) {
+      const observation = initial.actorObservations![index]!;
+      const actor = entities.get(observation.actorId);
+      if (!actor || actor.kind !== "character") {
+        errors.push(issue(
+          "INVALID_OPENING_OBSERVER",
+          `Opening observer ${observation.actorId} is not a canonical character`,
+          `actorObservations.${index}.actorId`,
+        ));
+      }
+      if (observationActorIds.has(observation.actorId)) {
+        errors.push(issue(
+          "DUPLICATE_OPENING_OBSERVER",
+          `Opening observer ${observation.actorId} is duplicated`,
+          `actorObservations.${index}.actorId`,
+        ));
+      }
+      observationActorIds.add(observation.actorId);
+      if (!physicalOpeningIds.has(observation.actorId)) {
+        errors.push(issue(
+          "OPENING_OBSERVER_NOT_PHYSICAL",
+          `Opening observer ${observation.actorId} must be physically present at the checkpoint`,
+          `actorObservations.${index}.actorId`,
+        ));
+      }
+    }
+    if (initial.readerContext) {
+      const focal = entities.get(initial.readerContext.focalActorId);
+      if (!focal || focal.kind !== "character") {
+        errors.push(issue(
+          "INVALID_OPENING_FOCAL_ACTOR",
+          `Opening reader focal actor ${initial.readerContext.focalActorId} is not a canonical character`,
+          "readerContext.focalActorId",
+        ));
+      }
+      if (!physicalOpeningIds.has(initial.readerContext.focalActorId)) {
+        errors.push(issue(
+          "OPENING_FOCAL_ACTOR_NOT_PHYSICAL",
+          `Opening reader focal actor ${initial.readerContext.focalActorId} must be physically present`,
+          "readerContext.focalActorId",
+        ));
+      }
+      const initialKnowledgeByFocal = new Set((initial.knowledge?.operations ?? []).flatMap((operation) =>
+        operation.op === "learn" && operation.actorId === initial.readerContext!.focalActorId
+          ? [operation.claimId]
+          : []));
+      const referencedCharacterIds = new Set<string>();
+      for (let factIndex = 0; factIndex < initial.readerContext.facts.length; factIndex += 1) {
+        const fact = initial.readerContext.facts[factIndex]!;
+        for (let entityIndex = 0; entityIndex < fact.entityIds.length; entityIndex += 1) {
+          const entityId = fact.entityIds[entityIndex]!;
+          const entity = entities.get(entityId);
+          if (!entity) {
+            errors.push(issue(
+              "UNKNOWN_READER_CONTEXT_ENTITY",
+              `Opening reader fact ${fact.id} references unknown entity ${entityId}`,
+              `readerContext.facts.${factIndex}.entityIds.${entityIndex}`,
+            ));
+          } else if (entity.kind === "character" && entityId !== initial.readerContext.focalActorId) {
+            referencedCharacterIds.add(entityId);
+          }
+        }
+        if (fact.holderEntityId) {
+          const holder = entities.get(fact.holderEntityId);
+          if (!holder || (holder.kind !== "character" && holder.kind !== "institution")) {
+            errors.push(issue(
+              "INVALID_READER_CONTEXT_HOLDER",
+              `Opening reader fact ${fact.id} has invalid stance/stakes holder ${fact.holderEntityId}`,
+              `readerContext.facts.${factIndex}.holderEntityId`,
+            ));
+          }
+        }
+        for (let claimIndex = 0; claimIndex < fact.focalKnowledgeClaimIds.length; claimIndex += 1) {
+          const claimId = fact.focalKnowledgeClaimIds[claimIndex]!;
+          if (!claims.has(claimId)) {
+            errors.push(issue(
+              "UNKNOWN_READER_CONTEXT_CLAIM",
+              `Opening reader fact ${fact.id} references unknown focal knowledge claim ${claimId}`,
+              `readerContext.facts.${factIndex}.focalKnowledgeClaimIds.${claimIndex}`,
+            ));
+          } else if (!initialKnowledgeByFocal.has(claimId)) {
+            errors.push(issue(
+              "UNSEEDED_READER_CONTEXT_KNOWLEDGE",
+              `Reader fact ${fact.id} marks ${claimId} as focal knowledge, but the initial KnowledgeDelta does not seed it`,
+              `readerContext.facts.${factIndex}.focalKnowledgeClaimIds.${claimIndex}`,
+            ));
+          }
+        }
+      }
+      const glossEntityIds = new Set<string>();
+      for (let glossIndex = 0; glossIndex < initial.readerContext.entityGlosses.length; glossIndex += 1) {
+        const gloss = initial.readerContext.entityGlosses[glossIndex]!;
+        if (!entities.has(gloss.entityId)) {
+          errors.push(issue(
+            "UNKNOWN_READER_GLOSS_ENTITY",
+            `Opening entity gloss references unknown entity ${gloss.entityId}`,
+            `readerContext.entityGlosses.${glossIndex}.entityId`,
+          ));
+        }
+        if (glossEntityIds.has(gloss.entityId)) {
+          errors.push(issue(
+            "DUPLICATE_READER_GLOSS",
+            `Opening entity ${gloss.entityId} has more than one first-use gloss`,
+            `readerContext.entityGlosses.${glossIndex}.entityId`,
+          ));
+        }
+        glossEntityIds.add(gloss.entityId);
+      }
+      for (const entityId of referencedCharacterIds) {
+        if (!glossEntityIds.has(entityId)) {
+          errors.push(issue(
+            "MISSING_READER_CHARACTER_GLOSS",
+            `Opening reader context references character ${entityId} without explaining who they are and why they matter now`,
+            "readerContext.entityGlosses",
+          ));
+        }
+      }
+      for (const actorId of physicalOpeningIds) {
+        if (!observationActorIds.has(actorId)) {
+          errors.push(issue(
+            "MISSING_OPENING_ACTOR_OBSERVATION",
+            `Physically present opening character ${actorId} needs a direct-perception Genesis observation`,
+            "actorObservations",
+          ));
+        }
+      }
+    }
     for (const operation of initial.delta.operations) {
       if ("entityId" in operation && entities.get(operation.entityId)?.kind === "character") {
         representedCharacters.add(operation.entityId);
@@ -567,6 +700,14 @@ export class CompilerValidator {
     for (let index = 0; index < (goal.activation?.afterCanonicalEventIds.length ?? 0); index += 1) {
       const eventId = goal.activation!.afterCanonicalEventIds[index]!;
       if (!events.has(eventId)) errors.push(issue("UNKNOWN_GOAL_EVENT", `Goal ${goal.id} activates after unknown canonical event ${eventId}`, `activation.afterCanonicalEventIds.${index}`));
+    }
+    for (let index = 0; index < (goal.activation?.afterExperiencedCanonicalEventIds?.length ?? 0); index += 1) {
+      const eventId = goal.activation!.afterExperiencedCanonicalEventIds![index]!;
+      if (!events.has(eventId)) errors.push(issue(
+        "UNKNOWN_GOAL_EXPERIENCE_EVENT",
+        `Goal ${goal.id} activates after unknown personally experienced canonical event ${eventId}`,
+        `activation.afterExperiencedCanonicalEventIds.${index}`,
+      ));
     }
     if (goal.activation?.storyWindow?.kind === "relative" && !events.has(goal.activation.storyWindow.anchorEventId)) {
       errors.push(issue("UNKNOWN_GOAL_EVENT", `Goal ${goal.id} story window references unknown canonical event ${goal.activation.storyWindow.anchorEventId}`, "activation.storyWindow.anchorEventId"));
@@ -1138,6 +1279,9 @@ export class CompilerCommitService {
     const worldRuleEvidenceIssues = kind === "world-rule"
       ? validateWorldRuleEvidenceAssertions(worldRuleSchema.parse(payload), evidenceAssertions)
       : [];
+    const initialWorldEvidenceIssues = kind === "initial-world"
+      ? validateInitialWorldEvidenceAssertions(initialWorldSchema.parse(payload), evidenceAssertions)
+      : [];
     const exactInspection = await this.evidence.inspectAssertions(evidenceAssertions);
     const legacySourceIds = evidenceSourceIds([...payloadEvidence, ...envelopeEvidence]);
     const exactSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
@@ -1186,6 +1330,7 @@ export class CompilerCommitService {
       ...characterEvidenceIssues,
       ...spatialEvidenceIssues,
       ...worldRuleEvidenceIssues,
+      ...initialWorldEvidenceIssues,
       ...exactInspection.issues,
       ...mixedSourceIssues,
       ...resolutionTraceIssues,

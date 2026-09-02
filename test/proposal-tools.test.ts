@@ -18,6 +18,7 @@ import { SourceStructureStore } from "../src/compiler/structure.js";
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 import { characterModelSchema } from "../src/world/actors.js";
 import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
+import { initialWorldSchema } from "../src/world/initial.js";
 
 const roots: string[] = [];
 
@@ -144,6 +145,90 @@ describe("compiler proposal tools", () => {
     });
     expect((await new CompilerCommitService(root).accept("entity", "entity-hero-legacy-revision")).accepted).toBe(true);
     await expect(new EvidenceAssertionStore(root).listForArtifact("entity", "hero")).resolves.toEqual([]);
+  });
+
+  it("lets the dedicated opening pass recover Longzu-style pre-checkpoint cause and stance from later discourse", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-opening-whole-source-context-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, [
+      "序章",
+      "Hero watches a grey avatar flicker on the screen.",
+      "第一章",
+      "Hero is a student living with his aunt.",
+      "His aunt submitted American university applications for him after earlier rejections.",
+      "Hero himself is indifferent to studying abroad.",
+      "The Chicago decision is still pending.",
+      "",
+    ].join("\n"));
+    const segments = await new SegmentStore(root).list(fixture.source.id);
+    expect(segments).toHaveLength(2);
+    const [openingSegment, laterSegment] = segments;
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch(
+      [openingSegment!.id],
+      `opening-batch-${fixture.source.id}-reader-context`,
+      fixture.source.id,
+    );
+    const initial = toolset.tools.find((candidate) => candidate.name === "propose_initial_world")!;
+    const selector = (segmentId: string, exact: string, targetPath: string) => ({
+      segment_id: segmentId,
+      exact,
+      target_path: targetPath,
+      relation: "supports",
+      strength: "explicit",
+    });
+
+    await expect(initial.execute("opening-context", {
+      proposal_id: "opening-context",
+      payload: {
+        version: 1,
+        readerSetup: "Hero is waiting at home while an overseas application arranged by his aunt remains unresolved.",
+        readerContext: {
+          version: 1,
+          focalActorId: "hero",
+          facts: [
+            { id: "focal", kind: "focal-identity", summary: "Hero is a student living with his aunt.", temporalClass: "later-discourse-preexisting", basis: "source-narrator-established", entityIds: ["hero"], focalKnowledgeClaimIds: [], dependsOnFactIds: [] },
+            { id: "time", kind: "time-place", summary: "Hero is at home during the opening wait.", temporalClass: "at-checkpoint", basis: "checkpoint-state", entityIds: ["hero"], focalKnowledgeClaimIds: [], dependsOnFactIds: [] },
+            { id: "cause", kind: "causal-premise", summary: "His aunt submitted American university applications after earlier rejections.", temporalClass: "later-discourse-preexisting", basis: "source-narrator-established", entityIds: ["hero", "aunt"], focalKnowledgeClaimIds: [], dependsOnFactIds: [] },
+            { id: "stance", kind: "actor-stance", summary: "Hero is indifferent to studying abroad.", temporalClass: "later-discourse-preexisting", basis: "source-narrator-established", entityIds: ["hero"], holderEntityId: "hero", stance: "indifferent", focalKnowledgeClaimIds: [], dependsOnFactIds: [] },
+            { id: "pressure", kind: "immediate-pressure", summary: "The Chicago decision remains pending.", temporalClass: "at-checkpoint", basis: "source-narrator-established", entityIds: ["hero"], focalKnowledgeClaimIds: [], dependsOnFactIds: ["cause"] },
+          ],
+          entityGlosses: [{ entityId: "aunt", relationshipToFocal: "Hero's guardian aunt", whyRelevantNow: "She initiated the American applications", factIds: ["cause"] }],
+          immediateSituation: {
+            summary: "An application arranged by Hero's aunt is awaiting Chicago's decision.",
+            causalFactIds: ["cause"],
+            pressureFactIds: ["pressure"],
+            unresolvedFactIds: ["pressure"],
+            outcomePolicy: "withhold-post-checkpoint-outcomes",
+          },
+        },
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        actorObservations: [{ actorId: "hero", summary: "Hero sees the grey avatar flicker on the screen." }],
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "wait" }] },
+      },
+      evidence_segment_ids: [openingSegment!.id, laterSegment!.id],
+      evidence_selectors: [
+        selector(laterSegment!.id, "His aunt submitted American university applications for him after earlier rejections.", "/readerSetup"),
+        selector(laterSegment!.id, "Hero is a student living with his aunt.", "/readerContext/facts/0/summary"),
+        selector(openingSegment!.id, "Hero watches a grey avatar flicker on the screen.", "/readerContext/facts/1/summary"),
+        selector(laterSegment!.id, "His aunt submitted American university applications for him after earlier rejections.", "/readerContext/facts/2/summary"),
+        selector(laterSegment!.id, "Hero himself is indifferent to studying abroad.", "/readerContext/facts/3/summary"),
+        selector(laterSegment!.id, "The Chicago decision is still pending.", "/readerContext/facts/4/summary"),
+        selector(laterSegment!.id, "living with his aunt", "/readerContext/entityGlosses/0/relationshipToFocal"),
+        selector(laterSegment!.id, "His aunt submitted American university applications for him", "/readerContext/entityGlosses/0/whyRelevantNow"),
+        selector(laterSegment!.id, "His aunt submitted American university applications for him after earlier rejections.", "/readerContext/immediateSituation/summary"),
+        selector(openingSegment!.id, "Hero watches a grey avatar flicker on the screen.", "/actorObservations/0/summary"),
+      ],
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { proposalId: "opening-context", kind: "initial-world" },
+    });
+
+    const pending = await new ProposalStore(root).read("pending", "opening-context", initialWorldSchema);
+    expect(new Set(pending.evidenceAssertions?.flatMap((assertion) =>
+      assertion.anchors.map((anchor) => anchor.sourceId)))).toEqual(new Set([fixture.source.id]));
+    expect(pending.evidenceAssertions?.some((assertion) =>
+      assertion.target.jsonPointer === "/readerContext/facts/2/summary"
+      && assertion.anchors[0]?.startLine === 5)).toBe(true);
   });
 
   it("rejects nonexistent evidence targets and inferred selectors without interpretations", async () => {

@@ -2,6 +2,7 @@ import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 import type {
   CanonicalEvent,
   CharacterEntryCheckpoint,
+  ActorEventObservation,
   Entity,
   EvidenceRef,
   KnowledgeDelta,
@@ -9,6 +10,7 @@ import type {
   StateDelta,
   StoryTime,
 } from "./model.js";
+import type { OpeningReaderContext } from "./initial.js";
 
 export type CharacterEntryPoint = {
   actorId: string;
@@ -18,6 +20,7 @@ export type CharacterEntryPoint = {
   storyTime?: StoryTime;
   canonicalEventId?: string;
   readerSetup?: string;
+  readerOrientation?: OpeningReaderContext;
   evidence: EvidenceRef[];
 };
 
@@ -39,6 +42,22 @@ export type ReaderContextBeat = {
   storyTime: StoryTime;
 };
 
+export type ReaderOrientationContext = {
+  facts: Array<{
+    kind: OpeningReaderContext["facts"][number]["kind"];
+    summary: string;
+    temporalClass: OpeningReaderContext["facts"][number]["temporalClass"];
+    holderName?: string;
+    stance?: NonNullable<OpeningReaderContext["facts"][number]["stance"]>;
+  }>;
+  entityGlosses: Array<{
+    name: string;
+    relationshipToFocal: string;
+    whyRelevantNow: string;
+  }>;
+  immediateSituation: { summary: string };
+};
+
 /** Reader knowledge is presentation-only and must never enter actor knowledge. */
 export type ReaderEntryContext = {
   version: 2;
@@ -48,6 +67,7 @@ export type ReaderEntryContext = {
   entryCanonicalEventId?: string;
   entryStoryTime?: StoryTime;
   entrySetup?: string;
+  orientation?: ReaderOrientationContext;
   storySoFar: ReaderContextBeat[];
 };
 
@@ -59,6 +79,7 @@ export type CharacterEntrySeed = {
   realizesCanonicalEventIds: string[];
   participantPresence?: ParticipantPresence[];
   actorObservation?: string;
+  actorObservations?: ActorEventObservation[];
   readerContext: ReaderEntryContext;
 };
 
@@ -91,6 +112,9 @@ export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): Charac
         discourseOrder: openingOrder,
         ...(bundle.canonical.initialWorld.readerSetup
           ? { readerSetup: bundle.canonical.initialWorld.readerSetup }
+          : {}),
+        ...(bundle.canonical.initialWorld.readerContext
+          ? { readerOrientation: structuredClone(bundle.canonical.initialWorld.readerContext) }
           : {}),
         ...(bundle.canonical.initialWorld.checkpoint?.storyTime
           ? { storyTime: structuredClone(bundle.canonical.initialWorld.checkpoint.storyTime) }
@@ -162,6 +186,8 @@ export function deriveCharacterEntrySeed(
       && event.narrativeContext?.mode !== "flashforward")
     .map((event) => event.id);
 
+  const initialActorObservation = bundle.canonical.initialWorld.actorObservations
+    ?.find((observation) => observation.actorId === actorId)?.summary;
   return {
     delta: { version: 1, operations: stateOperations },
     ...(knowledgeOperations.length ? { knowledge: { version: 1, operations: knowledgeOperations } } : {}),
@@ -172,10 +198,19 @@ export function deriveCharacterEntrySeed(
       ? {
           participantPresence: structuredClone(entryCheckpoint.participantPresence),
           actorObservation: entryCheckpoint.actorObservation,
+          actorObservations: [{ actorId, summary: entryCheckpoint.actorObservation }],
         }
-      : bundle.canonical.initialWorld.participantPresence?.length
-        ? { participantPresence: structuredClone(bundle.canonical.initialWorld.participantPresence) }
-        : {}),
+      : {
+          ...(bundle.canonical.initialWorld.participantPresence?.length
+            ? { participantPresence: structuredClone(bundle.canonical.initialWorld.participantPresence) }
+            : {}),
+          ...(initialActorObservation
+            ? { actorObservation: initialActorObservation }
+            : {}),
+          ...(bundle.canonical.initialWorld.actorObservations?.length
+            ? { actorObservations: structuredClone(bundle.canonical.initialWorld.actorObservations) }
+            : {}),
+        }),
     readerContext: readerContextForEntry(option.entry, priorEvents, bundle.canonical.entities),
   };
 }
@@ -195,6 +230,27 @@ export function readerContextForEntry(
     ...(entry.canonicalEventId ? { entryCanonicalEventId: entry.canonicalEventId } : {}),
     ...(entry.storyTime ? { entryStoryTime: structuredClone(entry.storyTime) } : {}),
     ...(entry.readerSetup ? { entrySetup: entry.readerSetup } : {}),
+    ...(entry.readerOrientation
+      ? {
+          orientation: {
+            facts: entry.readerOrientation.facts.map((fact) => ({
+              kind: fact.kind,
+              summary: fact.summary,
+              temporalClass: fact.temporalClass,
+              ...(fact.holderEntityId
+                ? { holderName: entityNames.get(fact.holderEntityId) ?? fact.holderEntityId }
+                : {}),
+              ...(fact.stance ? { stance: fact.stance } : {}),
+            })),
+            entityGlosses: entry.readerOrientation.entityGlosses.map((gloss) => ({
+              name: entityNames.get(gloss.entityId) ?? gloss.entityId,
+              relationshipToFocal: gloss.relationshipToFocal,
+              whyRelevantNow: gloss.whyRelevantNow,
+            })),
+            immediateSituation: { summary: entry.readerOrientation.immediateSituation.summary },
+          },
+        }
+      : {}),
     storySoFar: priorEvents.map((event, index) => ({
       eventId: event.id,
       title: event.title,
@@ -239,6 +295,14 @@ export function formatReaderEntryContext(
     context.entryTitle,
     ...(context.entrySetup ? ["", context.entrySetup] : []),
   );
+  if (context.orientation) {
+    lines.push("", "### 入场所需上下文", "");
+    for (const fact of context.orientation.facts) lines.push(`- ${fact.summary}`);
+    for (const gloss of context.orientation.entityGlosses) {
+      lines.push(`- ${gloss.name}：${gloss.relationshipToFocal}；${gloss.whyRelevantNow}`);
+    }
+    lines.push(`- 当前未决局面：${context.orientation.immediateSituation.summary}`);
+  }
   return lines.join("\n");
 }
 

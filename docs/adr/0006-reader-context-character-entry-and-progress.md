@@ -27,9 +27,17 @@ world could appear to have no way out of a repeated exchange.
 
 ### 1. Separate reader onboarding from actor knowledge
 
-For the opening checkpoint, `InitialWorld.readerSetup` supplies a concise,
-source-grounded, spoiler-free explanation of where, when, who, the premise needed
-to understand the scene, and the immediate unresolved situation. Its separate
+For the opening checkpoint, `InitialWorld.readerSetup` remains the concise fallback,
+while `InitialWorld.readerContext` is the verifiable literary-entry contract for an
+unread human. It records focal identity, time/place, first-use entity glosses,
+relationships, causal premises, completed prior beats, the actual holder and
+direction of relevant attitudes or social pressure, and the immediate unresolved
+situation. Each narrative field has exact explicit or strong-inference source
+evidence. Later discourse may support a fact only when the source establishes that
+it was already true at or before the checkpoint; it is marked
+`later-discourse-preexisting`. A later outcome or later-acquired knowledge is never
+admitted. `InitialWorld.actorObservations` separately records what every physically
+present opening actor directly perceives and is copied into Genesis.
 `participantPresence` must mark an actionable opening role as physically present;
 identity, alive state, mention, memory, or representation is insufficient. For a later
 character checkpoint, the host derives an ordered `ReaderEntryContext` from every
@@ -41,8 +49,9 @@ checkpoint with no prior beats skips the empty recap. The player-facing preface
 never explains character-knowledge boundaries or uses engine terminology. A later
 role is not offered if any preceding event lacks its recap. Reader context is
 never written to `KnowledgeDelta`, world state, NPC input, or player-action model
-input. Under ADR 0008, a bounded presentation-only form may enter only the final
-step-zero opening renderer so it can become seamless novel prose; it remains
+input. Under ADR 0008, the structured presentation-only form may enter only the final
+step-zero opening renderer. Every fact and first-use gloss is a narrative obligation
+to be realized naturally in continuous prose, rather than emitted as a recap list; it remains
 excluded from choice generation and every semantic decision. Actor capability and claims continue to come only
 from committed state, learned claims, and actor observations.
 
@@ -138,11 +147,15 @@ repetitive dialogue or silently replaying canon.
 
 ### 6. Audit for an executable world, not only extracted plot
 
-Novel-scale semantic readiness now checks:
+Novel scale is detected from immutable source byte size as well as compiled event
+count, so under-extraction cannot turn a long novel into a supposedly exempt short
+fixture. Novel-scale semantic readiness now checks:
 
 - explicit participant-presence coverage;
 - explicit physical presence for the actionable opening role;
 - a spoiler-free reader setup for the opening checkpoint;
+- structured unread-reader context with exact field-level provenance;
+- a direct Genesis observation for every physically present opening role;
 - a reader recap for every canonical event;
 - a complete actionable checkpoint for every later embodied character;
 - an opening location, plan, or momentum for a lived actionable checkpoint; and

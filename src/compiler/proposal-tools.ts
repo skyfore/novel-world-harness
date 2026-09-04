@@ -2904,13 +2904,13 @@ export function createCompilerProposalToolset(
           }
           successfulAnnotationProposalIds.add(summary.id);
         }
-        for (const summary of await entityResolutionStore.listBatchProposals(activeSourceId, compilerBatchId)) {
+        for (const summary of await entityResolutionStore.listRecoverableBatchProposals(activeSourceId, compilerBatchId)) {
           if (successfulProposalIds.has(summary.id) || successfulAnnotationProposalIds.has(summary.id)) {
             throw new Error(`Compiler batch ${compilerBatchId} reuses proposal ID ${summary.id} across proposal stores.`);
           }
           successfulEntityResolutionProposalIds.add(summary.id);
         }
-        for (const summary of await eventResolutionStore.listBatchProposals(activeSourceId, compilerBatchId)) {
+        for (const summary of await eventResolutionStore.listRecoverableBatchProposals(activeSourceId, compilerBatchId)) {
           if (successfulProposalIds.has(summary.id)
             || successfulAnnotationProposalIds.has(summary.id)
             || successfulEntityResolutionProposalIds.has(summary.id)) {

@@ -25,7 +25,7 @@ import {
   type IdentityResolution,
 } from "./entity-resolution.js";
 import { EvidenceAssertionStore, evidenceAssertionSourceIds } from "./evidence-assertions.js";
-import { CompilerBatchStore } from "./batches.js";
+import { CompilerBatchStore } from "./batch-progress.js";
 
 export const EVENT_RESOLUTION_ONTOLOGY_VERSION = "event-resolution-v1" as const;
 
@@ -120,6 +120,9 @@ export type EventResolutionProposalSummary = {
   status: EventResolution["status"];
   compilerBatchId?: string;
   createdAt: string;
+};
+export type RecoverableEventResolutionProposalSummary = EventResolutionProposalSummary & {
+  proposalStatus: "pending" | "accepted";
 };
 
 const storedEventResolutionRefSchema = z.object({
@@ -218,6 +221,53 @@ export class EventResolutionStore {
       ...await this.listProposals(sourceId, "accepted"),
     ].filter((summary) => summary.compilerBatchId === compilerBatchId)
       .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  /**
+   * Select the live leaf proposals for an idempotent batch retry. Event
+   * resolutions own a mention cluster, so an accepted proposal is recoverable
+   * only when every mention still points to its exact payload and no pending
+   * proposal overlaps the cluster.
+   */
+  async listRecoverableBatchProposals(
+    sourceIdInput: string,
+    compilerBatchIdInput: string,
+  ): Promise<RecoverableEventResolutionProposalSummary[]> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const compilerBatchId = idSchema.parse(compilerBatchIdInput);
+    const [pending, accepted] = await Promise.all([
+      this.listProposals(sourceId, "pending"),
+      this.listProposals(sourceId, "accepted"),
+    ]);
+    const pendingInBatch = pending.filter((summary) => summary.compilerBatchId === compilerBatchId);
+    const occupiedMentions = new Set(pendingInBatch.flatMap((summary) => summary.eventMentionIds));
+    const acceptedMatches: EventResolutionProposalSummary[] = [];
+    for (const summary of accepted) {
+      if (
+        summary.compilerBatchId !== compilerBatchId
+        || summary.eventMentionIds.some((mentionId) => occupiedMentions.has(mentionId))
+      ) continue;
+      const proposal = await this.readProposal(sourceId, "accepted", summary.id);
+      const proposalHash = contentHash(proposal.payload);
+      const current = await Promise.all(proposal.payload.eventMentionIds.map((mentionId) =>
+        this.currentForMention(sourceId, mentionId)));
+      if (current.every((active) => {
+        return active?.id === proposal.payload.id && contentHash(active) === proposalHash;
+      })) acceptedMatches.push(summary);
+    }
+    acceptedMatches.sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt)
+      || right.id.localeCompare(left.id));
+    const recoverable: RecoverableEventResolutionProposalSummary[] = pendingInBatch.map((summary) => ({
+      ...summary,
+      proposalStatus: "pending",
+    }));
+    for (const summary of acceptedMatches) {
+      if (summary.eventMentionIds.some((mentionId) => occupiedMentions.has(mentionId))) continue;
+      recoverable.push({ ...summary, proposalStatus: "accepted" });
+      for (const mentionId of summary.eventMentionIds) occupiedMentions.add(mentionId);
+    }
+    return recoverable.sort((left, right) => left.id.localeCompare(right.id));
   }
 
   async withdraw(sourceIdInput: string, proposalIdInput: string): Promise<void> {
@@ -917,14 +967,8 @@ async function loadIdentityCatalogForBatch(
   const store = new EntityResolutionStore(workspaceRoot);
   const catalog = new Map((await store.list(sourceId)).map((resolution) => [resolution.mentionId, resolution]));
   if (!compilerBatchId) return catalog;
-  for (const summary of await store.listBatchProposals(sourceId, compilerBatchId)) {
-    let proposal;
-    try {
-      proposal = await store.readProposal(sourceId, "pending", summary.id);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      proposal = await store.readProposal(sourceId, "accepted", summary.id);
-    }
+  for (const summary of await store.listRecoverableBatchProposals(sourceId, compilerBatchId)) {
+    const proposal = await store.readProposal(sourceId, summary.proposalStatus, summary.id);
     catalog.set(proposal.payload.mentionId, proposal.payload);
   }
   return catalog;

@@ -452,7 +452,123 @@ describe("event mention resolution", () => {
       }),
     ]);
   });
+
+  it("recovers only live event-resolution leaves across overlapping mention clusters", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-resolution-leaf-recovery-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "A bell rang. The ringing was remembered.\n");
+    const sourceId = fixture.source.id;
+    const firstBatch = `batch-${sourceId}-00001-semantic-recovery`;
+    const laterBatch = `batch-${sourceId}-00002-semantic-recovery`;
+    const store = new EventResolutionStore(root);
+    await store.stage(sourceId, storedEventResolutionProposal({
+      proposalId: "event-resolution-cluster-proposal",
+      resolutionId: "event-resolution-cluster",
+      sourceId,
+      batchId: firstBatch,
+      mentionIds: ["event-mention-ring", "event-mention-memory"],
+      supersedes: [],
+      createdAt: new Date(1_000).toISOString(),
+    }));
+    await store.commitProposals(sourceId, ["event-resolution-cluster-proposal"]);
+    await expect(store.listRecoverableBatchProposals(sourceId, firstBatch)).resolves.toEqual([
+      expect.objectContaining({
+        id: "event-resolution-cluster-proposal",
+        proposalStatus: "accepted",
+      }),
+    ]);
+
+    await store.stage(sourceId, storedEventResolutionProposal({
+      proposalId: "event-resolution-pending-revision",
+      resolutionId: "event-resolution-pending-revision",
+      sourceId,
+      batchId: firstBatch,
+      mentionIds: ["event-mention-ring"],
+      supersedes: ["event-resolution-cluster"],
+      createdAt: new Date(2_000).toISOString(),
+    }));
+    await expect(store.listRecoverableBatchProposals(sourceId, firstBatch)).resolves.toEqual([
+      expect.objectContaining({
+        id: "event-resolution-pending-revision",
+        proposalStatus: "pending",
+      }),
+    ]);
+    await store.withdraw(sourceId, "event-resolution-pending-revision");
+
+    for (const [proposalId, resolutionId, mentionId] of [
+      ["event-resolution-ring-proposal", "event-resolution-ring", "event-mention-ring"],
+      ["event-resolution-memory-proposal", "event-resolution-memory", "event-mention-memory"],
+    ] as const) {
+      await store.stage(sourceId, storedEventResolutionProposal({
+        proposalId,
+        resolutionId,
+        sourceId,
+        batchId: laterBatch,
+        mentionIds: [mentionId],
+        supersedes: ["event-resolution-cluster"],
+        createdAt: new Date(3_000).toISOString(),
+      }));
+    }
+    await store.commitProposals(sourceId, [
+      "event-resolution-ring-proposal",
+      "event-resolution-memory-proposal",
+    ]);
+    await expect(store.listRecoverableBatchProposals(sourceId, firstBatch)).resolves.toEqual([]);
+
+    await store.stage(sourceId, storedEventResolutionProposal({
+      proposalId: "event-resolution-migrated-leaf-proposal",
+      resolutionId: "event-resolution-migrated-leaf",
+      sourceId,
+      batchId: firstBatch,
+      mentionIds: ["event-mention-ring"],
+      supersedes: ["event-resolution-ring"],
+      createdAt: new Date(4_000).toISOString(),
+    }));
+    await expect(store.listBatchProposals(sourceId, firstBatch)).resolves.toEqual([
+      expect.objectContaining({ id: "event-resolution-cluster-proposal" }),
+      expect.objectContaining({ id: "event-resolution-migrated-leaf-proposal" }),
+    ]);
+    await expect(store.listRecoverableBatchProposals(sourceId, firstBatch)).resolves.toEqual([
+      expect.objectContaining({
+        id: "event-resolution-migrated-leaf-proposal",
+        proposalStatus: "pending",
+      }),
+    ]);
+  });
 });
+
+function storedEventResolutionProposal(input: {
+  proposalId: string;
+  resolutionId: string;
+  sourceId: string;
+  batchId: string;
+  mentionIds: string[];
+  supersedes: string[];
+  createdAt: string;
+}): Parameters<EventResolutionStore["stage"]>[1] {
+  return {
+    version: 1,
+    id: input.proposalId,
+    payload: {
+      version: 1,
+      id: input.resolutionId,
+      sourceId: input.sourceId,
+      eventMentionIds: input.mentionIds,
+      status: "unresolved",
+      candidates: [],
+      supersedesResolutionIds: input.supersedes,
+      rationale: "The recovery fixture intentionally leaves occurrence identity unresolved.",
+      derivation: {
+        runId: input.batchId,
+        worker: "test",
+        compilerBatchId: input.batchId,
+        ontologyVersion: "event-resolution-v1",
+      },
+    },
+    generatedBy: { worker: "test", compilerBatchId: input.batchId },
+    createdAt: input.createdAt,
+  };
+}
 
 function canonicalEvent(
   fixture: Awaited<ReturnType<typeof createEvidenceFixture>>,

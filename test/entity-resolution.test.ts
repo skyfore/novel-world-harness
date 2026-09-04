@@ -541,6 +541,101 @@ describe("entity mention resolution", () => {
       .resolves.toMatchObject({ id: "resolution-ambiguous", status: "ambiguous" });
   });
 
+  it("recovers a pending batch revision without reactivating its superseded accepted predecessor", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-leaf-recovery-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Someone waited.\n");
+    const observationBatch = `batch-${fixture.source.id}-00001-observation-recovery`;
+    const firstBatch = `batch-${fixture.source.id}-00001-semantic-recovery`;
+    const laterBatch = `batch-${fixture.source.id}-00002-semantic-recovery`;
+    const observation = createCompilerProposalToolset(root);
+    await observation.beginBatch([fixture.segmentId], observationBatch, fixture.source.id);
+    await observation.tools.find((tool) => tool.name === "propose_entity_mention")!.execute("mention", {
+      proposal_id: "proposal-mention-recovery",
+      annotation_id: "mention-recovery",
+      selector: { segment_id: fixture.segmentId, exact: "Someone" },
+      surface: "Someone",
+      form: "nominal",
+      kind_candidates: ["character"],
+      confidence: 0.5,
+    } as never, undefined, undefined, context);
+    await finishOnly(observation, fixture.segmentId, "Stored the source mention observation.");
+
+    const first = createCompilerProposalToolset(root);
+    await first.beginBatch([fixture.segmentId], firstBatch, fixture.source.id);
+    await first.tools.find((tool) => tool.name === "propose_entity_resolution")!.execute("initial", {
+      proposal_id: "proposal-resolution-recovery-v1",
+      resolution_id: "resolution-recovery-v1",
+      mention_id: "mention-recovery",
+      status: "unresolved",
+      candidates: [],
+      rationale: "The first evidence slice does not identify the person.",
+    } as never, undefined, undefined, context);
+    await finishOnly(first, fixture.segmentId, "Stored the initial unresolved identity.");
+
+    const store = new EntityResolutionStore(root);
+    await expect(store.listRecoverableBatchProposals(fixture.source.id, firstBatch)).resolves.toEqual([
+      expect.objectContaining({
+        id: "proposal-resolution-recovery-v1",
+        proposalStatus: "accepted",
+      }),
+    ]);
+
+    const later = createCompilerProposalToolset(root);
+    await later.beginBatch([fixture.segmentId], laterBatch, fixture.source.id);
+    await later.tools.find((tool) => tool.name === "propose_entity_resolution")!.execute("later-revision", {
+      proposal_id: "proposal-resolution-recovery-v2",
+      resolution_id: "resolution-recovery-v2",
+      mention_id: "mention-recovery",
+      status: "unresolved",
+      candidates: [],
+      supersedes_resolution_id: "resolution-recovery-v1",
+      rationale: "Later context still leaves the person's identity unresolved.",
+    } as never, undefined, undefined, context);
+    await finishOnly(later, fixture.segmentId, "Superseded the first resolution in a later batch.");
+    await expect(store.listRecoverableBatchProposals(fixture.source.id, firstBatch)).resolves.toEqual([]);
+
+    const interrupted = createCompilerProposalToolset(root);
+    await interrupted.beginBatch([fixture.segmentId], firstBatch, fixture.source.id);
+    await interrupted.tools.find((tool) => tool.name === "propose_entity_resolution")!.execute("migrated-revision", {
+      proposal_id: "proposal-resolution-recovery-v3",
+      resolution_id: "resolution-recovery-v3",
+      mention_id: "mention-recovery",
+      status: "unresolved",
+      candidates: [],
+      supersedes_resolution_id: "resolution-recovery-v2",
+      rationale: "The migrated first batch records a new immutable revision of the current decision.",
+    } as never, undefined, undefined, context);
+
+    await expect(store.listBatchProposals(fixture.source.id, firstBatch)).resolves.toEqual([
+      expect.objectContaining({ id: "proposal-resolution-recovery-v1" }),
+      expect.objectContaining({ id: "proposal-resolution-recovery-v3" }),
+    ]);
+    await expect(store.listRecoverableBatchProposals(fixture.source.id, firstBatch)).resolves.toEqual([
+      expect.objectContaining({
+        id: "proposal-resolution-recovery-v3",
+        proposalStatus: "pending",
+      }),
+    ]);
+
+    const retry = createCompilerProposalToolset(root);
+    await retry.beginBatch([fixture.segmentId], firstBatch, fixture.source.id);
+    await expect(retry.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute(
+      "finish-leaf-recovery",
+      finishInput(fixture.segmentId, "Recovered only the pending leaf resolution."),
+      undefined,
+      undefined,
+      context,
+    )).resolves.toMatchObject({
+      details: {
+        compilerBatchFinished: true,
+        proposalIds: ["proposal-resolution-recovery-v3"],
+      },
+    });
+    await expect(store.currentForMention(fixture.source.id, "mention-recovery"))
+      .resolves.toMatchObject({ id: "resolution-recovery-v3" });
+  });
+
   it("exposes source-scoped paged resolution retrieval and unresolved queues", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-retrieval-"));
     roots.push(root);

@@ -26,6 +26,7 @@ import { initialWorldSchema } from "../src/world/initial.js";
 import { characterGoalSchema, characterModelSchema } from "../src/world/actors.js";
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
+import { EntityResolutionStore } from "../src/compiler/entity-resolution.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -54,6 +55,39 @@ async function fixtureWithContent(content: string): Promise<{ root: string; sour
   const manifest = await segmentSource(root, source);
   await new SegmentStore(root).write(manifest);
   return { root, source };
+}
+
+function storedIdentityResolutionProposal(input: {
+  proposalId: string;
+  resolutionId: string;
+  sourceId: string;
+  batchId: string;
+  mentionId: string;
+  supersedes?: string;
+  createdAt: string;
+}): Parameters<EntityResolutionStore["stage"]>[1] {
+  return {
+    version: 1,
+    id: input.proposalId,
+    payload: {
+      version: 1,
+      id: input.resolutionId,
+      sourceId: input.sourceId,
+      mentionId: input.mentionId,
+      status: "unresolved",
+      candidates: [],
+      ...(input.supersedes ? { supersedesResolutionId: input.supersedes } : {}),
+      rationale: "The recovery fixture intentionally leaves identity unresolved.",
+      derivation: {
+        runId: input.batchId,
+        worker: "test",
+        compilerBatchId: input.batchId,
+        ontologyVersion: "entity-resolution-v1",
+      },
+    },
+    generatedBy: { worker: "test", compilerBatchId: input.batchId },
+    createdAt: input.createdAt,
+  };
 }
 
 describe("compiler batches", () => {
@@ -419,6 +453,61 @@ describe("compiler batches", () => {
     expect(hydrated.prompt).toContain('"logicalId":"person-recovered"');
     expect(hydrated.prompt).toContain("this is a recovery attempt");
     expect(hydrated.prompt).toContain("start recovery by calling finish_compiler_batch once");
+  });
+
+  it("hydrates only recoverable resolution leaves and labels accepted replay state", async () => {
+    const { root, source } = await fixture();
+    const batch = (await prepareCompilerBatches(root, source))
+      .find((candidate) => candidate.semanticStage === "semantic")!;
+    const laterBatchId = `batch-${source.id}-99999-semantic-later`;
+    const store = new EntityResolutionStore(root);
+    await store.stage(source.id, storedIdentityResolutionProposal({
+      proposalId: "identity-stale-v1-proposal",
+      resolutionId: "identity-stale-v1",
+      sourceId: source.id,
+      batchId: batch.id,
+      mentionId: "identity-stale-mention",
+      createdAt: new Date(1_000).toISOString(),
+    }));
+    await store.commitProposals(source.id, ["identity-stale-v1-proposal"]);
+    await store.stage(source.id, storedIdentityResolutionProposal({
+      proposalId: "identity-current-v2-proposal",
+      resolutionId: "identity-current-v2",
+      sourceId: source.id,
+      batchId: laterBatchId,
+      mentionId: "identity-stale-mention",
+      supersedes: "identity-stale-v1",
+      createdAt: new Date(2_000).toISOString(),
+    }));
+    await store.commitProposals(source.id, ["identity-current-v2-proposal"]);
+    await store.stage(source.id, storedIdentityResolutionProposal({
+      proposalId: "identity-pending-v3-proposal",
+      resolutionId: "identity-pending-v3",
+      sourceId: source.id,
+      batchId: batch.id,
+      mentionId: "identity-stale-mention",
+      supersedes: "identity-current-v2",
+      createdAt: new Date(3_000).toISOString(),
+    }));
+    await store.stage(source.id, storedIdentityResolutionProposal({
+      proposalId: "identity-current-stable-proposal",
+      resolutionId: "identity-current-stable",
+      sourceId: source.id,
+      batchId: batch.id,
+      mentionId: "identity-current-stable-mention",
+      createdAt: new Date(4_000).toISOString(),
+    }));
+    await store.commitProposals(source.id, ["identity-current-stable-proposal"]);
+
+    const hydrated = await hydrateCompilerBatch(root, batch);
+
+    expect(hydrated.prompt).not.toContain('"proposalId":"identity-stale-v1-proposal"');
+    expect(hydrated.prompt).toContain('"proposalId":"identity-pending-v3-proposal"');
+    expect(hydrated.prompt).toContain('"logicalId":"identity-pending-v3"');
+    expect(hydrated.prompt).toContain('"proposalStatus":"pending"');
+    expect(hydrated.prompt).toContain('"proposalId":"identity-current-stable-proposal"');
+    expect(hydrated.prompt).toContain('"proposalStatus":"accepted"');
+    expect(hydrated.prompt).toContain("pending resolution revision already takes precedence");
   });
 
   it("includes active source-accounting drafts in a retry turn so the model can withdraw a rejected disposition", async () => {

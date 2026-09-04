@@ -20,7 +20,7 @@ import {
   entityMentionSchema,
   type EntityMention,
 } from "./annotations.js";
-import { CompilerBatchStore } from "./batches.js";
+import { CompilerBatchStore } from "./batch-progress.js";
 
 export const ENTITY_RESOLUTION_ONTOLOGY_VERSION = "entity-resolution-v1" as const;
 
@@ -124,6 +124,9 @@ export type IdentityResolutionProposalSummary = {
   compilerBatchId?: string;
   createdAt: string;
 };
+export type RecoverableIdentityResolutionProposalSummary = IdentityResolutionProposalSummary & {
+  proposalStatus: "pending" | "accepted";
+};
 
 const storedResolutionRefSchema = z.object({
   version: z.literal(1),
@@ -219,6 +222,48 @@ export class EntityResolutionStore {
       ...await this.listProposals(sourceId, "accepted"),
     ].filter((summary) => summary.compilerBatchId === compilerBatchId)
       .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  /**
+   * Proposals that may participate in an idempotent retry of one compiler
+   * batch. Pending revisions win over accepted predecessors for their mention;
+   * an accepted proposal is replayed only while its exact immutable payload is
+   * still the current resolution. Historical accepted proposals remain
+   * queryable through listBatchProposals without being reactivated.
+   */
+  async listRecoverableBatchProposals(
+    sourceIdInput: string,
+    compilerBatchIdInput: string,
+  ): Promise<RecoverableIdentityResolutionProposalSummary[]> {
+    const sourceId = idSchema.parse(sourceIdInput);
+    const compilerBatchId = idSchema.parse(compilerBatchIdInput);
+    const [pending, accepted] = await Promise.all([
+      this.listProposals(sourceId, "pending"),
+      this.listProposals(sourceId, "accepted"),
+    ]);
+    const pendingInBatch = pending.filter((summary) => summary.compilerBatchId === compilerBatchId);
+    const occupiedMentions = new Set(pendingInBatch.map((summary) => summary.mentionId));
+    const acceptedMatches: IdentityResolutionProposalSummary[] = [];
+    for (const summary of accepted) {
+      if (summary.compilerBatchId !== compilerBatchId || occupiedMentions.has(summary.mentionId)) continue;
+      const active = await this.currentForMention(sourceId, summary.mentionId);
+      if (!active || active.id !== summary.resolutionId) continue;
+      const proposal = await this.readProposal(sourceId, "accepted", summary.id);
+      if (contentHash(active) === contentHash(proposal.payload)) acceptedMatches.push(summary);
+    }
+    acceptedMatches.sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt)
+      || right.id.localeCompare(left.id));
+    const recoverable: RecoverableIdentityResolutionProposalSummary[] = pendingInBatch.map((summary) => ({
+      ...summary,
+      proposalStatus: "pending",
+    }));
+    for (const summary of acceptedMatches) {
+      if (occupiedMentions.has(summary.mentionId)) continue;
+      recoverable.push({ ...summary, proposalStatus: "accepted" });
+      occupiedMentions.add(summary.mentionId);
+    }
+    return recoverable.sort((left, right) => left.id.localeCompare(right.id));
   }
 
   async withdraw(sourceIdInput: string, proposalIdInput: string): Promise<void> {

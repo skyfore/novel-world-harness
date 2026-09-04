@@ -51,6 +51,7 @@ import {
 import { baseStructuralUnits, ensureSourceStructure } from "./structure.js";
 import {
   SourceAccountingStore,
+  sourceUnitReviewRange,
   sourceUnitAccountingDecisionSchema,
   type SourceAccountingProposal,
   type SourceUnitAccountingDecision,
@@ -206,10 +207,10 @@ const SEMANTIC_STAGE_PROPOSAL_TOOLS: Record<CompilerSemanticStage, ReadonlySet<s
     "propose_canonical_event",
     "propose_event_participation",
     "propose_event_relation",
+    "propose_scene_occurrence",
     "propose_event_frame",
   ]),
   executable: new Set([
-    "propose_scene_occurrence",
     "propose_action_schema",
     "propose_action_constraint",
     "propose_norm_template",
@@ -248,6 +249,16 @@ export function semanticStageFromCompilerBatchId(
   const suffix = compilerBatchId.slice(prefix.length);
   const match = /^\d{5}-(observation|semantic|executable)-/u.exec(suffix);
   return match?.[1] as CompilerSemanticStage | undefined;
+}
+
+function legacyExecutableSceneBatchId(
+  compilerBatchId: string | undefined,
+  sourceId: string | undefined,
+): string | undefined {
+  if (!compilerBatchId || !sourceId || semanticStageFromCompilerBatchId(compilerBatchId, sourceId) !== "semantic") {
+    return undefined;
+  }
+  return compilerBatchId.replace("-semantic-", "-executable-");
 }
 
 /**
@@ -539,6 +550,27 @@ const MAX_IDENTICAL_FINISH_FAILURES = 2;
 
 function finishIssueSection(label: string, issues: readonly string[]): string[] {
   return issues.length ? [`${label} is incomplete:\n- ${issues.join("\n- ")}`] : [];
+}
+
+/**
+ * Source accounting can legitimately surface hundreds of independent missing
+ * units in a long-form batch. Returning every unit from the finish tool
+ * crowds the next tool turn out of the provider context and prevents the
+ * model from using the paged, exact-ID discovery tool that is the recovery
+ * path. Keep the diagnostic actionable but bounded; `find_source_accounting_units`
+ * remains the sole authority for the complete set and its opaque page tokens.
+ */
+function finishAccountingIssueSection(issues: readonly string[]): string[] {
+  if (!issues.length) return [];
+  const limit = 20;
+  const displayed = issues.slice(0, limit);
+  const remainder = issues.length - displayed.length;
+  return [
+    `Source-unit accounting is incomplete (${issues.length} issue(s)):\n- ${displayed.join("\n- ")}`
+      + (remainder > 0
+        ? `\n- ${remainder} additional issue(s) omitted. Call find_source_accounting_units with status=unresolved, offset=0, and max_results up to 20; copy the returned pageToken into one account_source_units call, then refetch unresolved at offset=0. Do not guess unit IDs or retry this finish unchanged.`
+        : ""),
+  ];
 }
 
 type CompilerBatchBlockedDetails = {
@@ -848,7 +880,7 @@ const sourceAccountingFindParameters = Type.Object({
     Type.Literal("pending"),
   ])),
   offset: Type.Optional(Type.Integer({ minimum: 0 })),
-  max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+  max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
 }, { additionalProperties: false });
 
 const sourceAccountingDecisionParameters = Type.Object({
@@ -1657,7 +1689,10 @@ export function createCompilerProposalToolset(
       ];
       const statusFilter = input.status ?? "all";
       const candidates = baseStructuralUnits(structure)
-        .filter((unit) => byteRangeCoveredBySegments(unit.anchor.startByte, unit.anchor.endByte, targetSegments))
+        .filter((unit) => {
+          const range = sourceUnitReviewRange(bytes, unit);
+          return byteRangeCoveredBySegments(range.startByte, range.endByte, targetSegments);
+        })
         .map((unit) => {
           const represented = unit.kind !== "non-scene" && semanticSpans.some((span) =>
             span.sourceId === source.id
@@ -1688,7 +1723,10 @@ export function createCompilerProposalToolset(
         .filter((unit) => statusFilter === "all"
           || (statusFilter === "pending" ? Boolean(unit.pending) : unit.status === "unresolved"));
       const offset = input.offset ?? 0;
-      const maxResults = input.max_results ?? 100;
+      // Sentence payloads are source text, not a compact index. Bound one
+      // page so a novel-scale slice cannot crowd out the model's proposal and
+      // finish context; exact nextOffset/pageToken preserve full coverage.
+      const maxResults = input.max_results ?? 20;
       const page = candidates.slice(offset, offset + maxResults);
       const nextOffset = offset + page.length < candidates.length ? offset + page.length : null;
       const pageToken = statusFilter === "unresolved" && page.length
@@ -1758,8 +1796,9 @@ export function createCompilerProposalToolset(
       const workspace = await WorkspaceStore.create(workspaceRoot);
       const source = await workspace.getSource(activeSourceId!);
       if (!source) throw new Error(`Unknown active compiler source: ${activeSourceId}`);
-      const [structure, activeProposals, semanticCoverage] = await Promise.all([
+      const [structure, bytes, activeProposals, semanticCoverage] = await Promise.all([
         ensureSourceStructure(workspaceRoot, source),
+        readSourceMaterial(workspaceRoot, source),
         readActiveAccountingProposals(),
         readProspectiveSemanticCoverage(),
       ]);
@@ -1822,7 +1861,8 @@ export function createCompilerProposalToolset(
       for (const decision of decisions) {
         const unit = byId.get(decision.unitId);
         if (!unit) throw new Error(`Unknown deterministic source unit ${decision.unitId}; call find_source_accounting_units and copy unitId exactly.`);
-        if (!byteRangeCoveredBySegments(unit.anchor.startByte, unit.anchor.endByte, boundedSliceSegments)) {
+        const reviewRange = sourceUnitReviewRange(bytes, unit);
+        if (!byteRangeCoveredBySegments(reviewRange.startByte, reviewRange.endByte, boundedSliceSegments)) {
           throw new Error(`Source unit ${decision.unitId} is outside the active bounded compiler slice.`);
         }
         if (unit.kind === "non-scene") {
@@ -2562,13 +2602,17 @@ export function createCompilerProposalToolset(
       let activeAccountingProposals: SourceAccountingProposal[] = [];
       let accountingSource: Awaited<ReturnType<WorkspaceStore["getSource"]>> | undefined;
       let accountingStructure: Awaited<ReturnType<typeof ensureSourceStructure>> | undefined;
+      let accountingBytes: Buffer | undefined;
       const stage = activeSemanticStage();
       const recordsSourceAccounting = !stage || stage === "executable";
       if (recordsSourceAccounting && activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const workspace = await WorkspaceStore.create(workspaceRoot);
         accountingSource = await workspace.getSource(activeSourceId) ?? undefined;
         if (!accountingSource) return failFinish(`Unknown active compiler source: ${activeSourceId}`);
-        accountingStructure = await ensureSourceStructure(workspaceRoot, accountingSource);
+        [accountingStructure, accountingBytes] = await Promise.all([
+          ensureSourceStructure(workspaceRoot, accountingSource),
+          readSourceMaterial(workspaceRoot, accountingSource),
+        ]);
         prospectiveCoverage = await readProspectiveSemanticCoverage();
         activeAccountingProposals = await readActiveAccountingProposals();
         const segmentsById = new Map(validatedSourceSegments.map((segment) => [segment.id, segment]));
@@ -2583,6 +2627,7 @@ export function createCompilerProposalToolset(
         });
         accountingIssues = accountingStore.validateBatchReview({
           structure: accountingStructure,
+          sourceBytes: accountingBytes,
           reviews: prospectiveReviews,
           evidenceAssertions: prospectiveCoverage.assertions,
           annotations: prospectiveCoverage.annotations,
@@ -2680,7 +2725,7 @@ export function createCompilerProposalToolset(
         ...finishIssueSection("Knowledge acquisition trace", acquisitionTraceIssues),
         ...finishIssueSection("Event-resolution graph", eventResolutionClosureIssues),
         ...finishIssueSection("Canonical event proposal trace", eventTraceIssues),
-        ...finishIssueSection("Source-unit accounting", accountingIssues),
+        ...finishAccountingIssueSection(accountingIssues),
         ...finishIssueSection(
           "Deterministic canonical commit preview",
           canonicalStructureIssues.flatMap((candidate) => candidate.errors.map((error) =>
@@ -2715,7 +2760,14 @@ export function createCompilerProposalToolset(
       }
       if (recordsSourceAccounting && activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const source = accountingSource;
-        if (!source || !accountingStructure) return failFinish(`Source-accounting validation state was unavailable for ${activeSourceId}.`);
+        if (!source || !accountingStructure || !accountingBytes) {
+          return failFinish(`Source-accounting validation state was unavailable for ${activeSourceId}.`);
+        }
+        // Accepted proposal files are prerequisites; the manifest review is
+        // the final durable marker. Both operations are idempotent, so a retry
+        // repairs either side of an older half-finished ordering without a
+        // special recovery branch.
+        await accountingStore.acceptProposals(activeSourceId, listedAccounting);
         const segmentsById = new Map(validatedSourceSegments.map((segment) => [segment.id, segment]));
         await accountingStore.recordBatchReview({
           source,
@@ -2732,13 +2784,14 @@ export function createCompilerProposalToolset(
             ...decision,
             proposalId: proposal.id,
           }))),
+          sourceBytes: accountingBytes,
         });
-        await accountingStore.acceptProposals(activeSourceId, listedAccounting);
       }
       finished = true;
       return {
         content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}).` }],
         details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: expected, reviewedSegmentIds: reviewedIds },
+        terminate: true,
       };
     },
   });
@@ -2831,15 +2884,16 @@ export function createCompilerProposalToolset(
         }
       }
       if (!compilerBatchId) return;
+      const migratedSceneBatchId = legacyExecutableSceneBatchId(compilerBatchId, activeSourceId);
       for (const summary of await service.store.list("pending")) {
         const envelope = await service.store.readEnvelope("pending", summary.id);
         const origin = envelope.generatedBy;
-        if (
-          origin
-          && typeof origin === "object"
-          && !Array.isArray(origin)
-          && (origin as Record<string, unknown>).compilerBatchId === compilerBatchId
-        ) {
+        const originBatchId = origin && typeof origin === "object" && !Array.isArray(origin)
+          && typeof (origin as Record<string, unknown>).compilerBatchId === "string"
+          ? (origin as Record<string, unknown>).compilerBatchId as string
+          : undefined;
+        if (originBatchId === compilerBatchId
+          || (summary.kind === "scene-occurrence" && originBatchId === migratedSceneBatchId)) {
           successfulProposalIds.add(summary.id);
         }
       }

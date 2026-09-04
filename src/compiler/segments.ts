@@ -58,10 +58,13 @@ const HEADING_PATTERNS = [
 // Segments remain finite evidence units, but modern model contexts do not need
 // the old ~24 KiB / 160-line cut. Chapters are now preserved up to a much wider
 // safety boundary; batching may join continuation pieces from the same chapter.
+// Keep an observation batch well below the host's 800-proposal runaway fuse.
+// Byte/prompt bounds do the primary work for prose; the line bound remains a
+// fallback for unusually short-line sources.
 const MAX_BLOCK_LINES = 1_000;
-const MAX_BLOCK_BYTES = 96 * 1024;
-const MAX_BLOCK_PROMPT_CHARS = 96 * 1024;
-export const SEGMENTER_VERSION = 6 as const;
+const MAX_BLOCK_BYTES = 48 * 1024;
+const MAX_BLOCK_PROMPT_CHARS = 48 * 1024;
+export const SEGMENTER_VERSION = 7 as const;
 
 const sourceSegmentSchema = z.object({
   version: z.literal(1),

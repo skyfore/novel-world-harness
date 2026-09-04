@@ -92,7 +92,7 @@ const LOOKUP_RECOVERY: Readonly<Record<string, LookupRecovery>> = Object.freeze(
   },
   account_source_units: {
     finder: "find_source_accounting_units",
-    arguments: { status: "unresolved", offset: 0, max_results: 200 },
+    arguments: { status: "unresolved", offset: 0, max_results: 20 },
     resultField: "pageToken",
   },
 });
@@ -425,7 +425,7 @@ export function buildNwhToolRecoveryAdvice(
       retryable: true,
       retryCondition: "Retry once only after every reported source unit has exact semantic coverage or a successful typed accounting proposal.",
       steps: [
-        "Call find_source_accounting_units with status=unresolved, offset=0, and max_results=200 in the same active batch.",
+        "Call find_source_accounting_units with status=unresolved, offset=0, and max_results=20 in the same active batch.",
         "Review every returned unit, then copy its exact pageToken into account_source_units with one page_default and only genuinely different page_overrides by exact returned unitIndex; never guess a token/index or label represented/non-scene units yourself.",
         "After each successful accounting proposal, refetch status=unresolved at offset=0 because the result set shrinks; repeat until units is empty instead of following a stale nextOffset.",
         "Keep unresolved or intentionally-deferred when the source cannot be decided honestly; those statuses remain publication blockers.",
@@ -433,7 +433,7 @@ export function buildNwhToolRecoveryAdvice(
       ],
       suggestedCall: {
         tool: "find_source_accounting_units",
-        arguments: { status: "unresolved", offset: 0, max_results: 200 },
+        arguments: { status: "unresolved", offset: 0, max_results: 20 },
       },
     };
   }

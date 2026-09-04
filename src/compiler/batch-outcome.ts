@@ -20,8 +20,10 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
   const succeeded = new Set<string>();
   const withdrawn = new Set<string>();
   const resultCallIds = new Set<string>();
+  const successfulFinishCallIds = new Set<string>();
   let assistantStopReason: string | undefined;
   let assistantErrorMessage: string | undefined;
+  let terminalFinishCallId: string | undefined;
   let completionOutcome: "complete" | "no-artifacts" | undefined;
   let blockedReason: string | undefined;
 
@@ -33,7 +35,19 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
         assistantStopReason = message.stopReason;
         assistantErrorMessage = typeof message.errorMessage === "string" ? message.errorMessage : undefined;
       }
+      terminalFinishCallId = undefined;
       if (!Array.isArray(message.content)) continue;
+      const toolCalls = message.content.filter((content): content is Record<string, unknown> => Boolean(
+        content
+        && typeof content === "object"
+        && (content as Record<string, unknown>).type === "toolCall",
+      ));
+      terminalFinishCallId = message.stopReason === "toolUse"
+        && toolCalls.length === 1
+        && toolCalls[0]?.name === "finish_compiler_batch"
+        && typeof toolCalls[0].id === "string"
+        ? toolCalls[0].id
+        : undefined;
       for (const contentValue of message.content) {
         if (!contentValue || typeof contentValue !== "object") continue;
         const content = contentValue as Record<string, unknown>;
@@ -72,6 +86,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     }
     if (toolName === "finish_compiler_batch") {
       if (message.isError !== true && call?.finishOutcome) {
+        successfulFinishCallIds.add(message.toolCallId);
         completionOutcome = call.finishOutcome;
         if (Array.isArray(details?.proposalIds)) {
           for (const proposalId of details.proposalIds) {
@@ -112,6 +127,19 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     if (call.finishOutcome && completionOutcome !== undefined) continue;
     if (call.withdrawnProposalId && withdrawn.has(call.withdrawnProposalId)) continue;
     unresolvedToolCalls += 1;
+  }
+
+  // A successful finish tool is terminal by contract (`terminate: true`). Pi
+  // therefore intentionally omits the otherwise automatic follow-up assistant
+  // response and leaves the final provider message at stopReason=toolUse.
+  if (
+    terminalFinishCallId
+    && successfulFinishCallIds.has(terminalFinishCallId)
+    && completionOutcome !== undefined
+    && unresolvedToolCalls === 0
+  ) {
+    assistantStopReason = "stop";
+    assistantErrorMessage = undefined;
   }
 
   return {

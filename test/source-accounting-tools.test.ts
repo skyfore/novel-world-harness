@@ -5,8 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { prepareCompilerBatches } from "../src/compiler/batches.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { SegmentStore } from "../src/compiler/segments.js";
-import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
+import { SourceAccountingStore, sourceUnitReviewRange } from "../src/compiler/source-accounting.js";
 import { baseStructuralUnits, ensureSourceStructure } from "../src/compiler/structure.js";
+import { readSourceMaterial } from "../src/storage/source-material-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
 const roots: string[] = [];
@@ -154,7 +155,7 @@ describe("source-unit accounting tools", () => {
       const result = await tool("find_source_accounting_units").execute(`find-${offset}`, {
         status: "all",
         offset,
-        max_results: 200,
+        max_results: 20,
       } as never, undefined, undefined, {} as never);
       const text = (result.content[0] as { text: string }).text;
       return JSON.parse(text) as {
@@ -205,9 +206,31 @@ describe("source-unit accounting tools", () => {
       summary: "Every deterministic semantic unit was reviewed.",
     } as never, undefined, undefined, {} as never)).resolves.toMatchObject({
       details: { compilerBatchFinished: true },
+      terminate: true,
     });
 
     const accounting = new SourceAccountingStore(root);
+    // Simulate a process failure after proposal acceptance but before the
+    // final accounting manifest write. A fresh session must hydrate accepted
+    // decisions and recreate the marker without asking for duplicate drafts.
+    await accounting.remove(fixture.source.id);
+    const retry = createCompilerProposalToolset(root, { provider: "test", model: "accounting-model" });
+    await retry.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+    await expect(retry.tools.find((candidate) => candidate.name === "finish_compiler_batch")!.execute(
+      "finish-after-marker-loss",
+      {
+        outcome: "complete",
+        reviewed_segments: reviewedSegments,
+        summary: "Recovered the final marker from already accepted accounting decisions.",
+      } as never,
+      undefined,
+      undefined,
+      {} as never,
+    )).resolves.toMatchObject({
+      details: { compilerBatchFinished: true },
+      terminate: true,
+    });
+
     const summary = await accounting.summarize(
       await ensureSourceStructure(root, fixture.source),
     );
@@ -222,5 +245,78 @@ describe("source-unit accounting tools", () => {
     await expect(accounting.listProposals(fixture.source.id, "accepted")).resolves.toEqual([]);
     expect((await accounting.listProposals(fixture.source.id, "rejected")).map((proposal) => proposal.id).sort())
       .toEqual(["account-partial", "account-remainder"]);
+  });
+
+  it("accounts CRLF sentence units whose trailing indentation crosses a segment boundary", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-cross-segment-"));
+    roots.push(root);
+    const content = Array.from(
+      { length: 720 },
+      (_value, index) => `\tSentence ${String(index + 1).padStart(3, "0")} describes ordinary background texture in the setting.`,
+    ).join("\r\n") + "\r\n";
+    const fixture = await createEvidenceFixture(root, content);
+    const [structure, sourceBytes, segments, batches] = await Promise.all([
+      ensureSourceStructure(root, fixture.source),
+      readSourceMaterial(root, fixture.source),
+      new SegmentStore(root).list(fixture.source.id),
+      prepareCompilerBatches(root, fixture.source),
+    ]);
+    const executableBatches = batches.filter((candidate) =>
+      candidate.purpose === "source-review" && candidate.semanticStage === "executable");
+    expect(executableBatches.length).toBeGreaterThan(1);
+
+    const crossingUnit = baseStructuralUnits(structure).find((unit) =>
+      segments.some((segment) =>
+        unit.anchor.startByte < segment.endByte && unit.anchor.endByte > segment.endByte));
+    expect(crossingUnit).toBeDefined();
+    const reviewRange = sourceUnitReviewRange(sourceBytes, crossingUnit!);
+    expect(segments.some((segment) =>
+      reviewRange.startByte >= segment.startByte && reviewRange.endByte <= segment.endByte)).toBe(true);
+
+    const toolset = createCompilerProposalToolset(root, { provider: "test", model: "cross-segment-model" });
+    const tool = (name: string) => toolset.tools.find((candidate) => candidate.name === name)!;
+    for (const [batchIndex, batch] of executableBatches.entries()) {
+      await toolset.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+      let proposalIndex = 0;
+      while (true) {
+        const result = await tool("find_source_accounting_units").execute(`find-${batchIndex}-${proposalIndex}`, {
+          status: "unresolved",
+          offset: 0,
+          max_results: 20,
+        } as never, undefined, undefined, {} as never);
+        const page = JSON.parse((result.content[0] as { text: string }).text) as {
+          pageToken?: string;
+          units: Array<{ unitId: string }>;
+        };
+        if (!page.units.length) break;
+        expect(page.pageToken).toBeDefined();
+        proposalIndex += 1;
+        await tool("account_source_units").execute(`account-${batchIndex}-${proposalIndex}`, {
+          proposal_id: `account-boundary-${batchIndex + 1}-${proposalIndex}`,
+          page_token: page.pageToken,
+          page_default: {
+            status: "background-only",
+            reason: "Reviewed as ordinary descriptive texture without a material world transition.",
+          },
+        } as never, undefined, undefined, {} as never);
+      }
+      await expect(tool("finish_compiler_batch").execute(`finish-${batchIndex}`, {
+        outcome: "complete",
+        reviewed_segments: batch.segmentIds.map((segmentId) => ({
+          segment_id: segmentId,
+          disposition: "proposed",
+          summary: "Every semantic unit in this bounded slice received an explicit disposition.",
+        })),
+        summary: "The bounded source-accounting slice is complete.",
+      } as never, undefined, undefined, {} as never)).resolves.toMatchObject({
+        details: { compilerBatchFinished: true },
+        terminate: true,
+      });
+    }
+
+    await expect(new SourceAccountingStore(root).summarize(structure)).resolves.toMatchObject({
+      unaccountedUnits: 0,
+      blockingUnits: 0,
+    });
   });
 });

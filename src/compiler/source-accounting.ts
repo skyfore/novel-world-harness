@@ -3,11 +3,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { worldStorageRoot } from "../world/paths.js";
-import type { SourceDocument } from "../storage/workspace-store.js";
+import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
+import { readSourceMaterial } from "../storage/source-material-store.js";
 import { canonicalJson } from "../world/canonical.js";
 import { idSchema, type EvidenceAssertion, type TextAnchor } from "../world/model.js";
 import type { SourceSegment } from "./segments.js";
-import { baseStructuralUnits, type SourceStructureManifest } from "./structure.js";
+import { baseStructuralUnits, type SourceStructureManifest, type StructuralUnit } from "./structure.js";
 
 export const sourceAccountingStatusSchema = z.enum([
   "represented",
@@ -123,8 +124,10 @@ export type SourceAccountingSummary = {
 
 export class SourceAccountingStore {
   readonly root: string;
+  private readonly workspaceRoot: string;
 
   constructor(workspaceRoot: string) {
+    this.workspaceRoot = workspaceRoot;
     this.root = path.join(worldStorageRoot(workspaceRoot), "compiler", "observations", "v1", "accounting");
   }
 
@@ -146,10 +149,16 @@ export class SourceAccountingStore {
     evidenceAssertions?: readonly EvidenceAssertion[];
     annotations?: ReadonlyArray<{ id: string; anchors: readonly TextAnchor[] }>;
     unitDecisions?: readonly SourceUnitAccountingDecision[];
+    sourceBytes?: Buffer;
   }): Promise<SourceAccountingManifest> {
     idSchema.parse(input.batchId);
     if (input.structure.sourceId !== input.source.id || input.structure.sourceSha256 !== input.source.contentSha256) {
       throw new Error(`Source accounting structure does not match source ${input.source.id}.`);
+    }
+    const sourceBytes = input.sourceBytes ?? await readSourceMaterial(this.workspaceRoot, input.source);
+    if (sourceBytes.byteLength !== input.structure.sourceBytes
+      || crypto.createHash("sha256").update(sourceBytes).digest("hex") !== input.source.contentSha256) {
+      throw new Error(`Source accounting bytes do not match source ${input.source.id}.`);
     }
     const reviewedAt = new Date().toISOString();
     const segments = input.reviews.map(({ segment, disposition, summary }) => {
@@ -180,6 +189,17 @@ export class SourceAccountingStore {
         throw new Error(`Accounting semantic span ${span.id} exceeds source ${input.source.id}.`);
       }
     }
+    const reviewIssues = this.validateBatchReview({
+      structure: input.structure,
+      sourceBytes,
+      reviews: segments,
+      evidenceAssertions: input.evidenceAssertions,
+      annotations: input.annotations,
+      unitDecisions: input.unitDecisions,
+    });
+    if (reviewIssues.length) {
+      throw new Error(`Invalid source accounting review ${input.batchId}: ${reviewIssues.join(" ")}`);
+    }
     const review = batchReviewSchema.parse({
       batchId: input.batchId,
       reviewedAt,
@@ -202,7 +222,7 @@ export class SourceAccountingStore {
       sourceSha256: input.source.contentSha256,
       structureVersion: input.structure.structureVersion,
       batchReviews,
-      records: deriveAccountingRecords(input.structure, batchReviews),
+      records: deriveAccountingRecords(input.structure, sourceBytes, batchReviews),
       updatedAt: reviewedAt,
     });
     await atomicJson(this.filePath(input.source.id), manifest);
@@ -216,12 +236,18 @@ export class SourceAccountingStore {
    */
   validateBatchReview(input: {
     structure: SourceStructureManifest;
+    sourceBytes: Buffer;
     reviews: Array<{ startByte: number; endByte: number; disposition: "proposed" | "no-artifacts" }>;
     evidenceAssertions?: readonly EvidenceAssertion[];
     annotations?: ReadonlyArray<{ id: string; anchors: readonly TextAnchor[] }>;
     unitDecisions?: readonly SourceUnitAccountingDecision[];
     requireExplicitSemanticDisposition?: boolean;
   }): string[] {
+    if (input.sourceBytes.byteLength !== input.structure.sourceBytes) {
+      throw new Error(
+        `Source accounting bytes have length ${input.sourceBytes.byteLength}, expected ${input.structure.sourceBytes}.`,
+      );
+    }
     const base = baseStructuralUnits(input.structure);
     const byId = new Map(base.map((unit) => [unit.id, unit]));
     const decisions = (input.unitDecisions ?? []).map((decision) => sourceUnitAccountingDecisionSchema.parse(decision));
@@ -243,11 +269,12 @@ export class SourceAccountingStore {
       if (unit.kind === "non-scene") {
         issues.push(`Non-scene unit ${decision.unitId} is classified deterministically and cannot receive a model decision.`);
       }
-      if (!rangeCovered(unit.anchor.startByte, unit.anchor.endByte, input.reviews)) {
+      const reviewRange = sourceUnitReviewRange(input.sourceBytes, unit);
+      if (!rangeCovered(reviewRange.startByte, reviewRange.endByte, input.reviews)) {
         issues.push(`Accounting decision for ${decision.unitId} escapes the reviewed compiler slice.`);
       }
       const overlappingReviews = input.reviews.filter((review) =>
-        rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, review.startByte, review.endByte));
+        rangesOverlap(reviewRange.startByte, reviewRange.endByte, review.startByte, review.endByte));
       if (overlappingReviews.length > 0
         && overlappingReviews.every((review) => review.disposition === "no-artifacts")) {
         issues.push(`Source unit ${decision.unitId} is inside a no-artifacts segment and is already host-classified as background-only.`);
@@ -262,9 +289,10 @@ export class SourceAccountingStore {
     if (!input.requireExplicitSemanticDisposition) return issues;
     for (const unit of base) {
       if (unit.kind === "non-scene") continue;
+      const reviewRange = sourceUnitReviewRange(input.sourceBytes, unit);
       const overlappingReviews = input.reviews.filter((review) =>
-        rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, review.startByte, review.endByte));
-      if (!rangeCovered(unit.anchor.startByte, unit.anchor.endByte, overlappingReviews)) continue;
+        rangesOverlap(reviewRange.startByte, reviewRange.endByte, review.startByte, review.endByte));
+      if (!rangeCovered(reviewRange.startByte, reviewRange.endByte, overlappingReviews)) continue;
       const represented = [...evidenceSpans, ...annotationSpans].some((span) =>
         span.sourceId === input.structure.sourceId
         && rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
@@ -446,10 +474,13 @@ export class SourceAccountingStore {
     const retained = current.batchReviews.filter((review) => !compilerBatchIds.has(review.batchId));
     const removed = current.batchReviews.length - retained.length;
     if (!removed) return 0;
+    const source = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(sourceId);
+    if (!source) throw new Error(`Unknown source accounting source: ${sourceId}`);
+    const sourceBytes = await readSourceMaterial(this.workspaceRoot, source);
     await atomicJson(this.filePath(sourceId), sourceAccountingManifestSchema.parse({
       ...current,
       batchReviews: retained,
-      records: deriveAccountingRecords(structure, retained),
+      records: deriveAccountingRecords(structure, sourceBytes, retained),
       updatedAt: new Date().toISOString(),
     }));
     return removed;
@@ -535,6 +566,7 @@ export class SourceAccountingStore {
 
 function deriveAccountingRecords(
   structure: SourceStructureManifest,
+  sourceBytes: Buffer,
   reviews: readonly BatchReview[],
 ): SourceAccountingRecord[] {
   const records: SourceAccountingRecord[] = [];
@@ -556,11 +588,18 @@ function deriveAccountingRecords(
       }));
       continue;
     }
+    const reviewRange = sourceUnitReviewRange(sourceBytes, unit);
     const overlapping = allSegments.filter(({ startByte, endByte }) =>
-      rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, startByte, endByte));
+      rangesOverlap(reviewRange.startByte, reviewRange.endByte, startByte, endByte));
+    const orderedOverlapping = [...overlapping]
+      .sort((left, right) => right.review.reviewedAt.localeCompare(left.review.reviewedAt)
+        || right.review.batchId.localeCompare(left.review.batchId));
+    const explicitDecision = orderedOverlapping
+      .flatMap(({ review }) => review.unitDecisions)
+      .find((decision) => decision.unitId === unit.id);
     if (!rangeCovered(
-      unit.anchor.startByte,
-      unit.anchor.endByte,
+      reviewRange.startByte,
+      reviewRange.endByte,
       overlapping.map(({ startByte, endByte }) => ({ startByte, endByte })),
     )) continue;
     const unitEvidence = uniqueIds(evidenceSpans
@@ -571,11 +610,6 @@ function deriveAccountingRecords(
       .map((span) => span.id));
     const represented = unitEvidence.length > 0 || unitAnnotations.length > 0;
     const allBackground = overlapping.every(({ disposition }) => disposition === "no-artifacts");
-    const explicitDecision = [...overlapping]
-      .sort((left, right) => right.review.reviewedAt.localeCompare(left.review.reviewedAt)
-        || right.review.batchId.localeCompare(left.review.batchId))
-      .flatMap(({ review }) => review.unitDecisions)
-      .find((decision) => decision.unitId === unit.id);
     const status: SourceAccountingStatus = represented
       ? "represented"
       : explicitDecision?.status
@@ -604,6 +638,31 @@ function deriveAccountingRecords(
     }));
   }
   return records.sort((left, right) => left.unitId.localeCompare(right.unitId));
+}
+
+/**
+ * Sentence units retain surrounding source whitespace so the structural leaves
+ * remain an exact byte partition. That whitespace may cross a segment edge
+ * (for example CRLF followed by the next line's indentation), even though all
+ * semantic text is inside one reviewed slice. Use the non-whitespace extent
+ * for batch authority while preserving the original unit identity and anchor.
+ */
+export function sourceUnitReviewRange(
+  sourceBytes: Buffer,
+  unit: Pick<StructuralUnit, "anchor">,
+): { startByte: number; endByte: number } {
+  const { startByte, endByte } = unit.anchor;
+  if (startByte < 0 || endByte > sourceBytes.byteLength || endByte <= startByte) {
+    throw new Error(`Source unit range ${startByte}-${endByte} is outside source length ${sourceBytes.byteLength}.`);
+  }
+  const text = sourceBytes.subarray(startByte, endByte).toString("utf8");
+  const leading = text.match(/^\s*/u)?.[0] ?? "";
+  const trailing = text.match(/\s*$/u)?.[0] ?? "";
+  const semanticStart = startByte + Buffer.byteLength(leading, "utf8");
+  const semanticEnd = endByte - Buffer.byteLength(trailing, "utf8");
+  return semanticEnd > semanticStart
+    ? { startByte: semanticStart, endByte: semanticEnd }
+    : { startByte, endByte };
 }
 
 function proposalIdentity(proposal: SourceAccountingProposal): unknown {

@@ -34,7 +34,7 @@ describe("source segmentation", () => {
   it("uses chapter headings while preserving exact CRLF byte slices", async () => {
     const { root, source, buffer } = await fixture("序言\r\n第一章 开端\r\n曹操进入大厅。\r\n\r\n第二章 转折\r\n曹操离开。\r\n");
     const manifest = await segmentSource(root, source);
-    expect(manifest.segmenterVersion).toBe(6);
+    expect(manifest.segmenterVersion).toBe(7);
     expect(manifest.segments.length).toBeGreaterThanOrEqual(3);
     expect(manifest.segments.some((segment) => segment.title?.startsWith("第一章"))).toBe(true);
     expect(manifest.segments.some((segment) => segment.title?.startsWith("第二章"))).toBe(true);
@@ -101,7 +101,7 @@ describe("source segmentation", () => {
     for (const segment of manifest.segments) {
       const text = await readSegmentText(root, segment);
       pieces.push(Buffer.from(text, "utf8"));
-      expect(promptJson(text).length).toBeLessThanOrEqual(96 * 1024 + 2);
+      expect(promptJson(text).length).toBeLessThanOrEqual(48 * 1024 + 2);
       expect(segment.startLine).toBe(1);
       expect(segment.endLine).toBe(1);
     }

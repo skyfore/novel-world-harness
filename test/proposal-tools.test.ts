@@ -322,8 +322,10 @@ describe("compiler proposal tools", () => {
     expect(compilerToolAllowedInSemanticStage("propose_entity_mention", "observation")).toBe(true);
     expect(compilerToolAllowedInSemanticStage("propose_entity", "observation")).toBe(false);
     expect(compilerToolAllowedInSemanticStage("propose_entity", "semantic")).toBe(true);
+    expect(compilerToolAllowedInSemanticStage("propose_scene_occurrence", "semantic")).toBe(true);
     expect(compilerToolAllowedInSemanticStage("propose_action_constraint", "semantic")).toBe(false);
     expect(compilerToolAllowedInSemanticStage("propose_action_constraint", "executable")).toBe(true);
+    expect(compilerToolAllowedInSemanticStage("propose_scene_occurrence", "executable")).toBe(false);
     expect(compilerToolAllowedInSemanticStage("find_source_accounting_units", "semantic")).toBe(false);
     expect(compilerToolAllowedInSemanticStage("find_source_accounting_units", "executable")).toBe(true);
     expect(compilerToolAllowedInSemanticStage("account_source_units", "executable")).toBe(true);
@@ -372,6 +374,27 @@ describe("compiler proposal tools", () => {
     } as never, undefined, undefined, context)).rejects.toThrow(
       "Compiler stage 'semantic' does not authorize propose_entity_mention",
     );
+    const sceneInput = {
+      proposal_id: "semantic-scene",
+      payload: {
+        ontologyVersion: "scene-occurrence-v1",
+        id: "semantic-scene",
+        discourseSegmentIds: ["observed-scene"],
+        eventIds: [],
+        viewpointActorIds: [],
+        presentActorIds: [],
+        entryConditions: [],
+        exitConditions: [],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    };
+    await expect(tool("propose_scene_occurrence").execute(
+      "semantic-scene",
+      sceneInput as never,
+      undefined,
+      undefined,
+      context,
+    )).resolves.toMatchObject({ details: { proposalId: "semantic-scene", kind: "scene-occurrence" } });
 
     await toolset.beginBatch(
       [fixture.segmentId],
@@ -385,6 +408,168 @@ describe("compiler proposal tools", () => {
     } as never, undefined, undefined, context)).rejects.toThrow(
       "Compiler stage 'executable' does not authorize propose_entity",
     );
+    await expect(tool("propose_scene_occurrence").execute("executable-scene-overreach", {
+      ...sceneInput,
+      proposal_id: "executable-scene-overreach",
+    } as never, undefined, undefined, context)).rejects.toThrow(
+      "Compiler stage 'executable' does not authorize propose_scene_occurrence",
+    );
+  });
+
+  it("closes reciprocal scene and event links in one semantic-stage finish", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-scene-event-closure-"));
+    roots.push(root);
+    const content = "The gate opened.\n";
+    const fixture = await createEvidenceFixture(root, content);
+    const toolset = createCompilerProposalToolset(root, { provider: "test", model: "scene-event-model" });
+    const tool = (name: string) => toolset.tools.find((candidate) => candidate.name === name)!;
+    const context = {} as ExtensionContext;
+    const reviewed = [{
+      segment_id: fixture.segmentId,
+      disposition: "proposed" as const,
+      summary: "Recorded the narrated scene and its gate-opening event mention.",
+    }];
+
+    await toolset.beginBatch(
+      [fixture.segmentId],
+      `batch-${fixture.source.id}-00001-observation-scene-event`,
+      fixture.source.id,
+    );
+    await tool("propose_discourse_segment").execute("observe-scene", {
+      proposal_id: "proposal-observed-gate-scene",
+      annotation_id: "observed-gate-scene",
+      kind: "scene",
+      selectors: [{ segment_id: fixture.segmentId, exact: content }],
+      confidence: 1,
+    } as never, undefined, undefined, context);
+    await tool("propose_event_mention").execute("observe-event", {
+      proposal_id: "proposal-mentioned-gate-opening",
+      annotation_id: "mentioned-gate-opening",
+      trigger_selector: { segment_id: fixture.segmentId, exact: "opened" },
+      trigger: "opened",
+      extent_selectors: [{ segment_id: fixture.segmentId, exact: "The gate opened." }],
+      event_type_candidates: ["state-change"],
+      participant_mention_ids: [],
+      scene_id: "observed-gate-scene",
+      salience: "major",
+      confidence: 1,
+    } as never, undefined, undefined, context);
+    await tool("finish_compiler_batch").execute("finish-observation", {
+      outcome: "complete",
+      reviewed_segments: reviewed,
+      summary: "The observation inventory is complete.",
+    } as never, undefined, undefined, context);
+
+    await toolset.beginBatch(
+      [fixture.segmentId],
+      `batch-${fixture.source.id}-00001-semantic-scene-event`,
+      fixture.source.id,
+    );
+    await tool("propose_canonical_event").execute("canonical-event", {
+      proposal_id: "proposal-gate-opening-event",
+      payload: {
+        id: "gate-opening-event",
+        title: "The gate opens",
+        participants: [],
+        participantPresence: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        causalParents: [],
+        sceneOccurrenceIds: ["gate-opening-scene"],
+        confidence: 1,
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await tool("propose_event_resolution").execute("resolve-event", {
+      proposal_id: "proposal-resolved-gate-opening",
+      resolution_id: "resolved-gate-opening",
+      event_mention_ids: ["mentioned-gate-opening"],
+      status: "new-event",
+      canonical_event_id: "gate-opening-event",
+      relation: "coreference",
+      candidates: [{
+        canonical_event_id: "gate-opening-event",
+        relation: "coreference",
+        confidence: 1,
+        basis_event_mention_ids: ["mentioned-gate-opening"],
+        evidence_assertion_ids: [],
+        rationale: "The event mention directly narrates this gate-opening occurrence.",
+      }],
+      supersedes_resolution_ids: [],
+      rationale: "The source introduces one new canonical gate-opening event.",
+    } as never, undefined, undefined, context);
+    await tool("propose_scene_occurrence").execute("canonical-scene", {
+      proposal_id: "proposal-gate-opening-scene",
+      payload: {
+        ontologyVersion: "scene-occurrence-v1",
+        id: "gate-opening-scene",
+        discourseSegmentIds: ["observed-gate-scene"],
+        eventIds: ["gate-opening-event"],
+        viewpointActorIds: [],
+        presentActorIds: [],
+        entryConditions: [],
+        exitConditions: [],
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await expect(tool("finish_compiler_batch").execute("finish-semantic", {
+      outcome: "complete",
+      reviewed_segments: reviewed,
+      summary: "The canonical event and scene close their reciprocal links in one semantic finish.",
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: {
+        compilerBatchFinished: true,
+        proposalIds: expect.arrayContaining([
+          "proposal-gate-opening-event",
+          "proposal-gate-opening-scene",
+          "proposal-resolved-gate-opening",
+        ]),
+      },
+      terminate: true,
+    });
+  });
+
+  it("lets a semantic recovery pass retire its legacy executable-stage scene draft", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-scene-stage-migration-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "The gate opened.\n");
+    const semanticBatchId = `batch-${fixture.source.id}-00001-semantic-scene-migration`;
+    const legacyBatchId = semanticBatchId.replace("-semantic-", "-executable-");
+    await new CompilerProposalService(root).submit("scene-occurrence", {
+      proposalId: "legacy-scene-proposal",
+      payload: {
+        ontologyVersion: "scene-occurrence-v1",
+        id: "legacy-scene",
+        discourseSegmentIds: ["legacy-discourse-scene"],
+        eventIds: [],
+        viewpointActorIds: [],
+        presentActorIds: [],
+        entryConditions: [],
+        exitConditions: [],
+        evidence: fixture.evidence("The gate opened."),
+      },
+      generatedBy: { worker: "test", compilerBatchId: legacyBatchId },
+    });
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], semanticBatchId, fixture.source.id);
+
+    await expect(toolset.tools.find((candidate) => candidate.name === "withdraw_compiler_proposal")!.execute(
+      "withdraw-legacy-scene",
+      {
+        proposal_id: "legacy-scene-proposal",
+        reason: "The legacy scene must be replaced beside its reciprocal canonical event.",
+      } as never,
+      undefined,
+      undefined,
+      {} as ExtensionContext,
+    )).resolves.toMatchObject({
+      details: { compilerProposalWithdrawn: true, proposalId: "legacy-scene-proposal" },
+    });
+    expect((await new ProposalStore(root).list("pending")).map((proposal) => proposal.id))
+      .not.toContain("legacy-scene-proposal");
+    expect((await new ProposalStore(root).list("rejected")).map((proposal) => proposal.id))
+      .toContain("legacy-scene-proposal");
   });
 
   it("checkpoints source closure across observation, semantic, and executable stages", async () => {

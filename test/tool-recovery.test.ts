@@ -100,7 +100,7 @@ describe("agent tool recovery", () => {
       retryable: true,
       suggestedCall: {
         tool: "find_source_accounting_units",
-        arguments: { status: "unresolved", offset: 0, max_results: 200 },
+        arguments: { status: "unresolved", offset: 0, max_results: 20 },
       },
     });
     expect(lookup.steps.join(" ")).toContain("Copy the exact pageToken");
@@ -116,7 +116,7 @@ describe("agent tool recovery", () => {
       retryable: true,
       suggestedCall: {
         tool: "find_source_accounting_units",
-        arguments: { status: "unresolved", offset: 0, max_results: 200 },
+        arguments: { status: "unresolved", offset: 0, max_results: 20 },
       },
     });
     expect(finish.steps.join(" ")).toContain("exact pageToken");

@@ -24,6 +24,8 @@ import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model
 import { claimSchema, entitySchema } from "../src/world/model.js";
 import { initialWorldSchema } from "../src/world/initial.js";
 import { characterGoalSchema, characterModelSchema } from "../src/world/actors.js";
+import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
+import { CompilerProposalService } from "../src/compiler/proposals.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -78,6 +80,32 @@ describe("compiler batches", () => {
     await expect(store.read(source.id)).resolves.toMatchObject({
       pipelineVersion: COMPILER_PIPELINE_VERSION,
       completedBatchIds: ["current-complete"],
+    });
+  });
+
+  it("preserves pipeline-30 observation checkpoints while invalidating semantic and executable work", async () => {
+    const { root, source } = await fixture();
+    const store = new CompilerBatchStore(root);
+    const observation = `batch-${source.id}-00001-observation-fixture`;
+    const structure = `structure-${source.id}-v1`;
+    await fs.mkdir(store.root, { recursive: true });
+    await fs.writeFile(path.join(store.root, `${source.id}.json`), `${JSON.stringify({
+      version: 1,
+      pipelineVersion: 30,
+      sourceId: source.id,
+      completedBatchIds: [
+        observation,
+        `batch-${source.id}-00001-semantic-fixture`,
+        `batch-${source.id}-00001-executable-fixture`,
+        `boundary-${source.id}-fixture`,
+        structure,
+      ],
+      updatedAt: new Date(0).toISOString(),
+    }, null, 2)}\n`);
+
+    await expect(store.read(source.id)).resolves.toMatchObject({
+      pipelineVersion: COMPILER_PIPELINE_VERSION,
+      completedBatchIds: [observation, structure],
     });
   });
 
@@ -197,6 +225,37 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure(outcome)).toBeUndefined();
   });
 
+  it("treats the successful terminal finish tool as the final assistant stop", () => {
+    const outcome = compilerBatchOutcomeFromMessages([
+      {
+        role: "assistant",
+        content: [{
+          type: "toolCall",
+          id: "finish",
+          name: "finish_compiler_batch",
+          arguments: { outcome: "complete", reviewed_segments: [], summary: "done" },
+        }],
+        stopReason: "toolUse",
+      },
+      {
+        role: "toolResult",
+        toolCallId: "finish",
+        toolName: "finish_compiler_batch",
+        isError: false,
+        content: [],
+        details: { compilerBatchFinished: true, proposalIds: ["proposal-from-terminal-finish"] },
+      },
+    ]);
+
+    expect(outcome).toMatchObject({
+      assistantStopReason: "stop",
+      proposalSucceeded: 1,
+      completionSignaled: true,
+      completionOutcome: "complete",
+    });
+    expect(compilerBatchFailure(outcome)).toBeUndefined();
+  });
+
   it("removes a successfully withdrawn proposal from the active batch outcome", () => {
     const outcome = compilerBatchOutcomeFromMessages([
       { role: "assistant", content: [{ type: "toolCall", id: "draft", name: "propose_claim", arguments: { proposal_id: "claim-draft" } }], stopReason: "toolUse" },
@@ -300,7 +359,7 @@ describe("compiler batches", () => {
     expect(batches.slice(1).every((batch) => batch.prompt.includes("Novel-title inference belongs only to the source-opening review batch"))).toBe(true);
   });
 
-  it("keeps continuation segments from one author chapter in one wider batch", async () => {
+  it("keeps continuation segments from one author chapter in one bounded batch", async () => {
     const { root, source } = await fixtureWithContent([
       "Chapter 1",
       ...Array.from({ length: 1_100 }, (_, index) => `Short chapter line ${index + 1}.`),
@@ -359,7 +418,56 @@ describe("compiler batches", () => {
     expect(hydrated.prompt).toContain('"proposalId":"entity-person-recovered"');
     expect(hydrated.prompt).toContain('"logicalId":"person-recovered"');
     expect(hydrated.prompt).toContain("this is a recovery attempt");
-    expect(hydrated.prompt).toContain("Start recovery by calling finish_compiler_batch once");
+    expect(hydrated.prompt).toContain("start recovery by calling finish_compiler_batch once");
+  });
+
+  it("includes active source-accounting drafts in a retry turn so the model can withdraw a rejected disposition", async () => {
+    const { root, source } = await fixture();
+    const batch = (await prepareCompilerBatches(root, source))
+      .find((candidate) => candidate.semanticStage === "executable")!;
+    await new SourceAccountingStore(root).stageProposal({
+      version: 1,
+      id: "accounting-recovered",
+      sourceId: source.id,
+      compilerBatchId: batch.id,
+      decisions: [{ unitId: "unit-sentence-placeholder", status: "background-only", reason: "Recovery fixture." }],
+      generatedBy: { worker: "account_source_units" },
+      createdAt: new Date(0).toISOString(),
+    });
+
+    const hydrated = await hydrateCompilerBatch(root, batch);
+
+    expect(hydrated.prompt).toContain('"proposalId":"accounting-recovered"');
+    expect(hydrated.prompt).toContain('"kind":"source-accounting"');
+    expect(hydrated.prompt).toContain("call withdraw_compiler_proposal for that exact accounting proposal ID");
+  });
+
+  it("re-homes a legacy executable-stage scene draft into its semantic recovery batch", async () => {
+    const { root, source } = await fixture();
+    const batch = (await prepareCompilerBatches(root, source))
+      .find((candidate) => candidate.semanticStage === "semantic")!;
+    const legacyBatchId = batch.id.replace("-semantic-", "-executable-");
+    await new CompilerProposalService(root).submit("scene-occurrence", {
+      proposalId: "legacy-executable-scene",
+      payload: {
+        ontologyVersion: "scene-occurrence-v1",
+        id: "legacy-scene",
+        discourseSegmentIds: ["legacy-discourse-scene"],
+        eventIds: [],
+        viewpointActorIds: [],
+        presentActorIds: [],
+        entryConditions: [],
+        exitConditions: [],
+        evidence: batch.evidence,
+      },
+      generatedBy: { worker: "test", compilerBatchId: legacyBatchId },
+    });
+
+    const hydrated = await hydrateCompilerBatch(root, batch);
+
+    expect(hydrated.prompt).toContain('"proposalId":"legacy-executable-scene"');
+    expect(hydrated.prompt).toContain(`"migratedFromBatchId":"${legacyBatchId}"`);
+    expect(hydrated.prompt).toContain("legacy executable-stage scene draft now owned by this semantic recovery pass");
   });
 
   it("replaces the ordinary initial-world restriction for the dedicated opening pass", async () => {
@@ -536,7 +644,7 @@ describe("compiler batches", () => {
     await prepareCompilerBatches(root, source);
 
     const repaired = await store.readManifest(source.id);
-    expect(repaired?.segmenterVersion).toBe(6);
+    expect(repaired?.segmenterVersion).toBe(7);
     expect(repaired?.segments.every((segment) => segment.promptCharacters > 0)).toBe(true);
   });
 

@@ -908,7 +908,11 @@ export async function runPromptWithTimeout(
         timer = setTimeout(() => {
           reject(timeoutError);
         }, timeoutMs);
-        timer.unref();
+        // This is a liveness guard, not background telemetry.  A provider can
+        // leave its request promise pending after all of its own sockets have
+        // closed; unref'ing the only remaining handle then lets Node exit 0
+        // before this rejection is delivered.  Keep the process alive until
+        // the prompt settles or the bounded recovery path runs.
       }),
     ]);
   } catch (error) {

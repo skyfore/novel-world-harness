@@ -78,6 +78,7 @@ import {
 } from "./spatial-ontology.js";
 import { modelVisibleWorldRules, resolveEffectiveWorldRules } from "./world-rule-ontology.js";
 import { deriveAdHocAction, mapActionInvocationEntities } from "./action-invocation.js";
+import { actorDecisionViewSchema, buildActorDecisionView, decisionReferenceIds, mapActorDecisionView } from "./actor-decision-view.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -308,7 +309,8 @@ const actorScopedEntitySchema = z
  * action. The isolated Pi adapter strips host-only fields and replaces stable
  * IDs with turn-local opaque handles before crossing the model boundary. It
  * contains no WorldState, frontier, canonical event list, character
- * goals/models, source evidence, or unacquired claims.
+ * source evidence, future goals/models, or unacquired claims. Decision facts
+ * are derived only from the current actor's visible branch projection.
  */
 export const actorScopedActionContextSchema = z
   .object({
@@ -322,6 +324,7 @@ export const actorScopedActionContextSchema = z
     writableEntityIds: z.array(idSchema),
     writableStateFields: z.array(stateFieldSpecSchema),
     spatialRelations: z.array(modelVisibleSpatialRelationSchema).default([]),
+    decision: actorDecisionViewSchema.optional(),
     scene: z.object({
       beat: z.number().int().nonnegative(),
       label: z.string().optional(),
@@ -429,6 +432,7 @@ export function playerActionTranslationContext(
     presentEntities: structuredClone(context.presentEntities),
     referenceableEntities: structuredClone(context.referenceableEntities),
     spatialRelations: structuredClone(context.spatialRelations),
+    ...(context.decision ? { decision: structuredClone(context.decision) } : {}),
     writableEntityIds: [...context.writableEntityIds],
     writableStateFields: structuredClone(context.writableStateFields),
     scene: {
@@ -484,6 +488,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
   );
   const reverseEntities = new Map<string, string>([...entityHandles].map(([id, handle]) => [handle, id]));
   const reverseClaims = new Map<string, string>([...claimHandles].map(([id, handle]) => [handle, id]));
+  const semanticHandles = new Map(decisionReferenceIds(context.decision).map((id, index) => [id, `semantic-${String(index + 1).padStart(3, "0")}`]));
+  const reverseSemantics = new Map([...semanticHandles].map(([id, handle]) => [handle, id]));
+  const semanticHandle = (id: string) => semanticHandles.get(id) ?? "semantic-unavailable";
   const writableFields = new Map(context.writableStateFields.map((field) => [field.key, field]));
   const entityHandle = (id: string): string => entityHandles.get(id) ?? id;
   const scopedEntityHandle = (id: string): string => entityHandles.get(id) ?? "entity-unavailable";
@@ -565,6 +572,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
     return playerActionCandidateSchema.parse(candidate);
   };
   const modelContext: Record<string, unknown> = {
+    ...(context.decision ? { decision: mapActorDecisionView(context.decision, scopedEntityHandle, semanticHandle) } : {}),
     actorId: entityHandle(context.actorId),
     selfState: mapState(context.selfState),
     ownedEntityState: Object.fromEntries(Object.entries(context.ownedEntityState)
@@ -971,12 +979,14 @@ export async function buildActorScopedActionContext(
     .map((event) => ({ kind: "scene" as const, summary: event.title }));
   const plan = view.selfState["character.plan"];
   if (typeof plan === "string" && plan.trim()) activeThreads.push({ kind: "plan", summary: plan.trim() });
+  const decision = await buildActorDecisionView(engine, actorId, commitId, { visibleEntityIds: referenceable, knownClaimIds, sourceId: effectiveSourceId });
   return actorScopedActionContextSchema.parse({
     actorId,
     atCommit: commitId,
     selfState: structuredClone(selfState),
     ownedEntityState,
     knowledge,
+    decision,
     presentEntities,
     referenceableEntities,
     writableEntityIds: [actorId, ...[...writable].filter((id) => id !== actorId).sort()],

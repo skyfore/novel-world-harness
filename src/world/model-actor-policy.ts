@@ -123,6 +123,7 @@ export type ModelActorWorldView = {
   activeThreads: ActorScopedActionContext["activeThreads"];
   activeNorms: ModelActorNormView[];
   activeProcesses: ModelActorProcessView[];
+  decision?: ActorScopedActionContext["decision"];
 };
 
 /**
@@ -303,6 +304,7 @@ export function modelActorProposalSource(
       const activeNorms = modelVisibleNorms(goal.actorId, knownClaimIds, projection, context.normTemplates ?? new Map());
       const activeProcesses = modelVisibleProcesses(goal.actorId, projection, context.processTemplates ?? new Map());
       const actor: ModelActorWorldView = {
+        ...(modelScoped.decision ? { decision: structuredClone(modelScoped.decision) } : {}),
         actorId: modelScoped.actorId,
         selfState: structuredClone(modelScoped.selfState),
         ownedEntityState: structuredClone(modelScoped.ownedEntityState),
@@ -320,8 +322,8 @@ export function modelActorProposalSource(
         },
         recentVisibleEvents: modelScoped.recentVisibleEvents.map(({ summary }) => ({ summary })),
         activeThreads: structuredClone(modelScoped.activeThreads),
-        activeNorms,
-        activeProcesses,
+        activeNorms: modelScoped.decision?.norms.map(({ id: _id, templateId: _templateId, ...item }) => item) ?? activeNorms,
+        activeProcesses: modelScoped.decision?.processes.map(({ id: _id, templateId: _templateId, ...item }) => item) ?? activeProcesses,
       };
       let output: ActorActionTemplate | null;
       try {
@@ -343,7 +345,7 @@ export function modelActorProposalSource(
                 ...(visibleOntology?.development.length ? { development: structuredClone(visibleOntology.development) } : {}),
                 ...(visibleRelationships?.length ? { relationships: structuredClone(visibleRelationships) } : {}),
                 ...(visibleBranch.branchAppraisals.length ? { branchAppraisals: visibleBranch.branchAppraisals } : {}),
-                ...(visibleBranch.branchRelationships.length ? { branchRelationships: visibleBranch.branchRelationships } : {}),
+                ...(modelScoped.decision?.relationships.length ? { branchRelationships: modelScoped.decision.relationships.map((item) => ({ direction: "outgoing" as const, counterpartyId: item.counterpartyId, dimensions: item.dimensions })) } : {}),
                 ...(visibleBranch.branchObligations.length ? { branchObligations: visibleBranch.branchObligations } : {}),
               }
             : null,

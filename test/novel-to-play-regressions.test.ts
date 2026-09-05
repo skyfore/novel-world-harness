@@ -8,6 +8,8 @@ import { actorKnowledgeBelongsToSource, KnowledgeProjector } from "../src/world/
 import type { Entity, EvidenceRef } from "../src/world/model.js";
 import {
   buildActorScopedActionContext,
+  createPlayerActionModelBoundary,
+  playerActionTranslationContext,
   playerActionToKnowledgeAwareAction,
   validatePlayerActionSpatialScope,
   type PlayerActionCandidate,
@@ -149,5 +151,28 @@ describe("novel-to-play review regressions", () => {
     expect(result.report.accepted).toBe(accepted);
     expect((await engine.projector.project(result.newHead)).values.hero?.["character.location"])
       .toBe(accepted ? "harbor" : "village");
+  });
+
+  it("S03/K04: decision views consume branch goals without exposing another actor's private attitudes or persistent IDs", async () => {
+    const { engine, head } = await fixture();
+    const result = await engine.commitProposal({
+      proposalId: "new-goal", branchId: "main", expectedParentCommit: head, source: "background", title: "A decision",
+      participants: ["hero", "rival"], proposedTime: { kind: "unknown" }, preconditions: [], causalParents: [], evidence: [],
+      proposedDelta: { version: 1, operations: [] },
+      proposedSemantics: { version: 1, operations: [
+        { op: "open-goal", localRef: "local-goal", goal: { actorId: "hero", description: "Deliver the letter", priority: 0.8, targetEntityIds: [] } },
+        { op: "adjust-relationship", relationshipRef: "local-private-attitude", createIfMissing: true, fromActorId: "rival", toActorId: "hero", dimensionId: "trust", amount: -0.5 },
+      ] },
+    });
+    expect(result.report.accepted).toBe(true);
+    const hero = await buildActorScopedActionContext(engine, "hero", result.newHead);
+    const rival = await buildActorScopedActionContext(engine, "rival", result.newHead);
+    expect(hero.decision?.goals).toEqual([expect.objectContaining({ description: "Deliver the letter" })]);
+    expect(hero.decision?.relationships).toEqual([]);
+    expect(rival.decision?.goals).toEqual([]);
+    expect((await buildActorScopedActionContext(engine, "hero", head)).decision?.goals).toEqual([]);
+    const model = createPlayerActionModelBoundary(playerActionTranslationContext(hero)).context;
+    expect(JSON.stringify(model)).not.toContain(hero.decision!.goals[0]!.id);
+    expect(model.decision).toMatchObject({ goals: [{ id: expect.stringMatching(/^semantic-/), description: "Deliver the letter" }] });
   });
 });

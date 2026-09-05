@@ -236,10 +236,7 @@ async function respondOneNpc(input: {
       ...(event.actorId && visibleNames.has(event.actorId) ? { speaker: visibleNames.get(event.actorId)! } : {}),
     }];
   }).map((message, order) => ({ ...message, order }));
-  const activeGoalIds = new Set(development.activeGoalIds);
-  const activeGoals = (worldContext.actorGoals ?? [])
-    .filter((goal) => goal.actorId === input.npcId && activeGoalIds.has(goal.id))
-    .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
+  const activeGoals = (actorContext.decision?.goals ?? [])
     .map((goal) => ({ description: goal.description, priority: goal.priority }));
   const activeWorldRules = modelVisibleWorldRules(
     resolveEffectiveWorldRules(worldContext.rules, state).effective,

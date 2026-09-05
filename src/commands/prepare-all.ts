@@ -44,6 +44,8 @@ export type PrepareAllCommandOptions = {
   acquireLock?: boolean;
   cacheRoot?: string;
   createBranch?: boolean;
+  /** Finish compilation and archive the candidate; independent Play certification can follow later. */
+  candidateOnly?: boolean;
   restoreCache?: boolean;
   /** Active immutable revision that an enclosing reparse is using as its rollback baseline. */
   reparseBaselineBundleHash?: string;
@@ -460,15 +462,25 @@ export async function prepareAllCommand(
 
   if (["create-branch", "ready"].includes(inspection.stage) && !cacheVerified) {
     report("Reviewing the independent major-character roster before candidate certification.");
-    await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
+    try { await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
       ...(options.model ? { model: options.model } : {}), signal: options.signal,
       onStatus: options.onStatus, onModelText: options.onModelText, onModelThinking: options.onModelThinking,
       onModelToolCall: options.onModelToolCall, onModelToolResult: options.onModelToolResult, onModelEvent: options.onModelEvent,
-    }, dependencies.compileInitialWorld);
+    }, dependencies.compileInitialWorld); } catch (error) {
+      if (!options.candidateOnly || !(error instanceof Error) || !error.message.startsWith("WORLD_CLOSURE_BLOCKED:")) throw error;
+      report(error.message);
+    }
     options.signal?.throwIfAborted();
     const evaluated = await preparedCache.inspectCandidate(inspection.source!);
     report(`Entry probes: ${evaluated.assessment.playability?.readyTotal ?? 0}/${evaluated.assessment.playability?.majorTotal ?? 0} major roles ready.`);
-    if (!evaluated.assessment.fullNovelReady) throw new Error(`WORLD_CLOSURE_BLOCKED: ${evaluated.assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
+    if (!evaluated.assessment.fullNovelReady && !options.candidateOnly) throw new Error(`WORLD_CLOSURE_BLOCKED: ${evaluated.assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
+    if (options.candidateOnly && evaluated.assessment.issues.length) report(`Candidate diagnostics: ${evaluated.assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
+  }
+
+  if (options.candidateOnly && ["create-branch", "ready"].includes(inspection.stage)) {
+    const archived = await preparedCache.archiveCandidate(inspection.source!, preparedRevisionPublishOptions(options));
+    report(`Archived compiled candidate ${archived.bundleHash}. Public Play activation is unchanged; inspect closure to review remaining semantic or certification work.`);
+    return inspection;
   }
 
   if (inspection.stage === "create-branch") {

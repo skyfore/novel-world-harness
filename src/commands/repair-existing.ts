@@ -23,6 +23,8 @@ import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { ProposalStore } from "../world/canonical-model.js";
 import { compileSourceCommand } from "./compile-source.js";
 import { prepareAllCommand } from "./prepare-all.js";
+import { parseOrdinalSelection } from "./reparse.js";
+import { planClosureRepair } from "../compiler/closure-repair.js";
 
 export type RepairExistingCommandOptions = {
   root: string;
@@ -30,6 +32,8 @@ export type RepairExistingCommandOptions = {
   sourceId?: string;
   fromRevision?: string;
   replaceStaging?: boolean;
+  candidateOnly?: boolean;
+  chapters?: string;
   model?: string;
   cacheRoot?: string;
   acquireLock?: boolean;
@@ -46,7 +50,8 @@ export type RepairExistingCommandOptions = {
 export type RepairExistingCommandResult = {
   sourceId: string;
   parentBundleHash: string;
-  activeBundleHash: string;
+  activeBundleHash: string | null;
+  candidateBundleHash?: string;
   runId: string;
   resumed: boolean;
   replacedProposalIds: string[];
@@ -67,9 +72,9 @@ const defaultDependencies: RepairExistingDependencies = {
 /**
  * Fork one immutable prepared revision into a resumable working repair.
  *
- * The parent revision remains immutable and active while proposals are staged.
- * A successful finalization publishes the materialized repair as a new active
- * content-addressed revision. A failed or interrupted run keeps its journal and
+ * The parent revision remains immutable; the existing active pointer is retained.
+ * Candidate mode archives without publication. Certified finalization may publish
+ * a new content-addressed revision. A failed or interrupted run keeps its journal and
  * checkpoints so an expensive source review can resume in place.
  */
 export async function repairExistingCommand(
@@ -90,6 +95,8 @@ export async function repairExistingCommand(
   const runStore = new RepairRunStore(root);
   const batchStore = new CompilerBatchStore(root);
   let run = await runStore.read(source.id);
+  const candidateOnly = run?.candidateOnly ?? options.candidateOnly ?? false;
+  if (run?.candidateOnly !== undefined && options.candidateOnly !== undefined && run.candidateOnly !== options.candidateOnly) throw new Error("REBUILD_MODE_CHANGED: finish or inspect the existing journal before changing publication mode");
   const resumed = Boolean(run);
   let replacedProposalIds: string[] = [];
 
@@ -120,12 +127,18 @@ export async function repairExistingCommand(
   }
 
   if (run) {
+    if (options.chapters) {
+      const available = [...new Set((await prepareCompilerBatches(root, source)).filter((batch) => batch.purpose === "source-review").map((batch) => batch.chapterOrdinal))];
+      if (!sameStrings(parseOrdinalSelection(options.chapters, available, "--chapters").map(String), (run.chapters ?? available).sort((a, b) => a - b).map(String))) throw new Error("REBUILD_SCOPE_CHANGED: resume the exact chapter scope stored in the repair journal");
+    }
     await validateRepairResume(root, source, parent, run, cache);
     const active = await cache.lookup(source);
-    if (active.bundleHash !== run.baselineBundleHash) {
+    const expectedActive = run.activeAtStart === undefined ? run.baselineBundleHash : run.activeAtStart;
+    if ((active.bundleHash ?? null) !== expectedActive) {
       if (run.phase === "finalizing" && active.bundleHash && !active.requiresReparse) {
         const difference = await cache.workspaceDifferenceFromRevision(source, active.bundleHash);
-        if (!difference) {
+        const published = await cache.loadRevision(source, active.bundleHash);
+        if (!difference && published?.bundle.lineage?.runId === run.runId && published.bundle.lineage.parentBundleHash === run.baselineBundleHash) {
           await runStore.remove(source.id);
           report(`Repair ${run.runId} had already published revision ${active.bundleHash}; cleared its completed journal.`);
           return {
@@ -139,7 +152,7 @@ export async function repairExistingCommand(
         }
       }
       throw new Error(
-        `Cannot resume repair ${run.runId}: active revision changed from parent ${run.baselineBundleHash} `
+        `Cannot resume repair ${run.runId}: active revision changed from ${expectedActive ?? "missing"} `
         + `to ${active.bundleHash ?? "missing"}. The repair journal was preserved; inspect prepared-cache history and do not retry unchanged.`,
       );
     }
@@ -150,6 +163,11 @@ export async function repairExistingCommand(
         `Cannot resume repair ${run.runId}: pending proposal(s) do not belong to this repair namespace: `
         + `${foreignProposalIds.join(", ")}. The journal and proposals were preserved; review the conflict and do not retry unchanged.`,
       );
+    }
+    if (run.phase === "initializing") {
+      await batchStore.markIncomplete(source.id, run.batchIds);
+      run = { ...run, phase: "compiling", updatedAt: new Date().toISOString() };
+      await runStore.write(run);
     }
     report(`Resuming historical-revision repair ${run.runId} from parent ${run.baselineBundleHash} (${run.phase}).`);
   } else {
@@ -179,27 +197,34 @@ export async function repairExistingCommand(
 
     options.signal?.throwIfAborted();
     options.onStatus?.(`Materializing historical revision ${baselineBundleHash}`);
-    await cache.activate(source, baselineBundleHash, { allowIncompatibleRollback: true });
+    await cache.restoreCompilerCheckpoint(source, baselineBundleHash);
     await new BoundaryCalibrationStore(root).reset(source.id);
     const difference = await cache.workspaceDifferenceFromRevision(source, baselineBundleHash);
     if (difference) {
       throw new Error(`Historical revision ${baselineBundleHash} did not materialize exactly: ${difference}`);
     }
 
-    const { sourceReviewBatchIds } = await validateRepairLayout(root, source, parent);
-    await batchStore.markIncomplete(source.id, sourceReviewBatchIds);
+    const available = [...new Set((await prepareCompilerBatches(root, source)).filter((batch) => batch.purpose === "source-review").map((batch) => batch.chapterOrdinal))];
+    const chapters = options.chapters ? parseOrdinalSelection(options.chapters, available, "--chapters") : undefined;
+    const { sourceReviewBatchIds } = await validateRepairLayout(root, source, parent, chapters);
     const now = new Date().toISOString();
     run = {
       version: 1,
       sourceId: source.id,
       baselineBundleHash,
+      activeAtStart: activeBefore.bundleHash ?? null,
+      candidateOnly,
+      ...(chapters ? { chapters } : {}),
       runId: `repair-${now.replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`,
       pipelineVersion: COMPILER_PIPELINE_VERSION,
       batchIds: sourceReviewBatchIds,
-      phase: "compiling",
+      phase: "initializing",
       startedAt: now,
       updatedAt: now,
     };
+    await runStore.write(run);
+    await batchStore.markIncomplete(source.id, sourceReviewBatchIds);
+    run = { ...run, phase: "compiling", updatedAt: new Date().toISOString() };
     await runStore.write(run);
     report(
       `Forked immutable revision ${baselineBundleHash} into repair ${run.runId}; `
@@ -268,7 +293,7 @@ export async function repairExistingCommand(
     const finalizing: RepairRun = { ...repair, phase: "finalizing", updatedAt: new Date().toISOString() };
     await runStore.write(finalizing);
     options.signal?.throwIfAborted();
-    options.onStatus?.("Checking semantic conflicts and publishing repaired revision");
+    options.onStatus?.(candidateOnly ? "Checking semantic conflicts and archiving rebuild candidate" : "Checking semantic conflicts and publishing repaired revision");
     await dependencies.finishPreparation({
       root,
       configPath: options.configPath,
@@ -276,6 +301,7 @@ export async function repairExistingCommand(
       ...(options.model ? { model: options.model } : {}),
       yes: true,
       createBranch: false,
+      candidateOnly,
       restoreCache: false,
       reparseBaselineBundleHash: repair.baselineBundleHash,
       reparseRunId: repair.runId,
@@ -291,6 +317,15 @@ export async function repairExistingCommand(
       onModelEvent: options.onModelEvent,
     });
     options.signal?.throwIfAborted();
+
+    if (candidateOnly) {
+      const candidate = await cache.archiveCandidate(source, { lineage: { operation: "repair", parentBundleHash: repair.baselineBundleHash, runId: repair.runId } });
+      const active = await cache.lookup(source);
+      if ((active.bundleHash ?? null) !== (repair.activeAtStart ?? null)) throw new Error("REBUILD_ACTIVE_CHANGED: candidate compilation must not change publication");
+      await runStore.remove(source.id);
+      report(`Rebuild candidate ${candidate.bundleHash} archived with parent ${repair.baselineBundleHash}; active publication is unchanged.`);
+      return { sourceId: source.id, parentBundleHash: repair.baselineBundleHash, activeBundleHash: active.bundleHash ?? null, candidateBundleHash: candidate.bundleHash, runId: repair.runId, resumed, replacedProposalIds };
+    }
 
     const active = await cache.lookup(source);
     if (!active.bundleHash || active.requiresReparse) {
@@ -351,7 +386,7 @@ async function validateRepairResume(
       + "Its journal was preserved; start no new repair until this migration conflict is reviewed.",
     );
   }
-  const { sourceReviewBatchIds } = await validateRepairLayout(root, source, parent);
+  const { sourceReviewBatchIds } = await validateRepairLayout(root, source, parent, run.chapters);
   if (!sameStrings(sourceReviewBatchIds, run.batchIds)) {
     throw new Error(
       `Repair ${run.runId} batch layout conflicts with the current source layout. `
@@ -369,6 +404,7 @@ async function validateRepairLayout(
   root: string,
   source: SourceDocument,
   parent: ActivePreparedNovel,
+  chapters?: number[],
 ): Promise<{ sourceReviewBatchIds: string[] }> {
   const batches = await prepareCompilerBatches(root, source, {
     chapterSplitPlan: parent.bundle.chapterSplitPlan ?? null,
@@ -383,9 +419,8 @@ async function validateRepairLayout(
       + "Targeted artifact reuse is unsafe; keep the revision immutable and use a full reparse for this source layout.",
     );
   }
-  const sourceReviewBatchIds = batches
-    .filter((batch) => batch.purpose === "source-review")
-    .map((batch) => batch.id);
+  const sourceReview = batches.filter((batch) => batch.purpose === "source-review");
+  const sourceReviewBatchIds = chapters ? planClosureRepair(parent.bundle, sourceReview, sourceReview.filter((batch) => chapters.includes(batch.chapterOrdinal)).map((batch) => batch.id)).batchIds : sourceReview.map((batch) => batch.id);
   if (!sourceReviewBatchIds.length) throw new Error(`Source ${source.id} has no source-review compiler batches.`);
   return { sourceReviewBatchIds };
 }
@@ -398,9 +433,7 @@ async function forkConflicts(
   cache: PreparedNovelCache,
 ): Promise<string[]> {
   const conflicts: string[] = [];
-  if (active.bundleHash !== parent.bundleHash) {
-    conflicts.push(`active prepared revision is ${active.bundleHash ?? "missing"}, not requested parent ${parent.bundleHash}`);
-  }
+  // Selecting an immutable parent does not request an active-pointer change.
   const difference = await cache.workspaceDifferenceFromRevision(source, parent.bundleHash);
   if (difference) conflicts.push(`materialized workspace differs from the requested parent: ${difference}`);
   const proposalIds = await pendingSourceProposalIds(root, source);

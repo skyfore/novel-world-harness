@@ -9,13 +9,42 @@ const DEFAULT_IGNORED_DIRECTORIES = new Set([
   ".git",
   ".novel-harness",
   ".aws",
+  ".agents",
+  ".claude",
+  ".codex",
+  ".cursor",
+  ".docker",
+  ".gnupg",
+  ".kube",
   ".ssh",
+  ".terraform",
+  ".terragrunt",
+  ".venv",
   "coverage",
   "dist",
   "node_modules",
 ]);
 
-const SENSITIVE_FILE_NAMES = new Set([".env", ".netrc", ".npmrc", ".pypirc"]);
+const SENSITIVE_FILE_NAMES = new Set([
+  ".env",
+  ".envrc",
+  ".htpasswd",
+  ".netrc",
+  ".npmrc",
+  ".pypirc",
+  ".dockerconfigjson",
+  ".git-credentials",
+  "application_default_credentials.json",
+  "auth.json",
+  "client_secret.json",
+  "credentials.json",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
+  "id_rsa",
+  "service-account.json",
+  "token.json",
+]);
 const SENSITIVE_FILE_EXTENSIONS = new Set([".key", ".p12", ".pem", ".pfx"]);
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -57,13 +86,23 @@ function looksBinary(buffer: Buffer): boolean {
   return buffer.subarray(0, 8_000).includes(0);
 }
 
+function decodeUtf8(buffer: Buffer, label: string): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+  } catch {
+    throw new Error(`File is not valid UTF-8: ${label}`);
+  }
+}
+
 function isExcludedRelative(relative: string): boolean {
   const normalized = normalizeRelative(relative);
-  if (normalized === "." || normalized === ".novel-harness/instructions.md") return false;
+  if (normalized === ".") return false;
   const parts = normalized.split("/");
-  if (parts.some((part) => DEFAULT_IGNORED_DIRECTORIES.has(part))) return true;
-  const name = parts.at(-1) ?? "";
+  if (parts.some((part) => DEFAULT_IGNORED_DIRECTORIES.has(part.toLocaleLowerCase()))) return true;
+  const name = (parts.at(-1) ?? "").toLocaleLowerCase();
   if (SENSITIVE_FILE_NAMES.has(name)) return true;
+  if (name.startsWith("client_secret_") && name.endsWith(".json")) return true;
+  if (/^(?:credentials|service-account)[._-].*\.json$/u.test(name)) return true;
   if (name.startsWith(".env.") && !name.endsWith(".example") && !name.endsWith(".template")) return true;
   return SENSITIVE_FILE_EXTENSIONS.has(path.extname(name).toLocaleLowerCase());
 }
@@ -113,7 +152,7 @@ export class LocalFileWorkspace {
       for (const entry of entries) {
         if (files.length >= limit) break;
         if (entry.isSymbolicLink()) continue;
-        if (entry.isDirectory() && DEFAULT_IGNORED_DIRECTORIES.has(entry.name)) continue;
+        if (entry.isDirectory() && DEFAULT_IGNORED_DIRECTORIES.has(entry.name.toLocaleLowerCase())) continue;
         if (!entry.isDirectory() && !entry.isFile()) continue;
         await visit(path.join(absolute, entry.name));
       }
@@ -133,7 +172,7 @@ export class LocalFileWorkspace {
 
     const buffer = await fs.readFile(absolute);
     if (looksBinary(buffer)) throw new Error(`Binary files are not supported: ${input.path}`);
-    const lines = buffer.toString("utf8").replace(/\r\n/g, "\n").split("\n");
+    const lines = decodeUtf8(buffer, input.path).replace(/\r\n/g, "\n").split("\n");
     const startLine = input.startLine ?? 1;
     if (!Number.isInteger(startLine) || startLine <= 0) throw new Error("startLine must be a positive integer.");
     if (startLine > lines.length) throw new Error(`startLine ${startLine} is past the end of ${input.path} (${lines.length} lines).`);
@@ -161,6 +200,31 @@ export class LocalFileWorkspace {
     return output.join("\n");
   }
 
+  /**
+   * Host-only exact read for a path the user explicitly promoted to trusted
+   * project guidance. This is intentionally not exposed as a model tool.
+   */
+  async readProjectInstruction(relativePath: string): Promise<string> {
+    if (path.isAbsolute(relativePath)) {
+      throw new Error(`Project instruction paths must be workspace-relative: ${relativePath}`);
+    }
+    const absolute = await this.resolveInside(relativePath);
+    const stat = await fs.stat(absolute);
+    if (!stat.isFile()) throw new Error(`Not a file: ${relativePath}`);
+    if (stat.size > MAX_FILE_BYTES) {
+      throw new Error(`File is larger than ${MAX_FILE_BYTES} bytes: ${relativePath}`);
+    }
+    const buffer = await fs.readFile(absolute);
+    if (looksBinary(buffer)) throw new Error(`Binary files are not supported: ${relativePath}`);
+    let decoded: string;
+    try {
+      decoded = decodeUtf8(buffer, relativePath);
+    } catch {
+      throw new Error(`Project instruction is not valid UTF-8: ${relativePath}`);
+    }
+    return decoded.replace(/\r\n/g, "\n");
+  }
+
   async searchFiles(input: SearchFilesInput): Promise<string[]> {
     const query = input.query.trim();
     if (!query) throw new Error("Search query cannot be empty.");
@@ -186,7 +250,13 @@ export class LocalFileWorkspace {
       if (stat.size > MAX_FILE_BYTES) continue;
       const buffer = await fs.readFile(absolute);
       if (looksBinary(buffer)) continue;
-      const lines = buffer.toString("utf8").replace(/\r\n/g, "\n").split("\n");
+      let decoded: string;
+      try {
+        decoded = decodeUtf8(buffer, relative);
+      } catch {
+        continue;
+      }
+      const lines = decoded.replace(/\r\n/g, "\n").split("\n");
       for (let index = 0; index < lines.length && matches.length < limit; index += 1) {
         const line = lines[index] ?? "";
         if (!line.toLocaleLowerCase().includes(normalizedQuery)) continue;
@@ -200,16 +270,13 @@ export class LocalFileWorkspace {
   private async searchWithRipgrep(input: SearchFilesInput, limit: number): Promise<string[] | null> {
     const absoluteStart = await this.resolveInside(input.path ?? ".");
     const relativeStart = normalizeRelative(path.relative(this.root, absoluteStart));
-    const excludedGlobs = [
-      ".git",
-      ".novel-harness",
-      ".aws",
-      ".ssh",
-      "coverage",
-      "dist",
-      "node_modules",
-    ].flatMap((directory) => [`!${directory}/**`, `!**/${directory}/**`]);
-    const sensitiveGlobs = ["!**/.env", "!**/.env.*", "!**/.netrc", "!**/.npmrc", "!**/.pypirc", "!**/*.key", "!**/*.p12", "!**/*.pem", "!**/*.pfx"];
+    const excludedGlobs = [...DEFAULT_IGNORED_DIRECTORIES]
+      .flatMap((directory) => [`!${directory}/**`, `!**/${directory}/**`]);
+    const sensitiveGlobs = [
+      ...[...SENSITIVE_FILE_NAMES].map((name) => `!**/${name}`),
+      "!**/.env.*",
+      ...[...SENSITIVE_FILE_EXTENSIONS].map((extension) => `!**/*${extension}`),
+    ];
     const args = [
       "--json",
       "--fixed-strings",
@@ -307,4 +374,3 @@ export class LocalFileWorkspace {
     return real;
   }
 }
-

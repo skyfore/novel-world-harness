@@ -39,6 +39,7 @@ describe("executable world vertical slice", () => {
       proposalId: "initial-world",
       payload: {
         version: 1,
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
         delta: {
           version: 1,
           operations: [
@@ -57,6 +58,7 @@ describe("executable world vertical slice", () => {
         id: "promotion",
         title: "Hero is promoted",
         participants: ["hero"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
         storyTime: { kind: "ordinal", label: "promotion scene" },
         preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
         observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.title", value: "Commander" }] },

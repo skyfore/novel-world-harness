@@ -3,7 +3,8 @@
 - **Status:** Proposed implementation blueprint
 - **Date:** 2026-08-11
 - **Applies to:** Phase 1–3 world compiler/runtime work
-- **Architecture decision:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md)
+- **Architecture decisions:** [ADR 0001](adr/0001-world-truth-history-and-possibility-space.md), [ADR 0003](adr/0003-world-time-character-development-and-divergence.md), [ADR 0004](adr/0004-model-first-player-intent-and-world-adjudication.md)
+- **Semantic compiler follow-up:** [中文技术计划](novel-semantic-compilation-plan.zh-CN.md) / [English technical plan](novel-semantic-compilation-plan.md)
 
 ## 1. Purpose
 
@@ -143,9 +144,221 @@ type EvidenceRef = {
   span: SourceSpan;
   strength: "explicit" | "strong-inference" | "weak-inference";
 };
+
+type TextAnchor = {
+  version: 1;
+  sourceId: string;
+  startByte: number;
+  endByte: number;
+  startLine: number;
+  endLine: number;
+  exactHash: string;
+  prefixHash: string;
+  suffixHash: string;
+  contextBytes: 64;
+  normalization: "source-bytes-v1";
+};
+
+type EvidenceAssertion = {
+  version: 1;
+  id: string;
+  target: { artifactKind: string; artifactId: string; jsonPointer: string };
+  anchors: TextAnchor[];
+  relation: "supports" | "contradicts" | "contextualizes";
+  strength: "explicit" | "strong-inference" | "weak-inference";
+  interpretation?: string;
+  derivation: { runId: string; worker: string; ontologyVersion: "evidence-v1" };
+};
 ```
 
-`quoteHash` lets the compiler detect stale evidence after a source file changes.
+`EvidenceRef` remains compatibility context for a bounded source segment. New
+field- and relation-level grounding uses `EvidenceAssertion`: its JSON Pointer
+identifies the supported semantic target, while its exact and adjacent-context
+hashes make the citation independently reviewable. Models submit only exact
+text selectors, context for disambiguation, target paths, relations, and
+strength; the host resolves byte/line ranges and every trusted hash from the
+immutable archived source. Inferred strengths require an interpretation.
+
+Exact assertions are immutable revisions stored separately from semantic world
+artifacts. On commit, an atomic binding connects the active artifact content
+hash to its current assertion revisions. This lets provenance change without
+manufacturing a new world-model revision, while audit and retrieval can reject
+stale bindings.
+
+#### 5.2.1 Source-observation structure and accounting
+
+Canonical artifacts are not a valid denominator for source coverage. Before
+canonicalization, the host materializes a source-observation tree with one
+`work` root, deterministic `paragraph` containers, and `sentence` / `non-scene`
+leaf units. The leaf anchors are a gap-free, non-overlapping byte partition of
+the immutable source. Their IDs are derived from source identity, structure
+version, kind, and byte range, so prompt batching never becomes semantic
+identity.
+
+Scene and discourse annotations are a separate overlapping layer. A memory,
+frame, embedded document, or narrator comment may overlap structural units or
+another discourse span; it never changes textual order or the base partition.
+
+At the successful batch finish handshake, reviewed segment ranges are projected
+onto base units:
+
+- a unit overlapping an exact semantic assertion or committed observation is
+  `represented`;
+- an explicitly reviewed no-artifact unit is `background-only`;
+- whitespace/non-scene bytes are classified deterministically;
+- a unit in a proposal-bearing segment without exact coverage is `unresolved`,
+  not silently counted as extracted.
+
+Accepted accounting proposals are immutable review history and can repair a
+missing finish marker on retry. If the retry adds exact semantics, host-derived
+`represented` coverage deterministically supersedes only the overlapping
+accepted dispositions; all other decisions replay unchanged. A newly staged
+pending disposition still conflicts with overlapping exact semantics, and the
+diagnostic names its exact proposal ID for withdrawal.
+
+Boundary-calibration requests are transient workflow state and are not part of
+an immutable prepared revision. Materializing a revision clears that queue and
+restores only its stable batch checkpoints; a reparse that performs recovery
+then derives its selected batches again from the restored state.
+
+Audit reports both unit and byte denominators. Missing reviews remain
+`unknown`; fully reviewed unresolved/deferred units are `not-ready`; only full
+accounting without blockers is `ready`.
+
+#### 5.2.2 Source-annotation lifecycle
+
+`src/compiler/annotations.ts` is the authority for four non-canonical source
+observations:
+
+- `EntityMention` stores exact source surface (or an explicitly interpreted
+  zero anaphor), mention form, and entity-kind candidates. It deliberately has
+  no `entityId`, canonical name, or alias field.
+- `EventMention` stores an exact trigger, one or more possibly discontinuous
+  extent anchors, event-type candidates, participant *mention IDs*, enclosing
+  discourse references, and major/supporting/minor salience. It deliberately
+  has no canonical event ID, truth status, state delta, or causal edge: a
+  remembered, dreamed, hypothetical, denied, or summarized event is still only
+  a textual observation at this layer.
+- `Quotation` stores direct/indirect/free-indirect mode and refers to speaker
+  and addressee *mention IDs*. Attribution therefore remains auditable before
+  identity resolution.
+- `DiscourseObservation` stores one or more possibly overlapping anchors for a
+  scene, summary, flashback, frame, recollection, hypothetical, dream,
+  embedded document, or narrator commentary. Viewpoint also refers to a
+  mention ID, so discourse analysis cannot grant canonical identity.
+
+Models submit exact text selectors only. `src/compiler/text-anchors.ts`
+resolves each selector against a host-validated source segment and constructs
+the trusted `TextAnchor`. Repeated text without context or an explicit
+one-based occurrence is rejected as ambiguous.
+
+Annotations use a distinct pending/accepted/rejected proposal history. A
+successful `finish_compiler_batch` first validates the complete source-local
+reference graph, then writes an immutable content-addressed annotation revision
+and atomically moves its current ref. Retrying the same compiler batch restores
+both pending proposals and annotations already committed by a partially
+completed finish. Rejecting that batch restores the preceding current revision
+without deleting immutable history.
+
+`find_source_annotations` returns bounded, source-scoped summaries;
+`read_source_annotation` pages the exact payload. Neither tool exposes another
+novel's observations. Audit verifies all committed anchors, reports annotation
+counts and pending closure failures. Entity resolution has an explicit M3a
+denominator; event mentions remain visibly unresolved until M3b adds event
+identity records.
+
+#### 5.2.3 Entity identity resolution
+
+`src/compiler/entity-resolution.ts` separates textual occurrence from stable
+identity. Each `IdentityResolution` addresses exactly one `EntityMention` and
+has one explicit status:
+
+- `resolved` selects an already-canonical entity;
+- `new-entity` selects an entity proposal included in the same finish
+  handshake;
+- `ambiguous` retains at least two compatible canonical candidates;
+- `unresolved` records that no safe selection is available.
+
+Candidate generation is deterministic and source-scoped. It compares the exact
+and NFKC-normalized mention surface with compatible canonical/pending entity
+names and aliases, filters by the mention's candidate kinds, and returns a
+stable rank. A lexical match is only a candidate; the model must still propose
+the decision, cite its basis mention IDs, and may preserve uncertainty.
+
+Current resolution refs are keyed by `mentionId`. Payloads are immutable,
+content-addressed revisions. Changing a decision requires a new resolution ID
+whose `supersedesResolutionId` names the current revision. This makes merging
+several mentions into one entity, or splitting one mention back out, explicit
+and reversible. Failed-batch cleanup restores the preceding current ref while
+retaining revision history.
+
+Recovery keeps current identity separate from creation provenance. A
+superseded accepted `new-entity` revision is never replayed or rebound as the
+current ref, but it may continue to prove how a still-pending entity was
+created when the current resolution for that same mention still selects the
+same identity. Rejected or identity-changing history cannot satisfy this
+check.
+
+The finish handshake validates mention existence, source locality, kind
+compatibility, candidate/evidence IDs, status-specific target authority, and
+the supersession chain. When a source has activated mention inventory, a new
+canonical entity proposal must trace its canonical name to a selected mention;
+every proposed alias needs a separately alias-classified selected mention. The
+same trace is rechecked by `CompilerCommitService`, so a caller cannot bypass
+the finish gate by invoking canonical acceptance directly. Legacy sources with
+no mention inventory remain readable until explicit reparse.
+
+Audit now has a real entity-resolution denominator. Missing, pending,
+ambiguous, unresolved, or invalid decisions are `not-ready`; all observed
+entity mentions selected through valid resolutions are `ready`; sources with no
+mention inventory remain `unknown` rather than receiving synthetic coverage.
+
+#### 5.2.4 Event identity and cluster resolution
+
+`src/compiler/event-resolution.ts` keeps textual event presentation separate
+from canonical occurrence. An `EventResolution` owns one or more event mention
+IDs and records one of four explicit outcomes:
+
+- `resolved` links the cluster to an existing canonical event;
+- `new-event` links it to a canonical-event proposal in the same finish
+  handshake;
+- `ambiguous` retains at least two event/relation candidates;
+- `unresolved` records that no safe event identity is available.
+
+A selected candidate also declares `coreference` or `subevent`.
+Coreference says the cluster describes the canonical event itself; subevent
+says it describes only a proper component and therefore cannot, by itself,
+ground the canonical event. Candidate generation is deterministic and
+source-scoped. It ranks exact-evidence overlap, normalized title/trigger
+similarity, and already-resolved participant overlap, but these signals never
+auto-merge events or assert that an event occurred.
+
+Current refs are keyed by event mention while immutable payloads may cover a
+cluster. A merge names all current `supersedesResolutionIds`; a split emits
+multiple non-overlapping new clusters that collectively cover every mention in
+the superseded cluster. Finish validation rejects dropped members, overlapping
+new clusters, in-place revision IDs, unknown candidates, unresolved
+participants, and cross-source evidence. Failed-batch cleanup restores the
+prior partition without deleting revision history.
+
+As with entity identity, recovery does not reactivate a superseded accepted
+`new-event` cluster. Its immutable revision may prove the creation origin only
+while a current coreferential resolution still affirms at least one of the
+same event mentions and the same canonical event.
+
+When a source has event mentions, every new canonical-event proposal must have
+a same-finish coreferential `new-event` trace. Every canonical participant must
+also trace through a participant entity mention whose identity resolution
+selects that entity. `CompilerCommitService` repeats the event trace check, so
+direct acceptance cannot bypass the finish gate. Sources compiled before event
+mention inventory remain readable until explicit reparse.
+
+`find_event_resolution_candidates`, `find_event_resolutions`, and
+`read_event_resolution` provide bounded source-local candidate, unresolved,
+merge/split, and exact-payload retrieval. Audit reports all event-resolution
+states and computes `majorEventResolution` from event mentions explicitly
+marked `major`; ambiguous, unresolved, pending, invalid, or absent decisions
+block resolution readiness.
 
 ### 5.3 Entity
 
@@ -194,10 +407,11 @@ type StoryTime =
 type LogicalTime = {
   step: number;
   storyTime?: StoryTime;
+  elapsedDays?: number;
 };
 ```
 
-`LogicalTime.step` gives every committed branch event a deterministic total order. `StoryTime` preserves the source's semantic uncertainty.
+`LogicalTime.step` gives every committed branch event a deterministic total order. `StoryTime` preserves the source's semantic uncertainty. `elapsedDays` is cumulative branch time for deterministic ageing and temporal predicates. Textual frame/flashback order belongs to `NarrativeContext`, never to these clocks.
 
 A compiler may know only that A occurs before B. The runtime still assigns deterministic commit steps while retaining the weaker story-time semantics.
 
@@ -435,16 +649,22 @@ Actor proposal generation receives `WorldView(actor, branch, commit)`, not omnis
 
 ## 6. Local storage architecture
 
-Keep the `.novel-harness/` control-plane files for project metadata, sources, deterministic evidence segments, compiler batch checkpoints, proposals, and Pi sessions. World data remains a separate namespace rather than expanding `WorkspaceStore` into a monolith.
+Keep human-readable control-plane and world files below `$NWH_HOME`. Exact
+source bytes are shared immutable objects keyed by SHA-256; each workspace gets
+an isolated state namespace keyed by the resolved workspace-path identity.
+World data remains a separate namespace rather than expanding `WorkspaceStore`
+into a monolith.
 
 ```text
-.novel-harness/
-├── project.json
-├── sources/
-├── segments/
-├── sessions/
-└── world/
-    └── v1/
+$NWH_HOME/
+├── sources/v1/<sha256>/{manifest.json,source.utf8}
+├── prepared-novels/v2/<md5>/
+├── sessions/<workspace-id>/
+└── workspaces/v1/<workspace-id>/
+    ├── project.json
+    ├── sources/
+    └── world/
+      └── v2/
         ├── compiler/batches/
         ├── canon/
         │   ├── entities/{refs,revisions}/
@@ -473,6 +693,9 @@ Keep the `.novel-harness/` control-plane files for project metadata, sources, de
         └── frontier/
             └── <branch-id>/<commit-sha>.json
 ```
+
+Legacy workspace-local `.novel-harness/` trees are copied atomically on first
+open and retained as a recovery source. New writes target only the user store.
 
 ### 6.1 Immutable-object commit protocol
 
@@ -643,6 +866,7 @@ For a given branch head, every candidate evaluates to one of:
 - `blocked` — a blocking condition currently holds;
 - `expired` — its window/conditions can no longer be satisfied;
 - `superseded` — another committed development replaces it;
+- `adapted` — a committed functional analogue fulfills a canonical development without claiming verbatim realization;
 - `realized` — linked to a committed event.
 
 These statuses are frontier evaluation results, not authoritative world facts.
@@ -664,7 +888,63 @@ CanonicalEvent
 
 At runtime, only the conditions and pressures relevant to the current branch are evaluated. The original event ID is a provenance link, not an imperative.
 
-### 9.4 Frontier refresh
+### 9.4 Bounded canonical scaffold recovery after divergence
+
+An exact canonical-derived possibility keeps the original participants and
+effects. For selected source events, compilation may additionally accept a
+separate `canon-analogue` template with `canonicalScaffold`. This does not make
+canon a scheduler. It declares up to four source-backed **functional roles**
+whose participants may be rebound if the exact event no longer fits the branch.
+An attachment must change at least one declared role; canonical-self execution
+stays on the exact-event path and cannot be relabeled as an adaptation.
+
+The accepted scaffold must preserve the referenced canonical event's
+participants, participant presence, story time, time advance, preconditions,
+typed state effect, knowledge effect, and causal parents exactly. Role gates may
+only make it more restrictive through entity kind, branch availability,
+`active-scene` presence, state predicates, and actor knowledge. Identity-bound
+roles such as a named victim, heir, spouse, prophesied person, or private
+secret-holder are not valid functional substitutions. If an opaque string in a
+locked predicate, effect, or knowledge claim contains the role entity's stable
+ID, canonical name, or alias, compilation fails closed because only typed
+entity references can be substituted safely.
+
+```text
+player event supersedes one currently eligible canonical event
+  ↓ grants one bounded progression slot
+scan accepted scaffolds in comparable story-time/evidence order
+  ├─ hard causal dependency superseded/expired → trace and skip
+  ├─ exact event + canonical-self role binding eligible
+  │                                              → exact event takes precedence
+  ├─ no branch-present role binding satisfies
+  │  state + knowledge + scene gates            → trace and skip
+  └─ one or more bindings survive
+       ↓
+     isolated LLM selects one opaque binding or none
+     and may add only title + participant observation/affect
+       ↓
+     engine reloads the pinned scaffold, rebinds structural entity refs,
+     compares every locked field, rechecks causal/state/knowledge/presence,
+     then commits through the ordinary event boundary
+```
+
+The committed event records `canonicalAdaptation` lineage, including source
+event, scaffold, scene anchor, role bindings, and a core-effect hash. It realizes
+the scaffold, but it does **not** claim `realizesCanonicalEventIds` for the exact
+source event. The frontier instead marks that exact possibility `adapted`: this
+prevents duplicate execution and satisfies downstream causal dependencies while
+preserving the historical fact that canon did not happen verbatim.
+
+The model never receives stable entity IDs, branch/commit IDs, unrestricted
+tools, or effect-writing authority in this lane. Binding enumeration and all
+persistent state/knowledge changes remain deterministic host work. A failed or
+declined attachment leaves the branch unchanged; the private turn audit retains
+the scan traces, exact-candidate exclusions, and offered-decision result. An
+exact event that passes only its weaker base predicates but fails the scaffold's
+functional role gates is excluded from that progression move, so the ordinary
+scheduler cannot bypass the stronger check.
+
+### 9.5 Frontier refresh
 
 After every commit:
 
@@ -842,7 +1122,7 @@ This distinction should also exist in future CLI commands and model tools.
 
 ## 14. Compiler architecture
 
-The current compiler is source-batch-driven: one bounded evidence batch is analyzed at a time and produces explicit artifact proposals rather than arbitrary JSON blobs. A future gap-driven refinement loop may schedule targeted follow-up batches, but it is not implemented today.
+The current compiler is source-batch-driven: one chapter-bounded evidence batch is analyzed at a time and produces explicit artifact proposals rather than arbitrary JSON blobs. Built-in heading detection remains deterministic. When a longer source lacks recognized headings, one preliminary agentic pass sees only a bounded structural sample and can submit a non-executable declarative chapter rule; deterministic host validation and the finish handshake gate persistence. A future gap-driven refinement loop may schedule targeted follow-up batches, but it is not implemented today.
 
 ### 14.1 Proposal envelope
 
@@ -867,6 +1147,8 @@ type ArtifactProposal<T> = {
 
 ```text
 segment-source
+  ↓
+validated chapter-structure discovery when needed
   ↓
 bounded/resumable evidence batches
   ↓
@@ -1164,7 +1446,7 @@ Acceptance: style/POV rewrite changes prose without changing branch head or worl
 
 Only after the vertical slice is stable:
 
-- broaden source segmentation;
+- broaden corpus coverage for safe declarative chapter discovery;
 - improve entity resolution;
 - add epistemic extraction;
 - add causal extraction;
@@ -1194,9 +1476,9 @@ The semantic core and typed compiler proposal boundary now exist. The next miles
 
 1. check in one annotated end-to-end novel slice and expose its compiler evaluation as a repeatable command;
 2. orchestrate ingest, bounded compile, proposal review summary, audit, and branch creation without bypassing explicit acceptance;
-3. translate a natural-language player action into a pending typed event proposal using only the actor-scoped view;
-4. add an interactive character session that shows perception, validation results, committed consequences, and the next prompt;
-5. connect one Pi-backed actor reasoner behind `ActorWorldView + CharacterGoal + CharacterModel`;
+3. evaluate the actor-scoped intent interpreter and current-world adjudicator on multilingual paraphrases, open destinations, direct contradictions, and impossible desired effects without adding host phrase lists;
+4. broaden narrow typed consequence capabilities for physical and social effects only where corpus failures show that committed event progress is insufficient;
+5. evaluate and refine the connected Pi-backed hybrid actor reasoner on representative long-horizon novel scenarios without widening its opaque actor-safe projection or deterministic commit gates;
 6. connect one Pi-backed narrative adapter behind the immutable `NarrativeFrame` contract;
 7. measure epistemic leakage, event/state-delta fidelity, divergence durability, and narrative quality on several genres;
 8. refine schemas and scheduling only from observed corpus failures.

@@ -1,0 +1,308 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { afterEach, describe, expect, it } from "vitest";
+import { BoundaryCalibrationStore } from "../src/compiler/boundary-calibration.js";
+import { prepareCompilerBatches, runCompilerBatches } from "../src/compiler/batches.js";
+import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
+import { SegmentStore } from "../src/compiler/segments.js";
+import { ProposalStore } from "../src/world/canonical-model.js";
+import { createEvidenceFixture } from "./helpers/evidence.js";
+
+const roots: string[] = [];
+
+afterEach(async () => {
+  for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
+});
+
+async function fixture() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-boundary-calibration-"));
+  roots.push(root);
+  const evidence = await createEvidenceFixture(
+    root,
+    "Chapter 1\nAlice raises the silver key and\n\nChapter 2\nopens the gate before dawn.\n",
+  );
+  const segments = await new SegmentStore(root).list(evidence.source.id);
+  expect(segments).toHaveLength(2);
+  return { root, evidence, segments };
+}
+
+function resultText(result: unknown): string {
+  return (result as { content: Array<{ type: string; text?: string }> }).content
+    .flatMap((item) => item.type === "text" && item.text ? [item.text] : [])
+    .join("\n");
+}
+
+describe("compiler boundary calibration", () => {
+  it("peeks beyond the edge of a multi-segment chapter batch", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-boundary-multi-segment-"));
+    roots.push(root);
+    const evidence = await createEvidenceFixture(root, [
+      "Chapter 1",
+      ...Array.from({ length: 1_100 }, (_, index) => `Chapter-one line ${index + 1}.`),
+      "Chapter 2",
+      "The neighboring chapter starts here.",
+    ].join("\n"));
+    const batches = await prepareCompilerBatches(root, evidence.source);
+    const first = batches[0]!;
+    expect(first.segmentIds).toHaveLength(2);
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch(first.segmentIds, first.id, evidence.source.id);
+    const peek = toolset.tools.find((tool) => tool.name === "peek_adjacent_evidence")!;
+
+    const preview = await peek.execute("peek", {
+      direction: "next",
+      reason: "Check the immediate batch boundary.",
+    } as never, undefined, undefined, {} as ExtensionContext);
+    expect(resultText(preview)).toContain("The neighboring chapter starts here");
+  });
+
+  it("peeks once without granting citable evidence and queues a durable pair batch", async () => {
+    const { root, evidence, segments } = await fixture();
+    const regular = (await prepareCompilerBatches(root, evidence.source))[0]!;
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([segments[0]!.id], regular.id, evidence.source.id);
+    const peek = toolset.tools.find((tool) => tool.name === "peek_adjacent_evidence")!;
+    const defer = toolset.tools.find((tool) => tool.name === "defer_boundary_artifact")!;
+
+    await expect(defer.execute("too-early", {
+      direction: "next",
+      reason: "The action may continue.",
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("peek_adjacent_evidence");
+
+    const preview = await peek.execute("peek", {
+      direction: "next",
+      max_chars: 1_000,
+      reason: "The first segment ends mid-action.",
+    } as never, undefined, undefined, {} as ExtensionContext);
+    expect(resultText(preview)).toContain("opens the gate before dawn");
+    expect(resultText(preview)).toContain("context-only");
+    expect(resultText(preview)).not.toContain("quoteHash");
+    await expect(peek.execute("peek-again", {
+      direction: "next",
+      reason: "Read it again.",
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow("already been read");
+
+    await expect(defer.execute("defer", {
+      direction: "next",
+      reason: "Raising and using the key is one action split between segments.",
+      artifact_ids: ["alice-opens-gate"],
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: { compilerBoundaryCalibrationRequested: true, direction: "next" },
+    });
+
+    const requests = await new BoundaryCalibrationStore(root).list(evidence.source.id);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      leftSegmentId: segments[0]!.id,
+      rightSegmentId: segments[1]!.id,
+      requestedBy: [{ batchId: regular.id, artifactIds: ["alice-opens-gate"] }],
+    });
+    const batches = await prepareCompilerBatches(root, evidence.source);
+    const calibration = batches.find((batch) => batch.purpose === "boundary-calibration")!;
+    expect(calibration.segmentIds).toEqual([segments[0]!.id, segments[1]!.id]);
+    expect(calibration.prompt).toContain("dedicated boundary-calibration pass");
+    expect(calibration.prompt).toContain("replace_boundary_proposal");
+    expect(calibration.prompt.match(/<source-segment id=/g)).toHaveLength(2);
+
+    const retry = createCompilerProposalToolset(root);
+    await retry.beginBatch([segments[0]!.id], regular.id, evidence.source.id);
+    await expect(new BoundaryCalibrationStore(root).list(evidence.source.id)).resolves.toEqual([]);
+  });
+
+  it("discovers newly requested calibration work before crossing the review barrier", async () => {
+    const { root, evidence, segments } = await fixture();
+    const seen: Array<{ id: string; purpose: string }> = [];
+    const result = await runCompilerBatches({
+      workspaceRoot: root,
+      source: evidence.source,
+      async runner(batch) {
+        seen.push({ id: batch.id, purpose: batch.purpose });
+        if (batch.purpose === "source-review"
+          && batch.semanticStage === "observation"
+          && batch.segmentIds[0] === segments[0]!.id) {
+          await new BoundaryCalibrationStore(root).request({
+            sourceId: evidence.source.id,
+            leftSegmentId: segments[0]!.id,
+            rightSegmentId: segments[1]!.id,
+            requestedByBatchId: batch.id,
+            requestedBySegmentId: segments[0]!.id,
+            direction: "next",
+            reason: "The action crosses the split.",
+          });
+        }
+      },
+    });
+
+    expect(seen.map((item) => item.purpose)).toEqual([
+      "source-review",
+      "source-review",
+      "source-review",
+      "source-review",
+      "source-review",
+      "source-review",
+      "boundary-calibration",
+    ]);
+    expect(result).toEqual({ total: 7, completed: 7, skipped: 0, remaining: 0 });
+  });
+
+  it("routes an adjacent cross-batch logical replacement back through deferral", async () => {
+    const { root, evidence, segments } = await fixture();
+    const semantic = (await prepareCompilerBatches(root, evidence.source))
+      .filter((batch) => batch.semanticStage === "semantic");
+    const priorBatch = semantic.find((batch) => batch.segmentIds[0] === segments[0]!.id)!;
+    const currentBatch = semantic.find((batch) => batch.segmentIds[0] === segments[1]!.id)!;
+    const framePayload = {
+      ontologyVersion: "event-frame-v1",
+      id: "gate-opening-frame",
+      name: "Opening a gate",
+      roles: [{
+        id: "opener",
+        label: "opener",
+        semanticRole: "agent",
+        allowedEntityKinds: ["character"],
+        minCardinality: 1,
+        maxCardinality: 1,
+        presence: "physical",
+      }],
+      temporalShape: "instant",
+    };
+    const context = {} as ExtensionContext;
+
+    const priorTools = createCompilerProposalToolset(root);
+    await priorTools.beginBatch(priorBatch.segmentIds, priorBatch.id, evidence.source.id);
+    await priorTools.tools.find((tool) => tool.name === "propose_event_frame")!.execute("prior", {
+      proposal_id: "frame-a-prior",
+      payload: framePayload,
+      evidence_segment_ids: [segments[0]!.id],
+    } as never, undefined, undefined, context);
+    await priorTools.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute("finish-prior", {
+      outcome: "complete",
+      reviewed_segments: [{
+        segment_id: segments[0]!.id,
+        disposition: "proposed",
+        summary: "Recorded the partial boundary frame.",
+      }],
+      summary: "Prior segment reviewed.",
+    } as never, undefined, undefined, context);
+
+    const currentTools = createCompilerProposalToolset(root);
+    await currentTools.beginBatch(currentBatch.segmentIds, currentBatch.id, evidence.source.id);
+    await currentTools.tools.find((tool) => tool.name === "propose_event_frame")!.execute("current", {
+      proposal_id: "frame-z-current",
+      payload: framePayload,
+      evidence_segment_ids: [segments[1]!.id],
+    } as never, undefined, undefined, context);
+    const finish = currentTools.tools.find((tool) => tool.name === "finish_compiler_batch")!;
+    await expect(finish.execute("finish-current", {
+      outcome: "complete",
+      reviewed_segments: [{
+        segment_id: segments[1]!.id,
+        disposition: "proposed",
+        summary: "Attempted to replace the adjacent frame.",
+      }],
+      summary: "Current segment reviewed.",
+    } as never, undefined, undefined, context)).rejects.toThrow(
+      /Cross-batch proposal lifecycle.*CROSS_BATCH_LOGICAL_SUPERSESSION direction=previous prior='frame-a-prior' current='frame-z-current'/su,
+    );
+
+    await currentTools.tools.find((tool) => tool.name === "withdraw_compiler_proposal")!.execute("withdraw-current", {
+      proposal_id: "frame-z-current",
+      reason: "The adjacent frame belongs in the queued pair calibration.",
+    } as never, undefined, undefined, context);
+    await currentTools.tools.find((tool) => tool.name === "peek_adjacent_evidence")!.execute("peek-previous", {
+      direction: "previous",
+      reason: "Confirm that the frame crosses the opening boundary.",
+    } as never, undefined, undefined, context);
+    await currentTools.tools.find((tool) => tool.name === "defer_boundary_artifact")!.execute("defer-current", {
+      direction: "previous",
+      reason: "The same logical frame uses evidence on both sides of the split.",
+      artifact_ids: ["frame-a-prior", "gate-opening-frame"],
+    } as never, undefined, undefined, context);
+    await expect(finish.execute("finish-deferred", {
+      outcome: "no-artifacts",
+      reviewed_segments: [{
+        segment_id: segments[1]!.id,
+        disposition: "no-artifacts",
+        summary: "The cross-boundary frame was deferred to a citable pair pass.",
+      }],
+      summary: "Current segment boundary work deferred.",
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true, outcome: "no-artifacts" },
+    });
+    await expect(new BoundaryCalibrationStore(root).list(evidence.source.id)).resolves.toEqual([
+      expect.objectContaining({
+        leftSegmentId: segments[0]!.id,
+        rightSegmentId: segments[1]!.id,
+        requestedBy: [expect.objectContaining({ batchId: currentBatch.id, direction: "previous" })],
+      }),
+    ]);
+  });
+
+  it("replaces only a same-identity adjacent draft from inside the pair calibration", async () => {
+    const { root, evidence, segments } = await fixture();
+    const regular = (await prepareCompilerBatches(root, evidence.source))
+      .find((batch) => batch.semanticStage === "semantic" && batch.segmentIds[0] === segments[0]!.id)!;
+    const sourceTools = createCompilerProposalToolset(root);
+    await sourceTools.beginBatch([segments[0]!.id], regular.id, evidence.source.id);
+    const proposeSourceEntity = sourceTools.tools.find((tool) => tool.name === "propose_entity")!;
+    await proposeSourceEntity.execute("partial", {
+      proposal_id: "alice-partial",
+      payload: {
+        id: "alice",
+        kind: "character",
+        canonicalName: "Alice",
+        aliases: [],
+      },
+      evidence_segment_ids: [segments[0]!.id],
+    } as never, undefined, undefined, {} as ExtensionContext);
+    const peek = sourceTools.tools.find((tool) => tool.name === "peek_adjacent_evidence")!;
+    const defer = sourceTools.tools.find((tool) => tool.name === "defer_boundary_artifact")!;
+    await peek.execute("peek", {
+      direction: "next",
+      reason: "The action continues.",
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await defer.execute("defer", {
+      direction: "next",
+      reason: "The identity participates in a cross-boundary action.",
+      artifact_ids: ["alice-partial"],
+    } as never, undefined, undefined, {} as ExtensionContext);
+
+    const calibration = (await prepareCompilerBatches(root, evidence.source))
+      .find((batch) => batch.purpose === "boundary-calibration")!;
+    const boundaryTools = createCompilerProposalToolset(root);
+    await boundaryTools.beginBatch(calibration.segmentIds, calibration.id, evidence.source.id);
+    const proposeReplacement = boundaryTools.tools.find((tool) => tool.name === "propose_entity")!;
+    const replace = boundaryTools.tools.find((tool) => tool.name === "replace_boundary_proposal")!;
+    await proposeReplacement.execute("replacement", {
+      proposal_id: "alice-boundary-v2",
+      payload: {
+        id: "alice",
+        kind: "character",
+        canonicalName: "Alice",
+        aliases: [],
+      },
+      evidence_segment_ids: [segments[0]!.id],
+    } as never, undefined, undefined, {} as ExtensionContext);
+    await expect(replace.execute("replace", {
+      proposal_id: "alice-partial",
+      replacement_proposal_id: "alice-boundary-v2",
+      reason: "The pair pass supersedes the partial boundary reading.",
+    } as never, undefined, undefined, {} as ExtensionContext)).resolves.toMatchObject({
+      details: {
+        compilerBoundaryProposalReplaced: true,
+        proposalId: "alice-partial",
+        replacementProposalId: "alice-boundary-v2",
+      },
+    });
+
+    const proposals = new ProposalStore(root);
+    await expect(proposals.list("pending")).resolves.toEqual([
+      expect.objectContaining({ id: "alice-boundary-v2" }),
+    ]);
+    await expect(proposals.list("rejected")).resolves.toEqual([
+      expect.objectContaining({ id: "alice-partial" }),
+    ]);
+  });
+});

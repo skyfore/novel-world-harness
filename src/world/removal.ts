@@ -1,0 +1,361 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { CompilerBatchStore } from "../compiler/batches.js";
+import { BoundaryCalibrationStore } from "../compiler/boundary-calibration.js";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { SegmentStore } from "../compiler/segments.js";
+import { ChapterSplitPlanStore } from "../compiler/chapter-split.js";
+import { SourceStructureStore } from "../compiler/structure.js";
+import { SourceAccountingStore } from "../compiler/source-accounting.js";
+import { SourceAnnotationStore } from "../compiler/annotations.js";
+import { EntityResolutionStore } from "../compiler/entity-resolution.js";
+import { EventResolutionStore } from "../compiler/event-resolution.js";
+import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
+import { ActorModelStore } from "./actors.js";
+import { CanonicalModelStore, ProposalStore } from "./canonical-model.js";
+import { InitialWorldStore } from "./initial.js";
+import { PlaySessionStore, type ActivePlaySession } from "./play-session.js";
+import { worldStorageRoot } from "./paths.js";
+import { PlayConversationStore } from "./play-conversation.js";
+import { inspectPlayExperience, resolveNovelSource } from "./play-experience.js";
+import { PossibilityTemplateStore } from "./possibility-model.js";
+import { BranchStore } from "./store.js";
+import { spatialRelationEvidence } from "./spatial-ontology.js";
+
+export type InstanceRemovalResult = {
+  branchId: string;
+  sourceId?: string;
+  nextActiveSession: ActivePlaySession | null;
+  detachedSession?: ActivePlaySession;
+  presentationPreserved: boolean;
+};
+
+export type NovelAnalysisRemovalResult = {
+  source: SourceDocument;
+  canonicalArtifacts: number;
+  actorArtifacts: number;
+  possibilities: number;
+  proposals: number;
+  initialWorld: boolean;
+  evidenceIndex: boolean;
+  sourceObservations: boolean;
+  compilerProgress: boolean;
+  preparedCache: boolean;
+  preservedPreparedRevisions: string[];
+};
+
+export type NovelRemovalResult = {
+  source: SourceDocument;
+  removedBranchIds: string[];
+  analysis: NovelAnalysisRemovalResult;
+  sourceUnregistered: boolean;
+};
+
+export async function removeWorldInstance(
+  root: string,
+  branchId: string,
+  options: { retainPresentation?: boolean } = {},
+): Promise<InstanceRemovalResult> {
+  const catalog = await inspectPlayExperience(root);
+  const instance = catalog.instances.find((candidate) => candidate.branchId === branchId);
+  if (!instance) throw new Error(`Unknown instance '${branchId}'. Use /instances to list playable instances.`);
+  const instanceSessions = catalog.savedSessions.filter((session) => session.branchId === branchId);
+
+  await new BranchStore(root).remove(branchId);
+  const sessionStore = new PlaySessionStore(root);
+  const detached = options.retainPresentation
+    ? await sessionStore.detachInstance(branchId)
+    : { detachedSession: null, nextActiveSession: await sessionStore.removeInstance(branchId) };
+  if (!options.retainPresentation) {
+    const conversations = new PlayConversationStore(root);
+    await Promise.all(instanceSessions.map((session) => conversations.remove(branchId, session.conversationId)));
+    if (!instanceSessions.length) await conversations.remove(branchId);
+  }
+  await fs.rm(path.join(worldStorageRoot(root), "frontier", branchId), {
+    recursive: true,
+    force: true,
+  });
+  return {
+    branchId,
+    ...(instance.sourceId ? { sourceId: instance.sourceId } : {}),
+    nextActiveSession: detached.nextActiveSession,
+    ...(detached.detachedSession ? { detachedSession: detached.detachedSession } : {}),
+    presentationPreserved: options.retainPresentation === true,
+  };
+}
+
+export async function removeNovelAnalysis(
+  root: string,
+  sourceInput: string | SourceDocument,
+  options: { cacheRoot?: string; preservePreparedRevisionHashes?: readonly string[] } = {},
+): Promise<NovelAnalysisRemovalResult> {
+  const workspace = await WorkspaceStore.create(root);
+  const source = typeof sourceInput === "string"
+    ? await resolveNovelSource(workspace, sourceInput)
+    : sourceInput;
+  const sourceId = source.id;
+  const canonical = new CanonicalModelStore(root);
+  const actors = new ActorModelStore(root);
+  const possibilities = new PossibilityTemplateStore(root);
+
+  let canonicalArtifacts = 0;
+  for (const entity of await canonical.listEntities()) {
+    if (!containsSourceEvidence(entity, sourceId)) continue;
+    const evidence = withoutSourceEvidence(entity, sourceId);
+    if (evidence.length) await canonical.putEntity({ ...entity, evidence });
+    else await canonical.removeCurrent("entities", entity.id);
+    canonicalArtifacts += 1;
+  }
+  for (const proposition of await canonical.listPropositions()) {
+    if (!containsSourceEvidence(proposition, sourceId)) continue;
+    const evidence = withoutSourceEvidence(proposition, sourceId);
+    if (evidence.length) await canonical.putProposition({ ...proposition, evidence });
+    else await canonical.removeCurrent("propositions", proposition.id);
+    canonicalArtifacts += 1;
+  }
+  for (const attribution of await canonical.listAttributions()) {
+    if (!containsSourceEvidence(attribution, sourceId)) continue;
+    const evidence = withoutSourceEvidence(attribution, sourceId);
+    if (evidence.length) await canonical.putAttribution({ ...attribution, evidence });
+    else await canonical.removeCurrent("attributions", attribution.id);
+    canonicalArtifacts += 1;
+  }
+  for (const claim of await canonical.listClaims()) {
+    if (!containsSourceEvidence(claim, sourceId)) continue;
+    const evidence = withoutSourceEvidence(claim, sourceId);
+    if (evidence.length) await canonical.putClaim({ ...claim, evidence });
+    else await canonical.removeCurrent("claims", claim.id);
+    canonicalArtifacts += 1;
+  }
+  for (const participation of await canonical.listEventParticipations()) {
+    if (!containsSourceEvidence(participation, sourceId)) continue;
+    const evidence = withoutSourceEvidence(participation, sourceId);
+    if (evidence.length) await canonical.putEventParticipation({ ...participation, evidence });
+    else await canonical.removeCurrent("event-participations", participation.id);
+    canonicalArtifacts += 1;
+  }
+  for (const relation of await canonical.listEventRelations()) {
+    const allEvidence = [...relation.evidence, ...(relation.counterEvidence ?? [])];
+    if (!allEvidence.some((reference) => reference.span.sourceId === sourceId)) continue;
+    const evidence = withoutSourceEvidence(relation, sourceId);
+    const counterEvidence = (relation.counterEvidence ?? []).filter((reference) => reference.span.sourceId !== sourceId);
+    if (evidence.length) {
+      const revised = { ...relation, evidence };
+      if (counterEvidence.length) revised.counterEvidence = counterEvidence;
+      else delete revised.counterEvidence;
+      await canonical.putEventRelation(revised);
+    } else {
+      await canonical.removeCurrent("event-relations", relation.id);
+    }
+    canonicalArtifacts += 1;
+  }
+  for (const relation of await canonical.listSpatialRelations()) {
+    const allEvidence = spatialRelationEvidence(relation);
+    if (!allEvidence.some((reference) => reference.span.sourceId === sourceId)) continue;
+    const evidence = relation.evidence.filter((reference) => reference.span.sourceId !== sourceId);
+    const counterEvidence = (relation.counterEvidence ?? []).filter((reference) => reference.span.sourceId !== sourceId);
+    if (evidence.length) {
+      const revised = { ...relation, evidence };
+      if (counterEvidence.length) revised.counterEvidence = counterEvidence;
+      else delete revised.counterEvidence;
+      await canonical.putSpatialRelation(revised);
+    } else {
+      await canonical.removeCurrent("spatial-relations", relation.id);
+    }
+    canonicalArtifacts += 1;
+  }
+  for (const event of await canonical.listEvents()) {
+    if (!containsSourceEvidence(event, sourceId)) continue;
+    const evidence = withoutSourceEvidence(event, sourceId);
+    if (evidence.length) await canonical.putEvent({ ...event, evidence });
+    else await canonical.removeCurrent("events", event.id);
+    canonicalArtifacts += 1;
+  }
+  for (const rule of await canonical.listRules()) {
+    if (!containsSourceEvidence(rule, sourceId)) continue;
+    const evidence = withoutSourceEvidence(rule, sourceId);
+    if (evidence.length) await canonical.putRule({ ...rule, evidence });
+    else await canonical.removeCurrent("rules", rule.id);
+    canonicalArtifacts += 1;
+  }
+
+  let actorArtifacts = 0;
+  for (const goal of await actors.listGoals()) {
+    if (!containsSourceEvidence(goal, sourceId)) continue;
+    const evidence = withoutSourceEvidence(goal, sourceId);
+    if (evidence.length) await actors.putGoal({ ...goal, evidence });
+    else await actors.removeGoal(goal.id);
+    actorArtifacts += 1;
+  }
+  for (const model of await actors.listModels()) {
+    if (!containsSourceEvidence(model, sourceId)) continue;
+    const evidence = withoutSourceEvidence(model, sourceId);
+    if (evidence.length) await actors.putModel({ ...model, evidence });
+    else await actors.removeModel(model.actorId);
+    actorArtifacts += 1;
+  }
+
+  let possibilityCount = 0;
+  for (const possibility of await possibilities.list()) {
+    if (!containsSourceEvidence(possibility, sourceId)) continue;
+    const evidence = withoutSourceEvidence(possibility, sourceId);
+    if (evidence.length) await possibilities.put({ ...possibility, evidence });
+    else await possibilities.remove(possibility.id);
+    possibilityCount += 1;
+  }
+
+  const initialWorldStore = new InitialWorldStore(root);
+  const initialWorld = await initialWorldStore.get();
+  const removedInitialWorld = Boolean(initialWorld && containsSourceEvidence(initialWorld, sourceId));
+  if (initialWorld && removedInitialWorld) {
+    const evidence = withoutSourceEvidence(initialWorld, sourceId);
+    if (evidence.length) await initialWorldStore.put({ ...initialWorld, evidence });
+    else await initialWorldStore.clear();
+  }
+
+  const segments = new SegmentStore(root);
+  const evidenceIndex = Boolean(await segments.readManifest(sourceId));
+  await segments.remove(sourceId);
+  await new ChapterSplitPlanStore(root).remove(sourceId);
+  const structureStore = new SourceStructureStore(root);
+  const accountingStore = new SourceAccountingStore(root);
+  const annotationStore = new SourceAnnotationStore(root);
+  const entityResolutionStore = new EntityResolutionStore(root);
+  const eventResolutionStore = new EventResolutionStore(root);
+  const annotationData = await Promise.all([
+    annotationStore.list(sourceId),
+    annotationStore.listProposals(sourceId, "pending"),
+    annotationStore.listProposals(sourceId, "accepted"),
+    annotationStore.listProposals(sourceId, "rejected"),
+  ]);
+  const entityResolutionData = await Promise.all([
+    entityResolutionStore.list(sourceId),
+    entityResolutionStore.listProposals(sourceId, "pending"),
+    entityResolutionStore.listProposals(sourceId, "accepted"),
+    entityResolutionStore.listProposals(sourceId, "rejected"),
+  ]);
+  const eventResolutionData = await Promise.all([
+    eventResolutionStore.list(sourceId),
+    eventResolutionStore.listProposals(sourceId, "pending"),
+    eventResolutionStore.listProposals(sourceId, "accepted"),
+    eventResolutionStore.listProposals(sourceId, "rejected"),
+  ]);
+  const sourceObservations = Boolean(
+    await structureStore.read(sourceId)
+    || await accountingStore.read(sourceId)
+    || annotationData.some((items) => items.length > 0)
+    || entityResolutionData.some((items) => items.length > 0)
+    || eventResolutionData.some((items) => items.length > 0),
+  );
+  await structureStore.remove(sourceId);
+  await accountingStore.remove(sourceId);
+  await annotationStore.removeSource(sourceId);
+  await entityResolutionStore.removeSource(sourceId);
+  await eventResolutionStore.removeSource(sourceId);
+
+  const batchStore = new CompilerBatchStore(root);
+  const boundaryStore = new BoundaryCalibrationStore(root);
+  const compilerProgress = (await batchStore.read(sourceId)).updatedAt !== new Date(0).toISOString()
+    || (await boundaryStore.list(sourceId)).length > 0;
+  await batchStore.reset(sourceId);
+  await boundaryStore.reset(sourceId);
+
+  let proposals = await new ProposalStore(root).removeForSource(sourceId);
+  const currentSource = await workspace.getSource(sourceId);
+  if (currentSource?.pendingTitleProposal) {
+    await workspace.withdrawSourceTitleProposal(sourceId, currentSource.pendingTitleProposal.proposalId);
+    proposals += 1;
+  }
+  const preservedHashes = options.preservePreparedRevisionHashes === undefined
+    ? await pinnedPreparedRevisions(root, sourceId)
+    : [...new Set(options.preservePreparedRevisionHashes)].sort();
+  const cachePrune = await new PreparedNovelCache(root, options.cacheRoot).prune(source, new Set(preservedHashes));
+
+  return {
+    source,
+    canonicalArtifacts,
+    actorArtifacts,
+    possibilities: possibilityCount,
+    proposals,
+    initialWorld: removedInitialWorld,
+    evidenceIndex,
+    sourceObservations,
+    compilerProgress,
+    preparedCache: cachePrune.existed,
+    preservedPreparedRevisions: cachePrune.retainedRevisions,
+  };
+}
+
+export async function removeNovel(
+  root: string,
+  sourceInput: string | SourceDocument,
+  options: { cacheRoot?: string; retainPresentation?: boolean } = {},
+): Promise<NovelRemovalResult> {
+  const workspace = await WorkspaceStore.create(root);
+  const source = typeof sourceInput === "string"
+    ? await resolveNovelSource(workspace, sourceInput)
+    : sourceInput;
+  const catalog = await inspectPlayExperience(root);
+  const branches = new BranchStore(root);
+  const removing = new Set(
+    catalog.instances
+      .filter((instance) => instance.sourceId === source.id)
+      .map((instance) => instance.branchId),
+  );
+
+  for (const branchId of removing) await branches.assertRemovable(branchId, removing);
+  const removalOrder = childFirstBranchOrder(
+    catalog.instances
+      .filter((instance) => removing.has(instance.branchId))
+      .map((instance) => ({ id: instance.branchId, parentId: instance.parentBranchId })),
+  );
+
+  const analysis = await removeNovelAnalysis(root, source, {
+    ...(options.cacheRoot ? { cacheRoot: options.cacheRoot } : {}),
+    preservePreparedRevisionHashes: [],
+  });
+  for (const branchId of removalOrder) {
+    await removeWorldInstance(root, branchId, options.retainPresentation ? { retainPresentation: true } : {});
+  }
+  const sourceUnregistered = await workspace.unregisterSource(source.id);
+  return { source, removedBranchIds: removalOrder, analysis, sourceUnregistered };
+}
+
+async function pinnedPreparedRevisions(root: string, sourceId: string): Promise<string[]> {
+  const branches = new BranchStore(root);
+  const hashes = new Set<string>();
+  for (const branchId of await branches.listIds()) {
+    const branch = await branches.read(branchId);
+    if (branch.sourceId === sourceId && branch.preparedRevisionHash) hashes.add(branch.preparedRevisionHash);
+  }
+  return [...hashes].sort();
+}
+
+function containsSourceEvidence(
+  artifact: { evidence: readonly { span: { sourceId: string } }[] },
+  sourceId: string,
+): boolean {
+  return artifact.evidence.some((reference) => reference.span.sourceId === sourceId);
+}
+
+function withoutSourceEvidence<T extends { span: { sourceId: string } }>(
+  artifact: { evidence: readonly T[] },
+  sourceId: string,
+): T[] {
+  return artifact.evidence.filter((reference) => reference.span.sourceId !== sourceId);
+}
+
+function childFirstBranchOrder(branches: readonly { id: string; parentId?: string }[]): string[] {
+  const remaining = new Map(branches.map((branch) => [branch.id, branch]));
+  const ordered: string[] = [];
+  while (remaining.size) {
+    const parents = new Set([...remaining.values()].flatMap((branch) => branch.parentId ? [branch.parentId] : []));
+    const leaves = [...remaining.keys()].filter((id) => !parents.has(id)).sort();
+    if (!leaves.length) throw new Error("Cannot remove novel instances because their parent graph contains a cycle.");
+    for (const id of leaves) {
+      remaining.delete(id);
+      ordered.push(id);
+    }
+  }
+  return ordered;
+}

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 
-const NOVEL_INSTRUCTIONS = `# Novel workspace
+const HARNESS_INSTRUCTIONS = `# Novel World Harness workspace
 
 ## Goal
 
@@ -50,5 +50,5 @@ export async function initCommand(target = process.cwd()): Promise<void> {
   template.project.name = path.basename(root) || "novel-world";
   const config = YAML.stringify(template);
   await createIfMissing(path.join(root, "novel-harness.yaml"), config);
-  await createIfMissing(path.join(root, "NOVEL.md"), NOVEL_INSTRUCTIONS);
+  await createIfMissing(path.join(root, "NWH.md"), HARNESS_INSTRUCTIONS);
 }

@@ -11,22 +11,23 @@ The repository contains a tested, constrained end-to-end novel-player vertical s
 Implemented:
 
 - Claude Code-style TUI with a persistent transcript, streaming responses, rendered tool calls, a multiline editor, status/footer information, and bounded local `list_files`, `search_files`, and `read_file` tools;
-- local state under `.novel-harness/`, with no PostgreSQL, vector database, or RAG service;
-- deterministic source registration, hashing, segmentation, and resumable compiler batches;
+- user-level local state under `$NWH_HOME` (default `~/.novel-harness/`), with no PostgreSQL, vector database, or RAG service;
+- deterministic source registration and hashing, validated agent-assisted chapter discovery when built-in heading rules are insufficient, and resumable chapter-bounded compiler batches;
 - Pi compiler sessions that can only create typed pending proposals;
 - an explicit compiler-batch finish handshake, so failed or partial tool runs remain retryable instead of being checkpointed;
 - cryptographic evidence verification before canonical or possibility acceptance;
 - logical canonical IDs backed by immutable content-addressed revisions;
-- event-sourced branch history pinned to immutable canonical snapshots, deterministic state projection, temporal rules, knowledge isolation, snapshots, and integrity checks;
+- event-sourced branch history pinned to immutable canonical snapshots, shared typed-effect projection, checkpoint-plus-tail replay, temporal rules, knowledge isolation, snapshots, and integrity checks;
 - canonical and non-canonical possibilities, counterfactual branches, checkpoint replay, and deterministic actor-goal policies.
 - a derived `prepare` workflow that guides ingest, bounded compilation, explicit review, audit, and branch creation without automatically accepting model output;
-- `play-world`, which selects a committed character and translates natural-language actions through an actor-scoped, capture-only model tool before deterministic scope, knowledge, engine, and commit gates;
-- a persistent real-provider test ledger with a non-increasable 100,000,000-token hard ceiling, per-session request caps, and conservative crash accounting.
+- a world-aware TUI and catalog commands (`novels`, `instances`, `characters`, `progress`, `resume`) that select a committed character and route play through an actor-scoped, capture-only model boundary before deterministic scope, knowledge, engine, and commit gates;
+- reader-only prior-story recaps, source-grounded per-character entry checkpoints, explicit physical-presence semantics, and material-progress exits that keep later roles and open-world play from collapsing into an opening-cast chat loop;
+- a hash-pinned original representative corpus, V2 semantic denominators, long-horizon fork/resource scenarios, projection diagnostics, and host-private move decision traces with an actor-safe projection;
 
 Still intentionally limited:
 
-- a Pi/LLM actor reasoner connected to the CLI runtime;
-- model-backed literary narration connected to `world render`;
+- live-provider actor behavior and literary-narration quality across genres;
+- model-backed literary narration in the low-level diagnostic `world render` path;
 - player actions can change the selected actor and currently owned artifacts, but broader physical/social simulation is not yet modeled;
 - corpus-backed proof that model extraction is reliable across full novels and genres.
 
@@ -36,7 +37,14 @@ The governing invariant is:
 proposal -> validate -> commit -> render
 ```
 
-See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
+See [ADR 0001](docs/adr/0001-world-truth-history-and-possibility-space.md) for the temporal model, [ADR 0004](docs/adr/0004-model-first-player-intent-and-world-adjudication.md) for model-first player intent and world consequences, [ADR 0006](docs/adr/0006-reader-context-character-entry-and-progress.md) for reader context, role entry, presence, and material progression, [ADR 0008](docs/adr/0008-frozen-base-isolated-play-and-third-person-narration.md) for frozen bases, isolated new play, and third-person prose, [ADR 0009](docs/adr/0009-runtime-source-context-consultation.md) for bounded runtime source consultation and authority-projected retry, [the context-injection audit](docs/context-injection-audit.md) for model data/tool/authority boundaries, [the cited semantic-compilation research report](docs/novel-semantic-compilation-plan.zh-CN.md) for the ontology audit, [the completed executable-world optimization plan](docs/executable-world-optimization-plan.zh-CN.md) for implementation contracts and release gates, [the executable-world release audit](docs/release-audit.zh-CN.md) for direct acceptance evidence, [the Web UI MVP design](docs/web-ui-mvp-design.zh-CN.md) for the browser, play-trace, and ontology workbench proposal, and [implementation status](docs/implementation-status.md) for the detailed completion assessment.
+
+For a standalone Chinese competition narrative covering the product thesis, end-to-end
+flows, technical highlights, demo plan, and honest limitations, see the
+[Hackson AI submission guide](docs/hackson-ai-submission.zh-CN.md).
+
+The browser MVP's requirement-to-code-to-test release gate is recorded in the
+[Web UI MVP acceptance matrix](docs/web-ui-mvp-acceptance.zh-CN.md).
 
 ## Install
 
@@ -48,6 +56,117 @@ pnpm link --global
 ```
 
 Node 22.19 or newer is required.
+
+## Local Web UI
+
+Build and open the local browser workbench:
+
+```bash
+pnpm run build
+nwh web
+```
+
+After the Web assets have been built once, quickly restart the workbench from
+the current server source without rebuilding:
+
+```bash
+pnpm dev web
+```
+
+Re-run `pnpm run build:web` only when the browser application changes. CLI
+options can be forwarded directly, for example `pnpm dev web --no-open --port
+3090`.
+
+The server binds to `127.0.0.1:3080` by default and reuses the same `$NWH_HOME`,
+workspace stores, world branches, play-session pointers, and Pi model catalog as
+the terminal harness. Use `--no-open` when a browser should not be launched.
+Binding beyond loopback is rejected unless `--allow-remote` is explicit because
+the MVP has no product login layer.
+
+The Web MVP is a complete browser workbench over the same application services
+and Pi runtime as the terminal harness. It supports source upload/paste,
+resumable preparation, proposal review and convergence, world-instance creation
+and forking, character selection, durable play/resume, and previewed maintenance
+actions. The play operation panel shows live phase/status data, the branch head,
+whether the deterministic commit boundary has been crossed, and safe Stop
+behavior. Session archive, restore, transcript clear, and presentation-session
+removal preserve committed branch truth.
+
+Web removal keeps observability and presentation lifecycles separate from world
+truth: removing an instance or novel detaches its historical play sessions and
+preserves their transcripts and traces, while removing a play session explicitly
+removes only that session's presentation data.
+
+Web operation snapshots and their idempotency keys are atomically persisted
+below the workspace state directory. A server restart retains completed runs and
+turns unfinished work into an explicit `interrupted` state; post-commit work is
+never presented as safe to replay unchanged.
+
+Short browser commands use the same restart-safe contract through a local
+mutation journal under `web/v1/mutations/`. It stores request fingerprints and
+redacted results, never raw source bodies or credentials. An orphaned `running`
+command is marked as having an unknown outcome and must be reconciled from the
+authoritative catalog/session snapshot before a new request is issued.
+
+If a committed move is stopped before presentation completes, the Play page can
+retry narration only. The server verifies the original move trace and current
+branch head, creates a separate `narration-retry` trace, and never replays the
+world mutation.
+
+On startup, interrupted player-move traces are reconciled against content-checked
+turn audits, immutable commit ancestry, the current branch head, and retained
+presentation messages. The host appends an inspectable recovery diagnostic and
+repairs observation links only; ambiguous head advancement stays unknown, and
+committed moves expose narration-only repair without synthesizing or replaying a
+world event.
+
+Creating a new session from an instance defaults to forking the selected commit
+and opening the chosen character on the child branch. The Play status strip and
+message badges expose actor, branch/head, story step, run stage, LLM/tool counts,
+commit presence, and wall duration; active operations remain controllable from
+the global tray while navigating between pages.
+
+The model settings page uses Pi's own provider catalog and credential runtime.
+It supports write-only API-key login, OAuth/device/manual-code prompts through
+single-use browser interactions, credential removal, and per-role model routes
+stored in the shared `novel-harness.yaml`. Secrets are never returned in API,
+operation, or SSE payloads.
+
+Every play and compiler run has a durable trajectory inspector. It exposes the
+ordered LLM requests and tool calls, context-part composition (system policy,
+world model, source evidence, prior messages, and tool results), exact request
+and response payloads after secret redaction, usage/timing, retries, story-time
+transitions, and commit boundaries. Trace storage is append-only diagnostic data
+and never becomes world truth.
+
+Each novel also has five read-only ontology projections: world model, events,
+places, rules, and provenance. They derive from the existing canonical stores
+and committed history—there is no second graph database. A projection can be
+pinned to a branch and ancestor commit; future canon is hidden by default and
+can only be displayed in the explicitly labeled possibility layer. The graph,
+searchable table fallback, and node inspector expose status, relationships,
+revision identity, and exact source excerpts.
+
+Every mutating request uses the per-process CSRF token returned by bootstrap;
+long-running compiler, play, and narration calls return an idempotent operation
+and stream updates over SSE. For frontend development, run `pnpm dev:web:all`
+to start the API host and Vite together. Alternatively, run
+`pnpm dev:web:server` and `pnpm dev:web` in separate terminals; Vite proxies
+`/api` to the local host.
+
+Run the deterministic test suite and the real-browser MVP acceptance journey
+with:
+
+```bash
+pnpm test
+pnpm test:e2e
+```
+
+The browser suite launches the production Fastify host on loopback and drives
+Chromium through source registration, compilation review, ontology inspection,
+play/resume, trace inspection, and destructive-action confirmations. If the
+Playwright browser cache is empty, install Chromium once with
+`pnpm exec playwright install chromium`.
 
 ## Local terminal assistant
 
@@ -65,26 +184,40 @@ authenticate and select a model inside the session:
 
 Pi supports subscription sign-in for ChatGPT Plus/Pro (Codex), Claude Pro/Max,
 and GitHub Copilot. `/model` switches models but does not authenticate a provider,
-so run `/login` first. The selected model is remembered per workspace in
-`.novel-harness/pi/settings.json`; an explicit `--model` or configured role profile
-overrides it for that invocation. Credentials are stored locally in
-`.novel-harness/pi-auth.json` for this workspace and are excluded from model file
-tools and Git.
+so run `/login` first. NWH reuses Pi's native authentication, model catalog, and
+default model selection in `~/.pi/agent/`; a user who has already configured Pi
+does not need to authenticate again. An explicit `--model` or configured role
+profile overrides Pi's default for that invocation. NWH conversations, archived
+source material, compiler state, and executable world data are stored under
+`~/.novel-harness/`; ordinary runs do not create `.novel-harness/` in the project.
 
 API keys remain supported as an alternative:
 
 ```bash
 export ANTHROPIC_API_KEY=your_key
 pnpm dev
-pnpm dev -p "列出这个工作区中的主要人物资料"
-pnpm dev --continue
+nwh novels
+nwh instances
+nwh characters
+nwh resume main --character 曹操
+nwh continue huozhe.txt
+nwh switch huozhe.txt
+nwh create huozhe.txt
+pnpm dev --new-session
+pnpm dev --session <session-id>
 pnpm dev --root ./my-novel
 pnpm dev --tui-mode fullscreen
 ```
 
 Paste or drag a standalone UTF-8 novel path (`.txt`, `.text`, `.novel`, `.md`, or
 `.markdown`) into the TUI to begin the compiler workflow immediately. NWH
-registers the source, builds bounded evidence segments,
+registers the source and builds bounded evidence segments. Recognized author
+headings become chapter boundaries directly. For a longer heading-free source,
+the first compiler turn receives a bounded structural sample and may configure a
+safe declarative heading rule (literal prefix, numbering style, and literal
+suffix); arbitrary model-generated code and regular expressions are never
+executed. The host checks exact sampled examples and the rule's full-source
+match rate, and commits it only with the normal finish handshake. NWH then
 dynamically enables the typed pending-proposal tools, and processes the first
 compiler batch without first exploring the repository or explaining the CLI:
 
@@ -93,36 +226,112 @@ compiler batch without first exploring the repository or explaining the CLI:
 /compile-next
 ```
 
-Each successful batch is checkpointed under `.novel-harness/`. `/compile-next`
+Each successful batch is checkpointed under `$NWH_HOME/workspaces/v1/`. `/compile-next`
 continues the active novel from the next unfinished batch. The loop is deliberately
 one batch per user action so importing a long novel cannot silently trigger an
 unbounded sequence of model requests. Generated artifacts remain pending proposals
-until deterministic validation and explicit acceptance.
+until deterministic validation and explicit acceptance. The MVP compiler does
+not expose capacity counters or ask the model to prioritize semantics by cost.
+A defective proposal can be withdrawn to rejected history within its originating
+batch, but valid material must never be withdrawn merely to save calls. Repeated
+unchanged finish failures remain circuit-broken, while host-only runaway safety
+fuses sit far above expected work at 800 active proposals and 1,000 tool calls.
+One additional final `finish_compiler_batch` call is reserved for the required
+checkpoint handshake. Concurrent CLI compiler writers are rejected by a
+workspace lock instead of racing proposal files.
+Non-interactive compiler turns also have a one-hour wall-clock deadline; a
+timed-out turn is aborted without checkpointing and resumes from durable progress.
+Batch identity is persisted on each proposal, so retrying an interrupted batch
+recovers its active drafts, supplies their exact proposal IDs to the retry turn,
+and can withdraw them without re-extracting duplicate logical artifacts. Ordinary
+source batches leave the initial world to the dedicated opening pass. The finish handshake is host-owned:
+the model reviews segment IDs but no longer has to echo an ever-growing proposal-ID list.
 
-`nwh` and `nwh play` open the TUI in `regular` mode by default, preserving terminal scrollback. `--tui-mode fullscreen` uses an alternate-screen layout. `-p` remains the non-interactive path for scripts and pipelines.
+Run `/prepare-all [source-id] [branch-id]` inside the TUI to finish the remaining
+batches in the current session, review guided acceptance choices, generate a
+missing opening state, and create a playable branch. Its internal continuation
+messages stay hidden from the visible transcript and carry their complete evidence
+slice directly rather than depending on user-prompt hooks.
+
+`nwh` and `nwh play` open Pi's viewport-based `fullscreen` TUI by default and continue the last transcript the interactive user opened. NWH records that selection explicitly when the TUI starts or switches sessions instead of inferring it only from JSONL modification times. On the first run after upgrading, it bootstraps the pointer from logical user/assistant/player activity and ignores title or startup metadata touches, preventing an old `main` transcript from becoming permanently sticky. A plain `--new-session` starts a blank Harness conversation: committed novels and world instances remain on disk, but no saved novel, instance, or character is attached to the new transcript. When `--new-session` accompanies an explicit player-entry command such as `resume`, `switch`, or `create`, that explicitly selected world is still opened. `/clear` has the same blank-conversation boundary and never silently re-enters the previously active character. Continuing an existing transcript—including one made entirely of player custom messages—does not inject another scene opener; a fresh transcript created by an explicit player-entry command receives one current-scene orientation because its screen has no prior context. While the main model is thinking, streaming, or waiting on a tool, an animated NWH owl and rotating context-aware status copy remain attached immediately above the editor; the indicator disappears only after the agent fully settles, is cancelled, or the session closes. Startup returns control to Pi before an optional narrator request begins, so transcript restoration and the first screen are never held behind a second model call. Opening, orientation, and post-action scenes mount the nested Pi session as one assistant stream inside Pi's native scrollable transcript; provider/model, retry, and capture-tool phases remain compact footer status instead of occupying an editor dock. Accepted prose is verified against that stream, then the same native component is committed in place as the durable scene—no second copy is mounted. Thinking and player-choice metadata persist outside parent-model context, survive transcript reload, and retain Pi's Ctrl+T behavior. A rejected underspecified attempt is removed before its one automatic retry starts. The TUI then offers 2-4 contextual next actions plus free-form input; either path enters the same restricted validation and commit pipeline. The TUI enters at the newest transcript content while keeping the editor, task status, and footer fixed; PageUp/PageDown scroll, Ctrl+Shift+Up/Down jump between prompts, and Ctrl+Shift+F searches the transcript. Pi's native Ctrl+O expands tool output, Ctrl+T toggles reasoning, and ↑/↓ browse prompt history. Foreground compiler tasks use Pi's assistant and tool components inside a focused fullscreen overlay: live thinking remains visible, completed thinking blocks collapse behind Ctrl+T, PageUp/PageDown inspect earlier task events, and new events follow the end until the user scrolls away. The first Ctrl+C clears pending input or stops the active model/scene/foreground task and displays a two-second confirmation; a second Ctrl+C in that window exits. After terminal restoration, NWH prints an exact `nwh --root ... --session ...` command for the current transcript (compiler sessions retain their compiler entry point). Fullscreen still avoids dumping the entire transcript. Use `--tui-mode regular` for terminal-native scrollback or terminal compatibility, and `-p` for non-interactive scripts and pipelines. An explicit Pi TUI preference saved through `/settings` is honored when the CLI flag is absent.
 
 Ordinary conversation starts with read-only discovery tools. Starting a source
-compiler loop adds only the narrow typed tools that can create pending proposals;
-it still cannot commit world truth or write arbitrary files. Inside the TUI:
+compiler loop adds only the narrow typed tools that can create pending proposals,
+withdraw defective current-batch drafts, and finish the batch; it still cannot
+commit world truth or write arbitrary files. When a saved character session exists,
+the TUI resumes player mode automatically. In player mode, ordinary input bypasses
+the local-file assistant and is translated in a fresh actor-scoped session that
+receives committed character context only. Inside the TUI:
 
 ```text
+/novels
+/instances
+/remove instance main
+/remove analysis huozhe.txt
+/remove all huozhe.txt
+/characters main
+/play 曹操 main
+/continue huozhe.txt
+/switch huozhe.txt
+/create-instance huozhe.txt
+/scene
+/progress
+/leave
+/world-resume main 曹操
 /files chapter
 /search 赤壁
 /read chapters/12.md 40:100
 分析 @chapters/12.md 中曹操的错误判断
 /compile-next
+/prepare-all
 /status
 /clear
 /exit
 ```
 
-The TUI also supports multiline editing, interrupt/queue shortcuts, session navigation, and expandable tool output; use `/hotkeys` for the current key map. A leading `!` is an explicit user-run shell command provided by the terminal UI. It is not exposed to the model as a tool.
+`/remove` is an explicitly confirmed development/debugging flow. `instance`
+deletes one leaf branch and its resume state, `analysis` resets the selected
+novel's evidence index, compiler artifacts, proposals, and prepared cache while
+leaving its registered source and pinned instances intact, and `all` also removes
+every owned instance and unregisters the novel. Immutable content-addressed
+source evidence is retained in every mode; it is never silently garbage-collected.
+
+The TUI also supports multiline editing, `↑`/`↓` prompt history, interrupt/queue shortcuts, session navigation, and expandable tool output; use `/hotkeys` for the current key map. The main agent receives a metadata-only `rename_session` tool and names a transcript after its concrete novel, character, or objective; host-known compiler/player contexts provide the same meaningful-title fallback, while an existing manual name is preserved. Long NWH operations such as `/reparse` open in a live task panel with host lifecycle events, tool calls, provider reasoning activity, and streamed model text explicitly labeled as unverified proposal commentary. `←` or `Esc` returns the task to a compact background widget without cancelling it, `/tasks` brings it back to the foreground, and the task panel's displayed cancel key propagates an abort into its nested Pi session. Completed, failed, and cancelled task output remains inspectable for the rest of the TUI session. A leading `!` is an explicit user-run shell command provided by the terminal UI. It is not exposed to the model as a tool.
 
 Selected excerpts are sent to the configured model provider. “Local-first” describes discovery, access control, and persistence; it is not an offline-model guarantee.
 
 Pi may also perform startup metadata checks or obtain its optional `fd` autocomplete helper. Set `PI_OFFLINE=1` to suppress those startup operations; model prompts still require the configured provider unless that provider is local.
 
 ## Prepare and enter a world
+
+To authorize one command to compile all remaining batches, automatically accept
+every proposal that passes deterministic validation, create the initial world,
+and open a playable branch:
+
+```bash
+nwh prepare-all ./books/novel.txt
+nwh characters
+nwh resume main --character <id-or-name>
+```
+
+`prepare-all` asks focused multiple-choice questions before running all model
+batches, accepting validated proposals, generating a missing opening state, and
+creating the playable branch. Choose the review/pause option at any question to
+retain the current durable progress. For scripts and CI, `--yes` accepts every
+recommended choice without prompting:
+
+```bash
+nwh prepare-all ./books/novel.txt --yes
+```
+
+`prepare-all` never force-accepts a blocked proposal. After the user authorizes
+safe convergence, invalid and staging-only drafts move to immutable rejected
+history while validated artifacts continue. If the dedicated opening-state model
+pass leaves no valid initial world, the deterministic alive-only fallback is
+restricted to a source with exactly one accepted character. Multi-character
+novels fail closed until the compiler supplies an evidence-backed actionable
+opening role instead of creating an unusable cast inventory.
+The existing `prepare` flow below remains the review-first path.
 
 ```bash
 nwh init ./my-novel
@@ -135,20 +344,84 @@ nwh proposals accept <kind> <proposal-id>   # or: nwh proposals reject <proposal
 nwh audit
 nwh prepare --source <source-id>
 nwh status
-nwh play-world --list-characters
-nwh play-world --character <id-or-name> --action "我前往藏书楼。"
+nwh novels
+nwh instances
+nwh characters <source-id> --branch main
+nwh resume main --character <id-or-name>
+nwh continue <source-id-or-title>
+nwh switch <source-id-or-title> --instance <id>
+nwh create <source-id-or-title> --instance <new-id>
 ```
 
 `init` is provider-neutral. Use the TUI's `/login` and `/model`, an existing workspace-local Pi authorization, or an explicit optional `llm` profile. `prepare` derives the next safe stage from durable artifacts, runs at most one unfinished compiler batch by default, and always prints `Next:`. It stops at the review barrier and never accepts model output. Once every proposal is explicitly accepted or rejected and the audit is clean, rerunning `prepare` creates the canonical-initialized branch exactly once.
 
 `ingest` and `compile-source` remain available as lower-level commands. Ingest stores a content-addressed source manifest and deterministic evidence segments; it does not copy the novel into a database. Compiler tools can only write pending typed proposals. `proposals accept-all` remains an automation helper that revalidates dependencies and evidence, but individual `show` plus `accept`/`reject` is the recommended review path.
 
+Ingest copies the exact UTF-8 bytes into the private immutable user material
+store before compilation. The disposable origin file may then be removed. File,
+stdin, inline CLI content, and TUI content use the same identity pipeline:
+
+```bash
+nwh ingest ./novel.txt
+nwh ingest --stdin --title novel.txt < novel.txt
+nwh ingest --content '第一章……' --title novel.txt
+# TUI: /prepare-content 第一章……
+```
+
+Prepared data is explicitly revisable. A full rebuild or a bounded chapter repair
+creates a new prepared revision for the same source bytes:
+
+```bash
+nwh reparse --all --source <source-id>
+nwh reparse --chapters 3,7-9 --source <source-id>
+nwh repair-existing --source <source-id> --from-revision <bundle-hash>
+nwh prepared-cache list --source <source-id>
+nwh prepared-cache activate <bundle-hash> --source <source-id>
+```
+
+Use `repair-existing` when a historical prepared revision contains valuable
+compiler material that should be corrected under the current pipeline instead
+of invalidated and rebuilt. It first compares the active revision, materialized
+workspace, pending proposals, batch checkpoint, and transient boundary work with
+the requested parent. A conflict is read-only by default. After inspection,
+repeat with `--replace-staging` to move displaced pending drafts into rejected
+history, materialize the historical parent exactly, and review every source batch
+while retaining correct existing artifacts. The repair journal survives process
+interruption, so the same command resumes completed batches. Only successful
+semantic conflict checks publish and activate the repaired child; the parent and
+all existing branch snapshots stay immutable. The child bundle itself records
+the repair operation, exact parent bundle hash, and durable run ID; `prepared-cache
+list` shows that ancestry alongside the revision.
+
+The same lifecycle is available without leaving the TUI. Omit flags to select
+the novel, scope, chapters, or revision through the native question UI:
+
+```text
+/reparse --chapters 3,7-9 --source <source-id>
+/reparse --all --source <source-id>
+/audit --source <source-id>
+/prepared-cache list --source <source-id>
+/prepared-cache activate <bundle-hash> --source <source-id>
+```
+
+Chapter ordinals follow built-in or validated agent-discovered heading sections;
+a source without a reliable heading form uses deterministic evidence blocks as
+the selectable units. Evidence segments are bounded at 96 KiB / 1,000 lines,
+while continuation segments from one author chapter may share one compiler batch
+up to a 128 KiB source/prompt safety boundary. Batches never merge across chapter
+boundaries. Reparse invalidates only
+the selected current artifacts, retains their immutable revisions, and publishes
+the result only after compilation, convergence, opening-state preparation, and
+cache validation succeed. A failed run restores the previous active revision.
+Activating an older revision changes the baseline used by future branches but
+does not rewrite any existing branch.
+
 For guided compiler work, `nwh compile` opens the same TUI in compiler mode and starts a small evidence-backed proposal batch. `nwh compile "<instruction>"` preserves the one-shot form.
 
 ## Execute a compiled world
 
 ```bash
-nwh world create main
+nwh world create main --source <source-id> # --source is optional only when one novel is registered
 nwh world show --branch main
 nwh world frontier --branch main
 nwh world move --branch main
@@ -163,7 +436,130 @@ nwh world validate ./player-action.json --branch main
 nwh world move --branch main --player ./player-action.json
 ```
 
-The safer natural-language path is `play-world`. Every action uses a fresh Pi session with no novel-file tools, project instructions, compiler extension, future canon, or branch-write capability. The model can only capture one candidate in memory; the host supplies branch/head/source/actor identity and commits only after deterministic validation. Rejections print concrete issue codes and leave the branch head unchanged. Omitting `--action` in a terminal opens a repeatable action prompt, and the active branch/character is persisted locally.
+The primary natural-language path is the full TUI entered by
+`nwh continue [novel]`, `nwh switch [novel]`, `nwh create [novel]`,
+`nwh resume`, `nwh play`, or the equivalent slash commands. `continue` selects that novel's most recently
+played/updated instance; `switch` asks when several source-owned instances exist;
+`create` starts a fresh instance from the novel's active prepared revision. If a
+selected prepared novel has no instance, NWH creates one automatically instead
+of falling back to an unrelated `main`. Branch ownership and prepared-revision
+identity are persisted, and each genesis snapshot contains only that novel's
+artifacts. Existing branches remain pinned to their original prepared revision.
+The TUI warns when a pinned revision differs from the active revision and tells
+the player to create a new instance. Sparse actor/location fields remain
+readiness diagnostics and are treated as unknown; they are not shown as
+unactionable story-entry warnings or used to rewrite history.
+
+For a new instance, role selection occurs before branch creation. An opening
+role uses the accepted opening cut; a supporting role begins at its first
+source-backed embodied scene, with prior main-timeline effects and an explicit
+pre-event actor checkpoint but without realizing that scene's canonical outcome.
+A step-zero opening instance is preserved and a sibling is created when a later
+role is selected. The final opening narrator weaves a source-grounded,
+spoiler-free reader setup for the novel's place, time, people, needed premise,
+and unresolved situation into continuous third-person prose. The opening role
+additionally requires explicit physical presence and grounded location, plan, or
+momentum. For a later role the opening also incorporates every prior discourse
+event as a source-grounded recap with participants, time/mode, and causal links.
+That channel is presentation-only—not actor knowledge or world state—and is
+excluded from action choices, intent translation, adjudication, and NPC
+reasoning. A later role is unavailable until all of its prior recaps and
+actionable entry checkpoint are complete.
+
+Scene narration follows the command's intent: `play` makes the narrator speak
+first for the chosen character, `create` opens a new story, and an actual
+`switch` establishes the selected current moment. `continue`, `resume`, and
+ordinary process restart add no duplicate narration. A fresh transcript opened
+through an explicit player-entry command gets one orientation; an unbound
+`--new-session` or `/clear` remains at the Harness welcome, and `/scene`
+explicitly re-renders a selected current moment. The scene path first runs three
+private isolated specialists in parallel: concrete next-action choice, literary
+style, and immediate-beat dramaturgy. A fresh final narrator receives their
+bounded advisories plus an authority-ranked packet containing the third-person
+narrative contract, committed
+actor frame, the exact resolved player act and locked dialogue, narrator-safe
+style-only source excerpts, exact presentation-only play prose, and—only for a
+fresh opening—the reader-orientation prelude. It has only
+read access over actor-safe context and branch-safe conversation memory; no
+choice, analysis, file, or mutation tool. Only this final session streams its Pi
+events into the current TUI. It automatically retries a structurally invalid,
+repetitive, or dialogue-dropping first draft once without rerunning the private
+specialists, and reports final model failure
+with direct recovery commands instead of displaying canned pseudo-prose. Scene
+prose is no longer forced into a compact 120-350-character target: it develops
+one current actor-visible beat as literature and ends on a concrete
+in-world fact or signal; the narrator never receives private host affordances.
+
+The choice tool generates 2-4 concrete things the inhabited actor could do or
+exact words they could say. After narration, the TUI merges those suggestions
+with bounded current-head host-preflighted exits and a free-form alternative,
+showing only action/line text—no system rationale or recommendation badge.
+Choice capture runs in its own private tool-only specialist session, concurrently
+with style and dramaturgy analysis. The final prose session is separate and
+tool-free apart from actor-safe retrieval, so literary composition is not the
+compressed residue of an option-generation transcript.
+Model suggestions do not claim capability or outcome: selecting one enters the
+same restricted player-action translation and deterministic validation boundary
+as free-form input. A host route retains an opaque current-head affordance ID,
+bypasses only probabilistic translation, and is re-resolved through deterministic
+scope/knowledge/engine gates. If the choice specialist omits or malforms its
+capture call, the host does not retry it; valid scene prose remains accepted and
+at least one preflighted exit remains beside free-form input. Rendering and
+choice capture never advance the branch or act for the player.
+
+Long TUI selectors use Pi's native height-aware scrolling window and remain
+filterable, with an additional free-form id/name/alias input instead of forwarding
+the decision to the model; RPC clients fall back to bounded pages. Every
+free-form player action uses a fresh Pi session with no novel-file tools, project
+instructions, compiler extension, future canon, or branch-write capability. Its
+actor-safe corpus is bounded with exact read-only retrieval, and stable
+entity/claim IDs become turn-local opaque handles. The model can only capture one
+candidate in memory; the host decodes those handles, supplies branch, head,
+source, and actor identity, and commits only after deterministic validation. Missing state
+fields remain unknown and cannot be invented as positive preconditions. While
+translation, validation, and scene rendering run, the TUI uses the same animated
+working indicator.
+
+An accepted action is rendered by the isolated narrator from the new committed
+actor frame. Before rendering, a separate host-private causal linker may select
+at most one currently eligible world development that the structured player
+intent directly triggers. The host rechecks the offered identity and branch head,
+then validates and commits that development as a second event; mere eligibility,
+shared characters, or canonical order is insufficient. Its candidate set and
+decision are retained in the private turn audit, while future canon, raw commit
+IDs, and hidden background events are not shown as narrative. Ordinary turns do
+not automatically commit unrelated background or canon events. The explicit
+wait route always advances five minutes and may commit at most one currently
+eligible autonomous obligation, causal consequence, background pressure,
+environmental process, or generated world process from the current temporal
+window; it never schedules a forward canon analogue. If no process is eligible,
+elapsed time still changes, so waiting cannot collapse into another conversational
+no-op. `--advance-background` remains an explicit low-level opt-in to temporally
+ordered advancement. If
+rendering fails, the action remains committed and `/scene` safely retries only
+the prose. A rejected proposal leaves the branch head unchanged, persists its
+diagnostic audit, and automatically returns the player to a live narration/choice
+loop instead of ending on an engine notice. Novel and character selection is
+persisted per instance, with one active pointer that ordinary `nwh` startup
+resumes automatically. `play-world --action` remains the compact script/legacy
+readline path.
+
+There is one bounded exception to ordinary no-auto-advance behavior: when the
+new player event directly conflicts with and supersedes a currently eligible
+canonical event, that turn receives one progression slot. The runtime scans
+explicitly compiled canonical scaffolds in story-time order, skips failed hard
+dependencies, and uses the exact event only when its canonical-self role binding
+also passes the stronger scaffold gates. If only a functional
+participant differs, a fresh isolated capture-only model may select one
+host-enumerated role binding and add bounded observation/affect text. At least
+one role must change—an all-canonical binding remains an exact event rather than
+being relabeled as adapted. The engine
+then reloads the pinned scaffold and rechecks its unmodified causal parents,
+time, state/knowledge effects, branch availability, knowledge, and scene
+presence before commit. The analogue is recorded as adapted lineage, never as a
+claim that the source event happened verbatim; it may satisfy later causal
+dependencies without snapping branch history back to canon. Older prepared
+revisions need reparse to acquire compiler-generated scaffolds.
 
 Branch and integrity workflows:
 
@@ -184,18 +580,27 @@ nwh world knowledge hero --branch main
 nwh world actor hero --branch main
 ```
 
-## Metered real-provider testing
+NWH does not impose a token budget, request-count ceiling, or smaller output cap
+on Pi model calls. The compiler's high host-only runaway fuse is an execution
+safeguard, not a model-visible content budget. Transient provider failures use Pi's automatic retry policy;
+the CLI reports retry progress and only returns a failure after retries are
+exhausted.
 
-Unit tests never call a model. Real white-box runs require explicit opt-in and are protected by a persistent ledger:
-
-```bash
-nwh --live-test --live-token-budget 100000000 prepare ./books/novel.txt
-nwh live-budget status
-```
-
-Before each provider call NWH durably reserves the model context ceiling. Successful calls reconcile against reported input, output, cache-read, and cache-write usage; errors, aborts, missing usage, or crashes remain charged conservatively. The hard ceiling cannot be configured above 100,000,000 tokens. Optional `--live-ledger`, `--live-max-requests`, `--live-max-output-tokens`, and `--live-request-timeout-ms` flags further constrain a campaign.
-
-If a process dies while holding the ledger lock, inspect it with `nwh live-budget lock`. Only after verifying the returned owner may `nwh live-budget repair-lock --owner <exact-id>` remove it; active, remote-host, malformed, or changed locks are refused.
+Successful full preparation publishes an immutable reusable revision under
+`$NWH_HOME/prepared-novels/v2/<content-md5>/revisions/<bundle-hash>/` (default
+`~/.novel-harness/prepared-novels/`). The MD5 is the lookup key for the exact
+novel bytes; SHA-256 and a canonical bundle hash are verified before reuse, so
+an MD5 collision cannot select another source. Reusing the same bytes in a new
+workspace restores canonical artifacts and compiler checkpoints without another
+model pass. A small atomic `active.json` pointer chooses the default revision;
+publishing or activating a revision never mutates an existing revision bundle.
+Branch objects and branch heads are never cached: every new branch captures its
+canonical data, actor policy, and possibility-template revisions and then evolves
+independently from later preparation changes and from every other branch.
+The exact source bytes are stored once under
+`$NWH_HOME/sources/v1/<content-sha256>/source.utf8`; prepared revisions refer to
+that immutable material, so audit, restore, and reparse do not reopen the origin
+path.
 
 ## Architecture
 
@@ -205,6 +610,7 @@ Novel files
   -> bounded Pi compiler batches
   -> typed pending proposals
   -> evidence + structural validation
+  -> versioned content-keyed preparation revisions + active pointer
   -> revisioned canonical model / possibility templates
   -> immutable branch events and StateDelta objects
   -> WorldState(branch, t) projection

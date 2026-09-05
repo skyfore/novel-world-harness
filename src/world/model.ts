@@ -3,6 +3,8 @@ import { z } from "zod";
 export type ProjectId = string;
 export type EntityId = string;
 export type ClaimId = string;
+export type PropositionId = string;
+export type AttributionId = string;
 export type CanonicalEventId = string;
 export type RuleId = string;
 export type BranchId = string;
@@ -14,7 +16,10 @@ export const SAFE_LOGICAL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export const idSchema = z.string().regex(
   SAFE_LOGICAL_ID,
   "IDs must start with an ASCII letter or digit and contain only letters, digits, dot, underscore, or hyphen",
-);
+).max(200, "IDs must be at most 200 characters");
+
+/** A SHA-256 content address. Logical IDs and immutable object references are intentionally distinct. */
+export const objectHashSchema = z.string().regex(/^[a-f0-9]{64}$/, "Object hashes must be lowercase SHA-256 hex strings");
 
 export const sourceSpanSchema = z
   .object({
@@ -37,10 +42,81 @@ export type SourceSpan = z.infer<typeof sourceSpanSchema>;
 export const evidenceRefSchema = z.object({ span: sourceSpanSchema, strength: z.enum(["explicit", "strong-inference", "weak-inference"]) }).strict();
 export type EvidenceRef = z.infer<typeof evidenceRefSchema>;
 
-export const entityKindSchema = z.enum(["character", "location", "faction", "artifact", "institution", "concept", "other"]);
+export const textAnchorSchema = z
+  .object({
+    version: z.literal(1),
+    sourceId: idSchema,
+    startByte: z.number().int().nonnegative(),
+    endByte: z.number().int().positive(),
+    startLine: z.number().int().positive(),
+    endLine: z.number().int().positive(),
+    exactHash: z.string().regex(/^[a-f0-9]{64}$/),
+    prefixHash: z.string().regex(/^[a-f0-9]{64}$/),
+    suffixHash: z.string().regex(/^[a-f0-9]{64}$/),
+    contextBytes: z.literal(64),
+    normalization: z.literal("source-bytes-v1"),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.endByte <= value.startByte) {
+      ctx.addIssue({ code: "custom", message: "endByte must be greater than startByte", path: ["endByte"] });
+    }
+    if (value.endLine < value.startLine) {
+      ctx.addIssue({ code: "custom", message: "endLine must be >= startLine", path: ["endLine"] });
+    }
+  });
+export type TextAnchor = z.infer<typeof textAnchorSchema>;
+
+export const evidenceAssertionSchema = z
+  .object({
+    version: z.literal(1),
+    id: idSchema,
+    target: z.object({
+      artifactKind: idSchema,
+      artifactId: idSchema,
+      jsonPointer: z.string().refine(
+        (value) => /^(?:\/(?:[^~/]|~[01])*)*$/.test(value),
+        "jsonPointer must be an RFC 6901 pointer",
+      ),
+    }).strict(),
+    anchors: z.array(textAnchorSchema).min(1).max(16),
+    relation: z.enum(["supports", "contradicts", "contextualizes"]),
+    strength: z.enum(["explicit", "strong-inference", "weak-inference"]),
+    interpretation: z.string().trim().min(1).max(1_000).optional(),
+    derivation: z.object({
+      runId: z.string().min(1).max(300),
+      worker: z.string().min(1),
+      compilerBatchId: idSchema.optional(),
+      provider: z.string().min(1).optional(),
+      model: z.string().min(1).optional(),
+      promptHash: z.string().min(1).optional(),
+      ontologyVersion: z.literal("evidence-v1"),
+    }).strict(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.strength !== "explicit" && !value.interpretation) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Inferred evidence assertions require an interpretation",
+        path: ["interpretation"],
+      });
+    }
+    const sourceIds = new Set(value.anchors.map((anchor) => anchor.sourceId));
+    if (sourceIds.size !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "One evidence assertion cannot mix source documents",
+        path: ["anchors"],
+      });
+    }
+  });
+export type EvidenceAssertion = z.infer<typeof evidenceAssertionSchema>;
+
+export const entityKindSchema = z.enum(["character", "location", "faction", "artifact", "institution", "relationship", "concept", "other"]);
 export type EntityKind = z.infer<typeof entityKindSchema>;
 
-export const entitySchema = z.object({ id: idSchema, kind: entityKindSchema, canonicalName: z.string().min(1), aliases: z.array(z.string()), evidence: z.array(evidenceRefSchema) }).strict();
+export const entitySchema = z.object({ id: idSchema, kind: entityKindSchema, canonicalName: z.string().min(1), aliases: z.array(z.string().min(1)), evidence: z.array(evidenceRefSchema) }).strict();
 export type Entity = z.infer<typeof entitySchema>;
 
 export const claimSchema = z
@@ -65,13 +141,200 @@ export const storyTimeSchema = z.discriminatedUnion("kind", [
 ]);
 export type StoryTime = z.infer<typeof storyTimeSchema>;
 
-export const logicalTimeSchema = z.object({ step: z.number().int().nonnegative(), storyTime: storyTimeSchema.optional() }).strict();
+/**
+ * A proposition is semantic content, not an assertion that the content is
+ * world truth. Truth commitment remains the responsibility of validated
+ * events, state deltas, rules, and their branch history.
+ */
+export const propositionObjectSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("entity"), entityId: idSchema }).strict(),
+  z.object({
+    kind: z.literal("literal"),
+    value: z.union([z.string(), z.number().finite(), z.boolean(), z.null()]),
+  }).strict(),
+  z.object({ kind: z.literal("proposition"), propositionId: idSchema }).strict(),
+]);
+export type PropositionObject = z.infer<typeof propositionObjectSchema>;
+
+export const propositionSchema = z
+  .object({
+    id: idSchema,
+    subjectEntityId: idSchema,
+    relationId: idSchema,
+    object: propositionObjectSchema,
+    polarity: z.enum(["positive", "negative"]),
+    modality: z.enum(["asserted", "possible", "necessary", "counterfactual"]),
+    validStoryTime: storyTimeSchema.optional(),
+    evidence: z.array(evidenceRefSchema),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.object.kind === "proposition" && value.object.propositionId === value.id) {
+      ctx.addIssue({ code: "custom", path: ["object", "propositionId"], message: "A proposition cannot contain itself" });
+    }
+  });
+export type Proposition = z.infer<typeof propositionSchema>;
+
+/**
+ * Attribution records an epistemic or speech attitude toward a proposition.
+ * Accepting this record validates that the attribution is source-grounded; it
+ * does not promote the referenced proposition to world truth.
+ */
+export const attributionSchema = z
+  .object({
+    id: idSchema,
+    propositionId: idSchema,
+    holderKind: z.enum(["narrator", "character", "system", "document", "unknown"]),
+    holderEntityId: idSchema.optional(),
+    attitude: z.enum(["asserts", "knows", "believes", "suspects", "reports", "denies", "questions"]),
+    certainty: z.number().finite().min(0).max(1),
+    sourceAttributionId: idSchema.optional(),
+    quotationIds: z.array(idSchema).min(1).max(64)
+      .refine((values) => new Set(values).size === values.length, "quotationIds must be unique")
+      .optional(),
+    evidence: z.array(evidenceRefSchema),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.holderKind === "character" || value.holderKind === "system" || value.holderKind === "document") && !value.holderEntityId) {
+      ctx.addIssue({ code: "custom", path: ["holderEntityId"], message: `${value.holderKind} attribution requires holderEntityId` });
+    }
+    if ((value.holderKind === "narrator" || value.holderKind === "unknown") && value.holderEntityId) {
+      ctx.addIssue({ code: "custom", path: ["holderEntityId"], message: `${value.holderKind} attribution cannot name a holder entity` });
+    }
+    if (value.sourceAttributionId === value.id) {
+      ctx.addIssue({ code: "custom", path: ["sourceAttributionId"], message: "An attribution cannot source itself" });
+    }
+  });
+export type Attribution = z.infer<typeof attributionSchema>;
+
+/**
+ * Human/calendar time and replay order deliberately stay separate. `step` is
+ * the authoritative total order of commits. `elapsedDays` is a deterministic
+ * duration accumulated by accepted events and is therefore safe to use for
+ * ageing, deadlines, recovery, decay, and other continuous world processes.
+ */
+export const logicalTimeSchema = z
+  .object({
+    step: z.number().int().nonnegative(),
+    storyTime: storyTimeSchema.optional(),
+    elapsedDays: z.number().finite().nonnegative().optional(),
+  })
+  .strict();
 export type LogicalTime = z.infer<typeof logicalTimeSchema>;
+
+export const timeAdvanceSchema = z
+  .object({
+    amount: z.number().finite().positive(),
+    unit: z.enum(["minute", "hour", "day", "week", "month", "year"]),
+  })
+  .strict();
+export type TimeAdvance = z.infer<typeof timeAdvanceSchema>;
+
+/** Narrative/discourse order is metadata, never the world clock. */
+export const narrativeContextSchema = z
+  .object({
+    layerId: idSchema,
+    discourseOrder: z.number().int().nonnegative(),
+    mode: z.enum(["scene", "summary", "flashback", "flashforward", "frame", "recollection", "hypothetical"]),
+    viewpointActorId: idSchema.optional(),
+  })
+  .strict();
+export type NarrativeContext = z.infer<typeof narrativeContextSchema>;
+
+/**
+ * Participation and bodily presence are deliberately separate. A character can
+ * cause or receive an event through a letter, memory, report, or remote channel
+ * without sharing the actor's scene.
+ */
+export const participantPresenceModeSchema = z.enum(["physical", "remote", "mentioned", "represented", "dream", "memory"]);
+export type ParticipantPresenceMode = z.infer<typeof participantPresenceModeSchema>;
+
+export const participantPresenceSchema = z.object({
+  entityId: idSchema.describe("Canonical character entity ID only. Locations, artifacts, factions, institutions, and relationships are not presence actors."),
+  mode: participantPresenceModeSchema
+    .describe("How this character participates without conflating mention, representation, memory, or remote contact with bodily presence."),
+}).strict();
+export type ParticipantPresence = z.infer<typeof participantPresenceSchema>;
+
+/**
+ * Typed semantic participation is independent from the legacy participant
+ * inventory. It records the entity's role in an occurrence; presence remains
+ * character-only and describes access to the lived scene, not causal agency.
+ */
+export const eventParticipationRoleSchema = z.enum([
+  "agent",
+  "patient",
+  "theme",
+  "experiencer",
+  "beneficiary",
+  "instrument",
+  "location",
+  "source",
+  "destination",
+  "other",
+]);
+export type EventParticipationRole = z.infer<typeof eventParticipationRoleSchema>;
+
+export const eventParticipationSchema = z.object({
+  id: idSchema,
+  eventId: idSchema,
+  entityId: idSchema,
+  role: eventParticipationRoleSchema,
+  presence: participantPresenceModeSchema.optional(),
+  confidence: z.number().finite().min(0).max(1),
+  evidence: z.array(evidenceRefSchema),
+}).strict();
+export type EventParticipation = z.infer<typeof eventParticipationSchema>;
 
 export const valueTypeSchema = z.enum(["boolean", "number", "string", "entity-ref", "entity-ref-set", "json-scalar"]);
 export type ValueType = z.infer<typeof valueTypeSchema>;
 
-export const stateFieldSpecSchema = z.object({ key: z.string().min(1), appliesTo: z.array(entityKindSchema).min(1), valueType: valueTypeSchema, cardinality: z.enum(["one", "many"]), required: z.boolean().optional(), exclusive: z.boolean().optional() }).strict();
+/**
+ * Visibility is enforced when world state crosses an actor/model boundary.
+ * Missing visibility is treated as engine-only for legacy or custom fields.
+ */
+export const stateFieldVisibilitySchema = z.enum(["public", "self", "owner", "knowledge", "engine"]);
+export type StateFieldVisibility = z.infer<typeof stateFieldVisibilitySchema>;
+
+export const stateFieldSpecSchema = z
+  .object({
+    key: z.string().min(1),
+    appliesTo: z.array(entityKindSchema).min(1),
+    valueType: valueTypeSchema,
+    cardinality: z.enum(["one", "many"]),
+    visibility: stateFieldVisibilitySchema.optional(),
+    required: z.boolean().optional(),
+    exclusive: z.boolean().optional(),
+    minimum: z.number().finite().optional(),
+    maximum: z.number().finite().optional(),
+    allowedValues: z.array(z.union([z.boolean(), z.number().finite(), z.string()])).min(1).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.minimum !== undefined || value.maximum !== undefined) && value.valueType !== "number") {
+      ctx.addIssue({ code: "custom", message: "minimum/maximum are only valid for number fields" });
+    }
+    if (value.minimum !== undefined && value.maximum !== undefined && value.minimum > value.maximum) {
+      ctx.addIssue({ code: "custom", message: "minimum must be <= maximum", path: ["minimum"] });
+    }
+    if (value.allowedValues && !["boolean", "number", "string", "json-scalar"].includes(value.valueType)) {
+      ctx.addIssue({ code: "custom", message: "allowedValues is valid only for scalar fields", path: ["allowedValues"] });
+    }
+    if (value.allowedValues && value.valueType !== "json-scalar") {
+      const invalidIndex = value.allowedValues.findIndex((item) => typeof item !== value.valueType);
+      if (invalidIndex >= 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: `allowedValues item must match valueType '${value.valueType}'`,
+          path: ["allowedValues", invalidIndex],
+        });
+      }
+    }
+    if (value.allowedValues && new Set(value.allowedValues.map((item) => `${typeof item}:${String(item)}`)).size !== value.allowedValues.length) {
+      ctx.addIssue({ code: "custom", message: "allowedValues must be unique", path: ["allowedValues"] });
+    }
+  });
 export type StateFieldSpec = z.infer<typeof stateFieldSpecSchema>;
 
 export const stateValueSchema = z.union([z.boolean(), z.number(), z.string(), z.array(z.string()), z.null()]);
@@ -79,11 +342,17 @@ export type StateValue = z.infer<typeof stateValueSchema>;
 
 export type Predicate =
   | { op: "fact-equals"; entityId: EntityId; field: string; value: StateValue }
+  | { op: "fact-gte"; entityId: EntityId; field: string; value: number }
+  | { op: "fact-lte"; entityId: EntityId; field: string; value: number }
   | { op: "fact-exists"; entityId: EntityId; field: string }
   | { op: "entity-in"; entityId: EntityId; field: string; member: EntityId }
   | { op: "rule-active"; ruleId: RuleId }
   | { op: "after-step"; step: number }
   | { op: "before-step"; step: number }
+  | { op: "elapsed-days-gte"; days: number }
+  | { op: "elapsed-days-lte"; days: number }
+  | { op: "story-time-at-or-after"; time: StoryTime }
+  | { op: "story-time-before"; time: StoryTime }
   | { op: "all"; items: Predicate[] }
   | { op: "any"; items: Predicate[] }
   | { op: "not"; item: Predicate };
@@ -91,22 +360,200 @@ export type Predicate =
 export const predicateSchema: z.ZodType<Predicate> = z.lazy(() =>
   z.discriminatedUnion("op", [
     z.object({ op: z.literal("fact-equals"), entityId: idSchema, field: z.string().min(1), value: stateValueSchema }).strict(),
+    z.object({ op: z.literal("fact-gte"), entityId: idSchema, field: z.string().min(1), value: z.number().finite() }).strict(),
+    z.object({ op: z.literal("fact-lte"), entityId: idSchema, field: z.string().min(1), value: z.number().finite() }).strict(),
     z.object({ op: z.literal("fact-exists"), entityId: idSchema, field: z.string().min(1) }).strict(),
     z.object({ op: z.literal("entity-in"), entityId: idSchema, field: z.string().min(1), member: idSchema }).strict(),
     z.object({ op: z.literal("rule-active"), ruleId: idSchema }).strict(),
     z.object({ op: z.literal("after-step"), step: z.number().int().nonnegative() }).strict(),
     z.object({ op: z.literal("before-step"), step: z.number().int().nonnegative() }).strict(),
+    z.object({ op: z.literal("elapsed-days-gte"), days: z.number().finite().nonnegative() }).strict(),
+    z.object({ op: z.literal("elapsed-days-lte"), days: z.number().finite().nonnegative() }).strict(),
+    z.object({ op: z.literal("story-time-at-or-after"), time: storyTimeSchema }).strict(),
+    z.object({ op: z.literal("story-time-before"), time: storyTimeSchema }).strict(),
     z.object({ op: z.literal("all"), items: z.array(predicateSchema) }).strict(),
     z.object({ op: z.literal("any"), items: z.array(predicateSchema) }).strict(),
     z.object({ op: z.literal("not"), item: predicateSchema }).strict(),
   ]),
 );
 
+export const eventRelationTypeSchema = z.enum([
+  "coreference",
+  "subevent",
+  "before",
+  "after",
+  "during",
+  "contains",
+  "overlaps",
+  "starts",
+  "finishes",
+  "causes",
+  "enables",
+  "prevents",
+  "motivates",
+  "explains",
+  "narrative-continuation",
+]);
+export type EventRelationType = z.infer<typeof eventRelationTypeSchema>;
+
+export const eventRelationStatusSchema = z.enum(["explicit", "inferred", "contested"]);
+export type EventRelationStatus = z.infer<typeof eventRelationStatusSchema>;
+
+export const relationOperationalitySchema = z.enum([
+  "necessary",
+  "contributory",
+  "blocking",
+  "motivational",
+  "explanatory",
+  "non-operational",
+]);
+export type RelationOperationality = z.infer<typeof relationOperationalitySchema>;
+
+export const eventRelationSchema = z.object({
+  id: idSchema,
+  fromEventId: idSchema,
+  toEventId: idSchema,
+  type: eventRelationTypeSchema,
+  operationality: relationOperationalitySchema,
+  motivatedActorIds: z.array(idSchema).max(32).optional(),
+  goalIds: z.array(idSchema).max(32).optional(),
+  status: eventRelationStatusSchema,
+  confidence: z.number().finite().min(0).max(1),
+  mechanism: z.string().trim().min(1).max(1_000).optional(),
+  requiredConditions: z.array(predicateSchema).max(32).optional(),
+  evidence: z.array(evidenceRefSchema),
+  counterEvidence: z.array(evidenceRefSchema).optional(),
+}).strict().superRefine((relation, ctx) => {
+  if (relation.fromEventId === relation.toEventId) {
+    ctx.addIssue({ code: "custom", path: ["toEventId"], message: "An event relation must connect two distinct canonical events" });
+  }
+  if (relation.status === "explicit" && !relation.evidence.some((item) => item.strength === "explicit")) {
+    ctx.addIssue({ code: "custom", path: ["status"], message: "An explicit event relation requires at least one explicit evidence reference" });
+  }
+  if (relation.status === "contested" && !(relation.counterEvidence?.length)) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "A contested event relation requires counter-evidence" });
+  }
+  if (["causes", "enables", "prevents", "motivates", "explains"].includes(relation.type)
+    && relation.status === "inferred" && !relation.mechanism) {
+    ctx.addIssue({ code: "custom", path: ["mechanism"], message: "An inferred causal or explanatory relation requires a mechanism" });
+  }
+  const allowed: Record<EventRelationType, readonly RelationOperationality[]> = {
+    coreference: ["non-operational"],
+    subevent: ["non-operational"],
+    before: ["non-operational"],
+    after: ["non-operational"],
+    during: ["non-operational"],
+    contains: ["non-operational"],
+    overlaps: ["non-operational"],
+    starts: ["non-operational"],
+    finishes: ["non-operational"],
+    causes: ["necessary", "contributory"],
+    enables: ["necessary"],
+    prevents: ["blocking"],
+    motivates: ["motivational"],
+    explains: ["explanatory"],
+    "narrative-continuation": ["non-operational"],
+  };
+  if (!allowed[relation.type].includes(relation.operationality)) {
+    ctx.addIssue({ code: "custom", path: ["operationality"], message: `${relation.type} cannot use ${relation.operationality} operationality` });
+  }
+  if (relation.operationality === "motivational" && !relation.motivatedActorIds?.length) {
+    ctx.addIssue({ code: "custom", path: ["motivatedActorIds"], message: "A motivational relation must name at least one motivated actor" });
+  }
+  if (relation.operationality !== "motivational" && (relation.motivatedActorIds?.length || relation.goalIds?.length)) {
+    ctx.addIssue({ code: "custom", path: ["motivatedActorIds"], message: "Actor/goal motivation bindings are reserved for motivational relations" });
+  }
+  for (const [path, values] of [["motivatedActorIds", relation.motivatedActorIds], ["goalIds", relation.goalIds]] as const) {
+    if (values && new Set(values).size !== values.length) {
+      ctx.addIssue({ code: "custom", path: [path], message: `${path} must contain unique IDs` });
+    }
+  }
+}).describe("An evidence-backed relation between canonical events. Narrative continuation and temporal order never imply causation.");
+export type EventRelation = z.infer<typeof eventRelationSchema>;
+
+export const possibilityCausalLinkSchema = z.object({
+  relationId: idSchema,
+  sourceEventId: idSchema,
+  type: eventRelationTypeSchema,
+  operationality: relationOperationalitySchema,
+  motivatedActorIds: z.array(idSchema).max(32).optional(),
+  goalIds: z.array(idSchema).max(32).optional(),
+}).strict().superRefine((relation, ctx) => {
+  const allowed: Record<EventRelationType, readonly RelationOperationality[]> = {
+    coreference: ["non-operational"],
+    subevent: ["non-operational"],
+    before: ["non-operational"],
+    after: ["non-operational"],
+    during: ["non-operational"],
+    contains: ["non-operational"],
+    overlaps: ["non-operational"],
+    starts: ["non-operational"],
+    finishes: ["non-operational"],
+    causes: ["necessary", "contributory"],
+    enables: ["necessary"],
+    prevents: ["blocking"],
+    motivates: ["motivational"],
+    explains: ["explanatory"],
+    "narrative-continuation": ["non-operational"],
+  };
+  if (!allowed[relation.type].includes(relation.operationality)) {
+    ctx.addIssue({ code: "custom", path: ["operationality"], message: `${relation.type} cannot use ${relation.operationality} operationality` });
+  }
+  if (relation.operationality === "motivational" && !relation.motivatedActorIds?.length && !relation.goalIds?.length) {
+    ctx.addIssue({ code: "custom", path: ["motivatedActorIds"], message: "A motivational possibility relation must bind an actor or goal" });
+  }
+  if (relation.operationality !== "motivational" && (relation.motivatedActorIds?.length || relation.goalIds?.length)) {
+    ctx.addIssue({ code: "custom", path: ["motivatedActorIds"], message: "Actor/goal motivation bindings are reserved for motivational relations" });
+  }
+  for (const [path, values] of [["motivatedActorIds", relation.motivatedActorIds], ["goalIds", relation.goalIds]] as const) {
+    if (values && new Set(values).size !== values.length) {
+      ctx.addIssue({ code: "custom", path: [path], message: `${path} must contain unique IDs` });
+    }
+  }
+});
+export type PossibilityCausalLink = z.infer<typeof possibilityCausalLinkSchema>;
+
+const branchCausalRelationTypeSchema = z.enum(["causes", "enables", "motivates", "explains"]);
+const branchCausalOperationalitySchema = z.enum(["necessary", "contributory", "motivational", "explanatory"]);
+export const branchEventRelationProposalSchema = z.object({
+  fromEventId: idSchema,
+  type: branchCausalRelationTypeSchema,
+  operationality: branchCausalOperationalitySchema,
+  actorId: idSchema.optional(),
+  goalId: idSchema.optional(),
+  description: z.string().trim().min(1).max(500).optional(),
+}).strict().superRefine((relation, ctx) => {
+  const allowed = relation.type === "causes"
+    ? ["necessary", "contributory"]
+    : relation.type === "enables"
+      ? ["necessary"]
+      : relation.type === "motivates"
+        ? ["motivational"]
+        : ["explanatory"];
+  if (!allowed.includes(relation.operationality)) {
+    ctx.addIssue({ code: "custom", path: ["operationality"], message: `${relation.type} cannot use ${relation.operationality} operationality` });
+  }
+  if (relation.operationality === "motivational" && !relation.actorId && !relation.goalId) {
+    ctx.addIssue({ code: "custom", path: ["actorId"], message: "A motivational branch relation must bind an actor or goal" });
+  }
+  if (relation.operationality !== "motivational" && (relation.actorId || relation.goalId)) {
+    ctx.addIssue({ code: "custom", path: ["actorId"], message: "Actor/goal bindings are reserved for motivational branch relations" });
+  }
+});
+export type BranchEventRelationProposal = z.infer<typeof branchEventRelationProposalSchema>;
+
+export const branchEventRelationSchema = branchEventRelationProposalSchema.safeExtend({
+  id: idSchema,
+  toEventId: idSchema,
+});
+export type BranchEventRelation = z.infer<typeof branchEventRelationSchema>;
+
 export const stateOperationSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("set"), entityId: idSchema, field: z.string().min(1), value: stateValueSchema }).strict(),
   z.object({ op: z.literal("unset"), entityId: idSchema, field: z.string().min(1) }).strict(),
   z.object({ op: z.literal("add-member"), entityId: idSchema, field: z.string().min(1), member: idSchema }).strict(),
   z.object({ op: z.literal("remove-member"), entityId: idSchema, field: z.string().min(1), member: idSchema }).strict(),
+  z.object({ op: z.literal("adjust-number"), entityId: idSchema, field: z.string().min(1), amount: z.number().finite() }).strict(),
   z.object({ op: z.literal("activate-rule"), ruleId: idSchema }).strict(),
   z.object({ op: z.literal("deactivate-rule"), ruleId: idSchema }).strict(),
 ]);
@@ -115,32 +562,934 @@ export const stateDeltaSchema = z.object({ version: z.literal(1), operations: z.
 export type StateDelta = z.infer<typeof stateDeltaSchema>;
 
 export const knowledgeStatusSchema = z.enum(["knows", "believes", "suspects", "heard", "disbelieves"]);
-export const knowledgeOperationSchema = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("learn"), actorId: idSchema, claimId: idSchema, status: knowledgeStatusSchema, confidence: z.number().min(0).max(1), sourceActorId: idSchema.optional() }).strict(),
-  z.object({ op: z.literal("forget"), actorId: idSchema, claimId: idSchema }).strict(),
+export const knowledgeAcquisitionModeSchema = z.enum([
+  "observed",
+  "told",
+  "read",
+  "inferred",
+  "remembered",
+  "deceived-misattributed",
 ]);
+export type KnowledgeAcquisitionMode = z.infer<typeof knowledgeAcquisitionModeSchema>;
+export const knowledgeOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("learn"),
+    actorId: idSchema,
+    claimId: idSchema,
+    propositionId: idSchema.optional(),
+    attributionId: idSchema.optional(),
+    acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
+    status: knowledgeStatusSchema,
+    confidence: z.number().min(0).max(1),
+    sourceActorId: idSchema.optional(),
+  }).strict(),
+  z.object({ op: z.literal("forget"), actorId: idSchema, claimId: idSchema, propositionId: idSchema.optional() }).strict(),
+]).superRefine((value, ctx) => {
+  if (value.op !== "learn") return;
+  const semantic = Boolean(value.propositionId || value.attributionId || value.acquisitionMode);
+  if (semantic && !value.propositionId) {
+    ctx.addIssue({ code: "custom", path: ["propositionId"], message: "Semantic knowledge acquisition requires propositionId" });
+  }
+  if (semantic && !value.acquisitionMode) {
+    ctx.addIssue({ code: "custom", path: ["acquisitionMode"], message: "Semantic knowledge acquisition requires acquisitionMode" });
+  }
+  if (value.attributionId && !value.propositionId) {
+    ctx.addIssue({ code: "custom", path: ["attributionId"], message: "attributionId requires propositionId" });
+  }
+  if (value.acquisitionMode === "told") {
+    if (!value.sourceActorId) ctx.addIssue({ code: "custom", path: ["sourceActorId"], message: "Told acquisition requires sourceActorId" });
+    if (!value.attributionId) ctx.addIssue({ code: "custom", path: ["attributionId"], message: "Told acquisition requires attributionId" });
+  }
+  if ((value.acquisitionMode === "read" || value.acquisitionMode === "deceived-misattributed") && !value.attributionId) {
+    ctx.addIssue({ code: "custom", path: ["attributionId"], message: `${value.acquisitionMode} acquisition requires attributionId` });
+  }
+  if (
+    value.acquisitionMode
+    && value.sourceActorId
+    && value.acquisitionMode !== "told"
+    && value.acquisitionMode !== "deceived-misattributed"
+  ) {
+    ctx.addIssue({ code: "custom", path: ["sourceActorId"], message: `${value.acquisitionMode} acquisition cannot name a source actor` });
+  }
+  if (value.acquisitionMode === "deceived-misattributed" && value.status === "knows") {
+    ctx.addIssue({ code: "custom", path: ["status"], message: "Deceived or misattributed content cannot have knows status" });
+  }
+});
 export type KnowledgeOperation = z.infer<typeof knowledgeOperationSchema>;
 export const knowledgeDeltaSchema = z.object({ version: z.literal(1), operations: z.array(knowledgeOperationSchema) }).strict();
 export type KnowledgeDelta = z.infer<typeof knowledgeDeltaSchema>;
 
+/** Branch-emergent semantic facts. These records are event-provenanced, not source evidence. */
+export const branchSemanticOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("record-proposition"),
+    proposition: z.object({
+      id: idSchema,
+      subjectEntityId: idSchema,
+      relationId: idSchema,
+      object: propositionObjectSchema,
+      polarity: z.enum(["positive", "negative"]),
+      modality: z.enum(["asserted", "possible", "necessary", "counterfactual"]),
+      validStoryTime: storyTimeSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("record-attribution"),
+    attribution: z.object({
+      id: idSchema,
+      propositionId: idSchema,
+      holderKind: z.enum(["character", "system", "document", "unknown"]),
+      holderEntityId: idSchema.optional(),
+      attitude: z.enum(["asserts", "knows", "believes", "suspects", "reports", "denies", "questions"]),
+      certainty: z.number().finite().min(0).max(1),
+      sourceAttributionId: idSchema.optional(),
+    }).strict().superRefine((value, ctx) => {
+      if (value.holderKind !== "unknown" && !value.holderEntityId) {
+        ctx.addIssue({ code: "custom", path: ["holderEntityId"], message: `${value.holderKind} attribution requires holderEntityId` });
+      }
+      if (value.holderKind === "unknown" && value.holderEntityId) {
+        ctx.addIssue({ code: "custom", path: ["holderEntityId"], message: "Unknown attribution cannot name a holder entity" });
+      }
+      if (value.sourceAttributionId === value.id) {
+        ctx.addIssue({ code: "custom", path: ["sourceAttributionId"], message: "An attribution cannot source itself" });
+      }
+    }),
+  }).strict(),
+  z.object({
+    op: z.literal("record-claim"),
+    claim: z.object({
+      id: idSchema,
+      propositionId: idSchema,
+      attributionId: idSchema.optional(),
+      status: z.enum(["asserted", "contested", "retracted"]),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("open-goal"),
+    goal: z.object({
+      id: idSchema,
+      actorId: idSchema,
+      description: z.string().trim().min(1).max(1_000),
+      priority: z.number().finite().min(0).max(1),
+      targetEntityIds: z.array(idSchema).max(32).default([]),
+      parentGoalId: idSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("close-goal"),
+    goalId: idSchema,
+    outcome: z.enum(["achieved", "abandoned", "failed", "superseded"]),
+  }).strict(),
+  z.object({
+    op: z.literal("record-appraisal"),
+    appraisal: z.object({
+      id: idSchema,
+      actorId: idSchema,
+      target: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("entity"), entityId: idSchema }).strict(),
+        z.object({ kind: z.literal("event"), eventId: idSchema }).strict(),
+        z.object({ kind: z.literal("current-event") }).strict(),
+        z.object({ kind: z.literal("proposition"), propositionId: idSchema }).strict(),
+      ]),
+      dimensionId: idSchema,
+      value: z.number().finite().min(-1).max(1),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("adjust-relationship"),
+    relationshipId: idSchema,
+    fromActorId: idSchema,
+    toActorId: idSchema,
+    dimensionId: idSchema,
+    amount: z.number().finite().min(-2).max(2).refine((value) => value !== 0, "Relationship adjustment cannot be zero"),
+  }).strict(),
+  z.object({
+    op: z.literal("create-obligation"),
+    obligation: z.object({
+      id: idSchema,
+      debtorActorId: idSchema,
+      creditorActorId: idSchema.optional(),
+      kindId: idSchema,
+      description: z.string().trim().min(1).max(1_000),
+      dueStoryTime: storyTimeSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("resolve-obligation"),
+    obligationId: idSchema,
+    resolution: z.enum(["fulfilled", "violated", "waived", "expired"]),
+  }).strict(),
+]);
+export type BranchSemanticOperation = z.infer<typeof branchSemanticOperationSchema>;
+export const branchSemanticDeltaSchema = z.object({
+  version: z.literal(1),
+  operations: z.array(branchSemanticOperationSchema).max(256),
+}).strict();
+export type BranchSemanticDelta = z.infer<typeof branchSemanticDeltaSchema>;
+
+/**
+ * Turn-local semantic proposal refs never become persistent IDs. The host
+ * resolves them after the branch head is fixed and before validation/commit.
+ */
+export const localSemanticRefSchema = z.string().regex(
+  /^local-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/,
+  "A semantic proposal ref must use the local-<token> form",
+);
+
+export const branchSemanticProposalOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("record-proposition"),
+    localRef: localSemanticRefSchema,
+    proposition: z.object({
+      subjectEntityId: idSchema,
+      relationId: idSchema,
+      object: propositionObjectSchema,
+      polarity: z.enum(["positive", "negative"]),
+      modality: z.enum(["asserted", "possible", "necessary", "counterfactual"]),
+      validStoryTime: storyTimeSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("record-attribution"),
+    localRef: localSemanticRefSchema,
+    attribution: z.object({
+      propositionId: idSchema,
+      holderKind: z.enum(["character", "system", "document", "unknown"]),
+      holderEntityId: idSchema.optional(),
+      attitude: z.enum(["asserts", "knows", "believes", "suspects", "reports", "denies", "questions"]),
+      certainty: z.number().finite().min(0).max(1),
+      sourceAttributionId: idSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("record-claim"),
+    localRef: localSemanticRefSchema,
+    claim: z.object({
+      propositionId: idSchema,
+      attributionId: idSchema.optional(),
+      status: z.enum(["asserted", "contested", "retracted"]),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("open-goal"),
+    localRef: localSemanticRefSchema,
+    goal: z.object({
+      actorId: idSchema,
+      description: z.string().trim().min(1).max(1_000),
+      priority: z.number().finite().min(0).max(1),
+      targetEntityIds: z.array(idSchema).max(32).default([]),
+      parentGoalId: idSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("close-goal"),
+    goalId: idSchema,
+    outcome: z.enum(["achieved", "abandoned", "failed", "superseded"]),
+  }).strict(),
+  z.object({
+    op: z.literal("record-appraisal"),
+    localRef: localSemanticRefSchema,
+    appraisal: z.object({
+      actorId: idSchema,
+      target: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("entity"), entityId: idSchema }).strict(),
+        z.object({ kind: z.literal("event"), eventId: idSchema }).strict(),
+        z.object({ kind: z.literal("current-event") }).strict(),
+        z.object({ kind: z.literal("proposition"), propositionId: idSchema }).strict(),
+      ]),
+      dimensionId: idSchema,
+      value: z.number().finite().min(-1).max(1),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("adjust-relationship"),
+    relationshipRef: idSchema,
+    createIfMissing: z.boolean().default(false),
+    fromActorId: idSchema,
+    toActorId: idSchema,
+    dimensionId: idSchema,
+    amount: z.number().finite().min(-2).max(2).refine((value) => value !== 0, "Relationship adjustment cannot be zero"),
+  }).strict(),
+  z.object({
+    op: z.literal("create-obligation"),
+    localRef: localSemanticRefSchema,
+    obligation: z.object({
+      debtorActorId: idSchema,
+      creditorActorId: idSchema.optional(),
+      kindId: idSchema,
+      description: z.string().trim().min(1).max(1_000),
+      dueStoryTime: storyTimeSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("resolve-obligation"),
+    obligationId: idSchema,
+    resolution: z.enum(["fulfilled", "violated", "waived", "expired"]),
+  }).strict(),
+]);
+export type BranchSemanticProposalOperation = z.infer<typeof branchSemanticProposalOperationSchema>;
+export const branchSemanticProposalDeltaSchema = z.object({
+  version: z.literal(1),
+  operations: z.array(branchSemanticProposalOperationSchema).min(1).max(256),
+}).strict().superRefine((value, ctx) => {
+  value.operations.forEach((operation, index) => {
+    if (operation.op === "adjust-relationship"
+      && operation.createIfMissing
+      && !localSemanticRefSchema.safeParse(operation.relationshipRef).success) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["operations", index, "relationshipRef"],
+        message: "A newly created relationship must use a turn-local semantic ref",
+      });
+    }
+  });
+  const introduced = value.operations.flatMap((operation) => {
+    if ("localRef" in operation) return [operation.localRef];
+    return operation.op === "adjust-relationship" && operation.createIfMissing ? [operation.relationshipRef] : [];
+  });
+  if (new Set(introduced).size !== introduced.length) {
+    ctx.addIssue({ code: "custom", path: ["operations"], message: "Each turn-local semantic ref must be introduced exactly once" });
+  }
+});
+export type BranchSemanticProposalDelta = z.infer<typeof branchSemanticProposalDeltaSchema>;
+
+export const processOwnerBindingSchema = z.object({
+  roleId: idSchema,
+  entityIds: z.array(idSchema).min(1).max(32),
+}).strict().superRefine((value, ctx) => {
+  if (new Set(value.entityIds).size !== value.entityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["entityIds"], message: "Process owner bindings must contain unique entity IDs" });
+  }
+});
+export type ProcessOwnerBinding = z.infer<typeof processOwnerBindingSchema>;
+
+export const processOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("start-process"),
+    process: z.object({
+      id: idSchema,
+      templateId: idSchema,
+      ownerBindings: z.array(processOwnerBindingSchema).min(1).max(32),
+      phaseId: idSchema,
+      progress: z.number().finite().min(0).max(1).default(0),
+      dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("advance-process"),
+    processId: idSchema,
+    amount: z.number().finite().positive().max(1),
+    phaseId: idSchema.optional(),
+    dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+  }).strict(),
+  z.object({ op: z.literal("pause-process"), processId: idSchema, reasonId: idSchema }).strict(),
+  z.object({ op: z.literal("resume-process"), processId: idSchema, dueAtElapsedDays: z.number().finite().nonnegative().optional() }).strict(),
+  z.object({ op: z.literal("finish-process"), processId: idSchema, outcomeId: idSchema }).strict(),
+]);
+export type ProcessOperation = z.infer<typeof processOperationSchema>;
+export const processDeltaSchema = z.object({ version: z.literal(1), operations: z.array(processOperationSchema).max(256) }).strict();
+export type ProcessDelta = z.infer<typeof processDeltaSchema>;
+
+export const processProposalOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("start-process"),
+    localRef: localSemanticRefSchema,
+    process: z.object({
+      templateId: idSchema,
+      ownerBindings: z.array(processOwnerBindingSchema).min(1).max(32),
+      phaseId: idSchema.optional(),
+      progress: z.number().finite().min(0).max(1).default(0),
+      dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    op: z.literal("advance-process"),
+    processRef: idSchema,
+    amount: z.number().finite().positive().max(1),
+    phaseId: idSchema.optional(),
+    dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+  }).strict(),
+  z.object({ op: z.literal("pause-process"), processRef: idSchema, reasonId: idSchema }).strict(),
+  z.object({ op: z.literal("resume-process"), processRef: idSchema, dueAtElapsedDays: z.number().finite().nonnegative().optional() }).strict(),
+  z.object({ op: z.literal("finish-process"), processRef: idSchema, outcomeId: idSchema }).strict(),
+]);
+export type ProcessProposalOperation = z.infer<typeof processProposalOperationSchema>;
+export const processProposalDeltaSchema = z.object({
+  version: z.literal(1),
+  operations: z.array(processProposalOperationSchema).min(1).max(256),
+}).strict().superRefine((value, ctx) => {
+  const refs = value.operations.flatMap((operation) => operation.op === "start-process" ? [operation.localRef] : []);
+  if (new Set(refs).size !== refs.length) {
+    ctx.addIssue({ code: "custom", path: ["operations"], message: "Each turn-local process ref must be introduced exactly once" });
+  }
+});
+export type ProcessProposalDelta = z.infer<typeof processProposalDeltaSchema>;
+
+export const normOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("instantiate-norm"),
+    norm: z.object({
+      id: idSchema,
+      templateId: idSchema,
+      subjectActorId: idSchema,
+      beneficiaryActorId: idSchema.optional(),
+      description: z.string().trim().min(1).max(1_000),
+      dueStoryTime: storyTimeSchema.optional(),
+      dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+    }).strict(),
+  }).strict(),
+  z.object({ op: z.literal("satisfy-norm"), normId: idSchema, byActorId: idSchema.optional() }).strict(),
+  z.object({ op: z.literal("violate-norm"), normId: idSchema, byActorId: idSchema.optional(), reasonId: idSchema.optional() }).strict(),
+  z.object({ op: z.literal("repair-norm"), normId: idSchema, byActorId: idSchema.optional(), reparationId: idSchema }).strict(),
+]);
+export type NormOperation = z.infer<typeof normOperationSchema>;
+export const normDeltaSchema = z.object({ version: z.literal(1), operations: z.array(normOperationSchema).max(256) }).strict();
+export type NormDelta = z.infer<typeof normDeltaSchema>;
+
+export const normProposalOperationSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("instantiate-norm"),
+    localRef: localSemanticRefSchema,
+    norm: z.object({
+      templateId: idSchema,
+      subjectActorId: idSchema,
+      beneficiaryActorId: idSchema.optional(),
+      description: z.string().trim().min(1).max(1_000),
+      dueStoryTime: storyTimeSchema.optional(),
+      dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+    }).strict(),
+  }).strict(),
+  z.object({ op: z.literal("satisfy-norm"), normRef: idSchema, byActorId: idSchema.optional() }).strict(),
+  z.object({ op: z.literal("violate-norm"), normRef: idSchema, byActorId: idSchema.optional(), reasonId: idSchema.optional() }).strict(),
+  z.object({ op: z.literal("repair-norm"), normRef: idSchema, byActorId: idSchema.optional(), reparationId: idSchema }).strict(),
+]);
+export type NormProposalOperation = z.infer<typeof normProposalOperationSchema>;
+export const normProposalDeltaSchema = z.object({
+  version: z.literal(1),
+  operations: z.array(normProposalOperationSchema).min(1).max(256),
+}).strict().superRefine((value, ctx) => {
+  const refs = value.operations.flatMap((operation) => operation.op === "instantiate-norm" ? [operation.localRef] : []);
+  if (new Set(refs).size !== refs.length) {
+    ctx.addIssue({ code: "custom", path: ["operations"], message: "Each turn-local norm ref must be introduced exactly once" });
+  }
+});
+export type NormProposalDelta = z.infer<typeof normProposalDeltaSchema>;
+
+/**
+ * A source-backed canonical possibility may expose a small number of semantic
+ * roles that can be rebound after branch divergence.  This policy belongs to
+ * the possibility layer, not to CanonicalEvent: the source event remains a
+ * fixed record of who actually participated on the canonical trajectory.
+ */
+export const canonicalScaffoldRoleSchema = z.object({
+  roleId: idSchema,
+  canonicalEntityId: idSchema,
+  description: z.string().trim().min(1).max(500),
+  allowedEntityKinds: z.array(entityKindSchema).min(1).max(8),
+  presence: z.enum(["anywhere", "active-scene"]),
+  requiredState: z.array(predicateSchema).max(16),
+  requiresKnowledge: z.array(idSchema).max(16),
+}).strict().superRefine((value, ctx) => {
+  if (new Set(value.allowedEntityKinds).size !== value.allowedEntityKinds.length) {
+    ctx.addIssue({ code: "custom", message: "allowedEntityKinds must be unique", path: ["allowedEntityKinds"] });
+  }
+  if (new Set(value.requiresKnowledge).size !== value.requiresKnowledge.length) {
+    ctx.addIssue({ code: "custom", message: "requiresKnowledge must be unique", path: ["requiresKnowledge"] });
+  }
+});
+export type CanonicalScaffoldRole = z.infer<typeof canonicalScaffoldRoleSchema>;
+
+export const canonicalScaffoldSchema = z.object({
+  version: z.literal(1),
+  mode: z.literal("participant-remap"),
+  roles: z.array(canonicalScaffoldRoleSchema).min(1).max(4),
+}).strict().superRefine((value, ctx) => {
+  const roleIds = new Set<string>();
+  const canonicalEntityIds = new Set<string>();
+  value.roles.forEach((role, index) => {
+    if (roleIds.has(role.roleId)) {
+      ctx.addIssue({ code: "custom", message: `Duplicate scaffold role ${role.roleId}`, path: ["roles", index, "roleId"] });
+    }
+    if (canonicalEntityIds.has(role.canonicalEntityId)) {
+      ctx.addIssue({ code: "custom", message: `Canonical entity ${role.canonicalEntityId} is assigned to more than one scaffold role`, path: ["roles", index, "canonicalEntityId"] });
+    }
+    roleIds.add(role.roleId);
+    canonicalEntityIds.add(role.canonicalEntityId);
+  });
+});
+export type CanonicalScaffold = z.infer<typeof canonicalScaffoldSchema>;
+
+export const canonicalRoleBindingSchema = z.object({
+  roleId: idSchema,
+  canonicalEntityId: idSchema,
+  boundEntityId: idSchema,
+}).strict();
+export type CanonicalRoleBinding = z.infer<typeof canonicalRoleBindingSchema>;
+
+/** Replay/audit lineage for a committed scaffold instantiation. */
+export const canonicalAdaptationSchema = z.object({
+  version: z.literal(1),
+  scaffoldPossibilityId: idSchema,
+  adaptedFromCanonicalEventId: idSchema,
+  sceneActorId: idSchema,
+  roleBindings: z.array(canonicalRoleBindingSchema).min(1).max(4),
+  coreEffectHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict().superRefine((value, ctx) => {
+  const roleIds = new Set<string>();
+  const canonicalEntityIds = new Set<string>();
+  const boundEntityIds = new Set<string>();
+  value.roleBindings.forEach((binding, index) => {
+    if (roleIds.has(binding.roleId)) {
+      ctx.addIssue({ code: "custom", message: `Duplicate adaptation role ${binding.roleId}`, path: ["roleBindings", index, "roleId"] });
+    }
+    if (canonicalEntityIds.has(binding.canonicalEntityId)) {
+      ctx.addIssue({ code: "custom", message: `Canonical entity ${binding.canonicalEntityId} is rebound more than once`, path: ["roleBindings", index, "canonicalEntityId"] });
+    }
+    if (boundEntityIds.has(binding.boundEntityId)) {
+      ctx.addIssue({ code: "custom", message: `Bound entity ${binding.boundEntityId} fills more than one role`, path: ["roleBindings", index, "boundEntityId"] });
+    }
+    roleIds.add(binding.roleId);
+    canonicalEntityIds.add(binding.canonicalEntityId);
+    boundEntityIds.add(binding.boundEntityId);
+  });
+});
+export type CanonicalAdaptation = z.infer<typeof canonicalAdaptationSchema>;
+
+/**
+ * A source-grounded cut immediately before one character's first embodied
+ * canonical scene. It is distinct from the event outcome: the delta/knowledge
+ * describe facts already true at the cut, actorObservation is limited to what
+ * that character can perceive, and readerSetup is presentation-only context.
+ */
+export const characterEntryCheckpointSchema = z
+  .object({
+    actorId: idSchema,
+    readerSetup: z.string().trim().min(1).max(1_500),
+    actorObservation: z.string().trim().min(1).max(1_000),
+    participantPresence: z.array(participantPresenceSchema).min(1).max(128),
+    delta: stateDeltaSchema,
+    knowledge: knowledgeDeltaSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const seen = new Set<string>();
+    let actorIsPhysical = false;
+    for (let index = 0; index < value.participantPresence.length; index += 1) {
+      const presence = value.participantPresence[index]!;
+      if (seen.has(presence.entityId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Entry checkpoint presence entries must have unique entity IDs",
+          path: ["participantPresence", index, "entityId"],
+        });
+      }
+      seen.add(presence.entityId);
+      if (presence.entityId === value.actorId && presence.mode === "physical") actorIsPhysical = true;
+    }
+    if (!actorIsPhysical) {
+      ctx.addIssue({
+        code: "custom",
+        message: "An entry checkpoint must establish its selected actor as physically present",
+        path: ["participantPresence"],
+      });
+    }
+  });
+export type CharacterEntryCheckpoint = z.infer<typeof characterEntryCheckpointSchema>;
+
+/**
+ * A committed event may advance the playable narrative without changing a
+ * canonical state field. These tags are typed, validated commit metadata rather
+ * than prose: the host derives channels/identity, while a world adjudication may
+ * propose the outcome status. They make scene movement, relationships, plans,
+ * pressures, consequences, and thread attachment replayable from branch history.
+ */
+export const progressChannelSchema = z.enum([
+  "state",
+  "knowledge",
+  "semantic",
+  "process",
+  "norm",
+  "speech",
+  "time",
+  "scene",
+  "relationship",
+  "resource",
+  "plan",
+  "thread",
+  "time-pressure",
+  "consequence",
+]);
+export type ProgressChannel = z.infer<typeof progressChannelSchema>;
+
+export const eventOutcomeStatusSchema = z.enum(["succeeded", "partial", "blocked", "interrupted"]);
+export type EventOutcomeStatus = z.infer<typeof eventOutcomeStatusSchema>;
+
+export const sceneTransitionSchema = z
+  .object({
+    kind: z.enum(["stay", "depart", "arrive", "explore"]),
+    /**
+     * Branch-local identity for an open scene that has not been reconciled to
+     * a compiled location entity. Labels are presentation and localization;
+     * they must never be used as scene identity for new events.
+     */
+    sceneId: idSchema.optional(),
+    label: z.string().trim().min(1).max(240).optional(),
+    destinationEntityId: idSchema.optional(),
+    beat: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.sceneId && value.kind !== "depart" && value.kind !== "explore") {
+      ctx.addIssue({ code: "custom", message: "sceneId is reserved for open depart/explore transitions", path: ["sceneId"] });
+    }
+    if (value.destinationEntityId && value.kind !== "arrive") {
+      ctx.addIssue({ code: "custom", message: "destinationEntityId requires an arrive transition", path: ["destinationEntityId"] });
+    }
+  });
+export type SceneTransition = z.infer<typeof sceneTransitionSchema>;
+
+/**
+ * Non-authoritative presentation/scheduling hint. It may be proposed by a
+ * host policy or model, but none of its fields prove that an event is material.
+ * Committed materiality is represented only by ProgressCertificate below.
+ */
+export const narrativeProgressSchema = z
+  .object({
+    version: z.literal(1),
+    channels: z.array(progressChannelSchema).min(1),
+    threadIds: z.array(idSchema).default([]),
+    noveltyKey: z.string().trim().min(1).max(500),
+    outcome: eventOutcomeStatusSchema.optional(),
+    scene: sceneTransitionSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (new Set(value.channels).size !== value.channels.length) {
+      ctx.addIssue({ code: "custom", message: "Progress channels must be unique", path: ["channels"] });
+    }
+    if (new Set(value.threadIds).size !== value.threadIds.length) {
+      ctx.addIssue({ code: "custom", message: "Progress thread IDs must be unique", path: ["threadIds"] });
+    }
+    if (value.scene && !value.channels.includes("scene")) {
+      ctx.addIssue({ code: "custom", message: "A scene transition requires the scene progress channel", path: ["channels"] });
+    }
+  });
+export type NarrativeProgress = z.infer<typeof narrativeProgressSchema>;
+
+export const effectPointerSchema = z.object({
+  effectHash: objectHashSchema,
+  operationIndex: z.number().int().nonnegative(),
+}).strict();
+export type EffectPointer = z.infer<typeof effectPointerSchema>;
+
+export const progressCertificateSchema = z.object({
+  version: z.literal(1),
+  stateOperations: z.array(effectPointerSchema).max(1_024),
+  knowledgeOperations: z.array(effectPointerSchema).max(1_024),
+  semanticOperations: z.array(effectPointerSchema).max(1_024),
+  processOperations: z.array(effectPointerSchema).max(1_024),
+  normOperations: z.array(effectPointerSchema).max(1_024),
+  utteranceCount: z.number().int().nonnegative(),
+  timeAdvanced: z.boolean(),
+  sceneTransition: sceneTransitionSchema.optional(),
+  channels: z.array(progressChannelSchema),
+}).strict().superRefine((certificate, ctx) => {
+  const uniqueChannels = new Set(certificate.channels);
+  if (uniqueChannels.size !== certificate.channels.length) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "Progress certificate channels must be unique" });
+  }
+  for (const [field, channel] of [
+    ["stateOperations", "state"],
+    ["knowledgeOperations", "knowledge"],
+    ["semanticOperations", "semantic"],
+    ["processOperations", "process"],
+    ["normOperations", "norm"],
+  ] as const) {
+    const pointers = certificate[field];
+    const keys = pointers.map((pointer) => `${pointer.effectHash}:${pointer.operationIndex}`);
+    if (new Set(keys).size !== keys.length) {
+      ctx.addIssue({ code: "custom", path: [field], message: `${field} must not repeat an effect operation` });
+    }
+    if (Boolean(pointers.length) !== uniqueChannels.has(channel)) {
+      ctx.addIssue({ code: "custom", path: ["channels"], message: `${channel} channel must exactly match ${field}` });
+    }
+  }
+  if (Boolean(certificate.utteranceCount) !== uniqueChannels.has("speech")) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "speech channel must exactly match utteranceCount" });
+  }
+  if (certificate.timeAdvanced !== uniqueChannels.has("time")) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "time channel must exactly match timeAdvanced" });
+  }
+  if (Boolean(certificate.sceneTransition) !== uniqueChannels.has("scene")) {
+    ctx.addIssue({ code: "custom", path: ["channels"], message: "scene channel must exactly match sceneTransition" });
+  }
+});
+export type ProgressCertificate = z.infer<typeof progressCertificateSchema>;
+
+export const eventFrameRoleBindingSchema = z.object({
+  roleId: idSchema,
+  entityIds: z.array(idSchema).min(1).max(32),
+}).strict().superRefine((value, ctx) => {
+  if (new Set(value.entityIds).size !== value.entityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["entityIds"], message: "Frame role bindings must contain unique entity IDs" });
+  }
+});
+export type EventFrameRoleBinding = z.infer<typeof eventFrameRoleBindingSchema>;
+
+export const eventFrameInstanceSchema = z.object({
+  frameId: idSchema,
+  roleBindings: z.array(eventFrameRoleBindingSchema).max(64),
+  parameters: z.record(idSchema, stateValueSchema).default({}),
+}).strict().superRefine((value, ctx) => {
+  const roles = new Set<string>();
+  value.roleBindings.forEach((binding, index) => {
+    if (roles.has(binding.roleId)) {
+      ctx.addIssue({ code: "custom", path: ["roleBindings", index, "roleId"], message: `Duplicate frame role binding ${binding.roleId}` });
+    }
+    roles.add(binding.roleId);
+  });
+});
+export type EventFrameInstance = z.infer<typeof eventFrameInstanceSchema>;
+
+export const actionRoleBindingSchema = z.object({
+  roleId: idSchema,
+  entityIds: z.array(idSchema).min(1).max(32),
+}).strict().superRefine((value, ctx) => {
+  if (new Set(value.entityIds).size !== value.entityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["entityIds"], message: "Action role bindings must contain unique entity IDs" });
+  }
+});
+export type ActionRoleBinding = z.infer<typeof actionRoleBindingSchema>;
+
+const schemaBoundActionInvocationSchema = z.object({
+  lane: z.literal("schema-bound"),
+  schemaId: idSchema,
+  roleBindings: z.array(actionRoleBindingSchema).max(64),
+  parameters: z.record(idSchema, stateValueSchema).default({}),
+}).strict().superRefine((value, ctx) => {
+  const roles = new Set<string>();
+  value.roleBindings.forEach((binding, index) => {
+    if (roles.has(binding.roleId)) {
+      ctx.addIssue({ code: "custom", path: ["roleBindings", index, "roleId"], message: `Duplicate action role binding ${binding.roleId}` });
+    }
+    roles.add(binding.roleId);
+  });
+});
+
+export const actionStateAddressSchema = z.object({
+  entityId: idSchema,
+  field: z.string().trim().min(1).max(240),
+}).strict();
+export type ActionStateAddress = z.infer<typeof actionStateAddressSchema>;
+
+export const actionResourceClaimSchema = actionStateAddressSchema.extend({
+  mode: z.enum(["read", "reserve", "consume", "produce", "transfer-in", "transfer-out"]),
+  amount: z.number().finite().positive().optional(),
+}).strict().superRefine((value, ctx) => {
+  if (["consume", "produce", "transfer-in", "transfer-out"].includes(value.mode) && value.amount === undefined) {
+    ctx.addIssue({ code: "custom", path: ["amount"], message: `${value.mode} resource claims require a positive amount` });
+  }
+  if (["read", "reserve"].includes(value.mode) && value.amount !== undefined) {
+    ctx.addIssue({ code: "custom", path: ["amount"], message: `${value.mode} resource claims cannot declare an amount` });
+  }
+});
+export type ActionResourceClaim = z.infer<typeof actionResourceClaimSchema>;
+
+export const actionFootprintSchema = z.object({
+  reads: z.array(actionStateAddressSchema).max(128),
+  writes: z.array(actionStateAddressSchema).max(128),
+  resources: z.array(actionResourceClaimSchema).max(64),
+}).strict().superRefine((value, ctx) => {
+  for (const field of ["reads", "writes", "resources"] as const) {
+    const keys = value[field].map((item) => `${item.entityId}\u0000${item.field}`);
+    if (new Set(keys).size !== keys.length) {
+      ctx.addIssue({ code: "custom", path: [field], message: `${field} must not repeat a state address` });
+    }
+  }
+});
+export type ActionFootprint = z.infer<typeof actionFootprintSchema>;
+
+export const actionInvocationSchema = z.discriminatedUnion("lane", [
+  schemaBoundActionInvocationSchema,
+  z.object({
+    lane: z.literal("ad-hoc"),
+    actionKindId: idSchema,
+    description: z.string().trim().min(1).max(1_000),
+    footprint: actionFootprintSchema,
+  }).strict(),
+]);
+export type ActionInvocation = z.infer<typeof actionInvocationSchema>;
+
 export const canonicalEventSchema = z.object({
   id: idSchema,
   title: z.string().min(1),
+  /** Completed-event recap for a reader who enters at a later source scene. */
+  readerSummary: z.string().trim().min(1).max(1_500).optional(),
   participants: z.array(idSchema),
+  participantPresence: z.array(participantPresenceSchema).max(128).optional()
+    .describe("Exactly one presence entry for every character participant; never include non-character participants."),
+  characterEntryCheckpoints: z.array(characterEntryCheckpointSchema).max(128).optional(),
   storyTime: storyTimeSchema,
+  timeAdvance: timeAdvanceSchema.optional(),
+  narrativeContext: narrativeContextSchema.optional(),
   preconditions: z.array(predicateSchema),
   observedOutcome: stateDeltaSchema,
   observedKnowledge: knowledgeDeltaSchema.optional(),
+  sceneOccurrenceIds: z.array(idSchema).max(16).optional(),
+  frameInstance: eventFrameInstanceSchema.optional(),
+  action: actionInvocationSchema.optional(),
   evidence: z.array(evidenceRefSchema),
   causalParents: z.array(idSchema),
   confidence: z.number().min(0).max(1),
 }).strict();
 export type CanonicalEvent = z.infer<typeof canonicalEventSchema>;
 
-export const worldRuleSchema = z.object({ id: idSchema, name: z.string().min(1), scope: z.enum(["global", "entity", "location", "faction", "institution"]), appliesWhen: z.array(predicateSchema), forbids: z.array(predicateSchema).optional(), requires: z.array(predicateSchema).optional(), evidence: z.array(evidenceRefSchema) }).strict();
-export type WorldRule = z.infer<typeof worldRuleSchema>;
+export const worldRuleScopeSchema = z.enum(["global", "entity", "location", "faction", "institution"]);
+export const worldRuleKindSchema = z.enum(["physical", "social", "legal", "magical", "institutional"]);
+export const worldRuleVisibilitySchema = z.enum(["public", "observable", "knowledge", "engine"]);
+export const worldRuleClauseModalitySchema = z.enum(["require", "forbid"]);
+const worldRuleStoryTimeSchema = storyTimeSchema.refine(
+  (value) => value.kind !== "relative" && value.kind !== "unknown",
+  "World-rule validity must use a concrete calendar/range/ordinal scope; event-driven changes use committed activate-rule/deactivate-rule operations",
+);
 
-export const eventProposalSchema = z
+const worldRuleEvidenceShape = {
+  basis: z.enum(["explicit", "inferred"]),
+  status: z.enum(["supported", "contested"]),
+  confidence: z.number().finite().min(0).max(1),
+  evidence: z.array(evidenceRefSchema).min(1),
+  counterEvidence: z.array(evidenceRefSchema).optional(),
+} as const;
+
+export const worldRuleClauseSchema = z.object({
+  id: idSchema,
+  modality: worldRuleClauseModalitySchema,
+  predicate: predicateSchema,
+  ...worldRuleEvidenceShape,
+}).strict().superRefine(validateWorldRuleEvidenceShape);
+export type WorldRuleClause = z.infer<typeof worldRuleClauseSchema>;
+
+export const worldRuleExceptionSchema = z.object({
+  id: idSchema,
+  appliesWhen: z.array(predicateSchema).min(1).max(32),
+  ...worldRuleEvidenceShape,
+}).strict().superRefine(validateWorldRuleEvidenceShape);
+export type WorldRuleException = z.infer<typeof worldRuleExceptionSchema>;
+
+export const controlledWorldRuleSchema = z.object({
+  ontologyVersion: z.literal("world-rule-v2"),
+  id: idSchema,
+  name: z.string().trim().min(1).max(500),
+  kind: worldRuleKindSchema,
+  scope: worldRuleScopeSchema,
+  authorityEntityId: idSchema.optional(),
+  jurisdictionEntityIds: z.array(idSchema).max(64).default([]),
+  appliesWhen: z.array(predicateSchema).max(64).default([]),
+  validStoryTime: worldRuleStoryTimeSchema.optional(),
+  visibility: worldRuleVisibilitySchema,
+  knownByClaimIds: z.array(idSchema).max(64).default([]),
+  priority: z.number().int().min(0).max(10_000),
+  defeasible: z.boolean(),
+  overridesRuleIds: z.array(idSchema).max(64).default([]),
+  clauses: z.array(worldRuleClauseSchema).min(1).max(64),
+  exceptions: z.array(worldRuleExceptionSchema).max(32).default([]),
+  ...worldRuleEvidenceShape,
+}).strict().superRefine((rule, ctx) => {
+  validateWorldRuleEvidenceShape(rule, ctx);
+  for (const [field, values] of [
+    ["jurisdictionEntityIds", rule.jurisdictionEntityIds],
+    ["knownByClaimIds", rule.knownByClaimIds],
+    ["overridesRuleIds", rule.overridesRuleIds],
+  ] as const) {
+    if (new Set(values).size !== values.length) {
+      ctx.addIssue({ code: "custom", path: [field], message: `${field} must contain unique IDs` });
+    }
+  }
+  if (rule.scope === "global" && rule.jurisdictionEntityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["jurisdictionEntityIds"], message: "A global rule cannot declare a bounded jurisdiction" });
+  }
+  if (rule.scope !== "global" && !rule.jurisdictionEntityIds.length) {
+    ctx.addIssue({ code: "custom", path: ["jurisdictionEntityIds"], message: `A ${rule.scope}-scoped rule requires at least one jurisdiction entity` });
+  }
+  if (rule.visibility === "knowledge" && !rule.knownByClaimIds.length) {
+    ctx.addIssue({ code: "custom", path: ["knownByClaimIds"], message: "A knowledge-visible rule requires at least one grounding claim" });
+  }
+  if (rule.visibility !== "knowledge" && rule.knownByClaimIds.length) {
+    ctx.addIssue({ code: "custom", path: ["knownByClaimIds"], message: "knownByClaimIds is reserved for knowledge-visible rules" });
+  }
+  if (rule.overridesRuleIds.includes(rule.id)) {
+    ctx.addIssue({ code: "custom", path: ["overridesRuleIds"], message: "A rule cannot override itself" });
+  }
+  const semanticIds = [...rule.clauses, ...rule.exceptions].map((item) => item.id);
+  if (new Set(semanticIds).size !== semanticIds.length) {
+    ctx.addIssue({ code: "custom", path: ["clauses"], message: "Clause and exception IDs must be unique within one rule" });
+  }
+  if (rule.status === "supported" && !rule.clauses.some((clause) => clause.status === "supported")) {
+    ctx.addIssue({ code: "custom", path: ["clauses"], message: "A supported rule requires at least one supported executable clause" });
+  }
+});
+export type ControlledWorldRule = z.infer<typeof controlledWorldRuleSchema>;
+
+export const worldRuleSchema = controlledWorldRuleSchema;
+export type WorldRule = ControlledWorldRule;
+
+function validateWorldRuleEvidenceShape(
+  value: { basis: "explicit" | "inferred"; status: "supported" | "contested"; evidence: EvidenceRef[]; counterEvidence?: EvidenceRef[] },
+  ctx: z.RefinementCtx,
+): void {
+  const evidenceKeys = value.evidence.map((reference) => JSON.stringify(reference));
+  if (new Set(evidenceKeys).size !== evidenceKeys.length) {
+    ctx.addIssue({ code: "custom", path: ["evidence"], message: "Rule evidence references must be unique" });
+  }
+  const counterKeys = (value.counterEvidence ?? []).map((reference) => JSON.stringify(reference));
+  if (new Set(counterKeys).size !== counterKeys.length) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "Rule counter-evidence references must be unique" });
+  }
+  const overlap = counterKeys.filter((key) => evidenceKeys.includes(key));
+  if (overlap.length) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "One exact source reference cannot both support and contradict the same rule semantic" });
+  }
+  if (value.status === "contested" && !value.counterEvidence?.length) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "A contested rule semantic requires counter-evidence" });
+  }
+  if (value.status === "supported" && value.counterEvidence?.length) {
+    ctx.addIssue({ code: "custom", path: ["counterEvidence"], message: "Counter-evidence requires contested status" });
+  }
+  if (value.basis === "explicit" && !value.evidence.some((reference) => reference.strength === "explicit")) {
+    ctx.addIssue({ code: "custom", path: ["basis"], message: "An explicit rule semantic requires explicit evidence" });
+  }
+}
+
+export const actorEventObservationSchema = z.object({
+  actorId: idSchema,
+  summary: z.string().trim().min(1).max(1_000),
+}).strict();
+export type ActorEventObservation = z.infer<typeof actorEventObservationSchema>;
+
+/**
+ * Exact words that were spoken as part of a committed event. The semantic
+ * knowledge transfer still lives in KnowledgeDelta; this record exists so a
+ * literary renderer can preserve wording without reverse-engineering dialogue
+ * from an actor-observation summary.
+ */
+export const spokenUtteranceSchema = z.object({
+  speakerId: idSchema,
+  addresseeIds: z.array(idSchema).min(1).max(16),
+  content: z.string().trim().min(1).max(2_000),
+  channel: z.literal("audible").default("audible"),
+}).strict();
+export type SpokenUtterance = z.infer<typeof spokenUtteranceSchema>;
+
+/** Event-scoped affect. Continuity is derived from history; this is not a second mutable character state. */
+export const actorAffectSchema = z.object({
+  actorId: idSchema,
+  label: z.string().trim().min(1).max(120),
+  intensity: z.number().min(0).max(1),
+  expression: z.string().trim().min(1).max(500).optional(),
+}).strict();
+export type ActorAffect = z.infer<typeof actorAffectSchema>;
+
+export const eventProposalBaseSchema = z
   .object({
     proposalId: idSchema,
     branchId: idSchema,
@@ -148,70 +1497,330 @@ export const eventProposalSchema = z
     source: z.enum(["player", "actor", "background", "canon-candidate", "compiler"]),
     actorId: idSchema.optional(),
     title: z.string().min(1),
+    actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
+    actorAffects: z.array(actorAffectSchema).max(128).optional(),
+    spokenUtterances: z.array(spokenUtteranceSchema).max(32).optional(),
     participants: z.array(idSchema),
+    participantPresence: z.array(participantPresenceSchema).max(128).optional(),
     proposedTime: storyTimeSchema,
+    timeAdvance: timeAdvanceSchema.optional(),
     preconditions: z.array(predicateSchema),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    proposedSemantics: branchSemanticProposalDeltaSchema.optional(),
+    proposedProcesses: processProposalDeltaSchema.optional(),
+    proposedNorms: normProposalDeltaSchema.optional(),
+    causalRelations: z.array(branchEventRelationProposalSchema).max(128).optional(),
+    /** @deprecated Runtime authority is causalRelations; retained until compiler T9 rewrites source artifacts. */
     causalParents: z.array(idSchema),
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     evidence: z.array(evidenceRefSchema),
     possibilityId: idSchema.optional(),
+    canonicalAdaptation: canonicalAdaptationSchema.optional(),
+    action: actionInvocationSchema.optional(),
+    progress: narrativeProgressSchema.optional(),
   })
   .strict();
+export type EventProposalBase = z.infer<typeof eventProposalBaseSchema>;
+
+export function validateCanonicalAdaptationProposalEnvelope(
+  value: Pick<EventProposalBase, "possibilityId" | "canonicalAdaptation">,
+  ctx: z.RefinementCtx,
+): void {
+  if (value.canonicalAdaptation && value.possibilityId !== value.canonicalAdaptation.scaffoldPossibilityId) {
+    ctx.addIssue({
+      code: "custom",
+      message: "A canonical adaptation must use its scaffold possibility as possibilityId",
+      path: ["possibilityId"],
+    });
+  }
+}
+
+export const eventProposalSchema = eventProposalBaseSchema.superRefine((value, ctx) => {
+  validateSpokenUtteranceParticipants(value, ctx);
+  validateCanonicalAdaptationProposalEnvelope(value, ctx);
+  validateCausalRelationProjection(value, ctx);
+});
 export type EventProposal = z.infer<typeof eventProposalSchema>;
+
+/**
+ * References to independently validated, content-addressed event effects.
+ *
+ * StateDelta and KnowledgeDelta remain separate channels because they have
+ * different reducers and visibility rules.  The event is the atomic envelope
+ * that binds their hashes into branch history.
+ */
+export const eventEffectsRefSchema = z.object({
+  version: z.literal(1),
+  stateDeltaHash: objectHashSchema.optional(),
+  knowledgeDeltaHash: objectHashSchema.optional(),
+  semanticDeltaHash: objectHashSchema.optional(),
+  processDeltaHash: objectHashSchema.optional(),
+  normDeltaHash: objectHashSchema.optional(),
+}).strict();
+export type EventEffectsRef = z.infer<typeof eventEffectsRefSchema>;
 
 export const committedEventSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     eventId: idSchema,
     branchId: idSchema,
     logicalTime: logicalTimeSchema,
+    timeAdvance: timeAdvanceSchema.optional(),
     proposalId: idSchema.optional(),
     title: z.string().min(1),
+    actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
+    actorAffects: z.array(actorAffectSchema).max(128).optional(),
+    spokenUtterances: z.array(spokenUtteranceSchema).max(32).optional(),
     participants: z.array(idSchema),
-    deltaHash: idSchema,
-    knowledgeDeltaHash: idSchema.optional(),
+    participantPresence: z.array(participantPresenceSchema).max(128).optional(),
+    effects: eventEffectsRefSchema,
+    progressCertificate: progressCertificateSchema,
     evidence: z.array(evidenceRefSchema),
+    causalRelations: z.array(branchEventRelationSchema).max(128),
+    /** @deprecated Non-authoritative display projection; causalRelations drives replay and scheduling. */
     causalParents: z.array(idSchema),
     supersedesCanonicalEventIds: z.array(idSchema).optional(),
     realizesCanonicalEventIds: z.array(idSchema).optional(),
     possibilityId: idSchema.optional(),
+    canonicalAdaptation: canonicalAdaptationSchema.optional(),
+    action: actionInvocationSchema.optional(),
+    actorId: idSchema.optional(),
+    progress: narrativeProgressSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(validateSpokenUtteranceParticipants)
+  .superRefine(validateParticipantPresence)
+  .superRefine((value, ctx) => {
+    validateCausalRelationProjection(value, ctx);
+    if (value.canonicalAdaptation && value.possibilityId !== value.canonicalAdaptation.scaffoldPossibilityId) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A committed canonical adaptation must retain its scaffold possibilityId",
+        path: ["possibilityId"],
+      });
+    }
+    if (value.canonicalAdaptation && value.realizesCanonicalEventIds?.includes(value.canonicalAdaptation.adaptedFromCanonicalEventId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "An adapted analogue cannot claim exact realization of its source canonical event",
+        path: ["realizesCanonicalEventIds"],
+      });
+    }
+  });
 export type CommittedEvent = z.infer<typeof committedEventSchema>;
 
-export const branchSchema = z.object({ id: idSchema, name: z.string().min(1), parentBranchId: idSchema.optional(), forkCommitId: idSchema.optional(), headCommitId: idSchema }).strict();
+function validateCausalRelationProjection(
+  value: { causalParents: string[]; causalRelations?: readonly { fromEventId: string }[] },
+  ctx: z.RefinementCtx,
+): void {
+  if (new Set(value.causalParents).size !== value.causalParents.length) {
+    ctx.addIssue({ code: "custom", path: ["causalParents"], message: "Causal parent display IDs must be unique" });
+  }
+  if (!value.causalRelations) return;
+  const relationSources = [...new Set(value.causalRelations.map((relation) => relation.fromEventId))].sort();
+  const parentSources = [...value.causalParents].sort();
+  if (JSON.stringify(relationSources) !== JSON.stringify(parentSources)) {
+    ctx.addIssue({ code: "custom", path: ["causalParents"], message: "causalParents must exactly project the authoritative causalRelations source IDs" });
+  }
+}
+
+function validateSpokenUtteranceParticipants(
+  value: { participants: string[]; spokenUtterances?: SpokenUtterance[] },
+  ctx: z.RefinementCtx,
+): void {
+  value.spokenUtterances?.forEach((utterance, index) => {
+    if (!value.participants.includes(utterance.speakerId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A spoken utterance speaker must be an event participant",
+        path: ["spokenUtterances", index, "speakerId"],
+      });
+    }
+    utterance.addresseeIds.forEach((addresseeId, addresseeIndex) => {
+      if (!value.participants.includes(addresseeId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "A spoken utterance addressee must be an event participant",
+          path: ["spokenUtterances", index, "addresseeIds", addresseeIndex],
+        });
+      }
+    });
+  });
+}
+
+export const branchSchema = z.object({
+  id: idSchema,
+  name: z.string().min(1),
+  sourceId: idSchema.optional(),
+  preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  /** Character whose grounded checkpoint seeded a fresh source-based instance. */
+  entryActorId: idSchema.optional(),
+  createdAt: z.string().datetime({ offset: true }).optional(),
+  parentBranchId: idSchema.optional(),
+  forkCommitId: idSchema.optional(),
+  headCommitId: idSchema,
+}).strict().superRefine((value, ctx) => {
+  if (value.preparedRevisionHash && !value.sourceId) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["preparedRevisionHash"],
+      message: "A frozen prepared revision requires a source identity",
+    });
+  }
+  if (value.entryActorId && (!value.sourceId || !value.preparedRevisionHash || value.parentBranchId)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["entryActorId"],
+      message: "An entry actor belongs only to a fresh source-based instance with a frozen prepared revision",
+    });
+  }
+});
 export type Branch = z.infer<typeof branchSchema>;
 export const worldCommitSchema = z.object({ version: z.literal(1), parentCommitId: idSchema.optional(), branchId: idSchema, logicalTime: logicalTimeSchema, eventHashes: z.array(idSchema), canonicalSnapshotHash: z.string().regex(/^[a-f0-9]{64}$/).optional(), engineVersion: z.string().min(1), schemaVersion: z.number().int().positive() }).strict();
 export type WorldCommit = z.infer<typeof worldCommitSchema>;
 export const worldStateSchema = z.object({ atCommit: idSchema, logicalTime: logicalTimeSchema, values: z.record(z.string(), z.record(z.string(), stateValueSchema)), activeRuleIds: z.array(idSchema) }).strict();
 export type WorldState = z.infer<typeof worldStateSchema>;
 
-export const possibilitySchema = z
+export const possibilityKindSchema = z.enum([
+  "canon-analogue",
+  "player-choice",
+  "direct-response",
+  "actor-plan",
+  "obligation",
+  "due-process",
+  "causal-consequence",
+  "background-pressure",
+  "institutional-pressure",
+  "environmental",
+  "generated",
+]);
+export type PossibilityKind = z.infer<typeof possibilityKindSchema>;
+export const AUTONOMOUS_BACKGROUND_KINDS = [
+  "direct-response",
+  "obligation",
+  "due-process",
+  "causal-consequence",
+  "background-pressure",
+  "institutional-pressure",
+  "environmental",
+  "generated",
+] as const satisfies readonly PossibilityKind[];
+
+export const possibilityBaseSchema = z
   .object({
     id: idSchema,
     branchId: idSchema,
     evaluatedAtCommit: idSchema,
-    kind: z.enum(["canon-analogue", "player-choice", "actor-plan", "obligation", "causal-consequence", "background-pressure", "environmental", "generated"]),
+    kind: possibilityKindSchema,
     title: z.string().min(1),
     candidateWindow: storyTimeSchema.optional(),
+    timeAdvance: timeAdvanceSchema.optional(),
     preconditions: z.array(predicateSchema),
     blockers: z.array(predicateSchema),
     expiry: z.array(predicateSchema).optional(),
     participants: z.array(idSchema),
+    participantPresence: z.array(participantPresenceSchema).max(128).optional(),
+    causalLinks: z.array(possibilityCausalLinkSchema).max(128).optional(),
+    /** @deprecated Runtime canonical possibilities always carry causalLinks. */
     causalParents: z.array(idSchema),
+    dueAtElapsedDays: z.number().finite().nonnegative().optional(),
+    sourceActorId: idSchema.optional(),
+    sourceGoalId: idSchema.optional(),
     canonicalEventId: idSchema.optional(),
     pressure: z.number().min(0),
     relevance: z.number().min(0),
     proposedDelta: stateDeltaSchema.optional(),
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    proposedSemantics: branchSemanticProposalDeltaSchema.optional(),
+    proposedProcesses: processProposalDeltaSchema.optional(),
+    proposedNorms: normProposalDeltaSchema.optional(),
+    action: actionInvocationSchema.optional(),
+    canonicalScaffold: canonicalScaffoldSchema.optional(),
     evidence: z.array(evidenceRefSchema),
   })
   .strict();
+export type PossibilityBase = z.infer<typeof possibilityBaseSchema>;
+
+type CanonicalScaffoldPossibilityShape = Pick<
+  PossibilityBase,
+  "kind" | "canonicalEventId" | "proposedDelta" | "participants" | "canonicalScaffold"
+>;
+
+export function validateCanonicalScaffoldPossibility(value: CanonicalScaffoldPossibilityShape, ctx: z.RefinementCtx): void {
+  if (!value.canonicalScaffold) return;
+  if (value.kind !== "canon-analogue") {
+    ctx.addIssue({ code: "custom", message: "A canonical scaffold must use kind=canon-analogue", path: ["kind"] });
+  }
+  if (!value.canonicalEventId) {
+    ctx.addIssue({ code: "custom", message: "A canonical scaffold must reference canonicalEventId", path: ["canonicalEventId"] });
+  }
+  if (!value.proposedDelta) {
+    ctx.addIssue({ code: "custom", message: "A canonical scaffold requires a typed core effect", path: ["proposedDelta"] });
+  }
+  value.canonicalScaffold.roles.forEach((role, index) => {
+    if (!value.participants.includes(role.canonicalEntityId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Scaffold role ${role.roleId} canonical entity must be an event participant`,
+        path: ["canonicalScaffold", "roles", index, "canonicalEntityId"],
+      });
+    }
+  });
+}
+
+export const possibilitySchema = possibilityBaseSchema
+  .superRefine(validateCanonicalScaffoldPossibility)
+  .superRefine((value, ctx) => {
+    const ids = value.causalLinks?.map((link) => link.relationId) ?? [];
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({ code: "custom", path: ["causalLinks"], message: "Possibility causal relation IDs must be unique" });
+    }
+    value.causalLinks?.forEach((link, index) => {
+      if (link.operationality === "motivational") {
+        const outside = (link.motivatedActorIds ?? []).find((actorId) => !value.participants.includes(actorId));
+        if (outside) ctx.addIssue({ code: "custom", path: ["causalLinks", index, "motivatedActorIds"], message: `Motivated actor ${outside} is not a possibility participant` });
+      }
+    });
+  });
 export type Possibility = z.infer<typeof possibilitySchema>;
 
-export const knowledgeFactSchema = z.object({ actorId: idSchema, claimId: idSchema, status: knowledgeStatusSchema, confidence: z.number().min(0).max(1), acquiredAtCommit: idSchema, sourceActorId: idSchema.optional() }).strict();
+export function validateParticipantPresence(
+  value: { participants: readonly string[]; participantPresence?: readonly ParticipantPresence[] },
+  ctx: z.RefinementCtx,
+): void {
+  const seen = new Set<string>();
+  for (let index = 0; index < (value.participantPresence?.length ?? 0); index += 1) {
+    const presence = value.participantPresence![index]!;
+    if (!value.participants.includes(presence.entityId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Participant presence must refer to an event participant",
+        path: ["participantPresence", index, "entityId"],
+      });
+    }
+    if (seen.has(presence.entityId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Participant presence entries must have unique entity IDs",
+        path: ["participantPresence", index, "entityId"],
+      });
+    }
+    seen.add(presence.entityId);
+  }
+}
+
+export const knowledgeFactSchema = z.object({
+  actorId: idSchema,
+  claimId: idSchema,
+  propositionId: idSchema.optional(),
+  attributionId: idSchema.optional(),
+  acquisitionMode: knowledgeAcquisitionModeSchema.optional(),
+  status: knowledgeStatusSchema,
+  confidence: z.number().min(0).max(1),
+  acquiredAtCommit: idSchema,
+  sourceActorId: idSchema.optional(),
+}).strict();
 export type KnowledgeFact = z.infer<typeof knowledgeFactSchema>;
 
 export const validationIssueSchema = z.object({ code: z.string().min(1), message: z.string().min(1), path: z.string().optional() }).strict();
@@ -220,9 +1829,9 @@ export const validationReportSchema = z.object({ proposalId: idSchema, evaluated
 export type ValidationReport = z.infer<typeof validationReportSchema>;
 
 export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
-  z.object({ id: idSchema, kind: z.string().min(1), schemaVersion: z.number().int().positive(), payload, evidence: z.array(evidenceRefSchema), generatedBy: z.object({ worker: z.string().min(1), provider: z.string().optional(), model: z.string().optional(), promptHash: z.string().optional() }).strict(), createdAt: z.string().min(1) }).strict();
+  z.object({ id: idSchema, kind: z.string().min(1), schemaVersion: z.number().int().positive(), payload, evidence: z.array(evidenceRefSchema), evidenceAssertions: z.array(evidenceAssertionSchema).default([]), generatedBy: z.object({ worker: z.string().min(1), provider: z.string().optional(), model: z.string().optional(), promptHash: z.string().optional(), compilerBatchId: idSchema.optional() }).strict(), createdAt: z.string().min(1) }).strict();
 
-export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string }; createdAt: string };
+export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
-export const WORLD_SCHEMA_VERSION = 1;
-export const WORLD_ENGINE_VERSION = "0.1.0";
+export const WORLD_SCHEMA_VERSION = 2;
+export const WORLD_ENGINE_VERSION = "0.2.0";

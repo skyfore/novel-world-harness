@@ -2,7 +2,7 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
 import {
-  playerActionCandidateSchema,
+  playerActionModelCandidateSchema,
   type PlayerActionCandidate,
 } from "../world/player-action.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
@@ -37,17 +37,21 @@ export function createPlayerActionCaptureTool(
 ): PlayerActionCaptureTool {
   let captured: PlayerActionCandidate | undefined;
   let executionAttempts = 0;
-  const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(playerActionCandidateSchema);
+  const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(playerActionModelCandidateSchema);
   constrainStateFields(jsonSchema, stateFields);
   const parameters = Type.Unsafe<PlayerActionCandidate>(jsonSchema as TSchema);
   const tool = defineTool({
     name: "propose_player_action",
     label: "Propose player action",
-    description: "Capture one strict player EventProposal candidate for deterministic host validation. This tool cannot commit or mutate world truth.",
+    description: "Capture one structured player intent plus actor-controlled candidate effects for host world adjudication and deterministic validation. This tool cannot commit or mutate world truth.",
     promptSnippet: "Submit exactly one scoped player-action candidate",
     promptGuidelines: [
       "Use only the supplied actor-scoped context; never infer future canon or hidden world state.",
       "Do not claim the action succeeded. The host validates and commits after this tool returns.",
+      "Always provide intent and controlledAct; put any hoped-for result that is not controlled by the actor in desiredEffect.",
+      "controlledAct describes only what the actor immediately does, with an in-world eventTitle and actor-visible actorObservation that assert no external result.",
+      "Always set controlledAct.interactionMode. Use direct and fill exact interaction/addressee data whenever a present character is addressed; use none only when nobody is directly addressed. Their response remains a desiredEffect.",
+      "Scene transitions and durations must be typed in intent rather than implied by wording.",
       "Submit exactly one candidate and do not invent entity or claim IDs outside the supplied scope.",
     ],
     parameters,
@@ -56,7 +60,7 @@ export function createPlayerActionCaptureTool(
       executionAttempts += 1;
       signal?.throwIfAborted();
       if (captured) throw new Error("Only one player action candidate may be captured per turn.");
-      const candidate = playerActionCandidateSchema.parse(input);
+      const candidate = playerActionModelCandidateSchema.parse(input);
       captured = structuredClone(candidate);
       onCapture?.(structuredClone(candidate));
       return {
@@ -75,7 +79,7 @@ export function createPlayerActionCaptureTool(
   };
 }
 
-function constrainStateFields(value: unknown, stateFields: readonly string[]): void {
+export function constrainStateFields(value: unknown, stateFields: readonly string[]): void {
   if (Array.isArray(value)) {
     for (const item of value) constrainStateFields(item, stateFields);
     return;
@@ -91,7 +95,7 @@ function constrainStateFields(value: unknown, stateFields: readonly string[]): v
       : undefined;
     if (
       typeof operation === "string"
-      && ["set", "unset", "add-member", "remove-member", "fact-equals", "fact-exists", "entity-in"].includes(operation)
+      && ["set", "unset", "adjust-number", "add-member", "remove-member", "fact-equals", "fact-gte", "fact-lte", "fact-exists", "entity-in"].includes(operation)
       && propertyRecord.field
     ) {
       propertyRecord.field = {

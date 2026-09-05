@@ -24,8 +24,8 @@ describe("llmProfileSchema", () => {
       provider: "openai-compatible-local",
       model: "novel-model",
       thinkingLevel: "medium",
-      maxTokens: 8_192,
     });
+    expect(llmProfileSchema.parse({ provider: "anthropic", model: "claude-sonnet-5" }).maxTokens).toBeUndefined();
   });
 
   it("does not allow repository config to select a general-purpose secret", () => {
@@ -46,7 +46,7 @@ describe("configSchema", () => {
 
     expect(config).toEqual({
       version: 1,
-      project: { name: "fresh-world", language: "zh-CN" },
+      project: { name: "fresh-world", language: "zh-CN", instructions: [] },
     });
     expect(profileForRole(config, "narrator")).toEqual({ name: undefined, profile: undefined });
   });

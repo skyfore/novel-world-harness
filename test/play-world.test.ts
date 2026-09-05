@@ -21,6 +21,14 @@ async function fixture(options: { withCanon?: boolean } = {}) {
   await canon.putEntity({ id: "hero", kind: "character", canonicalName: "林岐", aliases: ["Lin Qi"], evidence: [] });
   await canon.putEntity({ id: "hall", kind: "location", canonicalName: "前厅", aliases: [], evidence: [] });
   await canon.putEntity({ id: "camp", kind: "location", canonicalName: "营地", aliases: [], evidence: [] });
+  await canon.putClaim({
+    id: "hero-knows-camp",
+    subject: "hero",
+    predicate: "knows-route-to",
+    object: "camp",
+    epistemicType: "explicit-fact",
+    evidence: [],
+  });
   if (options.withCanon) {
     await canon.putEvent({
       id: "hero-goes-to-camp",
@@ -41,6 +49,9 @@ async function fixture(options: { withCanon?: boolean } = {}) {
       { op: "set", entityId: "hero", field: "character.alive", value: true },
       { op: "set", entityId: "hero", field: "character.location", value: "hall" },
     ],
+  }, {
+    version: 1,
+    operations: [{ op: "learn", actorId: "hero", claimId: "hero-knows-camp", status: "knows", confidence: 1 }],
   });
   return { root, genesis };
 }
@@ -74,7 +85,8 @@ describe("play-world command", () => {
 
     expect(result?.accepted).toBe(true);
     expect(result?.newHead).not.toBe(genesis);
-    expect(output.join("")).toContain("林岐离开前厅，抵达营地");
+    expect(output.join("")).toContain("Attempted player intent (not an asserted outcome): 我离开前厅,去营地。");
+    expect(output.join("")).not.toContain("林岐离开前厅，抵达营地");
     await expect(new PlaySessionStore(root).read()).resolves.toMatchObject({
       branchId: "main",
       actorId: "hero",
@@ -103,7 +115,7 @@ describe("play-world command", () => {
     });
 
     expect(result?.accepted).toBe(false);
-    expect(result?.issues).toContainEqual(expect.objectContaining({ code: "PRECONDITION_FAILED" }));
+    expect(result?.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_PRECONDITION_UNSATISFIED" }));
     expect(await (await openWorkspaceWorld(root)).engine.branches.readHead("main")).toBe(genesis);
   });
 
@@ -120,6 +132,7 @@ describe("play-world command", () => {
       branchId: "main",
       character: "hero",
       action: "我在前厅等待片刻。",
+      advanceBackground: 1,
       translator: () => ({
         title: "林岐在前厅等待",
         participants: [],

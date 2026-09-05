@@ -2,13 +2,16 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { workspaceStateDir } from "../src/agent/runtime-paths.js";
 import {
   markSourceLoopBatchComplete,
   parseStandaloneSourcePath,
   prepareNextSourceLoopTurn,
+  prepareSourceLoopFromContent,
   prepareSourceLoopFromInput,
 } from "../src/compiler/source-loop.js";
 import { WorkspaceStore } from "../src/storage/workspace-store.js";
+import { readSourceMaterial } from "../src/storage/source-material-store.js";
 
 const roots: string[] = [];
 
@@ -45,9 +48,11 @@ describe("novel source compiler loop", () => {
     expect(first.source.sourcePath).toBe("novel world.txt");
     expect(first.totalBatches).toBeGreaterThan(1);
     expect(first.prompt).toContain("Execute the novel-world compiler loop now");
-    expect(first.prompt).toContain("EvidenceRef");
+    expect(first.prompt).toContain("evidence_segment_ids");
+    expect(first.prompt).not.toContain("quoteHash");
     expect(first.prompt).toContain("人物1进入城池");
-    await expect(fs.stat(path.join(root, ".novel-harness", "sources", `${first.source.id}.json`))).resolves.toBeDefined();
+    expect(first.prompt).not.toContain("novel world.txt");
+    await expect(fs.stat(path.join(workspaceStateDir(root), "sources", `${first.source.id}.json`))).resolves.toBeDefined();
     await expect((await WorkspaceStore.create(root)).readProject()).resolves.toMatchObject({
       name: path.basename(root),
       language: "zh-CN",
@@ -76,6 +81,21 @@ describe("novel source compiler loop", () => {
     await expect(prepareSourceLoopFromInput(root, "请分析刘备的角色目标")).resolves.toBeNull();
   });
 
+  it("archives direct content and compiles it without creating a source file", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-source-content-"));
+    roots.push(root);
+    const exactContent = "\n第一章\n人物进入城池。\n\n";
+    const preparation = await prepareSourceLoopFromContent(root, exactContent, { title: "inline.txt" });
+
+    expect(preparation.status).toBe("ready");
+    expect(preparation.source).toMatchObject({ title: "inline.txt", sourcePath: "content:inline.txt" });
+    if (preparation.status !== "ready") throw new Error("expected compiler turn");
+    expect(preparation.prompt).toContain("人物进入城池");
+    expect((await readSourceMaterial(root, preparation.source)).toString("utf8")).toBe(exactContent);
+    await expect(fs.stat(path.join(root, "inline.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.stat(path.join(root, ".novel-harness"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("uses configured project metadata when a pasted path initializes local state", async () => {
     const { root, novel } = await fixture();
     await fs.writeFile(
@@ -91,6 +111,20 @@ describe("novel source compiler loop", () => {
       name: "configured-world",
       language: "en",
     });
+  });
+
+  it("does not let a TUI source turn reclassify configured guidance as novel evidence", async () => {
+    const { root } = await fixture();
+    const guidance = path.join(root, "NWH.md");
+    await fs.writeFile(guidance, "Trusted harness guidance.\n", "utf8");
+    await fs.writeFile(
+      path.join(root, "novel-harness.yaml"),
+      "version: 1\nproject:\n  name: configured-world\n  instructions:\n    - NWH.md\n",
+      "utf8",
+    );
+
+    await expect(prepareSourceLoopFromInput(root, guidance))
+      .rejects.toThrow("configured as trusted project guidance");
   });
 
   it("does not turn a standalone source-code attachment into a novel compiler loop", async () => {

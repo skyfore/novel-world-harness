@@ -14,11 +14,38 @@ export type NwhWelcomeOptions = {
 
 type ConversationEntry = {
   type: string;
-  message?: { role?: string };
+  message?: { role?: string; customType?: string; display?: boolean };
+  customType?: string;
+  data?: unknown;
+  display?: boolean;
 };
 
 export function isFreshConversation(entries: readonly ConversationEntry[]): boolean {
-  return !entries.some((entry) => entry.type === "message" && entry.message?.role === "user");
+  return !entries.some((entry) => {
+    if (entry.type === "message") {
+      if (entry.message?.role === "user" || entry.message?.role === "assistant") return true;
+      return entry.message?.role === "custom" && entry.message.display !== false;
+    }
+    if (entry.type === "custom_message") return entry.display !== false;
+    if (entry.type === "custom" && entry.customType === "nwh-narrator") return true;
+    return entry.type === "compaction" || entry.type === "branch_summary";
+  });
+}
+
+/**
+ * Player input is intercepted before Pi appends a normal user message, then
+ * persisted as `nwh-play`; narrator prose is persisted as `nwh-narrator`.
+ * Those custom entries therefore are the durable signal that a transcript
+ * already contains world context. Looking only for `role=user` misclassifies a
+ * long-running player transcript as new and launches a duplicate narrator.
+ */
+export function hasPlayerConversation(entries: readonly ConversationEntry[]): boolean {
+  return entries.some((entry) => {
+    const customType = entry.type === "custom_message" || entry.type === "custom"
+      ? entry.customType
+      : entry.message?.customType;
+    return customType === "nwh-play" || customType === "nwh-narrator";
+  });
 }
 
 type RenderRequester = {
@@ -34,9 +61,21 @@ function copyLines(options: NwhWelcomeOptions): string[] {
     return [
       "NWH  Novel World Harness",
       subtitle,
-      "Welcome back. Continue the conversation or type /status.",
+      options.mode === "compiler"
+        ? "Welcome back. Continue the compiler task or type /status."
+        : "Welcome back. Use /continue for the latest saved world, /switch to change worlds, or /status for details.",
       "Use /help whenever you need the command map.",
       "",
+    ];
+  }
+
+  if (options.mode === "compiler") {
+    return [
+      "NWH  Novel World Harness",
+      subtitle,
+      "1  Sign in with /login, then choose with /model",
+      "2  Paste a novel path to start the world compiler loop",
+      "3  Continue with /compile-next; /help shows every command",
     ];
   }
 
@@ -44,8 +83,8 @@ function copyLines(options: NwhWelcomeOptions): string[] {
     "NWH  Novel World Harness",
     subtitle,
     "1  Sign in with /login, then choose with /model",
-    "2  Paste a novel path to start the world compiler loop",
-    "3  Continue with /compile-next; /help shows every command",
+    "2  No world is active; /novels and /instances show what is ready",
+    "3  /play chooses a world; paste a novel path to compile",
   ];
 }
 
@@ -59,9 +98,11 @@ export function renderNwhWelcome(
   const copy = copyLines(options);
 
   if (width < 48) {
+    const freshHint = options.mode === "compiler" ? "/login -> /model" : "/continue, /switch, or paste a novel";
+    const returningHint = options.mode === "compiler" ? "Continue compiler. /status" : "Welcome back. /continue · /switch · /create-instance";
     return [
       `${theme.fg("accent", `(${eyes})`)} ${theme.bold("NWH")}`,
-      theme.fg("muted", options.freshConversation ? "/login -> /model" : "Welcome back. /status"),
+      theme.fg("muted", options.freshConversation ? freshHint : returningHint),
       theme.fg("dim", options.freshConversation ? "paste novel path -> compile" : "/help for commands"),
     ];
   }

@@ -21,7 +21,7 @@ describe("ingest command", () => {
     await fs.writeFile(novel, "第一章\n人物进入城池。\n", "utf8");
     vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-    await ingestCommand(novel, path.join(root, "novel-harness.yaml"));
+    await ingestCommand(novel, path.join(root, "novel-harness.yaml"), path.join(root, "prepared-cache"));
 
     const store = await WorkspaceStore.create(root);
     await expect(store.readProject()).resolves.toMatchObject({
@@ -31,5 +31,21 @@ describe("ingest command", () => {
     const [source] = await store.listSources();
     expect(source).toBeDefined();
     await expect(new SegmentStore(root).readManifest(source!.id)).resolves.toMatchObject({ sourceId: source!.id });
+  });
+
+  it("rejects one physical file being both trusted guidance and novel evidence", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-ingest-trust-conflict-"));
+    roots.push(root);
+    const guidance = path.join(root, "NWH.md");
+    await fs.writeFile(guidance, "This text cannot change trust roles mid-session.\n", "utf8");
+    await fs.writeFile(
+      path.join(root, "novel-harness.yaml"),
+      "version: 1\nproject:\n  name: trust-conflict\n  instructions:\n    - NWH.md\n",
+      "utf8",
+    );
+
+    await expect(ingestCommand(guidance, path.join(root, "novel-harness.yaml")))
+      .rejects.toThrow("configured as trusted project guidance");
+    await expect((await WorkspaceStore.create(root)).listSources()).resolves.toEqual([]);
   });
 });

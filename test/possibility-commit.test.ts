@@ -17,11 +17,14 @@ async function fixture() {
   const source = await createEvidenceFixture(root, "Hero may refuse the key.\n");
   const service = new PossibilityCommitService(root);
   await service.canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: source.evidence("Hero") });
+  await service.canon.putEntity({ id: "witness", kind: "character", canonicalName: "Witness", aliases: [], evidence: source.evidence("Hero") });
+  await service.canon.putEntity({ id: "hall", kind: "location", canonicalName: "Hall", aliases: [], evidence: source.evidence("Hero") });
   await service.canon.putClaim({ id: "known", subject: "hero", predicate: "knows", object: "key", epistemicType: "explicit-fact", evidence: source.evidence("Hero") });
   await service.canon.putEvent({
     id: "give-key",
     title: "Hero gives the key",
     participants: ["hero"],
+    participantPresence: [{ entityId: "hero", mode: "physical" }],
     storyTime: { kind: "unknown" },
     preconditions: [],
     observedOutcome: { version: 1, operations: [] },
@@ -33,6 +36,36 @@ async function fixture() {
 }
 
 describe("PossibilityCommitService", () => {
+  it("rejects non-character, non-participant, duplicate, and missing possibility presence", async () => {
+    const { service, evidence } = await fixture();
+    const invalid = await service.validate({
+      id: "invalid-presence",
+      kind: "environmental",
+      title: "Invalid presence declarations",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero", "hall"],
+      participantPresence: [
+        { entityId: "hall", mode: "physical" },
+        { entityId: "witness", mode: "remote" },
+        { entityId: "witness", mode: "mentioned" },
+      ],
+      causalParents: [],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence,
+    });
+
+    expect(invalid.accepted).toBe(false);
+    expect(invalid.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INVALID_PARTICIPANT_PRESENCE", path: "participantPresence.0.entityId" }),
+      expect.objectContaining({ code: "INVALID_PARTICIPANT_PRESENCE", path: "participantPresence.1.entityId" }),
+      expect.objectContaining({ code: "DUPLICATE_PARTICIPANT_PRESENCE", path: "participantPresence.2.entityId" }),
+      expect.objectContaining({ code: "MISSING_PARTICIPANT_PRESENCE", path: "participants.0" }),
+    ]));
+  });
+
   it("requires canon analogues to identify canon and validates proposed knowledge", async () => {
     const { service, evidence } = await fixture();
     const invalid = await service.validate({
@@ -42,6 +75,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: [],
       pressure: 1,
       relevance: 1,
@@ -56,12 +90,13 @@ describe("PossibilityCommitService", () => {
     ]));
 
     const valid = await service.validate({
-      id: "canon-give-key",
+      id: "alternate-give-key",
       kind: "canon-analogue",
       title: "Hero gives the key",
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: [],
       canonicalEventId: "give-key",
       pressure: 1,
@@ -73,6 +108,97 @@ describe("PossibilityCommitService", () => {
     expect(valid.accepted).toBe(true);
   });
 
+  it("rejects read acquisition whose document attribution has no quotation trace", async () => {
+    const { service, evidence } = await fixture();
+    await service.canon.putEntity({
+      id: "notice",
+      kind: "artifact",
+      canonicalName: "Notice",
+      aliases: [],
+      evidence,
+    });
+    await service.canon.putClaim({
+      id: "hero-may-refuse-claim",
+      subject: "hero",
+      predicate: "may-refuse-key",
+      object: true,
+      epistemicType: "explicit-fact",
+      evidence,
+    });
+    await service.canon.putProposition({
+      id: "hero-may-refuse",
+      subjectEntityId: "hero",
+      relationId: "may-refuse-key",
+      object: { kind: "literal", value: true },
+      polarity: "positive",
+      modality: "possible",
+      evidence,
+    });
+    await service.canon.putAttribution({
+      id: "notice-says-hero-may-refuse",
+      propositionId: "hero-may-refuse",
+      holderKind: "document",
+      holderEntityId: "notice",
+      attitude: "reports",
+      certainty: 1,
+      evidence,
+    });
+
+    const validation = await service.validate({
+      id: "hero-reads-notice",
+      kind: "generated",
+      title: "Hero reads the notice",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      causalParents: [],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      proposedKnowledge: {
+        version: 1,
+        operations: [{
+          op: "learn",
+          actorId: "hero",
+          claimId: "hero-may-refuse-claim",
+          propositionId: "hero-may-refuse",
+          attributionId: "notice-says-hero-may-refuse",
+          acquisitionMode: "read",
+          status: "believes",
+          confidence: 0.8,
+        }],
+      },
+      evidence,
+    });
+
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({
+      code: "INVALID_KNOWLEDGE_ACQUISITION_TRACE",
+      message: expect.stringContaining("requires attribution 'notice-says-hero-may-refuse' to cite a quotation"),
+    }));
+  });
+
+  it("reserves canon-* ids for canonical-derived possibilities", async () => {
+    const { service, evidence } = await fixture();
+    const validation = await service.validate({
+      id: "canon-manual-shadow",
+      kind: "generated",
+      title: "Manual shadow",
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      causalParents: [],
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence,
+    });
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "RESERVED_POSSIBILITY_ID" }));
+  });
+
   it("rejects actor-plan templates and unknown causal parents", async () => {
     const { service, evidence } = await fixture();
     const validation = await service.validate({
@@ -82,6 +208,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: ["missing-parent"],
       pressure: 1,
       relevance: 1,
@@ -104,6 +231,7 @@ describe("PossibilityCommitService", () => {
       preconditions: [],
       blockers: [],
       participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
       causalParents: [],
       pressure: 1,
       relevance: 1,
@@ -112,5 +240,115 @@ describe("PossibilityCommitService", () => {
     });
     expect(validation.accepted).toBe(false);
     expect(validation.errors).toContainEqual(expect.objectContaining({ code: "INERT_PLAYER_CHOICE" }));
+  });
+
+  it("accepts only source-event-preserving canonical scaffolds with validated role gates", async () => {
+    const { service, evidence } = await fixture();
+    const base = {
+      id: "give-key-role-scaffold",
+      kind: "canon-analogue" as const,
+      title: "A qualified holder participates in the key event",
+      candidateWindow: { kind: "unknown" as const },
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" as const }],
+      causalParents: [],
+      canonicalEventId: "give-key",
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1 as const, operations: [] },
+      canonicalScaffold: {
+        version: 1 as const,
+        mode: "participant-remap" as const,
+        roles: [{
+          roleId: "holder",
+          canonicalEntityId: "hero",
+          description: "the character currently responsible for the key",
+          allowedEntityKinds: ["character" as const],
+          presence: "active-scene" as const,
+          requiredState: [],
+          requiresKnowledge: ["known"],
+        }],
+      },
+      evidence,
+    };
+    const valid = await service.validate(base);
+    expect(valid.accepted).toBe(true);
+
+    const invalid = await service.validate({
+      ...base,
+      id: "forged-give-key-role-scaffold",
+      causalParents: ["give-key"],
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.alive", value: false }],
+      },
+      canonicalScaffold: {
+        ...base.canonicalScaffold,
+        roles: [{ ...base.canonicalScaffold.roles[0]!, requiresKnowledge: ["missing-claim"] }],
+      },
+    });
+    expect(invalid.accepted).toBe(false);
+    expect(invalid.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "SCAFFOLD_EFFECT_MISMATCH" }),
+      expect.objectContaining({ code: "SCAFFOLD_CAUSAL_PARENT_MISMATCH" }),
+      expect.objectContaining({ code: "UNKNOWN_SCAFFOLD_ROLE_CLAIM" }),
+    ]));
+  });
+
+  it("rejects a scaffold whose locked opaque effect still names the replaceable participant", async () => {
+    const { service, evidence } = await fixture();
+    await service.canon.putEvent({
+      id: "named-plan",
+      title: "Hero receives a person-specific plan",
+      participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      storyTime: { kind: "unknown" },
+      preconditions: [],
+      observedOutcome: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "Hero remains the designated holder" }],
+      },
+      evidence,
+      causalParents: [],
+      confidence: 1,
+    });
+    const validation = await service.validate({
+      id: "named-plan-scaffold",
+      kind: "canon-analogue",
+      title: "A qualified person receives the plan",
+      candidateWindow: { kind: "unknown" },
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      causalParents: [],
+      canonicalEventId: "named-plan",
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: {
+        version: 1,
+        operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "Hero remains the designated holder" }],
+      },
+      canonicalScaffold: {
+        version: 1,
+        mode: "participant-remap",
+        roles: [{
+          roleId: "holder",
+          canonicalEntityId: "hero",
+          description: "the designated holder",
+          allowedEntityKinds: ["character"],
+          presence: "anywhere",
+          requiredState: [],
+          requiresKnowledge: [],
+        }],
+      },
+      evidence,
+    });
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({
+      code: "SCAFFOLD_OPAQUE_ROLE_REFERENCE",
+    }));
   });
 });

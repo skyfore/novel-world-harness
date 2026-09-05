@@ -4,30 +4,31 @@ import { z } from "zod";
 import { validateEventProposal } from "../world/engine.js";
 import { diffWorldBranches } from "../world/diff.js";
 import { fsckWorld } from "../world/fsck.js";
-import { InitialWorldStore } from "../world/initial.js";
 import { KnowledgeProjector } from "../world/knowledge.js";
-import { eventProposalSchema, predicateSchema, stateDeltaSchema, type CommitId } from "../world/model.js";
+import {
+  eventProposalBaseSchema,
+  eventProposalSchema,
+  predicateSchema,
+  stateDeltaSchema,
+  validateCanonicalAdaptationProposalEnvelope,
+  type CommitId,
+} from "../world/model.js";
 import { NarrativeRenderer } from "../world/narrative.js";
 import { runIsolatedCanonReplay } from "../world/replay.js";
 import { WorldSnapshotStore } from "../world/snapshot.js";
 import { openWorkspaceWorld } from "../world/workspace-runtime.js";
+import { createWorldBranch } from "../world/instance.js";
+
+export { createWorldBranch } from "../world/instance.js";
 
 async function openWorld(root: string) {
   const { engine, runtime, actorModels } = await openWorkspaceWorld(root);
   return { engine, actors: actorModels, runtime };
 }
 
-export async function worldCreateCommand(root: string, branchId: string, seedPath?: string): Promise<void> {
-  const { engine } = await openWorld(root);
-  const canonicalInitial = seedPath ? null : await new InitialWorldStore(root).get();
-  if (!seedPath && !canonicalInitial) {
-    throw new Error("No accepted initial world. Review and accept an initial-world proposal before creating a playable branch, or pass --seed explicitly.");
-  }
-  const seed = seedPath
-    ? stateDeltaSchema.parse(JSON.parse(await fs.readFile(seedPath, "utf8")))
-    : canonicalInitial!.delta;
-  const head = await engine.createBranch(branchId, branchId, seed, seedPath ? undefined : canonicalInitial?.knowledge);
-  stdout.write(`${branchId}\t${head}${canonicalInitial && !seedPath ? "\t[canonical initial world]" : ""}\n`);
+export async function worldCreateCommand(root: string, branchId: string, seedPath?: string, sourceId?: string, cacheRoot?: string): Promise<void> {
+  const created = await createWorldBranch(root, branchId, seedPath, sourceId, cacheRoot);
+  stdout.write(`${branchId}\t${created.head}${created.usedCanonicalInitial ? "\t[canonical initial world]" : ""}${created.preparedRevisionHash ? `\trevision=${created.preparedRevisionHash}` : ""}\n`);
 }
 
 export async function worldShowCommand(root: string, branchId: string): Promise<void> {
@@ -65,7 +66,8 @@ export async function worldFrontierCommand(root: string, branchId: string): Prom
   const { runtime } = await openWorld(root);
   const frontier = await runtime.refreshFrontier(branchId);
   for (const entry of frontier.evaluated) {
-    stdout.write(`${entry.status}\t${entry.score.toFixed(4)}\t${entry.possibility.id}\t${entry.possibility.title}\n`);
+    const tuple = entry.trace.tuple;
+    stdout.write(`${entry.status}\tT${tuple.tier}\tdue=${tuple.dueTime ?? "-"}\t${entry.possibility.id}\t${entry.possibility.title}\n`);
     for (const reason of entry.reasons) stdout.write(`  - ${reason}\n`);
   }
 }
@@ -79,9 +81,10 @@ export async function worldKnowledgeCommand(root: string, branchId: string, acto
 export async function worldActorCommand(root: string, branchId: string, actorId: string): Promise<void> {
   const { engine, actors } = await openWorld(root);
   const head = await engine.branches.readHead(branchId);
+  const context = await engine.contextForCommit(head);
   const [model, goals, view] = await Promise.all([
-    actors.getModel(actorId),
-    actors.listGoals(actorId),
+    context.actorModels ? context.actorModels.get(actorId) : actors.getModel(actorId),
+    context.actorGoals?.filter((goal) => goal.actorId === actorId) ?? actors.listGoals(actorId),
     new KnowledgeProjector(engine).view(actorId, head),
   ]);
   stdout.write(`${JSON.stringify({ actorId, model, goals, view }, null, 2)}\n`);
@@ -102,7 +105,9 @@ export async function worldRenderCommand(root: string, branchId: string, actorId
   stdout.write(`${await renderer.render(branchId, head, style)}\n`);
 }
 
-const proposalFileSchema = eventProposalSchema.omit({ branchId: true, expectedParentCommit: true });
+const proposalFileSchema = eventProposalBaseSchema
+  .omit({ branchId: true, expectedParentCommit: true })
+  .superRefine(validateCanonicalAdaptationProposalEnvelope);
 
 export async function worldValidateCommand(root: string, branchId: string, proposalPath: string): Promise<void> {
   const { engine } = await openWorld(root);
@@ -148,8 +153,8 @@ export async function worldReplayCommand(root: string, branchId: string, checkpo
 export async function worldSnapshotCommand(root: string, branchId: string): Promise<void> {
   const { engine } = await openWorld(root);
   const head = await engine.branches.readHead(branchId);
-  const state = await engine.projector.project(head);
-  const snapshot = await new WorldSnapshotStore(root).write(head, state);
+  const projection = await engine.projections.project(head);
+  const snapshot = await new WorldSnapshotStore(root).write(projection);
   stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
 }
 

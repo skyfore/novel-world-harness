@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { CompilerBatchStore, prepareCompilerBatches, type CompilerBatch } from "./batches.js";
+import { CompilerBatchStore, hydrateCompilerBatch, prepareCompilerBatches, type CompilerBatch } from "./batches.js";
 import { loadOptionalConfig } from "../config/load.js";
 import type { SourceDocument } from "../storage/workspace-store.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
+import { PreparedNovelCache, type PreparedCacheResult } from "./prepared-cache.js";
+import { assertSourceIsNotProjectInstruction } from "../workspace/instruction-trust.js";
 
 const AUTO_SOURCE_EXTENSIONS = new Set([".txt", ".text", ".novel", ".md", ".markdown"]);
 
@@ -22,6 +24,7 @@ export type SourceLoopComplete = {
   status: "complete";
   source: SourceDocument;
   totalBatches: number;
+  preparedCache?: PreparedCacheResult;
 };
 
 export type SourceLoopPreparation = SourceLoopTurn | SourceLoopComplete;
@@ -42,6 +45,7 @@ export function parseStandaloneSourcePath(input: string): string | undefined {
 export async function prepareSourceLoopFromInput(
   workspaceRoot: string,
   input: string,
+  options: { cacheRoot?: string } = {},
 ): Promise<SourceLoopPreparation | null> {
   const candidate = parseStandaloneSourcePath(input);
   if (!candidate) return null;
@@ -60,9 +64,30 @@ export async function prepareSourceLoopFromInput(
   await workspace.readFile({ path: absolute, startLine: 1, endLine: 1 });
   const store = await WorkspaceStore.create(workspaceRoot);
   const config = await loadOptionalConfig(path.join(workspaceRoot, "novel-harness.yaml"));
+  await assertSourceIsNotProjectInstruction(workspaceRoot, absolute, config?.project.instructions);
   await store.ensureProject(config?.project);
   const source = await store.registerSource(absolute);
-  return prepareSourceLoopForSource(workspaceRoot, source);
+  const preparedCache = await new PreparedNovelCache(workspaceRoot, options.cacheRoot).restore(source);
+  const preparation = await prepareSourceLoopForSource(workspaceRoot, source);
+  return preparation.status === "complete" && preparedCache.status !== "miss"
+    ? { ...preparation, preparedCache }
+    : preparation;
+}
+
+export async function prepareSourceLoopFromContent(
+  workspaceRoot: string,
+  content: string | Uint8Array,
+  options: { title?: string; cacheRoot?: string } = {},
+): Promise<SourceLoopPreparation> {
+  const store = await WorkspaceStore.create(workspaceRoot);
+  const config = await loadOptionalConfig(path.join(workspaceRoot, "novel-harness.yaml"));
+  await store.ensureProject(config?.project);
+  const source = await store.registerSourceContent(options.title ?? "pasted-novel.txt", content);
+  const preparedCache = await new PreparedNovelCache(workspaceRoot, options.cacheRoot).restore(source);
+  const preparation = await prepareSourceLoopForSource(workspaceRoot, source);
+  return preparation.status === "complete" && preparedCache.status !== "miss"
+    ? { ...preparation, preparedCache }
+    : preparation;
 }
 
 export async function prepareNextSourceLoopTurn(
@@ -93,16 +118,17 @@ async function prepareSourceLoopForSource(
   const completed = new Set(progress.completedBatchIds);
   const batch = batches.find((candidate) => !completed.has(candidate.id));
   if (!batch) return { status: "complete", source, totalBatches: batches.length };
+  const hydratedBatch = await hydrateCompilerBatch(workspaceRoot, batch);
 
   const completedBatches = batches.filter((candidate) => completed.has(candidate.id)).length;
   return {
     status: "ready",
     source,
-    batch,
+    batch: hydratedBatch,
     totalBatches: batches.length,
     completedBatches,
     remainingAfterBatch: Math.max(0, batches.length - completedBatches - 1),
-    prompt: buildSourceLoopPrompt(source, batch, completedBatches, batches.length),
+    prompt: buildSourceLoopPrompt(source, hydratedBatch, completedBatches, batches.length),
   };
 }
 
@@ -112,9 +138,9 @@ function buildSourceLoopPrompt(
   completedBatches: number,
   totalBatches: number,
 ): string {
-  return `The user supplied the novel source ${source.sourcePath}. NWH has registered it as ${source.id}, split it into evidence segments, and selected compiler batch ${completedBatches + 1}/${totalBatches}.
+  return `NWH has registered immutable novel source ${source.id}, split it into evidence segments, and selected compiler batch ${completedBatches + 1}/${totalBatches}. The upload path and filename are intentionally withheld because they are not novel metadata.
 
-Execute the novel-world compiler loop now. Do not stop at identifying the book, explaining NWH, or suggesting commands. Treat the novel and its emerging world model as the primary subject. Repository source and documentation remain available as secondary context when the user explicitly asks about the harness or when compiler behavior genuinely requires inspection.
+Execute the novel-world compiler loop now. Do not stop at identifying the book, explaining NWH, or suggesting commands. Treat the novel and its emerging world model as the primary subject. This isolated source-review turn has no workspace or repository read tools; its evidence slice and source-scoped artifact retrieval tools are the complete permitted inputs.
 
 For this bounded batch, analyze the supplied evidence, use the typed propose_* tools to record small pending candidates, and finish with a concise progress report covering created proposals, unresolved identities or contradictions, and the next evidence frontier. Proposals are not committed world truth.
 

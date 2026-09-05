@@ -2,8 +2,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CompilerProposalService } from "../src/compiler/proposals.js";
-import { convergeWorldProposals } from "../src/compiler/converge.js";
+import { CompilerProposalService, validateCompilerProposalClosure } from "../src/compiler/proposals.js";
+import { convergeWorldProposals, quarantineUncommittableProposals } from "../src/compiler/converge.js";
 import { CompilerCommitService } from "../src/compiler/validator.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 
@@ -15,21 +15,308 @@ afterEach(async () => {
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-compiler-"));
   roots.push(root);
-  const source = await createEvidenceFixture(root, "曹操\nUnknown person appears\n");
-  return { proposals: new CompilerProposalService(root), commits: new CompilerCommitService(root), evidence: source.evidence };
+  const source = await createEvidenceFixture(root, "曹操，字孟德\n北门\nUnknown person appears\n");
+  return { root, proposals: new CompilerProposalService(root), commits: new CompilerCommitService(root), evidence: source.evidence };
+}
+
+function ruleEvidenceAssertions(artifactId: string, reference: ReturnType<Awaited<ReturnType<typeof createEvidenceFixture>>["evidence"]>[number]) {
+  const anchor = {
+    version: 1 as const,
+    sourceId: reference.span.sourceId,
+    startByte: reference.span.startByte!,
+    endByte: reference.span.endByte!,
+    startLine: reference.span.startLine,
+    endLine: reference.span.endLine,
+    exactHash: reference.span.quoteHash,
+    prefixHash: "0".repeat(64),
+    suffixHash: "0".repeat(64),
+    contextBytes: 64 as const,
+    normalization: "source-bytes-v1" as const,
+  };
+  return ["/name", "/clauses/0/predicate"].map((jsonPointer, index) => ({
+    version: 1 as const,
+    id: `${artifactId}-evidence-${index}`,
+    target: { artifactKind: "world-rule", artifactId, jsonPointer },
+    anchors: [anchor],
+    relation: "supports" as const,
+    strength: reference.strength,
+    derivation: { runId: "compiler-validator-test", worker: "test", ontologyVersion: "evidence-v1" as const },
+  }));
 }
 
 describe("CompilerCommitService", () => {
+  it("commits source-induced action constraints, norms, and processes after their typed dependencies", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-compiler-executable-policy-"));
+    roots.push(root);
+    const source = await createEvidenceFixture(
+      root,
+      "Hero hears the warning. Hero departs for the Gate. Hero arrives at the Gate.\n",
+    );
+    const proposals = new CompilerProposalService(root);
+    const evidence = source.evidence("Hero hears the warning. Hero departs for the Gate. Hero arrives at the Gate.");
+
+    for (const [proposalId, id, kind, canonicalName, quote] of [
+      ["policy-hero-proposal", "hero", "character", "Hero", "Hero"],
+      ["policy-gate-proposal", "gate", "location", "Gate", "Gate"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind, canonicalName, aliases: [], evidence: source.evidence(quote) },
+        generatedBy: { worker: "test" },
+      });
+    }
+    await proposals.submit("canonical-event", {
+      proposalId: "policy-depart-event-proposal",
+      payload: {
+        id: "hero-departs",
+        title: "Hero departs for the Gate",
+        participants: ["hero"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        storyTime: { kind: "ordinal", label: "departure", orderHint: 1 },
+        preconditions: [],
+        observedOutcome: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "reach-gate" }],
+        },
+        evidence: source.evidence("Hero departs for the Gate"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "policy-arrive-event-proposal",
+      payload: {
+        id: "hero-arrives",
+        title: "Hero arrives at the Gate",
+        participants: ["hero"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        storyTime: { kind: "ordinal", label: "arrival", orderHint: 2 },
+        preconditions: [],
+        observedOutcome: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.location", value: "gate" }],
+        },
+        evidence: source.evidence("Hero arrives at the Gate"),
+        causalParents: ["hero-departs"],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("action-schema", {
+      proposalId: "policy-travel-action-proposal",
+      payload: {
+        ontologyVersion: "action-schema-v1",
+        id: "travel-to-gate",
+        name: "Travel to the Gate",
+        roles: [{
+          id: "traveler",
+          label: "traveler",
+          allowedEntityKinds: ["character"],
+          minCardinality: 1,
+          maxCardinality: 1,
+        }],
+        parameters: [],
+        preconditions: [],
+        stateEffects: [{
+          op: "set",
+          entity: { kind: "role", roleId: "traveler" },
+          field: "character.location",
+          value: { source: "literal", value: "gate" },
+          required: true,
+        }],
+        effectEnvelope: {
+          maxStateOperations: 1,
+          allowedStateFields: ["character.location"],
+          allowsKnowledge: false,
+          allowsTimeAdvance: true,
+          allowsSceneTransition: true,
+        },
+        induction: { kind: "source-pattern", supportingEventIds: ["hero-departs", "hero-arrives"] },
+        evidence,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("action-constraint", {
+      proposalId: "policy-living-traveler-constraint-proposal",
+      payload: {
+        ontologyVersion: "action-constraint-v1",
+        id: "living-traveler-only",
+        name: "A traveler must be alive",
+        actionPattern: { kind: "schema", schemaId: "travel-to-gate" },
+        appliesWhen: [],
+        clauses: [{
+          id: "traveler-alive",
+          timing: "before",
+          modality: "require",
+          predicate: { op: "fact-equals", entity: { kind: "role", roleId: "traveler" }, field: "character.alive", value: true },
+        }],
+        exceptions: [],
+        priority: 10,
+        defeasible: true,
+        overridesConstraintIds: [],
+        status: "supported",
+        visibility: "public",
+        induction: { kind: "source-pattern", supportingEventIds: ["hero-departs"] },
+        evidence,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("norm-template", {
+      proposalId: "policy-warning-obligation-proposal",
+      payload: {
+        ontologyVersion: "norm-template-v1",
+        id: "heed-warning",
+        name: "Heed the warning by departing",
+        modality: "obligation",
+        actionPattern: { kind: "schema", schemaId: "travel-to-gate" },
+        authorityEntityId: "hero",
+        appliesWhen: [],
+        exceptions: [],
+        reparations: [],
+        priority: 10,
+        defeasible: true,
+        overridesTemplateIds: [],
+        status: "supported",
+        visibility: "public",
+        knownByClaimIds: [],
+        induction: { kind: "source-pattern", supportingEventIds: ["hero-departs"] },
+        evidence,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("process-template", {
+      proposalId: "policy-journey-process-proposal",
+      payload: {
+        ontologyVersion: "process-template-v1",
+        id: "journey-to-gate",
+        name: "Journey to the Gate",
+        ownerRoles: [{
+          id: "traveler",
+          label: "traveler",
+          allowedEntityKinds: ["character"],
+          minCardinality: 1,
+          maxCardinality: 1,
+        }],
+        phases: [
+          { id: "departed", label: "Departed", terminal: false },
+          { id: "arrived", label: "Arrived", terminal: true },
+        ],
+        initialPhaseId: "departed",
+        transitions: [{ fromPhaseId: "departed", toPhaseId: "arrived", minimumProgress: 1 }],
+        outcomeIds: ["arrived"],
+        visibility: "observable",
+        induction: { kind: "source-pattern", supportingEventIds: ["hero-departs", "hero-arrives"] },
+        evidence,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await convergeWorldProposals(root, source.source.id);
+    expect(result.canonical.blocked).toEqual([]);
+    expect(result.canonical.accepted).toEqual(expect.arrayContaining([
+      { id: "policy-travel-action-proposal", kind: "action-schema" },
+      { id: "policy-living-traveler-constraint-proposal", kind: "action-constraint" },
+      { id: "policy-warning-obligation-proposal", kind: "norm-template" },
+      { id: "policy-journey-process-proposal", kind: "process-template" },
+    ]));
+    const canon = new CompilerCommitService(root).canon;
+    await expect(canon.getActionConstraint("living-traveler-only")).resolves.toMatchObject({
+      actionPattern: { kind: "schema", schemaId: "travel-to-gate" },
+    });
+    await expect(canon.getNormTemplate("heed-warning")).resolves.toMatchObject({ modality: "obligation" });
+    await expect(canon.getProcessTemplate("journey-to-gate")).resolves.toMatchObject({ initialPhaseId: "departed" });
+
+    await expect(proposals.submit("action-constraint", {
+      proposalId: "forged-domain-module",
+      payload: {
+        ontologyVersion: "action-constraint-v1",
+        id: "forged-domain-module",
+        name: "Forged domain mechanic",
+        actionPattern: { kind: "any" },
+        appliesWhen: [],
+        clauses: [{
+          id: "always-alive",
+          timing: "before",
+          modality: "require",
+          predicate: { op: "fact-equals", entity: { kind: "entity", entityId: "hero" }, field: "character.alive", value: true },
+        }],
+        exceptions: [],
+        priority: 1,
+        defeasible: true,
+        overridesConstraintIds: [],
+        status: "supported",
+        visibility: "engine",
+        induction: { kind: "domain-module", moduleId: "forged", moduleVersion: "1" },
+        evidence: [],
+      },
+      generatedBy: { worker: "test" },
+    })).rejects.toThrow();
+  });
+
   it("commits an evidence-backed entity after deterministic validation", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {
       proposalId: "entity-cao",
-      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: ["孟德"], evidence: evidence("曹操") },
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: ["孟德"], evidence: evidence("曹操，字孟德") },
       generatedBy: { worker: "test" },
     });
     const validation = await commits.accept("entity", "entity-cao");
     expect(validation.accepted).toBe(true);
     await expect(commits.canon.getEntity("cao-cao")).resolves.toMatchObject({ canonicalName: "曹操" });
+  });
+
+  it("keeps entity names and aliases pending when they are absent from verified evidence", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-inferred-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: ["孟德"], evidence: evidence("Unknown person appears") },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("entity", "entity-inferred-cao");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "UNSUPPORTED_ENTITY_CANONICAL_NAME", path: "canonicalName" }),
+      expect.objectContaining({ code: "UNSUPPORTED_ENTITY_ALIAS", path: "aliases.0" }),
+    ]));
+    await expect(commits.canon.getEntity("cao-cao")).rejects.toThrow();
+  });
+
+  it("accepts an evidence-backed entity without inventing aliases", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-no-alias",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("entity", "entity-no-alias");
+    expect(validation.accepted).toBe(true);
+    expect(validation.warnings).toEqual([]);
+  });
+
+  it("accepts a Chinese personal name explicitly composed from surname and given name", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-compiler-composed-name-"));
+    roots.push(root);
+    const source = await createEvidenceFixture(root, "此人复姓诸葛，名亮，字孔明，号卧龙先生。\n");
+    const proposals = new CompilerProposalService(root);
+    const commits = new CompilerCommitService(root);
+    await proposals.submit("entity", {
+      proposalId: "entity-zhuge-liang",
+      payload: {
+        id: "zhuge-liang",
+        kind: "character",
+        canonicalName: "诸葛亮",
+        aliases: ["孔明", "卧龙先生"],
+        evidence: source.evidence("此人复姓诸葛，名亮，字孔明，号卧龙先生。"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("entity", "entity-zhuge-liang");
+    expect(validation.accepted).toBe(true);
+    await expect(commits.canon.getEntity("zhuge-liang")).resolves.toMatchObject({ canonicalName: "诸葛亮" });
   });
 
   it("keeps an invalid event pending when it references an unknown participant", async () => {
@@ -54,6 +341,287 @@ describe("CompilerCommitService", () => {
     expect(validation.errors.some((error) => error.code === "UNKNOWN_PARTICIPANT")).toBe(true);
     await expect(commits.canon.getEvent("event-1")).rejects.toThrow();
     await expect(commits.proposals.read("pending", "bad-event", (await import("../src/world/model.js")).canonicalEventSchema)).resolves.toMatchObject({ id: "bad-event" });
+  });
+
+  it("persists exact deterministic diagnostics when convergence quarantines a proposal", async () => {
+    const { root, proposals, commits, evidence } = await fixture();
+    await proposals.submit("claim", {
+      proposalId: "diagnosed-bad-claim",
+      payload: {
+        id: "diagnosed-bad-claim-artifact",
+        subject: "missing-subject",
+        predicate: "present",
+        object: true,
+        epistemicType: "explicit-fact",
+        evidence: evidence("Unknown person appears"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const convergence = await convergeWorldProposals(root);
+    await quarantineUncommittableProposals(root, convergence);
+
+    await expect(commits.proposals.readRejection("diagnosed-bad-claim")).resolves.toMatchObject({
+      proposalId: "diagnosed-bad-claim",
+      kind: "claim",
+      errors: [expect.objectContaining({ code: "UNKNOWN_SUBJECT", path: "subject" })],
+    });
+  });
+
+  it("requires exactly character-scoped event presence during canonical validation", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [proposalId, id, kind, name, quote] of [
+      ["presence-cao", "cao-cao", "character", "曹操", "曹操"],
+      ["presence-gate", "north-gate", "location", "北门", "北门"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind, canonicalName: name, aliases: [], evidence: evidence(quote) },
+        generatedBy: { worker: "test" },
+      });
+    }
+    expect((await commits.acceptAllValid()).blocked).toEqual([]);
+    await proposals.submit("canonical-event", {
+      proposalId: "invalid-presence-event",
+      payload: {
+        id: "cao-at-gate",
+        title: "曹操来到北门",
+        participants: ["cao-cao", "north-gate"],
+        participantPresence: [{ entityId: "north-gate", mode: "physical" }],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操，字孟德\n北门"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("canonical-event", "invalid-presence-event");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "INVALID_PARTICIPANT_PRESENCE" }),
+      expect.objectContaining({ code: "MISSING_PARTICIPANT_PRESENCE" }),
+    ]));
+  });
+
+  it("rejects a later-character checkpoint that has presence but no actionable pre-event state", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entry-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "entry-cao")).accepted).toBe(true);
+    await proposals.submit("canonical-event", {
+      proposalId: "inactionable-entry-event",
+      payload: {
+        id: "cao-appears",
+        title: "曹操 appears",
+        readerSummary: "曹操 appears at the northern gate.",
+        participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+        characterEntryCheckpoints: [{
+          actorId: "cao-cao",
+          readerSetup: "曹操 is about to enter the scene.",
+          actorObservation: "You can see the northern gate.",
+          participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+          delta: {
+            version: 1,
+            operations: [{ op: "set", entityId: "cao-cao", field: "character.alive", value: true }],
+          },
+        }],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("canonical-event", "inactionable-entry-event");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "INACTIONABLE_CHARACTER_ENTRY" }));
+  });
+
+  it("rejects an empty opening snapshot that cannot produce a playable character", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "opening-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "opening-cao")).accepted).toBe(true);
+    await proposals.submit("initial-world", {
+      proposalId: "empty-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("initial-world", "empty-opening");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "UNPLAYABLE_INITIAL_WORLD" }));
+  });
+
+  it("rejects an alive-only opening inventory for a multi-character source", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [proposalId, id, name] of [
+      ["opening-cao", "cao-cao", "曹操"],
+      ["opening-stranger", "stranger", "Unknown person"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind: "character", canonicalName: name, aliases: [], evidence: evidence(name) },
+        generatedBy: { worker: "test" },
+      });
+      expect((await commits.accept("entity", proposalId)).accepted).toBe(true);
+    }
+    await proposals.submit("initial-world", {
+      proposalId: "alive-inventory-opening",
+      payload: {
+        version: 1,
+        delta: {
+          version: 1,
+          operations: [
+            { op: "set", entityId: "cao-cao", field: "character.alive", value: true },
+            { op: "set", entityId: "stranger", field: "character.alive", value: true },
+          ],
+        },
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("initial-world", "alive-inventory-opening");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "INACTIONABLE_INITIAL_WORLD" }));
+  });
+
+  it("rejects character IDs stored as relationship references in an initial world", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "relationship-owner-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "relationship-owner-cao")).accepted).toBe(true);
+    await proposals.submit("initial-world", {
+      proposalId: "invalid-relationship-opening",
+      payload: {
+        version: 1,
+        delta: {
+          version: 1,
+          operations: [
+            { op: "set", entityId: "cao-cao", field: "character.alive", value: true },
+            { op: "set", entityId: "cao-cao", field: "character.relationships", value: ["cao-cao"] },
+          ],
+        },
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("initial-world", "invalid-relationship-opening");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({
+      code: "INVALID_RELATIONSHIP_REFERENCE",
+      path: "delta.operations.1.value.0",
+    }));
+  });
+
+  it("validates goal phase anchors, targets, and every action pattern at the commit boundary", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "goal-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "goal-cao")).accepted).toBe(true);
+    await proposals.submit("character-goal", {
+      proposalId: "bad-goal",
+      payload: {
+        id: "reach-missing-gate",
+        actorId: "cao-cao",
+        description: "Reach a later gate",
+        priority: 0.8,
+        requiresKnowledge: [],
+        targetIds: ["missing-gate"],
+        activation: {
+          preconditions: [],
+          afterCanonicalEventIds: ["missing-event"],
+        },
+        actionPatterns: [{
+          title: "Address a missing person",
+          participants: ["missing-person"],
+          preconditions: [],
+          proposedDelta: { version: 1, operations: [] },
+        }],
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("character-goal", "bad-goal");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "UNKNOWN_GOAL_TARGET" }),
+      expect.objectContaining({ code: "UNKNOWN_GOAL_EVENT" }),
+      expect.objectContaining({ code: "UNKNOWN_GOAL_PARTICIPANT" }),
+    ]));
+  });
+
+  it("rejects a canonical child whose story time precedes its causal parent", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "time-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "time-cao")).accepted).toBe(true);
+    await proposals.submit("canonical-event", {
+      proposalId: "future-parent",
+      payload: {
+        id: "future-parent-event",
+        title: "Later parent",
+        participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+        storyTime: { kind: "exact", value: "2050", precision: "year" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("canonical-event", "future-parent")).accepted).toBe(true);
+    await proposals.submit("canonical-event", {
+      proposalId: "past-child",
+      payload: {
+        id: "past-child-event",
+        title: "Earlier child",
+        participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+        storyTime: { kind: "exact", value: "1950", precision: "year" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: ["future-parent-event"],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("canonical-event", "past-child");
+    expect(validation.accepted).toBe(false);
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "TEMPORAL_CAUSAL_REGRESSION" }));
   });
 
   it("keeps an event with an unknown observed-knowledge claim pending", async () => {
@@ -104,25 +672,47 @@ describe("CompilerCommitService", () => {
     const { proposals, evidence } = await fixture();
     await proposals.submit("entity", {
       proposalId: "place",
-      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("曹操") },
+      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("北门") },
       generatedBy: { worker: "test" },
     });
+    const badRuleEvidence = evidence("曹操");
     await proposals.submit("world-rule", {
       proposalId: "bad-rule",
       payload: {
+        ontologyVersion: "world-rule-v2",
         id: "bad-rule",
         name: "Location uses a character-only field",
+        kind: "physical",
         scope: "location",
+        jurisdictionEntityIds: ["north-gate"],
         appliesWhen: [{ op: "fact-exists", entityId: "north-gate", field: "character.alive" }],
-        evidence: evidence("曹操"),
+        visibility: "public",
+        knownByClaimIds: [],
+        priority: 0,
+        defeasible: false,
+        overridesRuleIds: [],
+        clauses: [{
+          id: "bad-rule-clause",
+          modality: "require",
+          predicate: { op: "fact-exists", entityId: "north-gate", field: "character.alive" },
+          basis: "explicit",
+          status: "supported",
+          confidence: 1,
+          evidence: badRuleEvidence,
+        }],
+        exceptions: [],
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence: badRuleEvidence,
       },
+      evidenceAssertions: ruleEvidenceAssertions("bad-rule", badRuleEvidence[0]!),
       generatedBy: { worker: "test" },
     });
 
     const result = await convergeWorldProposals(roots.at(-1)!);
     expect(result.canonical.blocked).toMatchObject([{ id: "bad-rule", kind: "world-rule" }]);
     expect(result.canonical.blocked[0]?.errors).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "INERT_WORLD_RULE" }),
       expect.objectContaining({ code: "INVALID_PREDICATE_FIELD" }),
     ]));
     expect(result.staging).not.toContainEqual({ id: "bad-rule", kind: "world-rule" });
@@ -132,26 +722,979 @@ describe("CompilerCommitService", () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("entity", {
       proposalId: "gate",
-      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("曹操") },
+      payload: { id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("北门") },
       generatedBy: { worker: "test" },
     });
     expect((await commits.accept("entity", "gate")).accepted).toBe(true);
     const condition = { op: "fact-equals" as const, entityId: "north-gate", field: "location.open", value: true };
+    const selfRuleEvidence = evidence("曹操");
     await proposals.submit("world-rule", {
       proposalId: "self-forbidding-rule",
       payload: {
+        ontologyVersion: "world-rule-v2",
         id: "self-forbidding-rule",
         name: "门开时禁止门开",
-        scope: "location",
+        kind: "physical",
+        scope: "global",
+        jurisdictionEntityIds: [],
         appliesWhen: [condition],
-        forbids: [condition],
-        evidence: evidence("曹操"),
+        visibility: "public",
+        knownByClaimIds: [],
+        priority: 0,
+        defeasible: false,
+        overridesRuleIds: [],
+        clauses: [{
+          id: "self-forbidding-clause",
+          modality: "forbid",
+          predicate: condition,
+          basis: "explicit",
+          status: "supported",
+          confidence: 1,
+          evidence: selfRuleEvidence,
+        }],
+        exceptions: [],
+        basis: "explicit",
+        status: "supported",
+        confidence: 1,
+        evidence: selfRuleEvidence,
       },
+      evidenceAssertions: ruleEvidenceAssertions("self-forbidding-rule", selfRuleEvidence[0]!),
       generatedBy: { worker: "test" },
     });
 
     const validation = await commits.accept("world-rule", "self-forbidding-rule");
     expect(validation.accepted).toBe(false);
     expect(validation.errors).toContainEqual(expect.objectContaining({ code: "SELF_FORBIDDING_WORLD_RULE" }));
+  });
+
+  it("deterministically selects the newest active proposal for one logical artifact", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const proposalId of ["entity-cao-first", "entity-cao-second"]) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+    expect(result.accepted).toEqual([{ id: "entity-cao-second", kind: "entity" }]);
+    expect(result.blocked).toHaveLength(1);
+    expect(result.blocked[0]?.errors).toContainEqual(expect.objectContaining({ code: "SUPERSEDED_LOGICAL_PROPOSAL" }));
+    await expect(commits.canon.getEntity("cao-cao")).resolves.toMatchObject({ id: "cao-cao" });
+    await expect(commits.acceptAllValid()).resolves.toMatchObject({ accepted: [], blocked: [] });
+    await expect(commits.proposals.list("rejected")).resolves.toContainEqual(expect.objectContaining({ id: "entity-cao-first" }));
+  });
+
+  it("commits event dependencies in topological order with observable progress", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "child-submitted-first",
+      payload: {
+        id: "event-child",
+        title: "Second event",
+        participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+        storyTime: { kind: "relative", anchorEventId: "event-parent", relation: "after" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: ["event-parent"],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "parent-submitted-second",
+      payload: {
+        id: "event-parent",
+        title: "First event",
+        participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    const progress: number[] = [];
+
+    const result = await commits.acceptAllValid(undefined, (item) => progress.push(item.processed));
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.id)).toEqual(["entity-cao", "parent-submitted-second", "child-submitted-first"]);
+    expect(progress.at(-1)).toBe(3);
+    await expect(commits.canon.getEvent("event-child")).resolves.toMatchObject({ causalParents: ["event-parent"] });
+  });
+
+  it("reports causal cycles without repeatedly rescanning pending events", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [proposalId, id, parent] of [
+      ["cycle-a", "event-a", "event-b"],
+      ["cycle-b", "event-b", "event-a"],
+    ] as const) {
+      await proposals.submit("canonical-event", {
+        proposalId,
+        payload: {
+          id,
+          title: id,
+          participants: [],
+          storyTime: { kind: "unknown" },
+          preconditions: [],
+          observedOutcome: { version: 1, operations: [] },
+          evidence: evidence("曹操"),
+          causalParents: [parent],
+          confidence: 1,
+        },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+    expect(result.blocked).toHaveLength(2);
+    expect(result.blocked.every((item) => item.errors.some((error) => error.code === "CAUSAL_CYCLE"))).toBe(true);
+  });
+
+  it("commits proposition content before attribution without promoting either to world state", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("attribution", {
+      proposalId: "cao-reports-gate",
+      payload: {
+        id: "cao-reports-gate",
+        propositionId: "gate-open",
+        holderKind: "character",
+        holderEntityId: "cao-cao",
+        attitude: "reports",
+        certainty: 0.9,
+        evidence: evidence("曹操，字孟德\n北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("proposition", {
+      proposalId: "gate-open-proposition",
+      payload: {
+        id: "gate-open",
+        subjectEntityId: "north-gate",
+        relationId: "open",
+        object: { kind: "literal", value: true },
+        polarity: "positive",
+        modality: "asserted",
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    for (const [proposalId, id, kind, canonicalName, quote] of [
+      ["entity-cao", "cao-cao", "character", "曹操", "曹操"],
+      ["entity-gate", "north-gate", "location", "北门", "北门"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind, canonicalName, aliases: [], evidence: evidence(quote) },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.kind)).toEqual(["entity", "entity", "proposition", "attribution"]);
+    await expect(commits.canon.getProposition("gate-open")).resolves.toMatchObject({ relationId: "open" });
+    await expect(commits.canon.getAttribution("cao-reports-gate")).resolves.toMatchObject({ attitude: "reports" });
+    expect(await commits.canon.listClaims()).toEqual([]);
+    expect(await commits.canon.listEvents()).toEqual([]);
+  });
+
+  it("commits a same-pass claim, proposition, attribution, and semantic knowledge event in dependency order", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [proposalId, id, kind, canonicalName, quote] of [
+      ["entity-cao", "cao-cao", "character", "曹操", "曹操"],
+      ["entity-gate", "north-gate", "location", "北门", "北门"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind, canonicalName, aliases: [], evidence: evidence(quote) },
+        generatedBy: { worker: "test" },
+      });
+    }
+    await proposals.submit("claim", {
+      proposalId: "gate-open-claim-proposal",
+      payload: {
+        id: "gate-open-claim",
+        subject: "north-gate",
+        predicate: "open",
+        object: true,
+        epistemicType: "explicit-fact",
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("proposition", {
+      proposalId: "gate-open-proposition",
+      payload: {
+        id: "gate-open",
+        subjectEntityId: "north-gate",
+        relationId: "open",
+        object: { kind: "literal", value: true },
+        polarity: "positive",
+        modality: "asserted",
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("attribution", {
+      proposalId: "narrator-reports-gate",
+      payload: {
+        id: "narrator-reports-gate",
+        propositionId: "gate-open",
+        holderKind: "narrator",
+        attitude: "reports",
+        certainty: 1,
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "knowledge-event",
+      payload: {
+        id: "cao-remembers-gate-open",
+        title: "曹操记起北门状态",
+        participants: ["cao-cao"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        observedKnowledge: {
+          version: 1,
+          operations: [{
+            op: "learn",
+            actorId: "cao-cao",
+            claimId: "gate-open-claim",
+            propositionId: "gate-open",
+            attributionId: "narrator-reports-gate",
+            acquisitionMode: "remembered",
+            status: "knows",
+            confidence: 1,
+          }],
+        },
+        evidence: evidence("曹操，字孟德\n北门"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await commits.acceptAllValid();
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.kind)).toEqual([
+      "entity",
+      "entity",
+      "claim",
+      "proposition",
+      "attribution",
+      "canonical-event",
+    ]);
+    await expect(commits.canon.getEvent("cao-remembers-gate-open")).resolves.toMatchObject({
+      observedKnowledge: {
+        operations: [expect.objectContaining({
+          propositionId: "gate-open",
+          attributionId: "narrator-reports-gate",
+          acquisitionMode: "remembered",
+        })],
+      },
+    });
+  });
+
+  it("commits a same-pass event before its typed participation records", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await commits.canon.putEntity({ id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") });
+    await commits.canon.putEntity({ id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("北门") });
+    await proposals.submit("canonical-event", {
+      proposalId: "arrival-event",
+      payload: {
+        id: "cao-arrives-at-gate",
+        title: "曹操来到北门",
+        participants: ["cao-cao", "north-gate"],
+        participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操，字孟德\n北门"),
+        causalParents: [],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    for (const [proposalId, payload] of [
+      ["arrival-cao-role", {
+        id: "cao-arrives-at-gate-cao",
+        eventId: "cao-arrives-at-gate",
+        entityId: "cao-cao",
+        role: "agent",
+        presence: "physical",
+        confidence: 1,
+        evidence: evidence("曹操"),
+      }],
+      ["arrival-gate-role", {
+        id: "cao-arrives-at-gate-gate",
+        eventId: "cao-arrives-at-gate",
+        entityId: "north-gate",
+        role: "destination",
+        confidence: 1,
+        evidence: evidence("北门"),
+      }],
+    ] as const) {
+      await proposals.submit("event-participation", {
+        proposalId,
+        payload,
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.kind)).toEqual([
+      "canonical-event",
+      "event-participation",
+      "event-participation",
+    ]);
+    await expect(commits.canon.listEventParticipations()).resolves.toHaveLength(2);
+  });
+
+  it("blocks batch closure until typed roles project every legacy participant", async () => {
+    const { root, proposals, commits, evidence } = await fixture();
+    await commits.canon.putEntity({ id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") });
+    await commits.canon.putEntity({ id: "north-gate", kind: "location", canonicalName: "北门", aliases: [], evidence: evidence("北门") });
+    await commits.canon.putEvent({
+      id: "cao-at-gate",
+      title: "曹操在北门",
+      participants: ["cao-cao", "north-gate"],
+      participantPresence: [{ entityId: "cao-cao", mode: "physical" }],
+      storyTime: { kind: "unknown" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: evidence("曹操，字孟德\n北门"),
+      causalParents: [],
+      confidence: 1,
+    });
+    await proposals.submit("event-participation", {
+      proposalId: "cao-at-gate-cao-role",
+      payload: {
+        id: "cao-at-gate-cao",
+        eventId: "cao-at-gate",
+        entityId: "cao-cao",
+        role: "agent",
+        presence: "physical",
+        confidence: 1,
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const partial = await validateCompilerProposalClosure(
+      root,
+      ["cao-at-gate-cao-role"],
+    );
+    expect(partial.some((message) => message.includes("INCOMPLETE_EVENT_PARTICIPATION"))).toBe(true);
+
+    await proposals.submit("event-participation", {
+      proposalId: "cao-at-gate-gate-role",
+      payload: {
+        id: "cao-at-gate-gate",
+        eventId: "cao-at-gate",
+        entityId: "north-gate",
+        role: "location",
+        confidence: 1,
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await expect(validateCompilerProposalClosure(
+      root,
+      ["cao-at-gate-cao-role", "cao-at-gate-gate-role"],
+    )).resolves.toEqual([]);
+  });
+
+  it("commits a same-pass event before its independently evidenced causal relation", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await commits.canon.putEvent({
+      id: "first-event",
+      title: "曹操出现",
+      participants: [],
+      storyTime: { kind: "ordinal", label: "first", orderHint: 1 },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: evidence("曹操"),
+      causalParents: [],
+      confidence: 1,
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "second-event-proposal",
+      payload: {
+        id: "second-event",
+        title: "北门随后出现",
+        participants: [],
+        storyTime: { kind: "ordinal", label: "second", orderHint: 2 },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("北门"),
+        causalParents: ["first-event"],
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("event-relation", {
+      proposalId: "first-enables-second-proposal",
+      payload: {
+        id: "first-enables-second",
+        fromEventId: "first-event",
+        toEventId: "second-event",
+        type: "enables",
+        operationality: "necessary",
+        status: "explicit",
+        confidence: 1,
+        mechanism: "The first event establishes the condition for the second.",
+        evidence: evidence("曹操，字孟德\n北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await commits.acceptAllValid();
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.kind)).toEqual(["canonical-event", "event-relation"]);
+    await expect(commits.canon.getEventRelation("first-enables-second")).resolves.toMatchObject({
+      type: "enables",
+      fromEventId: "first-event",
+      toEventId: "second-event",
+    });
+  });
+
+  it("isolates a malformed event relation while atomically accepting a complete causal-parent group", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [id, causalParents] of [
+      ["parent-a", []],
+      ["parent-b", []],
+      ["target", ["parent-a", "parent-b"]],
+    ] as const) {
+      await commits.canon.putEvent({
+        id,
+        title: id,
+        participants: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [...causalParents],
+        confidence: 1,
+      });
+    }
+    for (const [proposalId, payload] of [
+      ["01-parent-a-causes-target", {
+        id: "parent-a-causes-target",
+        fromEventId: "parent-a",
+        toEventId: "target",
+        type: "causes",
+        operationality: "necessary",
+        status: "explicit",
+        confidence: 1,
+        mechanism: "Parent A directly contributes to the target.",
+        evidence: evidence("曹操"),
+      }],
+      ["02-parent-b-enables-target", {
+        id: "parent-b-enables-target",
+        fromEventId: "parent-b",
+        toEventId: "target",
+        type: "enables",
+        operationality: "necessary",
+        status: "explicit",
+        confidence: 1,
+        mechanism: "Parent B supplies another required condition.",
+        evidence: evidence("北门"),
+      }],
+      ["03-malformed-relation", {
+        id: "missing-before-target",
+        fromEventId: "missing-event",
+        toEventId: "target",
+        type: "before",
+        operationality: "non-operational",
+        status: "explicit",
+        confidence: 1,
+        evidence: evidence("曹操，字孟德\n北门"),
+      }],
+    ] as const) {
+      await proposals.submit("event-relation", {
+        proposalId,
+        payload,
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+
+    expect(result.accepted.map((item) => item.id)).toEqual([
+      "01-parent-a-causes-target",
+      "02-parent-b-enables-target",
+    ]);
+    expect(result.blocked).toEqual([expect.objectContaining({
+      id: "03-malformed-relation",
+      errors: expect.arrayContaining([expect.objectContaining({ code: "UNKNOWN_RELATION_SOURCE_EVENT" })]),
+    })]);
+    await expect(commits.canon.listEventRelations()).resolves.toHaveLength(2);
+  });
+
+  it("previews graph proposals in commit order so one cycle does not poison an earlier valid relation", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const id of ["event-a", "event-b"]) {
+      await commits.canon.putEvent({
+        id,
+        title: id,
+        participants: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      });
+    }
+    for (const [proposalId, relationId, fromEventId, toEventId] of [
+      ["01-a-before-b-proposal", "a-before-b", "event-a", "event-b"],
+      ["02-b-before-a-proposal", "b-before-a", "event-b", "event-a"],
+    ] as const) {
+      await proposals.submit("event-relation", {
+        proposalId,
+        payload: {
+          id: relationId,
+          fromEventId,
+          toEventId,
+          type: "before",
+          operationality: "non-operational",
+          status: "explicit",
+          confidence: 1,
+          evidence: evidence("曹操"),
+        },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const preview = await commits.validatePendingStructure();
+    expect(preview).toEqual([expect.objectContaining({
+      id: "02-b-before-a-proposal",
+      errors: expect.arrayContaining([expect.objectContaining({ code: "TEMPORAL_RELATION_CYCLE" })]),
+    })]);
+
+    const result = await commits.acceptAllValid();
+    expect(result.accepted).toEqual([{ id: "01-a-before-b-proposal", kind: "event-relation" }]);
+    expect(result.blocked).toEqual([expect.objectContaining({ id: "02-b-before-a-proposal" })]);
+  });
+
+  it("previews pending scenes as one graph before validating an unrelated earlier scene", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("canonical-event", {
+      proposalId: "01-target-event-proposal",
+      payload: {
+        id: "target-event",
+        title: "Target event",
+        participants: [],
+        participantPresence: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        causalParents: [],
+        sceneOccurrenceIds: ["target-scene"],
+        evidence: evidence("曹操"),
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("scene-occurrence", {
+      proposalId: "02-unrelated-scene-proposal",
+      payload: {
+        ontologyVersion: "scene-occurrence-v1",
+        id: "unrelated-scene",
+        discourseSegmentIds: ["unrelated-discourse"],
+        eventIds: [],
+        viewpointActorIds: [],
+        presentActorIds: [],
+        entryConditions: [],
+        exitConditions: [],
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("scene-occurrence", {
+      proposalId: "03-target-scene-proposal",
+      payload: {
+        ontologyVersion: "scene-occurrence-v1",
+        id: "target-scene",
+        discourseSegmentIds: ["target-discourse"],
+        eventIds: ["target-event"],
+        viewpointActorIds: [],
+        presentActorIds: [],
+        entryConditions: [],
+        exitConditions: [],
+        evidence: evidence("曹操，字孟德"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    await expect(commits.validatePendingStructure()).resolves.toEqual([]);
+
+    const result = await commits.acceptAllValid();
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.id)).toEqual([
+      "01-target-event-proposal",
+      "02-unrelated-scene-proposal",
+      "03-target-scene-proposal",
+    ]);
+  });
+
+  it("blocks an event-only revision that would break a committed scene backlink", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await commits.canon.putEvent({
+      id: "linked-event",
+      title: "Linked event",
+      participants: [],
+      storyTime: { kind: "unknown" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      causalParents: [],
+      sceneOccurrenceIds: ["linked-scene"],
+      evidence: evidence("曹操"),
+      confidence: 1,
+    });
+    await commits.canon.putSceneOccurrence({
+      ontologyVersion: "scene-occurrence-v1",
+      id: "linked-scene",
+      discourseSegmentIds: ["linked-discourse"],
+      eventIds: ["linked-event"],
+      viewpointActorIds: [],
+      presentActorIds: [],
+      entryConditions: [],
+      exitConditions: [],
+      evidence: evidence("北门"),
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "linked-event-revision",
+      payload: {
+        id: "linked-event",
+        title: "Linked event revision",
+        participants: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        causalParents: [],
+        evidence: evidence("曹操"),
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    await expect(commits.validatePendingStructure()).resolves.toEqual([
+      expect.objectContaining({
+        id: "linked-event-revision",
+        errors: expect.arrayContaining([
+          expect.objectContaining({ code: "SCENE_EVENT_BACKLINK_REQUIRED" }),
+        ]),
+      }),
+    ]);
+
+    const result = await commits.acceptAllValid();
+    expect(result.accepted).toEqual([]);
+    expect(result.blocked).toEqual([
+      expect.objectContaining({
+        id: "linked-event-revision",
+        errors: expect.arrayContaining([
+          expect.objectContaining({ code: "SCENE_EVENT_BACKLINK_REQUIRED" }),
+        ]),
+      }),
+    ]);
+    await expect(commits.canon.getEvent("linked-event")).resolves.toMatchObject({
+      sceneOccurrenceIds: ["linked-scene"],
+    });
+  });
+
+  it("rejects event relations with unknown endpoints", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("event-relation", {
+      proposalId: "orphan-relation",
+      payload: {
+        id: "orphan-relation",
+        fromEventId: "missing-first",
+        toEventId: "missing-second",
+        type: "before",
+        operationality: "non-operational",
+        status: "explicit",
+        confidence: 1,
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await commits.accept("event-relation", "orphan-relation");
+    expect(result.accepted).toBe(false);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "UNKNOWN_RELATION_SOURCE_EVENT" }),
+      expect.objectContaining({ code: "UNKNOWN_RELATION_TARGET_EVENT" }),
+    ]));
+  });
+
+  it("rejects a single accepted event relation that would make the canonical temporal graph cyclic", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const id of ["event-a", "event-b", "event-c"]) {
+      await commits.canon.putEvent({
+        id,
+        title: id,
+        participants: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: evidence("曹操"),
+        causalParents: [],
+        confidence: 1,
+      });
+    }
+    for (const [proposalId, relationId, fromEventId, toEventId] of [
+      ["a-before-b-proposal", "a-before-b", "event-a", "event-b"],
+      ["b-before-c-proposal", "b-before-c", "event-b", "event-c"],
+    ] as const) {
+      await proposals.submit("event-relation", {
+        proposalId,
+        payload: {
+          id: relationId,
+          fromEventId,
+          toEventId,
+          type: "before",
+          operationality: "non-operational",
+          status: "explicit",
+          confidence: 1,
+          evidence: evidence("曹操"),
+        },
+        generatedBy: { worker: "test" },
+      });
+      expect((await commits.accept("event-relation", proposalId)).accepted).toBe(true);
+    }
+    await proposals.submit("event-relation", {
+      proposalId: "c-before-a-proposal",
+      payload: {
+        id: "c-before-a",
+        fromEventId: "event-c",
+        toEventId: "event-a",
+        type: "before",
+        operationality: "non-operational",
+        status: "explicit",
+        confidence: 1,
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const result = await commits.accept("event-relation", "c-before-a-proposal");
+    expect(result.accepted).toBe(false);
+    expect(result.errors).toContainEqual(expect.objectContaining({ code: "TEMPORAL_RELATION_CYCLE" }));
+    await expect(commits.canon.getEventRelation("c-before-a")).rejects.toThrow("not found");
+  });
+
+  it("rejects invalid proposition references and epistemic relations", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("entity", "entity-cao")).accepted).toBe(true);
+    await proposals.submit("proposition", {
+      proposalId: "unknown-nested-proposition",
+      payload: {
+        id: "cao-expects-news",
+        subjectEntityId: "cao-cao",
+        relationId: "expects",
+        object: { kind: "proposition", propositionId: "missing-news" },
+        polarity: "positive",
+        modality: "possible",
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    const validation = await commits.accept("proposition", "unknown-nested-proposition");
+    expect(validation.errors).toContainEqual(expect.objectContaining({ code: "UNKNOWN_NESTED_PROPOSITION" }));
+    await expect(proposals.submit("proposition", {
+      proposalId: "meta-proposition",
+      payload: {
+        id: "cao-knows",
+        subjectEntityId: "cao-cao",
+        relationId: "knows",
+        object: { kind: "literal", value: "secret" },
+        polarity: "positive",
+        modality: "asserted",
+        evidence: evidence("曹操"),
+      },
+      generatedBy: { worker: "test" },
+    })).rejects.toThrow("Attribution");
+  });
+
+  it("rejects attribution holder/type mismatches and cross-proposition source chains", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    for (const [proposalId, id, kind, canonicalName, quote] of [
+      ["entity-cao", "cao-cao", "character", "曹操", "曹操"],
+      ["entity-gate", "north-gate", "location", "北门", "北门"],
+    ] as const) {
+      await proposals.submit("entity", {
+        proposalId,
+        payload: { id, kind, canonicalName, aliases: [], evidence: evidence(quote) },
+        generatedBy: { worker: "test" },
+      });
+    }
+    for (const [proposalId, id, value] of [
+      ["prop-open", "gate-open", true],
+      ["prop-closed", "gate-closed", false],
+    ] as const) {
+      await proposals.submit("proposition", {
+        proposalId,
+        payload: {
+          id,
+          subjectEntityId: "north-gate",
+          relationId: "open",
+          object: { kind: "literal", value },
+          polarity: "positive",
+          modality: "asserted",
+          evidence: evidence("北门"),
+        },
+        generatedBy: { worker: "test" },
+      });
+    }
+    expect((await commits.acceptAllValid()).blocked).toEqual([]);
+    await proposals.submit("attribution", {
+      proposalId: "bad-character-holder",
+      payload: {
+        id: "bad-character-holder",
+        propositionId: "gate-open",
+        holderKind: "character",
+        holderEntityId: "north-gate",
+        attitude: "believes",
+        certainty: 0.5,
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("attribution", "bad-character-holder")).errors)
+      .toContainEqual(expect.objectContaining({ code: "INVALID_ATTRIBUTION_HOLDER" }));
+    await proposals.submit("attribution", {
+      proposalId: "source-attribution",
+      payload: {
+        id: "source-attribution",
+        propositionId: "gate-open",
+        holderKind: "character",
+        holderEntityId: "cao-cao",
+        attitude: "asserts",
+        certainty: 1,
+        evidence: evidence("曹操，字孟德\n北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("attribution", "source-attribution")).accepted).toBe(true);
+    await proposals.submit("attribution", {
+      proposalId: "mismatched-chain",
+      payload: {
+        id: "mismatched-chain",
+        propositionId: "gate-closed",
+        holderKind: "narrator",
+        attitude: "reports",
+        certainty: 0.8,
+        sourceAttributionId: "source-attribution",
+        evidence: evidence("曹操，字孟德\n北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    expect((await commits.accept("attribution", "mismatched-chain")).errors)
+      .toContainEqual(expect.objectContaining({ code: "ATTRIBUTION_CHAIN_MISMATCH" }));
+  });
+
+  it("accepts a system-held attribution only for a modeled communication-system entity", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await commits.canon.putEntity({
+      id: "norma",
+      kind: "other",
+      canonicalName: "Unknown person",
+      aliases: [],
+      evidence: evidence("Unknown person"),
+    });
+    await commits.canon.putEntity({
+      id: "north-gate",
+      kind: "location",
+      canonicalName: "北门",
+      aliases: [],
+      evidence: evidence("北门"),
+    });
+    await commits.canon.putProposition({
+      id: "gate-open-system-content",
+      subjectEntityId: "north-gate",
+      relationId: "open",
+      object: { kind: "literal", value: true },
+      polarity: "positive",
+      modality: "asserted",
+      evidence: evidence("北门"),
+    });
+    for (const [proposalId, holderEntityId] of [
+      ["valid-system-holder", "norma"],
+      ["invalid-system-holder", "north-gate"],
+    ] as const) {
+      await proposals.submit("attribution", {
+        proposalId,
+        payload: {
+          id: proposalId,
+          propositionId: "gate-open-system-content",
+          holderKind: "system",
+          holderEntityId,
+          attitude: "reports",
+          certainty: 1,
+          evidence: evidence("Unknown person appears"),
+        },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    expect((await commits.accept("attribution", "valid-system-holder")).accepted).toBe(true);
+    expect((await commits.accept("attribution", "invalid-system-holder")).errors)
+      .toContainEqual(expect.objectContaining({ code: "INVALID_ATTRIBUTION_HOLDER" }));
+  });
+
+  it("reports proposition and attribution dependency cycles deterministically", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("entity", {
+      proposalId: "entity-cao",
+      payload: { id: "cao-cao", kind: "character", canonicalName: "曹操", aliases: [], evidence: evidence("曹操") },
+      generatedBy: { worker: "test" },
+    });
+    for (const [proposalId, id, nested] of [
+      ["prop-a", "proposition-a", "proposition-b"],
+      ["prop-b", "proposition-b", "proposition-a"],
+    ] as const) {
+      await proposals.submit("proposition", {
+        proposalId,
+        payload: {
+          id,
+          subjectEntityId: "cao-cao",
+          relationId: "considers",
+          object: { kind: "proposition", propositionId: nested },
+          polarity: "positive",
+          modality: "possible",
+          evidence: evidence("曹操"),
+        },
+        generatedBy: { worker: "test" },
+      });
+    }
+
+    const result = await commits.acceptAllValid();
+    expect(result.accepted).toEqual([{ id: "entity-cao", kind: "entity" }]);
+    expect(result.blocked).toHaveLength(2);
+    expect(result.blocked.every((item) => item.errors.some((error) => error.code === "PROPOSITION_DEPENDENCY_CYCLE"))).toBe(true);
   });
 });

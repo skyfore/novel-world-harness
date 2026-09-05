@@ -1,27 +1,144 @@
 import type { z } from "zod";
-import { EvidenceVerifier } from "./evidence.js";
+import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
 import { CanonicalCompiler, CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
-import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
+import {
+  InitialWorldStore,
+  initialWorldSchema,
+  validateInitialWorldEvidenceAssertions,
+  type InitialWorld,
+} from "../world/initial.js";
 import {
   canonicalEventSchema,
   claimSchema,
   entitySchema,
+  eventParticipationSchema,
+  eventRelationSchema,
+  attributionSchema,
+  propositionSchema,
   worldRuleSchema,
+  type Attribution,
   type CanonicalEvent,
   type Claim,
   type Entity,
+  type EvidenceAssertion,
   type EvidenceRef,
+  type EventParticipation,
+  type EventRelation,
+  type KnowledgeDelta,
   type Predicate,
+  type Proposition,
+  type StoryTime,
   type ValidationIssue,
   type WorldRule,
 } from "../world/model.js";
+import { validateEventParticipationRecord } from "../world/event-semantics.js";
+import {
+  eventRelationProjectsLegacyCausalParent,
+  validateEventRelationCatalog,
+  validateEventRelationRecord,
+} from "../world/event-relations.js";
+import {
+  validateCharacterOntologyEvidenceAssertions,
+  validateCharacterOntologyReferences,
+} from "../world/character-ontology.js";
+import {
+  validateRelationshipOntologyEvidenceAssertions,
+  validateRelationshipOntologyReferences,
+} from "../world/relationship-ontology.js";
+import {
+  spatialRelationSchema,
+  validateSpatialEvidenceAssertions,
+  validateSpatialRelationCatalog,
+  type SpatialRelation,
+} from "../world/spatial-ontology.js";
+import {
+  validateWorldRuleCatalog,
+  validateWorldRuleEvidenceAssertions,
+  worldRulePredicates,
+} from "../world/world-rule-ontology.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
-import { canonicalJson } from "../world/canonical.js";
+import { canonicalJson, contentHash } from "../world/canonical.js";
 import { isMetaKnowledgePredicate } from "./semantics.js";
+import { compilerPayloadEvidence, compilerProposalArtifactId, compilerProposalLogicalIdentity } from "./proposals.js";
+import {
+  EvidenceAssertionStore,
+  evidenceAssertionSourceIds,
+  validateEvidenceAssertionTargets,
+} from "./evidence-assertions.js";
+import { evidenceSourceIds } from "../world/source-scope.js";
+import { validateCommittedEntityResolutionTrace } from "./entity-resolution.js";
+import { validateCommittedEventResolutionTrace } from "./event-resolution.js";
+import {
+  findKnowledgeDeltas,
+  isCommunicatingKnowledgeSource,
+  validateKnowledgeSemanticReferences,
+} from "../world/knowledge-semantics.js";
+import {
+  validateCommittedAttributionTrace,
+  validateCommittedKnowledgeAcquisitionTrace,
+} from "./attribution-trace.js";
+import {
+  sceneOccurrenceSchema,
+  validateSceneOccurrenceCatalog,
+  type SceneOccurrence,
+} from "../world/scene-occurrence.js";
+import {
+  eventFrameSchema,
+  validateEventFrameInstance,
+  type EventFrame,
+} from "../world/event-frame.js";
+import {
+  actionSchemaSchema,
+  resolveActionInvocation,
+  validateActionSchemaCatalog,
+  type ActionSchema,
+} from "../world/action-ontology.js";
+import {
+  actionConstraintSchema,
+  validateActionConstraintCatalog,
+  type ActionConstraint,
+} from "../world/action-constraint.js";
+import {
+  normTemplateSchema,
+  validateNormTemplateCatalog,
+  type NormTemplate,
+} from "../world/norm-ontology.js";
+import {
+  processTemplateSchema,
+  validateProcessTemplateCatalog,
+  type ProcessTemplate,
+} from "../world/process-ontology.js";
 
-export type CanonicalProposalKind = "entity" | "claim" | "canonical-event" | "world-rule" | "initial-world" | "character-goal" | "character-model";
+export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
+export type CompilerCatalogValidationScope = "catalog" | "record";
+export type CompilerValidationCatalog = {
+  entities: Map<string, Entity>;
+  propositions: Map<string, Proposition>;
+  attributions: Map<string, Attribution>;
+  claims: Map<string, Claim>;
+  events: Map<string, CanonicalEvent>;
+  eventParticipations: Map<string, EventParticipation>;
+  eventRelations: Map<string, EventRelation>;
+  spatialRelations: Map<string, SpatialRelation>;
+  sceneOccurrences: Map<string, SceneOccurrence>;
+  eventFrames: Map<string, EventFrame>;
+  actionSchemas: Map<string, ActionSchema>;
+  actionConstraints: Map<string, ActionConstraint>;
+  normTemplates: Map<string, NormTemplate>;
+  processTemplates: Map<string, ProcessTemplate>;
+  rules: Map<string, WorldRule>;
+  goals: Map<string, CharacterGoal>;
+};
+export type CompilerConvergenceProgress = {
+  phase: "load" | "canonical" | "complete";
+  processed: number;
+  total: number;
+  accepted: number;
+  blocked: number;
+  proposalId?: string;
+};
 export type BatchAcceptResult = {
   accepted: Array<{ id: string; kind: CanonicalProposalKind }>;
   blocked: Array<{ id: string; kind: CanonicalProposalKind; errors: ValidationIssue[] }>;
@@ -29,35 +146,232 @@ export type BatchAcceptResult = {
 };
 
 export class CompilerValidator {
-  constructor(private readonly canon: CanonicalModelStore, private readonly stateSchema = new StateSchemaRegistry(DEFAULT_STATE_FIELDS)) {}
+  constructor(
+    private readonly canon: CanonicalModelStore,
+    private readonly stateSchema = new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    private readonly actors?: ActorModelStore,
+  ) {}
 
   async validate(kind: CanonicalProposalKind, payload: unknown): Promise<CompilerValidation> {
-    const [entityList, claimList, eventList, ruleList] = await Promise.all([
+    return this.validateWithCatalog(kind, payload, await this.loadCatalog());
+  }
+
+  async loadCatalog(): Promise<CompilerValidationCatalog> {
+    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, eventRelationList, spatialRelationList, sceneOccurrenceList, eventFrameList, actionSchemaList, actionConstraintList, normTemplateList, processTemplateList, ruleList, goalList] = await Promise.all([
       this.canon.listEntities(),
+      this.canon.listPropositions(),
+      this.canon.listAttributions(),
       this.canon.listClaims(),
       this.canon.listEvents(),
+      this.canon.listEventParticipations(),
+      this.canon.listEventRelations(),
+      this.canon.listSpatialRelations(),
+      this.canon.listSceneOccurrences(),
+      this.canon.listEventFrames(),
+      this.canon.listActionSchemas(),
+      this.canon.listActionConstraints(),
+      this.canon.listNormTemplates(),
+      this.canon.listProcessTemplates(),
       this.canon.listRules(),
+      this.actors?.listGoals() ?? [],
     ]);
-    const entities = new Map(entityList.map((entity) => [entity.id, entity]));
-    const claims = new Map(claimList.map((claim) => [claim.id, claim]));
-    const events = new Map(eventList.map((event) => [event.id, event]));
-    const rules = new Map(ruleList.map((rule) => [rule.id, rule]));
+    return {
+      entities: new Map(entityList.map((entity) => [entity.id, entity])),
+      propositions: new Map(propositionList.map((proposition) => [proposition.id, proposition])),
+      attributions: new Map(attributionList.map((attribution) => [attribution.id, attribution])),
+      claims: new Map(claimList.map((claim) => [claim.id, claim])),
+      events: new Map(eventList.map((event) => [event.id, event])),
+      eventParticipations: new Map(eventParticipationList.map((item) => [item.id, item])),
+      eventRelations: new Map(eventRelationList.map((item) => [item.id, item])),
+      spatialRelations: new Map(spatialRelationList.map((item) => [item.id, item])),
+      sceneOccurrences: new Map(sceneOccurrenceList.map((item) => [item.id, item])),
+      eventFrames: new Map(eventFrameList.map((item) => [item.id, item])),
+      actionSchemas: new Map(actionSchemaList.map((item) => [item.id, item])),
+      actionConstraints: new Map(actionConstraintList.map((item) => [item.id, item])),
+      normTemplates: new Map(normTemplateList.map((item) => [item.id, item])),
+      processTemplates: new Map(processTemplateList.map((item) => [item.id, item])),
+      rules: new Map(ruleList.map((rule) => [rule.id, rule])),
+      goals: new Map(goalList.map((goal) => [goal.id, goal])),
+    };
+  }
+
+  validateWithCatalog(
+    kind: CanonicalProposalKind,
+    payload: unknown,
+    catalog: CompilerValidationCatalog,
+    options: { graphScope?: CompilerCatalogValidationScope } = {},
+  ): CompilerValidation {
+    const { entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, actionConstraints, normTemplates, processTemplates, rules, goals } = catalog;
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
-    if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors, warnings);
+    if (kind === "entity") this.validateEntity(entitySchema.parse(payload), errors);
+    if (kind === "proposition") this.validateProposition(propositionSchema.parse(payload), entities, propositions, events, errors);
+    if (kind === "attribution") this.validateAttribution(attributionSchema.parse(payload), entities, propositions, attributions, errors);
     if (kind === "claim") this.validateClaim(claimSchema.parse(payload), entities, errors);
-    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, claims, events, rules, errors);
-    if (kind === "world-rule") this.validateRule(worldRuleSchema.parse(payload), entities, rules, errors);
-    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, claims, rules, errors);
-    if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, claims, rules, errors);
-    if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, errors);
+    if (kind === "canonical-event") this.validateEvent(canonicalEventSchema.parse(payload), entities, propositions, attributions, claims, events, eventFrames, actionSchemas, rules, errors);
+    if (kind === "event-participation") this.validateEventParticipation(eventParticipationSchema.parse(payload), entities, events, eventParticipations, errors);
+    if (kind === "event-relation") {
+      const relation = eventRelationSchema.parse(payload);
+      this.validateEventRelation(relation, entities, rules, errors);
+      if (options.graphScope === "record") {
+        errors.push(...validateEventRelationRecord(relation, events));
+      } else {
+        const prospectiveRelations = new Map(eventRelations);
+        prospectiveRelations.set(relation.id, relation);
+        errors.push(...validateEventRelationCatalog({
+          events,
+          relations: prospectiveRelations.values(),
+        }));
+      }
+    }
+    if (kind === "scene-occurrence") {
+      const scene = sceneOccurrenceSchema.parse(payload);
+      const prospectiveScenes = new Map(sceneOccurrences).set(scene.id, scene);
+      errors.push(...validateSceneOccurrenceCatalog({ entities, events, scenes: prospectiveScenes.values() }));
+    }
+    if (kind === "event-frame") {
+      const frame = eventFrameSchema.parse(payload);
+      if (!frame.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event frame ${frame.id} has no source evidence`, "evidence"));
+    }
+    if (kind === "action-schema") {
+      const action = actionSchemaSchema.parse(payload);
+      errors.push(...validateActionSchemaCatalog(action, entities, new Set(events.keys())));
+    }
+    if (kind === "action-constraint") {
+      const constraint = actionConstraintSchema.parse(payload);
+      const prospectiveConstraints = options.graphScope === "record"
+        ? [constraint]
+        : new Map(actionConstraints).set(constraint.id, constraint).values();
+      errors.push(...validateActionConstraintCatalog(prospectiveConstraints, { entities, actionSchemas }));
+    }
+    if (kind === "norm-template") {
+      const norm = normTemplateSchema.parse(payload);
+      if (norm.actionPattern.kind === "schema" && !actionSchemas.has(norm.actionPattern.schemaId)) {
+        errors.push(issue("UNKNOWN_NORM_ACTION_SCHEMA", `Norm template ${norm.id} references unknown action schema ${norm.actionPattern.schemaId}`, "actionPattern.schemaId"));
+      }
+      norm.appliesWhen.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      norm.exceptions.forEach((exception) => exception.appliesWhen.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors)));
+      norm.reparations.forEach((reparation, index) => {
+        if (reparation.actionPattern?.kind === "schema" && !actionSchemas.has(reparation.actionPattern.schemaId)) {
+          errors.push(issue("UNKNOWN_NORM_REPARATION_ACTION_SCHEMA", `Norm template ${norm.id} reparation references unknown action schema ${reparation.actionPattern.schemaId}`, `reparations.${index}.actionPattern.schemaId`));
+        }
+        reparation.requiresAfter.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      });
+      const prospectiveNorms = options.graphScope === "record"
+        ? [norm]
+        : new Map(normTemplates).set(norm.id, norm).values();
+      errors.push(...validateNormTemplateCatalog(prospectiveNorms, {
+        entities,
+        claimIds: new Set(claims.keys()),
+        canonicalEventIds: new Set(events.keys()),
+      }));
+    }
+    if (kind === "process-template") {
+      const process = processTemplateSchema.parse(payload);
+      const prospectiveProcesses = options.graphScope === "record"
+        ? [process]
+        : new Map(processTemplates).set(process.id, process).values();
+      errors.push(...validateProcessTemplateCatalog(prospectiveProcesses, new Set(events.keys())));
+    }
+    if (kind === "spatial-relation") {
+      const relation = spatialRelationSchema.parse(payload);
+      relation.requires.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      relation.blockedWhen.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      const prospectiveRelations = options.graphScope === "record"
+        ? [relation]
+        : new Map(spatialRelations).set(relation.id, relation).values();
+      errors.push(...validateSpatialRelationCatalog(prospectiveRelations, {
+        entities,
+        events,
+        claims: new Set(claims.keys()),
+        rules: new Set(rules.keys()),
+      }));
+    }
+    if (kind === "world-rule") {
+      const rule = worldRuleSchema.parse(payload);
+      this.validateRule(rule, entities, rules, errors);
+      const prospectiveRules = new Map(rules);
+      prospectiveRules.set(rule.id, rule);
+      errors.push(...validateWorldRuleCatalog(prospectiveRules.values(), {
+        entities,
+        events,
+        claims: new Set(claims.keys()),
+        rules: prospectiveRules,
+      }));
+    }
+    if (kind === "initial-world") this.validateInitialWorld(initialWorldSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
+    if (kind === "character-goal") this.validateGoal(characterGoalSchema.parse(payload), entities, propositions, attributions, claims, events, rules, errors);
+    if (kind === "character-model") this.validateCharacterModel(characterModelSchema.parse(payload), entities, propositions, claims, events, rules, goals, errors);
     return { accepted: errors.length === 0, errors, warnings };
   }
 
-  private validateEntity(entity: Entity, errors: ValidationIssue[], warnings: ValidationIssue[]): void {
+  private validateEntity(entity: Entity, errors: ValidationIssue[]): void {
     if (!entity.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Entity ${entity.id} has no source evidence`, "evidence"));
-    if (!entity.aliases.length) warnings.push(issue("NO_ALIASES", `Entity ${entity.id} has no aliases; this may be valid`));
+  }
+
+  private validateProposition(
+    proposition: Proposition,
+    entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    events: ReadonlyMap<string, CanonicalEvent>,
+    errors: ValidationIssue[],
+  ): void {
+    if (!proposition.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Proposition ${proposition.id} has no source evidence`, "evidence"));
+    if (!entities.has(proposition.subjectEntityId)) {
+      errors.push(issue("UNKNOWN_PROPOSITION_SUBJECT", `Proposition subject ${proposition.subjectEntityId} is not canonical`, "subjectEntityId"));
+    }
+    if (proposition.object.kind === "entity" && !entities.has(proposition.object.entityId)) {
+      errors.push(issue("UNKNOWN_PROPOSITION_OBJECT", `Proposition object ${proposition.object.entityId} is not canonical`, "object.entityId"));
+    }
+    if (proposition.object.kind === "proposition" && !propositions.has(proposition.object.propositionId)) {
+      errors.push(issue("UNKNOWN_NESTED_PROPOSITION", `Nested proposition ${proposition.object.propositionId} is not canonical`, "object.propositionId"));
+    }
+    if (proposition.validStoryTime?.kind === "relative" && !events.has(proposition.validStoryTime.anchorEventId)) {
+      errors.push(issue("UNKNOWN_PROPOSITION_TIME_ANCHOR", `Proposition story time references unknown canonical event ${proposition.validStoryTime.anchorEventId}`, "validStoryTime.anchorEventId"));
+    }
+    if (isMetaKnowledgePredicate(proposition.relationId)) {
+      errors.push(issue("META_KNOWLEDGE_PROPOSITION", `Proposition ${proposition.id} embeds epistemic attitude '${proposition.relationId}'; use Attribution around base semantic content`, "relationId"));
+    }
+  }
+
+  private validateAttribution(
+    attribution: Attribution,
+    entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
+    errors: ValidationIssue[],
+  ): void {
+    if (!attribution.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Attribution ${attribution.id} has no source evidence`, "evidence"));
+    if (!propositions.has(attribution.propositionId)) {
+      errors.push(issue("UNKNOWN_ATTRIBUTED_PROPOSITION", `Attribution references unknown proposition ${attribution.propositionId}`, "propositionId"));
+    }
+    if (attribution.holderKind === "character") {
+      const holder = attribution.holderEntityId ? entities.get(attribution.holderEntityId) : undefined;
+      if (!holder || holder.kind !== "character") {
+        errors.push(issue("INVALID_ATTRIBUTION_HOLDER", `Character attribution holder ${attribution.holderEntityId ?? "missing"} is not a canonical character`, "holderEntityId"));
+      }
+    }
+    if (attribution.holderKind === "document") {
+      const holder = attribution.holderEntityId ? entities.get(attribution.holderEntityId) : undefined;
+      if (!holder || holder.kind !== "artifact") {
+        errors.push(issue("INVALID_ATTRIBUTION_HOLDER", `Document attribution holder ${attribution.holderEntityId ?? "missing"} is not a canonical artifact`, "holderEntityId"));
+      }
+    }
+    if (attribution.holderKind === "system") {
+      const holder = attribution.holderEntityId ? entities.get(attribution.holderEntityId) : undefined;
+      if (!holder || !["institution", "artifact", "other"].includes(holder.kind)) {
+        errors.push(issue("INVALID_ATTRIBUTION_HOLDER", `System attribution holder ${attribution.holderEntityId ?? "missing"} is not a canonical institution, artifact, or other system entity`, "holderEntityId"));
+      }
+    }
+    if (attribution.sourceAttributionId) {
+      const source = attributions.get(attribution.sourceAttributionId);
+      if (!source) {
+        errors.push(issue("UNKNOWN_SOURCE_ATTRIBUTION", `Attribution source ${attribution.sourceAttributionId} is not canonical`, "sourceAttributionId"));
+      } else if (source.propositionId !== attribution.propositionId) {
+        errors.push(issue("ATTRIBUTION_CHAIN_MISMATCH", `Attribution source ${source.id} concerns proposition ${source.propositionId}, not ${attribution.propositionId}`, "sourceAttributionId"));
+      }
+    }
   }
 
   private validateClaim(claim: Claim, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
@@ -72,17 +386,79 @@ export class CompilerValidator {
   private validateEvent(
     event: CanonicalEvent,
     entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
     claims: ReadonlyMap<string, Claim>,
     events: ReadonlyMap<string, CanonicalEvent>,
+    eventFrames: ReadonlyMap<string, EventFrame>,
+    actionSchemas: ReadonlyMap<string, ActionSchema>,
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
   ): void {
     if (!event.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event ${event.id} has no source evidence`, "evidence"));
-    if (event.observedOutcome.operations.length > 1) {
-      errors.push(issue("NON_ATOMIC_CANONICAL_EVENT", `Event ${event.id} contains multiple world-state operations; submit one explicitly narrated transition per canonical event`, "observedOutcome.operations"));
+    if (event.observedOutcome.operations.length > 16) {
+      errors.push(issue("OVERSIZED_CANONICAL_EVENT", `Event ${event.id} contains more than 16 typed state effects and must be split at a genuine causal boundary`, "observedOutcome.operations"));
     }
-    for (const participant of event.participants) if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, "participants"));
-    for (const parent of event.causalParents) if (!events.has(parent)) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parent}`, "causalParents"));
+    const participantIds = new Set<string>();
+    for (let index = 0; index < event.participants.length; index += 1) {
+      const participant = event.participants[index]!;
+      if (!entities.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Unknown event participant ${participant}`, `participants.${index}`));
+      if (participantIds.has(participant)) errors.push(issue("DUPLICATE_PARTICIPANT", `Event ${event.id} contains duplicate participant ${participant}`, `participants.${index}`));
+      participantIds.add(participant);
+    }
+    const presenceActors = new Set<string>();
+    for (let index = 0; index < (event.participantPresence?.length ?? 0); index += 1) {
+      const presence = event.participantPresence![index]!;
+      if (!event.participants.includes(presence.entityId)) {
+        errors.push(issue("INVALID_PARTICIPANT_PRESENCE", `Event presence ${presence.entityId} is not an event participant`, `participantPresence.${index}.entityId`));
+      }
+      if (entities.get(presence.entityId)?.kind !== "character") {
+        errors.push(issue("INVALID_PARTICIPANT_PRESENCE", `Event presence ${presence.entityId} is not a canonical character`, `participantPresence.${index}.entityId`));
+      }
+      if (presenceActors.has(presence.entityId)) {
+        errors.push(issue("DUPLICATE_PARTICIPANT_PRESENCE", `Event presence ${presence.entityId} is duplicated`, `participantPresence.${index}.entityId`));
+      }
+      presenceActors.add(presence.entityId);
+    }
+    for (let index = 0; index < event.participants.length; index += 1) {
+      const participantId = event.participants[index]!;
+      if (entities.get(participantId)?.kind === "character" && !presenceActors.has(participantId)) {
+        errors.push(issue(
+          "MISSING_PARTICIPANT_PRESENCE",
+          `Character participant ${participantId} has no explicit event presence mode`,
+          `participants.${index}`,
+        ));
+      }
+    }
+    for (const parentId of event.causalParents) {
+      const parent = events.get(parentId);
+      if (!parent) errors.push(issue("UNKNOWN_CAUSAL_PARENT", `Unknown causal parent ${parentId}`, "causalParents"));
+      else if (storyTimeDefinitelyBefore(event.storyTime, parent.storyTime)) {
+        errors.push(issue("TEMPORAL_CAUSAL_REGRESSION", `Event ${event.id} is temporally earlier than causal parent ${parentId}`, "storyTime"));
+      }
+    }
+    if (event.storyTime.kind === "relative" && !events.has(event.storyTime.anchorEventId)) {
+      errors.push(issue("UNKNOWN_TIME_ANCHOR", `Unknown story-time anchor ${event.storyTime.anchorEventId}`, "storyTime.anchorEventId"));
+    }
+    if (event.frameInstance) {
+      const frame = eventFrames.get(event.frameInstance.frameId);
+      if (!frame) {
+        errors.push(issue("UNKNOWN_EVENT_FRAME", `Event ${event.id} references unknown frame ${event.frameInstance.frameId}`, "frameInstance.frameId"));
+      } else {
+        errors.push(...validateEventFrameInstance(event.frameInstance, frame, entities, event));
+      }
+    }
+    if (event.action) {
+      const resolved = resolveActionInvocation(event.action, actionSchemas, entities, {
+        participants: event.participants,
+        proposedDelta: event.observedOutcome,
+        hasKnowledge: Boolean(event.observedKnowledge?.operations.length),
+        hasTimeAdvance: Boolean(event.timeAdvance),
+        hasSceneTransition: false,
+      });
+      errors.push(...resolved.issues);
+      for (const predicate of resolved.preconditions) this.validatePredicate(predicate, entities, rules, errors);
+    }
     for (const predicate of event.preconditions) this.validatePredicate(predicate, entities, rules, errors);
     this.validateOperations(event.observedOutcome.operations, entities, rules, errors, "observedOutcome.operations");
     for (let index = 0; index < (event.observedKnowledge?.operations.length ?? 0); index += 1) {
@@ -93,37 +469,122 @@ export class CompilerValidator {
         if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Event knowledge references unknown claim ${operation.claimId}`, `observedKnowledge.operations.${index}`));
         if (operation.sourceActorId) {
           const source = entities.get(operation.sourceActorId);
-          if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Event knowledge source ${operation.sourceActorId} is not a canonical character`, `observedKnowledge.operations.${index}`));
+          if (!isCommunicatingKnowledgeSource(source)) errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Event knowledge source ${operation.sourceActorId} is not a canonical character or communication system`, `observedKnowledge.operations.${index}`));
         }
       }
+    }
+    this.validateKnowledgeSemantics(event.observedKnowledge, propositions, attributions, claims, "observedKnowledge", errors);
+    const entryActors = new Set<string>();
+    for (let index = 0; index < (event.characterEntryCheckpoints?.length ?? 0); index += 1) {
+      const checkpoint = event.characterEntryCheckpoints![index]!;
+      const prefix = `characterEntryCheckpoints.${index}`;
+      const actor = entities.get(checkpoint.actorId);
+      if (!actor || actor.kind !== "character") {
+        errors.push(issue("INVALID_ENTRY_ACTOR", `Entry actor ${checkpoint.actorId} is not a canonical character`, `${prefix}.actorId`));
+      }
+      if (!event.participants.includes(checkpoint.actorId)) {
+        errors.push(issue("INVALID_ENTRY_ACTOR", `Entry actor ${checkpoint.actorId} must be an event participant`, `${prefix}.actorId`));
+      }
+      if (entryActors.has(checkpoint.actorId)) {
+        errors.push(issue("DUPLICATE_CHARACTER_ENTRY", `Event ${event.id} has multiple entry checkpoints for ${checkpoint.actorId}`, `${prefix}.actorId`));
+      }
+      entryActors.add(checkpoint.actorId);
+      if (checkpoint.delta.operations.length > 16) {
+        errors.push(issue("OVERSIZED_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} contains more than 16 state operations`, `${prefix}.delta.operations`));
+      }
+      if (!checkpoint.delta.operations.some((operation) =>
+        "entityId" in operation
+        && operation.entityId === checkpoint.actorId
+        && ["character.location", "character.plan", "character.momentum"].includes(operation.field))) {
+        errors.push(issue("INACTIONABLE_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} must establish that actor's location, plan, or momentum before the event`, `${prefix}.delta.operations`));
+      }
+      for (let presenceIndex = 0; presenceIndex < checkpoint.participantPresence.length; presenceIndex += 1) {
+        const presence = checkpoint.participantPresence[presenceIndex]!;
+        if (!event.participants.includes(presence.entityId)) {
+          errors.push(issue("INVALID_ENTRY_PRESENCE", `Entry presence ${presence.entityId} is not an event participant`, `${prefix}.participantPresence.${presenceIndex}.entityId`));
+        }
+        if (entities.get(presence.entityId)?.kind !== "character") {
+          errors.push(issue("INVALID_ENTRY_PRESENCE", `Entry presence ${presence.entityId} is not a canonical character`, `${prefix}.participantPresence.${presenceIndex}.entityId`));
+        }
+      }
+      this.validateOperations(checkpoint.delta.operations, entities, rules, errors, `${prefix}.delta.operations`);
+      for (let knowledgeIndex = 0; knowledgeIndex < (checkpoint.knowledge?.operations.length ?? 0); knowledgeIndex += 1) {
+        const operation = checkpoint.knowledge!.operations[knowledgeIndex]!;
+        const knowledgePath = `${prefix}.knowledge.operations.${knowledgeIndex}`;
+        const knowledgeActor = entities.get(operation.actorId);
+        if (!knowledgeActor || knowledgeActor.kind !== "character") {
+          errors.push(issue("INVALID_KNOWLEDGE_ACTOR", `Entry knowledge actor ${operation.actorId} is not a canonical character`, knowledgePath));
+        }
+        if (operation.op === "learn") {
+          if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Entry knowledge references unknown claim ${operation.claimId}`, knowledgePath));
+          if (operation.sourceActorId) {
+            const source = entities.get(operation.sourceActorId);
+            if (!isCommunicatingKnowledgeSource(source)) errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Entry knowledge source ${operation.sourceActorId} is not a canonical character or communication system`, knowledgePath));
+          }
+        }
+      }
+      this.validateKnowledgeSemantics(checkpoint.knowledge, propositions, attributions, claims, `${prefix}.knowledge`, errors);
     }
   }
 
   private validateRule(rule: WorldRule, entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
     if (!rule.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Rule ${rule.id} has no source evidence`, "evidence"));
-    if (!(rule.requires?.length || rule.forbids?.length)) {
-      errors.push(issue("INERT_WORLD_RULE", `Rule ${rule.id} has neither requires nor forbids constraints and cannot affect deterministic validation`, "requires"));
-    }
-    const forbidden = new Set((rule.forbids ?? []).map((predicate) => canonicalJson(predicate)));
-    if (rule.appliesWhen.some((predicate) => forbidden.has(canonicalJson(predicate)))) {
-      errors.push(issue("SELF_FORBIDDING_WORLD_RULE", `Rule ${rule.id} forbids the same condition that makes it applicable`, "forbids"));
-    }
-    if ((rule.requires ?? []).some((predicate) => forbidden.has(canonicalJson(predicate)))) {
-      errors.push(issue("CONTRADICTORY_WORLD_RULE", `Rule ${rule.id} both requires and forbids the same condition`, "forbids"));
-    }
     const visibleRules = new Map(rules);
     visibleRules.set(rule.id, rule);
-    for (const predicate of [...rule.appliesWhen, ...(rule.requires ?? []), ...(rule.forbids ?? [])]) this.validatePredicate(predicate, entities, visibleRules, errors);
+    for (const predicate of worldRulePredicates(rule)) this.validatePredicate(predicate, entities, visibleRules, errors);
+  }
+
+  private validateEventParticipation(
+    participation: EventParticipation,
+    entities: ReadonlyMap<string, Entity>,
+    events: ReadonlyMap<string, CanonicalEvent>,
+    participations: ReadonlyMap<string, EventParticipation>,
+    errors: ValidationIssue[],
+  ): void {
+    if (!participation.evidence.length) {
+      errors.push(issue("MISSING_EVIDENCE", `Event participation ${participation.id} has no source evidence`, "evidence"));
+    }
+    errors.push(...validateEventParticipationRecord(participation, entities, events));
+    const duplicate = [...participations.values()].find((candidate) =>
+      candidate.id !== participation.id
+      && candidate.eventId === participation.eventId
+      && candidate.entityId === participation.entityId
+      && candidate.role === participation.role);
+    if (duplicate) {
+      errors.push(issue(
+        "DUPLICATE_EVENT_PARTICIPATION",
+        `Event ${participation.eventId} already has ${participation.role} participation ${duplicate.id} for ${participation.entityId}`,
+        "role",
+      ));
+    }
+  }
+
+  private validateEventRelation(
+    relation: EventRelation,
+    entities: ReadonlyMap<string, Entity>,
+    rules: ReadonlyMap<string, WorldRule>,
+    errors: ValidationIssue[],
+  ): void {
+    if (!relation.evidence.length) {
+      errors.push(issue("MISSING_EVIDENCE", `Event relation ${relation.id} has no source evidence`, "evidence"));
+    }
+    relation.requiredConditions?.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
   }
 
   private validateInitialWorld(
     initial: InitialWorld,
     entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
     claims: ReadonlyMap<string, Claim>,
+    events: ReadonlyMap<string, CanonicalEvent>,
     rules: ReadonlyMap<string, WorldRule>,
     errors: ValidationIssue[],
   ): void {
     if (!initial.evidence.length) errors.push(issue("MISSING_EVIDENCE", "Initial world has no source evidence", "evidence"));
+    if (initial.checkpoint?.beforeCanonicalEventId && !events.has(initial.checkpoint.beforeCanonicalEventId)) {
+      errors.push(issue("UNKNOWN_OPENING_EVENT", `Initial checkpoint references unknown canonical event ${initial.checkpoint.beforeCanonicalEventId}`, "checkpoint.beforeCanonicalEventId"));
+    }
     this.validateOperations(initial.delta.operations, entities, rules, errors, "delta.operations");
     for (let index = 0; index < (initial.knowledge?.operations.length ?? 0); index += 1) {
       const operation = initial.knowledge!.operations[index]!;
@@ -133,34 +594,334 @@ export class CompilerValidator {
         if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Initial knowledge references unknown claim ${operation.claimId}`, `knowledge.operations.${index}`));
         if (operation.sourceActorId) {
           const source = entities.get(operation.sourceActorId);
-          if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Initial knowledge source ${operation.sourceActorId} is not a canonical character`, `knowledge.operations.${index}`));
+          if (!isCommunicatingKnowledgeSource(source)) errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Initial knowledge source ${operation.sourceActorId} is not a canonical character or communication system`, `knowledge.operations.${index}`));
         }
       }
     }
+    this.validateKnowledgeSemantics(initial.knowledge, propositions, attributions, claims, "knowledge", errors);
+    const representedCharacters = new Set<string>();
+    const explicitlyDead = new Set<string>();
+    const openingPresenceIds = new Set<string>();
+    const physicalOpeningIds = new Set<string>();
+    for (let index = 0; index < (initial.participantPresence?.length ?? 0); index += 1) {
+      const presence = initial.participantPresence![index]!;
+      const entity = entities.get(presence.entityId);
+      if (!entity || entity.kind !== "character") {
+        errors.push(issue("INVALID_OPENING_PRESENCE", `Opening presence ${presence.entityId} is not a canonical character`, `participantPresence.${index}.entityId`));
+      }
+      if (openingPresenceIds.has(presence.entityId)) {
+        errors.push(issue("DUPLICATE_OPENING_PRESENCE", `Opening presence ${presence.entityId} is duplicated`, `participantPresence.${index}.entityId`));
+      }
+      openingPresenceIds.add(presence.entityId);
+      if (presence.mode === "physical") physicalOpeningIds.add(presence.entityId);
+    }
+    const observationActorIds = new Set<string>();
+    for (let index = 0; index < (initial.actorObservations?.length ?? 0); index += 1) {
+      const observation = initial.actorObservations![index]!;
+      const actor = entities.get(observation.actorId);
+      if (!actor || actor.kind !== "character") {
+        errors.push(issue(
+          "INVALID_OPENING_OBSERVER",
+          `Opening observer ${observation.actorId} is not a canonical character`,
+          `actorObservations.${index}.actorId`,
+        ));
+      }
+      if (observationActorIds.has(observation.actorId)) {
+        errors.push(issue(
+          "DUPLICATE_OPENING_OBSERVER",
+          `Opening observer ${observation.actorId} is duplicated`,
+          `actorObservations.${index}.actorId`,
+        ));
+      }
+      observationActorIds.add(observation.actorId);
+      if (!physicalOpeningIds.has(observation.actorId)) {
+        errors.push(issue(
+          "OPENING_OBSERVER_NOT_PHYSICAL",
+          `Opening observer ${observation.actorId} must be physically present at the checkpoint`,
+          `actorObservations.${index}.actorId`,
+        ));
+      }
+    }
+    if (initial.readerContext) {
+      const focal = entities.get(initial.readerContext.focalActorId);
+      if (!focal || focal.kind !== "character") {
+        errors.push(issue(
+          "INVALID_OPENING_FOCAL_ACTOR",
+          `Opening reader focal actor ${initial.readerContext.focalActorId} is not a canonical character`,
+          "readerContext.focalActorId",
+        ));
+      }
+      if (!physicalOpeningIds.has(initial.readerContext.focalActorId)) {
+        errors.push(issue(
+          "OPENING_FOCAL_ACTOR_NOT_PHYSICAL",
+          `Opening reader focal actor ${initial.readerContext.focalActorId} must be physically present`,
+          "readerContext.focalActorId",
+        ));
+      }
+      const initialKnowledgeByFocal = new Set((initial.knowledge?.operations ?? []).flatMap((operation) =>
+        operation.op === "learn" && operation.actorId === initial.readerContext!.focalActorId
+          ? [operation.claimId]
+          : []));
+      const referencedCharacterIds = new Set<string>();
+      for (let factIndex = 0; factIndex < initial.readerContext.facts.length; factIndex += 1) {
+        const fact = initial.readerContext.facts[factIndex]!;
+        for (let entityIndex = 0; entityIndex < fact.entityIds.length; entityIndex += 1) {
+          const entityId = fact.entityIds[entityIndex]!;
+          const entity = entities.get(entityId);
+          if (!entity) {
+            errors.push(issue(
+              "UNKNOWN_READER_CONTEXT_ENTITY",
+              `Opening reader fact ${fact.id} references unknown entity ${entityId}`,
+              `readerContext.facts.${factIndex}.entityIds.${entityIndex}`,
+            ));
+          } else if (entity.kind === "character" && entityId !== initial.readerContext.focalActorId) {
+            referencedCharacterIds.add(entityId);
+          }
+        }
+        if (fact.holderEntityId) {
+          const holder = entities.get(fact.holderEntityId);
+          if (!holder || (holder.kind !== "character" && holder.kind !== "institution")) {
+            errors.push(issue(
+              "INVALID_READER_CONTEXT_HOLDER",
+              `Opening reader fact ${fact.id} has invalid stance/stakes holder ${fact.holderEntityId}`,
+              `readerContext.facts.${factIndex}.holderEntityId`,
+            ));
+          }
+        }
+        for (let claimIndex = 0; claimIndex < fact.focalKnowledgeClaimIds.length; claimIndex += 1) {
+          const claimId = fact.focalKnowledgeClaimIds[claimIndex]!;
+          if (!claims.has(claimId)) {
+            errors.push(issue(
+              "UNKNOWN_READER_CONTEXT_CLAIM",
+              `Opening reader fact ${fact.id} references unknown focal knowledge claim ${claimId}`,
+              `readerContext.facts.${factIndex}.focalKnowledgeClaimIds.${claimIndex}`,
+            ));
+          } else if (!initialKnowledgeByFocal.has(claimId)) {
+            errors.push(issue(
+              "UNSEEDED_READER_CONTEXT_KNOWLEDGE",
+              `Reader fact ${fact.id} marks ${claimId} as focal knowledge, but the initial KnowledgeDelta does not seed it`,
+              `readerContext.facts.${factIndex}.focalKnowledgeClaimIds.${claimIndex}`,
+            ));
+          }
+        }
+      }
+      const glossEntityIds = new Set<string>();
+      for (let glossIndex = 0; glossIndex < initial.readerContext.entityGlosses.length; glossIndex += 1) {
+        const gloss = initial.readerContext.entityGlosses[glossIndex]!;
+        if (!entities.has(gloss.entityId)) {
+          errors.push(issue(
+            "UNKNOWN_READER_GLOSS_ENTITY",
+            `Opening entity gloss references unknown entity ${gloss.entityId}`,
+            `readerContext.entityGlosses.${glossIndex}.entityId`,
+          ));
+        }
+        if (glossEntityIds.has(gloss.entityId)) {
+          errors.push(issue(
+            "DUPLICATE_READER_GLOSS",
+            `Opening entity ${gloss.entityId} has more than one first-use gloss`,
+            `readerContext.entityGlosses.${glossIndex}.entityId`,
+          ));
+        }
+        glossEntityIds.add(gloss.entityId);
+      }
+      for (const entityId of referencedCharacterIds) {
+        if (!glossEntityIds.has(entityId)) {
+          errors.push(issue(
+            "MISSING_READER_CHARACTER_GLOSS",
+            `Opening reader context references character ${entityId} without explaining who they are and why they matter now`,
+            "readerContext.entityGlosses",
+          ));
+        }
+      }
+      for (const actorId of physicalOpeningIds) {
+        if (!observationActorIds.has(actorId)) {
+          errors.push(issue(
+            "MISSING_OPENING_ACTOR_OBSERVATION",
+            `Physically present opening character ${actorId} needs a direct-perception Genesis observation`,
+            "actorObservations",
+          ));
+        }
+      }
+    }
+    for (const operation of initial.delta.operations) {
+      if ("entityId" in operation && entities.get(operation.entityId)?.kind === "character") {
+        representedCharacters.add(operation.entityId);
+        if (operation.field === "character.alive") {
+          if (operation.op === "set" && operation.value === false) explicitlyDead.add(operation.entityId);
+          else explicitlyDead.delete(operation.entityId);
+        }
+      }
+    }
+    for (const operation of initial.knowledge?.operations ?? []) {
+      if (entities.get(operation.actorId)?.kind === "character") representedCharacters.add(operation.actorId);
+      if (operation.op === "learn" && operation.sourceActorId && entities.get(operation.sourceActorId)?.kind === "character") {
+        representedCharacters.add(operation.sourceActorId);
+      }
+    }
+    if (![...representedCharacters].some((characterId) => !explicitlyDead.has(characterId))) {
+      errors.push(issue(
+        "UNPLAYABLE_INITIAL_WORLD",
+        "Initial world must represent at least one non-dead opening character in committed state or knowledge; an evidence-backed empty or all-dead delta cannot create a playable cast.",
+        "delta.operations",
+      ));
+    }
+    const initialSourceIds = new Set(initial.evidence.map((reference) => reference.span.sourceId));
+    const sourceCharacterIds = [...entities.values()]
+      .filter((entity) => entity.kind === "character")
+      .filter((entity) => entity.evidence.some((reference) => initialSourceIds.has(reference.span.sourceId)))
+      .map((entity) => entity.id);
+    const actionableOpening = initial.delta.operations.some((operation) =>
+      "entityId" in operation
+      && sourceCharacterIds.includes(operation.entityId)
+      && physicalOpeningIds.has(operation.entityId)
+      && !explicitlyDead.has(operation.entityId)
+      && ["character.location", "character.plan", "character.momentum"].includes(operation.field)
+      && (operation.op !== "set" || operation.value !== null));
+    if (sourceCharacterIds.length > 1 && !physicalOpeningIds.size) {
+      errors.push(issue(
+        "MISSING_OPENING_PRESENCE",
+        "A multi-character source must explicitly identify at least one physically present opening role; identity, mention, or alive state is not presence.",
+        "participantPresence",
+      ));
+    }
+    if (sourceCharacterIds.length > 1 && !actionableOpening) {
+      errors.push(issue(
+        "INACTIONABLE_INITIAL_WORLD",
+        "A multi-character source must establish a bodily present opening role through a grounded location, plan, or momentum; a bare alive inventory cannot create a playable scene.",
+        "delta.operations",
+      ));
+    }
   }
 
-  private validateGoal(goal: CharacterGoal, entities: ReadonlyMap<string, Entity>, claims: ReadonlyMap<string, Claim>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[]): void {
+  private validateGoal(
+    goal: CharacterGoal,
+    entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
+    claims: ReadonlyMap<string, Claim>,
+    events: ReadonlyMap<string, CanonicalEvent>,
+    rules: ReadonlyMap<string, WorldRule>,
+    errors: ValidationIssue[],
+  ): void {
     const actor = entities.get(goal.actorId);
     if (!actor || actor.kind !== "character") errors.push(issue("INVALID_GOAL_ACTOR", `Goal actor ${goal.actorId} is not a canonical character`, "actorId"));
     if (!goal.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Goal ${goal.id} has no source evidence`, "evidence"));
     for (const claimId of [...goal.requiresKnowledge, ...(goal.blockedByKnowledge ?? [])]) {
       if (!claims.has(claimId)) errors.push(issue("UNKNOWN_GOAL_CLAIM", `Goal ${goal.id} references unknown claim ${claimId}`));
     }
-    if (goal.candidateAction) {
-      for (const participant of goal.candidateAction.participants ?? []) if (!entities.has(participant)) errors.push(issue("UNKNOWN_GOAL_PARTICIPANT", `Unknown goal participant ${participant}`));
-      for (const predicate of goal.candidateAction.preconditions) this.validatePredicate(predicate, entities, rules, errors);
-      this.validateOperations(goal.candidateAction.proposedDelta.operations, entities, rules, errors, "candidateAction.proposedDelta.operations");
-      for (const operation of goal.candidateAction.proposedKnowledge?.operations ?? []) {
-        if (!entities.has(operation.actorId)) errors.push(issue("UNKNOWN_KNOWLEDGE_ACTOR", `Unknown knowledge actor ${operation.actorId}`));
-        if (operation.op === "learn" && !claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Unknown knowledge claim ${operation.claimId}`));
+    for (let index = 0; index < (goal.targetIds?.length ?? 0); index += 1) {
+      if (!entities.has(goal.targetIds![index]!)) errors.push(issue("UNKNOWN_GOAL_TARGET", `Unknown goal target ${goal.targetIds![index]}`, `targetIds.${index}`));
+    }
+    for (let index = 0; index < (goal.activation?.preconditions.length ?? 0); index += 1) {
+      this.validatePredicate(goal.activation!.preconditions[index]!, entities, rules, errors);
+    }
+    for (let index = 0; index < (goal.activation?.afterCanonicalEventIds.length ?? 0); index += 1) {
+      const eventId = goal.activation!.afterCanonicalEventIds[index]!;
+      if (!events.has(eventId)) errors.push(issue("UNKNOWN_GOAL_EVENT", `Goal ${goal.id} activates after unknown canonical event ${eventId}`, `activation.afterCanonicalEventIds.${index}`));
+    }
+    for (let index = 0; index < (goal.activation?.afterExperiencedCanonicalEventIds?.length ?? 0); index += 1) {
+      const eventId = goal.activation!.afterExperiencedCanonicalEventIds![index]!;
+      if (!events.has(eventId)) errors.push(issue(
+        "UNKNOWN_GOAL_EXPERIENCE_EVENT",
+        `Goal ${goal.id} activates after unknown personally experienced canonical event ${eventId}`,
+        `activation.afterExperiencedCanonicalEventIds.${index}`,
+      ));
+    }
+    if (goal.activation?.storyWindow?.kind === "relative" && !events.has(goal.activation.storyWindow.anchorEventId)) {
+      errors.push(issue("UNKNOWN_GOAL_EVENT", `Goal ${goal.id} story window references unknown canonical event ${goal.activation.storyWindow.anchorEventId}`, "activation.storyWindow.anchorEventId"));
+    }
+    for (const [path, predicates] of [
+      ["completion", goal.completion ?? []],
+      ["expiry", goal.expiry ?? []],
+    ] as const) {
+      predicates.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      if (predicates.length && predicates.some((predicate) => (goal.activation?.preconditions ?? []).some((activation) => canonicalJson(activation) === canonicalJson(predicate)))) {
+        errors.push(issue("GOAL_ACTIVE_AND_COMPLETE", `Goal ${goal.id} uses the same predicate for activation and ${path}`, path));
       }
+    }
+    for (let milestoneIndex = 0; milestoneIndex < (goal.milestones?.length ?? 0); milestoneIndex += 1) {
+      goal.milestones![milestoneIndex]!.conditions.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+    }
+    const actions = [
+      ...(goal.candidateAction ? [{ path: "candidateAction", value: goal.candidateAction }] : []),
+      ...(goal.actionPatterns ?? []).map((value, index) => ({ path: `actionPatterns.${index}`, value })),
+    ];
+    for (const { path, value } of actions) {
+      for (let index = 0; index < (value.participants?.length ?? 0); index += 1) {
+        const participant = value.participants![index]!;
+        if (!entities.has(participant)) errors.push(issue("UNKNOWN_GOAL_PARTICIPANT", `Unknown goal participant ${participant}`, `${path}.participants.${index}`));
+      }
+      value.preconditions.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      this.validateOperations(value.proposedDelta.operations, entities, rules, errors, `${path}.proposedDelta.operations`);
+      for (let index = 0; index < (value.proposedKnowledge?.operations.length ?? 0); index += 1) {
+        const operation = value.proposedKnowledge!.operations[index]!;
+        const knowledgeActor = entities.get(operation.actorId);
+        if (!knowledgeActor || knowledgeActor.kind !== "character") errors.push(issue("UNKNOWN_KNOWLEDGE_ACTOR", `Unknown knowledge actor ${operation.actorId}`, `${path}.proposedKnowledge.operations.${index}.actorId`));
+        if (!claims.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Unknown knowledge claim ${operation.claimId}`, `${path}.proposedKnowledge.operations.${index}.claimId`));
+        if (operation.op === "learn" && operation.sourceActorId) {
+          const sourceActor = entities.get(operation.sourceActorId);
+          if (!isCommunicatingKnowledgeSource(sourceActor)) errors.push(issue("UNKNOWN_KNOWLEDGE_SOURCE", `Unknown character/system knowledge source ${operation.sourceActorId}`, `${path}.proposedKnowledge.operations.${index}.sourceActorId`));
+        }
+      }
+      this.validateKnowledgeSemantics(value.proposedKnowledge, propositions, attributions, claims, `${path}.proposedKnowledge`, errors);
     }
   }
 
-  private validateCharacterModel(model: CharacterModel, entities: ReadonlyMap<string, Entity>, errors: ValidationIssue[]): void {
+  private validateKnowledgeSemantics(
+    delta: KnowledgeDelta | undefined,
+    propositions: ReadonlyMap<string, Proposition>,
+    attributions: ReadonlyMap<string, Attribution>,
+    claims: ReadonlyMap<string, Claim>,
+    path: string,
+    errors: ValidationIssue[],
+  ): void {
+    for (let index = 0; index < (delta?.operations.length ?? 0); index += 1) {
+      errors.push(...validateKnowledgeSemanticReferences(delta!.operations[index]!, {
+        claims,
+        propositions,
+        attributions,
+      }, `${path}.operations.${index}`));
+    }
+  }
+
+  private validateCharacterModel(
+    model: CharacterModel,
+    entities: ReadonlyMap<string, Entity>,
+    propositions: ReadonlyMap<string, Proposition>,
+    claims: ReadonlyMap<string, Claim>,
+    events: ReadonlyMap<string, CanonicalEvent>,
+    rules: ReadonlyMap<string, WorldRule>,
+    goals: ReadonlyMap<string, CharacterGoal>,
+    errors: ValidationIssue[],
+  ): void {
     const actor = entities.get(model.actorId);
     if (!actor || actor.kind !== "character") errors.push(issue("INVALID_MODEL_ACTOR", `Character model actor ${model.actorId} is not a canonical character`, "actorId"));
     if (!model.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Character model ${model.actorId} has no source evidence`, "evidence"));
+    for (let phaseIndex = 0; phaseIndex < (model.developmentPhases?.length ?? 0); phaseIndex += 1) {
+      const phase = model.developmentPhases![phaseIndex]!;
+      phase.activation.preconditions.forEach((predicate) => this.validatePredicate(predicate, entities, rules, errors));
+      for (const eventId of [...phase.activation.afterCanonicalEventIds, ...phase.activation.afterExperiencedCanonicalEventIds]) {
+        if (!events.has(eventId)) errors.push(issue("UNKNOWN_DEVELOPMENT_EVENT", `Character phase ${phase.id} references unknown canonical event ${eventId}`, `developmentPhases.${phaseIndex}.activation`));
+      }
+      for (const claimId of phase.activation.requiresKnowledge) {
+        if (!claims.has(claimId)) errors.push(issue("UNKNOWN_DEVELOPMENT_CLAIM", `Character phase ${phase.id} references unknown claim ${claimId}`, `developmentPhases.${phaseIndex}.activation.requiresKnowledge`));
+      }
+      if (phase.activation.storyWindow?.kind === "relative" && !events.has(phase.activation.storyWindow.anchorEventId)) {
+        errors.push(issue("UNKNOWN_DEVELOPMENT_EVENT", `Character phase ${phase.id} story window references unknown canonical event ${phase.activation.storyWindow.anchorEventId}`, `developmentPhases.${phaseIndex}.activation.storyWindow`));
+      }
+    }
+    errors.push(...validateCharacterOntologyReferences(model, {
+      entities,
+      propositions: new Set(propositions.keys()),
+      events,
+      goals,
+    }));
+    errors.push(...validateRelationshipOntologyReferences(model, {
+      entities,
+      propositions: new Set(propositions.keys()),
+      claims: new Set(claims.keys()),
+      events,
+    }));
   }
 
   private validateOperations(operations: CanonicalEvent["observedOutcome"]["operations"], entities: ReadonlyMap<string, Entity>, rules: ReadonlyMap<string, WorldRule>, errors: ValidationIssue[], pathPrefix: string): void {
@@ -169,6 +930,22 @@ export class CompilerValidator {
       try {
         this.stateSchema.validateOperation(operation, entities);
         if ((operation.op === "activate-rule" || operation.op === "deactivate-rule") && !rules.has(operation.ruleId)) errors.push(issue("UNKNOWN_RULE", `Unknown rule ${operation.ruleId}`, `${pathPrefix}.${index}`));
+        if (operation.op !== "activate-rule" && operation.op !== "deactivate-rule" && operation.field === "character.relationships") {
+          const addedReferences = operation.op === "set" && Array.isArray(operation.value)
+            ? operation.value
+            : operation.op === "add-member"
+              ? [operation.member]
+              : [];
+          for (let memberIndex = 0; memberIndex < addedReferences.length; memberIndex += 1) {
+            const member = addedReferences[memberIndex];
+            if (typeof member !== "string" || entities.get(member)?.kind === "relationship") continue;
+            errors.push(issue(
+              "INVALID_RELATIONSHIP_REFERENCE",
+              `character.relationships may reference relationship entities only; ${member} is ${entities.get(member)?.kind ?? "unknown"}`,
+              operation.op === "set" ? `${pathPrefix}.${index}.value.${memberIndex}` : `${pathPrefix}.${index}.member`,
+            ));
+          }
+        }
       } catch (error) {
         errors.push(issue("INVALID_STATE_OPERATION", error instanceof Error ? error.message : String(error), `${pathPrefix}.${index}`));
       }
@@ -179,13 +956,18 @@ export class CompilerValidator {
     if (predicate.op === "all" || predicate.op === "any") { for (const item of predicate.items) this.validatePredicate(item, entities, rules, errors); return; }
     if (predicate.op === "not") { this.validatePredicate(predicate.item, entities, rules, errors); return; }
     if (predicate.op === "rule-active") { if (!rules.has(predicate.ruleId)) errors.push(issue("UNKNOWN_RULE", `Predicate references unknown rule ${predicate.ruleId}`)); return; }
-    if (predicate.op === "after-step" || predicate.op === "before-step") return;
+    if (predicate.op === "after-step" || predicate.op === "before-step"
+      || predicate.op === "elapsed-days-gte" || predicate.op === "elapsed-days-lte"
+      || predicate.op === "story-time-at-or-after" || predicate.op === "story-time-before") return;
     const entity = entities.get(predicate.entityId);
     if (!entity) { errors.push(issue("UNKNOWN_PREDICATE_ENTITY", `Predicate references unknown entity ${predicate.entityId}`)); return; }
     try {
       const field = this.stateSchema.get(predicate.field);
       if (!field.appliesTo.includes(entity.kind)) errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} does not apply to ${entity.kind}`));
       if (predicate.op === "fact-equals") this.stateSchema.validateValue(field, predicate.value, entities);
+      if ((predicate.op === "fact-gte" || predicate.op === "fact-lte") && field.valueType !== "number") {
+        errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} is not numeric`));
+      }
       if (predicate.op === "entity-in") {
         if (!entities.has(predicate.member)) errors.push(issue("UNKNOWN_PREDICATE_MEMBER", `Unknown member ${predicate.member}`));
         if (field.valueType !== "entity-ref-set") errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} is not a set field`));
@@ -203,80 +985,910 @@ export class CompilerCommitService {
   readonly validator: CompilerValidator;
   readonly initialWorld: InitialWorldStore;
   readonly actorModels: ActorModelStore;
+  readonly exactEvidence: EvidenceAssertionStore;
   private readonly evidence: EvidenceVerifier;
+  private readonly workspaceRoot: string;
 
   constructor(workspaceRoot: string) {
+    this.workspaceRoot = workspaceRoot;
     this.canon = new CanonicalModelStore(workspaceRoot);
     this.proposals = new ProposalStore(workspaceRoot);
     this.compiler = new CanonicalCompiler(this.proposals, this.canon);
-    this.validator = new CompilerValidator(this.canon);
     this.initialWorld = new InitialWorldStore(workspaceRoot);
     this.actorModels = new ActorModelStore(workspaceRoot);
+    this.validator = new CompilerValidator(this.canon, new StateSchemaRegistry(DEFAULT_STATE_FIELDS), this.actorModels);
+    this.exactEvidence = new EvidenceAssertionStore(workspaceRoot);
     this.evidence = new EvidenceVerifier(workspaceRoot);
   }
 
   async accept(kind: CanonicalProposalKind, id: string): Promise<CompilerValidation> {
     const schema = schemaFor(kind);
     const proposal = await this.proposals.read("pending", id, schema);
-    const validation = await this.validateProposal(kind, proposal.payload, proposal.evidence);
+    const validation = await this.validateProposal(
+      id,
+      kind,
+      proposal.payload,
+      proposal.evidence,
+      proposal.evidenceAssertions ?? [],
+    );
     if (!validation.accepted) return validation;
-    if (kind === "entity") await this.compiler.acceptEntity(id);
-    else if (kind === "claim") await this.compiler.acceptClaim(id);
-    else if (kind === "canonical-event") await this.compiler.acceptEvent(id);
-    else if (kind === "world-rule") await this.compiler.acceptRule(id);
-    else if (kind === "initial-world") await this.initialWorld.put(initialWorldSchema.parse(proposal.payload));
-    else if (kind === "character-goal") await this.actorModels.putGoal(characterGoalSchema.parse(proposal.payload));
-    else await this.actorModels.putModel(characterModelSchema.parse(proposal.payload));
-    if (kind === "initial-world" || kind === "character-goal" || kind === "character-model") await this.proposals.transition(id, "pending", "accepted");
+    await this.commitParsed({
+      id,
+      kind,
+      payload: proposal.payload,
+      evidence: proposal.evidence,
+      evidenceAssertions: proposal.evidenceAssertions ?? [],
+      createdAt: proposal.createdAt,
+    });
     return validation;
   }
 
-  async acceptAllValid(): Promise<BatchAcceptResult> {
-    const order: CanonicalProposalKind[] = ["entity", "claim", "world-rule", "initial-world", "character-model", "character-goal", "canonical-event"];
+  async acceptAllValid(
+    sourceId?: string,
+    onProgress?: (progress: CompilerConvergenceProgress) => void,
+  ): Promise<BatchAcceptResult> {
     const accepted: BatchAcceptResult["accepted"] = [];
-    let changed = true;
-    while (changed) {
-      changed = false;
-      const pending = await this.proposals.list("pending");
-      for (const kind of order) {
-        for (const proposal of pending.filter((item) => item.kind === kind)) {
-          const validation = await this.accept(kind, proposal.id);
-          if (validation.accepted) { accepted.push({ id: proposal.id, kind }); changed = true; }
+    const blocked: BatchAcceptResult["blocked"] = [];
+    const staging: BatchAcceptResult["staging"] = [];
+    const candidates: PendingCanonicalProposal[] = [];
+    for (const proposal of await this.proposals.list("pending", sourceId)) {
+      if (!isCanonicalKind(proposal.kind)) {
+        staging.push({ id: proposal.id, kind: proposal.kind });
+        continue;
+      }
+      const schema = schemaFor(proposal.kind);
+      const envelope = await this.proposals.read("pending", proposal.id, schema);
+      candidates.push({
+        id: proposal.id,
+        kind: proposal.kind,
+        payload: envelope.payload,
+        evidence: envelope.evidence,
+        evidenceAssertions: envelope.evidenceAssertions ?? [],
+        createdAt: proposal.createdAt,
+      });
+    }
+
+    const total = candidates.length;
+    let processed = 0;
+    onProgress?.({ phase: "load", processed, total, accepted: 0, blocked: 0 });
+    const deduplicated = selectLogicalCandidates(candidates);
+    const eligible = deduplicated.selected;
+    for (const { candidate, selectedId, identity } of deduplicated.superseded) {
+      const errors = [issue("SUPERSEDED_LOGICAL_PROPOSAL", `Proposal is superseded by newer active proposal '${selectedId}' for ${identity}.`)];
+      await this.proposals.reject(candidate.id, errors);
+      blocked.push({
+        id: candidate.id,
+        kind: candidate.kind,
+        errors,
+      });
+      processed += 1;
+      onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length, proposalId: candidate.id });
+    }
+
+    const catalog = await this.validator.loadCatalog();
+    const recordProgress = (candidate?: PendingCanonicalProposal): void => {
+      processed += 1;
+      onProgress?.({
+        phase: "canonical",
+        processed,
+        total,
+        accepted: accepted.length,
+        blocked: blocked.length,
+        ...(candidate ? { proposalId: candidate.id } : {}),
+      });
+    };
+    const blockCandidate = (candidate: PendingCanonicalProposal, errors: ValidationIssue[]): void => {
+      blocked.push({ id: candidate.id, kind: candidate.kind, errors });
+      recordProgress(candidate);
+    };
+    const commitCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
+      try {
+        await this.commitParsed(candidate);
+        addToCatalog(catalog, candidate.kind, candidate.payload);
+        accepted.push({ id: candidate.id, kind: candidate.kind });
+      } catch (error) {
+        blocked.push({
+          id: candidate.id,
+          kind: candidate.kind,
+          errors: [issue("COMMIT_CONFLICT", error instanceof Error ? error.message : String(error))],
+        });
+      }
+      recordProgress(candidate);
+    };
+    const validateCandidate = (
+      candidate: PendingCanonicalProposal,
+      candidateCatalog = catalog,
+      graphScope: CompilerCatalogValidationScope = "catalog",
+    ): Promise<CompilerValidation> => this.validateProposal(
+      candidate.id,
+      candidate.kind,
+      candidate.payload,
+      candidate.evidence,
+      candidate.evidenceAssertions,
+      candidateCatalog,
+      { graphScope },
+    );
+    const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
+      const validation = await validateCandidate(candidate);
+      if (!validation.accepted) {
+        blockCandidate(candidate, validation.errors);
+      } else {
+        await commitCandidate(candidate);
+      }
+    };
+
+    for (const candidate of eligible.filter((item) => item.kind === "entity")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "claim")) await processCandidate(candidate);
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "world-rule"),
+      catalog.rules,
+      ruleDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "RULE_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "proposition"),
+      catalog.propositions,
+      propositionDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "PROPOSITION_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "attribution"),
+      catalog.attributions,
+      attributionDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "ATTRIBUTION_DEPENDENCY_CYCLE",
+    );
+    for (const candidate of eligible.filter((item) => item.kind === "event-frame")) await processCandidate(candidate);
+    const sceneGraphCandidates = eligible.filter((item) =>
+      item.kind === "canonical-event" || item.kind === "scene-occurrence");
+    const sceneGraphPreflight = validateProspectiveSceneEventGraph(catalog, sceneGraphCandidates);
+    const sceneGraphBlockedIds = new Set<string>();
+    for (const [candidateId, errors] of sceneGraphPreflight.candidateErrors) {
+      const candidate = sceneGraphCandidates.find((item) => item.id === candidateId);
+      if (!candidate) continue;
+      sceneGraphBlockedIds.add(candidate.id);
+      blockCandidate(candidate, errors);
+    }
+    if (sceneGraphPreflight.unattributedErrors.length && sceneGraphCandidates.length) {
+      for (const candidate of sceneGraphCandidates) {
+        if (sceneGraphBlockedIds.has(candidate.id)) continue;
+        sceneGraphBlockedIds.add(candidate.id);
+        blockCandidate(candidate, [
+          issue(
+            "CANONICAL_SCENE_EVENT_GRAPH_INVALID",
+            `The existing scene/event graph must be repaired in the same convergence: ${sceneGraphPreflight.unattributedErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+          ),
+        ]);
+      }
+    }
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "canonical-event" && !sceneGraphBlockedIds.has(item.id)),
+      catalog.events,
+      eventDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "CAUSAL_CYCLE",
+    );
+    for (const candidate of eligible.filter((item) => item.kind === "action-schema")) await processCandidate(candidate);
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "action-constraint"),
+      catalog.actionConstraints,
+      actionConstraintDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "ACTION_CONSTRAINT_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "norm-template"),
+      catalog.normTemplates,
+      normTemplateDependencies,
+      processCandidate,
+      blocked,
+      () => {
+        processed += 1;
+        onProgress?.({ phase: "canonical", processed, total, accepted: accepted.length, blocked: blocked.length });
+      },
+      "NORM_TEMPLATE_DEPENDENCY_CYCLE",
+    );
+    for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
+    const sceneCandidates = eligible.filter((item) =>
+      item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
+    if (sceneCandidates.length) {
+      const prospectiveCatalog = cloneValidationCatalog(catalog);
+      sceneCandidates.forEach((candidate) => addToCatalog(prospectiveCatalog, candidate.kind, candidate.payload));
+      const validations = await Promise.all(
+        sceneCandidates.map((candidate) => validateCandidate(candidate, prospectiveCatalog)),
+      );
+      if (validations.every((validation) => validation.accepted)) {
+        for (const candidate of sceneCandidates) await commitCandidate(candidate);
+      } else {
+        const groupErrors = uniqueIssues(validations.flatMap((validation) => validation.errors));
+        for (const [index, candidate] of sceneCandidates.entries()) {
+          blockCandidate(candidate, validations[index]!.errors.length
+            ? validations[index]!.errors
+            : [
+                issue(
+                  "SCENE_OCCURRENCE_GROUP_BLOCKED",
+                  `Scene occurrence graph is invalid: ${groupErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+                ),
+              ]);
         }
       }
     }
-    const remaining = await this.proposals.list("pending");
-    const blocked: BatchAcceptResult["blocked"] = [];
-    const staging: BatchAcceptResult["staging"] = [];
-    for (const proposal of remaining) {
-      if (!isCanonicalKind(proposal.kind)) { staging.push({ id: proposal.id, kind: proposal.kind }); continue; }
-      const schema = schemaFor(proposal.kind);
-      const envelope = await this.proposals.read("pending", proposal.id, schema);
-      const validation = await this.validateProposal(proposal.kind, envelope.payload, envelope.evidence);
-      blocked.push({ id: proposal.id, kind: proposal.kind, errors: validation.errors });
+    for (const candidate of eligible.filter((item) => item.kind === "event-participation")) await processCandidate(candidate);
+    const relationCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of eligible.filter((item) => item.kind === "event-relation")) {
+      const validation = await validateCandidate(candidate, catalog, "record");
+      if (validation.accepted) relationCandidates.push(candidate);
+      else blockCandidate(candidate, validation.errors);
     }
+    const causalRelationGroups = new Map<string, PendingCanonicalProposal[]>();
+    const independentRelationCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of relationCandidates) {
+      const relation = eventRelationSchema.parse(candidate.payload);
+      if (eventRelationProjectsLegacyCausalParent(relation)) {
+        causalRelationGroups.set(relation.toEventId, [
+          ...(causalRelationGroups.get(relation.toEventId) ?? []),
+          candidate,
+        ]);
+      } else {
+        independentRelationCandidates.push(candidate);
+      }
+    }
+    for (const group of causalRelationGroups.values()) {
+      const prospectiveCatalog = cloneValidationCatalog(catalog);
+      group.forEach((candidate) => addToCatalog(prospectiveCatalog, candidate.kind, candidate.payload));
+      const validations = await Promise.all(group.map((candidate) => validateCandidate(candidate, prospectiveCatalog)));
+      if (validations.every((validation) => validation.accepted)) {
+        for (const candidate of group) await commitCandidate(candidate);
+        continue;
+      }
+      const groupErrors = uniqueIssues(validations.flatMap((validation) => validation.errors));
+      for (const [index, candidate] of group.entries()) {
+        blockCandidate(candidate, validations[index]!.errors.length
+          ? validations[index]!.errors
+          : [
+              issue(
+                "CAUSAL_RELATION_GROUP_BLOCKED",
+                `Causal relation group for ${eventRelationSchema.parse(candidate.payload).toEventId} is invalid: ${groupErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+              ),
+            ]);
+      }
+    }
+    for (const candidate of independentRelationCandidates) await processCandidate(candidate);
+
+    const spatialCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of eligible.filter((item) => item.kind === "spatial-relation")) {
+      const validation = await validateCandidate(candidate, catalog, "record");
+      if (validation.accepted) spatialCandidates.push(candidate);
+      else blockCandidate(candidate, validation.errors);
+    }
+    for (const candidate of spatialCandidates) await processCandidate(candidate);
+    for (const kind of ["initial-world", "character-goal", "character-model"] as const) {
+      for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
+    }
+    onProgress?.({ phase: "complete", processed, total, accepted: accepted.length, blocked: blocked.length });
     return { accepted, blocked, staging };
   }
 
-  private async validateProposal(kind: CanonicalProposalKind, payload: unknown, envelopeEvidence: readonly EvidenceRef[]): Promise<CompilerValidation> {
-    const validation = await this.validator.validate(kind, payload);
-    const payloadEvidence = (payload as { evidence?: EvidenceRef[] }).evidence ?? [];
-    const verified = await this.evidence.verifyAll([...payloadEvidence, ...envelopeEvidence]);
-    const errors = [...validation.errors, ...verified.issues];
+  /**
+   * Run the deterministic structural commit validator over the complete
+   * source-scoped pending graph without inspecting committed resolution traces
+   * or mutating proposal/canonical state. The finish handshake separately
+   * validates the pending annotation and resolution traces, so combining both
+   * checks gives finish the same semantic boundary used by convergence.
+   */
+  async validatePendingStructure(sourceId?: string): Promise<BatchAcceptResult["blocked"]> {
+    const candidates: PendingCanonicalProposal[] = [];
+    for (const proposal of await this.proposals.list("pending", sourceId)) {
+      if (!isCanonicalKind(proposal.kind)) continue;
+      const schema = schemaFor(proposal.kind);
+      const envelope = await this.proposals.read("pending", proposal.id, schema);
+      candidates.push({
+        id: proposal.id,
+        kind: proposal.kind,
+        payload: envelope.payload,
+        evidence: envelope.evidence,
+        evidenceAssertions: envelope.evidenceAssertions ?? [],
+        createdAt: proposal.createdAt,
+      });
+    }
+    const deduplicated = selectLogicalCandidates(candidates);
+    const catalog = await this.validator.loadCatalog();
+    const blocked: BatchAcceptResult["blocked"] = deduplicated.superseded.map(({ candidate, selectedId, identity }) => ({
+      id: candidate.id,
+      kind: candidate.kind,
+      errors: [issue("SUPERSEDED_LOGICAL_PROPOSAL", `Proposal is superseded by newer active proposal '${selectedId}' for ${identity}.`)],
+    }));
+    const eligible = deduplicated.selected;
+    const blockCandidate = (candidate: PendingCanonicalProposal, errors: readonly ValidationIssue[]): void => {
+      blocked.push({ id: candidate.id, kind: candidate.kind, errors: uniqueIssues(errors) });
+    };
+    const validateCandidate = (
+      candidate: PendingCanonicalProposal,
+      candidateCatalog = catalog,
+      graphScope: CompilerCatalogValidationScope = "catalog",
+    ): CompilerValidation => this.validator.validateWithCatalog(
+      candidate.kind,
+      candidate.payload,
+      candidateCatalog,
+      { graphScope },
+    );
+    const processCandidate = async (candidate: PendingCanonicalProposal): Promise<void> => {
+      const validation = validateCandidate(candidate);
+      if (!validation.accepted) blockCandidate(candidate, validation.errors);
+      else addToCatalog(catalog, candidate.kind, candidate.payload);
+    };
+
+    for (const candidate of eligible.filter((item) => item.kind === "entity")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "claim")) await processCandidate(candidate);
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "world-rule"),
+      catalog.rules,
+      ruleDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "RULE_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "proposition"),
+      catalog.propositions,
+      propositionDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "PROPOSITION_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "attribution"),
+      catalog.attributions,
+      attributionDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "ATTRIBUTION_DEPENDENCY_CYCLE",
+    );
+    for (const candidate of eligible.filter((item) => item.kind === "event-frame")) await processCandidate(candidate);
+    const sceneGraphCandidates = eligible.filter((item) =>
+      item.kind === "canonical-event" || item.kind === "scene-occurrence");
+    const sceneGraphPreflight = validateProspectiveSceneEventGraph(catalog, sceneGraphCandidates);
+    const sceneGraphBlockedIds = new Set<string>();
+    for (const [candidateId, errors] of sceneGraphPreflight.candidateErrors) {
+      const candidate = sceneGraphCandidates.find((item) => item.id === candidateId);
+      if (!candidate) continue;
+      sceneGraphBlockedIds.add(candidate.id);
+      blockCandidate(candidate, errors);
+    }
+    if (sceneGraphPreflight.unattributedErrors.length) {
+      blocked.push({
+        id: "canonical-scene-event-graph",
+        kind: "scene-occurrence",
+        errors: uniqueIssues(sceneGraphPreflight.unattributedErrors),
+      });
+    }
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "canonical-event" && !sceneGraphBlockedIds.has(item.id)),
+      catalog.events,
+      eventDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "CAUSAL_CYCLE",
+    );
+    for (const candidate of eligible.filter((item) => item.kind === "action-schema")) await processCandidate(candidate);
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "action-constraint"),
+      catalog.actionConstraints,
+      actionConstraintDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "ACTION_CONSTRAINT_DEPENDENCY_CYCLE",
+    );
+    await processDependencyKind(
+      eligible.filter((item) => item.kind === "norm-template"),
+      catalog.normTemplates,
+      normTemplateDependencies,
+      processCandidate,
+      blocked,
+      () => undefined,
+      "NORM_TEMPLATE_DEPENDENCY_CYCLE",
+    );
+    for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
+    const sceneCandidates = eligible.filter((item) =>
+      item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
+    if (sceneCandidates.length) {
+      const prospectiveCatalog = cloneValidationCatalog(catalog);
+      sceneCandidates.forEach((candidate) => addToCatalog(prospectiveCatalog, candidate.kind, candidate.payload));
+      const validations = sceneCandidates.map((candidate) => validateCandidate(candidate, prospectiveCatalog));
+      if (validations.every((validation) => validation.accepted)) {
+        sceneCandidates.forEach((candidate) => addToCatalog(catalog, candidate.kind, candidate.payload));
+      } else {
+        const groupErrors = uniqueIssues(validations.flatMap((validation) => validation.errors));
+        for (const [index, candidate] of sceneCandidates.entries()) {
+          blockCandidate(candidate, validations[index]!.errors.length
+            ? validations[index]!.errors
+            : [
+                issue(
+                  "SCENE_OCCURRENCE_GROUP_BLOCKED",
+                  `Scene occurrence graph is invalid: ${groupErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+                ),
+              ]);
+        }
+      }
+    }
+    for (const candidate of eligible.filter((item) => item.kind === "event-participation")) await processCandidate(candidate);
+
+    const relationCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of eligible.filter((item) => item.kind === "event-relation")) {
+      const validation = validateCandidate(candidate, catalog, "record");
+      if (validation.accepted) relationCandidates.push(candidate);
+      else blockCandidate(candidate, validation.errors);
+    }
+    const causalRelationGroups = new Map<string, PendingCanonicalProposal[]>();
+    const independentRelationCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of relationCandidates) {
+      const relation = eventRelationSchema.parse(candidate.payload);
+      if (eventRelationProjectsLegacyCausalParent(relation)) {
+        causalRelationGroups.set(relation.toEventId, [
+          ...(causalRelationGroups.get(relation.toEventId) ?? []),
+          candidate,
+        ]);
+      } else {
+        independentRelationCandidates.push(candidate);
+      }
+    }
+    for (const group of causalRelationGroups.values()) {
+      const prospectiveCatalog = cloneValidationCatalog(catalog);
+      group.forEach((candidate) => addToCatalog(prospectiveCatalog, candidate.kind, candidate.payload));
+      const validations = group.map((candidate) => validateCandidate(candidate, prospectiveCatalog));
+      if (validations.every((validation) => validation.accepted)) {
+        group.forEach((candidate) => addToCatalog(catalog, candidate.kind, candidate.payload));
+        continue;
+      }
+      const groupErrors = uniqueIssues(validations.flatMap((validation) => validation.errors));
+      for (const [index, candidate] of group.entries()) {
+        blockCandidate(candidate, validations[index]!.errors.length
+          ? validations[index]!.errors
+          : [
+              issue(
+                "CAUSAL_RELATION_GROUP_BLOCKED",
+                `Causal relation group for ${eventRelationSchema.parse(candidate.payload).toEventId} is invalid: ${groupErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+              ),
+            ]);
+      }
+    }
+    for (const candidate of independentRelationCandidates) await processCandidate(candidate);
+
+    const spatialCandidates: PendingCanonicalProposal[] = [];
+    for (const candidate of eligible.filter((item) => item.kind === "spatial-relation")) {
+      const validation = validateCandidate(candidate, catalog, "record");
+      if (validation.accepted) spatialCandidates.push(candidate);
+      else blockCandidate(candidate, validation.errors);
+    }
+    for (const candidate of spatialCandidates) await processCandidate(candidate);
+    for (const kind of ["initial-world", "character-goal", "character-model"] as const) {
+      for (const candidate of eligible.filter((item) => item.kind === kind)) await processCandidate(candidate);
+    }
+    return blocked.sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  private async validateProposal(
+    proposalId: string,
+    kind: CanonicalProposalKind,
+    payload: unknown,
+    envelopeEvidence: readonly EvidenceRef[],
+    evidenceAssertions: readonly EvidenceAssertion[],
+    catalog?: CompilerValidationCatalog,
+    options: { graphScope?: CompilerCatalogValidationScope } = {},
+  ): Promise<CompilerValidation> {
+    const validation = catalog
+      ? this.validator.validateWithCatalog(kind, payload, catalog, options)
+      : await this.validator.validate(kind, payload);
+    const payloadEvidence = compilerPayloadEvidence(payload);
+    const inspected = await this.evidence.inspectAll([...payloadEvidence, ...envelopeEvidence]);
+    const groundingIssues = kind === "entity" && inspected.valid
+      ? validateEntityNameEvidence(entitySchema.parse(payload), inspected.excerpts)
+      : [];
+    const artifactId = compilerProposalArtifactId(kind, payload, proposalId);
+    const targetIssues = validateEvidenceAssertionTargets(kind, artifactId, payload, evidenceAssertions);
+    const characterEvidenceIssues = kind === "character-model"
+      ? [
+          ...validateCharacterOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
+          ...validateRelationshipOntologyEvidenceAssertions(characterModelSchema.parse(payload), evidenceAssertions),
+        ]
+      : [];
+    const spatialEvidenceIssues = kind === "spatial-relation"
+      ? validateSpatialEvidenceAssertions(spatialRelationSchema.parse(payload), evidenceAssertions)
+      : [];
+    const worldRuleEvidenceIssues = kind === "world-rule"
+      ? validateWorldRuleEvidenceAssertions(worldRuleSchema.parse(payload), evidenceAssertions)
+      : [];
+    const initialWorldEvidenceIssues = kind === "initial-world"
+      ? validateInitialWorldEvidenceAssertions(initialWorldSchema.parse(payload), evidenceAssertions)
+      : [];
+    const exactInspection = await this.evidence.inspectAssertions(evidenceAssertions);
+    const legacySourceIds = evidenceSourceIds([...payloadEvidence, ...envelopeEvidence]);
+    const exactSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
+    const mixedSourceIssues = legacySourceIds.length && exactSourceIds.length
+      && (legacySourceIds.length !== 1 || exactSourceIds.length !== 1 || legacySourceIds[0] !== exactSourceIds[0])
+      ? [issue(
+          "EVIDENCE_SOURCE_MISMATCH",
+          `Proposal ${proposalId} has legacy evidence from ${legacySourceIds.join(", ")} and exact evidence from ${exactSourceIds.join(", ")}.`,
+          "evidenceAssertions",
+        )]
+      : [];
+    const sourceIds = [...new Set([...legacySourceIds, ...exactSourceIds])];
+    const resolutionTraceIssues = kind === "entity" && sourceIds.length === 1
+      ? (await validateCommittedEntityResolutionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        entitySchema.parse(payload),
+      )).map((message) => issue("MISSING_ENTITY_RESOLUTION_TRACE", message, "id"))
+      : [];
+    const eventResolutionTraceIssues = kind === "canonical-event" && sourceIds.length === 1
+      ? (await validateCommittedEventResolutionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        canonicalEventSchema.parse(payload),
+      )).map((message) => issue("MISSING_EVENT_RESOLUTION_TRACE", message, "id"))
+      : [];
+    const attributionTraceIssues = kind === "attribution" && sourceIds.length === 1
+      ? (await validateCommittedAttributionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        attributionSchema.parse(payload),
+      )).map((message) => issue("INVALID_ATTRIBUTION_TRACE", message, "quotationIds"))
+      : [];
+    const knowledgeTraceIssues = sourceIds.length === 1
+      ? (await validateCommittedKnowledgeAcquisitionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        findKnowledgeDeltas(payload),
+      )).map((message) => issue("INVALID_KNOWLEDGE_ACQUISITION_TRACE", message))
+      : [];
+    const errors = [
+      ...validation.errors,
+      ...inspected.issues,
+      ...groundingIssues,
+      ...targetIssues,
+      ...characterEvidenceIssues,
+      ...spatialEvidenceIssues,
+      ...worldRuleEvidenceIssues,
+      ...initialWorldEvidenceIssues,
+      ...exactInspection.issues,
+      ...mixedSourceIssues,
+      ...resolutionTraceIssues,
+      ...eventResolutionTraceIssues,
+      ...attributionTraceIssues,
+      ...knowledgeTraceIssues,
+    ];
     return { accepted: errors.length === 0, errors, warnings: validation.warnings };
+  }
+
+  private async commitParsed(candidate: PendingCanonicalProposal): Promise<void> {
+    const { kind, id, payload } = candidate;
+    if (kind === "entity") await this.canon.putEntity(entitySchema.parse(payload));
+    else if (kind === "proposition") await this.canon.putProposition(propositionSchema.parse(payload));
+    else if (kind === "attribution") await this.canon.putAttribution(attributionSchema.parse(payload));
+    else if (kind === "claim") await this.canon.putClaim(claimSchema.parse(payload));
+    else if (kind === "canonical-event") await this.canon.putEvent(canonicalEventSchema.parse(payload));
+    else if (kind === "event-participation") await this.canon.putEventParticipation(eventParticipationSchema.parse(payload));
+    else if (kind === "event-relation") await this.canon.putEventRelation(eventRelationSchema.parse(payload));
+    else if (kind === "scene-occurrence") await this.canon.putSceneOccurrence(sceneOccurrenceSchema.parse(payload));
+    else if (kind === "event-frame") await this.canon.putEventFrame(eventFrameSchema.parse(payload));
+    else if (kind === "action-schema") await this.canon.putActionSchema(actionSchemaSchema.parse(payload));
+    else if (kind === "action-constraint") await this.canon.putActionConstraint(actionConstraintSchema.parse(payload));
+    else if (kind === "norm-template") await this.canon.putNormTemplate(normTemplateSchema.parse(payload));
+    else if (kind === "process-template") await this.canon.putProcessTemplate(processTemplateSchema.parse(payload));
+    else if (kind === "spatial-relation") await this.canon.putSpatialRelation(spatialRelationSchema.parse(payload));
+    else if (kind === "world-rule") await this.canon.putRule(worldRuleSchema.parse(payload));
+    else if (kind === "initial-world") await this.initialWorld.put(initialWorldSchema.parse(payload));
+    else if (kind === "character-goal") await this.actorModels.putGoal(characterGoalSchema.parse(payload));
+    else await this.actorModels.putModel(characterModelSchema.parse(payload));
+    const artifactId = compilerProposalArtifactId(kind, payload, id);
+    await this.exactEvidence.replaceForArtifact(
+      kind,
+      artifactId,
+      contentHash(payload),
+      candidate.evidenceAssertions,
+    );
+    await this.proposals.transition(id, "pending", "accepted");
   }
 }
 
+type PendingCanonicalProposal = {
+  id: string;
+  kind: CanonicalProposalKind;
+  payload: unknown;
+  evidence: EvidenceRef[];
+  evidenceAssertions: EvidenceAssertion[];
+  createdAt: string;
+};
+
+function selectLogicalCandidates(candidates: readonly PendingCanonicalProposal[]): {
+  selected: PendingCanonicalProposal[];
+  superseded: Array<{ candidate: PendingCanonicalProposal; selectedId: string; identity: string }>;
+} {
+  const byIdentity = new Map<string, PendingCanonicalProposal[]>();
+  const selected: PendingCanonicalProposal[] = [];
+  const superseded: Array<{ candidate: PendingCanonicalProposal; selectedId: string; identity: string }> = [];
+  for (const candidate of candidates) {
+    const identity = compilerProposalLogicalIdentity(candidate.kind, candidate.payload);
+    if (!identity) {
+      selected.push(candidate);
+      continue;
+    }
+    byIdentity.set(identity, [...(byIdentity.get(identity) ?? []), candidate]);
+  }
+  for (const [identity, group] of byIdentity) {
+    const ranked = [...group].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    const winner = ranked.at(-1)!;
+    selected.push(winner);
+    for (const candidate of ranked.slice(0, -1)) superseded.push({ candidate, selectedId: winner.id, identity });
+  }
+  return {
+    selected: selected.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)),
+    superseded,
+  };
+}
+
+async function processDependencyKind<T extends { id: string }>(
+  candidates: readonly PendingCanonicalProposal[],
+  canonical: ReadonlyMap<string, T>,
+  dependencies: (payload: T) => string[],
+  process: (candidate: PendingCanonicalProposal) => Promise<void>,
+  blocked: BatchAcceptResult["blocked"],
+  recordCycle: () => void,
+  cycleCode: string,
+): Promise<void> {
+  const byLogicalId = new Map(candidates.map((candidate) => [(candidate.payload as T).id, candidate]));
+  const indegree = new Map<string, number>();
+  const children = new Map<string, string[]>();
+  for (const [id, candidate] of byLogicalId) {
+    const localDependencies = [...new Set(dependencies(candidate.payload as T).filter((dependency) => byLogicalId.has(dependency) && !canonical.has(dependency)))];
+    indegree.set(id, localDependencies.length);
+    for (const dependency of localDependencies) children.set(dependency, [...(children.get(dependency) ?? []), id]);
+  }
+  const ready = [...indegree].filter(([, count]) => count === 0).map(([id]) => id).sort();
+  const visited = new Set<string>();
+  while (ready.length) {
+    const id = ready.shift()!;
+    visited.add(id);
+    await process(byLogicalId.get(id)!);
+    for (const child of (children.get(id) ?? []).sort()) {
+      const next = (indegree.get(child) ?? 1) - 1;
+      indegree.set(child, next);
+      if (next === 0) {
+        ready.push(child);
+        ready.sort();
+      }
+    }
+  }
+  for (const [id, candidate] of byLogicalId) {
+    if (visited.has(id)) continue;
+    blocked.push({ id: candidate.id, kind: candidate.kind, errors: [issue(cycleCode, `Dependency cycle prevents committing logical artifact ${id}.`)] });
+    recordCycle();
+  }
+}
+
+function ruleDependencies(rule: WorldRule): string[] {
+  const dependencies = [...rule.overridesRuleIds];
+  for (const predicate of worldRulePredicates(rule)) collectRuleDependencies(predicate, dependencies);
+  return dependencies;
+}
+
+function collectRuleDependencies(predicate: Predicate, dependencies: string[]): void {
+  if (predicate.op === "rule-active") dependencies.push(predicate.ruleId);
+  else if (predicate.op === "all" || predicate.op === "any") predicate.items.forEach((item) => collectRuleDependencies(item, dependencies));
+  else if (predicate.op === "not") collectRuleDependencies(predicate.item, dependencies);
+}
+
+function eventDependencies(event: CanonicalEvent): string[] {
+  return [...event.causalParents, ...(event.storyTime.kind === "relative" ? [event.storyTime.anchorEventId] : [])];
+}
+
+function propositionDependencies(proposition: Proposition): string[] {
+  return proposition.object.kind === "proposition" ? [proposition.object.propositionId] : [];
+}
+
+function attributionDependencies(attribution: Attribution): string[] {
+  return attribution.sourceAttributionId ? [attribution.sourceAttributionId] : [];
+}
+
+function actionConstraintDependencies(constraint: ActionConstraint): string[] {
+  return [...constraint.overridesConstraintIds];
+}
+
+function normTemplateDependencies(template: NormTemplate): string[] {
+  return [...template.overridesTemplateIds];
+}
+
+function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposalKind, payload: unknown): void {
+  if (kind === "entity") { const value = entitySchema.parse(payload); catalog.entities.set(value.id, value); }
+  if (kind === "proposition") { const value = propositionSchema.parse(payload); catalog.propositions.set(value.id, value); }
+  if (kind === "attribution") { const value = attributionSchema.parse(payload); catalog.attributions.set(value.id, value); }
+  if (kind === "claim") { const value = claimSchema.parse(payload); catalog.claims.set(value.id, value); }
+  if (kind === "canonical-event") { const value = canonicalEventSchema.parse(payload); catalog.events.set(value.id, value); }
+  if (kind === "event-participation") { const value = eventParticipationSchema.parse(payload); catalog.eventParticipations.set(value.id, value); }
+  if (kind === "event-relation") { const value = eventRelationSchema.parse(payload); catalog.eventRelations.set(value.id, value); }
+  if (kind === "scene-occurrence") { const value = sceneOccurrenceSchema.parse(payload); catalog.sceneOccurrences.set(value.id, value); }
+  if (kind === "event-frame") { const value = eventFrameSchema.parse(payload); catalog.eventFrames.set(value.id, value); }
+  if (kind === "action-schema") { const value = actionSchemaSchema.parse(payload); catalog.actionSchemas.set(value.id, value); }
+  if (kind === "action-constraint") { const value = actionConstraintSchema.parse(payload); catalog.actionConstraints.set(value.id, value); }
+  if (kind === "norm-template") { const value = normTemplateSchema.parse(payload); catalog.normTemplates.set(value.id, value); }
+  if (kind === "process-template") { const value = processTemplateSchema.parse(payload); catalog.processTemplates.set(value.id, value); }
+  if (kind === "spatial-relation") { const value = spatialRelationSchema.parse(payload); catalog.spatialRelations.set(value.id, value); }
+  if (kind === "world-rule") { const value = worldRuleSchema.parse(payload); catalog.rules.set(value.id, value); }
+  if (kind === "character-goal") { const value = characterGoalSchema.parse(payload); catalog.goals.set(value.id, value); }
+}
+
+function cloneValidationCatalog(catalog: CompilerValidationCatalog): CompilerValidationCatalog {
+  return {
+    entities: new Map(catalog.entities),
+    propositions: new Map(catalog.propositions),
+    attributions: new Map(catalog.attributions),
+    claims: new Map(catalog.claims),
+    events: new Map(catalog.events),
+    eventParticipations: new Map(catalog.eventParticipations),
+    eventRelations: new Map(catalog.eventRelations),
+    spatialRelations: new Map(catalog.spatialRelations),
+    sceneOccurrences: new Map(catalog.sceneOccurrences),
+    eventFrames: new Map(catalog.eventFrames),
+    actionSchemas: new Map(catalog.actionSchemas),
+    actionConstraints: new Map(catalog.actionConstraints),
+    normTemplates: new Map(catalog.normTemplates),
+    processTemplates: new Map(catalog.processTemplates),
+    rules: new Map(catalog.rules),
+    goals: new Map(catalog.goals),
+  };
+}
+
+function validateProspectiveSceneEventGraph(
+  catalog: CompilerValidationCatalog,
+  candidates: readonly PendingCanonicalProposal[],
+): {
+  candidateErrors: Map<string, ValidationIssue[]>;
+  unattributedErrors: ValidationIssue[];
+} {
+  const prospective = cloneValidationCatalog(catalog);
+  for (const candidate of candidates) addToCatalog(prospective, candidate.kind, candidate.payload);
+  const scenes = [...prospective.sceneOccurrences.values()];
+  const issues = validateSceneOccurrenceCatalog({
+    entities: prospective.entities,
+    events: prospective.events,
+    scenes,
+  });
+  const eventCandidates = new Map(candidates.flatMap((candidate) =>
+    candidate.kind === "canonical-event"
+      ? [[canonicalEventSchema.parse(candidate.payload).id, candidate] as const]
+      : []));
+  const sceneCandidates = new Map(candidates.flatMap((candidate) =>
+    candidate.kind === "scene-occurrence"
+      ? [[sceneOccurrenceSchema.parse(candidate.payload).id, candidate] as const]
+      : []));
+  const candidateErrors = new Map<string, ValidationIssue[]>();
+  const unattributedErrors: ValidationIssue[] = [];
+
+  for (const graphIssue of issues) {
+    const { eventIds, sceneIds } = sceneEventGraphIssueArtifacts(graphIssue, scenes);
+    const implicated = new Map<string, PendingCanonicalProposal>();
+    for (const eventId of eventIds) {
+      const candidate = eventCandidates.get(eventId);
+      if (candidate) implicated.set(candidate.id, candidate);
+    }
+    for (const sceneId of sceneIds) {
+      const candidate = sceneCandidates.get(sceneId);
+      if (candidate) implicated.set(candidate.id, candidate);
+    }
+    if (!implicated.size) {
+      unattributedErrors.push(graphIssue);
+      continue;
+    }
+    for (const candidate of implicated.values()) {
+      candidateErrors.set(candidate.id, uniqueIssues([
+        ...(candidateErrors.get(candidate.id) ?? []),
+        graphIssue,
+      ]));
+    }
+  }
+  return {
+    candidateErrors,
+    unattributedErrors: uniqueIssues(unattributedErrors),
+  };
+}
+
+function sceneEventGraphIssueArtifacts(
+  graphIssue: ValidationIssue,
+  scenes: readonly SceneOccurrence[],
+): { eventIds: Set<string>; sceneIds: Set<string> } {
+  const eventIds = new Set<string>();
+  const sceneIds = new Set<string>();
+  const scenePath = graphIssue.path?.match(/^scenes\.(\d+)(?:\.eventIds\.(\d+))?/u);
+  if (scenePath) {
+    const scene = scenes[Number(scenePath[1])];
+    if (scene) {
+      sceneIds.add(scene.id);
+      if (scenePath[2] !== undefined) {
+        const eventId = scene.eventIds[Number(scenePath[2])];
+        if (eventId) eventIds.add(eventId);
+      }
+    }
+  }
+  const eventPath = graphIssue.path?.match(/^events\.(.+)\.sceneOccurrenceIds\.(\d+)$/u);
+  if (eventPath) eventIds.add(eventPath[1]!);
+  for (const match of graphIssue.message.matchAll(/\b[Ee]vent ([A-Za-z0-9][A-Za-z0-9._-]*)/gu)) {
+    eventIds.add(match[1]!);
+  }
+  for (const match of graphIssue.message.matchAll(/\b[Ss]cene ([A-Za-z0-9][A-Za-z0-9._-]*)/gu)) {
+    sceneIds.add(match[1]!);
+  }
+  return { eventIds, sceneIds };
+}
+
+function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
+  return [...new Map(issues.map((value) => [canonicalJson(value), value])).values()];
+}
+
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
-  return kind === "entity" || kind === "claim" || kind === "canonical-event" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "action-schema" || kind === "action-constraint" || kind === "norm-template" || kind === "process-template" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
 }
 function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "entity") return entitySchema;
+  if (kind === "proposition") return propositionSchema;
+  if (kind === "attribution") return attributionSchema;
   if (kind === "claim") return claimSchema;
   if (kind === "canonical-event") return canonicalEventSchema;
+  if (kind === "event-participation") return eventParticipationSchema;
+  if (kind === "event-relation") return eventRelationSchema;
+  if (kind === "scene-occurrence") return sceneOccurrenceSchema;
+  if (kind === "event-frame") return eventFrameSchema;
+  if (kind === "action-schema") return actionSchemaSchema;
+  if (kind === "action-constraint") return actionConstraintSchema;
+  if (kind === "norm-template") return normTemplateSchema;
+  if (kind === "process-template") return processTemplateSchema;
+  if (kind === "spatial-relation") return spatialRelationSchema;
   if (kind === "initial-world") return initialWorldSchema;
   if (kind === "character-goal") return characterGoalSchema;
   if (kind === "character-model") return characterModelSchema;
   return worldRuleSchema;
 }
 function issue(code: string, message: string, path?: string): ValidationIssue { return path ? { code, message, path } : { code, message }; }
+
+function storyTimeDefinitelyBefore(left: StoryTime, right: StoryTime): boolean {
+  const comparable = (value: StoryTime): { scale: "year" | "ordinal"; min: number; max: number } | undefined => {
+    if (value.kind === "ordinal" && typeof value.orderHint === "number") return { scale: "ordinal", min: value.orderHint, max: value.orderHint };
+    const values = value.kind === "exact" ? [value.value] : value.kind === "range" ? [value.earliest, value.latest] : [];
+    const years = values.flatMap((entry) => [...entry.matchAll(/(?:^|\D)(\d{3,4})(?:s)?(?=\D|$)/g)].map((match) => Number(match[1])));
+    return years.length ? { scale: "year", min: Math.min(...years), max: Math.max(...years.map((year) => year + 9)) } : undefined;
+  };
+  const leftRange = comparable(left);
+  const rightRange = comparable(right);
+  return Boolean(leftRange && rightRange && leftRange.scale === rightRange.scale && leftRange.max < rightRange.min);
+}

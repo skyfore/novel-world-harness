@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -5,27 +6,36 @@ import type { z } from "zod";
 import { canonicalJson, assertContentHash, contentHash } from "./canonical.js";
 import {
   branchSchema,
+  branchSemanticDeltaSchema,
   committedEventSchema,
   knowledgeDeltaSchema,
+  normDeltaSchema,
+  processDeltaSchema,
   stateDeltaSchema,
   worldCommitSchema,
   type Branch,
+  type BranchSemanticDelta,
   type BranchId,
   type CommitId,
   type CommittedEvent,
   type KnowledgeDelta,
+  type NormDelta,
   type ObjectHash,
+  type ProcessDelta,
   type StateDelta,
   type WorldCommit,
 } from "./model.js";
+import { worldStorageRoot } from "./paths.js";
 
-const WORLD_STORAGE_VERSION = "v1";
 const BRANCH_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-type ObjectKind = "deltas" | "knowledge" | "events" | "commits";
+type ObjectKind = "deltas" | "knowledge" | "semantics" | "processes" | "norms" | "events" | "commits";
 type Schema<T> = z.ZodType<T>;
-type BranchHead = { version: 1; commitId: CommitId; updatedAt: string };
-type BranchLock = { version: 1; pid: number; hostname: string; createdAt: string };
-export type BranchLockStatus = { present: boolean; stale: boolean; metadata?: BranchLock };
+export type BranchHead = { version: 1; commitId: CommitId; updatedAt: string };
+export type BranchLockMetadata =
+  | { version: 1; pid: number; hostname: string; createdAt: string }
+  | { version: 2; pid: number; hostname: string; createdAt: string; token: string };
+export type BranchLockStatus = { present: boolean; stale: boolean; metadata?: BranchLockMetadata };
+type HeldBranchLock = { handle: fs.FileHandle; token: string };
 
 function assertBranchId(id: string): void {
   if (!BRANCH_ID.test(id)) throw new Error(`Invalid branch id: ${id}`);
@@ -33,33 +43,76 @@ function assertBranchId(id: string): void {
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
 }
+async function syncDirectory(directory: string): Promise<void> {
+  if (process.platform === "win32") return;
+  const handle = await fs.open(directory, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+async function writeSyncedFile(filePath: string, content: string): Promise<void> {
+  const handle = await fs.open(filePath, "wx", 0o600);
+  try {
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
 async function atomicWrite(filePath: string, content: string): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(temporary, content, { encoding: "utf8", mode: 0o600 });
-  await fs.rename(temporary, filePath);
+  const directory = path.dirname(filePath);
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    await writeSyncedFile(temporary, content);
+    await fs.rename(temporary, filePath);
+    await syncDirectory(directory);
+  } finally {
+    await fs.rm(temporary, { force: true });
+  }
 }
 async function writeImmutable(filePath: string, content: string): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const directory = path.dirname(filePath);
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  let published = false;
   try {
-    await fs.writeFile(filePath, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    const existing = await fs.readFile(filePath, "utf8");
-    if (existing !== content) throw new Error(`Immutable object collision at ${filePath}`);
+    await writeSyncedFile(temporary, content);
+    try {
+      await fs.link(temporary, filePath);
+      published = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const existing = await fs.readFile(filePath, "utf8");
+      if (existing !== content) throw new Error(`Immutable object collision at ${filePath}`);
+    }
+    if (published) await syncDirectory(directory);
+  } finally {
+    await fs.rm(temporary, { force: true });
   }
 }
 
 export class WorldObjectStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", WORLD_STORAGE_VERSION);
+    this.root = worldStorageRoot(workspaceRoot);
   }
   putDelta(delta: StateDelta): Promise<ObjectHash> {
     return this.put("deltas", stateDeltaSchema, delta);
   }
   putKnowledgeDelta(delta: KnowledgeDelta): Promise<ObjectHash> {
     return this.put("knowledge", knowledgeDeltaSchema, delta);
+  }
+  putSemanticDelta(delta: BranchSemanticDelta): Promise<ObjectHash> {
+    return this.put("semantics", branchSemanticDeltaSchema, delta);
+  }
+  putProcessDelta(delta: ProcessDelta): Promise<ObjectHash> {
+    return this.put("processes", processDeltaSchema, delta);
+  }
+  putNormDelta(delta: NormDelta): Promise<ObjectHash> {
+    return this.put("norms", normDeltaSchema, delta);
   }
   putEvent(event: CommittedEvent): Promise<ObjectHash> {
     return this.put("events", committedEventSchema, event);
@@ -72,6 +125,15 @@ export class WorldObjectStore {
   }
   getKnowledgeDelta(hash: ObjectHash): Promise<KnowledgeDelta> {
     return this.get("knowledge", knowledgeDeltaSchema, hash);
+  }
+  getSemanticDelta(hash: ObjectHash): Promise<BranchSemanticDelta> {
+    return this.get("semantics", branchSemanticDeltaSchema, hash);
+  }
+  getProcessDelta(hash: ObjectHash): Promise<ProcessDelta> {
+    return this.get("processes", processDeltaSchema, hash);
+  }
+  getNormDelta(hash: ObjectHash): Promise<NormDelta> {
+    return this.get("norms", normDeltaSchema, hash);
   }
   getEvent(hash: ObjectHash): Promise<CommittedEvent> {
     return this.get("events", committedEventSchema, hash);
@@ -100,21 +162,27 @@ export class WorldObjectStore {
 export class BranchStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", WORLD_STORAGE_VERSION, "branches");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "branches");
   }
   async create(input: Branch): Promise<Branch> {
     const branch = branchSchema.parse(input);
     assertBranchId(branch.id);
+    await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
     const directory = this.branchDirectory(branch.id);
-    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-    const branchPath = path.join(directory, "branch.json");
+    const staging = path.join(this.root, `.staging-${branch.id}-${crypto.randomUUID()}`);
+    await fs.mkdir(staging, { mode: 0o700 });
     try {
-      await fs.writeFile(branchPath, `${JSON.stringify(branch, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      await atomicWrite(path.join(staging, "branch.json"), `${JSON.stringify(branch, null, 2)}\n`);
+      await this.writeHeadAtDirectory(staging, branch.headCommitId);
+      await syncDirectory(staging);
+      await fs.rename(staging, directory);
+      await syncDirectory(this.root);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      throw new Error(`Branch already exists: ${branch.id}`);
+      await fs.rm(staging, { recursive: true, force: true });
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EEXIST" || code === "ENOTEMPTY") throw new Error(`Branch already exists: ${branch.id}`);
+      throw error;
     }
-    await this.writeHead(branch.id, branch.headCommitId);
     return branch;
   }
   async read(id: BranchId): Promise<Branch> {
@@ -122,12 +190,51 @@ export class BranchStore {
     const branch = branchSchema.parse(await readJson<unknown>(path.join(this.branchDirectory(id), "branch.json")));
     return { ...branch, headCommitId: await this.readHead(id) };
   }
+  async listIds(): Promise<string[]> {
+    try {
+      const entries = await fs.readdir(this.root, { withFileTypes: true });
+      return entries.filter((entry) => entry.isDirectory() && BRANCH_ID.test(entry.name)).map((entry) => entry.name).sort();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }
+  async assertRemovable(id: BranchId, removingBranchIds: ReadonlySet<string> = new Set([id])): Promise<void> {
+    assertBranchId(id);
+    await this.read(id);
+    for (const candidateId of await this.listIds()) {
+      if (candidateId === id || removingBranchIds.has(candidateId)) continue;
+      const candidate = await this.read(candidateId);
+      if (candidate.parentBranchId === id) {
+        throw new Error(`Cannot remove instance '${id}' while child instance '${candidateId}' still depends on it. Remove the child first.`);
+      }
+    }
+    const lock = await this.inspectLock(id);
+    if (lock.present) throw new Error(`Cannot remove instance '${id}' while its branch lock is ${lock.stale ? "stale" : "active"}.`);
+  }
+  async remove(id: BranchId): Promise<void> {
+    await this.assertRemovable(id);
+    const directory = this.branchDirectory(id);
+    const tombstone = path.join(this.root, `.deleting-${id}-${crypto.randomUUID()}`);
+    await this.withLock(id, async () => {
+      await fs.rename(directory, tombstone);
+    });
+    await fs.rm(tombstone, { recursive: true, force: true });
+  }
   async readHead(id: BranchId): Promise<CommitId> {
+    return (await this.readHeadInfo(id)).commitId;
+  }
+  async readHeadInfo(id: BranchId): Promise<BranchHead> {
     assertBranchId(id);
     const head = await readJson<BranchHead>(path.join(this.branchDirectory(id), "head.json"));
-    if (head.version !== 1 || typeof head.commitId !== "string") throw new Error(`Invalid branch head: ${id}`);
+    if (
+      head.version !== 1
+      || typeof head.commitId !== "string"
+      || typeof head.updatedAt !== "string"
+      || !Number.isFinite(Date.parse(head.updatedAt))
+    ) throw new Error(`Invalid branch head: ${id}`);
     assertContentHash(head.commitId);
-    return head.commitId;
+    return head;
   }
   async updateHead(id: BranchId, expected: CommitId, next: CommitId): Promise<void> {
     assertBranchId(id);
@@ -144,13 +251,13 @@ export class BranchStore {
     const directory = this.branchDirectory(id);
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const lockPath = path.join(directory, "lock");
-    let handle: fs.FileHandle | undefined;
+    let held: HeldBranchLock | undefined;
     try {
-      handle = await this.acquireLock(id, lockPath);
+      held = await this.acquireLock(id, lockPath);
       return await fn();
     } finally {
-      await handle?.close();
-      if (handle) await fs.rm(lockPath, { force: true });
+      await held?.handle.close();
+      if (held) await this.releaseOwnedLock(lockPath, held.token);
     }
   }
   async inspectLock(id: BranchId): Promise<BranchLockStatus> {
@@ -158,10 +265,17 @@ export class BranchStore {
     const lockPath = path.join(this.branchDirectory(id), "lock");
     try {
       const raw = await fs.readFile(lockPath, "utf8");
-      let metadata: BranchLock | undefined;
+      let metadata: BranchLockMetadata | undefined;
       try {
-        const value = JSON.parse(raw) as BranchLock;
-        if (value.version === 1 && Number.isInteger(value.pid) && value.pid > 0 && typeof value.hostname === "string" && typeof value.createdAt === "string" && Number.isFinite(Date.parse(value.createdAt))) metadata = value;
+        const value = JSON.parse(raw) as Record<string, unknown>;
+        const commonValid = (value.version === 1 || value.version === 2)
+          && Number.isInteger(value.pid)
+          && Number(value.pid) > 0
+          && typeof value.hostname === "string"
+          && typeof value.createdAt === "string"
+          && Number.isFinite(Date.parse(value.createdAt));
+        const tokenValid = value.version !== 2 || (typeof value.token === "string" && value.token.length > 0);
+        if (commonValid && tokenValid) metadata = value as BranchLockMetadata;
       } catch {
         // A process may be between exclusive create and metadata write.
       }
@@ -171,29 +285,42 @@ export class BranchStore {
       throw error;
     }
   }
-  private async acquireLock(id: BranchId, lockPath: string): Promise<fs.FileHandle> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+  private async acquireLock(id: BranchId, lockPath: string): Promise<HeldBranchLock> {
+    try {
+      const handle = await fs.open(lockPath, "wx", 0o600);
+      const token = crypto.randomUUID();
+      const metadata: BranchLockMetadata = { version: 2, pid: process.pid, hostname: os.hostname(), createdAt: new Date().toISOString(), token };
       try {
-        const handle = await fs.open(lockPath, "wx", 0o600);
-        const metadata: BranchLock = { version: 1, pid: process.pid, hostname: os.hostname(), createdAt: new Date().toISOString() };
-        try {
-          await handle.writeFile(`${JSON.stringify(metadata)}\n`, "utf8");
-        } catch (error) {
-          await handle.close();
-          await fs.rm(lockPath, { force: true });
-          throw error;
-        }
-        return handle;
+        await handle.writeFile(`${JSON.stringify(metadata)}\n`, "utf8");
+        await handle.sync();
+        await syncDirectory(path.dirname(lockPath));
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        const status = await this.inspectLock(id);
-        if (attempt > 0 || !status.stale) throw new Error(`Branch is locked: ${id}`);
+        await handle.close();
         await fs.rm(lockPath, { force: true });
+        throw error;
       }
+      return { handle, token };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const status = await this.inspectLock(id);
+      if (status.stale) {
+        throw new Error(`Branch has a stale lock: ${id}; recover it explicitly only after confirming no NWH process owns the branch`);
+      }
+      throw new Error(`Branch is locked: ${id}`);
     }
-    throw new Error(`Branch is locked: ${id}`);
   }
-  private async isStaleLock(lockPath: string, metadata?: BranchLock): Promise<boolean> {
+  private async releaseOwnedLock(lockPath: string, token: string): Promise<void> {
+    try {
+      const value = JSON.parse(await fs.readFile(lockPath, "utf8")) as Record<string, unknown>;
+      if (value.version !== 2 || value.token !== token) return;
+      await fs.rm(lockPath);
+      await syncDirectory(path.dirname(lockPath));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+  }
+  private async isStaleLock(lockPath: string, metadata?: BranchLockMetadata): Promise<boolean> {
     if (metadata?.hostname === os.hostname()) {
       try {
         process.kill(metadata.pid, 0);
@@ -208,13 +335,15 @@ export class BranchStore {
     return Date.now() - stat.mtimeMs > 5 * 60_000;
   }
   private async writeHead(id: BranchId, commitId: CommitId): Promise<void> {
+    await this.writeHeadAtDirectory(this.branchDirectory(id), commitId);
+  }
+  private async writeHeadAtDirectory(directory: string, commitId: CommitId): Promise<void> {
     assertContentHash(commitId);
     const head: BranchHead = { version: 1, commitId, updatedAt: new Date().toISOString() };
-    await atomicWrite(path.join(this.branchDirectory(id), "head.json"), `${JSON.stringify(head, null, 2)}\n`);
+    await atomicWrite(path.join(directory, "head.json"), `${JSON.stringify(head, null, 2)}\n`);
   }
   private branchDirectory(id: BranchId): string {
     assertBranchId(id);
     return path.join(this.root, id);
   }
 }
-

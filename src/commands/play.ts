@@ -1,9 +1,9 @@
 import { stdout as output, stderr } from "node:process";
 import type { TuiMode } from "@earendil-works/pi-coding-agent";
-import { PiAgentSession } from "../agent/pi-session.js";
+import { formatRetryNotice, PiAgentSession } from "../agent/pi-session.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
-import type { PiLiveTestOptions } from "../agent/pi-session.js";
+import type { PlaySceneRequest } from "../world/play-opening.js";
 
 export type PlayCommandOptions = {
   configPath: string;
@@ -11,11 +11,16 @@ export type PlayCommandOptions = {
   root?: string;
   model?: string;
   continueSession?: boolean;
+  sessionId?: string;
   saveSession?: boolean;
   printPrompt?: string;
   tuiMode?: TuiMode;
-  liveTest?: PiLiveTestOptions;
+  activeWorldScene?: PlaySceneRequest;
 };
+
+export function resolvePlaySessionContinuation(options: Pick<PlayCommandOptions, "continueSession" | "printPrompt" | "sessionId">): boolean {
+  return options.sessionId !== undefined || (options.continueSession ?? options.printPrompt === undefined);
+}
 
 async function optionalConfig(options: PlayCommandOptions) {
   try {
@@ -27,20 +32,32 @@ async function optionalConfig(options: PlayCommandOptions) {
 }
 
 export async function playCommand(options: PlayCommandOptions): Promise<void> {
+  if (options.sessionId && options.continueSession === false) {
+    throw new Error("Choose either --session or --new-session, not both.");
+  }
   const workspace = await LocalFileWorkspace.create(options.root ?? process.cwd());
   const config = await optionalConfig(options);
   const profile = config ? profileForRole(config, "narrator").profile : undefined;
   const model = options.model ?? profile?.model;
   const saveSession = options.saveSession ?? true;
   const printMode = options.printPrompt !== undefined;
+  const continueSession = resolvePlaySessionContinuation(options);
   let textStarted = false;
   const session = await PiAgentSession.create({
     workspace,
     profile,
     model,
-    continueSession: options.continueSession,
+    ...(config?.project.instructions.length
+      ? { projectInstructionPaths: config.project.instructions }
+      : {}),
+    continueSession,
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
     saveSession,
-    ...(options.liveTest ? { liveTest: options.liveTest } : {}),
+    trackLastOpenedSession: !printMode,
+    ...(options.activeWorldScene !== undefined ? { activeWorldScene: options.activeWorldScene } : {}),
+    ...(printMode ? { onRetry(event) {
+      stderr.write(`\n${formatRetryNotice(event)}\n`);
+    } } : {}),
     ...(printMode ? { onText(delta: string) {
       textStarted = true;
       output.write(delta);

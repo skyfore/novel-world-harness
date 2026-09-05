@@ -1,9 +1,23 @@
-import type { EvidenceRef, Predicate, ValidationIssue, WorldRule } from "../world/model.js";
+import type { EvidenceAssertion, EvidenceRef, Predicate, ValidationIssue, WorldRule } from "../world/model.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { PossibilityTemplateStore, possibilityTemplateSchema, type PossibilityTemplate } from "../world/possibility-model.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../world/state.js";
 import { EvidenceVerifier } from "./evidence.js";
 import { hasExecutablePossibilityEffect } from "./semantics.js";
+import { canonicalJson, contentHash } from "../world/canonical.js";
+import { canonicalScaffoldRoleNeutralityIssues } from "../world/canonical-adaptation.js";
+import {
+  EvidenceAssertionStore,
+  evidenceAssertionSourceIds,
+  validateEvidenceAssertionTargets,
+} from "./evidence-assertions.js";
+import { evidenceSourceIds } from "../world/source-scope.js";
+import {
+  findKnowledgeDeltas,
+  isCommunicatingKnowledgeSource,
+  validateKnowledgeSemanticReferences,
+} from "../world/knowledge-semantics.js";
+import { validateCommittedKnowledgeAcquisitionTrace } from "./attribution-trace.js";
 
 export type PossibilityValidation = {
   accepted: boolean;
@@ -15,6 +29,7 @@ export class PossibilityCommitService {
   readonly proposals: ProposalStore;
   readonly templates: PossibilityTemplateStore;
   readonly canon: CanonicalModelStore;
+  readonly exactEvidence: EvidenceAssertionStore;
   private readonly evidence: EvidenceVerifier;
   private readonly stateSchema = new StateSchemaRegistry(DEFAULT_STATE_FIELDS);
 
@@ -22,32 +37,95 @@ export class PossibilityCommitService {
     this.proposals = new ProposalStore(workspaceRoot);
     this.templates = new PossibilityTemplateStore(workspaceRoot);
     this.canon = new CanonicalModelStore(workspaceRoot);
+    this.exactEvidence = new EvidenceAssertionStore(workspaceRoot);
     this.evidence = new EvidenceVerifier(workspaceRoot);
   }
 
-  async validate(templateInput: unknown, envelopeEvidence: readonly EvidenceRef[] = []): Promise<PossibilityValidation> {
+  async validate(
+    templateInput: unknown,
+    envelopeEvidence: readonly EvidenceRef[] = [],
+    evidenceAssertions: readonly EvidenceAssertion[] = [],
+  ): Promise<PossibilityValidation> {
     const template = possibilityTemplateSchema.parse(templateInput);
-    const [entities, rules, events, claims, templates] = await Promise.all([
+    const [entities, rules, events, claims, propositions, attributions, templates] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listRules(),
       this.canon.listEvents(),
       this.canon.listClaims(),
+      this.canon.listPropositions(),
+      this.canon.listAttributions(),
       this.templates.list(),
     ]);
     const entityMap = new Map(entities.map((entity) => [entity.id, entity]));
     const ruleMap = new Map(rules.map((rule) => [rule.id, rule]));
+    const eventMap = new Map(events.map((event) => [event.id, event]));
+    const claimMap = new Map(claims.map((claim) => [claim.id, claim]));
+    const propositionMap = new Map(propositions.map((proposition) => [proposition.id, proposition]));
+    const attributionMap = new Map(attributions.map((attribution) => [attribution.id, attribution]));
     const eventIds = new Set(events.map((event) => event.id));
     const claimIds = new Set(claims.map((claim) => claim.id));
     const templateIds = new Set(templates.map((candidate) => candidate.id));
     const errors: ValidationIssue[] = [];
     const warnings: ValidationIssue[] = [];
 
+    if (template.id.startsWith("canon-")) {
+      errors.push(issue("RESERVED_POSSIBILITY_ID", `Possibility template ${template.id} uses the reserved canonical-derived namespace`, "id"));
+    }
     if (!template.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Possibility ${template.id} has no evidence`, "evidence"));
     const verified = await this.evidence.verifyAll([...template.evidence, ...envelopeEvidence]);
     errors.push(...verified.issues);
+    errors.push(...validateEvidenceAssertionTargets("possibility", template.id, template, evidenceAssertions));
+    const exactVerified = await this.evidence.verifyAssertions(evidenceAssertions);
+    errors.push(...exactVerified.issues);
+    const legacySourceIds = evidenceSourceIds([...template.evidence, ...envelopeEvidence]);
+    const exactSourceIds = evidenceAssertionSourceIds(evidenceAssertions);
+    if (legacySourceIds.length && exactSourceIds.length
+      && (legacySourceIds.length !== 1 || exactSourceIds.length !== 1 || legacySourceIds[0] !== exactSourceIds[0])) {
+      errors.push(issue(
+        "EVIDENCE_SOURCE_MISMATCH",
+        `Possibility ${template.id} has legacy evidence from ${legacySourceIds.join(", ")} and exact evidence from ${exactSourceIds.join(", ")}.`,
+        "evidenceAssertions",
+      ));
+    }
 
     for (const participant of template.participants) {
       if (!entityMap.has(participant)) errors.push(issue("UNKNOWN_PARTICIPANT", `Possibility ${template.id} references unknown participant ${participant}`, "participants"));
+    }
+    const presenceActors = new Set<string>();
+    for (let index = 0; index < (template.participantPresence?.length ?? 0); index += 1) {
+      const presence = template.participantPresence![index]!;
+      if (!template.participants.includes(presence.entityId)) {
+        errors.push(issue(
+          "INVALID_PARTICIPANT_PRESENCE",
+          `Possibility presence ${presence.entityId} is not a possibility participant`,
+          `participantPresence.${index}.entityId`,
+        ));
+      }
+      if (entityMap.get(presence.entityId)?.kind !== "character") {
+        errors.push(issue(
+          "INVALID_PARTICIPANT_PRESENCE",
+          `Possibility presence ${presence.entityId} is not a canonical character`,
+          `participantPresence.${index}.entityId`,
+        ));
+      }
+      if (presenceActors.has(presence.entityId)) {
+        errors.push(issue(
+          "DUPLICATE_PARTICIPANT_PRESENCE",
+          `Possibility presence ${presence.entityId} is duplicated`,
+          `participantPresence.${index}.entityId`,
+        ));
+      }
+      presenceActors.add(presence.entityId);
+    }
+    for (let index = 0; index < template.participants.length; index += 1) {
+      const participantId = template.participants[index]!;
+      if (entityMap.get(participantId)?.kind === "character" && !presenceActors.has(participantId)) {
+        errors.push(issue(
+          "MISSING_PARTICIPANT_PRESENCE",
+          `Character participant ${participantId} has no explicit possibility presence mode`,
+          `participants.${index}`,
+        ));
+      }
     }
     if (template.canonicalEventId && !eventIds.has(template.canonicalEventId)) {
       errors.push(issue("UNKNOWN_CANONICAL_EVENT", `Possibility ${template.id} references unknown canonical event ${template.canonicalEventId}`, "canonicalEventId"));
@@ -60,6 +138,56 @@ export class PossibilityCommitService {
     }
     if (template.kind === "player-choice" && !hasExecutablePossibilityEffect(template)) {
       errors.push(issue("INERT_PLAYER_CHOICE", `Player-choice possibility ${template.id} has no concrete state or knowledge effect and cannot diverge from canon`, "proposedDelta"));
+    }
+    if (template.canonicalScaffold && template.canonicalEventId) {
+      const canonicalEvent = eventMap.get(template.canonicalEventId);
+      if (canonicalEvent) {
+        const compare = (actual: unknown, expected: unknown, code: string, path: string, label: string) => {
+          if (canonicalJson(actual) !== canonicalJson(expected)) {
+            errors.push(issue(code, `Canonical scaffold ${template.id} must preserve the source event ${label}`, path));
+          }
+        };
+        compare(template.participants, canonicalEvent.participants, "SCAFFOLD_PARTICIPANTS_MISMATCH", "participants", "participants");
+        compare(template.participantPresence, canonicalEvent.participantPresence, "SCAFFOLD_PRESENCE_MISMATCH", "participantPresence", "participant presence");
+        compare(template.candidateWindow, canonicalEvent.storyTime, "SCAFFOLD_TIME_MISMATCH", "candidateWindow", "story time");
+        compare(template.timeAdvance, canonicalEvent.timeAdvance, "SCAFFOLD_TIME_ADVANCE_MISMATCH", "timeAdvance", "time advance");
+        compare(template.preconditions, canonicalEvent.preconditions, "SCAFFOLD_PRECONDITIONS_MISMATCH", "preconditions", "preconditions");
+        compare(template.proposedDelta, canonicalEvent.observedOutcome, "SCAFFOLD_EFFECT_MISMATCH", "proposedDelta", "typed outcome");
+        compare(template.proposedKnowledge, canonicalEvent.observedKnowledge, "SCAFFOLD_KNOWLEDGE_MISMATCH", "proposedKnowledge", "knowledge outcome");
+        compare(template.causalParents, canonicalEvent.causalParents, "SCAFFOLD_CAUSAL_PARENT_MISMATCH", "causalParents", "causal parents");
+      }
+      for (let roleIndex = 0; roleIndex < template.canonicalScaffold.roles.length; roleIndex += 1) {
+        const role = template.canonicalScaffold.roles[roleIndex]!;
+        const entity = entityMap.get(role.canonicalEntityId);
+        if (entity && !role.allowedEntityKinds.includes(entity.kind)) {
+          errors.push(issue(
+            "SCAFFOLD_ROLE_KIND_MISMATCH",
+            `Canonical role ${role.roleId} does not admit source entity kind ${entity.kind}`,
+            `canonicalScaffold.roles.${roleIndex}.allowedEntityKinds`,
+          ));
+        }
+        role.requiredState.forEach((predicate) => validatePredicate(predicate, entityMap, ruleMap, this.stateSchema, errors));
+        role.requiresKnowledge.forEach((claimId, claimIndex) => {
+          if (!claimIds.has(claimId)) {
+            errors.push(issue(
+              "UNKNOWN_SCAFFOLD_ROLE_CLAIM",
+              `Canonical role ${role.roleId} requires unknown claim ${claimId}`,
+              `canonicalScaffold.roles.${roleIndex}.requiresKnowledge.${claimIndex}`,
+            ));
+          }
+        });
+      }
+      for (const neutralityIssue of canonicalScaffoldRoleNeutralityIssues(template, {
+        entities: entityMap,
+        claims: claimMap,
+        stateSchema: this.stateSchema,
+      })) {
+        errors.push(issue(
+          "SCAFFOLD_OPAQUE_ROLE_REFERENCE",
+          `Canonical scaffold ${template.id} is not structurally role-neutral: ${neutralityIssue}`,
+          "canonicalScaffold.roles",
+        ));
+      }
     }
     for (let index = 0; index < template.causalParents.length; index += 1) {
       const parent = template.causalParents[index]!;
@@ -90,18 +218,38 @@ export class PossibilityCommitService {
         if (!claimIds.has(operation.claimId)) errors.push(issue("UNKNOWN_KNOWLEDGE_CLAIM", `Possibility knowledge references unknown claim ${operation.claimId}`, `proposedKnowledge.operations.${index}`));
         if (operation.sourceActorId) {
           const source = entityMap.get(operation.sourceActorId);
-          if (!source || source.kind !== "character") errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Possibility knowledge source ${operation.sourceActorId} is not a canonical character`, `proposedKnowledge.operations.${index}`));
+          if (!isCommunicatingKnowledgeSource(source)) errors.push(issue("INVALID_KNOWLEDGE_SOURCE", `Possibility knowledge source ${operation.sourceActorId} is not a canonical character or communication system`, `proposedKnowledge.operations.${index}`));
         }
       }
+      errors.push(...validateKnowledgeSemanticReferences(operation, {
+        claims: claimMap,
+        propositions: propositionMap,
+        attributions: attributionMap,
+      }, `proposedKnowledge.operations.${index}`));
+    }
+    const sourceIds = [...new Set([...legacySourceIds, ...exactSourceIds])];
+    if (sourceIds.length === 1) {
+      errors.push(...(await validateCommittedKnowledgeAcquisitionTrace(
+        this.workspaceRoot,
+        sourceIds[0]!,
+        findKnowledgeDeltas(template),
+      )).map((message) => issue("INVALID_KNOWLEDGE_ACQUISITION_TRACE", message)));
     }
     return { accepted: errors.length === 0, errors, warnings };
   }
 
   async accept(proposalId: string): Promise<PossibilityValidation> {
     const proposal = await this.proposals.read("pending", proposalId, possibilityTemplateSchema);
-    const validation = await this.validate(proposal.payload, proposal.evidence);
+    const evidenceAssertions = proposal.evidenceAssertions ?? [];
+    const validation = await this.validate(proposal.payload, proposal.evidence, evidenceAssertions);
     if (!validation.accepted) return validation;
     await this.templates.put(proposal.payload);
+    await this.exactEvidence.replaceForArtifact(
+      "possibility",
+      proposal.payload.id,
+      contentHash(proposal.payload),
+      evidenceAssertions,
+    );
     await this.proposals.transition(proposalId, "pending", "accepted");
     return validation;
   }
@@ -126,7 +274,9 @@ function validatePredicate(
     if (!rules.has(predicate.ruleId)) errors.push(issue("UNKNOWN_RULE", `Predicate references unknown rule ${predicate.ruleId}`));
     return;
   }
-  if (predicate.op === "after-step" || predicate.op === "before-step") return;
+  if (predicate.op === "after-step" || predicate.op === "before-step"
+    || predicate.op === "elapsed-days-gte" || predicate.op === "elapsed-days-lte"
+    || predicate.op === "story-time-at-or-after" || predicate.op === "story-time-before") return;
   const entity = entities.get(predicate.entityId);
   if (!entity) {
     errors.push(issue("UNKNOWN_PREDICATE_ENTITY", `Predicate references unknown entity ${predicate.entityId}`));
@@ -136,6 +286,9 @@ function validatePredicate(
     const field = schema.get(predicate.field);
     if (!field.appliesTo.includes(entity.kind as never)) errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} does not apply to ${entity.kind}`));
     if (predicate.op === "fact-equals") schema.validateValue(field, predicate.value, entities as never);
+    if ((predicate.op === "fact-gte" || predicate.op === "fact-lte") && field.valueType !== "number") {
+      errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} is not numeric`));
+    }
     if (predicate.op === "entity-in") {
       if (!entities.has(predicate.member)) errors.push(issue("UNKNOWN_PREDICATE_MEMBER", `Unknown member ${predicate.member}`));
       if (field.valueType !== "entity-ref-set") errors.push(issue("INVALID_PREDICATE_FIELD", `${predicate.field} is not a set field`));

@@ -16,7 +16,7 @@ export const llmProfileSchema = z
     baseUrl: z.url().optional(),
     apiProtocol: z.string().min(1).optional(),
     contextWindow: z.number().int().positive().optional(),
-    maxTokens: z.number().int().positive().default(8_192),
+    maxTokens: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -29,6 +29,15 @@ export const configSchema = z
       .object({
         name: z.string().min(1),
         language: z.string().min(1).default("zh-CN"),
+        /**
+         * Workspace guidance is trusted only when the user explicitly lists it
+         * in configuration. Novel source files are never implicitly promoted to
+         * system instructions by filename.
+         */
+        instructions: z.array(
+          z.string().trim().min(1).max(500)
+            .refine((value) => !/[\r\n\0]/u.test(value), "instruction paths must be a single line"),
+        ).max(8).default([]),
       })
       .strict(),
     llm: z

@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">Novel World Harness 系统总览</title>
+  <desc id="desc">原始小说经过语义编译、验证和人工审阅成为不可变 canonical 模型，再由分支运行时生成可回放事件，最后渲染为角色视角叙事。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#EEF2FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#1E293B" flood-opacity="0.09"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0L10 5L0 10Z" fill="#64748B"/>
+    </marker>
+    <style>
+      .font{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","Microsoft YaHei",sans-serif}
+      .title{font-size:25px;font-weight:700;fill:#0F172A}
+      .subtitle{font-size:14px;fill:#64748B}
+      .card-title{font-size:17px;font-weight:700;fill:#0F172A}
+      .card-copy{font-size:12px;fill:#475569}
+      .label{font-size:12px;font-weight:600}
+    </style>
+  </defs>
+
+  <rect width="1200" height="520" rx="24" fill="url(#bg)"/>
+  <g class="font">
+    <text class="title" x="56" y="58">从小说文本到可执行世界</text>
+    <text class="subtitle" x="56" y="84">AI 负责理解与提出候选；确定性代码负责验证、提交、回放和权限边界</text>
+
+    <g stroke="#64748B" stroke-width="2" fill="none" marker-end="url(#arrow)">
+      <path d="M244 222H278"/>
+      <path d="M464 222H498"/>
+      <path d="M684 222H718"/>
+      <path d="M904 222H938"/>
+    </g>
+
+    <g filter="url(#shadow)">
+      <rect x="58" y="132" width="186" height="180" rx="18" fill="#FFFFFF" stroke="#CBD5E1"/>
+      <rect x="278" y="132" width="186" height="180" rx="18" fill="#FFFFFF" stroke="#C7D2FE"/>
+      <rect x="498" y="132" width="186" height="180" rx="18" fill="#FFFFFF" stroke="#99F6E4"/>
+      <rect x="718" y="132" width="186" height="180" rx="18" fill="#FFFFFF" stroke="#DDD6FE"/>
+      <rect x="938" y="132" width="204" height="180" rx="18" fill="#FFFFFF" stroke="#FED7AA"/>
+    </g>
+
+    <!-- book icon -->
+    <g transform="translate(126 154)" fill="none" stroke="#334155" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="50" height="50" rx="14" fill="#F1F5F9" stroke="none"/>
+      <path d="M13 14h9c3 0 5 2 5 5v19c0-3-2-5-5-5h-9z"/>
+      <path d="M37 14h-5c-3 0-5 2-5 5v19c0-3 2-5 5-5h5z"/>
+    </g>
+    <text class="card-title" x="151" y="232" text-anchor="middle">不可变原文</text>
+    <text class="card-copy" x="151" y="258" text-anchor="middle">内容寻址归档</text>
+    <text class="card-copy" x="151" y="278" text-anchor="middle">精确行号 / 字节 / 哈希</text>
+
+    <!-- compiler icon -->
+    <g transform="translate(346 154)" fill="none" stroke="#4F46E5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="50" height="50" rx="14" fill="#EEF2FF" stroke="none"/>
+      <path d="M17 31l-6-6 6-6M33 19l6 6-6 6M29 14l-8 22"/>
+    </g>
+    <text class="card-title" x="371" y="232" text-anchor="middle">AI 语义编译</text>
+    <text class="card-copy" x="371" y="258" text-anchor="middle">mention / relation / rule</text>
+    <text class="card-copy" x="371" y="278" text-anchor="middle">只生成 typed proposal</text>
+
+    <!-- shield icon -->
+    <g transform="translate(566 154)" fill="none" stroke="#0F766E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="50" height="50" rx="14" fill="#F0FDFA" stroke="none"/>
+      <path d="M25 10l13 5v9c0 8-5 13-13 17-8-4-13-9-13-17v-9z"/>
+      <path d="M19 25l4 4 8-9"/>
+    </g>
+    <text class="card-title" x="591" y="232" text-anchor="middle">Canonical 模型</text>
+    <text class="card-copy" x="591" y="258" text-anchor="middle">验证 + 显式审阅</text>
+    <text class="card-copy" x="591" y="278" text-anchor="middle">不可变 revision</text>
+
+    <!-- branch icon -->
+    <g transform="translate(786 154)" fill="none" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="50" height="50" rx="14" fill="#F5F3FF" stroke="none"/>
+      <circle cx="15" cy="14" r="4"/>
+      <circle cx="35" cy="16" r="4"/>
+      <circle cx="35" cy="37" r="4"/>
+      <path d="M15 18v8c0 6 5 11 11 11h5M19 14h6c6 0 10 2 10 7v12"/>
+    </g>
+    <text class="card-title" x="811" y="232" text-anchor="middle">分支世界运行时</text>
+    <text class="card-copy" x="811" y="258" text-anchor="middle">事件提交 / 状态投影</text>
+    <text class="card-copy" x="811" y="278" text-anchor="middle">规则 / 知识 / 可能性</text>
+
+    <!-- narrative icon -->
+    <g transform="translate(1015 154)" fill="none" stroke="#C2410C" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="50" height="50" rx="14" fill="#FFF7ED" stroke="none"/>
+      <path d="M13 15h24v16H24l-7 6v-6h-4z"/>
+      <path d="M18 21h14M18 26h9"/>
+    </g>
+    <text class="card-title" x="1040" y="232" text-anchor="middle">沉浸式交互</text>
+    <text class="card-copy" x="1040" y="258" text-anchor="middle">Web + 终端双入口</text>
+    <text class="card-copy" x="1040" y="278" text-anchor="middle">角色视角叙事与追踪</text>
+
+    <rect x="58" y="362" width="1084" height="100" rx="16" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <line x1="276" y1="382" x2="276" y2="442" stroke="#E2E8F0"/>
+    <line x1="494" y1="382" x2="494" y2="442" stroke="#E2E8F0"/>
+    <line x1="712" y1="382" x2="712" y2="442" stroke="#E2E8F0"/>
+    <line x1="930" y1="382" x2="930" y2="442" stroke="#E2E8F0"/>
+    <text class="label" x="167" y="402" text-anchor="middle" fill="#334155">证据边界</text>
+    <text class="card-copy" x="167" y="427" text-anchor="middle">原文是编译 ground truth</text>
+    <text class="label" x="385" y="402" text-anchor="middle" fill="#4F46E5">提案边界</text>
+    <text class="card-copy" x="385" y="427" text-anchor="middle">模型无直接写权限</text>
+    <text class="label" x="603" y="402" text-anchor="middle" fill="#0F766E">提交边界</text>
+    <text class="card-copy" x="603" y="427" text-anchor="middle">验证后才进入权威历史</text>
+    <text class="label" x="821" y="402" text-anchor="middle" fill="#7C3AED">时间边界</text>
+    <text class="card-copy" x="821" y="427" text-anchor="middle">未来 canon 不是当前事实</text>
+    <text class="label" x="1039" y="402" text-anchor="middle" fill="#C2410C">渲染边界</text>
+    <text class="card-copy" x="1039" y="427" text-anchor="middle">文案永不反写世界真值</text>
+  </g>
+</svg>

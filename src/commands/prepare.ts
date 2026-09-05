@@ -1,11 +1,10 @@
 import path from "node:path";
 import { stdout } from "node:process";
 import { loadOptionalConfig } from "../config/load.js";
-import { inspectPreparation, type PreparationInspection } from "../workflow/prepare.js";
+import { inspectPreparation, resolvePreparationBranchId, type PreparationInspection } from "../workflow/prepare.js";
 import { compileSourceCommand } from "./compile-source.js";
 import { ingestWorkspaceSource } from "./ingest.js";
 import { worldCreateCommand } from "./world.js";
-import type { PiLiveTestOptions } from "../agent/pi-session.js";
 
 export type PrepareCommandOptions = {
   root: string;
@@ -15,7 +14,6 @@ export type PrepareCommandOptions = {
   branchId?: string;
   model?: string;
   maxBatches?: number;
-  liveTest?: PiLiveTestOptions;
 };
 
 export async function prepareCommand(options: PrepareCommandOptions): Promise<PreparationInspection> {
@@ -29,7 +27,12 @@ export async function prepareCommand(options: PrepareCommandOptions): Promise<Pr
     stdout.write(`Registered ${ingested.document.sourcePath} as ${sourceId}; indexed ${ingested.manifest.segments.length} segment(s).\n`);
   }
 
-  let inspection = await inspectPreparation(root, { sourceId, branchId: options.branchId });
+  let branchId = options.branchId;
+  let inspection = await inspectPreparation(root, { sourceId, branchId });
+  if (!branchId && inspection.source) {
+    branchId = await resolvePreparationBranchId(root, inspection.source);
+    if (branchId !== inspection.branchId) inspection = await inspectPreparation(root, { sourceId: inspection.source.id, branchId });
+  }
   if (inspection.stage === "compile" && (options.maxBatches ?? 1) > 0) {
     await compileSourceCommand({
       root,
@@ -39,18 +42,17 @@ export async function prepareCommand(options: PrepareCommandOptions): Promise<Pr
       ...(options.model ? { model: options.model } : {}),
       maxBatches: options.maxBatches ?? 1,
       resume: true,
-      ...(options.liveTest ? { liveTest: options.liveTest } : {}),
     });
     inspection = await inspectPreparation(root, {
       sourceId: inspection.source!.id,
-      branchId: options.branchId,
+      branchId,
     });
   }
   if (inspection.stage === "create-branch") {
-    await worldCreateCommand(root, inspection.branchId);
+    await worldCreateCommand(root, inspection.branchId, undefined, inspection.source!.id);
     inspection = await inspectPreparation(root, {
       sourceId: inspection.source!.id,
-      branchId: inspection.branchId,
+      branchId,
     });
   }
 
@@ -69,5 +71,6 @@ function printInspection(inspection: PreparationInspection): void {
     stdout.write(`Pending review: ${[...byKind.entries()].sort().map(([kind, count]) => `${kind}=${count}`).join(", ")}\n`);
     stdout.write("Nothing was accepted automatically. Inspect each proposal before accepting or rejecting it.\n");
   }
+  for (const reason of inspection.repairReasons ?? []) stdout.write(`Repair: ${reason}\n`);
   stdout.write(`Next: ${inspection.next}\n`);
 }

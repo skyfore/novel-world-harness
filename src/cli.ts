@@ -2,24 +2,23 @@
 import path from "node:path";
 import { Command } from "commander";
 import type { TuiMode } from "@earendil-works/pi-coding-agent";
-import type { PiLiveTestOptions } from "./agent/pi-session.js";
-import { LIVE_TOKEN_BUDGET_HARD_LIMIT } from "./agent/live-token-ledger.js";
 import { resolveConfigPath } from "./config/load.js";
 import { auditCommand } from "./commands/audit.js";
 import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
-import { ingestCommand } from "./commands/ingest.js";
+import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
+import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
+import { resumeCommand } from "./commands/resume.js";
 import { playCommand } from "./commands/play.js";
 import { compileCommand } from "./commands/compile.js";
 import { compileSourceCommand } from "./commands/compile-source.js";
 import { prepareCommand } from "./commands/prepare.js";
+import { prepareAllCommand } from "./commands/prepare-all.js";
+import { reparseCommand } from "./commands/reparse.js";
+import { repairExistingCommand } from "./commands/repair-existing.js";
+import { activatePreparedCacheRevisionCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
 import { playWorldCommand } from "./commands/play-world.js";
-import {
-  liveBudgetLockCommand,
-  liveBudgetRepairLockCommand,
-  liveBudgetStatusCommand,
-} from "./commands/live-budget.js";
 import { acceptAllValidProposalsCommand, acceptProposalCommand, listProposalsCommand, rejectProposalCommand, showProposalCommand } from "./commands/proposals.js";
 import {
   worldActorCommand,
@@ -37,6 +36,10 @@ import {
   worldSnapshotCommand,
   worldValidateCommand,
 } from "./commands/world.js";
+import { choosePlayExperience } from "./world/play-choice.js";
+import { playSceneRequestForEntry } from "./world/play-opening.js";
+import { askUserQuestion } from "./util/ask-user-question.js";
+import { parseWebPort, webCommand } from "./commands/web.js";
 
 const program = new Command();
 program
@@ -46,15 +49,11 @@ program
   .option("--root <path>", "local novel workspace", process.cwd())
   .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
-  .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
+  .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
   .option("--continue", "continue the latest session in this workspace")
-  .option("--no-save", "do not persist the interactive session")
-  .option("--live-test", "explicitly enable metered real-provider white-box testing")
-  .option("--live-ledger <path>", "shared live-test token ledger")
-  .option("--live-token-budget <n>", "campaign token ceiling (maximum 100000000)")
-  .option("--live-max-requests <n>", "maximum provider requests per model session")
-  .option("--live-max-output-tokens <n>", "maximum output tokens per provider request")
-  .option("--live-request-timeout-ms <n>", "provider request timeout in milliseconds");
+  .option("--session <id>", "resume an exact saved TUI session in this workspace")
+  .option("--new-session", "start a fresh terminal transcript while preserving world progress")
+  .option("--no-save", "do not persist the interactive session");
 
 function rootFor(options: { root?: string }): string {
   return options.root ?? program.opts().root ?? process.cwd();
@@ -62,62 +61,167 @@ function rootFor(options: { root?: string }): string {
 function configFor(options: { root?: string; config?: string }): string {
   return options.config ? resolveConfigPath(options.config) : path.resolve(rootFor(options), "novel-harness.yaml");
 }
+async function launchPlayableInstance(
+  novel: string | undefined,
+  options: {
+    root?: string;
+    config?: string;
+    instance?: string;
+    character?: string;
+    model?: string;
+    tuiMode?: TuiMode;
+    continue?: boolean;
+    newSession?: boolean;
+    save?: boolean;
+  },
+  instanceMode: "continue" | "switch" | "create",
+): Promise<void> {
+  const globalOptions = program.opts();
+  await resumeCommand({
+    root: rootFor(options),
+    configPath: configFor(options),
+    ...(options.instance ? { branchId: options.instance } : {}),
+    ...(options.character ? { character: options.character } : {}),
+    ...(novel ? { source: novel } : {}),
+    model: options.model ?? globalOptions.model,
+    tuiMode: options.tuiMode ?? globalOptions.tuiMode,
+    continueSession: options.newSession || globalOptions.newSession ? false : options.continue || globalOptions.continue || undefined,
+    saveSession: options.save && globalOptions.save,
+    instanceMode,
+  });
+}
 function nonNegativeInteger(value: string, name: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${name} must be a non-negative integer`);
   return parsed;
-}
-function positiveInteger(value: string, name: string): number {
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`${name} must be a positive safe integer`);
-  return parsed;
-}
-function liveTestFor(root: string): PiLiveTestOptions | undefined {
-  const options = program.opts();
-  const enabled = options.liveTest === true || process.env.NWH_LIVE_TESTS === "1";
-  const configured = options.liveLedger ?? options.liveTokenBudget ?? options.liveMaxRequests
-    ?? options.liveMaxOutputTokens ?? options.liveRequestTimeoutMs
-    ?? process.env.NWH_LIVE_LEDGER ?? process.env.NWH_LIVE_TOKEN_BUDGET
-    ?? process.env.NWH_LIVE_MAX_REQUESTS ?? process.env.NWH_LIVE_MAX_OUTPUT_TOKENS
-    ?? process.env.NWH_LIVE_REQUEST_TIMEOUT_MS;
-  if (!enabled) {
-    if (configured !== undefined) throw new Error("Live-test limits require --live-test or NWH_LIVE_TESTS=1.");
-    return undefined;
-  }
-  const tokenBudget = positiveInteger(String(options.liveTokenBudget ?? process.env.NWH_LIVE_TOKEN_BUDGET ?? LIVE_TOKEN_BUDGET_HARD_LIMIT), "--live-token-budget");
-  if (tokenBudget > LIVE_TOKEN_BUDGET_HARD_LIMIT) throw new Error(`--live-token-budget cannot exceed ${LIVE_TOKEN_BUDGET_HARD_LIMIT}`);
-  return {
-    ledgerPath: path.resolve(options.liveLedger ?? process.env.NWH_LIVE_LEDGER ?? path.join(root, ".novel-harness", "live-tests", "token-budget-v1.json")),
-    tokenBudget,
-    ...(options.liveMaxRequests ?? process.env.NWH_LIVE_MAX_REQUESTS
-      ? { maxRequests: positiveInteger(String(options.liveMaxRequests ?? process.env.NWH_LIVE_MAX_REQUESTS), "--live-max-requests") }
-      : {}),
-    ...(options.liveMaxOutputTokens ?? process.env.NWH_LIVE_MAX_OUTPUT_TOKENS
-      ? { maxOutputTokens: positiveInteger(String(options.liveMaxOutputTokens ?? process.env.NWH_LIVE_MAX_OUTPUT_TOKENS), "--live-max-output-tokens") }
-      : {}),
-    ...(options.liveRequestTimeoutMs ?? process.env.NWH_LIVE_REQUEST_TIMEOUT_MS
-      ? { requestTimeoutMs: positiveInteger(String(options.liveRequestTimeoutMs ?? process.env.NWH_LIVE_REQUEST_TIMEOUT_MS), "--live-request-timeout-ms") }
-      : {}),
-  };
-}
-function liveTestArgument(root: string): { liveTest: PiLiveTestOptions } | Record<string, never> {
-  const liveTest = liveTestFor(root);
-  return liveTest ? { liveTest } : {};
 }
 function parseTuiMode(value: string): TuiMode {
   if (value !== "regular" && value !== "fullscreen") throw new Error("--tui-mode must be regular or fullscreen");
   return value;
 }
 
+async function readStandardInput(): Promise<Buffer> {
+  if (process.stdin.isTTY) throw new Error("--stdin requires piped UTF-8 novel content.");
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  const content = Buffer.concat(chunks);
+  if (!content.length) throw new Error("--stdin received no novel content.");
+  return content;
+}
+
 program.command("init")
   .argument("[directory]", "target directory")
   .option("--root <path>", "local novel workspace")
-  .description("create starter novel-harness.yaml and NOVEL.md files")
+  .description("create starter novel-harness.yaml and NWH.md files")
   .action(async (directory, options) => initCommand(directory ?? rootFor(options)));
 program.command("doctor").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("validate runtime, credentials and local file tooling").action(async (options) => doctorCommand(configFor(options)));
-program.command("ingest").argument("<novel>", "UTF-8 source novel path").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("register a novel and build its deterministic evidence index").action(async (novel, options) => ingestCommand(novel, configFor(options)));
+program.command("ingest")
+  .argument("[novel]", "UTF-8 source novel path")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--stdin", "read exact UTF-8 novel content from standard input")
+  .option("--content <text>", "use exact inline UTF-8 novel content")
+  .option("--title <name>", "title for stdin or inline content", "pasted-novel.txt")
+  .description("archive a novel in the user-level material store and build its evidence index")
+  .action(async (novel, options) => {
+    const selected = Number(Boolean(novel)) + Number(Boolean(options.stdin)) + Number(options.content !== undefined);
+    if (selected !== 1) throw new Error("Choose exactly one source: [novel], --stdin, or --content <text>.");
+    if (novel) return ingestCommand(novel, configFor(options));
+    const content = options.stdin ? await readStandardInput() : options.content;
+    return ingestContentCommand(content, options.title, configFor(options));
+  });
 program.command("status").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("show inventory and the next safe preparation step").action(async (options) => statusCommand(configFor(options)));
-program.command("audit").option("--root <path>", "local novel workspace").description("audit compiler sources, evidence and canonical consistency").action(async (options) => auditCommand(rootFor(options)));
+program.command("novels")
+  .option("--root <path>", "local novel workspace")
+  .description("list registered novels in the current workspace")
+  .action(async (options) => novelsCommand(rootFor(options)));
+program.command("instances")
+  .option("--root <path>", "local novel workspace")
+  .description("list playable world instances and committed progress")
+  .action(async (options) => instancesCommand(rootFor(options)));
+program.command("characters")
+  .argument("[novel]", "registered source id, title or path")
+  .option("--root <path>", "local novel workspace")
+  .option("--branch <id>", "playable instance id")
+  .description("list committed characters for a novel at an instance head")
+  .action(async (novel, options) => charactersCommand(rootFor(options), options.branch, novel));
+program.command("progress")
+  .argument("[instance]", "playable instance id")
+  .option("--root <path>", "local novel workspace")
+  .description("show committed progress for the current or named instance")
+  .action(async (instance, options) => progressCommand(rootFor(options), instance));
+program.command("web")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--model <model>", "override the Pi model for Web play calls")
+  .option("--host <host>", "listen host", "127.0.0.1")
+  .option("--port <port>", "listen port", parseWebPort, 3080)
+  .option("--no-open", "do not open the browser automatically")
+  .option("--allow-remote", "allow binding the unauthenticated UI beyond loopback")
+  .description("open the local Novel World Harness Web UI")
+  .action(async (options) => {
+    const globalOptions = program.opts();
+    return webCommand({
+      root: rootFor(options),
+      configPath: configFor(options),
+      model: options.model ?? globalOptions.model,
+      host: options.host,
+      port: options.port,
+      open: options.open,
+      allowRemote: Boolean(options.allowRemote),
+    });
+  });
+program.command("resume")
+  .argument("[instance]", "playable instance id")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--character <id-or-name>", "character to inhabit")
+  .option("--novel <id-or-title>", "registered novel source to enter")
+  .option("--model <model>", "override the Pi model for player actions")
+  .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
+  .option("--continue", "continue the latest TUI transcript")
+  .option("--new-session", "start a fresh TUI transcript while preserving world progress")
+  .option("--no-save", "do not persist the TUI transcript")
+  .description("resume a novel, character and playable instance in the full TUI")
+  .action(async (instance, options) => {
+    const globalOptions = program.opts();
+    await resumeCommand({
+      root: rootFor(options),
+      configPath: configFor(options),
+      ...(instance ? { branchId: instance } : {}),
+      ...(options.character ? { character: options.character } : {}),
+      ...(options.novel ? { source: options.novel } : {}),
+      model: options.model ?? globalOptions.model,
+      tuiMode: options.tuiMode ?? globalOptions.tuiMode,
+      continueSession: options.newSession || globalOptions.newSession ? false : options.continue || globalOptions.continue || undefined,
+      saveSession: options.save && globalOptions.save,
+    });
+  });
+for (const command of [
+  { name: "continue", mode: "continue" as const, description: "continue the latest instance for a novel" },
+  { name: "switch", mode: "switch" as const, description: "switch to a novel, instance or character" },
+  { name: "create", mode: "create" as const, description: "create and enter a fresh instance for a novel" },
+]) {
+  const configured = program.command(command.name)
+    .argument("[novel]", "registered novel source id, title or path")
+    .option("-c, --config <path>", "configuration file")
+    .option("--root <path>", "local novel workspace")
+    .option("--instance <id>", "playable instance id")
+    .option("--character <id-or-name>", "character to inhabit")
+    .option("--model <model>", "override the Pi model for player actions")
+    .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
+    .option("--continue", "continue the latest TUI transcript")
+    .option("--new-session", "start a fresh TUI transcript while preserving world progress")
+    .option("--no-save", "do not persist the TUI transcript")
+    .description(command.description)
+    .action(async (novel, options) => launchPlayableInstance(novel, options, command.mode));
+  if (command.name === "create") configured.alias("create-instance");
+}
+program.command("audit")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "audit only one registered novel source")
+  .description("audit compiler sources, evidence and canonical consistency")
+  .action(async (options) => auditCommand(rootFor(options), options.source));
 
 program
   .command("compile")
@@ -125,7 +229,8 @@ program
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
   .option("--model <model>", "override compiler model")
-  .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
+  .option("--session <id>", "resume an exact saved compiler session")
+  .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
   .option("--no-save", "do not persist compiler session")
   .description("open an explicit compiler session with typed proposal tools")
   .action(async (prompt, options) => {
@@ -135,9 +240,9 @@ program
       configPath: configFor(options),
       allowMissingConfig: !options.config,
       model: options.model ?? globalOptions.model,
+      sessionId: options.session ?? globalOptions.session,
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
       saveSession: options.save && globalOptions.save,
-      ...liveTestArgument(rootFor(options)),
       ...(prompt ? { prompt } : {}),
     });
   });
@@ -162,9 +267,61 @@ program
       model: options.model ?? globalOptions.model,
       ...(maxBatches !== undefined ? { maxBatches } : {}),
       resume: options.resume,
-      ...liveTestArgument(rootFor(options)),
     });
   });
+
+program
+  .command("reparse")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id; required when more than one source exists")
+  .option("--all", "reparse the entire novel into a new prepared revision")
+  .option("--chapters <selection>", "reparse detected chapter ordinals, for example 1,3-5")
+  .option("--model <model>", "override compiler model")
+  .description("explicitly rebuild all or selected chapters while retaining prior prepared revisions")
+  .action(async (options) => {
+    const globalOptions = program.opts();
+    await reparseCommand({
+      root: rootFor(options),
+      configPath: configFor(options),
+      sourceId: options.source,
+      all: Boolean(options.all),
+      chapters: options.chapters,
+      model: options.model ?? globalOptions.model,
+    });
+  });
+
+program
+  .command("repair-existing")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id; required when more than one source exists")
+  .option("--from-revision <bundle-hash>", "immutable prepared revision to fork; defaults to the active revision")
+  .option("--replace-staging", "replace conflicting compiler staging after preserving pending drafts in rejected history")
+  .option("--model <model>", "override compiler model")
+  .description("fork a prepared revision, repair it in place with reusable artifacts, and publish a new current revision")
+  .action(async (options) => {
+    const globalOptions = program.opts();
+    await repairExistingCommand({
+      root: rootFor(options),
+      configPath: configFor(options),
+      sourceId: options.source,
+      fromRevision: options.fromRevision,
+      replaceStaging: Boolean(options.replaceStaging),
+      model: options.model ?? globalOptions.model,
+    });
+  });
+
+const preparedCache = program.command("prepared-cache").description("inspect or activate versioned prepared-novel revisions");
+preparedCache.command("list")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id")
+  .action(async (options) => listPreparedCacheRevisionsCommand(rootFor(options), options.source));
+preparedCache.command("activate")
+  .argument("<bundle-hash>", "prepared revision bundle hash")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id")
+  .action(async (bundleHash, options) => activatePreparedCacheRevisionCommand(rootFor(options), bundleHash, options.source));
 
 const proposals = program.command("proposals").description("review compiler proposals before canonical commit");
 proposals.command("list").option("--root <path>", "local novel workspace").option("--status <status>", "pending, accepted or rejected", "pending").action(async (options) => {
@@ -180,7 +337,12 @@ proposals.command("accept-all").option("--root <path>", "local novel workspace")
 proposals.command("reject").argument("<id>").option("--root <path>", "local novel workspace").action(async (id, options) => rejectProposalCommand(rootFor(options), id));
 
 const world = program.command("world").description("inspect and execute committed novel-world branches");
-world.command("create").argument("[branch]", "branch id", "main").option("--root <path>", "local novel workspace").option("--seed <json>", "StateDelta JSON seed; canonical initial world is used by default").action(async (branch, options) => worldCreateCommand(rootFor(options), branch, options.seed));
+world.command("create")
+  .argument("[branch]", "branch id", "main")
+  .option("--root <path>", "local novel workspace")
+  .option("--seed <json>", "StateDelta JSON seed; canonical initial world is used by default")
+  .option("--source <id>", "registered source id; required when more than one source exists")
+  .action(async (branch, options) => worldCreateCommand(rootFor(options), branch, options.seed, options.source));
 world.command("show").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").action(async (options) => worldShowCommand(rootFor(options), options.branch));
 world.command("history").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").action(async (options) => worldHistoryCommand(rootFor(options), options.branch));
 world.command("frontier").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").action(async (options) => worldFrontierCommand(rootFor(options), options.branch));
@@ -199,39 +361,13 @@ world.command("replay").argument("<checkpoints>", "checkpoint JSON file").option
 world.command("snapshot").option("--root <path>", "local novel workspace").option("--branch <id>", "branch id", "main").description("materialize a derived state snapshot for a branch head").action(async (options) => worldSnapshotCommand(rootFor(options), options.branch));
 world.command("fsck").option("--root <path>", "local novel workspace").description("verify branch ancestry, object hashes, replay and snapshots").action(async (options) => worldFsckCommand(rootFor(options)));
 
-const liveBudget = program.command("live-budget").description("inspect the persistent real-provider white-box token budget");
-function liveLedgerPath(options: { root?: string; ledger?: string }): string {
-  const globalOptions = program.opts();
-  const root = rootFor(options);
-  return path.resolve(
-    options.ledger
-      ?? globalOptions.liveLedger
-      ?? process.env.NWH_LIVE_LEDGER
-      ?? path.join(root, ".novel-harness", "live-tests", "token-budget-v1.json"),
-  );
-}
-liveBudget.command("status").option("--root <path>", "local novel workspace").option("--ledger <path>", "token ledger path").action(async (options) => {
-  const globalOptions = program.opts();
-  const tokenBudget = positiveInteger(String(globalOptions.liveTokenBudget ?? process.env.NWH_LIVE_TOKEN_BUDGET ?? LIVE_TOKEN_BUDGET_HARD_LIMIT), "--live-token-budget");
-  await liveBudgetStatusCommand({
-    ledgerPath: liveLedgerPath(options),
-    tokenBudget,
-  });
-});
-liveBudget.command("lock").option("--root <path>", "local novel workspace").option("--ledger <path>", "token ledger path").description("inspect a ledger lock before any repair").action(async (options) => {
-  await liveBudgetLockCommand(liveLedgerPath(options));
-});
-liveBudget.command("repair-lock").requiredOption("--owner <id>", "exact owner id returned by live-budget lock").option("--root <path>", "local novel workspace").option("--ledger <path>", "token ledger path").description("remove only a verified dead local lock owner").action(async (options) => {
-  await liveBudgetRepairLockCommand(liveLedgerPath(options), options.owner);
-});
-
 program
   .command("prepare")
   .argument("[novel]", "UTF-8 source novel path inside the workspace")
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
   .option("--source <id>", "registered source id")
-  .option("--branch <id>", "playable branch id", "main")
+  .option("--branch <id>", "playable branch id")
   .option("--model <model>", "override compiler model; use provider/model when ambiguous")
   .option("--max-batches <n>", "run at most N unfinished batches", "1")
   .description("advance one safe step from novel ingest toward a reviewed playable world")
@@ -241,10 +377,31 @@ program
       configPath: configFor(options),
       ...(novel ? { novelPath: novel } : {}),
       ...(options.source ? { sourceId: options.source } : {}),
-      branchId: options.branch,
+      ...(options.branch ? { branchId: options.branch } : {}),
       model: options.model ?? program.opts().model,
       maxBatches: nonNegativeInteger(options.maxBatches, "--max-batches"),
-      ...liveTestArgument(rootFor(options)),
+    });
+  });
+
+program
+  .command("prepare-all")
+  .argument("[novel]", "UTF-8 source novel path inside the workspace")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "registered source id")
+  .option("--branch <id>", "playable branch id")
+  .option("--model <model>", "override compiler model; use provider/model when ambiguous")
+  .option("-y, --yes", "accept every recommended preparation decision without prompting")
+  .description("guide full compilation, validation and playable-branch preparation")
+  .action(async (novel, options) => {
+    await prepareAllCommand({
+      root: rootFor(options),
+      configPath: configFor(options),
+      ...(novel ? { novelPath: novel } : {}),
+      ...(options.source ? { sourceId: options.source } : {}),
+      ...(options.branch ? { branchId: options.branch } : {}),
+      model: options.model ?? program.opts().model,
+      yes: Boolean(options.yes),
     });
   });
 
@@ -254,22 +411,23 @@ program
   .option("--root <path>", "local novel workspace")
   .option("--branch <id>", "playable branch id")
   .option("--character <id-or-name>", "character to inhabit")
+  .option("--novel <id-or-title>", "registered novel source to enter")
   .option("-a, --action <text>", "perform one natural-language action and exit")
-  .option("--advance-background <n>", "maximum background/canon events after an accepted action", "1")
+  .option("--advance-background <n>", "opt in to at most n temporally safe background/canon events after an accepted action", "0")
   .option("--list-characters", "list committed playable characters")
   .option("--model <model>", "override action translator model; use provider/model when ambiguous")
-  .description("inhabit a committed character and drive a validated alternate timeline")
+  .description("choose a novel, inhabit a committed character and drive a validated alternate timeline")
   .action(async (options) => {
     const result = await playWorldCommand({
       root: rootFor(options),
       configPath: configFor(options),
       ...(options.branch ? { branchId: options.branch } : {}),
       ...(options.character ? { character: options.character } : {}),
+      ...(options.novel ? { source: options.novel } : {}),
       ...(options.action !== undefined ? { action: options.action } : {}),
       advanceBackground: nonNegativeInteger(options.advanceBackground, "--advance-background"),
       listCharacters: Boolean(options.listCharacters),
       model: options.model ?? program.opts().model,
-      ...liveTestArgument(rootFor(options)),
     });
     if (result && !result.accepted) process.exitCode = 2;
   });
@@ -278,14 +436,30 @@ program
   .command("play")
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
+  .option("--branch <id>", "playable instance to enter")
+  .option("--character <id-or-name>", "character to inhabit")
+  .option("--novel <id-or-title>", "registered novel source to enter")
   .option("--model <model>", "override the Pi model for the interactive session")
   .option("-p, --print <prompt>", "run one prompt and exit")
-  .option("--tui-mode <mode>", "TUI layout: regular or fullscreen", parseTuiMode)
+  .option("--tui-mode <mode>", "TUI layout (default: fullscreen; regular uses terminal scrollback)", parseTuiMode)
   .option("--continue", "continue the latest session in this workspace")
+  .option("--session <id>", "resume an exact saved TUI session in this workspace")
+  .option("--new-session", "start a fresh terminal transcript while preserving world progress")
   .option("--no-save", "do not persist the interactive session")
   .description("open the local-first terminal session")
   .action(async (options) => {
     const globalOptions = program.opts();
+    const explicitlySelectedWorld = Boolean(options.branch || options.character || options.novel);
+    if (explicitlySelectedWorld) {
+      await choosePlayExperience(rootFor(options), {
+        ...(options.branch ? { branchId: options.branch } : {}),
+        ...(options.character ? { character: options.character } : {}),
+        ...(options.novel ? { source: options.novel } : {}),
+        preferActiveSource: false,
+        preferSavedCharacter: false,
+        instanceMode: "continue",
+      }, askUserQuestion);
+    }
     await playCommand({
       configPath: configFor(options),
       allowMissingConfig: !options.config,
@@ -293,9 +467,10 @@ program
       model: options.model ?? globalOptions.model,
       printPrompt: options.print ?? globalOptions.print,
       tuiMode: options.tuiMode ?? globalOptions.tuiMode,
-      continueSession: options.continue || globalOptions.continue,
+      continueSession: options.newSession || globalOptions.newSession ? false : options.continue || globalOptions.continue || undefined,
+      sessionId: options.session ?? globalOptions.session,
       saveSession: options.save && globalOptions.save,
-      ...liveTestArgument(rootFor(options)),
+      ...(explicitlySelectedWorld ? { activeWorldScene: playSceneRequestForEntry("play") } : {}),
     });
   });
 
@@ -308,9 +483,9 @@ program.action(async () => {
     model: options.model,
     printPrompt: options.print,
     tuiMode: options.tuiMode,
-    continueSession: options.continue,
+    continueSession: options.newSession ? false : options.continue || undefined,
+    sessionId: options.session,
     saveSession: options.save,
-    ...liveTestArgument(options.root),
   });
 });
 

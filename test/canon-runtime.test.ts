@@ -6,7 +6,7 @@ import { canonicalPossibilitySource } from "../src/world/canon-runtime.js";
 import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import { KnowledgeProjector } from "../src/world/knowledge.js";
-import type { CanonicalEvent, Claim, Entity } from "../src/world/model.js";
+import type { CanonicalEvent, Claim, Entity, EventRelation } from "../src/world/model.js";
 import { WorldRuntime } from "../src/world/runtime.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 
@@ -61,6 +61,17 @@ async function fixture() {
   };
   await canon.putEvent(first);
   await canon.putEvent(second);
+  await canon.putEventRelation({
+    id: "first-enables-second",
+    fromEventId: "first",
+    toEventId: "second",
+    type: "enables",
+    operationality: "necessary",
+    status: "inferred",
+    confidence: 1,
+    mechanism: "The first event is required before the second.",
+    evidence: [],
+  });
   const engine = new WorldEngine(root, context);
   await engine.createBranch("main", "Main", {
     version: 1,
@@ -120,10 +131,23 @@ describe("canonical runtime possibilities", () => {
     const canon = new CanonicalModelStore(root);
     await canon.putEvent(opening);
     await canon.putEvent(next);
+    const nextRelation: EventRelation = {
+      id: "opening-enables-next",
+      fromEventId: "opening",
+      toEventId: "next",
+      type: "enables",
+      operationality: "necessary",
+      status: "inferred",
+      confidence: 1,
+      mechanism: "The opening establishes the next transition.",
+      evidence: [],
+    };
+    await canon.putEventRelation(nextRelation);
     const context: WorldModelContext = {
       entities: new Map([[hero.id, hero]]),
       claims: new Map([[claim.id, claim]]),
       events: new Map([[opening.id, opening], [next.id, next]]),
+      eventRelations: [nextRelation],
       rules: new Map(),
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
     };

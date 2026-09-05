@@ -21,8 +21,10 @@ export async function listProposalsCommand(root: string, status: ProposalStatus 
 }
 
 export async function showProposalCommand(root: string, id: string, status: ProposalStatus = "pending"): Promise<void> {
-  const proposal = await new ProposalStore(root).readEnvelope(status, id);
-  stdout.write(`${JSON.stringify(proposal, null, 2)}\n`);
+  const store = new ProposalStore(root);
+  const proposal = await store.readEnvelope(status, id);
+  const rejection = status === "rejected" ? await store.readRejection(id) : null;
+  stdout.write(`${JSON.stringify(rejection ? { proposal, rejection } : proposal, null, 2)}\n`);
 }
 
 export async function acceptProposalCommand(root: string, kind: string, id: string): Promise<void> {
@@ -66,6 +68,9 @@ export async function acceptAllValidProposalsCommand(root: string): Promise<void
 }
 
 export async function rejectProposalCommand(root: string, id: string): Promise<void> {
-  await new ProposalStore(root).transition(id, "pending", "rejected");
+  await new ProposalStore(root).reject(id, [{
+    code: "MANUAL_PROPOSAL_REJECTION",
+    message: "Proposal was explicitly rejected through the proposal CLI.",
+  }]);
   stdout.write(`Rejected proposal ${id}.\n`);
 }

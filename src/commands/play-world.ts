@@ -1,91 +1,148 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { createPiPlayerActionTranslator } from "../agent/pi-player-action.js";
+import { createPiPlayerWorldAdjudicator } from "../agent/pi-player-world-adjudicator.js";
+import { createPiPlayerWorldResponseResolver } from "../agent/pi-player-world-response.js";
+import { createPiNpcReactionReasoner } from "../agent/pi-npc-reaction.js";
+import { createPiActorReasoner } from "../agent/pi-actor-reasoner.js";
+import { createPiCanonicalAttachmentResolver } from "../agent/pi-canonical-attachment.js";
+import { createPiRuntimeContextResolver } from "../agent/pi-runtime-context.js";
 import { loadOptionalConfig, profileForRole } from "../config/load.js";
-import type { Entity } from "../world/model.js";
-import { PlayerTurnService, type PlayerActionTranslator, type PlayerTurnResult } from "../world/player-action.js";
-import { PlaySessionStore } from "../world/play-session.js";
-import { openWorkspaceWorld } from "../world/workspace-runtime.js";
-import type { PiLiveTestOptions } from "../agent/pi-session.js";
-import type { WorldRuntime } from "../world/runtime.js";
+import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "../world/player-action.js";
+import type { PlayerWorldResponseResolver } from "../world/runtime.js";
+import type { NpcReactionReasoner } from "../world/npc-reaction.js";
+import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
+import type { RuntimeContextResolver } from "../world/runtime-context.js";
+import type { ActorReasoner } from "../world/model-actor-policy.js";
+import { PlayConversationStore } from "../world/play-conversation.js";
+import {
+  inspectPlayExperience,
+  listPlayableCharacters,
+  performPlayTurn,
+  type SelectedPlayExperience,
+} from "../world/play-experience.js";
+import { catalogForSource, choosePlayExperience, choosePlayInstance, choosePlayNovel, createSourcePlayInstance, type AskPlayQuestion } from "../world/play-choice.js";
+import { askUserQuestion } from "../util/ask-user-question.js";
+import { formatCharacters } from "./catalog.js";
 
 export type PlayWorldCommandOptions = {
   root: string;
   configPath: string;
   branchId?: string;
   character?: string;
+  source?: string;
   action?: string;
   listCharacters?: boolean;
   model?: string;
   translator?: PlayerActionTranslator;
+  adjudicator?: PlayerWorldAdjudicator;
+  contextResolver?: RuntimeContextResolver;
+  worldResponseResolver?: PlayerWorldResponseResolver;
+  canonicalAttachmentResolver?: CanonicalAttachmentResolver;
+  npcResponseReasoner?: NpcReactionReasoner;
+  actorReasoner?: ActorReasoner;
   advanceBackground?: number;
-  liveTest?: PiLiveTestOptions;
+  ask?: AskPlayQuestion;
 };
 
 export async function playWorldCommand(options: PlayWorldCommandOptions): Promise<PlayerTurnResult | undefined> {
-  const sessionStore = new PlaySessionStore(options.root);
-  const active = await sessionStore.read();
-  const branchId = options.branchId ?? active?.branchId ?? "main";
-  const { engine, runtime } = await openWorkspaceWorld(options.root);
-  let head: string;
-  try {
-    head = await engine.branches.readHead(branchId);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new Error(`Playable branch '${branchId}' does not exist. Run nwh prepare after reviewing proposals.`);
-    }
-    throw error;
-  }
-  const context = await engine.contextForCommit(head);
-  const characters = [...context.entities.values()]
-    .filter((entity) => entity.kind === "character")
-    .sort((left, right) => left.canonicalName.localeCompare(right.canonicalName));
+  const ask = options.ask ?? askUserQuestion;
+  let branchId = options.branchId;
+  let source = options.source;
   if (options.listCharacters) {
-    printCharacters(characters, active?.actorId);
+    const catalog = await inspectPlayExperience(options.root);
+    source = catalog.novels.length || source
+      ? await choosePlayNovel(catalog, source, ask, { preferActive: false })
+      : undefined;
+    if (catalog.novels.length && !source) return undefined;
+    let instanceCatalog = source ? catalogForSource(catalog, source) : catalog;
+    if (source && !instanceCatalog.instances.length) {
+      await createSourcePlayInstance(options.root, catalog, source);
+      instanceCatalog = catalogForSource(await inspectPlayExperience(options.root), source);
+    }
+    branchId = await choosePlayInstance(options.root, branchId, ask, instanceCatalog);
+    if (!branchId) return undefined;
+    const listed = await listPlayableCharacters(options.root, { branchId, ...(source ? { source } : {}) });
+    stdout.write(`${formatCharacters(listed.characters, listed.branchId)}\n`);
     if (!options.action) return undefined;
   }
-  const requestedActor = options.character ?? active?.actorId ?? (characters.length === 1 ? characters[0]!.id : undefined);
-  if (!requestedActor) {
-    printCharacters(characters, active?.actorId);
-    throw new Error("Choose a character with --character <id-or-name>.");
-  }
-  const actor = resolveCharacter(characters, requestedActor);
-  if (!actor) throw new Error(`Unknown or ambiguous character '${requestedActor}'. Use --list-characters.`);
-  await sessionStore.write({ branchId, actorId: actor.id, lastCommitId: head });
-
+  const selection = await choosePlayExperience(options.root, {
+    ...(branchId ? { branchId } : {}),
+    ...(options.character ? { character: options.character } : {}),
+    ...(source ? { source } : {}),
+    preferActiveSource: false,
+    preferSavedCharacter: false,
+    instanceMode: "continue",
+  }, ask);
+  if (!selection) return undefined;
   const config = await loadOptionalConfig(options.configPath);
   const profile = config ? profileForRole(config, "narrator").profile : undefined;
   const translator = options.translator ?? createPiPlayerActionTranslator({
     root: options.root,
     ...(profile ? { profile } : {}),
     ...(options.model ? { model: options.model } : {}),
-    ...(options.liveTest ? { liveTest: options.liveTest } : {}),
   });
-  const turns = new PlayerTurnService(
-    engine,
-    translator,
-    undefined,
-    (proposal) => runtime.resolveEligibleCanonicalEvents(proposal),
-  );
-  const advanceBackground = options.advanceBackground ?? 1;
+  const adjudicator = options.adjudicator ?? (!options.translator
+    ? createPiPlayerWorldAdjudicator({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
+  const worldResponseResolver = options.worldResponseResolver ?? (!options.translator
+    ? createPiPlayerWorldResponseResolver({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
+  const contextResolver = options.contextResolver ?? (!options.translator
+    ? createPiRuntimeContextResolver({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
+  const npcResponseReasoner = options.npcResponseReasoner ?? (!options.translator
+    ? createPiNpcReactionReasoner({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
+  const actorReasoner = options.actorReasoner ?? (!options.translator
+    ? createPiActorReasoner({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
+  const canonicalAttachmentResolver = options.canonicalAttachmentResolver ?? (!options.translator
+    ? createPiCanonicalAttachmentResolver({
+        root: options.root,
+        ...(profile ? { profile } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      })
+    : undefined);
+  const advanceBackground = options.advanceBackground ?? 0;
   if (!Number.isInteger(advanceBackground) || advanceBackground < 0 || advanceBackground > 100) {
     throw new Error("advanceBackground must be an integer between 0 and 100");
   }
   if (options.action !== undefined) {
-    return runAndPrintTurn(turns, runtime, sessionStore, branchId, actor, options.action, advanceBackground);
+    return runAndPrintTurn(options.root, selection, translator, adjudicator, contextResolver, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, actorReasoner, options.action, advanceBackground);
   }
   if (!stdin.isTTY || !stdout.isTTY) {
     throw new Error("Pass --action <text> for non-interactive play.");
   }
 
-  stdout.write(`You are ${actor.canonicalName} (${actor.id}) on branch ${branchId}. Type an action; /exit leaves the world.\n`);
+  stdout.write(`You are ${selection.actor.canonicalName} (${selection.actor.id}) on branch ${selection.session.branchId}. Type an action; /exit leaves the world.\n`);
   const terminal = createInterface({ input: stdin, output: stdout });
   try {
     while (true) {
-      const utterance = (await terminal.question(`${actor.canonicalName}> `)).trim();
+      const utterance = (await terminal.question(`${selection.actor.canonicalName}> `)).trim();
       if (!utterance) continue;
       if (utterance === "/exit" || utterance === "/quit") break;
-      await runAndPrintTurn(turns, runtime, sessionStore, branchId, actor, utterance, advanceBackground);
+      await runAndPrintTurn(options.root, selection, translator, adjudicator, contextResolver, worldResponseResolver, canonicalAttachmentResolver, npcResponseReasoner, actorReasoner, utterance, advanceBackground);
     }
   } finally {
     terminal.close();
@@ -94,56 +151,63 @@ export async function playWorldCommand(options: PlayWorldCommandOptions): Promis
 }
 
 async function runAndPrintTurn(
-  turns: PlayerTurnService,
-  runtime: WorldRuntime,
-  sessionStore: PlaySessionStore,
-  branchId: string,
-  actor: Entity,
+  root: string,
+  selection: SelectedPlayExperience,
+  translator: PlayerActionTranslator,
+  adjudicator: PlayerWorldAdjudicator | undefined,
+  contextResolver: RuntimeContextResolver | undefined,
+  worldResponseResolver: PlayerWorldResponseResolver | undefined,
+  canonicalAttachmentResolver: CanonicalAttachmentResolver | undefined,
+  npcResponseReasoner: NpcReactionReasoner | undefined,
+  actorReasoner: ActorReasoner | undefined,
   utterance: string,
   advanceBackground: number,
 ): Promise<PlayerTurnResult> {
-  const result = await turns.turn({ branchId, actorId: actor.id, utterance });
+  const outcome = await performPlayTurn({
+    root,
+    branchId: selection.session.branchId,
+    actorId: selection.actor.id,
+    utterance,
+    translator,
+    ...(adjudicator ? { adjudicator } : {}),
+    ...(contextResolver ? { contextResolver } : {}),
+    ...(worldResponseResolver ? { worldResponseResolver } : {}),
+    ...(canonicalAttachmentResolver ? { canonicalAttachmentResolver } : {}),
+    ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
+    ...(actorReasoner ? { actorReasoner } : {}),
+    advanceBackground,
+    origin: "cli",
+  });
+  const { result } = outcome;
   if (!result.accepted) {
-    stdout.write(`Action rejected at ${result.stage}; world head unchanged (${result.previousHead}).\n`);
+    stdout.write(`The requested effect was not committed (${result.stage}); the current scene and world head remain available (${result.previousHead}). Choose another immediate action to continue.\n`);
     for (const issue of result.issues) stdout.write(`- ${issue.code}: ${issue.message}\n`);
+    if (outcome.repairHintError) stdout.write(`Runtime compiler repair hint could not be persisted: ${outcome.repairHintError}\n`);
     return result;
   }
   stdout.write(`${result.renderedText}\n`);
-  stdout.write(`Committed player action at ${result.newHead}.\n`);
-  let finalHead = result.newHead;
-  if (advanceBackground > 0) {
-    const advanced = await runtime.move({
-      branchId,
-      maxActorCandidates: 0,
-      maxBackgroundCandidates: advanceBackground,
+  try {
+    await new PlayConversationStore(root).append({
+      branchId: selection.session.branchId,
+      actorId: selection.actor.id,
+      atCommit: result.newHead,
+      role: "scene",
+      status: "rendered",
+      text: result.renderedText,
     });
-    finalHead = advanced.newHead;
-    for (const eventHash of advanced.committedEvents) {
-      const event = await runtime.engine.objects.getEvent(eventHash);
-      stdout.write(`World advanced: ${event.title}\n`);
-    }
+  } catch (error) {
+    stdout.write(`Scene memory could not be persisted: ${error instanceof Error ? error.message : String(error)}\n`);
   }
-  await sessionStore.write({ branchId, actorId: actor.id, lastCommitId: finalHead });
+  stdout.write(`Committed player action at ${result.newHead}.\n`);
+  for (const event of outcome.worldResponseEvents) stdout.write(`Immediate world response: ${event.title}\n`);
+  for (const event of outcome.canonicalRecoveryEvents) stdout.write(`Canon scaffold adapted: ${event.title}\n`);
+  for (const event of outcome.reactionEvents) stdout.write(`World responded: ${event.title}\n`);
+  for (const event of outcome.backgroundEvents) stdout.write(`World advanced: ${event.title}\n`);
+  if (outcome.backgroundError) stdout.write(`Background advancement stopped: ${outcome.backgroundError}\n`);
+  if (outcome.worldResponseError) stdout.write(`Immediate world response stopped: ${outcome.worldResponseError}\n`);
+  if (outcome.canonicalRecoveryError) stdout.write(`Canonical scaffold recovery stopped: ${outcome.canonicalRecoveryError}\n`);
+  if (outcome.npcResponseError) stdout.write(`NPC response stopped (not treated as in-world silence): ${outcome.npcResponseError}\n`);
+  if (outcome.conversationError) stdout.write(`Conversation memory could not be persisted: ${outcome.conversationError}\n`);
+  if (outcome.repairHintError) stdout.write(`Runtime compiler repair hint could not be persisted: ${outcome.repairHintError}\n`);
   return result;
-}
-
-function resolveCharacter(characters: Entity[], value: string): Entity | undefined {
-  const exactId = characters.find((character) => character.id === value);
-  if (exactId) return exactId;
-  const normalized = value.normalize("NFKC").toLocaleLowerCase();
-  const matches = characters.filter((character) =>
-    [character.canonicalName, ...character.aliases]
-      .some((name) => name.normalize("NFKC").toLocaleLowerCase() === normalized));
-  return matches.length === 1 ? matches[0] : undefined;
-}
-
-function printCharacters(characters: Entity[], activeActorId?: string): void {
-  if (!characters.length) {
-    stdout.write("No playable characters are committed. Review compiler proposals first.\n");
-    return;
-  }
-  stdout.write("Playable characters:\n");
-  for (const character of characters) {
-    stdout.write(`${character.id === activeActorId ? "*" : " "} ${character.id}\t${character.canonicalName}${character.aliases.length ? `\t${character.aliases.join(", ")}` : ""}\n`);
-  }
 }

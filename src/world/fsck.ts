@@ -1,9 +1,11 @@
+import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
-import type { Branch, CommitId, WorldState } from "./model.js";
+import type { Branch, CommitId } from "./model.js";
 import { WorldSnapshotStore } from "./snapshot.js";
+import { hasMaterialProgress } from "./progress.js";
 
 export type FsckIssue = {
   severity: "error" | "warning";
@@ -20,6 +22,9 @@ export type WorldFsckReport = {
   reachableEvents: number;
   reachableDeltas: number;
   reachableKnowledgeDeltas: number;
+  reachableSemanticDeltas: number;
+  reachableProcessDeltas: number;
+  reachableNormDeltas: number;
   orphanObjects: Record<string, string[]>;
   issues: FsckIssue[];
 };
@@ -29,6 +34,9 @@ type Reachable = {
   events: Set<string>;
   deltas: Set<string>;
   knowledge: Set<string>;
+  semantics: Set<string>;
+  processes: Set<string>;
+  norms: Set<string>;
 };
 
 export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
@@ -38,9 +46,12 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
     events: new Set(),
     deltas: new Set(),
     knowledge: new Set(),
+    semantics: new Set(),
+    processes: new Set(),
+    norms: new Set(),
   };
-  const branches = await listBranches(engine);
-  const snapshots = new WorldSnapshotStore(path.resolve(engine.objects.root, "../../.."));
+  const branches = await listBranches(engine, issues);
+  const snapshots = new WorldSnapshotStore(engine.workspaceRoot);
 
   for (const branch of branches) {
     const lock = await engine.branches.inspectLock(branch.id);
@@ -53,14 +64,26 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
     }
     try {
       await auditBranch(engine, branch, reachable, issues);
-      const first = await engine.projector.project(branch.headCommitId);
-      const second = await engine.projector.project(branch.headCommitId);
+      const first = await engine.projections.project(branch.headCommitId, { fresh: true, useCheckpoints: false });
+      const second = await engine.projections.project(branch.headCommitId, { fresh: true, useCheckpoints: false });
       if (contentHash(first) !== contentHash(second)) {
-        issues.push(error("NON_DETERMINISTIC_REPLAY", `Branch ${branch.id} projected to different states`, branch.id));
+        issues.push(error("NON_DETERMINISTIC_REPLAY", `Branch ${branch.id} projected to different bundles`, branch.id));
       }
-      const snapshot = await snapshots.read(branch.headCommitId);
-      if (snapshot && contentHash(snapshot.state) !== contentHash(first)) {
-        issues.push(warning("STALE_SNAPSHOT", `Snapshot for ${branch.headCommitId} differs from authoritative replay`, branch.id, branch.headCommitId));
+      const checkpoint = await snapshots.inspect(branch.headCommitId);
+      if (checkpoint.status === "invalid") {
+        issues.push(warning(
+          "INVALID_CHECKPOINT",
+          `Projection checkpoint for ${branch.headCommitId} is invalid and will be ignored: ${checkpoint.reason}`,
+          branch.id,
+          branch.headCommitId,
+        ));
+      } else if (checkpoint.status === "valid" && checkpoint.snapshot.projectionHash !== contentHash(first)) {
+        issues.push(warning(
+          "CHECKPOINT_DRIFT",
+          `Projection checkpoint for ${branch.headCommitId} differs from authoritative genesis replay`,
+          branch.id,
+          branch.headCommitId,
+        ));
       }
     } catch (cause) {
       issues.push(error("BRANCH_REPLAY_FAILED", cause instanceof Error ? cause.message : String(cause), branch.id));
@@ -83,7 +106,7 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
     }
   }
 
-  const objectKinds = ["commits", "events", "deltas", "knowledge"] as const;
+  const objectKinds = ["commits", "events", "deltas", "knowledge", "semantics", "processes", "norms"] as const;
   const orphanObjects: Record<string, string[]> = {};
   for (const kind of objectKinds) {
     const all = await listObjectHashes(engine.objects.root, kind);
@@ -102,6 +125,9 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
     reachableEvents: reachable.events.size,
     reachableDeltas: reachable.deltas.size,
     reachableKnowledgeDeltas: reachable.knowledge.size,
+    reachableSemanticDeltas: reachable.semantics.size,
+    reachableProcessDeltas: reachable.processes.size,
+    reachableNormDeltas: reachable.norms.size,
     orphanObjects,
     issues,
   };
@@ -110,14 +136,19 @@ export async function fsckWorld(engine: WorldEngine): Promise<WorldFsckReport> {
 async function auditBranch(engine: WorldEngine, branch: Branch, reachable: Reachable, issues: FsckIssue[]): Promise<void> {
   const seen = new Set<string>();
   let cursor: CommitId | undefined = branch.headCommitId;
-  let childStep = Number.POSITIVE_INFINITY;
+  let childStep: number | undefined;
   while (cursor) {
     if (seen.has(cursor)) throw new Error(`Commit ancestry cycle at ${cursor}`);
     seen.add(cursor);
     reachable.commits.add(cursor);
     const commit = await engine.objects.getCommit(cursor);
-    if (commit.logicalTime.step >= childStep) {
-      issues.push(error("NON_MONOTONIC_TIME", `Commit ${cursor} step ${commit.logicalTime.step} is not before child step ${childStep}`, branch.id, cursor));
+    if (childStep !== undefined && commit.logicalTime.step !== childStep - 1) {
+      issues.push(error(
+        "NON_CONTIGUOUS_TIME",
+        `Commit ${cursor} step ${commit.logicalTime.step} is not exactly one step before child step ${childStep}`,
+        branch.id,
+        cursor,
+      ));
     }
     childStep = commit.logicalTime.step;
     for (const eventHash of commit.eventHashes) {
@@ -126,30 +157,69 @@ async function auditBranch(engine: WorldEngine, branch: Branch, reachable: Reach
       if (event.logicalTime.step !== commit.logicalTime.step) {
         issues.push(error("EVENT_TIME_MISMATCH", `Event ${eventHash} step ${event.logicalTime.step} differs from commit step ${commit.logicalTime.step}`, branch.id, eventHash));
       }
-      reachable.deltas.add(event.deltaHash);
-      await engine.objects.getDelta(event.deltaHash);
-      if (event.knowledgeDeltaHash) {
-        reachable.knowledge.add(event.knowledgeDeltaHash);
-        await engine.objects.getKnowledgeDelta(event.knowledgeDeltaHash);
+      let material = hasMaterialProgress(event.progressCertificate);
+      if (event.effects.stateDeltaHash) {
+        reachable.deltas.add(event.effects.stateDeltaHash);
+        const delta = await engine.objects.getDelta(event.effects.stateDeltaHash);
+        material ||= delta.operations.length > 0;
+      }
+      if (event.effects.knowledgeDeltaHash) {
+        reachable.knowledge.add(event.effects.knowledgeDeltaHash);
+        const delta = await engine.objects.getKnowledgeDelta(event.effects.knowledgeDeltaHash);
+        material ||= delta.operations.length > 0;
+      }
+      if (event.effects.semanticDeltaHash) {
+        reachable.semantics.add(event.effects.semanticDeltaHash);
+        const delta = await engine.objects.getSemanticDelta(event.effects.semanticDeltaHash);
+        material ||= delta.operations.length > 0;
+      }
+      if (event.effects.processDeltaHash) {
+        reachable.processes.add(event.effects.processDeltaHash);
+        const delta = await engine.objects.getProcessDelta(event.effects.processDeltaHash);
+        material ||= delta.operations.length > 0;
+      }
+      if (event.effects.normDeltaHash) {
+        reachable.norms.add(event.effects.normDeltaHash);
+        const delta = await engine.objects.getNormDelta(event.effects.normDeltaHash);
+        material ||= delta.operations.length > 0;
+      }
+      if (commit.parentCommitId && !material) {
+        issues.push(error(
+          "EMPTY_EVENT",
+          `Event ${eventHash} has no material effect, utterance, adjudicated outcome, time advancement, or scene beat`,
+          branch.id,
+          eventHash,
+        ));
       }
     }
     cursor = commit.parentCommitId;
   }
 }
 
-async function listBranches(engine: WorldEngine): Promise<Branch[]> {
-  let names: string[];
+async function listBranches(engine: WorldEngine, issues: FsckIssue[]): Promise<Branch[]> {
+  let entries: Dirent[];
   try {
-    names = (await fs.readdir(engine.branches.root, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort();
+    entries = await fs.readdir(engine.branches.root, { withFileTypes: true });
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw cause;
   }
   const branches: Branch[] = [];
-  for (const name of names) branches.push(await engine.branches.read(name));
+  for (const entry of entries.filter((candidate) => candidate.isDirectory()).sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(entry.name)) {
+      issues.push(warning("UNRECOGNIZED_BRANCH_DIRECTORY", `Ignoring non-branch directory ${entry.name}`, entry.name));
+      continue;
+    }
+    try {
+      branches.push(await engine.branches.read(entry.name));
+    } catch (cause) {
+      issues.push(error(
+        "INCOMPLETE_BRANCH",
+        `Branch ${entry.name} cannot be read completely: ${cause instanceof Error ? cause.message : String(cause)}`,
+        entry.name,
+      ));
+    }
+  }
   return branches;
 }
 
@@ -178,11 +248,9 @@ async function isAncestor(engine: WorldEngine, ancestor: CommitId, descendant: C
   return false;
 }
 
-
 function error(code: string, message: string, branchId?: string, objectId?: string): FsckIssue {
   return { severity: "error", code, message, ...(branchId ? { branchId } : {}), ...(objectId ? { objectId } : {}) };
 }
 function warning(code: string, message: string, branchId?: string, objectId?: string): FsckIssue {
   return { severity: "warning", code, message, ...(branchId ? { branchId } : {}), ...(objectId ? { objectId } : {}) };
 }
-

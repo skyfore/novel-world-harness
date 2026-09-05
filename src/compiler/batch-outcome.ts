@@ -1,28 +1,53 @@
 export type CompilerBatchOutcome = {
   assistantStopReason?: string;
+  assistantErrorMessage?: string;
   proposalSucceeded: number;
   proposalFailed: number;
   completionSignaled: boolean;
   completionOutcome?: "complete" | "no-artifacts";
+  blockedReason?: string;
+  /** Compiler mutation/control calls that never received a tool result and were not superseded by a verified retry. */
+  unresolvedToolCalls?: number;
 };
 
 export function isCompilerProposalTool(toolName: string): boolean {
-  return toolName.startsWith("propose_");
+  return toolName.startsWith("propose_") || toolName === "account_source_units";
 }
 
 export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): CompilerBatchOutcome {
-  const calls = new Map<string, { toolName: string; proposalId?: string; finishOutcome?: "complete" | "no-artifacts" }>();
+  const calls = new Map<string, { toolName: string; proposalId?: string; withdrawnProposalId?: string; finishOutcome?: "complete" | "no-artifacts" }>();
   const failed = new Set<string>();
   const succeeded = new Set<string>();
+  const withdrawn = new Set<string>();
+  const resultCallIds = new Set<string>();
+  const successfulFinishCallIds = new Set<string>();
   let assistantStopReason: string | undefined;
+  let assistantErrorMessage: string | undefined;
+  let terminalFinishCallId: string | undefined;
   let completionOutcome: "complete" | "no-artifacts" | undefined;
+  let blockedReason: string | undefined;
 
   for (const value of messages) {
     if (!value || typeof value !== "object") continue;
     const message = value as Record<string, unknown>;
     if (message.role === "assistant") {
-      if (typeof message.stopReason === "string") assistantStopReason = message.stopReason;
+      if (typeof message.stopReason === "string") {
+        assistantStopReason = message.stopReason;
+        assistantErrorMessage = typeof message.errorMessage === "string" ? message.errorMessage : undefined;
+      }
+      terminalFinishCallId = undefined;
       if (!Array.isArray(message.content)) continue;
+      const toolCalls = message.content.filter((content): content is Record<string, unknown> => Boolean(
+        content
+        && typeof content === "object"
+        && (content as Record<string, unknown>).type === "toolCall",
+      ));
+      terminalFinishCallId = message.stopReason === "toolUse"
+        && toolCalls.length === 1
+        && toolCalls[0]?.name === "finish_compiler_batch"
+        && typeof toolCalls[0].id === "string"
+        ? toolCalls[0].id
+        : undefined;
       for (const contentValue of message.content) {
         if (!contentValue || typeof contentValue !== "object") continue;
         const content = contentValue as Record<string, unknown>;
@@ -30,12 +55,17 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
           content.type !== "toolCall" ||
           typeof content.id !== "string" ||
           typeof content.name !== "string" ||
-          !isCompilerProposalTool(content.name) && content.name !== "finish_compiler_batch"
+          !isCompilerProposalTool(content.name)
+            && content.name !== "withdraw_compiler_proposal"
+            && content.name !== "finish_compiler_batch"
         ) continue;
         const args = content.arguments;
         if (content.name === "finish_compiler_batch") {
           const outcome = finishOutcome(args);
           calls.set(content.id, outcome ? { toolName: content.name, finishOutcome: outcome } : { toolName: content.name });
+        } else if (content.name === "withdraw_compiler_proposal") {
+          const withdrawnProposalId = proposalEnvelopeIdentity(args);
+          calls.set(content.id, withdrawnProposalId ? { toolName: content.name, withdrawnProposalId } : { toolName: content.name });
         } else {
           const proposalId = proposalIdentity(content.name, args);
           calls.set(content.id, proposalId ? { toolName: content.name, proposalId } : { toolName: content.name });
@@ -44,10 +74,37 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
       continue;
     }
     if (message.role !== "toolResult" || typeof message.toolCallId !== "string") continue;
+    resultCallIds.add(message.toolCallId);
     const call = calls.get(message.toolCallId);
     const toolName = call?.toolName ?? (typeof message.toolName === "string" ? message.toolName : "");
+    const details = message.details && typeof message.details === "object" && !Array.isArray(message.details)
+      ? message.details as Record<string, unknown>
+      : undefined;
+    if (details?.compilerBatchBlocked === true) {
+      blockedReason = typeof details.reason === "string" ? details.reason : "compiler circuit breaker opened";
+      continue;
+    }
     if (toolName === "finish_compiler_batch") {
-      if (message.isError !== true && call?.finishOutcome) completionOutcome = call.finishOutcome;
+      if (message.isError !== true && call?.finishOutcome) {
+        successfulFinishCallIds.add(message.toolCallId);
+        completionOutcome = call.finishOutcome;
+        if (Array.isArray(details?.proposalIds)) {
+          for (const proposalId of details.proposalIds) {
+            if (typeof proposalId !== "string") continue;
+            const suffix = `:envelope:${proposalId}`;
+            if (![...succeeded].some((key) => key.endsWith(suffix))) succeeded.add(`finish:envelope:${proposalId}`);
+          }
+        }
+      }
+      continue;
+    }
+    if (toolName === "withdraw_compiler_proposal") {
+      if (message.isError !== true && call?.withdrawnProposalId) {
+        withdrawn.add(call.withdrawnProposalId);
+        for (const key of succeeded) {
+          if (key.endsWith(`:${call.withdrawnProposalId}`)) succeeded.delete(key);
+        }
+      }
       continue;
     }
     if (!isCompilerProposalTool(toolName)) continue;
@@ -59,12 +116,41 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     }
   }
 
+  let unresolvedToolCalls = 0;
+  for (const [toolCallId, call] of calls) {
+    if (resultCallIds.has(toolCallId)) continue;
+    if (call.proposalId) {
+      const proposalRecovered = [...succeeded].some((key) => key.endsWith(`:${call.proposalId}`))
+        || withdrawn.has(call.proposalId);
+      if (proposalRecovered) continue;
+    }
+    if (call.finishOutcome && completionOutcome !== undefined) continue;
+    if (call.withdrawnProposalId && withdrawn.has(call.withdrawnProposalId)) continue;
+    unresolvedToolCalls += 1;
+  }
+
+  // A successful finish tool is terminal by contract (`terminate: true`). Pi
+  // therefore intentionally omits the otherwise automatic follow-up assistant
+  // response and leaves the final provider message at stopReason=toolUse.
+  if (
+    terminalFinishCallId
+    && successfulFinishCallIds.has(terminalFinishCallId)
+    && completionOutcome !== undefined
+    && unresolvedToolCalls === 0
+  ) {
+    assistantStopReason = "stop";
+    assistantErrorMessage = undefined;
+  }
+
   return {
     assistantStopReason,
+    ...(assistantErrorMessage ? { assistantErrorMessage } : {}),
     proposalSucceeded: succeeded.size,
     proposalFailed: failed.size,
     completionSignaled: completionOutcome !== undefined,
     ...(completionOutcome ? { completionOutcome } : {}),
+    ...(blockedReason ? { blockedReason } : {}),
+    ...(unresolvedToolCalls ? { unresolvedToolCalls } : {}),
   };
 }
 
@@ -96,9 +182,20 @@ function proposalIdentity(toolName: string, argsValue: unknown): string | undefi
   return undefined;
 }
 
+function proposalEnvelopeIdentity(argsValue: unknown): string | undefined {
+  if (!argsValue || typeof argsValue !== "object" || Array.isArray(argsValue)) return undefined;
+  const proposalId = (argsValue as Record<string, unknown>).proposal_id;
+  return typeof proposalId === "string" ? `envelope:${proposalId}` : undefined;
+}
+
 export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | undefined {
+  if (outcome.blockedReason) return `compiler circuit breaker stopped the batch: ${outcome.blockedReason}`;
   if (outcome.assistantStopReason !== "stop") {
-    return `model ended with ${outcome.assistantStopReason ?? "no final assistant response"}`;
+    const detail = outcome.assistantErrorMessage ? `: ${outcome.assistantErrorMessage}` : "";
+    return `model ended with ${outcome.assistantStopReason ?? "no final assistant response"}${detail}`;
+  }
+  if (outcome.unresolvedToolCalls) {
+    return `${outcome.unresolvedToolCalls} compiler tool call(s) ended without a tool result`;
   }
   if (!outcome.completionSignaled) {
     if (outcome.proposalFailed > 0) return `${outcome.proposalFailed} proposal tool call(s) failed`;
@@ -114,4 +211,28 @@ export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | un
     return `${outcome.proposalFailed} proposal tool call(s) failed before the model declared no artifacts`;
   }
   return undefined;
+}
+
+export function isRecoverableCompilerBatchInterruption(outcome: CompilerBatchOutcome): boolean {
+  if (outcome.blockedReason) {
+    // The tool-call breaker protects one model turn, not the immutable batch.
+    // A fresh turn can hydrate the exact active drafts, reset the per-turn
+    // counter, and continue from deterministic closure diagnostics. Other
+    // circuit-breaker causes (for example repeated identical finish failures)
+    // indicate a semantic loop and must remain terminal.
+    return outcome.blockedReason.startsWith("compiler tool-call safety fuse tripped")
+      || outcome.blockedReason.startsWith("compiler tool-call budget exceeded");
+  }
+  return outcome.assistantStopReason === "error"
+    || Boolean(outcome.unresolvedToolCalls)
+    // A successful no-artifacts finish cannot erase earlier failed proposal
+    // attempts.  Treat this as an abandoned bounded review, not as a
+    // deterministic semantic blocker: one fresh turn can re-read the same
+    // immutable slice and retain whatever survives validation.
+    || (
+      outcome.assistantStopReason === "stop"
+      && outcome.completionOutcome === "no-artifacts"
+      && outcome.proposalSucceeded === 0
+      && outcome.proposalFailed > 0
+    );
 }

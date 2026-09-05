@@ -58,6 +58,12 @@ describe("WorldEngine", () => {
     const result = await engine.commitProposal(proposal);
     expect(result.report.accepted).toBe(true);
     expect(result.newHead).not.toBe(genesis);
+    expect(result.progressCertificate).toMatchObject({
+      stateOperations: [{ operationIndex: 0 }],
+      knowledgeOperations: [],
+      channels: expect.arrayContaining(["state", "consequence"]),
+    });
+    expect(result.progressCertificate?.stateOperations[0]?.effectHash).toBe(result.report.derivedDeltaHash);
 
     const first = await engine.projector.project(result.newHead);
     const second = await engine.projector.project(result.newHead);
@@ -94,6 +100,115 @@ describe("WorldEngine", () => {
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
+  it("rejects raw empty player commits and false progress claims", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "cao-cao", field: "character.alive", value: true }],
+    });
+    const proposal = {
+      proposalId: "empty-player-event",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "player" as const,
+      actorId: "cao-cao",
+      title: "Nothing changes",
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" as const },
+      preconditions: [],
+      proposedDelta: { version: 1 as const, operations: [] },
+      causalParents: [],
+      evidence: [],
+    };
+
+    const empty = await engine.commitProposal(proposal);
+    expect(empty.report.errors).toContainEqual(expect.objectContaining({ code: "EVENT_MATERIALITY_REQUIRED" }));
+    const falseState = await engine.commitProposal({
+      ...proposal,
+      proposalId: "false-state-progress",
+      progress: {
+        version: 1,
+        channels: ["state"],
+        threadIds: [],
+        noveltyKey: "false-state",
+      },
+    });
+    expect(falseState.report.errors).toContainEqual(expect.objectContaining({ code: "FALSE_STATE_PROGRESS" }));
+    const outcomeOnly = await engine.commitProposal({
+      ...proposal,
+      proposalId: "outcome-only-progress",
+      progress: {
+        version: 1,
+        channels: ["consequence"],
+        threadIds: [],
+        noveltyKey: "outcome-only",
+        outcome: "succeeded",
+      },
+    });
+    expect(outcomeOnly.report.errors).toContainEqual(expect.objectContaining({ code: "EVENT_MATERIALITY_REQUIRED" }));
+    expect(await engine.branches.readHead("main")).toBe(genesis);
+  });
+
+  it("does not certify or persist a repeated knowledge no-op", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "cao-cao", field: "character.alive", value: true }],
+    });
+    const proposal = {
+      branchId: "main",
+      source: "background" as const,
+      title: "Cao Cao remembers a report",
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" as const },
+      preconditions: [],
+      proposedDelta: { version: 1 as const, operations: [] },
+      proposedKnowledge: {
+        version: 1 as const,
+        operations: [{ op: "learn" as const, actorId: "cao-cao", claimId: "same-report", status: "heard" as const, confidence: 0.5 }],
+      },
+      causalParents: [],
+      evidence: [],
+    };
+    const first = await engine.commitProposal({ ...proposal, proposalId: "first-report", expectedParentCommit: genesis });
+    expect(first.report.accepted).toBe(true);
+    expect(first.progressCertificate?.knowledgeOperations).toHaveLength(1);
+    const repeated = await engine.commitProposal({ ...proposal, proposalId: "same-report-again", expectedParentCommit: first.newHead });
+    expect(repeated.report.accepted).toBe(false);
+    expect(repeated.report.errors).toContainEqual(expect.objectContaining({ code: "EVENT_MATERIALITY_REQUIRED" }));
+    expect(repeated.newHead).toBe(first.newHead);
+  });
+
+  it("certifies speech without automatically granting knowledge", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main", {
+      version: 1,
+      operations: [{ op: "set", entityId: "cao-cao", field: "character.alive", value: true }],
+    });
+    const spoken = await engine.commitProposal({
+      proposalId: "spoken-without-belief",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "player",
+      actorId: "cao-cao",
+      title: "Cao Cao speaks aloud",
+      spokenUtterances: [{ speakerId: "cao-cao", addresseeIds: ["cao-cao"], content: "The gate is open.", channel: "audible" }],
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(spoken.report.accepted).toBe(true);
+    expect(spoken.progressCertificate).toMatchObject({
+      utteranceCount: 1,
+      knowledgeOperations: [],
+      channels: ["speech"],
+    });
+    expect((await engine.projections.project(spoken.newHead)).knowledge.actors["cao-cao"]).toBeUndefined();
+  });
+
   it("rejects activation of an unknown world rule", async () => {
     const { engine } = await fixture();
     const genesis = await engine.createBranch("main", "Main");
@@ -112,6 +227,66 @@ describe("WorldEngine", () => {
     });
     expect(result.report.accepted).toBe(false);
     expect(result.report.errors.some((error) => error.code === "INVALID_DELTA" && error.message.includes("Unknown world rule"))).toBe(true);
+    await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
+  });
+
+  it("commits material time without persisting an empty state effect", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main");
+    const result = await engine.commitProposal({
+      proposalId: "wait-one-minute",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "player",
+      actorId: "cao-cao",
+      title: "曹操等待片刻",
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" },
+      timeAdvance: { amount: 1, unit: "minute" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence: [],
+    });
+
+    expect(result.report).toMatchObject({ accepted: true });
+    expect(result.report.derivedDeltaHash).toBeUndefined();
+    if (!result.eventHash) throw new Error("accepted event must have a hash");
+    const event = await engine.objects.getEvent(result.eventHash);
+    expect(event.effects).toEqual({ version: 1 });
+    expect(event.progressCertificate).toMatchObject({
+      stateOperations: [],
+      timeAdvanced: true,
+      channels: expect.arrayContaining(["time", "time-pressure", "consequence"]),
+    });
+    expect((await engine.projector.project(result.newHead)).logicalTime.elapsedDays).toBeCloseTo(1 / 1_440);
+  });
+
+  it("requires actor-visible event summaries to name unique participating characters", async () => {
+    const { engine } = await fixture();
+    const genesis = await engine.createBranch("main", "Main");
+    const result = await engine.commitProposal({
+      proposalId: "invalid-observers",
+      branchId: "main",
+      expectedParentCommit: genesis,
+      source: "background",
+      title: "Hidden event title",
+      actorObservations: [
+        { actorId: "cao-cao", summary: "First observation" },
+        { actorId: "cao-cao", summary: "Duplicate observation" },
+        { actorId: "hall", summary: "A location cannot observe" },
+      ],
+      participants: ["cao-cao"],
+      proposedTime: { kind: "unknown" },
+      preconditions: [],
+      proposedDelta: { version: 1, operations: [] },
+      causalParents: [],
+      evidence: [],
+    });
+    expect(result.report.errors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "DUPLICATE_EVENT_OBSERVER" }),
+      expect.objectContaining({ code: "INVALID_EVENT_OBSERVER" }),
+    ]));
     await expect(engine.branches.readHead("main")).resolves.toBe(genesis);
   });
 
@@ -160,4 +335,3 @@ describe("predicate evaluation", () => {
     ).toBe(true);
   });
 });
-

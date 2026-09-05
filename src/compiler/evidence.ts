@@ -1,59 +1,150 @@
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { readSourceMaterial } from "../storage/source-material-store.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
-import type { EvidenceRef, SourceSpan, ValidationIssue } from "../world/model.js";
+import {
+  evidenceAssertionSchema,
+  textAnchorSchema,
+  type Entity,
+  type EvidenceAssertion,
+  type EvidenceRef,
+  type TextAnchor,
+  type ValidationIssue,
+} from "../world/model.js";
 
 export type EvidenceVerification = {
   valid: boolean;
   issues: ValidationIssue[];
 };
 
+export type EvidenceInspection = EvidenceVerification & {
+  excerpts: string[];
+};
+
 type CachedSource = {
   source: SourceDocument;
   buffer: Buffer;
+  sha256: string;
   lines: Array<{ startByte: number; endByte: number }>;
 };
 
 export class EvidenceVerifier {
   private cache?: Map<string, CachedSource>;
+  private sourceErrors?: Map<string, string>;
 
   constructor(private readonly workspaceRoot: string) {}
 
   async verifyAll(evidence: readonly EvidenceRef[]): Promise<EvidenceVerification> {
-    this.cache = undefined;
+    const { excerpts: _excerpts, ...verification } = await this.inspectAll(evidence);
+    return verification;
+  }
+
+  async inspectAll(evidence: readonly EvidenceRef[]): Promise<EvidenceInspection> {
     const issues: ValidationIssue[] = [];
-    try {
-      for (let index = 0; index < evidence.length; index += 1) {
-        const result = await this.verifyCached(evidence[index]!);
-        for (const issue of result.issues) issues.push({ ...issue, path: issue.path ? `evidence.${index}.${issue.path}` : `evidence.${index}` });
-      }
-      return { valid: issues.length === 0, issues };
-    } finally {
-      this.cache = undefined;
+    const excerpts: string[] = [];
+    for (let index = 0; index < evidence.length; index += 1) {
+      const result = await this.inspectCached(evidence[index]!);
+      for (const issue of result.issues) issues.push({ ...issue, path: issue.path ? `evidence.${index}.${issue.path}` : `evidence.${index}` });
+      if (result.excerpt !== undefined) excerpts.push(result.excerpt);
     }
+    return { valid: issues.length === 0, issues, excerpts };
   }
 
   async verify(reference: EvidenceRef): Promise<EvidenceVerification> {
-    this.cache = undefined;
-    try {
-      return await this.verifyCached(reference);
-    } finally {
-      this.cache = undefined;
-    }
+    const { excerpt: _excerpt, ...verification } = await this.inspect(reference);
+    return verification;
   }
 
-  private async verifyCached(reference: EvidenceRef): Promise<EvidenceVerification> {
+  async inspect(reference: EvidenceRef): Promise<EvidenceVerification & { excerpt?: string }> {
+    return this.inspectCached(reference);
+  }
+
+  async verifyAssertions(assertions: readonly EvidenceAssertion[]): Promise<EvidenceVerification> {
+    const { excerpts: _excerpts, ...verification } = await this.inspectAssertions(assertions);
+    return verification;
+  }
+
+  async inspectAssertions(assertionsInput: readonly EvidenceAssertion[]): Promise<EvidenceInspection> {
+    const issues: ValidationIssue[] = [];
+    const excerpts: string[] = [];
+    for (let assertionIndex = 0; assertionIndex < assertionsInput.length; assertionIndex += 1) {
+      const assertion = evidenceAssertionSchema.parse(assertionsInput[assertionIndex]);
+      for (let anchorIndex = 0; anchorIndex < assertion.anchors.length; anchorIndex += 1) {
+        const result = await this.inspectAnchor(assertion.anchors[anchorIndex]!);
+        for (const item of result.issues) {
+          issues.push({
+            ...item,
+            path: item.path
+              ? `evidenceAssertions.${assertionIndex}.anchors.${anchorIndex}.${item.path}`
+              : `evidenceAssertions.${assertionIndex}.anchors.${anchorIndex}`,
+          });
+        }
+        if (result.excerpt !== undefined) excerpts.push(result.excerpt);
+      }
+    }
+    return { valid: issues.length === 0, issues, excerpts };
+  }
+
+  async inspectAnchor(anchorInput: TextAnchor): Promise<EvidenceVerification & { excerpt?: string }> {
+    const anchor = textAnchorSchema.parse(anchorInput);
+    const exact = await this.inspectCached({
+      span: {
+        sourceId: anchor.sourceId,
+        startByte: anchor.startByte,
+        endByte: anchor.endByte,
+        startLine: anchor.startLine,
+        endLine: anchor.endLine,
+        quoteHash: anchor.exactHash,
+      },
+      strength: "explicit",
+    });
+    if (!exact.valid) return exact;
+    const cached = await this.getSource(anchor.sourceId);
+    if (!cached) {
+      return {
+        valid: false,
+        issues: [issue("UNKNOWN_EVIDENCE_SOURCE", `Evidence source ${anchor.sourceId} is not ingested`)],
+      };
+    }
+    const prefixHash = sha256(cached.buffer.subarray(
+      Math.max(0, anchor.startByte - anchor.contextBytes),
+      anchor.startByte,
+    ));
+    const suffixHash = sha256(cached.buffer.subarray(
+      anchor.endByte,
+      Math.min(cached.buffer.byteLength, anchor.endByte + anchor.contextBytes),
+    ));
+    const issues: ValidationIssue[] = [];
+    if (prefixHash !== anchor.prefixHash) {
+      issues.push(issue("EVIDENCE_PREFIX_HASH_MISMATCH", "Evidence prefix context hash does not match the archived source."));
+    }
+    if (suffixHash !== anchor.suffixHash) {
+      issues.push(issue("EVIDENCE_SUFFIX_HASH_MISMATCH", "Evidence suffix context hash does not match the archived source."));
+    }
+    return { valid: issues.length === 0, issues, ...(exact.excerpt === undefined ? {} : { excerpt: exact.excerpt }) };
+  }
+
+  clearCache(): void {
+    this.cache = undefined;
+    this.sourceErrors = undefined;
+  }
+
+  private async inspectCached(reference: EvidenceRef): Promise<EvidenceVerification & { excerpt?: string }> {
     const span = reference.span;
     const cached = await this.getSource(span.sourceId);
     if (!cached) {
-      return { valid: false, issues: [issue("UNKNOWN_EVIDENCE_SOURCE", `Evidence source ${span.sourceId} is not ingested`)] };
-    }
-    const currentHash = sha256(cached.buffer);
-    if (currentHash !== cached.source.contentSha256) {
+      const sourceError = this.sourceErrors?.get(span.sourceId);
       return {
         valid: false,
-        issues: [issue("EVIDENCE_SOURCE_CHANGED", `Source ${cached.source.sourcePath} changed after ingest; expected ${cached.source.contentSha256}, found ${currentHash}`)],
+        issues: [issue(
+          sourceError ? "EVIDENCE_SOURCE_MISSING" : "UNKNOWN_EVIDENCE_SOURCE",
+          sourceError ?? `Evidence source ${span.sourceId} is not ingested`,
+        )],
+      };
+    }
+    if (cached.sha256 !== cached.source.contentSha256) {
+      return {
+        valid: false,
+        issues: [issue("EVIDENCE_SOURCE_CHANGED", `Source ${cached.source.sourcePath} changed after ingest; expected ${cached.source.contentSha256}, found ${cached.sha256}`)],
       };
     }
     if (span.startLine > cached.lines.length || span.endLine > cached.lines.length) {
@@ -79,27 +170,89 @@ export class EvidenceVerifier {
     if (actualHash !== span.quoteHash) {
       return {
         valid: false,
-        issues: [issue("EVIDENCE_HASH_MISMATCH", `Evidence hash mismatch; expected ${span.quoteHash}, found ${actualHash}`)],
+        issues: [issue("EVIDENCE_HASH_MISMATCH", `Evidence hash mismatch; provided ${span.quoteHash}, computed ${actualHash}`)],
       };
     }
-    return { valid: true, issues: [] };
+    return { valid: true, issues: [], excerpt: cached.buffer.subarray(startByte, endByte).toString("utf8") };
   }
 
   private async getSource(sourceId: string): Promise<CachedSource | undefined> {
-    if (!this.cache) {
-      const store = await WorkspaceStore.create(this.workspaceRoot);
-      const sources = await store.listSources();
-      this.cache = new Map();
-      for (const source of sources) {
-        const absolute = path.resolve(this.workspaceRoot, source.sourcePath);
-        const relative = path.relative(this.workspaceRoot, absolute);
-        if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
-        const buffer = await fs.readFile(absolute);
-        this.cache.set(source.id, { source, buffer, lines: lineRanges(buffer.toString("utf8")) });
+    if (!this.cache) await this.loadSources();
+    let cached = this.cache!.get(sourceId);
+    if (!cached) {
+      await this.loadSources();
+      cached = this.cache!.get(sourceId);
+    }
+    return cached;
+  }
+
+  private async loadSources(): Promise<void> {
+    const store = await WorkspaceStore.create(this.workspaceRoot);
+    const sources = await store.listSources();
+    this.cache = new Map();
+    this.sourceErrors = new Map();
+    for (const source of sources) {
+      try {
+        const buffer = await readSourceMaterial(this.workspaceRoot, source);
+        this.cache.set(source.id, { source, buffer, sha256: sha256(buffer), lines: lineRanges(buffer.toString("utf8")) });
+      } catch (error) {
+        this.sourceErrors.set(source.id, error instanceof Error ? error.message : String(error));
       }
     }
-    return this.cache.get(sourceId);
   }
+}
+
+export function validateEntityNameEvidence(entity: Entity, excerpts: readonly string[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  if (!excerpts.some((excerpt) => containsEvidenceName(excerpt, entity.canonicalName, entity.kind === "character"))) {
+    issues.push({
+      code: "UNSUPPORTED_ENTITY_CANONICAL_NAME",
+      message: `Entity ${entity.id} canonical name '${entity.canonicalName}' does not occur in its verified source evidence`,
+      path: "canonicalName",
+    });
+  }
+  entity.aliases.forEach((alias, index) => {
+    if (excerpts.some((excerpt) => containsEvidenceName(excerpt, alias, false))) return;
+    issues.push({
+      code: "UNSUPPORTED_ENTITY_ALIAS",
+      message: `Entity ${entity.id} alias '${alias}' does not occur in its verified source evidence`,
+      path: `aliases.${index}`,
+    });
+  });
+  return issues;
+}
+
+function containsEvidenceName(excerpt: string, name: string, allowExplicitPersonalName = false): boolean {
+  const haystack = excerpt.normalize("NFKC").toLowerCase();
+  const needle = name.normalize("NFKC").toLowerCase();
+  if (!needle) return false;
+  const asciiWord = /[a-z0-9]/i;
+  let offset = haystack.indexOf(needle);
+  while (offset >= 0) {
+    const before = offset > 0 ? haystack[offset - 1] : undefined;
+    const after = haystack[offset + needle.length];
+    const startBound = !asciiWord.test(needle[0]!) || before === undefined || !asciiWord.test(before);
+    const endBound = !asciiWord.test(needle.at(-1)!) || after === undefined || !asciiWord.test(after);
+    if (startBound && endBound) return true;
+    offset = haystack.indexOf(needle, offset + 1);
+  }
+  return allowExplicitPersonalName && containsExplicitChinesePersonalName(haystack, needle);
+}
+
+function containsExplicitChinesePersonalName(excerpt: string, name: string): boolean {
+  if (!/^\p{Script=Han}{2,4}$/u.test(name)) return false;
+  for (const surnameLength of [1, 2]) {
+    if (surnameLength >= name.length) continue;
+    const surname = escapeRegExp(name.slice(0, surnameLength));
+    const givenName = escapeRegExp(name.slice(surnameLength));
+    const pattern = new RegExp(`(?:复姓|覆姓|姓)\\s*${surname}\\s*[，,、；;：:\\s]*名\\s*${givenName}`, "u");
+    if (pattern.test(excerpt)) return true;
+  }
+  return false;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function lineRanges(text: string): Array<{ startByte: number; endByte: number }> {

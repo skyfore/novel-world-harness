@@ -8,6 +8,9 @@ import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js"
 import { InitialWorldStore } from "../world/initial.js";
 import { PossibilityTemplateStore } from "../world/possibility-model.js";
 import { inspectPreparation } from "../workflow/prepare.js";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { inspectPlayExperience } from "../world/play-experience.js";
+import { formatInstances } from "./catalog.js";
 
 export async function statusCommand(configPath: string): Promise<void> {
   const config = await loadOptionalConfig(configPath);
@@ -18,15 +21,20 @@ export async function statusCommand(configPath: string): Promise<void> {
   const sources = await store.listSources();
   const segments = new SegmentStore(root);
   const batches = new CompilerBatchStore(root);
+  const preparedCache = new PreparedNovelCache(root);
   const sourceRows = await Promise.all(sources.map(async (source) => {
-    const [manifest, progress] = await Promise.all([
+    const [manifest, progress, cached] = await Promise.all([
       segments.readManifest(source.id),
       batches.read(source.id),
+      preparedCache.lookup(source),
     ]);
     return {
       source: source.sourcePath,
       id: source.id,
       bytes: source.bytes,
+      md5: cached.contentMd5,
+      preparedCache: cached.status === "already-cached" ? "ready" : "missing",
+      preparedRevision: cached.bundleHash?.slice(0, 12) ?? "-",
       segments: manifest?.segments.length ?? 0,
       completedBatches: progress.completedBatchIds.length,
     };
@@ -50,8 +58,9 @@ export async function statusCommand(configPath: string): Promise<void> {
   ]);
 
   if (project) console.log(`Project: ${project.name} (${project.id})`);
-  else if (config) console.log(`Project: ${config.project.name} (no local harness state)`);
-  else console.log(`Project: ${path.basename(root) || "novel-world"} (no config or local harness state)`);
+  else if (config) console.log(`Project: ${config.project.name} (no NWH state)`);
+  else console.log(`Project: ${path.basename(root) || "novel-world"} (no config or NWH state)`);
+  console.log(`State: ${store.stateDir}`);
   console.table(sourceRows);
   console.table([
     { area: "proposals", pending: pending.length, accepted: accepted.length, rejected: rejected.length },
@@ -62,4 +71,6 @@ export async function statusCommand(configPath: string): Promise<void> {
   const preparation = await inspectPreparation(root);
   console.log(`Preparation: ${preparation.stage}`);
   console.log(`Next: ${preparation.next}`);
+  const experience = await inspectPlayExperience(root);
+  console.log(formatInstances(experience.instances));
 }

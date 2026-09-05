@@ -1,9 +1,13 @@
 import { auditCompiler, type CompilerAuditReport } from "../compiler/audit.js";
-import { CompilerBatchStore, prepareCompilerBatches } from "../compiler/batches.js";
+import { isNovelScaleCompilation } from "../compiler/scale.js";
+import { CompilerBatchStore, prepareCompilerBatches, selectOpeningCompilerBatches } from "../compiler/batches.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
-import { ProposalStore, type ProposalSummary } from "../world/canonical-model.js";
-import { InitialWorldStore } from "../world/initial.js";
+import { CanonicalModelStore, ProposalStore, type ProposalSummary } from "../world/canonical-model.js";
+import { InitialWorldStore, type InitialWorld } from "../world/initial.js";
+import { openWorkspaceWorld } from "../world/workspace-runtime.js";
 import { BranchStore } from "../world/store.js";
+import { assertEvidenceExclusiveToSource } from "../world/source-scope.js";
+import { novelTitleIdStem } from "../storage/novel-title.js";
 
 export type PreparationStage =
   | "needs-source"
@@ -24,8 +28,69 @@ export type PreparationInspection = {
   completedBatches: number;
   totalBatches: number;
   audit?: CompilerAuditReport;
+  repairReasons?: string[];
   next: string;
 };
+
+type NovelScalePublicationAudit = {
+  sources?: Pick<CompilerAuditReport["sources"], "bytes">;
+  canonical: Pick<CompilerAuditReport["canonical"], "events">;
+  readiness: Pick<CompilerAuditReport["readiness"], "evidence" | "accounting" | "resolution" | "blockingIssues">;
+  observations: Pick<CompilerAuditReport["observations"], "unaccountedUnits" | "blockingUnits">;
+  resolutions: Pick<CompilerAuditReport["resolutions"], "missing" | "ambiguous" | "unresolved">;
+  eventResolutions: Pick<CompilerAuditReport["eventResolutions"], "missing" | "ambiguous" | "unresolved">;
+};
+
+/** A novel-scale branch cannot be published while core traceability is merely unknown or partial. */
+export function novelScalePublicationRepairReasons(audit: NovelScalePublicationAudit): string[] {
+  if (!isNovelScaleCompilation(audit.sources?.bytes ?? 0, audit.canonical.events)) return [];
+  const required = (["evidence", "accounting", "resolution"] as const)
+    .filter((dimension) => audit.readiness[dimension] !== "ready");
+  if (!required.length) return [];
+  const detail = [
+    `exact evidence=${audit.readiness.evidence}`,
+    `source accounting=${audit.readiness.accounting} (${audit.observations.unaccountedUnits} unaccounted, ${audit.observations.blockingUnits} blocking unit(s))`,
+    `identity/event resolution=${audit.readiness.resolution} (${audit.resolutions.missing + audit.eventResolutions.missing} missing, ${audit.resolutions.ambiguous + audit.resolutions.unresolved + audit.eventResolutions.ambiguous + audit.eventResolutions.unresolved} ambiguous/unresolved mention(s))`,
+  ].join("; ");
+  return [
+    `Novel-scale publication requires ready exact-evidence, source-accounting, and identity/event-resolution dimensions; ${detail}.`,
+    ...audit.readiness.blockingIssues.slice(0, 20),
+  ];
+}
+
+export async function resolvePreparationBranchId(
+  workspaceRoot: string,
+  source: SourceDocument,
+  requestedBranchId?: string,
+  options: { preferNew?: boolean } = {},
+): Promise<string> {
+  if (requestedBranchId) return requestedBranchId;
+  const branches = new BranchStore(workspaceRoot);
+  const ids = await branches.listIds();
+  if (!ids.includes("main")) return "main";
+  if (!options.preferNew && await preparationBranchMatchesSource(workspaceRoot, branches, "main", source.id)) return "main";
+
+  // Only accepted model inference may influence a generated instance ID. The
+  // ingest label is often just the upload filename and is not novel metadata.
+  const sourceStem = novelTitleIdStem(source.titleInference?.title ?? "");
+  const base = `${sourceStem || "novel"}-${source.id.slice(0, 8)}`;
+  for (let suffix = 1; ; suffix += 1) {
+    const candidate = suffix === 1 ? base : `${base}-${suffix}`;
+    if (!ids.includes(candidate)) return candidate;
+    if (!options.preferNew && await preparationBranchMatchesSource(workspaceRoot, branches, candidate, source.id)) return candidate;
+  }
+}
+
+async function preparationBranchMatchesSource(
+  workspaceRoot: string,
+  branches: BranchStore,
+  branchId: string,
+  sourceId: string,
+): Promise<boolean> {
+  const branch = await branches.read(branchId);
+  if (branch.sourceId) return branch.sourceId === sourceId;
+  return branchGenesisHasPlayableCharacter(workspaceRoot, branchId, sourceId);
+}
 
 export async function inspectPreparation(
   workspaceRoot: string,
@@ -51,8 +116,10 @@ export async function inspectPreparation(
     };
   }
 
-  const pending = await new ProposalStore(workspaceRoot).list("pending");
-  const earlyAudit = await auditCompiler(workspaceRoot);
+  const pending = await new ProposalStore(workspaceRoot).list("pending", source.id);
+  // Preparation is source-local. A stale or invalid second novel must not
+  // prevent this source from compiling or becoming playable.
+  const earlyAudit = await auditCompiler(workspaceRoot, { sourceId: source.id });
   if (earlyAudit.sources.changedSinceIngest.length > 0) {
     return {
       branchId,
@@ -62,8 +129,9 @@ export async function inspectPreparation(
       completedBatches: 0,
       totalBatches: 0,
       audit: earlyAudit,
+      repairReasons: preparationRepairReasons(earlyAudit),
       stage: "repair",
-      next: "nwh audit",
+      next: `nwh audit --source ${source.id}`,
     };
   }
 
@@ -71,7 +139,7 @@ export async function inspectPreparation(
   const progress = await new CompilerBatchStore(workspaceRoot).read(source.id);
   const batchIds = new Set(batches.map((batch) => batch.id));
   const completedBatches = progress.completedBatchIds.filter((id) => batchIds.has(id)).length;
-  const shared = { branchId, sources, source, pending, completedBatches, totalBatches: batches.length };
+  const shared = { branchId, sources, source, pending, completedBatches, totalBatches: batches.length, audit: earlyAudit };
   if (completedBatches < batches.length) {
     return {
       ...shared,
@@ -91,11 +159,19 @@ export async function inspectPreparation(
   if (
     audit.sources.changedSinceIngest.length > 0
     || audit.evidence.invalidReferences > 0
+    || audit.evidence.invalidAssertions > 0
     || audit.consistency.causalGraphValid === false
   ) {
-    return { ...shared, audit, stage: "repair", next: "nwh audit" };
+    return {
+      ...shared,
+      audit,
+      repairReasons: preparationRepairReasons(audit),
+      stage: "repair",
+      next: `nwh audit --source ${source.id}`,
+    };
   }
-  if (!(await new InitialWorldStore(workspaceRoot).get())) {
+  const initialWorld = await new InitialWorldStore(workspaceRoot).get();
+  if (!initialWorld || !initialWorld.evidence.some((reference) => reference.span.sourceId === source.id)) {
     return {
       ...shared,
       audit,
@@ -103,10 +179,173 @@ export async function inspectPreparation(
       next: "nwh compile \"Propose an evidence-backed initial world for the opening state\"",
     };
   }
-  if (!(await branchExists(new BranchStore(workspaceRoot), branchId))) {
+  assertEvidenceExclusiveToSource(initialWorld.evidence, source.id, "Prepared opening world");
+  const openingBatches = selectOpeningCompilerBatches(batches);
+  if (openingBatches.length && !initialWorld.evidence.some((reference) =>
+    openingBatches.some((batch) => batch.evidence.some((opening) => evidenceSpansOverlap(reference, opening))))) {
+    const openingRanges = openingBatches.map((batch) => `${batch.startLine}-${batch.endLine}`).join(" or ");
+    return {
+      ...shared,
+      audit,
+      stage: "needs-initial-world",
+      repairReasons: [
+        `The accepted initial world for source ${source.id} is grounded outside the selected narrative opening (lines ${openingRanges}); replace it before creating another branch.`,
+      ],
+      next: "nwh compile \"Propose an evidence-backed replacement initial world for the opening state\"",
+    };
+  }
+
+  const sourceCharacters = (await new CanonicalModelStore(workspaceRoot).listEntities())
+    .filter((entity) => entity.kind === "character")
+    .filter((entity) => {
+      const matches = entity.evidence.some((reference) => reference.span.sourceId === source.id);
+      if (matches) assertEvidenceExclusiveToSource(entity.evidence, source.id, `Playable character ${entity.id}`);
+      return matches;
+    });
+  if (!sourceCharacters.length) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: [
+        `No committed character entities from source ${source.id} are available for player selection; a playable branch cannot be created. Reparse the source so at least one evidence-backed character is accepted.`,
+      ],
+      next: `nwh reparse --source ${source.id} --all`,
+    };
+  }
+  if (!sourceCharacters.some((character) => characterPlayableAtGenesis(initialWorld, character.id))) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: [
+        `The accepted initial world for source ${source.id} does not represent any living opening character in committed state or knowledge; a playable branch cannot be created. Rebuild the opening state before preparing a branch.`,
+      ],
+      next: `nwh reparse --source ${source.id} --all`,
+    };
+  }
+
+  // Whole-world semantic readiness depends on knowing the actual opening
+  // actors first: only then can later first-embodied entry checkpoints be
+  // classified. Generate/validate the opening before routing semantic repair.
+  if (audit.consistency.semanticReady === false) {
+    return {
+      ...shared,
+      audit,
+      repairReasons: preparationRepairReasons(audit),
+      stage: "repair",
+      next: `nwh audit --source ${source.id}`,
+    };
+  }
+
+  const novelScaleRepairReasons = novelScalePublicationRepairReasons(audit);
+  if (novelScaleRepairReasons.length) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: novelScaleRepairReasons,
+      next: `nwh audit --source ${source.id}`,
+    };
+  }
+
+  const branches = new BranchStore(workspaceRoot);
+  if (!(await branchExists(branches, branchId))) {
     return { ...shared, audit, stage: "create-branch", next: `nwh prepare --source ${source.id} --branch ${branchId}` };
   }
-  return { ...shared, audit, stage: "ready", next: `nwh play-world --branch ${branchId} --list-characters` };
+  const branch = await branches.read(branchId);
+  if (branch.sourceId && branch.sourceId !== source.id) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: [
+        `Branch '${branchId}' belongs to source ${branch.sourceId}, not ${source.id}; prepare this novel on a different branch instead of mixing source timelines.`,
+      ],
+      next: `nwh prepare --source ${source.id} --branch <new-branch-id>`,
+    };
+  }
+  if (!(await branchGenesisHasPlayableCharacter(workspaceRoot, branchId, source.id))) {
+    return {
+      ...shared,
+      audit,
+      stage: "repair",
+      repairReasons: [
+        `Branch '${branchId}' was created without a living committed character from source ${source.id}. Its pinned genesis snapshot is immutable; prepare a new branch after repairing the source/opening state instead of treating this branch as playable.`,
+      ],
+      next: `nwh prepare --source ${source.id} --branch <new-branch-id>`,
+    };
+  }
+  return { ...shared, audit, stage: "ready", next: `nwh characters --branch ${branchId}` };
+}
+
+function evidenceSpansOverlap(left: InitialWorld["evidence"][number], right: InitialWorld["evidence"][number]): boolean {
+  return left.span.sourceId === right.span.sourceId
+    && left.span.startLine <= right.span.endLine
+    && left.span.endLine >= right.span.startLine;
+}
+
+function preparationRepairReasons(audit: CompilerAuditReport): string[] {
+  return [
+    ...audit.sources.changedSinceIngest.map((sourceId) =>
+      `Archived source material for ${sourceId} is missing or failed integrity verification; re-ingest the exact source bytes before preparing it.`),
+    ...audit.evidence.errors.map((error) =>
+      `Evidence ${error.artifact} failed ${error.code}: ${error.message}`),
+    ...audit.consistency.causalCycles.map((cycle) =>
+      `Causal cycle detected: ${cycle.join(" -> ")}`),
+    ...audit.consistency.missingCausalParents.map(({ eventId, parentId }) =>
+      `Event ${eventId} references missing causal parent ${parentId}.`),
+    ...audit.consistency.temporalRegressions.map(({ eventId, parentId }) =>
+      `Event ${eventId} is temporally earlier than its causal parent ${parentId}.`),
+    ...(audit.consistency.narrativeGraphNavigable === false
+      ? [`The event graph has ${audit.consistency.unconditionalRootEvents.length} unconditional roots across ${audit.consistency.causalComponents} causal components; reparse with phase gates and evidence-backed causal links so later canon cannot all activate at the opening.`]
+      : []),
+    ...audit.consistency.semanticIssues,
+  ];
+}
+
+function characterPlayableAtGenesis(initialWorld: InitialWorld, characterId: string): boolean {
+  let alive: boolean | undefined;
+  let represented = false;
+  for (const operation of initialWorld.delta.operations) {
+    if (!("entityId" in operation) || !("field" in operation)) continue;
+    if (operation.entityId === characterId) represented = true;
+    if (operation.entityId !== characterId || operation.field !== "character.alive") continue;
+    if (operation.op === "unset") alive = undefined;
+    else if (operation.op === "set" && typeof operation.value === "boolean") alive = operation.value;
+  }
+  if (initialWorld.knowledge?.operations.some((operation) =>
+    operation.actorId === characterId || (operation.op === "learn" && operation.sourceActorId === characterId))) represented = true;
+  return represented && alive !== false;
+}
+
+async function branchGenesisHasPlayableCharacter(
+  workspaceRoot: string,
+  branchId: string,
+  sourceId: string,
+): Promise<boolean> {
+  const { engine } = await openWorkspaceWorld(workspaceRoot);
+  let genesisId = await engine.branches.readHead(branchId);
+  for (;;) {
+    const commit = await engine.objects.getCommit(genesisId);
+    if (!commit.parentCommitId) break;
+    genesisId = commit.parentCommitId;
+  }
+  const [context, state, genesis] = await Promise.all([
+    engine.contextForCommit(genesisId),
+    engine.projector.project(genesisId),
+    engine.objects.getCommit(genesisId),
+  ]);
+  const participants = new Set<string>();
+  for (const eventHash of genesis.eventHashes) {
+    const event = await engine.objects.getEvent(eventHash);
+    for (const participant of event.participants) participants.add(participant);
+  }
+  return [...context.entities.values()].some((entity) =>
+    entity.kind === "character"
+    && entity.evidence.some((reference) => reference.span.sourceId === sourceId)
+    && participants.has(entity.id)
+    && state.values[entity.id]?.["character.alive"] !== false);
 }
 
 async function branchExists(branches: BranchStore, branchId: string): Promise<boolean> {

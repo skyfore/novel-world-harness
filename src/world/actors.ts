@@ -1,17 +1,78 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { canonicalJson, contentHash } from "./canonical.js";
 import type { WorldEngine } from "./engine.js";
-import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { actionableKnowledgeClaimIds, KnowledgeProjector } from "./knowledge.js";
+import { isCommunicatingKnowledgeSource } from "./knowledge-semantics.js";
+import { worldStorageRoot } from "./paths.js";
 import {
+  actionInvocationSchema,
   evidenceRefSchema,
+  eventProposalSchema,
   idSchema,
   knowledgeDeltaSchema,
   predicateSchema,
+  storyTimeSchema,
   stateDeltaSchema,
   type EventProposal,
+  type Entity,
+  type NarrativeProgress,
+  type StoryTime,
+  type WorldState,
 } from "./model.js";
+import { evaluatePredicate } from "./state.js";
+import { committedHistory, experiencedCanonicalEvents, projectActorScene, realizedCanonicalEvents } from "./scene.js";
+import { AmbiguousLegacySourceError, evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
+import { storyTimesOverlap } from "./time.js";
+import {
+  CHARACTER_ONTOLOGY_VERSION,
+  characterOntologyModelFields,
+  resolveCharacterOntology,
+  type AppraisalEpisode,
+  type CharacterDisposition,
+  type DevelopmentEpisode,
+  type EffectiveCharacterAppraisal,
+  type EffectiveCharacterDisposition,
+  type EffectiveDevelopmentEpisode,
+} from "./character-ontology.js";
+import {
+  RELATIONSHIP_ONTOLOGY_VERSION,
+  relationshipOntologyModelFields,
+  resolveRelationshipOntology,
+  type EffectiveRelationshipChange,
+  type EffectiveRelationshipObligation,
+  type EffectiveRelationshipStance,
+  type RelationshipChangeEpisode,
+  type RelationshipObligation,
+  type RelationshipStance,
+} from "./relationship-ontology.js";
+
+export const actorCoordinationSchema = z.object({
+  exclusiveParticipantIds: z.array(idSchema).max(32).default([]),
+  consentActorIds: z.array(idSchema).max(32).default([]),
+  authorityEntityIds: z.array(idSchema).max(32).default([]),
+}).strict().superRefine((value, ctx) => {
+  for (const [field, ids] of Object.entries(value) as Array<[keyof typeof value, string[]]>) {
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({ code: "custom", path: [field], message: `${field} must contain unique IDs` });
+    }
+  }
+});
+export type ActorCoordination = z.infer<typeof actorCoordinationSchema>;
+
+const goalActionSchema = z
+  .object({
+    title: z.string().min(1),
+    participants: z.array(idSchema).optional(),
+    preconditions: z.array(predicateSchema),
+    proposedDelta: stateDeltaSchema,
+    proposedKnowledge: knowledgeDeltaSchema.optional(),
+    action: actionInvocationSchema.optional(),
+    coordination: actorCoordinationSchema.optional(),
+  })
+  .strict();
 
 export const characterGoalSchema = z
   .object({
@@ -21,57 +82,318 @@ export const characterGoalSchema = z
     priority: z.number().min(0).max(1),
     requiresKnowledge: z.array(idSchema),
     blockedByKnowledge: z.array(idSchema).optional(),
-    candidateAction: z
+    targetIds: z.array(idSchema).optional(),
+    activation: z
       .object({
-        title: z.string().min(1),
-        participants: z.array(idSchema).optional(),
-        preconditions: z.array(predicateSchema),
-        proposedDelta: stateDeltaSchema,
-        proposedKnowledge: knowledgeDeltaSchema.optional(),
+        preconditions: z.array(predicateSchema).default([]),
+        afterCanonicalEventIds: z.array(idSchema).default([]),
+        /** Personal development gate; unlike world realization, the actor must have lived through the event. */
+        afterExperiencedCanonicalEventIds: z.array(idSchema).optional(),
+        storyWindow: storyTimeSchema.optional(),
       })
       .strict()
       .optional(),
+    completion: z.array(predicateSchema).optional(),
+    expiry: z.array(predicateSchema).optional(),
+    milestones: z.array(z.object({
+      id: idSchema,
+      description: z.string().min(1),
+      conditions: z.array(predicateSchema),
+    }).strict()).optional(),
+    candidateAction: goalActionSchema.optional(),
+    actionPatterns: z.array(goalActionSchema).optional(),
     evidence: z.array(evidenceRefSchema).min(1),
   })
   .strict();
 export type CharacterGoal = z.infer<typeof characterGoalSchema>;
+
+export const characterDevelopmentPhaseSchema = z
+  .object({
+    id: idSchema,
+    label: z.string().trim().min(1),
+    activation: z
+      .object({
+        preconditions: z.array(predicateSchema).default([]),
+        afterCanonicalEventIds: z.array(idSchema).default([]),
+        afterExperiencedCanonicalEventIds: z.array(idSchema).default([]),
+        requiresKnowledge: z.array(idSchema).default([]),
+        storyWindow: storyTimeSchema.optional(),
+      })
+      .strict(),
+    traitModifiers: z.record(z.string(), z.number().min(-2).max(2)).default({}),
+    decisionBiasModifiers: z.record(z.string(), z.number().min(-2).max(2)).default({}),
+    evidence: z.array(evidenceRefSchema).min(1),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const activation = value.activation;
+    if (!activation.preconditions.length
+      && !activation.afterCanonicalEventIds.length
+      && !activation.afterExperiencedCanonicalEventIds.length
+      && !activation.requiresKnowledge.length
+      && !activation.storyWindow) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A development phase must have at least one state, event, knowledge, or story-time trigger",
+        path: ["activation"],
+      });
+    }
+  });
+export type CharacterDevelopmentPhase = z.infer<typeof characterDevelopmentPhaseSchema>;
 
 export const characterModelSchema = z
   .object({
     actorId: idSchema,
     traits: z.record(z.string(), z.number().min(-1).max(1)),
     decisionBiases: z.record(z.string(), z.number().min(-1).max(1)),
+    developmentPhases: z.array(characterDevelopmentPhaseSchema).optional(),
+    ...characterOntologyModelFields,
+    ...relationshipOntologyModelFields,
     evidence: z.array(evidenceRefSchema).min(1),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const ids = value.developmentPhases?.map((phase) => phase.id) ?? [];
+    if (new Set(ids).size !== ids.length) {
+      ctx.addIssue({ code: "custom", message: "Character development phase IDs must be unique", path: ["developmentPhases"] });
+    }
+    const semanticCollections = [
+      ["dispositions", value.dispositions ?? []],
+      ["appraisalEpisodes", value.appraisalEpisodes ?? []],
+      ["developmentEpisodes", value.developmentEpisodes ?? []],
+    ] as const;
+    const hasCharacterOntology = semanticCollections.some(([, items]) => items.length > 0);
+    if (hasCharacterOntology && value.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Structured character semantics require ontologyVersion '${CHARACTER_ONTOLOGY_VERSION}'`,
+        path: ["ontologyVersion"],
+      });
+    }
+    if (value.ontologyVersion === CHARACTER_ONTOLOGY_VERSION && !hasCharacterOntology) {
+      ctx.addIssue({
+        code: "custom",
+        message: `A ${CHARACTER_ONTOLOGY_VERSION} model must contain at least one disposition, appraisal, or development episode`,
+        path: ["ontologyVersion"],
+      });
+    }
+    for (const [field, items] of semanticCollections) {
+      const itemIds = items.map((item) => item.id);
+      if (new Set(itemIds).size !== itemIds.length) {
+        ctx.addIssue({ code: "custom", message: `${field} IDs must be unique`, path: [field] });
+      }
+    }
+    const relationshipCollections = [
+      ["relationshipStances", value.relationshipStances ?? []],
+      ["relationshipObligations", value.relationshipObligations ?? []],
+      ["relationshipChanges", value.relationshipChanges ?? []],
+    ] as const;
+    const hasRelationshipOntology = relationshipCollections.some(([, items]) => items.length > 0);
+    if (hasRelationshipOntology && value.relationshipOntologyVersion !== RELATIONSHIP_ONTOLOGY_VERSION) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Structured relationship semantics require relationshipOntologyVersion '${RELATIONSHIP_ONTOLOGY_VERSION}'`,
+        path: ["relationshipOntologyVersion"],
+      });
+    }
+    if (value.relationshipOntologyVersion === RELATIONSHIP_ONTOLOGY_VERSION && !hasRelationshipOntology) {
+      ctx.addIssue({
+        code: "custom",
+        message: `A ${RELATIONSHIP_ONTOLOGY_VERSION} model must contain at least one stance, obligation, or change episode`,
+        path: ["relationshipOntologyVersion"],
+      });
+    }
+    for (const [field, items] of relationshipCollections) {
+      const itemIds = items.map((item) => item.id);
+      if (new Set(itemIds).size !== itemIds.length) {
+        ctx.addIssue({ code: "custom", message: `${field} IDs must be unique`, path: [field] });
+      }
+    }
+    if (value.ontologyVersion === CHARACTER_ONTOLOGY_VERSION) {
+      for (const [field, record] of [["traits", value.traits], ["decisionBiases", value.decisionBiases]] as const) {
+        const unnamespaced = Object.keys(record).filter((key) => !key.startsWith("legacy:"));
+        if (unnamespaced.length) {
+          ctx.addIssue({
+            code: "custom",
+            message: `V2 character models may retain free-form ${field} only under an explicit legacy: namespace; use registered dispositions for new semantics`,
+            path: [field],
+          });
+        }
+      }
+      value.developmentPhases?.forEach((phase, phaseIndex) => {
+        for (const [field, record] of [["traitModifiers", phase.traitModifiers], ["decisionBiasModifiers", phase.decisionBiasModifiers]] as const) {
+          if (Object.keys(record).some((key) => !key.startsWith("legacy:"))) {
+            ctx.addIssue({
+              code: "custom",
+              message: `V2 development phases may modify only explicit legacy: keys; use DevelopmentEpisode plus registered dispositions for new semantics`,
+              path: ["developmentPhases", phaseIndex, field],
+            });
+          }
+        }
+      });
+    }
+  });
 export type CharacterModel = z.infer<typeof characterModelSchema>;
 
+export type EffectiveCharacterModel = {
+  actorId: string;
+  traits: Record<string, number>;
+  decisionBiases: Record<string, number>;
+  activePhaseIds: string[];
+  legacyDimensions: Record<string, number>;
+  dispositions: EffectiveCharacterDisposition[];
+  appraisals: EffectiveCharacterAppraisal[];
+  developmentEpisodes: EffectiveDevelopmentEpisode[];
+  relationshipStances: EffectiveRelationshipStance[];
+  relationshipObligations: EffectiveRelationshipObligation[];
+  relationshipChanges: EffectiveRelationshipChange[];
+};
+
+export function resolveCharacterModel(
+  model: CharacterModel,
+  input: {
+    state: WorldState;
+    knownClaimIds: ReadonlySet<string>;
+    realizedCanonicalEventIds: ReadonlySet<string>;
+    experiencedCanonicalEventIds: ReadonlySet<string>;
+    storyTime?: StoryTime;
+  },
+): EffectiveCharacterModel {
+  const traits = { ...model.traits };
+  const decisionBiases = { ...model.decisionBiases };
+  const activePhaseIds: string[] = [];
+  for (const phase of model.developmentPhases ?? []) {
+    const activation = phase.activation;
+    const active = activation.preconditions.every((predicate) => evaluatePredicate(input.state, predicate))
+      && activation.afterCanonicalEventIds.every((eventId) => input.realizedCanonicalEventIds.has(eventId))
+      && activation.afterExperiencedCanonicalEventIds.every((eventId) => input.experiencedCanonicalEventIds.has(eventId))
+      && activation.requiresKnowledge.every((claimId) => input.knownClaimIds.has(claimId))
+      && (!activation.storyWindow || goalStoryWindowActive(
+        input.storyTime,
+        activation.storyWindow,
+        input.realizedCanonicalEventIds,
+      ));
+    if (!active) continue;
+    activePhaseIds.push(phase.id);
+    applyModifiers(traits, phase.traitModifiers);
+    applyModifiers(decisionBiases, phase.decisionBiasModifiers);
+  }
+  const ontology = resolveCharacterOntology({ ...model, traits, decisionBiases }, input);
+  const relationships = resolveRelationshipOntology(model, input);
+  return { actorId: model.actorId, traits, decisionBiases, activePhaseIds, ...ontology, ...relationships };
+}
+
+export type { AppraisalEpisode, CharacterDisposition, DevelopmentEpisode };
+export type { RelationshipChangeEpisode, RelationshipObligation, RelationshipStance };
+
+export type GoalActivation = {
+  active: boolean;
+  complete: boolean;
+  expired: boolean;
+  reasons: string[];
+};
+
+/** True only when a goal can represent change across time, not merely a static wish. */
+export function characterGoalHasDevelopmentBoundary(goal: CharacterGoal): boolean {
+  return Boolean(
+    goal.requiresKnowledge.length
+    || goal.blockedByKnowledge?.length
+    || goal.activation?.preconditions.length
+    || goal.activation?.afterCanonicalEventIds.length
+    || goal.activation?.afterExperiencedCanonicalEventIds?.length
+    || goal.activation?.storyWindow
+    || goal.completion?.length
+    || goal.expiry?.length
+    || goal.milestones?.some((milestone) => milestone.conditions.length),
+  );
+}
+
+export function evaluateCharacterGoal(
+  goal: CharacterGoal,
+  input: {
+    state: WorldState;
+    knownClaimIds: ReadonlySet<string>;
+    realizedCanonicalEventIds?: ReadonlySet<string>;
+    experiencedCanonicalEventIds?: ReadonlySet<string>;
+    storyTime?: StoryTime;
+  },
+): GoalActivation {
+  const reasons: string[] = [];
+  const complete = Boolean(goal.completion?.length && goal.completion.every((predicate) => evaluatePredicate(input.state, predicate)));
+  const expired = Boolean(goal.expiry?.some((predicate) => evaluatePredicate(input.state, predicate)));
+  if (complete) reasons.push("completion conditions are satisfied");
+  if (expired) reasons.push("an expiry condition is satisfied");
+  const missingKnowledge = goal.requiresKnowledge.filter((claimId) => !input.knownClaimIds.has(claimId));
+  if (missingKnowledge.length) reasons.push(`missing knowledge: ${missingKnowledge.join(", ")}`);
+  const blockedKnowledge = (goal.blockedByKnowledge ?? []).filter((claimId) => input.knownClaimIds.has(claimId));
+  if (blockedKnowledge.length) reasons.push(`blocked by knowledge: ${blockedKnowledge.join(", ")}`);
+  const activationPredicates = goal.activation?.preconditions ?? [];
+  const failedActivation = activationPredicates.filter((predicate) => !evaluatePredicate(input.state, predicate));
+  if (failedActivation.length) reasons.push(`${failedActivation.length} activation condition(s) are false`);
+  const missingParents = (goal.activation?.afterCanonicalEventIds ?? []).filter((eventId) =>
+    !input.realizedCanonicalEventIds?.has(eventId));
+  if (missingParents.length) reasons.push(`waiting for canonical anchor(s): ${missingParents.join(", ")}`);
+  const missingExperiences = (goal.activation?.afterExperiencedCanonicalEventIds ?? []).filter((eventId) =>
+    !input.experiencedCanonicalEventIds?.has(eventId));
+  if (missingExperiences.length) reasons.push(`waiting for personally experienced canonical anchor(s): ${missingExperiences.join(", ")}`);
+  const storyWindowActive = !goal.activation?.storyWindow || goalStoryWindowActive(
+    input.storyTime,
+    goal.activation.storyWindow,
+    input.realizedCanonicalEventIds,
+  );
+  if (!storyWindowActive) {
+    reasons.push("goal story window does not overlap the active scene");
+  }
+  return {
+    active: !complete && !expired && !missingKnowledge.length && !blockedKnowledge.length
+      && !failedActivation.length && !missingParents.length
+      && !missingExperiences.length
+      && storyWindowActive,
+    complete,
+    expired,
+    reasons,
+  };
+}
+
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export type ActorArtifactKind = "goals" | "models";
+export type ActorRevisionRef = { id: string; hash: string };
+type StoredActorRef = { version: 1; id: string; hash: string; updatedAt: string };
 
 export class ActorModelStore {
   readonly root: string;
   constructor(workspaceRoot: string) {
-    this.root = path.join(workspaceRoot, ".novel-harness", "world", "v1", "canon", "actors");
+    this.root = path.join(worldStorageRoot(workspaceRoot), "canon", "actors");
   }
 
   async putGoal(input: CharacterGoal): Promise<void> {
     const goal = characterGoalSchema.parse(input);
-    await this.writeImmutable(path.join(this.root, "goals", `${safeId(goal.id)}.json`), goal);
+    await this.put("goals", goal.id, goal);
   }
 
   async putModel(input: CharacterModel): Promise<void> {
     const model = characterModelSchema.parse(input);
-    await this.writeImmutable(path.join(this.root, "models", `${safeId(model.actorId)}.json`), model);
+    await this.put("models", model.actorId, model);
+  }
+
+  async ensureGoalRevision(input: CharacterGoal): Promise<void> {
+    const goal = characterGoalSchema.parse(input);
+    await writeImmutable(this.revisionPath("goals", safeId(goal.id), contentHash(goal)), goal);
+  }
+
+  async ensureModelRevision(input: CharacterModel): Promise<void> {
+    const model = characterModelSchema.parse(input);
+    await writeImmutable(this.revisionPath("models", safeId(model.actorId), contentHash(model)), model);
   }
 
   async listGoals(actorId?: string): Promise<CharacterGoal[]> {
-    const all = await this.list(path.join(this.root, "goals"), characterGoalSchema);
+    const all = await this.list("goals", characterGoalSchema);
     return actorId ? all.filter((goal) => goal.actorId === actorId) : all;
   }
 
   async getModel(actorId: string): Promise<CharacterModel | null> {
     try {
-      return characterModelSchema.parse(JSON.parse(await fs.readFile(path.join(this.root, "models", `${safeId(actorId)}.json`), "utf8")));
+      return await this.get("models", actorId, characterModelSchema);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -79,65 +401,296 @@ export class ActorModelStore {
   }
 
   async listModels(): Promise<CharacterModel[]> {
-    return this.list(path.join(this.root, "models"), characterModelSchema);
+    return this.list("models", characterModelSchema);
   }
 
-  private async writeImmutable(filePath: string, value: unknown): Promise<void> {
-    const serialized = `${canonicalJson(value)}\n`;
-    await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  getGoalRevision(id: string, hash: string): Promise<CharacterGoal> {
+    return this.getRevision("goals", id, hash, characterGoalSchema);
+  }
+
+  getModelRevision(id: string, hash: string): Promise<CharacterModel> {
+    return this.getRevision("models", id, hash, characterModelSchema);
+  }
+
+  async currentRevision(kind: ActorArtifactKind, idInput: string): Promise<ActorRevisionRef | null> {
+    const id = safeId(idInput);
+    const ref = await this.readRef(kind, id);
+    if (ref) return { id, hash: ref.hash };
+    const legacy = await this.readLegacy(kind, id);
+    return legacy === null ? null : { id, hash: contentHash(legacy) };
+  }
+
+  async removeGoal(id: string): Promise<void> { await this.removeCurrent("goals", id); }
+  async removeModel(actorId: string): Promise<void> { await this.removeCurrent("models", actorId); }
+
+  private async put(kind: ActorArtifactKind, idInput: string, value: unknown): Promise<void> {
+    const id = safeId(idInput);
+    await this.migrateLegacy(kind, id);
+    const hash = contentHash(value);
+    await writeImmutable(this.revisionPath(kind, id, hash), value);
+    await atomicJson(this.refPath(kind, id), { version: 1, id, hash, updatedAt: new Date().toISOString() } satisfies StoredActorRef);
+  }
+
+  private async get<T>(kind: ActorArtifactKind, idInput: string, schema: z.ZodType<T>): Promise<T> {
+    const id = safeId(idInput);
+    const ref = await this.readRef(kind, id);
+    if (ref) return this.getRevision(kind, id, ref.hash, schema);
+    const legacy = await this.readLegacy(kind, id);
+    if (legacy === null) throw Object.assign(new Error(`Actor ${kind} artifact not found: ${id}`), { code: "ENOENT" });
+    return schema.parse(legacy);
+  }
+
+  private async getRevision<T>(kind: ActorArtifactKind, idInput: string, hash: string, schema: z.ZodType<T>): Promise<T> {
+    const id = safeId(idInput);
+    if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error(`Invalid actor artifact revision hash: ${hash}`);
+    let raw: unknown;
     try {
-      await fs.writeFile(filePath, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      raw = JSON.parse(await fs.readFile(this.revisionPath(kind, id, hash), "utf8")) as unknown;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if ((await fs.readFile(filePath, "utf8")) !== serialized) throw new Error(`Actor model artifact already exists with different content: ${filePath}`);
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const legacy = await this.readLegacy(kind, id);
+      if (legacy === null || contentHash(legacy) !== hash) {
+        throw Object.assign(new Error(`Actor ${kind} revision not found: ${id}@${hash}`), { code: "ENOENT" });
+      }
+      raw = legacy;
     }
+    const value = schema.parse(raw);
+    if (contentHash(value) !== hash) throw new Error(`Corrupt actor ${kind} revision ${id}@${hash}`);
+    return value;
   }
 
-  private async list<T>(directory: string, schema: z.ZodType<T>): Promise<T[]> {
-    let names: string[];
-    try {
-      names = (await fs.readdir(directory)).filter((name) => name.endsWith(".json")).sort();
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
+  private async list<T>(kind: ActorArtifactKind, schema: z.ZodType<T>): Promise<T[]> {
+    const ids = new Set<string>();
+    for (const directory of [path.join(this.root, kind, "refs"), path.join(this.root, kind)]) {
+      try {
+        for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+          if (entry.isFile() && entry.name.endsWith(".json")) ids.add(entry.name.slice(0, -5));
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
     const values: T[] = [];
-    for (const name of names) values.push(schema.parse(JSON.parse(await fs.readFile(path.join(directory, name), "utf8"))));
+    for (const id of [...ids].sort()) values.push(await this.get(kind, id, schema));
     return values;
+  }
+
+  private async removeCurrent(kind: ActorArtifactKind, idInput: string): Promise<void> {
+    const id = safeId(idInput);
+    await this.migrateLegacy(kind, id);
+    await fs.rm(this.refPath(kind, id), { force: true });
+  }
+
+  private async migrateLegacy(kind: ActorArtifactKind, id: string): Promise<void> {
+    const legacy = await this.readLegacy(kind, id);
+    if (legacy === null) return;
+    await writeImmutable(this.revisionPath(kind, id, contentHash(legacy)), legacy);
+    await fs.rm(this.legacyPath(kind, id), { force: true });
+  }
+
+  private refPath(kind: ActorArtifactKind, id: string): string { return path.join(this.root, kind, "refs", `${id}.json`); }
+  private revisionPath(kind: ActorArtifactKind, id: string, hash: string): string { return path.join(this.root, kind, "revisions", id, `${hash}.json`); }
+  private legacyPath(kind: ActorArtifactKind, id: string): string { return path.join(this.root, kind, `${id}.json`); }
+
+  private async readRef(kind: ActorArtifactKind, id: string): Promise<StoredActorRef | null> {
+    try {
+      const value = JSON.parse(await fs.readFile(this.refPath(kind, id), "utf8")) as StoredActorRef;
+      if (value.version !== 1 || value.id !== id || !/^[a-f0-9]{64}$/.test(value.hash)) throw new Error(`Invalid actor artifact ref: ${kind}/${id}`);
+      return value;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  private async readLegacy(kind: ActorArtifactKind, id: string): Promise<unknown | null> {
+    try { return JSON.parse(await fs.readFile(this.legacyPath(kind, id), "utf8")) as unknown; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
   }
 }
 
-export type ActorProposalCandidate = {
-  proposal: EventProposal;
-  priority: number;
-  goalId: string;
-};
+async function writeImmutable(filePath: string, value: unknown): Promise<void> {
+  const serialized = `${canonicalJson(value)}\n`;
+  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  try {
+    await fs.writeFile(filePath, serialized, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if ((await fs.readFile(filePath, "utf8")) !== serialized) throw new Error(`Actor artifact revision collision: ${filePath}`);
+  }
+}
+
+async function atomicJson(filePath: string, value: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporary = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(temporary, `${canonicalJson(value)}\n`, { encoding: "utf8", mode: 0o600 });
+  await fs.rename(temporary, filePath);
+}
+
+export const actorCandidateSourceSchema = z.enum(["compiled-action", "model-reasoner", "injected"]);
+export type ActorCandidateSource = z.infer<typeof actorCandidateSourceSchema>;
+
+export const actorSalienceTraceSchema = z.object({
+  tier: z.number().int().min(0).max(4),
+  dueNormCount: z.number().int().nonnegative(),
+  dueProcessCount: z.number().int().nonnegative(),
+  latestEventParticipant: z.boolean(),
+  currentScene: z.boolean(),
+  goalPriority: z.number().finite().min(0).max(1),
+  cooldownPenalty: z.number().finite().min(0).max(1),
+}).strict();
+export type ActorSalienceTrace = z.infer<typeof actorSalienceTraceSchema>;
+
+export const actorProposalCandidateSchema = z.object({
+  proposal: eventProposalSchema,
+  priority: z.number().finite().min(0).max(1),
+  goalId: idSchema,
+  candidateSource: actorCandidateSourceSchema.optional(),
+  salience: actorSalienceTraceSchema.optional(),
+  coordination: actorCoordinationSchema.optional(),
+}).strict();
+export type ActorProposalCandidate = z.infer<typeof actorProposalCandidateSchema>;
 
 export type ActorProposalSource = (input: {
   branchId: string;
   commitId: string;
+  /** Host-owned selection budget; a source must rank before any model calls. */
+  maxActors?: number;
+  /** Hard cap on logical model-reasoner calls for this refresh. */
+  maxModelCalls?: number;
 }) => Promise<readonly ActorProposalCandidate[]> | readonly ActorProposalCandidate[];
 
 export function deterministicActorProposalSource(engine: WorldEngine, actors: ActorModelStore): ActorProposalSource {
   const knowledge = new KnowledgeProjector(engine);
-  return async ({ branchId, commitId }) => {
+  return async ({ branchId, commitId, maxActors }) => {
     const candidates: ActorProposalCandidate[] = [];
-    const goals = await actors.listGoals();
-    const context = await engine.contextForCommit(commitId);
+    const [context, state, history] = await Promise.all([
+      engine.contextForCommit(commitId),
+      engine.projector.project(commitId),
+      committedHistory(engine, commitId),
+    ]);
+    let activeSourceId: string | undefined;
+    try {
+      activeSourceId = await resolveCommitSourceId(engine, context, commitId, undefined, "Actor scheduler");
+    } catch (error) {
+      // Automatic NPC policy has no authority to choose between novels for an
+      // unscoped legacy branch. Disable it without turning a valid player
+      // commit into a background error.
+      if (error instanceof AmbiguousLegacySourceError) return [];
+      throw error;
+    }
+    const belongsToActiveWorld = (evidence: Parameters<typeof evidenceBelongsExclusivelyToSource>[0]) => activeSourceId
+      ? evidenceBelongsExclusivelyToSource(evidence, activeSourceId)
+      : evidence.length === 0;
+    const latestPlayerEvent = [...history].reverse().find((entry) => entry.event.actorId);
+    if (!latestPlayerEvent?.event.actorId) {
+      const goals = (context.actorGoals ?? await actors.listGoals())
+        .filter((goal) => belongsToActiveWorld(goal.evidence));
+      for (const goal of goals) {
+        const entity = context.entities.get(goal.actorId);
+        if (!entity || entity.kind !== "character") continue;
+        if (!belongsToActiveWorld(entity.evidence) || !belongsToActiveWorld(goal.evidence)) continue;
+        const actorHistory = history.filter((entry) => !entry.event.evidence.length
+          || belongsToActiveWorld(entry.event.evidence));
+        const realizedCanonicalEventIds = realizedCanonicalEvents(actorHistory);
+        const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
+        const action = [goal.candidateAction, ...(goal.actionPatterns ?? [])]
+          .find((pattern) => pattern?.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
+        if (!action || !actorActionHasMaterialEffect(action)) continue;
+        const view = await knowledge.view(goal.actorId, commitId);
+        const known = actionableKnowledgeClaimIds(view, activeSourceId);
+        if (!evaluateCharacterGoal(goal, {
+          state,
+          knownClaimIds: known,
+          realizedCanonicalEventIds,
+          experiencedCanonicalEventIds,
+          storyTime: state.logicalTime.storyTime,
+        }).active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;
+        candidates.push({
+          goalId: goal.id,
+          priority: goal.priority,
+          candidateSource: "compiled-action",
+          coordination: normalizeActorCoordination(goal.actorId, action.coordination),
+          proposal: {
+            proposalId: `goal-${contentHash({ goalId: goal.id, branchId, commitId }).slice(0, 24)}`,
+            branchId,
+            expectedParentCommit: commitId,
+            source: "actor",
+            actorId: goal.actorId,
+            title: action.title,
+            participants: [...new Set([goal.actorId, ...(action.participants ?? [])])],
+            participantPresence: [{ entityId: goal.actorId, mode: "physical" }],
+            proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
+            preconditions: action.preconditions,
+            proposedDelta: action.proposedDelta,
+            ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+            ...(action.action ? { action: structuredClone(action.action) } : {}),
+            causalParents: [],
+            evidence: goal.evidence,
+            progress: {
+              version: 1,
+              channels: action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["thread", "consequence"],
+              threadIds: [`goal-${goal.id}`],
+              noveltyKey: `standalone-goal:${goal.id}:${commitId}`,
+              outcome: "succeeded",
+            },
+          },
+        });
+      }
+      return limitActorCandidates(candidates, maxActors);
+    }
+    const initiatingActorId = latestPlayerEvent.event.actorId;
+    const scene = await projectActorScene(engine, initiatingActorId, commitId, activeSourceId);
+    const localActors = new Set(scene.presentEntityIds);
+    localActors.delete(initiatingActorId);
+    if (!localActors.size) return candidates;
+    const goals = (context.actorGoals ?? await actors.listGoals())
+      .filter((goal) => belongsToActiveWorld(goal.evidence));
     for (const goal of goals) {
-      if (!goal.candidateAction) continue;
       const entity = context.entities.get(goal.actorId);
-      if (!entity || entity.kind !== "character") continue;
+      if (!entity || entity.kind !== "character" || !localActors.has(goal.actorId)) continue;
+      if (!belongsToActiveWorld(entity.evidence) || !belongsToActiveWorld(goal.evidence)) continue;
+      const actorHistory = history.filter((entry) => !entry.event.evidence.length
+        || belongsToActiveWorld(entry.event.evidence));
+      const realizedCanonicalEventIds = realizedCanonicalEvents(actorHistory);
+      const experiencedCanonicalEventIds = experiencedCanonicalEvents(actorHistory, goal.actorId, context.events);
       const view = await knowledge.view(goal.actorId, commitId);
-      const known = new Set(view.knowledge.filter((entry) => isActionableKnowledge(entry.fact)).map((entry) => entry.fact.claimId));
-      if (goal.requiresKnowledge.some((claimId) => !known.has(claimId))) continue;
-      if (goal.blockedByKnowledge?.some((claimId) => known.has(claimId))) continue;
-      const action = goal.candidateAction;
-      const participants = [...new Set([goal.actorId, ...(action.participants ?? [])])];
+      const known = actionableKnowledgeClaimIds(view, activeSourceId);
+      const activation = evaluateCharacterGoal(goal, {
+        state,
+        knownClaimIds: known,
+        realizedCanonicalEventIds,
+        experiencedCanonicalEventIds,
+        storyTime: state.logicalTime.storyTime,
+      });
+      if (!activation.active || !goalSupportedInCurrentPhase(goal, actorHistory, goal.actorId)) continue;
+      const proposedAction = [goal.candidateAction, ...(goal.actionPatterns ?? [])]
+        .find((pattern) => pattern?.preconditions.every((predicate) => evaluatePredicate(state, predicate)));
+      const action = proposedAction && actorActionIsLocal(
+        proposedAction,
+        goal.actorId,
+        initiatingActorId,
+        localActors,
+        state,
+        context.entities,
+      ) ? proposedAction : undefined;
+      if (!action || !actorActionHasMaterialEffect(action)) continue;
+      const actionParticipants = action.participants ?? goal.targetIds ?? [initiatingActorId];
+      const participants = [...new Set([goal.actorId, ...actionParticipants])]
+        .filter((participantId) => participantId === goal.actorId || localActors.has(participantId) || participantId === initiatingActorId);
       const proposalId = `goal-${contentHash({ goalId: goal.id, branchId, commitId }).slice(0, 24)}`;
+      const progress: NarrativeProgress = {
+        version: 1,
+        channels: action.proposedDelta.operations.length ? ["state", "thread", "consequence"] : ["knowledge", "thread", "consequence"],
+        threadIds: [`goal-${goal.id}`],
+        noveltyKey: `actor-goal:${goal.id}:${latestPlayerEvent.event.eventId}`,
+        outcome: "succeeded",
+      };
       candidates.push({
         goalId: goal.id,
         priority: goal.priority,
+        candidateSource: "compiled-action",
+        coordination: normalizeActorCoordination(goal.actorId, action.coordination),
         proposal: {
           proposalId,
           branchId,
@@ -146,17 +699,148 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           actorId: goal.actorId,
           title: action.title,
           participants,
-          proposedTime: { kind: "unknown" },
+          participantPresence: participants
+            .filter((participantId) => context.entities.get(participantId)?.kind === "character")
+            .map((entityId) => ({ entityId, mode: "physical" as const })),
+          proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
           preconditions: action.preconditions,
           proposedDelta: action.proposedDelta,
           ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
-          causalParents: [],
+          ...(action.action ? { action: structuredClone(action.action) } : {}),
+          causalRelations: [{
+            fromEventId: latestPlayerEvent.event.eventId,
+            type: "causes",
+            operationality: "contributory",
+            description: "Compiled actor response to the latest perceived actor event",
+          }],
+          causalParents: [latestPlayerEvent.event.eventId],
           evidence: goal.evidence,
+          progress,
         },
       });
     }
-    return candidates.sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId));
+    return limitActorCandidates(candidates, maxActors);
   };
+}
+
+function actorActionHasMaterialEffect(action: z.infer<typeof goalActionSchema>): boolean {
+  return action.proposedDelta.operations.length > 0
+    || (action.proposedKnowledge?.operations.length ?? 0) > 0;
+}
+
+export function normalizeActorCoordination(
+  actorId: string,
+  value?: ActorCoordination,
+): ActorCoordination {
+  return actorCoordinationSchema.parse({
+    exclusiveParticipantIds: [...new Set([actorId, ...(value?.exclusiveParticipantIds ?? [])])].sort(),
+    consentActorIds: [...new Set(value?.consentActorIds ?? [])].sort(),
+    authorityEntityIds: [...new Set(value?.authorityEntityIds ?? [])].sort(),
+  });
+}
+
+function limitActorCandidates(
+  candidates: readonly ActorProposalCandidate[],
+  maxActors: number | undefined,
+): ActorProposalCandidate[] {
+  const limit = maxActors ?? 32;
+  if (!Number.isInteger(limit) || limit < 0 || limit > 32) throw new Error("Actor source maxActors must be an integer between 0 and 32");
+  const seenActors = new Set<string>();
+  return [...candidates]
+    .sort((left, right) => right.priority - left.priority || left.proposal.proposalId.localeCompare(right.proposal.proposalId))
+    .filter((candidate) => {
+      const actorId = candidate.proposal.actorId;
+      if (!actorId || seenActors.has(actorId)) return false;
+      seenActors.add(actorId);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+export function goalSupportedInCurrentPhase(
+  goal: CharacterGoal,
+  history: Awaited<ReturnType<typeof committedHistory>>,
+  actorId: string,
+): boolean {
+  if (goal.activation || goal.requiresKnowledge.length > 0) return true;
+  if (history.some((entry) => entry.event.progress?.threadIds.includes(`goal-${goal.id}`))) return true;
+  return [...history].reverse().slice(0, 12).some((entry) =>
+    entry.event.participants.includes(actorId)
+    && entry.event.evidence.some((eventEvidence) => goal.evidence.some((goalEvidence) => evidenceOverlaps(eventEvidence, goalEvidence))));
+}
+
+function evidenceOverlaps(
+  left: CharacterGoal["evidence"][number],
+  right: CharacterGoal["evidence"][number],
+): boolean {
+  return left.span.sourceId === right.span.sourceId
+    && left.span.startLine <= right.span.endLine
+    && left.span.endLine >= right.span.startLine;
+}
+
+function actorActionIsLocal(
+  action: NonNullable<CharacterGoal["candidateAction"]>,
+  actorId: string,
+  initiatingActorId: string,
+  localActors: ReadonlySet<string>,
+  state: WorldState,
+  entities: ReadonlyMap<string, Pick<Entity, "kind">>,
+): boolean {
+  const localCharacters = new Set([actorId, initiatingActorId, ...localActors]);
+  for (const participantId of action.participants ?? []) {
+    if (entities.get(participantId)?.kind === "character" && !localCharacters.has(participantId)) return false;
+  }
+  const actorLocation = state.values[actorId]?.["character.location"];
+  for (const operation of action.proposedDelta.operations) {
+    if (operation.op === "activate-rule" || operation.op === "deactivate-rule") return false;
+    const targetKind = entities.get(operation.entityId)?.kind;
+    if (targetKind === "character" && operation.entityId !== actorId) return false;
+    if (targetKind === "artifact" && state.values[operation.entityId]?.["artifact.owner"] !== actorId) return false;
+    if (targetKind === "location" && operation.entityId !== actorLocation) return false;
+    if (targetKind !== "character" && targetKind !== "artifact" && targetKind !== "location") return false;
+    if (operation.op === "set" && typeof operation.value === "string") {
+      const referencedKind = entities.get(operation.value)?.kind;
+      if (referencedKind === "character" && !localCharacters.has(operation.value)) return false;
+    }
+    if ((operation.op === "add-member" || operation.op === "remove-member")
+      && entities.get(operation.member)?.kind === "character"
+      && !localCharacters.has(operation.member)) return false;
+  }
+  for (const operation of action.proposedKnowledge?.operations ?? []) {
+    if (!localCharacters.has(operation.actorId)) return false;
+    if (operation.op === "learn" && operation.sourceActorId) {
+      const source = entities.get(operation.sourceActorId);
+      if (!isCommunicatingKnowledgeSource(source)
+        || (source.kind === "character" && !localCharacters.has(operation.sourceActorId))) return false;
+    }
+  }
+  return true;
+}
+
+function goalStoryWindowActive(
+  current: StoryTime | undefined,
+  candidate: StoryTime,
+  realizedCanonicalEventIds: ReadonlySet<string> | undefined,
+): boolean {
+  if (candidate.kind === "unknown") return true;
+  if (candidate.kind === "relative") {
+    return Boolean(realizedCanonicalEventIds?.has(candidate.anchorEventId));
+  }
+  if (!current || current.kind === "unknown" || current.kind === "relative") return false;
+  if (storyTimesOverlap(current, candidate)) return true;
+  // Unnumbered ordinal labels are only comparable by stable normalized label.
+  return current.kind === "ordinal"
+    && candidate.kind === "ordinal"
+    && current.orderHint === undefined
+    && candidate.orderHint === undefined
+    && current.label.normalize("NFKC").trim().toLocaleLowerCase()
+      === candidate.label.normalize("NFKC").trim().toLocaleLowerCase();
+}
+
+function applyModifiers(target: Record<string, number>, modifiers: Record<string, number>): void {
+  for (const [key, modifier] of Object.entries(modifiers)) {
+    target[key] = Math.max(-1, Math.min(1, (target[key] ?? 0) + modifier));
+  }
 }
 
 function safeId(id: string): string {

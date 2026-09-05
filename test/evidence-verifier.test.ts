@@ -11,7 +11,7 @@ const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
 
 describe("compiler evidence verification", () => {
-  it("rejects a previously valid proposal after the registered source changes", async () => {
+  it("keeps proposals bound to the immutable archived source after the origin file changes", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-evidence-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "Hero appears.\n");
@@ -24,11 +24,11 @@ describe("compiler evidence verification", () => {
     });
     await fs.writeFile(path.join(root, fixture.source.sourcePath), "Hero disappears.\n", "utf8");
     const result = await commits.accept("entity", "hero");
-    expect(result.accepted).toBe(false);
-    expect(result.errors.some((error) => error.code === "EVIDENCE_SOURCE_CHANGED")).toBe(true);
+    expect(result.accepted).toBe(true);
+    expect(result.errors).toEqual([]);
   });
 
-  it("does not reuse a stale source buffer across verification calls", async () => {
+  it("continues verifying the archived bytes when the disposable origin changes", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-evidence-cache-"));
     roots.push(root);
     const fixture = await createEvidenceFixture(root, "Hero appears.\n");
@@ -37,7 +37,18 @@ describe("compiler evidence verification", () => {
     expect((await verifier.verify(evidence)).valid).toBe(true);
     await fs.writeFile(path.join(root, fixture.source.sourcePath), "Hero disappears.\n", "utf8");
     const changed = await verifier.verify(evidence);
-    expect(changed.valid).toBe(false);
-    expect(changed.issues.some((error) => error.code === "EVIDENCE_SOURCE_CHANGED")).toBe(true);
+    expect(changed.valid).toBe(true);
+    expect(changed.issues).toEqual([]);
+  });
+
+  it("returns only text backed by verified evidence spans", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-evidence-inspection-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "曹操，字孟德。\n");
+    const verifier = new EvidenceVerifier(root);
+
+    const inspected = await verifier.inspectAll(fixture.evidence("曹操，字孟德"));
+
+    expect(inspected).toMatchObject({ valid: true, issues: [], excerpts: ["曹操，字孟德"] });
   });
 });

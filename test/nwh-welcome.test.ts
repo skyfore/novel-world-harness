@@ -1,6 +1,6 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { isFreshConversation, NWH_WORKING_FRAMES, renderNwhWelcome } from "../src/agent/nwh-welcome.js";
+import { hasPlayerConversation, isFreshConversation, NWH_WORKING_FRAMES, renderNwhWelcome } from "../src/agent/nwh-welcome.js";
 
 const theme = {
   bold: (text: string) => text,
@@ -16,7 +16,8 @@ describe("NWH welcome header", () => {
     expect(output).toContain("/login");
     expect(output).toContain("/model");
     expect(output).toContain("novel path");
-    expect(output).toContain("/compile-next");
+    expect(output).toContain("/instances");
+    expect(output).toContain("/play");
   });
 
   it("uses a shorter message for an existing conversation and narrow terminals", () => {
@@ -25,6 +26,13 @@ describe("NWH welcome header", () => {
     expect(lines.join("\n")).toContain("(-,-)");
     expect(lines.join("\n")).toContain("Welcome back");
     expect(lines).toHaveLength(3);
+  });
+
+  it("keeps compiler-mode onboarding focused on evidence batches", () => {
+    const output = renderNwhWelcome(theme, { mode: "compiler", freshConversation: true }, 0, 100).join("\n");
+
+    expect(output).toContain("/compile-next");
+    expect(output).not.toContain("/play <character>");
   });
 
   it("uses the mascot as the working animation", () => {
@@ -40,5 +48,31 @@ describe("NWH welcome header", () => {
       { type: "model_change" },
       { type: "message", message: { role: "user" } },
     ])).toBe(false);
+    expect(isFreshConversation([
+      { type: "custom_message", customType: "nwh-play", display: true },
+    ])).toBe(false);
+    expect(isFreshConversation([
+      { type: "message", message: { role: "custom", customType: "nwh-narrator", display: true } },
+    ])).toBe(false);
+    expect(isFreshConversation([
+      { type: "custom", customType: "nwh-narrator", data: { __piAssistantStream: 1 } },
+    ])).toBe(false);
+  });
+
+  it("recognizes player-only custom transcripts as existing world context", () => {
+    expect(hasPlayerConversation([
+      { type: "model_change" },
+      { type: "custom_message", customType: "nwh-play", display: true },
+      { type: "custom_message", customType: "nwh-narrator", display: true },
+    ])).toBe(true);
+    expect(hasPlayerConversation([
+      { type: "message", message: { role: "user" } },
+    ])).toBe(false);
+    expect(hasPlayerConversation([
+      { type: "message", message: { role: "custom", customType: "nwh-narrator", display: true } },
+    ])).toBe(true);
+    expect(hasPlayerConversation([
+      { type: "custom", customType: "nwh-narrator", data: { __piAssistantStream: 1 } },
+    ])).toBe(true);
   });
 });

@@ -188,6 +188,8 @@ const GAP_ELIGIBLE_CODES = new Set([
   "PLAYER_SPATIAL_ORIGIN_UNKNOWN",
   "PLAYER_SPATIAL_CONTEXT_UNKNOWN",
   "PLAYER_SPATIAL_ROUTE_UNPROVEN",
+  "SPATIAL_LOCATION_REQUIRED",
+  "SPATIAL_ROUTE_UNPROVEN",
   "PLAYER_ENTITY_OUT_OF_SCOPE",
 ]);
 
@@ -207,7 +209,7 @@ export function runtimeContextNeedForIssues(
 ): RuntimeContextNeed | undefined {
   if (!issues.length || !issues.every(isRuntimeContextGapIssue)) return undefined;
   const codes = [...new Set(issues.map((entry) => entry.code))].sort();
-  const domain: RuntimeContextDomain = codes.some((code) => code.startsWith("PLAYER_SPATIAL_"))
+  const domain: RuntimeContextDomain = codes.some((code) => code.startsWith("PLAYER_SPATIAL_") || code.startsWith("SPATIAL_"))
     ? "spatial"
     : codes.includes("PLAYER_ENTITY_OUT_OF_SCOPE")
       ? "identity"

@@ -1261,11 +1261,14 @@ export const actionRoleBindingSchema = z.object({
 });
 export type ActionRoleBinding = z.infer<typeof actionRoleBindingSchema>;
 
+export const actionTravelModeSchema = z.enum(["foot", "mounted", "wheeled", "rail", "water", "air", "climb", "crawl", "portal"]);
+
 const schemaBoundActionInvocationSchema = z.object({
   lane: z.literal("schema-bound"),
   schemaId: idSchema,
   roleBindings: z.array(actionRoleBindingSchema).max(64),
   parameters: z.record(idSchema, stateValueSchema).default({}),
+  travelMode: actionTravelModeSchema.optional(),
 }).strict().superRefine((value, ctx) => {
   const roles = new Set<string>();
   value.roleBindings.forEach((binding, index) => {
@@ -1316,6 +1319,7 @@ export const actionInvocationSchema = z.discriminatedUnion("lane", [
     actionKindId: idSchema,
     description: z.string().trim().min(1).max(1_000),
     footprint: actionFootprintSchema,
+    travelMode: actionTravelModeSchema.optional(),
   }).strict(),
 ]);
 export type ActionInvocation = z.infer<typeof actionInvocationSchema>;
@@ -1834,4 +1838,4 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
 export const WORLD_SCHEMA_VERSION = 2;
-export const WORLD_ENGINE_VERSION = "0.2.0";
+export const WORLD_ENGINE_VERSION = "0.3.0";

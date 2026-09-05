@@ -2,8 +2,9 @@ import { z } from "zod";
 import { commitKnowledgeAwareAction, validateActionKnowledge, type KnowledgeAwareAction } from "./action-gate.js";
 import { contentHash } from "./canonical.js";
 import { validateEventProposal, type WorldEngine, type WorldModelContext } from "./engine.js";
-import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { actorKnowledgeBelongsToSource, isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import {
+  actionInvocationSchema,
   claimSchema,
   entityKindSchema,
   eventProposalSchema,
@@ -76,6 +77,7 @@ import {
   spatialTravelModeSchema,
 } from "./spatial-ontology.js";
 import { modelVisibleWorldRules, resolveEffectiveWorldRules } from "./world-rule-ontology.js";
+import { deriveAdHocAction, mapActionInvocationEntities } from "./action-invocation.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -176,6 +178,7 @@ export const playerActionCandidateSchema = z
     preconditions: z.array(predicateSchema).default([]),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    action: actionInvocationSchema.optional(),
     requiresKnowledge: z.array(idSchema).default([]),
     forbidsKnowledge: z.array(idSchema).default([]),
   })
@@ -518,6 +521,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
   };
   const encodeCandidate = (candidateInput: PlayerActionCandidate): PlayerActionCandidate => {
     const candidate = structuredClone(playerActionCandidateSchema.parse(candidateInput));
+    if (candidate.action) candidate.action = mapActionInvocationEntities(candidate.action, scopedEntityHandle);
     candidate.participants = candidate.participants.map(scopedEntityHandle);
     candidate.preconditions = candidate.preconditions.map(encodePredicate);
     candidate.proposedDelta.operations = candidate.proposedDelta.operations.map((operation) => {
@@ -657,6 +661,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
     decodeClaimId: decodeClaim,
     decodeCandidate(candidateInput) {
       const candidate = structuredClone(candidateInput) as PlayerActionCandidate;
+      if (candidate.action) candidate.action = mapActionInvocationEntities(candidate.action, decodeEntity);
       candidate.participants = candidate.participants.map(decodeEntity);
       candidate.preconditions = candidate.preconditions
         .map((predicate) => decodePredicate(predicate as unknown as Record<string, unknown>) as never);
@@ -829,7 +834,7 @@ export async function buildActorScopedActionContext(
   const ownedEntityState: Record<EntityId, Record<string, StateValue>> = {};
   const visibleKnowledge = effectiveSourceId
     ? view.knowledge.filter((entry) => entry.claim
-      && evidenceBelongsExclusivelyToSource(entry.claim.evidence, effectiveSourceId)
+      && actorKnowledgeBelongsToSource(entry, effectiveSourceId)
       && entityIdBelongsToSource(entry.claim.subject, context.entities, effectiveSourceId)
       && (!entry.claim.speaker || entityIdBelongsToSource(entry.claim.speaker, context.entities, effectiveSourceId))
       && claimObjectBelongsToSource(entry.claim.object, context.entities, effectiveSourceId))
@@ -1234,10 +1239,10 @@ export async function validatePlayerActionSpatialScope(
         realizedCanonicalEventIds: new Set(history.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? [])),
       })
     : [];
-  const destination = candidate.intent?.sceneTransition?.kind === "arrive"
-    && candidate.intent.sceneTransition.destination?.kind === "entity"
-    ? candidate.intent.sceneTransition.destination.entityId
-    : undefined;
+  const locationWrite = candidate.proposedDelta.operations.findLast((operation) =>
+    "entityId" in operation && operation.entityId === actorId && "field" in operation && operation.field === "character.location");
+  const destination = locationWrite?.op === "set" && typeof locationWrite.value === "string"
+    ? locationWrite.value : undefined;
   if (destination && context.spatialOntologyVersion === "spatial-v1" && destination !== actorLocation) {
     if (typeof actorLocation !== "string") {
       issues.push(issue(
@@ -1246,7 +1251,7 @@ export async function validatePlayerActionSpatialScope(
         "intent.sceneTransition.destination.entityId",
       ));
     } else {
-      const travelMode = candidate.intent?.sceneTransition?.travelMode;
+      const travelMode = candidate.action?.travelMode ?? candidate.intent?.sceneTransition?.travelMode;
       if (!travelMode) {
         issues.push(issue(
           "PLAYER_SPATIAL_MODE_REQUIRED",
@@ -1340,6 +1345,17 @@ export function playerActionToKnowledgeAwareAction(input: {
     expectedParentCommit: input.expectedParentCommit,
     source: "player",
     actorId: input.actorId,
+    action: candidate.action ? {
+      ...candidate.action,
+      ...(candidate.action.travelMode ? {} : candidate.intent?.sceneTransition?.travelMode
+        ? { travelMode: candidate.intent.sceneTransition.travelMode } : {}),
+    } : deriveAdHocAction({
+      kind: candidate.intent?.controlledAct?.interaction?.kind === "speech" ? "speak" : candidate.intent?.kind ?? "act",
+      description: candidate.intent?.summary ?? candidate.title,
+      delta: candidate.proposedDelta,
+      preconditions: candidate.preconditions,
+      travelMode: candidate.intent?.sceneTransition?.travelMode,
+    }),
     title: input.eventTitle ?? playerIntentTitle(input.utterance),
     actorObservations,
     ...(interaction?.kind === "speech"

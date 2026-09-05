@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { actionConstraintSchema } from "../src/world/action-constraint.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
-import { KnowledgeProjector } from "../src/world/knowledge.js";
+import { actorKnowledgeBelongsToSource, KnowledgeProjector } from "../src/world/knowledge.js";
 import type { Entity, EvidenceRef } from "../src/world/model.js";
 import {
   buildActorScopedActionContext,
@@ -52,6 +52,14 @@ async function fixture(extra: Partial<WorldModelContext> = {}) {
   return { engine, head };
 }
 
+function spatialFixture() {
+  return fixture({ spatialOntologyVersion: "spatial-v1", spatialRelations: [spatialRelationSchema.parse({
+    ontologyVersion: "spatial-v1", id: "road", kind: "route", fromLocationId: "village", toLocationId: "harbor",
+    direction: "two-way", modes: ["foot"], duration: { minimum: 2, typical: 2, maximum: 2, unit: "hour" },
+    basis: "explicit", visibility: "public", status: "supported", confidence: 1, evidence,
+  })] });
+}
+
 describe("novel-to-play review regressions", () => {
   it("F1: ordinary player conversion obeys the same any-action constraint as an explicit invocation", async () => {
     const constraint = actionConstraintSchema.parse({
@@ -96,17 +104,16 @@ describe("novel-to-play review regressions", () => {
     const projected = await new KnowledgeProjector(engine).view("hero", next);
     expect(projected.knowledge).toHaveLength(1);
     expect(projected.knowledge[0]?.claim?.evidence).toEqual([]);
+    expect(actorKnowledgeBelongsToSource(projected.knowledge[0]!, "novel")).toBe(true);
+    expect(actorKnowledgeBelongsToSource(projected.knowledge[0]!, "another-novel")).toBe(false);
+    expect(actorKnowledgeBelongsToSource(structuredClone(projected.knowledge[0]!), "novel")).toBe(false);
     expect((await buildActorScopedActionContext(engine, "hero", next, undefined, "novel")).knowledge).toHaveLength(1);
     expect((await buildActorScopedActionContext(engine, "rival", next, undefined, "novel")).knowledge).toHaveLength(0);
     expect((await buildActorScopedActionContext(engine, "hero", head, undefined, "novel")).knowledge).toHaveLength(0);
   });
 
   it("F3: removing an arrive label cannot authorize a too-fast location delta at the engine boundary", async () => {
-    const { engine, head } = await fixture({ spatialOntologyVersion: "spatial-v1", spatialRelations: [spatialRelationSchema.parse({
-      ontologyVersion: "spatial-v1", id: "road", kind: "route", fromLocationId: "village", toLocationId: "harbor",
-      direction: "two-way", modes: ["foot"], duration: { minimum: 2, typical: 2, maximum: 2, unit: "hour" },
-      basis: "explicit", visibility: "public", status: "supported", confidence: 1, evidence,
-    })] });
+    const { engine, head } = await spatialFixture();
     const candidate: PlayerActionCandidate = {
       title: "Travel", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [],
       intent: { kind: "act", summary: "Walk to harbor", targets: [], requestedTimeAdvance: { amount: 1, unit: "hour" },
@@ -122,5 +129,25 @@ describe("novel-to-play review regressions", () => {
     expect(result.report.accepted).toBe(false);
     expect(result.report.errors.some((error) => error.code.includes("SPATIAL"))).toBe(true);
     expect((await engine.branches.read("main")).headCommitId).toBe(head);
+  });
+
+  it.each([
+    { mode: "foot" as const, hours: 2, accepted: true },
+    { mode: "foot" as const, hours: 1, accepted: false },
+    { mode: "water" as const, hours: 2, accepted: false },
+    { mode: undefined, hours: 2, accepted: false },
+  ])("A02/A03: direct engine travel $mode for $hours hours has verdict $accepted", async ({ mode, hours, accepted }) => {
+    const { engine, head } = await spatialFixture();
+    const result = await engine.commitProposal({
+      proposalId: "direct-travel", branchId: "main", expectedParentCommit: head, source: "actor", actorId: "hero",
+      title: "Travel", participants: ["hero"], proposedTime: { kind: "unknown" }, timeAdvance: { amount: hours, unit: "hour" },
+      preconditions: [], causalParents: [], evidence: [],
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "harbor" }] },
+      action: { lane: "ad-hoc", actionKindId: "travel", description: "Travel", ...(mode ? { travelMode: mode } : {}),
+        footprint: { reads: [], writes: [{ entityId: "hero", field: "character.location" }], resources: [] } },
+    });
+    expect(result.report.accepted).toBe(accepted);
+    expect((await engine.projector.project(result.newHead)).values.hero?.["character.location"])
+      .toBe(accepted ? "harbor" : "village");
   });
 });

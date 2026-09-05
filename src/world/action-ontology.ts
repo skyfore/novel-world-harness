@@ -266,7 +266,7 @@ export function validateAdHocActionFootprint(
   return issues;
 }
 
-function predicateStateAddresses(predicate: Predicate): ActionStateAddress[] {
+export function predicateStateAddresses(predicate: Predicate): ActionStateAddress[] {
   if (predicate.op === "all" || predicate.op === "any") return predicate.items.flatMap(predicateStateAddresses);
   if (predicate.op === "not") return predicateStateAddresses(predicate.item);
   if ("entityId" in predicate && "field" in predicate) return [{ entityId: predicate.entityId, field: predicate.field }];

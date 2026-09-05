@@ -71,6 +71,8 @@ import { ProjectionService, type ProjectionOptions, type WorldProjectionBundle }
 import { WorldSnapshotStore } from "./snapshot.js";
 import { deriveProgressCertificate, hasMaterialProgress } from "./progress.js";
 import { resolveActionInvocation, type ActionSchema } from "./action-ontology.js";
+import { normalizeActorProposal } from "./action-invocation.js";
+import { validateEffectObligations } from "./effect-obligations.js";
 import type { EventFrame } from "./event-frame.js";
 import type { SceneOccurrence } from "./scene-occurrence.js";
 import type { ActionConstraint } from "./action-constraint.js";
@@ -166,9 +168,9 @@ export function validateEventProposal(
   head: CommitId,
   state: WorldState,
   context: WorldModelContext,
-  options: { branchSemantics?: BranchSemanticState; deferMateriality?: boolean } = {},
+  options: { branchSemantics?: BranchSemanticState; deferMateriality?: boolean; realizedCanonicalEventIds?: ReadonlySet<string> } = {},
 ): { report: ValidationReport; postState?: WorldState } {
-  const proposal = eventProposalSchema.parse(proposalInput);
+  const proposal = normalizeActorProposal(eventProposalSchema.parse(proposalInput));
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
   if (proposal.expectedParentCommit !== head) errors.push({ code: "STALE_PARENT", message: `Expected ${proposal.expectedParentCommit}, current head is ${head}` });
@@ -343,6 +345,8 @@ export function validateEventProposal(
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
       postState = applyStateDelta(evaluationState, delta, context.stateSchema, context.entities, context.rules);
+      errors.push(...validateEffectObligations({ proposal, before: state, after: postState, context,
+        realizedCanonicalEventIds: options.realizedCanonicalEventIds }));
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
       for (const rule of applicableRules.filter((candidate) => isHardStateRule(candidate.rule))) {
         const forbidden = rule.forbids.some((predicate) => evaluatePredicate(postState!, predicate));
@@ -601,7 +605,7 @@ export class WorldEngine {
     return commitHash;
   }
   async commitProposal(proposal: EventProposal): Promise<CommitProposalResult> {
-    let parsed = eventProposalSchema.parse(proposal);
+    let parsed = normalizeActorProposal(eventProposalSchema.parse(proposal));
     const branch = await this.branches.read(parsed.branchId);
     const head = branch.headCommitId;
     const context = await this.contextForCommit(head);
@@ -686,6 +690,7 @@ export class WorldEngine {
     const { report: baseReport, postState } = validateEventProposal(parsed, head, state, context, {
       branchSemantics: stagedSemantics,
       deferMateriality: true,
+      realizedCanonicalEventIds: new Set(projection.history.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? [])),
     });
     let report = baseReport;
     if (semanticErrors.length || causalRelationErrors.length) {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { canonicalJson } from "./canonical.js";
 import {
+  actionTravelModeSchema,
   evidenceRefSchema,
   idSchema,
   predicateSchema,
@@ -18,19 +19,8 @@ import { evaluatePredicate } from "./state.js";
 
 export const SPATIAL_ONTOLOGY_VERSION = "spatial-v1" as const;
 
-export const SPATIAL_TRAVEL_MODE_IDS = [
-  "foot",
-  "mounted",
-  "wheeled",
-  "rail",
-  "water",
-  "air",
-  "climb",
-  "crawl",
-  "portal",
-] as const;
-
-export const spatialTravelModeSchema = z.enum(SPATIAL_TRAVEL_MODE_IDS);
+export const SPATIAL_TRAVEL_MODE_IDS = actionTravelModeSchema.options;
+export const spatialTravelModeSchema = actionTravelModeSchema;
 export type SpatialTravelMode = z.infer<typeof spatialTravelModeSchema>;
 
 export const spatialVisibilitySchema = z.enum(["public", "observable", "knowledge", "engine"]);

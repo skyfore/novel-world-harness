@@ -8,7 +8,7 @@ passing).
 
 This document describes behavior verified from the code on `agent/local-first-novel-cli`. It intentionally separates engine primitives from user-facing product completion.
 
-## Follow-up design — proposed, 2026-09-05
+## Follow-up implementation — 2026-09-05
 
 The review of `main@b2c010548edc519ea957e0ddc9fffdb47c297a5d` found additional
 integration gaps in ordinary player action invocation, branch-knowledge
@@ -20,9 +20,12 @@ The [novel-to-play technical design](novel-to-play-technical-design.zh-CN.md)
 defines the next contracts; the
 [implementation and acceptance plan](novel-to-play-acceptance-plan.zh-CN.md)
 maps them to W0–W8 and explicit regression/quality gates.
-[ADR 0010](adr/0010-major-character-play-and-world-closure.md) remains Proposed.
-The design does not mark these fixes or all-major-character play as implemented;
-the historical baseline and completion assessment below retain their original scope.
+[ADR 0010](adr/0010-major-character-play-and-world-closure.md) is partially implemented.
+The [implementation record](novel-to-play-implementation-progress.zh-CN.md) and
+[core compiler/rebuild guide](novel-world-core-and-rebuild.zh-CN.md) track the actual
+changes. Core parser/runtime integration is implemented; complete-work live Pi
+certification and the broader entity lifecycle remain outstanding. The historical
+baseline and completion assessment below retain their original scope.
 
 ## Overall assessment
 

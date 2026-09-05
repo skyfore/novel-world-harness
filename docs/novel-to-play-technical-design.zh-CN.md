@@ -1,6 +1,6 @@
 # 小说编译到主要人物 Play：完整链路技术设计
 
-- **状态：** Proposed；本 PR 交付设计，本文新增契约尚未实现。
+- **状态：** 核心实现已进入本分支；本文保留完整目标契约，不能将所有章节视为已验收。具体实现、命令与边界见[核心编译与 rebuild](novel-world-core-and-rebuild.zh-CN.md)及[实施记录](novel-to-play-implementation-progress.zh-CN.md)。
 - **日期：** 2026-09-05。
 - **代码基准：** [`main@b2c010548edc519ea957e0ddc9fffdb47c297a5d`](https://github.com/skyfore/novel-world-harness/commit/b2c010548edc519ea957e0ddc9fffdb47c297a5d)，创建本分支前已重新 fetch 并确认。
 - **依据：** 本次小说世界模型调研及三个 API 反例；文献与复现条件见第 15 节。
@@ -429,7 +429,7 @@ UI 不展示引擎私有知识或机制隐藏条件；详情可在编译工作�
 | `compiler/evaluation-runs/v1/<runId>/` | manifest、输入、逐场景结果、成本／失败记录 |
 | prepared bundle／branch history | 继续使用现有存储与内容地址；新增字段需要版本切换 |
 
-当前 `PreparedNovelBundle.version=3`、`WORLD_SCHEMA_VERSION=2`、`WORLD_ENGINE_VERSION=0.2.0`、world storage `v2`。计划在实现工作包的集成门一次切换到 prepared V4、world schema V3、engine 0.3.0 与新 world storage `v3`；相关 cache 格式和 fingerprint 同步升级。上述版本号是拟议值，若期间主线已占用则顺延并更新本 ADR/计划。
+设计基准为 prepared V3、world schema V2、engine 0.2.0、world storage v2。本分支已切换到 prepared V4、world schema V3、engine 0.3.0、world storage v3、cache format V3、canonical snapshot V9、compiler pipeline 32、compiler prompt 28。验证指纹同时绑定依赖闭合、场景契约、语义支持与入口切面等契约版本。
 
 旧数据不删除、不隐式迁移、不双读为新格式；不兼容的 resume 返回明确版本错误和“使用相应版本／从不可变来源重编译”的恢复路径。重新编译创建新世界，不延续旧分支身份。纯修复不改日志语义的早期工作包可先保留现有格式；首次不兼容字段或 reducer 语义改动必须连同版本门一起落地，不能等整轮结束再补。
 

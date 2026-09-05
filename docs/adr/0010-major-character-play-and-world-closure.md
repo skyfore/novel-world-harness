@@ -1,6 +1,6 @@
 # ADR 0010: Major-character play certification and novel-to-world closure
 
-- **Status:** Proposed
+- **Status:** Partially implemented; complete-work acceptance pending
 - **Date:** 2026-09-05
 - **Implementation baseline:** `b2c010548edc519ea957e0ddc9fffdb47c297a5d`
 - **Scope:** Compilation completeness, grounded character entry, prepared publication, shared action adjudication and actor decision views.
@@ -158,7 +158,9 @@ understanding.
 
 ## Acceptance
 
-This ADR remains Proposed in the design PR. Implementation acceptance requires
+Core implementation is recorded in the [compiler and rebuild guide](../novel-world-core-and-rebuild.zh-CN.md)
+and [implementation record](../novel-to-play-implementation-progress.zh-CN.md).
+Full implementation acceptance still requires
 W0–W8 and the linked case matrix, including the three regression fixes, all-major
 entry coverage, branch knowledge consumption, free-interaction social effects,
 counterfactual/background progression, version isolation and real complete-work

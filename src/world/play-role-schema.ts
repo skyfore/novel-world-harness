@@ -12,4 +12,3 @@ export const preparedPlayRoleSchema = z.object({
   if (role.status === "unresolved-identity" && role.actorId) context.addIssue({ code: "custom", message: "Unresolved roles cannot contain an actor identity" });
 });
 export type PreparedPlayRole = z.infer<typeof preparedPlayRoleSchema>;
-

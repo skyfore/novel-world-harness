@@ -119,6 +119,36 @@
 
 按用户最新要求，优先完善 Pi 小说编译的结构、语义／机制接线与可恢复 rebuild。Web 浏览器回归暂停；不将缺浏览器环境的未运行项记为通过。
 
-## 待完成
+## Pi 核心：语义事件与执行机制接线
 
-W1–W8 的剩余实现与完整验收仍在进行；不能以本记录或基准单测代替整本主要人物认证。
+- 新增独立 `EventExecution`：在 executable 阶段将先前 accepted 的 canonical event 绑定到 action schema、发起人物和精确参数。核对语义 agent 参与、来源、发起者角色、重复／冲突绑定和完整效果多重集合；原始事件不被重写。
+- `propose_event_execution` 接入 Pi 阶段工具、同作用域检索和失败恢复；对应 canonical store、proposal/converge、审计、reparse、prepared 与 frozen context 均支持该类型。
+- 场景执行契约核对主要人物事件覆盖、角色入口、退出谓词、知识获取路径和传递依赖。普通旅行复用实际 pre-event 状态、活动路线、方式与最短耗时；一次旅行不强迫泛化成新行动定律。
+- `SupportAssessment` 区分原文定位和独立语义支持。没有独立复核为 underdetermined；不允许整项机制没有 evidence binding，也不允许只复核一个效果就认证其他前提、例外或权限。独立复核随冻结的评测计划和报告保存。
+- 依赖图增加字段 JSON Pointer 与用途、accepted discourse、事件执行绑定、类型化参数／实体集合，以及初态和入口的知识、语义、过程和规范依赖。入口局部命题／claim 不误报为缺失 canonical；失效沿新旧图的消费者固定点传播。
+
+## 核心 rebuild：归档与发布分离
+
+- 新增 `nwh rebuild`：可以从原文及现有批次进度继续完成首次候选，或从明确历史 revision 复用工件重建；`--chapters` 自动纳入跨章节消费者。
+- journal 记录 immutable parent、原 active、模式、章节、精确批次与 initializing／compiling／finalizing。先持久化初始化意图再使批次失效；中断保留已接受工件和已完成批次。
+- 恢复核对版本、来源布局、章节、proposal namespace 和 active；冲突不覆盖，重复执行相同 rebuild 即恢复。历史编译快照的恢复不会激活未认证世界。
+- rebuild 输出不可变 candidate hash 和 parent lineage；缺少全书 gold／真实 Pi 长程证据不丢弃编译产物，也不解除公开 Play 的严格发布门。
+- 晚出场入口保留此前显式耗时；开篇已有非物理状态却缺少晚出场完整种子时，返回 `ENTRY_PROJECTION_SEED_REQUIRED`，不静默遗失承诺或过程。
+
+## 本轮核心收尾的检查记录
+
+- 追加独立完整入口绑定：在规范／过程模板收敛后接受 `entryCheckpoint`，多名亲历角色可分别补齐同一事件之前的完整状态；不需要被动人物冒充 action 发起者，不改写原始 canonical event。
+- 入口查询、Genesis seed、冻结 context 与 typed closure 均消费执行绑定的完整种子；种子局部语义身份参与独立 entry 节点，避免错误的 canonical 查找。complete checkpoint 不再受局部补丁的 16 个状态操作限制。
+- 最后针对该阶段接线及 snapshot V9 的核心检查：6 文件／72 项通过，服务端 TypeScript 构建通过。
+
+- 核心编译、提议、机制绑定、证据支持、闭合与恢复：7 文件／96 项通过。
+- 新增场景路线、入口时钟、局部语义依赖及真实发布拒绝相关检查：5 文件／13 项通过。上述两组包含交集，不作为 109 个独立案例宣传。
+- 核心 TypeScript 检查通过。此前全套 157 文件／896 项通过属于更早的实现快照，不能当作这次最终 head 的全套结果。
+- Web fixture 已对齐“未认证不能新建”的入口契约；浏览器未安装，且按当前优先级暂缓回归，未声明通过。
+
+## 仍未完成的完整目标
+
+- 没有运行真实整本小说的 Pi 抽取及逐 major 三次长程验收；环境没有可用 provider 凭据，独立完整 gold 也尚未交付。因此未产生可宣称整本通过的生产证书。
+- 通用分支实体 create／identify／retire 生命周期尚未落地；关键场景需要该能力时应保持 capability blocked。
+- 谓词运行时目前为三值 true／false／unknown，尚无统一四值 conflicting 投影；已有关键矛盾在独立语义复核与入口检查处阻断。
+- “两部长篇＋三个微型作品”的聚合发布验收及 Web 浏览器全链路仍待执行。验收优先级降低不改变这些结果的真实性要求。

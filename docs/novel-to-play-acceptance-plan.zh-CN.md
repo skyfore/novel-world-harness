@@ -1,6 +1,6 @@
 # 小说到 Play：实施工作包与验收计划
 
-- **状态：** Proposed；下列工作包均为待实施，不表示当前主线已通过。
+- **状态：** 实施中的完整验收基线；已落地范围见[实施记录](novel-to-play-implementation-progress.zh-CN.md)，下列目标不能整体标记通过。当前优先 Pi 核心解析、世界结构与 rebuild，Web 浏览器回归暂缓，真实整本认证尚未运行。
 - **基准：** `b2c010548edc519ea957e0ddc9fffdb47c297a5d`，2026-09-05。
 - **技术契约：** [完整链路技术设计](novel-to-play-technical-design.zh-CN.md)。
 - **决策依据：** [ADR 0010](adr/0010-major-character-play-and-world-closure.md)。

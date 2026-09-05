@@ -13,6 +13,8 @@ import { NovelPlayQualityStore, novelPlayQualitySchema, validateNovelPlayQuality
 import { baseStructuralUnits, validateSourceStructure } from "./structure.js";
 import { deriveCharacterEntrySeed } from "../world/entry-context.js";
 import { annotationAnchors } from "./annotations.js";
+import { assessSemanticSupport, supportAssessmentSchema } from "./semantic-support.js";
+import { buildSceneExecutionContracts, sceneExecutionContractSchema } from "./scene-execution-contracts.js";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const novelClosureAssessmentSchema = z.object({
@@ -21,6 +23,7 @@ export const novelClosureAssessmentSchema = z.object({
   closure: closureGraphSchema, roster: roleRosterSchema.nullable(), playability: playabilityManifestSchema.nullable(),
   entryReady: z.boolean(), fullNovelReady: z.boolean(),
   quality: novelPlayQualitySchema.nullable(),
+  supportAssessments: z.array(supportAssessmentSchema), sceneContracts: z.array(sceneExecutionContractSchema),
   issues: z.array(validationIssueSchema),
 }).strict();
 export type NovelClosureAssessment = z.infer<typeof novelClosureAssessmentSchema>;
@@ -48,13 +51,15 @@ export async function assessNovelClosure(root: string, bundle: PreparedNovelBund
   } catch (error) {
     issues.push({ code: "ROSTER_ASSESSMENT_BLOCKED", message: error instanceof Error ? error.message : String(error) });
   }
-  const entryReady = issues.length === 0 && Boolean(playability && playability.majorTotal > 0 && playability.readyTotal === playability.majorTotal);
   const quality = await new NovelPlayQualityStore(root).read(subjectSnapshotHash);
+  const support = assessSemanticSupport(bundle, quality?.supportReviews), scenes = buildSceneExecutionContracts(bundle, roster);
+  issues.push(...support.issues, ...scenes.issues);
+  const entryReady = issues.length === 0 && Boolean(playability && playability.majorTotal > 0 && playability.readyTotal === playability.majorTotal);
   const qualityIssues = roster ? validateNovelPlayQuality(quality, { sourceSha256: bundle.source.contentSha256, subjectSnapshotHash, roster, sourceBytes: snapshot.structure.sourceBytes, sourceUnits: snapshot.structure.baseUnitIds.length, engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION }) : [{ code: "NOVEL_ROSTER_REQUIRED", message: "Quality evaluation requires a frozen independent major roster" }];
   issues.push(...qualityIssues);
   // Entry probes establish deterministic operability, never semantic recall or 50-turn Pi behavior.
   const assessment = novelClosureAssessmentSchema.parse({ version: 1, sourceId: bundle.source.id, sourceSha256: bundle.source.contentSha256, subjectSnapshotHash,
-    engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION, closure, roster, playability, entryReady, fullNovelReady: entryReady && qualityIssues.length === 0, quality,
+    engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION, closure, roster, playability, entryReady, fullNovelReady: entryReady && qualityIssues.length === 0, quality, supportAssessments: support.assessments, sceneContracts: scenes.contracts,
     issues: [...new Map(issues.map((issue) => [`${issue.code}/${issue.path ?? ""}/${issue.message}`, issue])).values()] });
   await new NovelClosureStore(root).write(assessment);
   return assessment;
@@ -66,6 +71,8 @@ export function validateAssessmentRevision(bundle: PreparedNovelBundle, assessme
   if (assessment.sourceId !== bundle.source.id || assessment.sourceSha256 !== bundle.source.contentSha256) issues.push("WORLD_SOURCE_MISMATCH: certificate belongs to another source");
   if (assessment.engineVersion !== WORLD_ENGINE_VERSION || assessment.schemaVersion !== WORLD_SCHEMA_VERSION) issues.push("WORLD_VERSION_UNSUPPORTED: evaluator fingerprint changed");
   if (contentHash(buildPreparedClosure(bundle)) !== contentHash(assessment.closure)) issues.push("WORLD_CLOSURE_STALE: dependency revisions changed");
+  if (contentHash(buildSceneExecutionContracts(bundle, assessment.roster).contracts) !== contentHash(assessment.sceneContracts)) issues.push("SCENE_CONTRACT_STALE: scene execution inputs changed");
+  if (contentHash(assessSemanticSupport(bundle, assessment.quality?.supportReviews).assessments) !== contentHash(assessment.supportAssessments)) issues.push("SUPPORT_ASSESSMENT_STALE: support review inputs changed");
   if (assessment.playability && (assessment.playability.subjectSnapshotHash !== assessment.subjectSnapshotHash || assessment.playability.rosterHash !== contentHash(assessment.roster))) issues.push("MAJOR_ROLE_ROSTER_MISMATCH: entry probes refer to another source or roster");
   return issues;
 }
@@ -75,6 +82,7 @@ export function assertPreparedReadiness(bundle: PreparedNovelBundle): void {
   const assessment = bundle.readiness;
   if (!assessment) throw new Error("WORLD_CLOSURE_BLOCKED: this revision has no full-novel readiness certificate. Complete independent role review and candidate evaluation before publication.");
   const issues = validateAssessmentRevision(bundle, assessment);
+  issues.push(...assessSemanticSupport(bundle, assessment.quality?.supportReviews).issues.map((issue) => `${issue.code}: ${issue.message}`), ...buildSceneExecutionContracts(bundle, assessment.roster).issues.map((issue) => `${issue.code}: ${issue.message}`));
   issues.push(...buildPreparedClosure(bundle).issues.map((issue) => `${issue.code}: ${issue.message}`), ...validateFrozenAccounting(bundle).map((issue) => `${issue.code}: ${issue.message}`));
   issues.push(...assessment.issues.map((issue) => `${issue.code}: ${issue.message}`));
   if (!assessment.entryReady || !assessment.fullNovelReady || !assessment.roster || !assessment.playability) issues.push("WORLD_CLOSURE_BLOCKED: all major roles and independent semantic/live evaluations must pass");

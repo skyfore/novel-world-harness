@@ -11,12 +11,14 @@ import { playerActionCandidateSchema } from "../world/player-action.js";
 import { worldStorageRoot } from "../world/paths.js";
 import { compilerSemanticGoldSchema } from "./compiler-eval.js";
 import { BENCHMARK_SEMANTIC_LAYERS } from "./benchmark-corpus.js";
+import { supportReviewSchema } from "../compiler/semantic-support.js";
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/), nonempty = z.string().trim().min(1);
 const conditions = z.array(predicateSchema).min(1);
 export const novelEvaluationPlanInputSchema = z.object({
   reviewerRunIds: z.array(nonempty).min(1),
   gold: compilerSemanticGoldSchema,
+  supportReviews: z.array(supportReviewSchema).default([]),
   inapplicableLayers: z.array(z.object({ layer: z.enum(BENCHMARK_SEMANTIC_LAYERS), reason: nonempty }).strict()),
   criticalChecks: z.array(z.object({ id: nonempty, jsonPointer: z.string().startsWith("/canonical/"), expected: z.unknown() }).strict()).min(1),
   roles: z.array(z.object({
@@ -42,6 +44,9 @@ export function validateEvaluationPlan(plan: NovelEvaluationPlan, bundle: Prepar
   const expected = majorRoleCandidates(roster).map((role) => role.id).sort();
   if (canonicalJson(expected) !== canonicalJson(plan.roles.map((role) => role.candidateId).sort())) throw new Error("EVALUATION_MAJOR_DENOMINATOR_CHANGED: every independent major must have exactly one scenario");
   if (new Set(plan.reviewerRunIds).size !== plan.reviewerRunIds.length || plan.reviewerRunIds.some((id) => roster.extractionRunIds.includes(id))) throw new Error("EVALUATION_GOLD_NOT_INDEPENDENT: reviewers must be distinct from extraction");
+  const assertions = bundle.compilerSnapshot.evidenceBindings.flatMap((binding) => binding.assertions);
+  if (plan.reviewerRunIds.some((id) => assertions.some((assertion) => assertion.derivation.runId === id))) throw new Error("EVALUATION_GOLD_NOT_INDEPENDENT: support review cannot reuse its extraction run");
+  if (new Set(plan.supportReviews.map((review) => review.assertionId)).size !== plan.supportReviews.length || plan.supportReviews.some((review) => !assertions.some((assertion) => assertion.id === review.assertionId && contentHash(assertion) === review.assertionHash))) throw new Error("EVALUATION_SUPPORT_REVIEW_STALE: reviews must identify distinct frozen evidence assertions");
   if (new Set(plan.criticalChecks.map((check) => check.id)).size !== plan.criticalChecks.length || new Set(plan.inapplicableLayers.map((layer) => layer.layer)).size !== plan.inapplicableLayers.length) throw new Error("EVALUATION_INVENTORY_DUPLICATED: checks and layer declarations must be unique");
   for (const role of plan.roles) {
     if (roster.candidates.find((candidate) => candidate.id === role.candidateId)?.entityId !== role.actorId || deriveCharacterEntrySeed(bundle, role.actorId).cut.hash !== role.entryCutHash) throw new Error(`EVALUATION_ENTRY_STALE: ${role.candidateId}`);

@@ -7,6 +7,7 @@ import { worldStorageRoot } from "../world/paths.js";
 import { validationIssueSchema, type ValidationIssue } from "../world/model.js";
 import { BENCHMARK_SEMANTIC_LAYERS } from "./benchmark-corpus.js";
 import { majorRoleCandidates, type RoleRoster } from "../compiler/role-roster.js";
+import { supportReviewSchema } from "../compiler/semantic-support.js";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const countSchema = z.number().int().nonnegative();
@@ -24,6 +25,7 @@ export const novelPlayQualitySchema = z.object({
     criticalCheckIds: z.array(z.string().min(1)).min(1), requiredTasks: z.array(z.object({ candidateId: z.string().min(1), taskIds: z.array(z.string().min(1)).min(1) }).strict()).min(1),
   }).strict(),
   startedAt: z.string().datetime(), completedAt: z.string().datetime(),
+  supportReviews: z.array(supportReviewSchema).default([]),
   layers: z.record(z.enum(BENCHMARK_SEMANTIC_LAYERS), qualityLayerSchema),
   criticalChecks: z.array(z.object({ id: z.string().min(1), passed: z.boolean(), evidenceHash: hashSchema }).strict()).min(1),
   runs: z.array(z.object({
@@ -41,7 +43,7 @@ export const novelPlayQualitySchema = z.object({
 }).strict();
 export type NovelPlayQuality = z.infer<typeof novelPlayQualitySchema>;
 
-export const NOVEL_VALIDATOR_FINGERPRINT = contentHash({ profile: "novel-play-v1", closure: 1, entryCut: 1, roleReview: 1, effectMechanism: 2, actorOutcome: 1, predicateTruth: 1 });
+export const NOVEL_VALIDATOR_FINGERPRINT = contentHash({ profile: "novel-play-v1", closure: 2, sceneContract: 1, supportAssessment: 1, entryCut: 1, roleReview: 1, effectMechanism: 2, actorOutcome: 2, actorView: 2, predicateTruth: 1, liveEvaluator: 1 });
 
 /** Wilson intervals disclose finite annotation uncertainty; an empty denominator has no estimate. */
 export function proportion95(successes: number, total: number): { estimate: number; lower: number; upper: number } | null {

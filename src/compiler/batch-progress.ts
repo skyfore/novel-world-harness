@@ -4,7 +4,7 @@ import path from "node:path";
 import { worldStorageRoot } from "../world/paths.js";
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 31;
+export const COMPILER_PIPELINE_VERSION = 32;
 const SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION = 30;
 
 export type BatchProgress = {
@@ -37,8 +37,8 @@ export class CompilerBatchStore {
       return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };
     }
     if (parsed.pipelineVersion === SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION) {
-      // Pipeline 31 moves scene construction beside canonical events and
-      // rechecks executable source accounting. Structure discovery and the
+      // Pipelines 31/32 move scene construction beside canonical events and
+      // bind their executable mechanisms. Structure discovery and the
       // source-observation inventory are byte-identical in pipeline 30, so
       // preserve only those checkpoints instead of paying to recreate them.
       return {

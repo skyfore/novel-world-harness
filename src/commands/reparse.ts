@@ -412,6 +412,7 @@ export async function invalidatePreparationArtifacts(
     sceneOccurrences,
     eventFrames,
     actionSchemas,
+    eventExecutions,
     actionConstraints,
     normTemplates,
     processTemplates,
@@ -432,6 +433,7 @@ export async function invalidatePreparationArtifacts(
     canon.listSceneOccurrences(),
     canon.listEventFrames(),
     canon.listActionSchemas(),
+    canon.listEventExecutions(),
     canon.listActionConstraints(),
     canon.listNormTemplates(),
     canon.listProcessTemplates(),
@@ -457,6 +459,7 @@ export async function invalidatePreparationArtifacts(
   }
   for (const item of sceneOccurrences) if (shouldInvalidate(item, "scene", item.id)) await invalidate("scene-occurrence", item.id, () => canon.removeCurrent("scene-occurrences", item.id));
   for (const item of eventFrames) if (shouldInvalidate(item, "frame", item.id)) await invalidate("event-frame", item.id, () => canon.removeCurrent("event-frames", item.id));
+  for (const item of eventExecutions) if (shouldInvalidate(item, "event-execution", item.id)) await invalidate("event-execution", item.id, () => canon.removeCurrent("event-executions", item.id));
   for (const item of actionSchemas) if (shouldInvalidate(item, "action", item.id)) await invalidate("action-schema", item.id, () => canon.removeCurrent("action-schemas", item.id));
   for (const item of actionConstraints) if (shouldInvalidate(item, "constraint", item.id)) await invalidate("action-constraint", item.id, () => canon.removeCurrent("action-constraints", item.id));
   for (const item of normTemplates) if (shouldInvalidate(item, "norm", item.id)) await invalidate("norm-template", item.id, () => canon.removeCurrent("norm-templates", item.id));

@@ -564,7 +564,7 @@ export async function auditCompiler(
 
   const canon = new CanonicalModelStore(workspaceRoot);
   const actorStore = new ActorModelStore(workspaceRoot);
-  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allEventParticipations, allEventRelations, allSceneOccurrences, allEventFrames, allActionSchemas, allActionConstraints, allNormTemplates, allProcessTemplates, allSpatialRelations, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
+  const [allEntities, allPropositions, allAttributions, allClaims, allEvents, allEventParticipations, allEventRelations, allSceneOccurrences, allEventFrames, allActionSchemas, allEventExecutions, allActionConstraints, allNormTemplates, allProcessTemplates, allSpatialRelations, allRules, storedInitialWorld, allGoals, allModels, allPossibilities] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -575,6 +575,7 @@ export async function auditCompiler(
     canon.listSceneOccurrences(),
     canon.listEventFrames(),
     canon.listActionSchemas(),
+    canon.listEventExecutions(),
     canon.listActionConstraints(),
     canon.listNormTemplates(),
     canon.listProcessTemplates(),
@@ -603,6 +604,7 @@ export async function auditCompiler(
   const eventRelations = allEventRelations.filter(belongsToSelectedSource);
   const sceneOccurrences = allSceneOccurrences.filter(belongsToSelectedSource);
   const eventFrames = allEventFrames.filter(belongsToSelectedSource);
+  const eventExecutions = allEventExecutions.filter(belongsToSelectedSource);
   const actionSchemas = allActionSchemas.filter((item) => item.induction.kind === "domain-module" || belongsToSelectedSource(item));
   const actionConstraints = allActionConstraints.filter((item) => item.induction.kind === "domain-module" || belongsToSelectedSource(item));
   const normTemplates = allNormTemplates.filter((item) => item.induction.kind === "domain-module" || belongsToSelectedSource(item));
@@ -629,6 +631,7 @@ export async function auditCompiler(
     ...eventRelations.map((item) => ({ name: `event-relation:${item.id}`, kind: "event-relation", id: item.id, payload: item, evidence: artifactEvidence(item) })),
     ...sceneOccurrences.map((item) => ({ name: `scene-occurrence:${item.id}`, kind: "scene-occurrence", id: item.id, payload: item, evidence: item.evidence })),
     ...eventFrames.map((item) => ({ name: `event-frame:${item.id}`, kind: "event-frame", id: item.id, payload: item, evidence: item.evidence })),
+    ...eventExecutions.map((item) => ({ name: `event-execution:${item.id}`, kind: "event-execution", id: item.id, payload: item, evidence: item.evidence })),
     ...actionSchemas.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `action-schema:${item.id}`, kind: "action-schema", id: item.id, payload: item, evidence: item.evidence })),
     ...actionConstraints.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `action-constraint:${item.id}`, kind: "action-constraint", id: item.id, payload: item, evidence: item.evidence })),
     ...normTemplates.filter((item) => item.induction.kind === "source-pattern").map((item) => ({ name: `norm-template:${item.id}`, kind: "norm-template", id: item.id, payload: item, evidence: item.evidence })),

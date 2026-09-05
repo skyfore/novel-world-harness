@@ -1,3 +1,4 @@
+import { eventExecutionSchema } from "../world/event-execution.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -79,7 +80,7 @@ import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 3;
-export const COMPILER_PROMPT_VERSION = 27;
+export const COMPILER_PROMPT_VERSION = 28;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -116,6 +117,7 @@ const preparedCanonicalSchema = z.object({
   sceneOccurrences: z.array(sceneOccurrenceSchema),
   eventFrames: z.array(eventFrameSchema),
   actionSchemas: z.array(actionSchemaSchema),
+  eventExecutions: z.array(eventExecutionSchema).default([]),
   actionConstraints: z.array(actionConstraintSchema).default([]),
   normTemplates: z.array(normTemplateSchema).default([]),
   processTemplates: z.array(processTemplateSchema).default([]),
@@ -222,6 +224,7 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     bundle.canonical.spatialRelations,
     bundle.canonical.sceneOccurrences,
     bundle.canonical.eventFrames,
+    bundle.canonical.eventExecutions,
     bundle.canonical.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
     bundle.canonical.actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
     bundle.canonical.normTemplates.filter((template) => template.induction.kind === "source-pattern"),
@@ -462,6 +465,11 @@ export class PreparedNovelCache {
   async inspectCandidate(source: SourceDocument) {
     const bundle = await this.candidateSnapshot(source);
     return { bundle, assessment: await assessNovelClosure(this.workspaceRoot, bundle) };
+  }
+
+  /** Freeze reviewable compiler output while keeping public Play activation unchanged. */
+  async archiveCandidate(source: SourceDocument, options: { lineage?: PreparedRevisionLineage } = {}): Promise<PreparedCacheResult> {
+    return this.publish(source, { ...options, allowSemanticDebtForRollback: true });
   }
 
   async publish(
@@ -738,7 +746,7 @@ export class PreparedNovelCache {
         if (matches) assertEvidenceExclusiveToSource(item.evidence, source.id, `Prepared artifact ${item.id ?? item.actorId ?? "unknown"}`);
         return matches;
       });
-    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, actionConstraints, normTemplates, processTemplates, rules, goals, models, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, eventExecutions, actionConstraints, normTemplates, processTemplates, rules, goals, models, possibilities] = await Promise.all([
       canonical.listEntities(),
       canonical.listPropositions(),
       canonical.listAttributions(),
@@ -750,6 +758,7 @@ export class PreparedNovelCache {
       canonical.listSceneOccurrences(),
       canonical.listEventFrames(),
       canonical.listActionSchemas(),
+      canonical.listEventExecutions(),
       canonical.listActionConstraints(),
       canonical.listNormTemplates(),
       canonical.listProcessTemplates(),
@@ -770,6 +779,7 @@ export class PreparedNovelCache {
       spatialRelations: fromSource(spatialRelations),
       sceneOccurrences: fromSource(sceneOccurrences),
       eventFrames: fromSource(eventFrames),
+      eventExecutions: fromSource(eventExecutions),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module")
         .concat(fromSource(actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"))),
       actionConstraints: actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module")
@@ -884,6 +894,7 @@ export class PreparedNovelCache {
       ["scene occurrence", current.sceneOccurrences, expected.sceneOccurrences, (item: { id: string }) => item.id],
       ["event frame", current.eventFrames, expected.eventFrames, (item: { id: string }) => item.id],
       ["action schema", current.actionSchemas, expected.actionSchemas, (item: { id: string }) => item.id],
+      ["event execution", current.eventExecutions, expected.eventExecutions, (item: { id: string }) => item.id],
       ["rule", current.rules, expected.rules, (item: { id: string }) => item.id],
       ["goal", current.goals, expected.goals, (item: { id: string }) => item.id],
       ["model", current.models, expected.models, (item: { actorId: string }) => item.actorId],
@@ -948,6 +959,7 @@ export class PreparedNovelCache {
       ["spatial relations", fromSource(current.spatialRelations), bundle.canonical.spatialRelations, (item: { id: string }) => item.id],
       ["scene occurrences", fromSource(current.sceneOccurrences), bundle.canonical.sceneOccurrences, (item: { id: string }) => item.id],
       ["event frames", fromSource(current.eventFrames), bundle.canonical.eventFrames, (item: { id: string }) => item.id],
+      ["event executions", current.eventExecutions.filter((binding) => binding.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.eventExecutions, (item: { id: string }) => item.id],
       ["action schemas", current.actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || schema.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionSchemas, (item: { id: string }) => item.id],
       ["action constraints", current.actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module" || constraint.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionConstraints, (item: { id: string }) => item.id],
       ["norm templates", current.normTemplates.filter((template) => template.induction.kind === "domain-module" || template.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.normTemplates, (item: { id: string }) => item.id],
@@ -1075,6 +1087,7 @@ export class PreparedNovelCache {
       await removeMissing(current.spatialRelations, new Set(bundle.canonical.spatialRelations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("spatial-relations", id));
       await removeMissing(current.sceneOccurrences, new Set(bundle.canonical.sceneOccurrences.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("scene-occurrences", id));
       await removeMissing(current.eventFrames, new Set(bundle.canonical.eventFrames.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-frames", id));
+      await removeMissing(current.eventExecutions, new Set(bundle.canonical.eventExecutions.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-executions", id));
       await removeMissing(current.actionSchemas, new Set(bundle.canonical.actionSchemas.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-schemas", id));
       await removeMissing(current.actionConstraints, new Set(bundle.canonical.actionConstraints.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-constraints", id));
       await removeMissing(current.normTemplates, new Set(bundle.canonical.normTemplates.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("norm-templates", id));
@@ -1095,6 +1108,7 @@ export class PreparedNovelCache {
     for (const relation of bundle.canonical.spatialRelations) await canonical.putSpatialRelation(relation);
     for (const scene of bundle.canonical.sceneOccurrences) await canonical.putSceneOccurrence(scene);
     for (const frame of bundle.canonical.eventFrames) await canonical.putEventFrame(frame);
+    for (const binding of bundle.canonical.eventExecutions) await canonical.putEventExecution(binding);
     for (const schema of bundle.canonical.actionSchemas) await canonical.putActionSchema(schema);
     for (const constraint of bundle.canonical.actionConstraints) await canonical.putActionConstraint(constraint);
     for (const template of bundle.canonical.normTemplates) await canonical.putNormTemplate(template);
@@ -1282,6 +1296,7 @@ function preparedArtifactDescriptors(canonical: {
   sceneOccurrences: PreparedCanonical["sceneOccurrences"];
   eventFrames: PreparedCanonical["eventFrames"];
   actionSchemas: PreparedCanonical["actionSchemas"];
+  eventExecutions: PreparedCanonical["eventExecutions"];
   actionConstraints: PreparedCanonical["actionConstraints"];
   normTemplates: PreparedCanonical["normTemplates"];
   processTemplates: PreparedCanonical["processTemplates"];
@@ -1302,6 +1317,7 @@ function preparedArtifactDescriptors(canonical: {
     ...canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation", id: payload.id, payload })),
     ...canonical.sceneOccurrences.map((payload) => ({ kind: "scene-occurrence", id: payload.id, payload })),
     ...canonical.eventFrames.map((payload) => ({ kind: "event-frame", id: payload.id, payload })),
+    ...canonical.eventExecutions.map((payload) => ({ kind: "event-execution", id: payload.id, payload })),
     ...canonical.actionSchemas.map((payload) => ({ kind: "action-schema", id: payload.id, payload })),
     ...canonical.actionConstraints.map((payload) => ({ kind: "action-constraint", id: payload.id, payload })),
     ...canonical.normTemplates.map((payload) => ({ kind: "norm-template", id: payload.id, payload })),
@@ -1349,6 +1365,7 @@ async function currentCanonical(workspaceRoot: string) {
     sceneOccurrences: await canonical.listSceneOccurrences(),
     eventFrames: await canonical.listEventFrames(),
     actionSchemas: await canonical.listActionSchemas(),
+    eventExecutions: await canonical.listEventExecutions(),
     actionConstraints: await canonical.listActionConstraints(),
     normTemplates: await canonical.listNormTemplates(),
     processTemplates: await canonical.listProcessTemplates(),
@@ -1532,6 +1549,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     sceneOccurrences: new Map(bundle.canonical.sceneOccurrences.map((item) => [item.id, item])),
     eventFrames: new Map(bundle.canonical.eventFrames.map((item) => [item.id, item])),
     actionSchemas: new Map(bundle.canonical.actionSchemas.map((item) => [item.id, item])),
+    eventExecutions: new Map(bundle.canonical.eventExecutions.map((item) => [item.id, item])),
     actionConstraints: new Map(bundle.canonical.actionConstraints.map((item) => [item.id, item])),
     normTemplates: new Map(bundle.canonical.normTemplates.map((item) => [item.id, item])),
     processTemplates: new Map(bundle.canonical.processTemplates.map((item) => [item.id, item])),
@@ -1550,6 +1568,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     ...bundle.canonical.eventRelations.map((payload) => ({ kind: "event-relation" as const, label: payload.id, payload })),
     ...bundle.canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation" as const, label: payload.id, payload })),
     ...bundle.canonical.eventFrames.map((payload) => ({ kind: "event-frame" as const, label: payload.id, payload })),
+    ...bundle.canonical.eventExecutions.map((payload) => ({ kind: "event-execution" as const, label: payload.id, payload })),
     ...bundle.canonical.actionSchemas.map((payload) => ({ kind: "action-schema" as const, label: payload.id, payload })),
     ...bundle.canonical.actionConstraints.map((payload) => ({ kind: "action-constraint" as const, label: payload.id, payload })),
     ...bundle.canonical.normTemplates.map((payload) => ({ kind: "norm-template" as const, label: payload.id, payload })),

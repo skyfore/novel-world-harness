@@ -4,6 +4,8 @@ import path from "node:path";
 import type { LlmProfile } from "../config/schema.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { validateFrozenAccounting } from "../compiler/certification.js";
+import { assessSemanticSupport } from "../compiler/semantic-support.js";
+import { buildSceneExecutionContracts } from "../compiler/scene-execution-contracts.js";
 import { probeMajorRoleEntries } from "../compiler/playability.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { TraceRecorder } from "../trace/recorder.js";
@@ -67,6 +69,7 @@ export async function evaluateNovelPlay(options: {
   const startedAt = new Date().toISOString();
   const semantic = await evaluateCompilerAgainstGold(options.root, plan.gold, bundle);
   const entries = await probeMajorRoleEntries(bundle, roster, plan.subjectSnapshotHash);
+  const preflight = [...assessSemanticSupport(bundle, plan.supportReviews).issues, ...buildSceneExecutionContracts(bundle, roster).issues];
   const report: NovelPlayQuality = {
     version: 1, profile: "novel-play-v1", sourceSha256: plan.sourceSha256, subjectSnapshotHash: plan.subjectSnapshotHash, rosterHash: plan.rosterHash,
     engineVersion: WORLD_ENGINE_VERSION, schemaVersion: WORLD_SCHEMA_VERSION, validatorFingerprint: NOVEL_VALIDATOR_FINGERPRINT,
@@ -75,7 +78,7 @@ export async function evaluateNovelPlay(options: {
     accountedUnits: validateFrozenAccounting(bundle).length ? 0 : bundle.compilerSnapshot.structure.baseUnitIds.length,
     gold: { hash: options.planHash, frozenAt: plan.frozenAt, reviewerRunIds: plan.reviewerRunIds, extractionRunIds: roster.extractionRunIds,
       majorCandidateIds: plan.roles.map((role) => role.candidateId), criticalCheckIds: plan.criticalChecks.map((check) => check.id), requiredTasks: plan.roles.map((role) => ({ candidateId: role.candidateId, taskIds: role.tasks.map((task) => task.id) })) },
-    startedAt, completedAt: startedAt,
+    startedAt, completedAt: startedAt, supportReviews: plan.supportReviews,
     layers: Object.fromEntries(BENCHMARK_SEMANTIC_LAYERS.map((layer) => {
       const exemption = plan.inapplicableLayers.find((entry) => entry.layer === layer);
       if (exemption) return [layer, { status: "not-applicable", reason: exemption.reason, frozenBeforeRun: true }];
@@ -87,7 +90,7 @@ export async function evaluateNovelPlay(options: {
       const actual = pointerValue(bundle, check.jsonPointer);
       return { id: check.id, passed: actual !== undefined && canonicalJson(actual) === canonicalJson(check.expected), evidenceHash: contentHash({ check, actual: actual ?? null, subject: plan.subjectSnapshotHash }) };
     }),
-    runs: [], issues: [...validateFrozenAccounting(bundle), ...entries.issues, ...entries.roles.flatMap((role) => role.issues)],
+    runs: [], issues: [...validateFrozenAccounting(bundle), ...entries.issues, ...entries.roles.flatMap((role) => role.issues), ...preflight],
   };
   // Every run has its own root, branch, conversation, trace and fresh Pi sessions.
   for (const scenario of plan.roles) for (let repetition = 1; repetition <= 3; repetition += 1) {
@@ -107,7 +110,7 @@ export async function evaluateNovelPlay(options: {
       const context = await new WorldContextStore(root).capturePrepared(plan.sourceId, plan.subjectSnapshotHash, bundle.canonical);
       const engine = new WorldEngine(root, context);
       const seed = deriveCharacterEntrySeed(bundle, scenario.actorId);
-      if (!seed.projectionSeed || !entries.roles.some((role) => role.actorId === scenario.actorId && role.status === "ready")) throw new Error("EVALUATION_ENTRY_BLOCKED: deterministic entry probes must pass before live execution");
+      if (preflight.length || !seed.projectionSeed || !entries.roles.some((role) => role.actorId === scenario.actorId && role.status === "ready")) throw new Error("EVALUATION_ENTRY_BLOCKED: scene closure, independent mechanism support and deterministic entry probes must pass before live execution");
       let head = await engine.createBranch("evaluation", scenario.actorId, seed.delta, seed.knowledge, plan.sourceId, plan.subjectSnapshotHash, seed.evidence,
         { ...(seed.storyTime ? { storyTime: seed.storyTime } : {}), elapsedDays: seed.projectionSeed.elapsedDays },
         { entryActorId: scenario.actorId, projectionSeed: seed.projectionSeed, realizesCanonicalEventIds: seed.realizesCanonicalEventIds, participantPresence: seed.participantPresence, actorObservations: seed.actorObservations });

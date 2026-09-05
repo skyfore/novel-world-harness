@@ -119,6 +119,7 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
   for (const node of nodes.values()) {
     const payload = payloads.get(key(node));
     if (node.kind !== "source") link(node, "source", bundle.source.id);
+    if (node.kind === "scene") link(node, "initial", bundle.source.id);
     // Entry branch-semantic IDs are validated by the production seed reducer, not canonical lookup.
     if (!["evidence", "unit"].includes(node.kind)) visit(node, node.kind === "initial" ? { delta: canonical.initialWorld.delta, knowledge: canonical.initialWorld.knowledge, checkpoint: canonical.initialWorld.checkpoint, ...canonical.initialWorld.projectionSeed } : payload, undefined, node.kind === "initial" ? seedLocals(canonical.initialWorld.projectionSeed) : undefined);
     if (node.kind === "claim") {

@@ -5,7 +5,7 @@ import { findSpatialRoute, resolveActiveSpatialRelations, validateActiveSpatialT
 
 /** Validate actual effects at the final boundary; intent labels never enable this gate. */
 export function validateEffectObligations(input: {
-  proposal: EventProposal;
+  proposal: Pick<EventProposal, "actorId" | "source" | "action">;
   before: WorldState;
   effectBaseline?: WorldState;
   after: WorldState;

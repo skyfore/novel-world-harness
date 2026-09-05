@@ -141,6 +141,15 @@ function bundle(): PreparedNovelBundle {
 }
 
 describe("character entry context", () => {
+  it("keeps the prior elapsed clock and refuses to drop social projections at a later entry", () => {
+    const prepared = bundle();
+    prepared.canonical.events.find((event) => event.id === "letter-is-read")!.timeAdvance = { amount: 2, unit: "day" };
+    expect(deriveCharacterEntrySeed(prepared, "later-actor").projectionSeed?.elapsedDays).toBe(2);
+    prepared.canonical.initialWorld.projectionSeed = { version: 1, elapsedDays: 4, activeRuleIds: [],
+      semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] },
+      norms: { version: 1, operations: [{ op: "instantiate", templateId: "promise", instanceId: "existing-promise", subjectEntityId: "opening-actor" }] } } as never;
+    expect(() => deriveCharacterEntrySeed(prepared, "later-actor")).toThrow("ENTRY_PROJECTION_SEED_REQUIRED");
+  });
   it("gives an unread opening-role player a display-only spoiler-free setup", () => {
     const seed = deriveCharacterEntrySeed(bundle(), "opening-actor");
     const rendered = formatReaderEntryContext(seed.readerContext, "Opening Actor");

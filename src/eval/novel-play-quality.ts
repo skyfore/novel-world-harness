@@ -43,7 +43,7 @@ export const novelPlayQualitySchema = z.object({
 }).strict();
 export type NovelPlayQuality = z.infer<typeof novelPlayQualitySchema>;
 
-export const NOVEL_VALIDATOR_FINGERPRINT = contentHash({ profile: "novel-play-v1", closure: 2, sceneContract: 1, supportAssessment: 1, entryCut: 1, roleReview: 1, effectMechanism: 2, actorOutcome: 2, actorView: 2, predicateTruth: 1, liveEvaluator: 1 });
+export const NOVEL_VALIDATOR_FINGERPRINT = contentHash({ profile: "novel-play-v1", closure: 3, sceneContract: 2, supportAssessment: 2, entryCut: 2, roleReview: 1, effectMechanism: 2, actorOutcome: 2, actorView: 2, predicateTruth: 1, liveEvaluator: 1 });
 
 /** Wilson intervals disclose finite annotation uncertainty; an empty denominator has no estimate. */
 export function proportion95(successes: number, total: number): { estimate: number; lower: number; upper: number } | null {

@@ -61,3 +61,20 @@ it("indexes discourse and event resolution as their own typed dependencies", () 
   expect(graph.issues).toEqual([]);
   expect(affectedClosureNodes(graph, [{ kind: "discourse", id: "flashback" }])).toContain("event/e");
 });
+
+it("tracks entry seed dependencies without treating seed-local semantic identities as missing canonical artifacts", () => {
+  const input = bundle();
+  input.canonical.initialWorld.projectionSeed = { version: 1, activeRuleIds: [], elapsedDays: 0,
+    semantics: { version: 1, operations: [
+      { op: "record-proposition", proposition: { ...input.canonical.propositions[0]!, id: "entry-proposition" } },
+      { op: "record-claim", claim: { id: "entry-claim", subject: "hero", predicate: "says", object: "hello", evidence: [], confidence: 1 } },
+    ] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] } } as never;
+  input.canonical.initialWorld.knowledge = { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "entry-claim", propositionId: "entry-proposition", status: "knows", evidence: [] }] } as never;
+  const graph = buildPreparedClosure(input);
+  expect(graph.issues).toEqual([]);
+  const initial = graph.nodes.find((node) => node.kind === "initial")!;
+  expect(initial.dependsOn).toContainEqual(expect.objectContaining({ kind: "entity", id: "hero", uses: expect.arrayContaining([expect.objectContaining({ pointer: "/knowledge/operations/0/actorId", purpose: "entry-seed" })]) }));
+  expect(affectedClosureNodes(graph, [{ kind: "entity", id: "hero" }])).toContain("initial/source");
+  input.canonical.initialWorld.knowledge!.operations[0] = { ...input.canonical.initialWorld.knowledge!.operations[0], claimId: "unintroduced-claim" } as never;
+  expect(buildPreparedClosure(input).issues).toContainEqual(expect.objectContaining({ message: expect.stringContaining("claim/unintroduced-claim") }));
+});

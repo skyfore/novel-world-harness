@@ -1,4 +1,5 @@
 import { deriveEntryCut, type EntryCut } from "./entry-cut.js";
+import { timeAdvanceInDays } from "./time.js";
 import type { EntryProjectionSeed } from "./model.js";
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 import type {
@@ -168,7 +169,12 @@ export function deriveCharacterEntrySeed(
     ? orderedEvents.find((event) => event.id === option.entry.canonicalEventId)
     : undefined;
   const entryCheckpoint = targetEvent ? entryCheckpointFor(targetEvent, actorId) : undefined;
-  const projectionSeed = entryCheckpoint?.projectionSeed ?? (option.entry.kind === "opening" ? bundle.canonical.initialWorld.projectionSeed : undefined);
+  let projectionSeed = entryCheckpoint?.projectionSeed ?? (option.entry.kind === "opening" ? bundle.canonical.initialWorld.projectionSeed : undefined);
+  const openingSeed = bundle.canonical.initialWorld.projectionSeed;
+  if (option.entry.kind !== "opening" && !entryCheckpoint?.projectionSeed && openingSeed
+    && [openingSeed.semantics, openingSeed.processes, openingSeed.norms].some((delta) => delta.operations.length)) {
+    throw new Error("ENTRY_PROJECTION_SEED_REQUIRED: a later entry must explicitly restore its semantic, process and norm state; opening obligations cannot silently disappear or be assumed unchanged.");
+  }
   const cut = deriveEntryCut({
     events: bundle.canonical.events, relations: bundle.canonical.eventRelations ?? [],
     beforeEventId: targetEvent?.id ?? bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId,
@@ -190,6 +196,15 @@ export function deriveCharacterEntrySeed(
     ...forwardEvents.flatMap((event) => structuredClone(event.observedKnowledge?.operations ?? [])),
     ...structuredClone(entryCheckpoint?.knowledge?.operations ?? []),
   ];
+  if (!projectionSeed) {
+    const activeRuleIds = new Set(openingSeed?.activeRuleIds ?? []);
+    for (const operation of stateOperations) {
+      if (operation.op === "activate-rule") activeRuleIds.add(operation.ruleId);
+      if (operation.op === "deactivate-rule") activeRuleIds.delete(operation.ruleId);
+    }
+    projectionSeed = { version: 1, semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] },
+      activeRuleIds: [...activeRuleIds].sort(), elapsedDays: (openingSeed?.elapsedDays ?? 0) + forwardEvents.reduce((days, event) => days + timeAdvanceInDays(event.timeAdvance), 0) };
+  }
   const evidence = uniqueEvidence([
     ...bundle.canonical.initialWorld.evidence,
     ...priorEvents.flatMap((event) => event.evidence),

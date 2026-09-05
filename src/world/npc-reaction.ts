@@ -1,3 +1,4 @@
+import { actorOutcomeShape, copyActorOutcome, hasActorOutcome } from "./actor-outcome.js";
 import { z } from "zod";
 import { validateActionKnowledge } from "./action-gate.js";
 import { observeCommittedEvent } from "./actor-visible.js";
@@ -6,6 +7,7 @@ import { projectCharacterDevelopment } from "./development.js";
 import type { WorldEngine } from "./engine.js";
 import {
   actorAffectSchema,
+  actionInvocationSchema,
   eventProposalSchema,
   knowledgeDeltaSchema,
   knowledgeStatusSchema,
@@ -54,7 +56,9 @@ export const npcReactionCandidateSchema = z.object({
   interaction: playerInteractionSchema.optional(),
   preconditions: z.array(predicateSchema).default([]),
   proposedDelta: stateDeltaSchema,
+  action: actionInvocationSchema.optional(),
   proposedKnowledge: knowledgeDeltaSchema.optional(),
+    ...actorOutcomeShape,
   communicatedClaimIds: z.array(z.string().min(1)).max(32).default([]),
   requiresKnowledge: z.array(z.string().min(1)).max(64).default([]),
   forbidsKnowledge: z.array(z.string().min(1)).max(64).default([]),
@@ -313,6 +317,7 @@ async function respondOneNpc(input: {
   if (
     !reaction.interaction
     && reaction.proposedDelta.operations.length === 0
+    && !hasActorOutcome(reaction)
     && !reaction.proposedKnowledge?.operations.length
     && reaction.communicatedClaimIds.length === 0
   ) {
@@ -331,13 +336,18 @@ async function respondOneNpc(input: {
 
   const communicated = [...new Set(reaction.communicatedClaimIds)].map((claimId) => {
     const known = actorContext.knowledge.find((entry) => entry.claimId === claimId && entry.status !== "disbelieves");
-    if (!known) throw new Error(`NPC cannot communicate unknown or disbelieved claim '${claimId}'.`);
+    const created = reaction.proposedSemantics?.operations.find((op) => op.op === "record-claim" && op.localRef === claimId);
+    const attribution = created?.op === "record-claim" ? reaction.proposedSemantics?.operations.find((op) =>
+      op.op === "record-attribution" && op.localRef === created.claim.attributionId && op.attribution.holderEntityId === input.npcId) : undefined;
+    if ((!known && !attribution) || reaction.interaction?.kind !== "speech") {
+      throw new Error(`NPC must know or explicitly assert a claim in the current speech before communicating '${claimId}'.`);
+    }
     return {
       op: "learn" as const,
       actorId: input.playerId,
       claimId,
       status: knowledgeStatusSchema.parse("heard"),
-      confidence: known.confidence,
+      confidence: known?.confidence ?? 1,
       sourceActorId: input.npcId,
     };
   });
@@ -385,7 +395,9 @@ async function respondOneNpc(input: {
     proposedTime: state.logicalTime.storyTime ?? { kind: "unknown" },
     preconditions: reaction.preconditions,
     proposedDelta: reaction.proposedDelta,
+    ...(reaction.action ? { action: reaction.action } : {}),
     ...(proposedKnowledge ? { proposedKnowledge } : {}),
+    ...copyActorOutcome(reaction),
     causalRelations: [{
       fromEventId: input.triggerEvent.eventId,
       type: "causes",
@@ -466,7 +478,9 @@ function reactionAsPlayerCandidate(reaction: NpcReactionCandidate, playerId: str
     participants: [playerId],
     preconditions: reaction.preconditions,
     proposedDelta: reaction.proposedDelta,
+    ...(reaction.action ? { action: reaction.action } : {}),
     ...(reaction.proposedKnowledge ? { proposedKnowledge: reaction.proposedKnowledge } : {}),
+      ...copyActorOutcome(reaction),
     requiresKnowledge: reaction.requiresKnowledge,
     forbidsKnowledge: reaction.forbidsKnowledge,
   });

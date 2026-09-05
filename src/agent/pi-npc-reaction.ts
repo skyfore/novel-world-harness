@@ -1,3 +1,4 @@
+import { copyActorOutcome } from "../world/actor-outcome.js";
 import type { LlmProfile } from "../config/schema.js";
 import {
   createPlayerActionModelBoundary,
@@ -30,6 +31,10 @@ export type PiNpcReactionReasonerOptions = {
 const NPC_REACTION_TIMEOUT_MS = 90_000;
 
 const NPC_REACTION_SYSTEM_PROMPT = `You reason as one NPC inside a committed executable novel world and propose that NPC's immediate response to an interaction they directly perceived.
+- Five outcome channels are available: proposedDelta, proposedKnowledge, proposedSemantics, proposedProcesses, proposedNorms. All are proposals until one atomic engine commit succeeds.
+- Use decision goals, relationships, obligations, norms, processes and capabilities. Existing references must use their current opaque handles; introduce new semantic/process/norm objects with unique local-* refs. Never guess persistent IDs.
+- Only set your own goals, appraisals and outgoing attitudes. Create an obligation only when you, its debtor, accept it; a creditor's request alone creates no duty. Only a creditor can acknowledge fulfilment or waive a duty. Use only admitted process/norm templates and owned instances.
+- New propositions are asserted content, not physical truth. Ground personal belief in an attribution held by yourself; do not give another person knowledge or goals.
 
 Truth and isolation:
 - The supplied actor-scoped context and find_actor_context/read_actor_context corpus are the NPC's complete host-provided current knowledge, visible state, scene, and capabilities. Missing data is unknown, not permission to import remembered canon or invent history.
@@ -46,7 +51,7 @@ Response contract:
 - Emotion must be a current event-scoped affect with label, intensity, and preferably an outward expression. Continue or change prior affect only when the trigger and lived context support it; avoid generic melodrama.
 - For speak, interaction.content contains the NPC's exact words and addresseeIds contains only the supplied player handle. For a visible/physical response, provide its exact perceptible description. Never author the player's reply or internal reaction.
 - npcObservation states what this NPC experiences/does; playerObservation states only what the player can perceive. Do not assert a desired external outcome as accomplished.
-- proposedDelta and proposedKnowledge may alter only the NPC's admitted writable scope. communicatedClaimIds may include only supplied claim handles the NPC already knows and actually communicates in this response; the host records them as hearsay for the player.
+- proposedDelta and proposedKnowledge may alter only the NPC's admitted writable scope. communicatedClaimIds may include supplied known claim handles or local claim refs explicitly asserted by the NPC in this exact speech; the host records them as hearsay for the player.
 - Use only opaque handles supplied in context. The host owns branch, actor, participants, time, causal parent, progress, validation, and commit. After the tool succeeds, stop.`;
 
 /** Fresh isolated Pi session for each directly addressed NPC. */
@@ -272,6 +277,8 @@ function decodeReaction(
     participants: [modelPlayerHandle],
     preconditions: modelReaction.preconditions,
     proposedDelta: modelReaction.proposedDelta,
+    ...copyActorOutcome(modelReaction),
+    ...(modelReaction.action ? { action: modelReaction.action } : {}),
     ...(modelReaction.proposedKnowledge ? { proposedKnowledge: modelReaction.proposedKnowledge } : {}),
     requiresKnowledge: modelReaction.requiresKnowledge,
     forbidsKnowledge: modelReaction.forbidsKnowledge,
@@ -284,6 +291,8 @@ function decodeReaction(
       : { interaction: undefined }),
     preconditions: decoded.preconditions,
     proposedDelta: decoded.proposedDelta,
+    ...copyActorOutcome(decoded),
+    ...(decoded.action ? { action: decoded.action } : {}),
     ...(decoded.proposedKnowledge ? { proposedKnowledge: decoded.proposedKnowledge } : { proposedKnowledge: undefined }),
     communicatedClaimIds: modelReaction.communicatedClaimIds.map(boundary.decodeClaimId),
     requiresKnowledge: decoded.requiresKnowledge,

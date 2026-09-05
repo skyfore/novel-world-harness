@@ -31,6 +31,10 @@ export {
 } from "../world/player-action.js";
 
 const PLAYER_ACTION_SYSTEM_PROMPT = `You translate one player's natural-language action into one strict candidate for a deterministic novel-world engine.
+- Five outcome channels are available: proposedDelta, proposedKnowledge, proposedSemantics, proposedProcesses, proposedNorms. All are proposals until one atomic engine commit succeeds.
+- Use decision goals, relationships, obligations, norms, processes and capabilities. Existing references must use their current opaque handles; introduce new semantic/process/norm objects with unique local-* refs. Never guess persistent IDs.
+- Only set your own goals, appraisals and outgoing attitudes. Create an obligation only when you, its debtor, accept it; a creditor's request alone creates no duty. Only a creditor can acknowledge fulfilment or waive a duty. Use only admitted process/norm templates and owned instances.
+- New propositions are asserted content, not physical truth. Ground personal belief in an attribution held by yourself; do not give another person knowledge or goals.
 
 Security and truth boundaries:
 - The bounded actor-scoped projection plus exact find_actor_context/read_actor_context results are the complete host-provided turn context available to this translator. They contain actor-visible data and capabilities, not global world truth.

@@ -1,3 +1,4 @@
+import { actorOutcomeShape, copyActorOutcome } from "./actor-outcome.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -69,6 +70,7 @@ const goalActionSchema = z
     preconditions: z.array(predicateSchema),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    ...actorOutcomeShape,
     action: actionInvocationSchema.optional(),
     coordination: actorCoordinationSchema.optional(),
   })
@@ -624,6 +626,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
             preconditions: action.preconditions,
             proposedDelta: action.proposedDelta,
             ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+      ...copyActorOutcome(action),
             ...(action.action ? { action: structuredClone(action.action) } : {}),
             causalParents: [],
             evidence: goal.evidence,
@@ -706,6 +709,7 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           preconditions: action.preconditions,
           proposedDelta: action.proposedDelta,
           ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+      ...copyActorOutcome(action),
           ...(action.action ? { action: structuredClone(action.action) } : {}),
           causalRelations: [{
             fromEventId: latestPlayerEvent.event.eventId,

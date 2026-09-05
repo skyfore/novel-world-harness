@@ -1,3 +1,4 @@
+import { validateActorOutcomeOwnership } from "./actor-outcome.js";
 import { contentHash } from "./canonical.js";
 import type { CharacterGoal, CharacterModel } from "./actors.js";
 import {
@@ -604,7 +605,15 @@ export class WorldEngine {
     });
     return commitHash;
   }
+  async previewProposal(proposal: EventProposal): Promise<CommitProposalResult> {
+    return this.evaluateProposal(proposal, false);
+  }
+
   async commitProposal(proposal: EventProposal): Promise<CommitProposalResult> {
+    return this.evaluateProposal(proposal, true);
+  }
+
+  private async evaluateProposal(proposal: EventProposal, persist: boolean): Promise<CommitProposalResult> {
     let parsed = normalizeActorProposal(eventProposalSchema.parse(proposal));
     const branch = await this.branches.read(parsed.branchId);
     const head = branch.headCommitId;
@@ -636,7 +645,7 @@ export class WorldEngine {
     );
     let semanticDelta: import("./model.js").BranchSemanticDelta | undefined;
     let stagedSemantics = projection.semantics;
-    const semanticErrors: ValidationIssue[] = [];
+    const semanticErrors: ValidationIssue[] = validateActorOutcomeOwnership(parsed, projection);
     if (parsed.proposedSemantics) {
       try {
         const materialized = materializeBranchSemanticProposal(parsed.proposedSemantics, {
@@ -947,6 +956,7 @@ export class WorldEngine {
       };
       return { report, previousHead: head, newHead: head };
     }
+    if (!persist) return { report, previousHead: head, newHead: head };
     const deltaHash = effectiveStateIndexes.length
       ? await this.objects.putDelta(parsed.proposedDelta)
       : undefined;

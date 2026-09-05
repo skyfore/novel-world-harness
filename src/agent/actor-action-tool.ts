@@ -32,7 +32,7 @@ export function createActorActionCaptureTool(stateFields: readonly string[]): Ac
     promptSnippet: "Submit one material autonomous actor action",
     promptGuidelines: [
       "Use only opaque handles and writable fields present in the supplied actor view.",
-      "Propose a concrete state or knowledge effect; do not submit a generic reaction or narration-only no-op.",
+      "Propose a concrete state, knowledge, semantic, process or norm effect; do not submit a generic reaction or narration-only no-op.",
       "Treat goal, disposition, norms, and processes as current guidance, never as permission to import future canon or hidden facts.",
       "Declare an ad-hoc action footprint when using the action field. Coordination claims request exclusivity, consent, or authority; they do not prove permission.",
       "Call this tool at most once. The tool captures a proposal only and cannot commit world truth.",

@@ -1,3 +1,4 @@
+import { actorOutcomeShape, copyActorOutcome, hasActorOutcome } from "./actor-outcome.js";
 import { z } from "zod";
 import { contentHash } from "./canonical.js";
 import {
@@ -49,6 +50,7 @@ export const actorActionTemplateSchema = z
     preconditions: z.array(predicateSchema).default([]),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    ...actorOutcomeShape,
     action: actionInvocationSchema.optional(),
     coordination: actorCoordinationSchema.optional(),
     rationale: z.string().optional(),
@@ -369,7 +371,9 @@ export function modelActorProposalSource(
           participants: encodedAction.participants,
           preconditions: encodedAction.preconditions,
           proposedDelta: encodedAction.proposedDelta,
+          ...(encodedAction.action ? { action: encodedAction.action } : {}),
           ...(encodedAction.proposedKnowledge ? { proposedKnowledge: encodedAction.proposedKnowledge } : {}),
+      ...copyActorOutcome(encodedAction),
           requiresKnowledge: [],
           forbidsKnowledge: [],
         }));
@@ -379,7 +383,7 @@ export function modelActorProposalSource(
           ...await validatePlayerActionSpatialScope(engine, candidate, goal.actorId, commitId, activeSourceId),
         ];
         if (capabilityIssues.length || !candidateHasMaterialEffect(candidate)) continue;
-        const action = encodedAction.action ? decodeActionInvocation(encodedAction.action, boundary) : undefined;
+        const action = candidate.action;
         if (action && actionEntityIds(action).some((id) => !referenceable.has(id))) continue;
         const participants = [...new Set([goal.actorId, ...candidate.participants])];
         const coordination = decodeCoordination(encodedAction.coordination, boundary);
@@ -487,7 +491,9 @@ async function firstValidCompiledAction(input: {
       participants: action.participants ?? [],
       preconditions: action.preconditions,
       proposedDelta: action.proposedDelta,
+      ...(action.action ? { action: action.action } : {}),
       ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+      ...copyActorOutcome(action),
       requiresKnowledge: [],
       forbidsKnowledge: [],
     });
@@ -545,6 +551,7 @@ function actorCandidateFromAction(input: {
       preconditions: input.candidate.preconditions,
       proposedDelta: input.candidate.proposedDelta,
       ...(input.candidate.proposedKnowledge ? { proposedKnowledge: input.candidate.proposedKnowledge } : {}),
+      ...copyActorOutcome(input.candidate),
       ...(input.action ? { action: input.action } : {}),
       causalRelations,
       causalParents: causalRelations.map((relation) => relation.fromEventId),
@@ -554,7 +561,7 @@ function actorCandidateFromAction(input: {
 }
 
 function candidateHasMaterialEffect(candidate: ReturnType<typeof playerActionCandidateSchema.parse>): boolean {
-  return candidate.proposedDelta.operations.length > 0
+  return hasActorOutcome(candidate) || candidate.proposedDelta.operations.length > 0
     || (candidate.proposedKnowledge?.operations.length ?? 0) > 0;
 }
 

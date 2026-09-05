@@ -13,7 +13,11 @@ import {
   playerActionToKnowledgeAwareAction,
   validatePlayerActionSpatialScope,
   type PlayerActionCandidate,
+  PlayerTurnService,
+  validatePlayerActionScope,
 } from "../src/world/player-action.js";
+import { processTemplateSchema } from "../src/world/process-ontology.js";
+import { normTemplateSchema } from "../src/world/norm-ontology.js";
 import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
 import { DEFAULT_STATE_FIELDS, StateSchemaRegistry } from "../src/world/state.js";
 
@@ -63,6 +67,67 @@ function spatialFixture() {
 }
 
 describe("novel-to-play review regressions", () => {
+  it("S01/S04: the real player turn admits five channels atomically and exposes them on the next decision", async () => {
+    const process = processTemplateSchema.parse({
+      ontologyVersion: "process-template-v1", id: "delivery", name: "Delivery", ownerRoles: [{ id: "courier", label: "Courier", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      phases: [{ id: "accepted", label: "Accepted", terminal: false }, { id: "delivered", label: "Delivered", terminal: true }],
+      initialPhaseId: "accepted", transitions: [{ fromPhaseId: "accepted", toPhaseId: "delivered", minimumProgress: 1 }], outcomeIds: ["delivered"],
+      visibility: "public", induction: { kind: "domain-module", moduleId: "delivery", moduleVersion: "1" }, evidence: [],
+    });
+    const norm = normTemplateSchema.parse({ ontologyVersion: "norm-template-v1", id: "delivery-duty", name: "Deliver accepted letter", modality: "obligation", actionPattern: { kind: "ad-hoc", actionKindId: "deliver" },
+      defaultDeadlineDays: 1, priority: 1, defeasible: false, status: "supported", visibility: "public", induction: { kind: "domain-module", moduleId: "delivery", moduleVersion: "1" }, evidence: [] });
+    const { engine, head } = await fixture({ processTemplates: new Map([[process.id, process]]), normTemplates: new Map([[norm.id, norm]]) });
+    const candidate: PlayerActionCandidate = {
+      title: "Accept delivery", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [],
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "Deliver the letter" }] },
+      proposedSemantics: { version: 1, operations: [
+        { op: "record-proposition", localRef: "local-p", proposition: { subjectEntityId: "hero", relationId: "intends-delivery", object: { kind: "literal", value: "letter" }, polarity: "positive", modality: "asserted" } },
+        { op: "record-attribution", localRef: "local-a", attribution: { propositionId: "local-p", holderKind: "character", holderEntityId: "hero", attitude: "believes", certainty: 1 } },
+        { op: "record-claim", localRef: "local-c", claim: { propositionId: "local-p", attributionId: "local-a", status: "asserted" } },
+        { op: "open-goal", localRef: "local-g", goal: { actorId: "hero", description: "Deliver letter", priority: 0.8, targetEntityIds: [] } },
+        { op: "create-obligation", localRef: "local-o", obligation: { debtorActorId: "hero", kindId: "provide", description: "Accepted delivery" } },
+      ] },
+      proposedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "local-c", propositionId: "local-p", attributionId: "local-a", acquisitionMode: "inferred", status: "believes", confidence: 1 }] },
+      proposedProcesses: { version: 1, operations: [{ op: "start-process", localRef: "local-job", process: { templateId: process.id, ownerBindings: [{ roleId: "courier", entityIds: ["hero"] }], progress: 0 } }] },
+      proposedNorms: { version: 1, operations: [{ op: "instantiate-norm", localRef: "local-duty", norm: { templateId: norm.id, subjectActorId: "hero", description: "Deliver before tomorrow" } }] },
+    };
+    const context = await buildActorScopedActionContext(engine, "hero", head, undefined, "novel");
+    const boundary = createPlayerActionModelBoundary(playerActionTranslationContext(context));
+    const encoded = boundary.encodeCandidate(candidate);
+    expect(JSON.stringify(encoded)).not.toContain('"delivery-duty"');
+    const decoded = boundary.decodeCandidate(encoded);
+    expect(decoded).toEqual(candidate);
+    expect(validatePlayerActionScope(decoded, context)).toEqual([]);
+    const proposal = playerActionToKnowledgeAwareAction({ branchId: "main", actorId: "hero", expectedParentCommit: head, utterance: "I accept", candidate }).proposal;
+    const preview = await engine.previewProposal(proposal);
+    expect(preview.report.errors).toEqual([]);
+    expect((await engine.branches.read("main")).headCommitId).toBe(head);
+    const invalid = structuredClone(proposal);
+    invalid.proposedNorms!.operations.push({ op: "satisfy-norm", normRef: "missing", byActorId: "hero" });
+    expect((await engine.commitProposal(invalid)).report.accepted).toBe(false);
+    expect((await engine.projections.project(head)).semantics.goals).toEqual({});
+    const result = await new PlayerTurnService(engine, () => candidate).turn({ branchId: "main", actorId: "hero", sourceId: "novel", utterance: "I accept delivery" });
+    expect(result.issues).toEqual([]);
+    expect(result.accepted).toBe(true);
+    expect(result.contextAfter.decision?.goals).toHaveLength(1);
+    expect(result.contextAfter.decision?.obligations).toHaveLength(1);
+    expect(result.contextAfter.decision?.processes).toHaveLength(1);
+    expect(result.contextAfter.decision?.norms).toHaveLength(1);
+    expect(result.contextAfter.knowledge).toHaveLength(1);
+    expect((await buildActorScopedActionContext(engine, "rival", result.newHead, undefined, "novel")).decision?.goals).toEqual([]);
+  });
+
+  it("S05: a direct actor proposal cannot assign its counterparty a goal or accepted debt", async () => {
+    const { engine, head } = await fixture();
+    const candidate: PlayerActionCandidate = { title: "Order rival", participants: ["rival"], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [], proposedDelta: { version: 1, operations: [] },
+      proposedSemantics: { version: 1, operations: [{ op: "open-goal", localRef: "local-g", goal: { actorId: "rival", description: "Obey me", priority: 1, targetEntityIds: [] } },
+        { op: "create-obligation", localRef: "local-o", obligation: { debtorActorId: "rival", creditorActorId: "hero", kindId: "obedience", description: "Obey me" } }] } };
+    const proposal = playerActionToKnowledgeAwareAction({ branchId: "main", actorId: "hero", expectedParentCommit: head, utterance: "Obey", candidate }).proposal;
+    const result = await engine.commitProposal(proposal);
+    expect(result.report.errors.filter((x) => x.code === "ACTOR_OUTCOME_AUTHORITY_REQUIRED")).toHaveLength(2);
+    expect(result.newHead).toBe(head);
+  });
+
   it("F1: ordinary player conversion obeys the same any-action constraint as an explicit invocation", async () => {
     const constraint = actionConstraintSchema.parse({
       ontologyVersion: "action-constraint-v1", id: "no-action", name: "No action while alive",

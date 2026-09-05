@@ -1,3 +1,5 @@
+import { deriveEntryCut, type EntryCut } from "./entry-cut.js";
+import type { EntryProjectionSeed } from "./model.js";
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 import type {
   CanonicalEvent,
@@ -72,6 +74,8 @@ export type ReaderEntryContext = {
 };
 
 export type CharacterEntrySeed = {
+  cut: EntryCut;
+  projectionSeed?: EntryProjectionSeed;
   delta: StateDelta;
   knowledge?: KnowledgeDelta;
   evidence: EvidenceRef[];
@@ -160,19 +164,29 @@ export function deriveCharacterEntrySeed(
   const orderedEvents = eventsInDiscourseOrder(bundle.canonical.events);
   const baselineOrder = openingDiscourseOrder(bundle, orderedEvents);
   const priorEvents = orderedEvents.slice(0, option.entry.discourseOrder);
-  const forwardEvents = priorEvents.filter((event, index) =>
-    index >= baselineOrder && eventAdvancesMainTimeline(event));
   const targetEvent = option.entry.canonicalEventId
     ? orderedEvents.find((event) => event.id === option.entry.canonicalEventId)
     : undefined;
   const entryCheckpoint = targetEvent ? entryCheckpointFor(targetEvent, actorId) : undefined;
+  const projectionSeed = entryCheckpoint?.projectionSeed ?? (option.entry.kind === "opening" ? bundle.canonical.initialWorld.projectionSeed : undefined);
+  const cut = deriveEntryCut({
+    events: bundle.canonical.events, relations: bundle.canonical.eventRelations ?? [],
+    beforeEventId: targetEvent?.id ?? bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId,
+    storyTime: option.entry.storyTime,
+    baselineEventId: bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId,
+    baselineTime: bundle.canonical.initialWorld.checkpoint?.storyTime,
+    completeCheckpoint: Boolean(projectionSeed),
+  });
+  if (cut.issues.length) throw new Error(cut.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
+  const forwardEvents = cut.replayEventIds.map((id) => bundle.canonical.events.find((event) => event.id === id)!);
+  const useOpening = !entryCheckpoint?.projectionSeed;
   const stateOperations = [
-    ...structuredClone(bundle.canonical.initialWorld.delta.operations),
+    ...(useOpening ? structuredClone(bundle.canonical.initialWorld.delta.operations) : []),
     ...forwardEvents.flatMap((event) => structuredClone(event.observedOutcome.operations)),
     ...structuredClone(entryCheckpoint?.delta.operations ?? []),
   ];
   const knowledgeOperations = [
-    ...structuredClone(bundle.canonical.initialWorld.knowledge?.operations ?? []),
+    ...(useOpening ? structuredClone(bundle.canonical.initialWorld.knowledge?.operations ?? []) : []),
     ...forwardEvents.flatMap((event) => structuredClone(event.observedKnowledge?.operations ?? [])),
     ...structuredClone(entryCheckpoint?.knowledge?.operations ?? []),
   ];
@@ -181,14 +195,13 @@ export function deriveCharacterEntrySeed(
     ...priorEvents.flatMap((event) => event.evidence),
     ...option.entry.evidence,
   ]);
-  const realizesCanonicalEventIds = priorEvents
-    .filter((event) => event.narrativeContext?.mode !== "hypothetical"
-      && event.narrativeContext?.mode !== "flashforward")
-    .map((event) => event.id);
+  const realizesCanonicalEventIds = cut.completedEventIds;
 
   const initialActorObservation = bundle.canonical.initialWorld.actorObservations
     ?.find((observation) => observation.actorId === actorId)?.summary;
   return {
+    cut,
+    ...(projectionSeed ? { projectionSeed: structuredClone(projectionSeed) } : {}),
     delta: { version: 1, operations: stateOperations },
     ...(knowledgeOperations.length ? { knowledge: { version: 1, operations: knowledgeOperations } } : {}),
     evidence,

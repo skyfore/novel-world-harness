@@ -1061,6 +1061,17 @@ export type CanonicalAdaptation = z.infer<typeof canonicalAdaptationSchema>;
  * describe facts already true at the cut, actorObservation is limited to what
  * that character can perceive, and readerSetup is presentation-only context.
  */
+/** Complete nonphysical projection at a source-evidenced pre-event checkpoint. */
+export const entryProjectionSeedSchema = z.object({
+  version: z.literal(1),
+  semantics: branchSemanticDeltaSchema,
+  processes: processDeltaSchema,
+  norms: normDeltaSchema,
+  activeRuleIds: z.array(idSchema),
+  elapsedDays: z.number().finite().nonnegative(),
+}).strict();
+export type EntryProjectionSeed = z.infer<typeof entryProjectionSeedSchema>;
+
 export const characterEntryCheckpointSchema = z
   .object({
     actorId: idSchema,
@@ -1069,6 +1080,7 @@ export const characterEntryCheckpointSchema = z
     participantPresence: z.array(participantPresenceSchema).min(1).max(128),
     delta: stateDeltaSchema,
     knowledge: knowledgeDeltaSchema.optional(),
+    projectionSeed: entryProjectionSeedSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

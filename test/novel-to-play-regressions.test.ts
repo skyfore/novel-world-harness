@@ -114,6 +114,16 @@ describe("novel-to-play review regressions", () => {
     expect(result.contextAfter.decision?.processes).toHaveLength(1);
     expect(result.contextAfter.decision?.norms).toHaveLength(1);
     expect(result.contextAfter.knowledge).toHaveLength(1);
+    const committed = (await engine.projections.project(result.newHead)).history.at(-1)!;
+    const reentry = await engine.createBranch("reentry", "Reentry", { version: 1, operations: [
+      { op: "set", entityId: "hero", field: "character.alive", value: true },
+      { op: "set", entityId: "hero", field: "character.location", value: "village" },
+      ...committed.delta.operations,
+    ] }, committed.knowledgeDelta, "novel", undefined, evidence, {}, { entryActorId: "hero", realizesCanonicalEventIds: [],
+      projectionSeed: { version: 1, semantics: committed.semanticDelta!, processes: committed.processDelta!, norms: committed.normDelta!, activeRuleIds: [], elapsedDays: 0 } });
+    const reentered = await buildActorScopedActionContext(engine, "hero", reentry, undefined, "novel");
+    expect(reentered.decision).toEqual(result.contextAfter.decision);
+    expect(reentered.knowledge).toEqual(result.contextAfter.knowledge);
     expect((await buildActorScopedActionContext(engine, "rival", result.newHead, undefined, "novel")).decision?.goals).toEqual([]);
   });
 

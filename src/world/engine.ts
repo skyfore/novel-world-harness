@@ -1,3 +1,7 @@
+import { entryProjectionSeedSchema, type EntryProjectionSeed } from "./model.js";
+import { emptyBranchSemanticState } from "./semantic-effects.js";
+import { emptyProcessState } from "./process-effects.js";
+import { emptyNormState } from "./norm-effects.js";
 import { validateActorOutcomeOwnership } from "./actor-outcome.js";
 import { contentHash } from "./canonical.js";
 import type { CharacterGoal, CharacterModel } from "./actors.js";
@@ -439,6 +443,7 @@ export class WorldEngine {
     initialTime: Omit<LogicalTime, "step"> = {},
     genesisOptions: {
       entryActorId?: EntityId;
+      projectionSeed?: EntryProjectionSeed;
       realizesCanonicalEventIds?: readonly string[];
       participantPresence?: readonly ParticipantPresence[];
       actorObservations?: readonly ActorEventObservation[];
@@ -460,8 +465,9 @@ export class WorldEngine {
     }
     stateDeltaSchema.parse(initialDelta);
     const knowledge = initialKnowledge ? knowledgeDeltaSchema.parse(initialKnowledge) : undefined;
-    if (knowledge) validateKnowledgeDeltaForContext(knowledge, this.context);
-    const logicalTime: LogicalTime = { step: 0, ...initialTime };
+    const completeSeed = genesisOptions.projectionSeed ? entryProjectionSeedSchema.parse(genesisOptions.projectionSeed) : undefined;
+    if (completeSeed) initialDelta = { version: 1, operations: [...initialDelta.operations, ...completeSeed.activeRuleIds.map((ruleId) => ({ op: "activate-rule" as const, ruleId }))] };
+    const logicalTime: LogicalTime = { step: 0, ...initialTime, ...(completeSeed ? { elapsedDays: completeSeed.elapsedDays } : {}) };
     if (genesisOptions.entryActorId) {
       const entryActor = this.context.entities.get(genesisOptions.entryActorId);
       if (!entryActor || entryActor.kind !== "character") {
@@ -517,6 +523,23 @@ export class WorldEngine {
     );
     const invariantErrors = validateEngineInvariants(initialState, this.context.stateSchema, this.context.entities, this.context.rules);
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
+    const seedProvenance: EffectProvenance = { commitId: "genesis", eventId: "genesis", eventHash: "0".repeat(64) };
+    const semantics = completeSeed ? applyBranchSemanticDelta(emptyBranchSemanticState("genesis"), completeSeed.semantics, {
+      entities: this.context.entities, canonicalPropositionIds: new Set(this.context.propositions?.keys() ?? []),
+      canonicalAttributionIds: new Set(this.context.attributions?.keys() ?? []), canonicalClaimIds: new Set(this.context.claims?.keys() ?? []),
+      canonicalGoalIds: new Set(this.context.actorGoals?.map((goal) => goal.id) ?? []), canonicalEventIds: new Set(this.context.events?.keys() ?? []),
+      knownCommittedEventIds: new Set(),
+    }, seedProvenance) : undefined;
+    if (knowledge) applyKnowledgeDelta(emptyKnowledgeState("genesis"), knowledge, "genesis", {
+      entities: this.context.entities, claims: this.context.claims, propositions: this.context.propositions,
+      attributions: this.context.attributions, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
+    });
+    if (completeSeed) {
+      applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map() }, seedProvenance, logicalTime.elapsedDays ?? 0);
+      applyNormDelta(emptyNormState("genesis"), completeSeed.norms, { entities: this.context.entities, templates: this.context.normTemplates ?? new Map(), postState: initialState,
+        normativeRuleIds: new Set([...this.context.rules.values()].filter(isNormativeWorldRule).map((rule) => rule.id)) }, seedProvenance);
+      if (JSON.stringify([...initialState.activeRuleIds].sort()) !== JSON.stringify([...new Set(completeSeed.activeRuleIds)].sort())) throw new Error("Entry seed active rule set disagrees with its state delta");
+    }
     const deltaHash = stateFactsChanged(emptyInitialState, initialState)
       ? await this.objects.putDelta(initialDelta)
       : undefined;
@@ -526,16 +549,25 @@ export class WorldEngine {
     const knowledgeDeltaHash = knowledge && effectiveInitialKnowledgeIndexes.length
       ? await this.objects.putKnowledgeDelta(knowledge)
       : undefined;
+    const semanticDeltaHash = completeSeed?.semantics.operations.length ? await this.objects.putSemanticDelta(completeSeed.semantics) : undefined;
+    const processDeltaHash = completeSeed?.processes.operations.length ? await this.objects.putProcessDelta(completeSeed.processes) : undefined;
+    const normDeltaHash = completeSeed?.norms.operations.length ? await this.objects.putNormDelta(completeSeed.norms) : undefined;
     const effects: CommittedEvent["effects"] = {
       version: 1,
       ...(deltaHash ? { stateDeltaHash: deltaHash } : {}),
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
+      ...(semanticDeltaHash ? { semanticDeltaHash } : {}),
+      ...(processDeltaHash ? { processDeltaHash } : {}),
+      ...(normDeltaHash ? { normDeltaHash } : {}),
     };
     const progressCertificate = deriveProgressCertificate({
       effects,
       loaded: {
         ...(deltaHash ? { stateDelta: initialDelta } : {}),
         ...(knowledgeDeltaHash && knowledge ? { knowledgeDelta: knowledge } : {}),
+        ...(semanticDeltaHash && completeSeed ? { semanticDelta: completeSeed.semantics } : {}),
+        ...(processDeltaHash && completeSeed ? { processDelta: completeSeed.processes } : {}),
+        ...(normDeltaHash && completeSeed ? { normDelta: completeSeed.norms } : {}),
       },
       effectiveStateOperationIndexes: deltaHash
         ? effectiveStateOperationIndexes(emptyInitialState, initialDelta, this.context)
@@ -548,7 +580,7 @@ export class WorldEngine {
       .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
       .map((event) => event.id);
     const realizesCanonicalEventIds = [...new Set([
-      ...inferredRealizations,
+      ...(genesisOptions.realizesCanonicalEventIds === undefined ? inferredRealizations : []),
       ...(genesisOptions.realizesCanonicalEventIds ?? []),
     ])].sort();
     for (const eventId of realizesCanonicalEventIds) {

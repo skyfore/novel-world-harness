@@ -132,7 +132,8 @@ export async function createWorldBranch(
     },
     seedPath ? {} : {
       ...(entryActorId ? { entryActorId } : {}),
-      ...(entrySeed?.realizesCanonicalEventIds.length
+      ...((entrySeed?.projectionSeed ?? canonicalInitial?.projectionSeed) ? { projectionSeed: entrySeed?.projectionSeed ?? canonicalInitial?.projectionSeed } : {}),
+      ...(entrySeed
         ? { realizesCanonicalEventIds: entrySeed.realizesCanonicalEventIds }
         : {}),
       ...(checkpointPresence ? { participantPresence: checkpointPresence } : {}),

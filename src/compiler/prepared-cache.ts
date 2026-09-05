@@ -76,8 +76,8 @@ import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
-const CACHE_FORMAT_VERSION = 2;
-export const COMPILER_PROMPT_VERSION = 26;
+const CACHE_FORMAT_VERSION = 3;
+export const COMPILER_PROMPT_VERSION = 27;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -143,7 +143,7 @@ const preparedBundleCommonShape = {
 };
 
 export const preparedNovelBundleSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(4),
   ...preparedBundleCommonShape,
   lineage: preparedRevisionLineageSchema.optional(),
   compilerSnapshot: preparedCompilerSnapshotSchema,
@@ -781,7 +781,7 @@ export class PreparedNovelCache {
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
     const bundle = preparedNovelBundleSchema.parse({
-      version: 3,
+      version: 4,
       source: {
         id: source.id,
         ...identity,

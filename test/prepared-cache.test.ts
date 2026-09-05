@@ -586,7 +586,7 @@ describe("versioned prepared novel cache", () => {
       version: number;
       compilerSnapshot?: unknown;
     };
-    expect(rawBundle).toMatchObject({ version: 3, compilerSnapshot: expect.any(Object) });
+    expect(rawBundle).toMatchObject({ version: 4, compilerSnapshot: expect.any(Object) });
 
     const restoredRoot = await temporaryRoot("nwh-prepared-compiler-snapshot-restored-");
     const restoredFixture = await createEvidenceFixture(restoredRoot, content, "renamed-copy.md");

@@ -299,7 +299,7 @@ export async function repairExistingCommand(
     const activeRevision = await cache.loadRevision(source, active.bundleHash);
     if (
       !activeRevision
-      || activeRevision.bundle.version !== 3
+      || activeRevision.bundle.version !== 4
       || activeRevision.bundle.lineage?.operation !== "repair"
       || activeRevision.bundle.lineage.parentBundleHash !== repair.baselineBundleHash
       || activeRevision.bundle.lineage.runId !== repair.runId

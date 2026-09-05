@@ -50,6 +50,7 @@ import {
   applyStateDelta,
   emptyWorldState,
   evaluatePredicate,
+  evaluatePredicateTruth,
   validateEngineInvariants,
   validateResourceConservation,
   validateResourcePolicyCatalog,
@@ -273,7 +274,8 @@ export function validateEventProposal(
   }
   errors.push(...validateCanonicalAdaptationContract(proposal, context));
   for (let index = 0; index < proposal.preconditions.length; index += 1) {
-    if (!evaluatePredicate(evaluationState, proposal.preconditions[index]!)) errors.push({ code: "PRECONDITION_FAILED", message: `Precondition ${index} is false`, path: `preconditions.${index}` });
+    const result = evaluatePredicateTruth(evaluationState, proposal.preconditions[index]!, context.stateSchema);
+    if (result !== "true") errors.push({ code: result === "unknown" ? "PRECONDITION_UNKNOWN" : "PRECONDITION_FAILED", message: `Precondition ${index} is ${result}`, path: `preconditions.${index}` });
   }
   if (proposal.action) {
     const resolvedAction = resolveActionInvocation(
@@ -291,7 +293,7 @@ export function validateEventProposal(
     );
     errors.push(...resolvedAction.issues);
     resolvedAction.preconditions.forEach((predicate, index) => {
-      if (!evaluatePredicate(evaluationState, predicate)) {
+      if (!evaluatePredicate(evaluationState, predicate, context.stateSchema)) {
         errors.push({
           code: "ACTION_SCHEMA_PRECONDITION_FAILED",
           message: `Action schema precondition ${index} is false`,
@@ -338,7 +340,7 @@ export function validateEventProposal(
   if (!errors.some((error) => error.code === "UNKNOWN_ACTIVE_RULE")) {
     applicableRules.push(...resolveEffectiveWorldRules(context.rules, evaluationState).effective);
     for (const rule of applicableRules.filter((candidate) => isHardStateRule(candidate.rule))) {
-      if (rule.requires.some((predicate) => !evaluatePredicate(evaluationState, predicate))) {
+      if (rule.requires.some((predicate) => !evaluatePredicate(evaluationState, predicate, context.stateSchema))) {
         errors.push({ code: "STATE_RULE_REQUIREMENT_FAILED", message: `State rule ${rule.id} requirement is not satisfied` });
       }
     }

@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { actionConstraintSchema } from "../src/world/action-constraint.js";
+import { actionSchemaSchema } from "../src/world/action-ontology.js";
+import { buildActorDecisionView, mapActorDecisionView } from "../src/world/actor-decision-view.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import { actorKnowledgeBelongsToSource, KnowledgeProjector } from "../src/world/knowledge.js";
 import type { Entity, EvidenceRef } from "../src/world/model.js";
@@ -67,6 +69,18 @@ function spatialFixture() {
 }
 
 describe("novel-to-play review regressions", () => {
+  it("does not expose hidden entity choices in capabilities and encodes custom entity-set literals", async () => {
+    const schema = (id: string, value: string[]) => actionSchemaSchema.parse({ ontologyVersion: "action-schema-v1", id, name: id,
+      roles: [{ id: "initiator", label: "Initiator", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }], initiatorRoleId: "initiator", parameters: [], preconditions: [],
+      stateEffects: [{ op: "set", entity: { kind: "role", roleId: "initiator" }, field: "character.destinations", value: { source: "literal", value } }],
+      effectEnvelope: { maxStateOperations: 1, allowedStateFields: ["character.destinations"], allowsKnowledge: false, allowsTimeAdvance: false, allowsSceneTransition: false }, induction: { kind: "domain-module", moduleId: "test", moduleVersion: "1" }, evidence: [] });
+    const known = schema("known", ["village"]), hidden = schema("hidden", ["harbor"]), parameter = schema("parameter", ["village"]);
+    parameter.parameters = [{ id: "destination", valueType: "entity-ref", required: false, allowedValues: ["harbor"] }];
+    const { engine, head } = await fixture({ stateSchema: new StateSchemaRegistry([...DEFAULT_STATE_FIELDS, { key: "character.destinations", appliesTo: ["character"], valueType: "entity-ref-set", cardinality: "many", visibility: "self" }]), actionSchemas: new Map([known, hidden, parameter].map((action) => [action.id, action])) });
+    const view = await buildActorDecisionView(engine, "hero", head, { sourceId: "novel", visibleEntityIds: new Set(["hero", "village"]), knownClaimIds: new Set() });
+    expect(view.capabilities.actions.map((action) => action.id)).toEqual(["known"]);
+    expect(mapActorDecisionView(view, (id) => `handle-${id}`, (id) => `ref-${id}`).capabilities.actions[0]!.stateEffects[0]).toMatchObject({ value: { source: "literal", value: ["handle-village"] } });
+  });
   it("does not authorize physical or resource effects from a wait label or a matching ad-hoc footprint", async () => {
     const { engine, head } = await fixture();
     for (const field of ["character.health", "character.wealth"]) {
@@ -128,6 +142,12 @@ describe("novel-to-play review regressions", () => {
     expect(result.contextAfter.decision?.processes).toHaveLength(1);
     expect(result.contextAfter.decision?.norms).toHaveLength(1);
     expect(result.contextAfter.knowledge).toHaveLength(1);
+    const dishonestDischarge = playerActionToKnowledgeAwareAction({ branchId: "main", actorId: "hero", expectedParentCommit: result.newHead, utterance: "I declare my duty discharged", candidate: {
+      title: "Self-issued receipt", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [], proposedDelta: { version: 1, operations: [] },
+      proposedNorms: { version: 1, operations: [{ op: "satisfy-norm", normRef: result.contextAfter.decision!.norms[0]!.id, byActorId: "hero" }] },
+    } }).proposal;
+    expect((await engine.commitProposal(dishonestDischarge)).report.errors).toContainEqual(expect.objectContaining({ code: "ACTOR_OUTCOME_AUTHORITY_REQUIRED" }));
+    expect(await engine.branches.readHead("main")).toBe(result.newHead);
     const committed = (await engine.projections.project(result.newHead)).history.at(-1)!;
     const reentry = await engine.createBranch("reentry", "Reentry", { version: 1, operations: [
       { op: "set", entityId: "hero", field: "character.alive", value: true },

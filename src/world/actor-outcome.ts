@@ -155,15 +155,22 @@ export function validateActorOutcomeOwnership(proposal: EventProposal, projectio
   for (const [index, op] of (proposal.proposedProcesses?.operations ?? []).entries()) {
     const path = `proposedProcesses.operations.${index}`;
     if (op.op === "start-process") {
-      owned(op.process.ownerBindings.some((binding) => binding.entityIds.includes(actor)), path);
+      owned(op.process.ownerBindings.some((binding) => binding.entityIds.includes(actor))
+        && op.process.ownerBindings.every((binding) => binding.entityIds.every((id) => id === actor || projection.state.values[id]?.["artifact.owner"] === actor)), path);
       processes.add(op.localRef);
     } else owned(processes.has(op.processRef), path);
   }
-  const norms = new Set(Object.values(projection.norms.instances).filter((item) => item.subjectActorId === actor).map((item) => item.id));
+  const norms = new Map(Object.values(projection.norms.instances).map((item) => [item.id, { subject: item.subjectActorId, beneficiary: item.beneficiaryActorId }]));
   for (const [index, op] of (proposal.proposedNorms?.operations ?? []).entries()) {
     const path = `proposedNorms.operations.${index}`;
-    if (op.op === "instantiate-norm") { owned(op.norm.subjectActorId === actor, path); norms.add(op.localRef); }
-    else owned(norms.has(op.normRef) && (!op.byActorId || op.byActorId === actor), path);
+    if (op.op === "instantiate-norm") { owned(op.norm.subjectActorId === actor, path); norms.set(op.localRef, { subject: op.norm.subjectActorId, beneficiary: op.norm.beneficiaryActorId }); }
+    else {
+      const norm = norms.get(op.normRef);
+      // A debtor's declaration is not a receipt. Deterministic norm evaluation
+      // can still recognize a qualifying action; manual discharge needs its counterparty.
+      owned(Boolean(norm) && (op.op === "satisfy-norm" || op.op === "repair-norm" ? norm?.beneficiary === actor : norm?.subject === actor)
+        && (!op.byActorId || op.byActorId === actor), path);
+    }
   }
   return errors;
 }

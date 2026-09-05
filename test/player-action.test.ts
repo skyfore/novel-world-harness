@@ -1,3 +1,6 @@
+import { giftSchema, giftSilverKey } from "./helpers/actions.js";
+import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
+import { hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -276,7 +279,7 @@ describe("runtime context consultation", () => {
   });
 });
 
-async function fixture() {
+async function fixture(withoutLocations = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-player-action-"));
   roots.push(root);
   const entities: Entity[] = [
@@ -342,7 +345,15 @@ async function fixture() {
     causalParents: [],
     confidence: 1,
   };
+  const evidence = [{ span: { sourceId: "novel", startByte: 0, endByte: 10, startLine: 1, endLine: 1, quoteHash: "a".repeat(64) }, strength: "explicit" as const }];
+  for (const entity of entities) entity.evidence = evidence;
+  for (const claim of [route, rumor, futureSecret]) claim.evidence = evidence;
+  for (const event of [futureEvent, giveKeyEvent]) event.evidence = evidence;
   const context: WorldModelContext = {
+    sourceId: "novel",
+    actionSchemas: new Map([[giftSchema.id, giftSchema]]),
+    spatialOntologyVersion: "spatial-v1",
+    spatialRelations: ["camp", "library"].map((destination) => spatialRelationSchema.parse({ ontologyVersion: "spatial-v1", id: `hall-${destination}-route`, kind: "route", fromLocationId: "hall", toLocationId: destination, direction: "two-way", modes: ["foot"], duration: { minimum: 1, unit: "minute" }, basis: "explicit", visibility: "knowledge", knownByClaimIds: ["known-route"], status: "supported", confidence: 1, evidence })),
     entities: new Map(entities.map((entity) => [entity.id, entity])),
     claims: new Map([route, rumor, futureSecret].map((claim) => [claim.id, claim])),
     events: new Map([futureEvent, giveKeyEvent].map((event) => [event.id, event])),
@@ -354,18 +365,18 @@ async function fixture() {
     version: 1,
     operations: [
       { op: "set", entityId: "hero", field: "character.alive", value: true },
-      { op: "set", entityId: "hero", field: "character.location", value: "hall" },
+      ...(!withoutLocations ? [{ op: "set" as const, entityId: "hero", field: "character.location", value: "hall" }] : []),
       { op: "set", entityId: "villain", field: "character.alive", value: true },
-      { op: "set", entityId: "villain", field: "character.location", value: "secret-lair" },
+      ...(!withoutLocations ? [{ op: "set" as const, entityId: "villain", field: "character.location", value: "secret-lair" }] : []),
       { op: "set", entityId: "mo-yan", field: "character.alive", value: true },
-      { op: "set", entityId: "mo-yan", field: "character.location", value: "hall" },
+      ...(!withoutLocations ? [{ op: "set" as const, entityId: "mo-yan", field: "character.location", value: "hall" }] : []),
       { op: "set", entityId: "silver-key", field: "artifact.owner", value: "hero" },
       { op: "set", entityId: "black-key", field: "artifact.owner", value: "villain" },
       { op: "set", entityId: "secret-bond", field: "relationship.from", value: "hero" },
       { op: "set", entityId: "secret-bond", field: "relationship.to", value: "villain" },
       { op: "set", entityId: "secret-bond", field: "relationship.strength", value: 0.9 },
     ],
-  });
+  }, undefined, "novel", undefined, evidence);
   const learned = await engine.commitProposal({
     proposalId: "learn-known-route",
     branchId: "main",
@@ -389,9 +400,11 @@ async function fixture() {
 function moveToCamp(): PlayerActionCandidate {
   return {
     title: "Hero walks from the Hall to Camp",
+    action: hallCampWalkAction,
     intent: {
       kind: "act",
       summary: "Walk from the Hall to Camp",
+      requestedTimeAdvance: { amount: 1, unit: "minute" },
       controlledAct: {
         eventTitle: "Hero starts walking from the Hall toward Camp",
         actorObservation: "You leave the Hall behind and start along the road toward Camp.",
@@ -469,9 +482,11 @@ describe("actor-scoped player action context", () => {
     const campHandle = entities.find((entity) => entity.name === "Camp")!.id;
     const decoded = boundary.decodeCandidate({
       title: "Hero walks from the Hall to Camp",
+      action: { ...hallCampWalkAction, footprint: { reads: [{ entityId: actorHandle, field: "character.location" }], writes: [{ entityId: actorHandle, field: "character.location" }], resources: [] } },
       intent: {
         kind: "act",
         summary: "Walk from the Hall to Camp",
+        requestedTimeAdvance: { amount: 1, unit: "minute" },
         controlledAct: {
           eventTitle: "Hero starts walking from the Hall toward Camp",
           actorObservation: "You leave the Hall behind and start along the road toward Camp.",
@@ -855,6 +870,8 @@ describe("PlayerTurnService", () => {
       observedContext = input.context;
       return {
         title: "Hero goes to the Library",
+        action: hallCampWalkAction,
+        intent: { kind: "act", summary: "Walk to the Library", targets: [{ kind: "entity", entityId: "library" }], requestedTimeAdvance: { amount: 1, unit: "minute" }, sceneTransition: { kind: "arrive", destination: { kind: "entity", entityId: "library" }, travelMode: "foot" } },
         participants: ["library"],
         preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
         proposedDelta: {
@@ -1118,6 +1135,7 @@ describe("PlayerTurnService", () => {
       observedWritable = input.context.writableEntityIds;
       return {
         title: "Hero gives the silver key to Mo Yan",
+        action: giftSilverKey,
         participants: ["silver-key", "mo-yan"],
         preconditions: [{ op: "fact-equals", entityId: "silver-key", field: "artifact.owner", value: "hero" }],
         proposedDelta: {
@@ -1227,7 +1245,7 @@ describe("PlayerTurnService", () => {
   });
 
   it("distinguishes scene-grounded presence from unknown and known-remote locations", async () => {
-    const { engine, head } = await fixture();
+    const { engine, head } = await fixture(true);
     const sparseScene = await engine.commitProposal({
       proposalId: "sparse-shared-scene",
       branchId: "main",
@@ -1243,11 +1261,7 @@ describe("PlayerTurnService", () => {
       preconditions: [],
       proposedDelta: {
         version: 1,
-        operations: [
-          { op: "unset", entityId: "hero", field: "character.location" },
-          { op: "unset", entityId: "mo-yan", field: "character.location" },
-          { op: "unset", entityId: "villain", field: "character.location" },
-        ],
+        operations: [],
       },
       proposedKnowledge: { version: 1, operations: [{ op: "learn", actorId: "hero", claimId: "false-rumor", status: "heard", confidence: 0.4 }] },
       causalParents: [],
@@ -1350,7 +1364,8 @@ describe("PlayerTurnService", () => {
       engine,
       () => ({
         title: "Hero gives the silver key to Mo Yan",
-        participants: ["mo-yan"],
+        action: giftSilverKey,
+        participants: ["silver-key", "mo-yan"],
         preconditions: [{ op: "fact-equals", entityId: "silver-key", field: "artifact.owner", value: "hero" }],
         proposedDelta: {
           version: 1,

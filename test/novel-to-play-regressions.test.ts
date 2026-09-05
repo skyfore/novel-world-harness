@@ -67,6 +67,20 @@ function spatialFixture() {
 }
 
 describe("novel-to-play review regressions", () => {
+  it("does not authorize physical or resource effects from a wait label or a matching ad-hoc footprint", async () => {
+    const { engine, head } = await fixture();
+    for (const field of ["character.health", "character.wealth"]) {
+      const action = playerActionToKnowledgeAwareAction({ branchId: "main", actorId: "hero", expectedParentCommit: head, utterance: "I wait and recover", candidate: {
+        title: "Wait", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [],
+        action: { lane: "ad-hoc", actionKindId: "wait", description: "Wait", footprint: { reads: [], writes: [{ entityId: "hero", field }], resources: [] } },
+        proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field, value: 1 }] },
+      } });
+      const result = await engine.commitProposal(action.proposal);
+      expect(result.report.errors).toContainEqual(expect.objectContaining({ code: "ACTOR_EFFECT_REQUIRES_MECHANISM" }));
+      expect(await engine.branches.readHead("main")).toBe(head);
+    }
+  });
+
   it("S01/S04: the real player turn admits five channels atomically and exposes them on the next decision", async () => {
     const process = processTemplateSchema.parse({
       ontologyVersion: "process-template-v1", id: "delivery", name: "Delivery", ownerRoles: [{ id: "courier", label: "Courier", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],

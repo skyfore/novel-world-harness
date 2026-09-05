@@ -33,7 +33,7 @@ export function normalizeActorProposal(proposal: EventProposal): EventProposal {
   }) };
 }
 
-export function mapActionInvocationEntities(action: ActionInvocation, map: (id: string) => string): ActionInvocation {
+export function mapActionInvocationEntities(action: ActionInvocation, map: (id: string) => string, parameters: readonly { id: string; valueType: string }[] = []): ActionInvocation {
   const value = (input: StateValue): StateValue => {
     if (typeof input === "string") return map(input);
     if (Array.isArray(input)) return input.map((item) => typeof item === "string" ? map(item) : item) as StateValue;
@@ -42,7 +42,8 @@ export function mapActionInvocationEntities(action: ActionInvocation, map: (id: 
   if (action.lane === "schema-bound") return {
     ...action,
     roleBindings: action.roleBindings.map((binding) => ({ ...binding, entityIds: binding.entityIds.map(map) })),
-    parameters: Object.fromEntries(Object.entries(action.parameters).map(([key, item]) => [key, value(item)])),
+    parameters: Object.fromEntries(Object.entries(action.parameters).map(([key, item]) => [key,
+      ["entity-ref", "entity-ref-set"].includes(parameters.find((spec) => spec.id === key)?.valueType ?? "") ? value(item) : item])),
   };
   return { ...action, footprint: {
     reads: action.footprint.reads.map((address) => ({ ...address, entityId: map(address.entityId) })),

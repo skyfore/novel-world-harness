@@ -68,7 +68,7 @@ describe("versioned prepared novel cache", () => {
       });
     }
     await canon.putActionSchema({
-      ontologyVersion: "action-schema-v1",
+      ontologyVersion: "action-schema-v1", initiatorRoleId: "actor",
       id: "depart-after-order",
       name: "Depart after an order",
       roles: [{ id: "actor", label: "departing actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
@@ -789,21 +789,21 @@ describe("versioned prepared novel cache", () => {
     await engine.createBranch("alternate", "alternate", initial.delta, initial.knowledge);
     const mainHead = await engine.branches.readHead("main");
     await engine.commitProposal({
-      proposalId: "hero-falls",
+      proposalId: "hero-changes-plan",
       branchId: "main",
       expectedParentCommit: mainHead,
       source: "player",
       actorId: "hero",
-      title: "Hero falls",
+      title: "Hero changes plan",
       participants: ["hero"],
       proposedTime: { kind: "unknown" },
       preconditions: [],
-      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: false }] },
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "Take another path" }] },
       causalParents: [],
       evidence: fixture.evidence("Hero"),
     });
-    expect((await engine.projector.project(await engine.branches.readHead("main"))).values.hero?.["character.alive"]).toBe(false);
-    expect((await engine.projector.project(await engine.branches.readHead("alternate"))).values.hero?.["character.alive"]).toBe(true);
+    expect((await engine.projector.project(await engine.branches.readHead("main"))).values.hero?.["character.plan"]).toBe("Take another path");
+    expect((await engine.projector.project(await engine.branches.readHead("alternate"))).values.hero?.["character.plan"]).toBeUndefined();
     expect(await fs.readFile(cachedBundlePath, "utf8")).toBe(immutableBaseline);
 
     const originalEntity = await new CanonicalModelStore(sourceRoot).getEntity("hero");

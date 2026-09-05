@@ -19,7 +19,7 @@ const entityList: Entity[] = [
 ];
 const entities = new Map(entityList.map((entity) => [entity.id, entity]));
 const transfer: ActionSchema = {
-  ontologyVersion: "action-schema-v1",
+  ontologyVersion: "action-schema-v1", initiatorRoleId: "giver",
   id: "transfer-item",
   name: "Transfer an item",
   roles: [
@@ -153,6 +153,7 @@ describe("ActionSchema", () => {
         },
       },
     });
-    expect(adHoc.report.accepted).toBe(true);
+    expect(adHoc.report.accepted).toBe(false);
+    expect(adHoc.report.errors).toContainEqual(expect.objectContaining({ code: "ACTOR_EFFECT_REQUIRES_MECHANISM" }));
   });
 });

@@ -11,7 +11,7 @@ import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
 /** Actor-owned decision facts shared by player translation, NPCs and autonomous actors. */
 export const actorDecisionViewSchema = z.object({
   capabilities: z.object({
-    actions: z.array(z.object(actionSchemaSchema.shape).pick({ id: true, name: true, roles: true, parameters: true, effectEnvelope: true })),
+    actions: z.array(z.object(actionSchemaSchema.shape).pick({ id: true, name: true, roles: true, initiatorRoleId: true, parameters: true, effectEnvelope: true })),
     processes: z.array(z.object(processTemplateSchema.shape).pick({ id: true, name: true, ownerRoles: true, phases: true, initialPhaseId: true, transitions: true, outcomeIds: true })),
     norms: z.array(z.object(normTemplateSchema.shape).pick({ id: true, name: true, modality: true, defaultDeadlineDays: true })),
   }).strict().default({ actions: [], processes: [], norms: [] }),
@@ -88,7 +88,7 @@ export async function buildActorDecisionView(
     item.visibility !== "engine" && item.visibility !== "knowledge" && (item.induction.kind === "domain-module"
       || evidenceBelongsExclusivelyToSource(item.evidence, scope.sourceId) && item.induction.supportingEventIds?.some((id) => experienced.has(id)));
   const capabilities = {
-    actions: [...(context.actionSchemas?.values() ?? [])].filter(usable).map(({ id, name, roles, parameters, effectEnvelope }) => ({ id, name, roles, parameters, effectEnvelope })),
+    actions: [...(context.actionSchemas?.values() ?? [])].filter(usable).map(({ id, name, roles, initiatorRoleId, parameters, effectEnvelope }) => ({ id, name, roles, initiatorRoleId, parameters, effectEnvelope })),
     processes: [...(context.processTemplates?.values() ?? [])].filter(usable).map(({ id, name, ownerRoles, phases, initialPhaseId, transitions, outcomeIds }) => ({ id, name, ownerRoles, phases, initialPhaseId, transitions, outcomeIds })),
     norms: [...(context.normTemplates?.values() ?? [])].filter(usable).map(({ id, name, modality, defaultDeadlineDays }) => ({ id, name, modality, defaultDeadlineDays })),
   };

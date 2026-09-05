@@ -97,6 +97,7 @@ export const actionSchemaSchema = z.object({
   id: idSchema,
   name: z.string().trim().min(1).max(300),
   roles: z.array(actionRoleSpecSchema).min(1).max(32),
+  initiatorRoleId: idSchema.describe("The single character role that must be bound to the acting character; binding another role does not grant initiation authority."),
   parameters: z.array(actionParameterSpecSchema).max(32),
   preconditions: z.array(predicateTemplateSchema).max(64),
   stateEffects: z.array(actionStateEffectTemplateSchema).max(64),
@@ -113,6 +114,8 @@ export const actionSchemaSchema = z.object({
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
+  const initiator = value.roles.find((role) => role.id === value.initiatorRoleId);
+  if (!initiator || initiator.minCardinality !== 1 || initiator.maxCardinality !== 1 || !initiator.allowedEntityKinds.includes("character")) ctx.addIssue({ code: "custom", path: ["initiatorRoleId"], message: "Action initiator must reference a single required character role" });
   for (const [field, ids] of [
     ["roles", value.roles.map((role) => role.id)],
     ["parameters", value.parameters.map((parameter) => parameter.id)],
@@ -151,6 +154,7 @@ export function resolveActionInvocation(
   entities: ReadonlyMap<string, Entity>,
   input: {
     participants: readonly string[];
+    actorId?: string;
     proposedDelta: StateDelta;
     hasKnowledge: boolean;
     hasTimeAdvance: boolean;
@@ -174,6 +178,7 @@ export function resolveActionInvocation(
   };
   const issues = validateActionBindings(schema, invocation, entities, input.participants);
   const roles = new Map(invocation.roleBindings.map((binding) => [binding.roleId, binding.entityIds]));
+  if (input.actorId && (roles.get(schema.initiatorRoleId)?.length !== 1 || roles.get(schema.initiatorRoleId)?.[0] !== input.actorId)) issues.push(issue("ACTION_INITIATOR_MISMATCH", "The action initiator role must be bound to the acting character", "action.roleBindings"));
   const parameters = invocation.parameters;
   validateActionParameters(schema, parameters, issues);
   let preconditions: Predicate[] = [];

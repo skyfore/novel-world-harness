@@ -284,6 +284,7 @@ export function validateEventProposal(
       context.entities,
       {
         participants: proposal.participants,
+        ...(proposal.actorId ? { actorId: proposal.actorId } : {}),
         proposedDelta: proposal.proposedDelta,
         hasKnowledge: Boolean(proposal.proposedKnowledge?.operations.length),
         hasTimeAdvance: Boolean(proposal.timeAdvance),
@@ -352,7 +353,7 @@ export function validateEventProposal(
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
       postState = applyStateDelta(evaluationState, delta, context.stateSchema, context.entities, context.rules);
-      errors.push(...validateEffectObligations({ proposal, before: state, after: postState, context,
+      errors.push(...validateEffectObligations({ proposal, before: state, after: postState, effectBaseline: evaluationState, context,
         realizedCanonicalEventIds: options.realizedCanonicalEventIds }));
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
       for (const rule of applicableRules.filter((candidate) => isHardStateRule(candidate.rule))) {

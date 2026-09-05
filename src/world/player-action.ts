@@ -532,7 +532,8 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
     const candidate = structuredClone(playerActionCandidateSchema.parse(candidateInput));
     Object.assign(candidate, mapActorOutcome(candidate, scopedEntityHandle, semanticHandle));
     if (candidate.action) {
-      candidate.action = mapActionInvocationEntities(candidate.action, scopedEntityHandle);
+      const schemaId = candidate.action.lane === "schema-bound" ? candidate.action.schemaId : undefined;
+      candidate.action = mapActionInvocationEntities(candidate.action, scopedEntityHandle, context.decision?.capabilities.actions.find((schema) => schema.id === schemaId)?.parameters);
       if (candidate.action.lane === "schema-bound") candidate.action.schemaId = semanticHandle(candidate.action.schemaId);
     }
     candidate.participants = candidate.participants.map(scopedEntityHandle);
@@ -680,8 +681,9 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
       const candidate = structuredClone(candidateInput) as PlayerActionCandidate;
       Object.assign(candidate, mapActorOutcome(candidate, decodeEntity, decodeSemantic));
       if (candidate.action) {
-        candidate.action = mapActionInvocationEntities(candidate.action, decodeEntity);
         if (candidate.action.lane === "schema-bound") candidate.action.schemaId = decodeSemantic(candidate.action.schemaId);
+        const schemaId = candidate.action.lane === "schema-bound" ? candidate.action.schemaId : undefined;
+        candidate.action = mapActionInvocationEntities(candidate.action, decodeEntity, context.decision?.capabilities.actions.find((schema) => schema.id === schemaId)?.parameters);
       }
       candidate.participants = candidate.participants.map(decodeEntity);
       candidate.preconditions = candidate.preconditions

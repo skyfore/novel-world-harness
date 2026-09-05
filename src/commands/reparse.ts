@@ -75,24 +75,80 @@ export async function reparseCommand(
   const dependencies = { ...defaultDependencies, ...dependencyOverrides };
   const report = (message: string) => options.onProgress ? options.onProgress(message) : stdout.write(`${message}\n`);
   const source = await resolveSource(root, options.sourceId);
-  const batches = await prepareCompilerBatches(root, source);
+  let batches = await prepareCompilerBatches(root, source);
   options.signal?.throwIfAborted();
-  const chapterBatches = batches.filter((batch) => batch.purpose !== "structure-discovery");
+  let chapterBatches = batches.filter((batch) => batch.purpose !== "structure-discovery");
   if (!chapterBatches.length) throw new Error(`Source ${source.id} has no chapter compiler batches.`);
-  const availableChapters = [...new Set(chapterBatches.map((batch) => batch.chapterOrdinal))].sort((left, right) => left - right);
-  const selectedChapters = options.all
+  let availableChapters = [...new Set(chapterBatches.map((batch) => batch.chapterOrdinal))].sort((left, right) => left - right);
+  let selectedChapters = options.all
     ? availableChapters
     : parseOrdinalSelection(options.chapters!, availableChapters, "--chapters");
-  const selected = chapterBatches.filter((batch) => selectedChapters.includes(batch.chapterOrdinal));
+  let selected = chapterBatches.filter((batch) => selectedChapters.includes(batch.chapterOrdinal));
   if (!selected.length) throw new Error("The chapter selection did not match any compiler batch.");
 
   const cache = new PreparedNovelCache(root, options.cacheRoot);
-  const selectedBatchIds = selected.map((batch) => batch.id);
+  let selectedBatchIds = selected.map((batch) => batch.id);
+  const runId = `reparse-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`;
   options.onStatus?.("Checking active revision and rollback baseline");
   report("Checking the active prepared revision and rollback baseline.");
   await recoverInterruptedReparse(root, source, batches, selectedBatchIds, cache, report);
   options.signal?.throwIfAborted();
-  const activeBaseline = await cache.lookup(source);
+  // Recovery may materialize a prepared revision. That operation deliberately
+  // clears transient boundary-calibration requests, so never continue with
+  // the pre-recovery batch objects or their now-stale IDs.
+  batches = await prepareCompilerBatches(root, source);
+  chapterBatches = batches.filter((batch) => batch.purpose !== "structure-discovery");
+  if (!chapterBatches.length) throw new Error(`Source ${source.id} has no chapter compiler batches after rollback recovery.`);
+  availableChapters = [...new Set(chapterBatches.map((batch) => batch.chapterOrdinal))]
+    .sort((left, right) => left - right);
+  selectedChapters = options.all
+    ? availableChapters
+    : parseOrdinalSelection(options.chapters!, availableChapters, "--chapters");
+  selected = chapterBatches.filter((batch) => selectedChapters.includes(batch.chapterOrdinal));
+  if (!selected.length) throw new Error("The chapter selection did not match any compiler batch after rollback recovery.");
+  selectedBatchIds = selected.map((batch) => batch.id);
+  if (options.all) {
+    const rejected = await rejectPendingCompilerSourceProposals(root, source.id, {
+      code: "SOURCE_REPARSE_BASELINE_CLEANUP",
+      message: `Pending proposal was preserved in rejected history before the whole-source reparse baseline for ${source.id} was published.`,
+    });
+    if (rejected.length) {
+      report(
+        `Preserved ${rejected.length} pending source proposal(s) in rejected history before publishing the rollback baseline.`,
+      );
+    }
+  }
+  let activeBaseline = await cache.lookup(source);
+  const initialWorld = await new InitialWorldStore(root).get();
+  if (
+    !activeBaseline.bundleHash
+    && (!initialWorld || !initialWorld.evidence.some((reference) => reference.span.sourceId === source.id))
+  ) {
+    options.onStatus?.("Establishing an evidence-backed opening for the rollback baseline");
+    report("No evidence-backed opening world exists; establishing one before publishing the rollback baseline.");
+    await dependencies.finishPreparation({
+      root,
+      configPath: options.configPath,
+      sourceId: source.id,
+      ...(options.model ? { model: options.model } : {}),
+      yes: true,
+      createBranch: false,
+      restoreCache: false,
+      reparseRunId: runId,
+      stopAfterInitialWorld: true,
+      acquireLock: false,
+      signal: options.signal,
+      cacheRoot: options.cacheRoot,
+      onProgress: report,
+      onStatus: options.onStatus,
+      onModelText: options.onModelText,
+      onModelThinking: options.onModelThinking,
+      onModelToolCall: options.onModelToolCall,
+      onModelToolResult: options.onModelToolResult,
+      onModelEvent: options.onModelEvent,
+    });
+    activeBaseline = await cache.lookup(source);
+  }
   // During a semantic upgrade, the active immutable revision is the rollback
   // authority even though its compiler fingerprint is intentionally old.
   // Republishing its materialized contents here would stamp those old
@@ -106,7 +162,6 @@ export async function reparseCommand(
   }
   if (!baseline.bundleHash) throw new Error("Current prepared revision was not published.");
   const previousBundleHash = baseline.bundleHash;
-  const runId = `reparse-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`;
   report(
     `Starting ${options.all ? "whole-novel" : "chapter"} reparse ${runId} for ${source.id}: `
     + `${selected.length} batch(es), chapter(s) ${selectedChapters.join(", ")}.`,

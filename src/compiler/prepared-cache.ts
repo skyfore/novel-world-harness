@@ -72,6 +72,7 @@ import { SourceAccountingStore, sourceAccountingManifestSchema } from "./source-
 import { sceneOccurrenceSchema } from "../world/scene-occurrence.js";
 import { eventFrameSchema } from "../world/event-frame.js";
 import { actionSchemaSchema } from "../world/action-ontology.js";
+import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
@@ -1088,6 +1089,11 @@ export class PreparedNovelCache {
     const chapterSplits = new ChapterSplitPlanStore(this.workspaceRoot);
     if (bundle.chapterSplitPlan) await chapterSplits.write(bundle.chapterSplitPlan);
     else await chapterSplits.remove(sourceId);
+    // Boundary calibration requests are transient workflow state and are
+    // intentionally absent from prepared bundles. Leaving an old request in
+    // place while restoring only the bundle's stable batch IDs manufactures
+    // an unfinished batch that never belonged to the restored revision.
+    await new BoundaryCalibrationStore(this.workspaceRoot).reset(sourceId);
     const source = await workspace.getSource(sourceId);
     if (!source) throw new Error(`Prepared revision source is not registered: ${sourceId}`);
     await prepareCompilerBatches(this.workspaceRoot, source, {

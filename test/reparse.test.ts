@@ -217,6 +217,150 @@ describe("explicit prepared-novel reparsing", () => {
     await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ canonicalName: "Hero" });
   });
 
+  it("preserves stale source drafts before publishing a whole-reparse rollback baseline", async () => {
+    const root = await temporaryRoot("nwh-reparse-baseline-cleanup-");
+    const cacheRoot = await temporaryRoot("nwh-reparse-baseline-cleanup-cache-");
+    const content = "Hero waits.\n";
+    const fixture = await createEvidenceFixture(root, content);
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    const batch = batches[0]!;
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "baseline-cleanup-hero",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence: batch.evidence },
+      generatedBy: { worker: "test", compilerBatchId: batch.id },
+    });
+    await proposals.submit("initial-world", {
+      proposalId: "baseline-cleanup-opening",
+      payload: {
+        version: 1,
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }] },
+        evidence: batch.evidence,
+      },
+      generatedBy: { worker: "test", compilerBatchId: `opening-${batch.id}` },
+    });
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((candidate) => candidate.id));
+    await convergeWorldProposals(root, fixture.source.id);
+
+    const bytes = Buffer.from(content, "utf8");
+    const anchor = textAnchorForByteRange(fixture.source.id, bytes, 0, Buffer.byteLength("Hero"));
+    const annotationStore = new SourceAnnotationStore(root);
+    await annotationStore.stage(fixture.source.id, {
+      version: 1,
+      id: "stale-hero-mention-proposal",
+      annotationType: "entity-mention",
+      payload: {
+        version: 1,
+        id: "stale-hero-mention",
+        sourceId: fixture.source.id,
+        annotationType: "entity-mention",
+        anchor,
+        surface: "Hero",
+        form: "proper",
+        kindCandidates: ["character"],
+        confidence: 1,
+        derivation: {
+          runId: "stale-observation-run",
+          worker: "test",
+          ontologyVersion: "observation-v1",
+          compilerBatchId: `batch-${fixture.source.id}-stale-observation`,
+        },
+      },
+      generatedBy: { worker: "test", compilerBatchId: `batch-${fixture.source.id}-stale-observation` },
+      createdAt: "2025-01-01T00:00:00.000Z",
+    });
+    const progressMessages: string[] = [];
+
+    await expect(reparseCommand({
+      root,
+      configPath: path.join(root, "missing.yaml"),
+      sourceId: fixture.source.id,
+      all: true,
+      cacheRoot,
+      onProgress: (message) => progressMessages.push(message),
+    }, {
+      async compileSource() {
+        throw new Error("simulated provider failure after baseline cleanup");
+      },
+    })).rejects.toThrow("simulated provider failure after baseline cleanup");
+
+    expect(progressMessages).toContainEqual(expect.stringContaining(
+      "Preserved 1 pending source proposal(s) in rejected history before publishing the rollback baseline",
+    ));
+    await expect(annotationStore.listProposals(fixture.source.id, "pending")).resolves.toEqual([]);
+    await expect(annotationStore.listProposals(fixture.source.id, "rejected")).resolves.toEqual([
+      expect.objectContaining({ id: "stale-hero-mention-proposal" }),
+    ]);
+    await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ canonicalName: "Hero" });
+    await expect(new PreparedNovelCache(root, cacheRoot).listRevisions(fixture.source)).resolves.toEqual([
+      expect.objectContaining({ active: true }),
+    ]);
+  });
+
+  it("establishes a missing opening world before publishing the first rollback baseline", async () => {
+    const root = await temporaryRoot("nwh-reparse-opening-bootstrap-");
+    const cacheRoot = await temporaryRoot("nwh-reparse-opening-bootstrap-cache-");
+    const fixture = await createEvidenceFixture(root, "Hero waits.\n");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    const proposals = new CompilerProposalService(root);
+    await proposals.submit("entity", {
+      proposalId: "opening-bootstrap-hero",
+      payload: {
+        id: "hero",
+        kind: "character",
+        canonicalName: "Hero",
+        aliases: [],
+        evidence: fixture.evidence("Hero"),
+      },
+      generatedBy: { worker: "test", compilerBatchId: batches[0]!.id },
+    });
+    await new CompilerBatchStore(root).replaceCompleted(fixture.source.id, batches.map((batch) => batch.id));
+    await convergeWorldProposals(root, fixture.source.id);
+    const progressMessages: string[] = [];
+    let openingBootstrapCalls = 0;
+
+    await expect(reparseCommand({
+      root,
+      configPath: path.join(root, "missing.yaml"),
+      sourceId: fixture.source.id,
+      all: true,
+      cacheRoot,
+      onProgress: (message) => progressMessages.push(message),
+    }, {
+      async finishPreparation(options) {
+        openingBootstrapCalls += 1;
+        expect(options.stopAfterInitialWorld).toBe(true);
+        await new InitialWorldStore(root).put({
+          version: 1,
+          participantPresence: [{ entityId: "hero", mode: "physical" }],
+          delta: {
+            version: 1,
+            operations: [
+              { op: "set", entityId: "hero", field: "character.alive", value: true },
+              { op: "set", entityId: "hero", field: "character.plan", value: "wait" },
+            ],
+          },
+          evidence: fixture.evidence("Hero waits."),
+        });
+        return inspectPreparation(root, { sourceId: fixture.source.id });
+      },
+      async compileSource() {
+        throw new Error("simulated provider failure after opening bootstrap");
+      },
+    })).rejects.toThrow("simulated provider failure after opening bootstrap");
+
+    expect(openingBootstrapCalls).toBe(1);
+    expect(progressMessages).toContainEqual(expect.stringContaining(
+      "No evidence-backed opening world exists; establishing one before publishing the rollback baseline",
+    ));
+    await expect(new InitialWorldStore(root).get()).resolves.toMatchObject({
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+    });
+    await expect(new PreparedNovelCache(root, cacheRoot).listRevisions(fixture.source)).resolves.toEqual([
+      expect.objectContaining({ active: true }),
+    ]);
+  });
+
   it("does not bootstrap a rollback revision from an incomplete legacy checkpoint", async () => {
     const root = await temporaryRoot("nwh-reparse-incomplete-legacy-");
     const cacheRoot = await temporaryRoot("nwh-reparse-incomplete-legacy-cache-");

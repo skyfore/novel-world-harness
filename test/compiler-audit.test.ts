@@ -973,6 +973,110 @@ describe("compiler audit", () => {
     expect(report.notes).toContainEqual(expect.stringContaining("dominated by unconditional disconnected roots"));
   });
 
+  it("uses necessary typed event relations as the authoritative executable causal graph", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-typed-graph-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Each opened gate enables the hero to cross the next threshold.\n");
+    const canon = new CanonicalModelStore(root);
+    const evidence = fixture.evidence("Each opened gate enables the hero to cross the next threshold.");
+
+    for (let index = 1; index <= 10; index += 1) {
+      await canon.putEvent({
+        id: `typed-event-${index}`,
+        title: `Typed story beat ${index}`,
+        participants: [],
+        storyTime: { kind: "ordinal", label: `typed-beat-${index}`, orderHint: index },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence,
+        causalParents: [],
+        confidence: 1,
+      });
+      if (index > 1) {
+        await canon.putEventRelation({
+          id: `typed-link-${index - 1}-${index}`,
+          fromEventId: `typed-event-${index - 1}`,
+          toEventId: `typed-event-${index}`,
+          type: "enables",
+          operationality: "necessary",
+          status: "explicit",
+          confidence: 1,
+          mechanism: "The preceding threshold must open before the next crossing.",
+          evidence,
+        });
+      }
+    }
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.consistency.causalGraphValid).toBe(true);
+    expect(report.consistency.narrativeGraphNavigable).toBe(true);
+    expect(report.consistency.unconditionalRootEvents).toEqual(["typed-event-1"]);
+    expect(report.consistency.causalComponents).toBe(1);
+  });
+
+  it("does not treat legacy causalParents as executable graph authority", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-legacy-graph-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero crosses ten successive story beats.\n");
+    const canon = new CanonicalModelStore(root);
+    const evidence = fixture.evidence("Hero crosses ten successive story beats.");
+
+    for (let index = 1; index <= 10; index += 1) {
+      await canon.putEvent({
+        id: `legacy-event-${index}`,
+        title: `Legacy story beat ${index}`,
+        participants: [],
+        storyTime: { kind: "ordinal", label: `legacy-beat-${index}`, orderHint: index },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence,
+        causalParents: index === 1 ? [] : [`legacy-event-${index - 1}`],
+        confidence: 1,
+      });
+    }
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.consistency.causalGraphValid).toBe(true);
+    expect(report.consistency.narrativeGraphNavigable).toBe(false);
+    expect(report.consistency.unconditionalRootEvents).toHaveLength(10);
+    expect(report.consistency.causalComponents).toBe(10);
+  });
+
+  it("routes a broken scene-to-event backlink to the implicated event repair target", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-scene-backlink-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero crosses the hall.\n");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEvent({
+      id: "hall-crossing",
+      title: "Hero crosses the hall",
+      participants: [],
+      storyTime: { kind: "unknown" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      evidence: fixture.evidence("Hero crosses the hall."),
+      causalParents: [],
+      confidence: 1,
+    });
+    await canon.putSceneOccurrence({
+      ontologyVersion: "scene-occurrence-v1",
+      id: "hall-scene",
+      discourseSegmentIds: ["hall-discourse"],
+      eventIds: ["hall-crossing"],
+      viewpointActorIds: [],
+      presentActorIds: [],
+      entryConditions: [],
+      exitConditions: [],
+      evidence: fixture.evidence("Hero crosses the hall."),
+    });
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.eventSemantics.executableSemanticErrors).toEqual([
+      expect.objectContaining({ code: "SCENE_EVENT_BACKLINK_REQUIRED" }),
+    ]);
+    expect(report.semanticRepairTargets.eventIds).toContain("hall-crossing");
+  });
+
   it("blocks novel-scale output that has plot records but no executable effects or character growth", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-semantics-"));
     roots.push(root);
@@ -1009,7 +1113,7 @@ describe("compiler audit", () => {
       expect.stringContaining("phase-bounded goals or evidence-grounded development episodes"),
       expect.stringContaining("participant slots declare"),
       expect.stringContaining("source-grounded reader recap"),
-      expect.stringContaining("no executable actor goal or non-canonical autonomous possibility"),
+      expect.stringContaining("no executable autonomous driver active at the opening checkpoint"),
     ]));
     expect(report.readiness.semantic).toBe("not-ready");
     expect(report.readiness.publication).toBe("not-ready");
@@ -1058,5 +1162,135 @@ describe("compiler audit", () => {
       expect.stringContaining("direct-perception Genesis observation"),
     ]));
     expect(report.semanticRepairTargets.initialWorld).toBe(true);
+  });
+
+  it("treats ordinal labels without order hints as unanchored repair targets", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-incomparable-time-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero crosses a long sequence of scenes.\n");
+    const evidence = fixture.evidence("Hero crosses a long sequence of scenes.");
+    const canon = new CanonicalModelStore(root);
+
+    for (let index = 1; index <= 20; index += 1) {
+      await canon.putEvent({
+        id: `unhinted-event-${index}`,
+        title: `Unordered story beat ${index}`,
+        participants: [],
+        storyTime: { kind: "ordinal", label: `scene-${index}` },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence,
+        causalParents: [],
+        confidence: 1,
+      });
+    }
+
+    const report = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(report.coverage.timelineAnchoring).toBe(0);
+    expect(report.consistency.semanticIssues).toContainEqual(
+      expect.stringContaining("comparable story-time anchor"),
+    );
+    expect(report.semanticRepairTargets.eventIds).toEqual(
+      expect.arrayContaining(Array.from({ length: 20 }, (_, index) => `unhinted-event-${index + 1}`)),
+    );
+  });
+
+  it("distinguishes compiled autonomous inventory from drivers active at Genesis", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-audit-opening-drivers-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero knows the order and prepares to leave.\n");
+    const evidence = fixture.evidence("Hero knows the order and prepares to leave.");
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence });
+    await canon.putClaim({
+      id: "opening-order",
+      subject: "hero",
+      predicate: "has-order",
+      object: true,
+      epistemicType: "explicit-fact",
+      evidence,
+    });
+    for (let index = 1; index <= 20; index += 1) {
+      await canon.putEvent({
+        id: `driver-event-${index}`,
+        title: `Story beat ${index}`,
+        participants: ["hero"],
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        storyTime: { kind: "ordinal", label: `beat-${index}`, orderHint: index },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence,
+        causalParents: [],
+        confidence: 1,
+      });
+    }
+    await new ActorModelStore(root).putGoal({
+      id: "follow-opening-order",
+      actorId: "hero",
+      description: "Follow the order",
+      priority: 1,
+      requiresKnowledge: ["opening-order"],
+      candidateAction: {
+        title: "Leave to carry out the order",
+        preconditions: [],
+        proposedDelta: {
+          version: 1,
+          operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "leave" }],
+        },
+      },
+      evidence,
+    });
+    const initialWorlds = new InitialWorldStore(root);
+    const initialWorld = {
+      version: 1 as const,
+      readerSetup: "Hero prepares to act.",
+      participantPresence: [{ entityId: "hero" as const, mode: "physical" as const }],
+      delta: {
+        version: 1 as const,
+        operations: [{ op: "set" as const, entityId: "hero", field: "character.plan", value: "wait" }],
+      },
+      checkpoint: {
+        mode: "chronological" as const,
+        storyTime: { kind: "ordinal" as const, label: "opening", orderHint: 0 },
+        rationale: "Immediately before the hero acts",
+      },
+      evidence,
+    };
+    await initialWorlds.put(initialWorld);
+
+    const dormant = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(dormant.canonical).toMatchObject({
+      autonomousWorldDrivers: 1,
+      openingActiveWorldDrivers: 0,
+    });
+    expect(dormant.coverage).toMatchObject({
+      openingTimelineComparable: 1,
+      autonomousDriverCoverage: 0,
+    });
+    expect(dormant.consistency.semanticIssues).toContainEqual(
+      expect.stringContaining("active at the opening checkpoint"),
+    );
+    expect(dormant.semanticRepairTargets.characterIds).toContain("hero");
+    expect(dormant.semanticRepairTargets.requiresFullReparse).toBe(false);
+
+    await initialWorlds.put({
+      ...initialWorld,
+      knowledge: {
+        version: 1,
+        operations: [{
+          op: "learn",
+          actorId: "hero",
+          claimId: "opening-order",
+          status: "knows",
+          confidence: 1,
+        }],
+      },
+    });
+    const active = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(active.canonical).toMatchObject({
+      autonomousWorldDrivers: 1,
+      openingActiveWorldDrivers: 1,
+    });
+    expect(active.coverage.autonomousDriverCoverage).toBe(1);
   });
 });

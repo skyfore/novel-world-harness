@@ -106,6 +106,10 @@ import {
   COMPILER_FINISH_GRACE_CALLS,
   COMPILER_TOOL_CALL_SAFETY_FUSE,
 } from "./limits.js";
+import {
+  graphAdjudicationIterationFromBatchId,
+  validateGraphAdjudicationProposalScope,
+} from "./reconcile-world.js";
 
 function proposalResult(
   text: string,
@@ -125,7 +129,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   claim: { name: "propose_claim", label: "Propose claim", description: "Submit an evidence-backed base-world claim candidate. Character knowledge or ignorance is never a claim predicate; represent learning only in a KnowledgeDelta. This does not commit canonical truth." },
   "canonical-event": { name: "propose_canonical_event", label: "Propose canonical event", description: "Submit an explicitly narrated canonical event with preconditions, deterministic state outcome, and any observed character-knowledge change. Later canon remains a candidate until runtime commitment." },
   "event-participation": { name: "propose_event_participation", label: "Propose event participation", description: "Submit one evidence-backed semantic role for an entity in a canonical event as part of a complete same-finish inventory. Role and character scene-presence are independent; accepting this record does not create or execute the event." },
-  "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Only non-contested causes/enables can project to legacy causalParents; narrative sequence never implies causation." },
+  "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Typed operationality is authoritative at runtime; narrative sequence and legacy causalParents never imply causation." },
   "scene-occurrence": { name: "propose_scene_occurrence", label: "Propose scene occurrence", description: "Submit one evidence-backed canonical scene occurrence with discourse segments, event membership, location, viewpoint, physical presence, story interval, and entry/exit conditions. It describes source canon and never activates a future runtime scene." },
   "event-frame": { name: "propose_event_frame", label: "Propose event frame", description: "Submit one reusable evidence-backed event frame with typed semantic roles, kind/cardinality constraints, and temporal shape. A frame classifies occurrences; it is not itself an event or world change." },
   "action-schema": { name: "propose_action_schema", label: "Propose action schema", description: "Submit a source-induced reusable action schema only when at least two canonical events support the pattern. Declare role and parameter binding, preconditions, typed effects, and a strict effect envelope; a single occurrence must remain ad hoc, and domain modules are host-managed." },
@@ -180,6 +184,19 @@ export const SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES = [
   "propose_discourse_segment",
 ] as const;
 
+/**
+ * A semantic pass normally consumes the committed observation inventory. It
+ * may, however, discover that a canonical entity or event cannot satisfy its
+ * deterministic trace contract because the observation pass missed the exact
+ * prerequisite mention. Keep that repair surface deliberately narrower than
+ * the full observation toolset: quotations and discourse segmentation remain
+ * owned by the observation pass.
+ */
+export const SEMANTIC_SOURCE_REPAIR_PROPOSAL_TOOL_NAMES = [
+  "propose_entity_mention",
+  "propose_event_mention",
+] as const;
+
 export const ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES = ["propose_entity_resolution"] as const;
 export const EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES = ["propose_event_resolution"] as const;
 
@@ -198,6 +215,7 @@ const SEMANTIC_STAGE_PROPOSAL_TOOLS: Record<CompilerSemanticStage, ReadonlySet<s
     ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
   ]),
   semantic: new Set([
+    ...SEMANTIC_SOURCE_REPAIR_PROPOSAL_TOOL_NAMES,
     "propose_entity_resolution",
     "propose_event_resolution",
     "propose_entity",
@@ -543,6 +561,11 @@ function constrainCompilerStateFields(value: unknown): void {
 export type CompilerProposalToolset = {
   tools: ToolDefinition[];
   beginBatch(segmentIds?: readonly string[], compilerBatchId?: string, sourceId?: string): Promise<void>;
+};
+
+type ActiveSourceAccountingProposal = {
+  proposal: SourceAccountingProposal;
+  proposalStatus: "pending" | "accepted";
 };
 
 const MAX_CONSECUTIVE_FINISH_FAILURES = 3;
@@ -1209,7 +1232,15 @@ export function createCompilerProposalToolset(
       if (!jsonPointerExists(input.payload, selector.target_path)) {
         throw new Error(`Evidence selector target_path '${selector.target_path}' does not exist in the proposal payload.`);
       }
-      const anchor = await resolveTextAnchor(workspaceRoot, segment, selector);
+      let anchor: Awaited<ReturnType<typeof resolveTextAnchor>>;
+      try {
+        anchor = await resolveTextAnchor(workspaceRoot, segment, selector);
+      } catch (error) {
+        throw new Error(
+          `Evidence selector ${index + 1} for target_path '${selector.target_path}' failed: ${error instanceof Error ? error.message : String(error)}`,
+          error instanceof Error ? { cause: error } : undefined,
+        );
+      }
       const exactReference = evidenceRefSchema.parse({
           span: {
             sourceId: anchor.sourceId,
@@ -1591,18 +1622,80 @@ export function createCompilerProposalToolset(
     },
   });
 
-  const readActiveAccountingProposals = async (): Promise<SourceAccountingProposal[]> => {
+  const readActiveAccountingProposals = async (): Promise<ActiveSourceAccountingProposal[]> => {
     if (!activeSourceId) return [];
-    const proposals: SourceAccountingProposal[] = [];
+    const proposals: ActiveSourceAccountingProposal[] = [];
     for (const proposalId of [...successfulAccountingProposalIds].sort()) {
       try {
-        proposals.push(await accountingStore.readProposal(activeSourceId, "pending", proposalId));
+        proposals.push({
+          proposal: await accountingStore.readProposal(activeSourceId, "pending", proposalId),
+          proposalStatus: "pending",
+        });
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        proposals.push(await accountingStore.readProposal(activeSourceId, "accepted", proposalId));
+        proposals.push({
+          proposal: await accountingStore.readProposal(activeSourceId, "accepted", proposalId),
+          proposalStatus: "accepted",
+        });
       }
     }
     return proposals;
+  };
+
+  const projectActiveAccountingDecisions = (
+    activeProposals: readonly ActiveSourceAccountingProposal[],
+    structure: Awaited<ReturnType<typeof ensureSourceStructure>>,
+    semanticCoverage: Awaited<ReturnType<typeof readProspectiveSemanticCoverage>>,
+  ): SourceUnitAccountingDecision[] => {
+    const units = new Map(baseStructuralUnits(structure).map((unit) => [unit.id, unit]));
+    const semanticSpans = [
+      ...semanticCoverage.assertions.flatMap((assertion) => assertion.anchors),
+      ...semanticCoverage.annotations.flatMap((annotation) => annotation.anchors),
+    ];
+    return activeProposals.flatMap(({ proposal, proposalStatus }) =>
+      proposal.decisions.flatMap((decision) => {
+        const unit = units.get(decision.unitId);
+        const nowRepresented = unit !== undefined && unit.kind !== "non-scene" && semanticSpans.some((span) =>
+          span.sourceId === structure.sourceId
+          && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
+        // Accepted dispositions were valid under their original finish. On a
+        // later recovery, newly available exact semantics deterministically
+        // supersede only the overlapping decisions; the immutable proposal
+        // remains history and every still-unrepresented decision is replayed.
+        if (proposalStatus === "accepted" && nowRepresented) return [];
+        return [{ ...decision, proposalId: proposal.id }];
+      }));
+  };
+
+  const readActiveAnnotationInventory = async (): Promise<Array<{
+    proposalId: string;
+    annotationType: SourceAnnotationType;
+    annotationId: string;
+    annotation: SourceAnnotation;
+  }>> => {
+    if (!activeSourceId) return [];
+    const inventory: Array<{
+      proposalId: string;
+      annotationType: SourceAnnotationType;
+      annotationId: string;
+      annotation: SourceAnnotation;
+    }> = [];
+    for (const proposalId of [...successfulAnnotationProposalIds].sort()) {
+      let proposal;
+      try {
+        proposal = await annotationStore.readProposal(activeSourceId, "pending", proposalId);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        proposal = await annotationStore.readProposal(activeSourceId, "accepted", proposalId);
+      }
+      inventory.push({
+        proposalId,
+        annotationType: proposal.annotationType,
+        annotationId: proposal.payload.id,
+        annotation: proposal.payload,
+      });
+    }
+    return inventory;
   };
 
   const readProspectiveSemanticCoverage = async (): Promise<{
@@ -1614,19 +1707,10 @@ export function createCompilerProposalToolset(
       const envelope = await service.store.readEnvelope("pending", proposalId);
       assertions.push(...evidenceAssertionSchema.array().parse(envelope.evidenceAssertions ?? []));
     }
-    const annotations: Array<{ id: string; anchors: ReturnType<typeof annotationAnchors> }> = [];
-    if (activeSourceId) {
-      for (const proposalId of [...successfulAnnotationProposalIds].sort()) {
-        let proposal;
-        try {
-          proposal = await annotationStore.readProposal(activeSourceId, "pending", proposalId);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-          proposal = await annotationStore.readProposal(activeSourceId, "accepted", proposalId);
-        }
-        annotations.push({ id: proposal.payload.id, anchors: annotationAnchors(proposal.payload) });
-      }
-    }
+    const annotations = (await readActiveAnnotationInventory()).map(({ annotationId, annotation }) => ({
+      id: annotationId,
+      anchors: annotationAnchors(annotation),
+    }));
     return { assertions, annotations };
   };
 
@@ -1679,10 +1763,10 @@ export function createCompilerProposalToolset(
         ? boundedSliceSegments.filter((segment) => segment.id === input.segment_id)
         : boundedSliceSegments;
       const currentByUnit = new Map((manifest?.records ?? []).map((record) => [record.unitId, record]));
-      const pendingByUnit = new Map(activeAccounting.flatMap((proposal) => proposal.decisions.map((decision) => [
+      const pendingByUnit = new Map(projectActiveAccountingDecisions(activeAccounting, structure, semanticCoverage).map((decision) => [
         decision.unitId,
-        { proposalId: proposal.id, status: decision.status, reason: decision.reason },
-      ] as const)));
+        { proposalId: decision.proposalId!, status: decision.status, reason: decision.reason },
+      ] as const));
       const semanticSpans = [
         ...semanticCoverage.assertions.flatMap((assertion) => assertion.anchors),
         ...semanticCoverage.annotations.flatMap((annotation) => annotation.anchors),
@@ -1803,10 +1887,10 @@ export function createCompilerProposalToolset(
         readProspectiveSemanticCoverage(),
       ]);
       const byId = new Map(baseStructuralUnits(structure).map((unit) => [unit.id, unit]));
-      const alreadyDecided = new Map(activeProposals.flatMap((proposal) => proposal.decisions.map((decision) => [
+      const alreadyDecided = new Map(projectActiveAccountingDecisions(activeProposals, structure, semanticCoverage).map((decision) => [
         decision.unitId,
-        proposal.id,
-      ] as const)));
+        decision.proposalId!,
+      ] as const));
       const exactMode = Boolean(input.decisions?.length);
       const pageMode = Boolean(input.page_token || input.page_default || input.page_overrides?.length);
       if (exactMode === pageMode) {
@@ -2551,7 +2635,9 @@ export function createCompilerProposalToolset(
     promptGuidelines: [
       "Call this after all propose_* calls and after withdrawing any invalid successful draft.",
       "Use outcome=complete when the batch has active proposals, or no-artifacts only when it has none. The host automatically includes every active proposal; do not enumerate proposal_ids.",
-      "After a failed finish, correct the reported proposal or segment-review issue before trying again; never repeat an identical failing call.",
+      "Annotation reference fields take the referenced payload's exact annotation_id, never its proposal_id/ref or a guessed prefix variant.",
+      "After a failed finish, repair or withdraw only the proposals named by the complete diagnostic and preserve every unrelated valid active draft; use outcome=complete whenever any draft remains.",
+      "Never repeat an identical failing finish or switch to no-artifacts merely to escape a diagnostic.",
     ],
     executionMode: "sequential",
     parameters: finishParameters,
@@ -2599,12 +2685,14 @@ export function createCompilerProposalToolset(
         assertions: [],
         annotations: [],
       };
-      let activeAccountingProposals: SourceAccountingProposal[] = [];
+      let activeAccountingProposals: ActiveSourceAccountingProposal[] = [];
+      let activeAccountingDecisions: SourceUnitAccountingDecision[] = [];
       let accountingSource: Awaited<ReturnType<WorkspaceStore["getSource"]>> | undefined;
       let accountingStructure: Awaited<ReturnType<typeof ensureSourceStructure>> | undefined;
       let accountingBytes: Buffer | undefined;
       const stage = activeSemanticStage();
       const recordsSourceAccounting = !stage || stage === "executable";
+      const graphAdjudicationIteration = graphAdjudicationIterationFromBatchId(compilerBatchId, activeSourceId);
       if (recordsSourceAccounting && activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const workspace = await WorkspaceStore.create(workspaceRoot);
         accountingSource = await workspace.getSource(activeSourceId) ?? undefined;
@@ -2615,6 +2703,11 @@ export function createCompilerProposalToolset(
         ]);
         prospectiveCoverage = await readProspectiveSemanticCoverage();
         activeAccountingProposals = await readActiveAccountingProposals();
+        activeAccountingDecisions = projectActiveAccountingDecisions(
+          activeAccountingProposals,
+          accountingStructure,
+          prospectiveCoverage,
+        );
         const segmentsById = new Map(validatedSourceSegments.map((segment) => [segment.id, segment]));
         const prospectiveReviews = input.reviewed_segments.map((review) => {
           const segment = segmentsById.get(review.segment_id);
@@ -2631,10 +2724,7 @@ export function createCompilerProposalToolset(
           reviews: prospectiveReviews,
           evidenceAssertions: prospectiveCoverage.assertions,
           annotations: prospectiveCoverage.annotations,
-          unitDecisions: activeAccountingProposals.flatMap((proposal) => proposal.decisions.map((decision) => ({
-            ...decision,
-            proposalId: proposal.id,
-          }))),
+          unitDecisions: activeAccountingDecisions,
           requireExplicitSemanticDisposition: accountingSource.bytes >= EXPLICIT_SOURCE_ACCOUNTING_MIN_SOURCE_BYTES
             && compilerBatchId.startsWith(`batch-${activeSourceId}-`)
             && !activeBoundaryCalibration,
@@ -2649,6 +2739,7 @@ export function createCompilerProposalToolset(
         acquisitionTraceIssues,
         eventResolutionClosureIssues,
         eventTraceIssues,
+        graphAdjudicationIssues,
         canonicalStructureIssues,
       ] = await Promise.all([
         validateCompilerProposalClosure(workspaceRoot, listed, activeSourceId),
@@ -2711,21 +2802,85 @@ export function createCompilerProposalToolset(
             listedEventResolutions,
           )
           : Promise.resolve([]),
+        activeSourceId && graphAdjudicationIteration !== undefined
+          ? validateGraphAdjudicationProposalScope(
+            workspaceRoot,
+            activeSourceId,
+            graphAdjudicationIteration,
+            listed,
+          )
+          : Promise.resolve([]),
         new CompilerCommitService(workspaceRoot).validatePendingStructure(activeSourceId),
       ]);
+      const annotationReferenceInventory = annotationClosureIssues.some((issue) =>
+        issue.includes("references unknown annotation"))
+        ? await readActiveAnnotationInventory()
+        : [];
+      const annotationReferenceInventorySection = annotationReferenceInventory.length
+        ? [
+            "Active source annotation IDs available for exact reference repair "
+              + "(copy annotation_id values; proposal IDs and refs are envelope/discovery handles only):\n"
+              + (["entity-mention", "event-mention", "quotation", "discourse-segment"] as const)
+                .map((annotationType) => {
+                  const annotationIds = annotationReferenceInventory
+                    .filter((item) => item.annotationType === annotationType)
+                    .map((item) => item.annotationId)
+                    .sort();
+                  return `- ${annotationType} annotation_id values: ${annotationIds.length ? annotationIds.join(", ") : "(none active in this batch)"}`;
+                })
+                .join("\n"),
+          ]
+        : [];
+      const currentWorldProposalIds = new Set(listed);
+      const ordinaryBatchOrdinal = (batchId: string | undefined): number | undefined => {
+        if (!batchId || !activeSourceId) return undefined;
+        const prefix = `batch-${activeSourceId}-`;
+        if (!batchId.startsWith(prefix)) return undefined;
+        const suffix = batchId.slice(prefix.length);
+        const match = /^(\d{5})-(?:observation|semantic|executable)-/u.exec(suffix);
+        return match ? Number.parseInt(match[1]!, 10) : undefined;
+      };
+      const currentBatchOrdinal = ordinaryBatchOrdinal(compilerBatchId);
+      const crossBatchLifecycleIssues = (await Promise.all(canonicalStructureIssues.map(async (candidate) => {
+        if (currentWorldProposalIds.has(candidate.id)) return [];
+        return (await Promise.all(candidate.errors.map(async (error) => {
+          if (error.code !== "SUPERSEDED_LOGICAL_PROPOSAL") return undefined;
+          const replacementProposalId = /newer active proposal '([A-Za-z0-9][A-Za-z0-9._-]*)'/u.exec(error.message)?.[1];
+          if (!replacementProposalId || !currentWorldProposalIds.has(replacementProposalId)) return undefined;
+          const prior = await service.store.readEnvelope("pending", candidate.id);
+          const generatedBy = prior.generatedBy;
+          const priorBatchId = generatedBy && typeof generatedBy === "object" && !Array.isArray(generatedBy)
+            && typeof (generatedBy as Record<string, unknown>).compilerBatchId === "string"
+            ? (generatedBy as Record<string, unknown>).compilerBatchId as string
+            : undefined;
+          if (!priorBatchId || priorBatchId === compilerBatchId) return undefined;
+          const priorBatchOrdinal = ordinaryBatchOrdinal(priorBatchId);
+          const direction = currentBatchOrdinal !== undefined && priorBatchOrdinal === currentBatchOrdinal - 1
+            ? "previous"
+            : currentBatchOrdinal !== undefined && priorBatchOrdinal === currentBatchOrdinal + 1
+              ? "next"
+              : "unknown";
+          return `CROSS_BATCH_LOGICAL_SUPERSESSION direction=${direction} prior='${candidate.id}' current='${replacementProposalId}' kind='${candidate.kind}': the prior proposal belongs to checkpointed batch '${priorBatchId}' and cannot be withdrawn from '${compilerBatchId}'. Withdraw the current-batch replacement, not the prior proposal. ${direction === "unknown"
+            ? "Read the prior payload and decide whether this is accidental identity reuse or a genuine adjacent-boundary artifact before making one corrected retry."
+            : `Repair or withdraw current-batch drafts that would leave one-sided links, call peek_adjacent_evidence with direction=${direction}, then call defer_boundary_artifact with the prior and dependent artifact IDs so the queued two-segment calibration pass can replace them.`}`;
+        }))).filter((issue): issue is string => issue !== undefined);
+      }))).flat();
       const validationSections = [
         ...(listedAnnotations.length && !activeSourceId
           ? ["Source annotations require an active source-scoped compiler batch."]
           : []),
         ...finishIssueSection("Compiler batch proposal graph", closureIssues),
         ...finishIssueSection("Source annotation graph", annotationClosureIssues),
+        ...annotationReferenceInventorySection,
         ...finishIssueSection("Entity-resolution graph", resolutionClosureIssues),
         ...finishIssueSection("Canonical entity proposal trace", entityTraceIssues),
         ...finishIssueSection("Attribution quotation trace", attributionTraceIssues),
         ...finishIssueSection("Knowledge acquisition trace", acquisitionTraceIssues),
         ...finishIssueSection("Event-resolution graph", eventResolutionClosureIssues),
         ...finishIssueSection("Canonical event proposal trace", eventTraceIssues),
+        ...finishIssueSection("Graph-adjudication mutation scope", graphAdjudicationIssues),
         ...finishAccountingIssueSection(accountingIssues),
+        ...finishIssueSection("Cross-batch proposal lifecycle", crossBatchLifecycleIssues),
         ...finishIssueSection(
           "Deterministic canonical commit preview",
           canonicalStructureIssues.flatMap((candidate) => candidate.errors.map((error) =>
@@ -2780,10 +2935,7 @@ export function createCompilerProposalToolset(
           }),
           evidenceAssertions: prospectiveCoverage.assertions,
           annotations: prospectiveCoverage.annotations,
-          unitDecisions: activeAccountingProposals.flatMap((proposal) => proposal.decisions.map((decision) => ({
-            ...decision,
-            proposalId: proposal.id,
-          }))),
+          unitDecisions: activeAccountingDecisions,
           sourceBytes: accountingBytes,
         });
       }

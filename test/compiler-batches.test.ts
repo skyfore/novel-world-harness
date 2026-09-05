@@ -171,6 +171,13 @@ describe("compiler batches", () => {
       ...outcome,
       blockedReason: "compiler tool-call safety fuse tripped after 1000 calls",
     })).toBe(true);
+    expect(isRecoverableCompilerBatchInterruption({
+      assistantStopReason: "stop",
+      proposalSucceeded: 0,
+      proposalFailed: 21,
+      completionSignaled: true,
+      completionOutcome: "no-artifacts",
+    })).toBe(true);
     expect(isRecoverableCompilerBatchInterruption({ ...outcome, blockedReason: "proposal graph remains incomplete" })).toBe(false);
   });
 
@@ -359,6 +366,9 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("empty aliases are valid"))).toBe(true);
     expect(batches.every((batch) => !batch.prompt.includes("general compiler tool calls"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Preserve the payload's stable logical id"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("rather than creating parallel identities"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("Synopsis, publication blurbs, contents summaries"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("cannot by themselves ground canonical events"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("<source-segment"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("character.location"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("ASCII logical entity ID"))).toBe(true);
@@ -373,6 +383,9 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("never use a chapter number, bell count"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Pending proposals are immutable"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("withdraw_compiler_proposal"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("CROSS_BATCH_LOGICAL_SUPERSESSION"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("never a checkpointed proposal owned by another ordinary batch"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes("only the later boundary-calibration batch may replace the prior proposal"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("kind=canon-analogue"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("Use player-choice"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("evidence_selectors"))).toBe(true);
@@ -388,6 +401,26 @@ describe("compiler batches", () => {
     expect(batches.every((batch) => batch.prompt.includes("defer_boundary_artifact"))).toBe(true);
     expect(batches.every((batch) => batch.prompt.includes("context-only"))).toBe(true);
     expect(batches.every((batch) => !batch.prompt.includes("novel.txt"))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes(
+      "repair or withdraw only those named proposals and preserve every unrelated valid active draft",
+    ))).toBe(true);
+    expect(batches.every((batch) => batch.prompt.includes(
+      "never withdraw unlisted valid work or switch to no-artifacts merely to escape a finish diagnostic",
+    ))).toBe(true);
+    const observationBatches = batches.filter((batch) => batch.semanticStage === "observation");
+    expect(observationBatches.every((batch) => batch.prompt.includes(
+      "must copy the exact payload annotation_id",
+    ))).toBe(true);
+    expect(observationBatches.every((batch) => batch.prompt.includes(
+      "never use its proposal_id/ref or invent a prefix variant",
+    ))).toBe(true);
+    const semanticBatches = batches.filter((batch) => batch.semanticStage === "semantic");
+    expect(semanticBatches.every((batch) => batch.prompt.includes(
+      "repair only that exact prerequisite with propose_entity_mention or propose_event_mention",
+    ))).toBe(true);
+    expect(semanticBatches.every((batch) => batch.prompt.includes(
+      "Do not perform a second observation sweep, create quotations or discourse segments",
+    ))).toBe(true);
     expect(batches[0]!.prompt).toContain("Use your semantic reading");
     expect(batches[0]!.prompt).toContain("do not use a regular-expression convention");
     expect(batches.slice(1).every((batch) => batch.prompt.includes("Novel-title inference belongs only to the source-opening review batch"))).toBe(true);
@@ -514,7 +547,8 @@ describe("compiler batches", () => {
     const { root, source } = await fixture();
     const batch = (await prepareCompilerBatches(root, source))
       .find((candidate) => candidate.semanticStage === "executable")!;
-    await new SourceAccountingStore(root).stageProposal({
+    const accounting = new SourceAccountingStore(root);
+    await accounting.stageProposal({
       version: 1,
       id: "accounting-recovered",
       sourceId: source.id,
@@ -523,11 +557,25 @@ describe("compiler batches", () => {
       generatedBy: { worker: "account_source_units" },
       createdAt: new Date(0).toISOString(),
     });
+    await accounting.stageProposal({
+      version: 1,
+      id: "accounting-accepted-recovered",
+      sourceId: source.id,
+      compilerBatchId: batch.id,
+      decisions: [{ unitId: "unit-sentence-accepted", status: "background-only", reason: "Accepted recovery fixture." }],
+      generatedBy: { worker: "account_source_units" },
+      createdAt: new Date(1_000).toISOString(),
+    });
+    await accounting.acceptProposals(source.id, ["accounting-accepted-recovered"]);
 
     const hydrated = await hydrateCompilerBatch(root, batch);
 
     expect(hydrated.prompt).toContain('"proposalId":"accounting-recovered"');
+    expect(hydrated.prompt).toContain('"proposalStatus":"pending"');
+    expect(hydrated.prompt).toContain('"proposalId":"accounting-accepted-recovered"');
+    expect(hydrated.prompt).toContain('"proposalStatus":"accepted"');
     expect(hydrated.prompt).toContain('"kind":"source-accounting"');
+    expect(hydrated.prompt).toContain("exact semantics added during recovery deterministically supersede");
     expect(hydrated.prompt).toContain("call withdraw_compiler_proposal for that exact accounting proposal ID");
   });
 
@@ -565,7 +613,7 @@ describe("compiler batches", () => {
     const opening = await prepareOpeningWorldCompilerBatch(root, source);
 
     expect(opening.prompt).toContain("may propose exactly one initial-world");
-    expect(opening.prompt).toContain("one world-time cut");
+    expect(opening.prompt).toContain("one explicit world-time cut");
     expect(opening.prompt).toContain("readerSetup");
     expect(opening.prompt).toContain("structured readerContext");
     expect(opening.prompt).toContain("first-use character");

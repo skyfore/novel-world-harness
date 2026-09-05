@@ -144,6 +144,40 @@ describe("preparation workflow inspection", () => {
     });
   });
 
+  it("establishes the opening world before repairing a disconnected narrative graph", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-opening-before-graph-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero crosses ten independent story beats.\n");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    const canon = new CanonicalModelStore(root);
+    await canon.putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("Hero"),
+    });
+    for (let index = 1; index <= 10; index += 1) {
+      await canon.putEvent({
+        id: `event-${index}`,
+        title: `Independent story beat ${index}`,
+        participants: ["hero"],
+        storyTime: { kind: "ordinal", label: `beat-${index}`, orderHint: index },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence: fixture.evidence("Hero crosses ten independent story beats."),
+        causalParents: [],
+        confidence: 1,
+      });
+    }
+
+    await expect(inspectPreparation(root, { sourceId: fixture.source.id })).resolves.toMatchObject({
+      stage: "needs-initial-world",
+      audit: { consistency: { narrativeGraphNavigable: false } },
+    });
+  });
+
   it("requires replacement when an accepted initial world is grounded in front matter", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-front-matter-"));
     roots.push(root);

@@ -147,6 +147,99 @@ describe("compiler boundary calibration", () => {
     expect(result).toEqual({ total: 7, completed: 7, skipped: 0, remaining: 0 });
   });
 
+  it("routes an adjacent cross-batch logical replacement back through deferral", async () => {
+    const { root, evidence, segments } = await fixture();
+    const semantic = (await prepareCompilerBatches(root, evidence.source))
+      .filter((batch) => batch.semanticStage === "semantic");
+    const priorBatch = semantic.find((batch) => batch.segmentIds[0] === segments[0]!.id)!;
+    const currentBatch = semantic.find((batch) => batch.segmentIds[0] === segments[1]!.id)!;
+    const framePayload = {
+      ontologyVersion: "event-frame-v1",
+      id: "gate-opening-frame",
+      name: "Opening a gate",
+      roles: [{
+        id: "opener",
+        label: "opener",
+        semanticRole: "agent",
+        allowedEntityKinds: ["character"],
+        minCardinality: 1,
+        maxCardinality: 1,
+        presence: "physical",
+      }],
+      temporalShape: "instant",
+    };
+    const context = {} as ExtensionContext;
+
+    const priorTools = createCompilerProposalToolset(root);
+    await priorTools.beginBatch(priorBatch.segmentIds, priorBatch.id, evidence.source.id);
+    await priorTools.tools.find((tool) => tool.name === "propose_event_frame")!.execute("prior", {
+      proposal_id: "frame-a-prior",
+      payload: framePayload,
+      evidence_segment_ids: [segments[0]!.id],
+    } as never, undefined, undefined, context);
+    await priorTools.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute("finish-prior", {
+      outcome: "complete",
+      reviewed_segments: [{
+        segment_id: segments[0]!.id,
+        disposition: "proposed",
+        summary: "Recorded the partial boundary frame.",
+      }],
+      summary: "Prior segment reviewed.",
+    } as never, undefined, undefined, context);
+
+    const currentTools = createCompilerProposalToolset(root);
+    await currentTools.beginBatch(currentBatch.segmentIds, currentBatch.id, evidence.source.id);
+    await currentTools.tools.find((tool) => tool.name === "propose_event_frame")!.execute("current", {
+      proposal_id: "frame-z-current",
+      payload: framePayload,
+      evidence_segment_ids: [segments[1]!.id],
+    } as never, undefined, undefined, context);
+    const finish = currentTools.tools.find((tool) => tool.name === "finish_compiler_batch")!;
+    await expect(finish.execute("finish-current", {
+      outcome: "complete",
+      reviewed_segments: [{
+        segment_id: segments[1]!.id,
+        disposition: "proposed",
+        summary: "Attempted to replace the adjacent frame.",
+      }],
+      summary: "Current segment reviewed.",
+    } as never, undefined, undefined, context)).rejects.toThrow(
+      /Cross-batch proposal lifecycle.*CROSS_BATCH_LOGICAL_SUPERSESSION direction=previous prior='frame-a-prior' current='frame-z-current'/su,
+    );
+
+    await currentTools.tools.find((tool) => tool.name === "withdraw_compiler_proposal")!.execute("withdraw-current", {
+      proposal_id: "frame-z-current",
+      reason: "The adjacent frame belongs in the queued pair calibration.",
+    } as never, undefined, undefined, context);
+    await currentTools.tools.find((tool) => tool.name === "peek_adjacent_evidence")!.execute("peek-previous", {
+      direction: "previous",
+      reason: "Confirm that the frame crosses the opening boundary.",
+    } as never, undefined, undefined, context);
+    await currentTools.tools.find((tool) => tool.name === "defer_boundary_artifact")!.execute("defer-current", {
+      direction: "previous",
+      reason: "The same logical frame uses evidence on both sides of the split.",
+      artifact_ids: ["frame-a-prior", "gate-opening-frame"],
+    } as never, undefined, undefined, context);
+    await expect(finish.execute("finish-deferred", {
+      outcome: "no-artifacts",
+      reviewed_segments: [{
+        segment_id: segments[1]!.id,
+        disposition: "no-artifacts",
+        summary: "The cross-boundary frame was deferred to a citable pair pass.",
+      }],
+      summary: "Current segment boundary work deferred.",
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: { compilerBatchFinished: true, outcome: "no-artifacts" },
+    });
+    await expect(new BoundaryCalibrationStore(root).list(evidence.source.id)).resolves.toEqual([
+      expect.objectContaining({
+        leftSegmentId: segments[0]!.id,
+        rightSegmentId: segments[1]!.id,
+        requestedBy: [expect.objectContaining({ batchId: currentBatch.id, direction: "previous" })],
+      }),
+    ]);
+  });
+
   it("replaces only a same-identity adjacent draft from inside the pair calibration", async () => {
     const { root, evidence, segments } = await fixture();
     const regular = (await prepareCompilerBatches(root, evidence.source))

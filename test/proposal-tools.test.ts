@@ -153,6 +153,30 @@ describe("compiler proposal tools", () => {
     await expect(new EvidenceAssertionStore(root).listForArtifact("entity", "hero")).resolves.toEqual([]);
   });
 
+  it("identifies the exact failing selector and target path when source wording is absent", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-proposal-missing-exact-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero enters the village.\n");
+    const toolset = createCompilerProposalToolset(root);
+    await toolset.beginBatch([fixture.segmentId], `batch-${fixture.source.id}-missing-exact`, fixture.source.id);
+    const entity = toolset.tools.find((candidate) => candidate.name === "propose_entity")!;
+
+    await expect(entity.execute("missing-exact", {
+      proposal_id: "entity-hero-missing-exact",
+      payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+      evidence_selectors: [{
+        segment_id: fixture.segmentId,
+        exact: "Hero entered a city that is not in this source.",
+        target_path: "/canonicalName",
+        relation: "supports",
+        strength: "explicit",
+      }],
+    } as never, undefined, undefined, {} as ExtensionContext)).rejects.toThrow(
+      `Evidence selector 1 for target_path '/canonicalName' failed: Exact evidence quote was not found in segment ${fixture.segmentId}.`,
+    );
+  });
+
   it("lets the dedicated opening pass recover Longzu-style pre-checkpoint cause and stance from later discourse", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-opening-whole-source-context-"));
     roots.push(root);
@@ -321,6 +345,10 @@ describe("compiler proposal tools", () => {
     expect(compilerToolAllowedInSemanticStage("find_compiler_artifacts", "observation")).toBe(true);
     expect(compilerToolAllowedInSemanticStage("propose_entity_mention", "observation")).toBe(true);
     expect(compilerToolAllowedInSemanticStage("propose_entity", "observation")).toBe(false);
+    expect(compilerToolAllowedInSemanticStage("propose_entity_mention", "semantic")).toBe(true);
+    expect(compilerToolAllowedInSemanticStage("propose_event_mention", "semantic")).toBe(true);
+    expect(compilerToolAllowedInSemanticStage("propose_quotation", "semantic")).toBe(false);
+    expect(compilerToolAllowedInSemanticStage("propose_discourse_segment", "semantic")).toBe(false);
     expect(compilerToolAllowedInSemanticStage("propose_entity", "semantic")).toBe(true);
     expect(compilerToolAllowedInSemanticStage("propose_scene_occurrence", "semantic")).toBe(true);
     expect(compilerToolAllowedInSemanticStage("propose_action_constraint", "semantic")).toBe(false);
@@ -363,16 +391,47 @@ describe("compiler proposal tools", () => {
       `batch-${fixture.source.id}-00001-semantic-stage-test`,
       fixture.source.id,
     );
-    await expect(tool("propose_entity_mention").execute("semantic-overreach", {
-      proposal_id: "semantic-overreach",
-      annotation_id: "semantic-overreach",
+    await expect(tool("propose_entity_mention").execute("semantic-entity-repair", {
+      proposal_id: "semantic-entity-repair",
+      annotation_id: "semantic-entity-repair",
       selector: { segment_id: fixture.segmentId, exact: "Hero" },
       surface: "Hero",
       form: "proper",
       kind_candidates: ["character"],
       confidence: 1,
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: {
+        proposalId: "semantic-entity-repair",
+        kind: "entity-mention",
+        annotationId: "semantic-entity-repair",
+      },
+    });
+    await expect(tool("propose_event_mention").execute("semantic-event-repair", {
+      proposal_id: "semantic-event-repair",
+      annotation_id: "semantic-event-repair",
+      trigger_selector: { segment_id: fixture.segmentId, exact: "leaves" },
+      trigger: "leaves",
+      extent_selectors: [{ segment_id: fixture.segmentId, exact: "Hero leaves after the warning." }],
+      event_type_candidates: ["movement"],
+      participant_mention_ids: ["semantic-entity-repair"],
+      salience: "major",
+      confidence: 1,
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: {
+        proposalId: "semantic-event-repair",
+        kind: "event-mention",
+        annotationId: "semantic-event-repair",
+      },
+    });
+    await expect(tool("propose_quotation").execute("semantic-quotation-overreach", {
+      proposal_id: "semantic-quotation-overreach",
+      annotation_id: "semantic-quotation-overreach",
+      selector: { segment_id: fixture.segmentId, exact: "warning" },
+      mode: "direct",
+      addressee_mention_ids: [],
+      attribution_confidence: 1,
     } as never, undefined, undefined, context)).rejects.toThrow(
-      "Compiler stage 'semantic' does not authorize propose_entity_mention",
+      "Compiler stage 'semantic' does not authorize propose_quotation",
     );
     const sceneInput = {
       proposal_id: "semantic-scene",

@@ -48,6 +48,8 @@ export type PrepareAllCommandOptions = {
   reparseBaselineBundleHash?: string;
   /** Stable identifier for resumable proposal namespaces inside an enclosing reparse. */
   reparseRunId?: string;
+  /** Internal recovery mode: establish a validated opening world, then return before semantic repair or branch creation. */
+  stopAfterInitialWorld?: boolean;
   signal?: AbortSignal;
   onProgress?: (message: string) => void;
   onStatus?: (message: string) => void;
@@ -76,7 +78,7 @@ const defaultDependencies: PrepareAllDependencies = {
   reparse: async (options) => (await import("./reparse.js")).reparseCommand(options),
 };
 
-export const INITIAL_WORLD_PROMPT = `Inspect the selected opening evidence, whole-source evidence retrieval, and existing artifact catalog, then propose one evidence-backed initial world representing one explicit world-time cut, not merely the facts stated in the opening passage. Treat the player as a human who has never read the novel. Add a concise readerSetup and a structured readerContext whose facts establish the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, completed pre-checkpoint beats, the actual holder and direction of relevant attitudes or social pressure, and the immediate unresolved situation. Add an entityGloss for every non-focal character referenced by those facts, explaining who that person is relative to the focal actor and why they matter now. Reader context is presentation-only and never character knowledge. Add one actorObservation for each physically present opening character, limited to that actor's direct checkpoint perception. readerSetup, every readerContext fact summary, entity-gloss relationship/relevance field, immediate-situation summary, and actorObservation summary requires its own exact explicit or strong-inference evidence_selector JSON Pointer; weak inference is not sufficient. Use find_source_evidence/read_source_evidence only to recover context that later discourse establishes as already true at or before the checkpoint; mark it later-discourse-preexisting. Never import the result of the unresolved opening situation, any later development, or later-acquired character knowledge. Set participantPresence explicitly for every character represented at the checkpoint; only bodily co-presence is physical, while mention, memory, dream, remote contact, or representation never establishes an opening role. Separate textual narrator frames, recollections, flashbacks, and lived chronology. Prefer the earliest playable chronological scene when it is present in the supplied evidence; otherwise mark a textual-frame checkpoint. Include checkpoint.mode and rationale, plus storyTime, narrativeLayerId, and beforeCanonicalEventId whenever supported. Never merge old-age frame facts with a younger remembered self. Retrieve exact existing artifact payloads as needed and seed grounded actionable state only for source characters bodily present at this checkpoint, including location, plan, momentum, and actor-known active relationships when supported. Do not create a catalog-wide alive inventory: later characters become playable through separate source-backed checkpoints attached to their first embodied canonical events. Store relationship entity IDs, never counterpart character IDs, in character.relationships. Propose genuinely missing referenced entities or base claims first. Finish the compiler batch explicitly after all proposal calls succeed.`;
+export const INITIAL_WORLD_PROMPT = `Inspect the selected opening evidence, whole-source evidence retrieval, and existing artifact catalog, then propose one evidence-backed initial world representing one explicit world-time cut, not merely the facts stated in the opening passage. Treat the player as a human who has never read the novel. Add a concise readerSetup and a structured readerContext whose facts establish the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, completed pre-checkpoint beats, the actual holder and direction of relevant attitudes or social pressure, and the immediate unresolved situation. Add an entityGloss for every non-focal character referenced by those facts, explaining who that person is relative to the focal actor and why they matter now. Reader context is presentation-only and never character knowledge. Add one actorObservation for each physically present opening character, limited to that actor's direct checkpoint perception. readerSetup, every readerContext fact summary, entity-gloss relationship/relevance field, immediate-situation summary, and actorObservation summary requires its own exact explicit or strong-inference evidence_selector JSON Pointer; weak inference is not sufficient. Use find_source_evidence/read_source_evidence only to recover context that later discourse establishes as already true at or before the checkpoint; mark it later-discourse-preexisting. Never import the result of the unresolved opening situation, any later development, or later-acquired character knowledge. Set participantPresence explicitly for every character represented at the checkpoint; only bodily co-presence is physical, while mention, memory, dream, remote contact, or representation never establishes an opening role. Separate textual narrator frames, recollections, flashbacks, and lived chronology. Prefer the earliest playable chronological scene when it is present in the supplied evidence; otherwise mark a textual-frame checkpoint. Include checkpoint.mode and rationale, plus storyTime, narrativeLayerId, and beforeCanonicalEventId whenever supported. Never merge old-age frame facts with a younger remembered self. Retrieve exact existing artifact payloads as needed and seed grounded actionable state only for source characters bodily present at this checkpoint, including location, plan, momentum, and actor-known active relationships when supported. Do not create a catalog-wide alive inventory: later characters become playable through separate source-backed checkpoints attached to their first embodied canonical events. Store relationship entity IDs, never counterpart character IDs, in character.relationships. When the opening requires a genuinely missing entity, stage its exact source entity mention and same-finish new-entity resolution as well as the entity proposal; an untraced entity cannot pass the finish barrier. Propose genuinely missing referenced entities or base claims first. Finish the compiler batch explicitly after all proposal calls succeed.`;
 
 export async function prepareAllCommand(
   options: PrepareAllCommandOptions,
@@ -304,8 +306,7 @@ export async function prepareAllCommand(
         includeLocalTools: false,
         disabledProposalTools: [
           "propose_state_delta",
-          ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
-          ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
+          ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES.filter((name) => name !== "propose_entity_mention"),
           ...EVENT_RESOLUTION_PROPOSAL_TOOL_NAMES,
         ],
         acquireLock: false,
@@ -348,6 +349,12 @@ export async function prepareAllCommand(
       await convergeForPreparation(root, sourceId, dependencies.converge, report);
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
+  }
+
+  if (options.stopAfterInitialWorld) {
+    if (inspection.stage === "needs-initial-world") throw preparationFailure(inspection);
+    report("Opening world is available for rollback-baseline publication; deferred later semantic repair.");
+    return inspection;
   }
 
   if (inspection.audit && narrativeGraphRepairIsTargetable(inspection.audit)) {
@@ -507,9 +514,6 @@ async function runWorldReconciliationPass(input: {
 }): Promise<void> {
   const audit = input.inspection.audit;
   if (!audit) throw new Error("Cannot reconcile a world without an audit report.");
-  const namespace = input.options.reparseRunId
-    ? ` Every proposal envelope ID in this pass must end with -${input.options.reparseRunId}.`
-    : "";
   await input.dependencies.compileInitialWorld({
     root: input.root,
     configPath: input.configPath,
@@ -521,8 +525,11 @@ async function runWorldReconciliationPass(input: {
       input.sourceId,
       audit,
       input.iteration,
-      { mode: input.mode },
-    )}${namespace}`,
+      {
+        mode: input.mode,
+        ...(input.options.reparseRunId ? { proposalIdSuffixTail: input.options.reparseRunId } : {}),
+      },
+    )}`,
     compilerBatchId: `reconcile-${input.sourceId}-${input.mode}-${input.options.reparseRunId ?? "v3"}-${input.iteration}`,
     sourceId: input.sourceId,
     includeLocalTools: false,

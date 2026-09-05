@@ -675,6 +675,15 @@ describe("versioned prepared novel cache", () => {
     const bundle = JSON.parse(await fs.readFile(path.join(published.cachePath, "bundle.json"), "utf8")) as { batchIds: string[] };
     expect(bundle.batchIds).toEqual(regular.map((batch) => batch.id).sort());
 
+    // Exact activation must not combine the stable bundle checkpoint with a
+    // transient calibration request that the bundle intentionally omits.
+    await expect(new PreparedNovelCache(sourceRoot, cacheRoot).activate(fixture.source, published.bundleHash!))
+      .resolves.toMatchObject({ status: "activated", bundleHash: published.bundleHash });
+    await expect(new BoundaryCalibrationStore(sourceRoot).list(fixture.source.id)).resolves.toEqual([]);
+    await expect(new CompilerBatchStore(sourceRoot).read(fixture.source.id)).resolves.toMatchObject({
+      completedBatchIds: regular.map((batch) => batch.id).sort(),
+    });
+
     const restoredRoot = await temporaryRoot("nwh-prepared-boundary-restored-");
     const restoredFixture = await createEvidenceFixture(restoredRoot, content);
     await expect(new PreparedNovelCache(restoredRoot, cacheRoot).restore(restoredFixture.source))

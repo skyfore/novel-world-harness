@@ -1155,7 +1155,7 @@ function validateKnowledgeDeltaForContext(knowledge: KnowledgeDelta, context: Wo
   }
 }
 
-function canonicalEventSatisfiedAtGenesis(
+export function canonicalEventSatisfiedAtGenesis(
   event: CanonicalEvent,
   state: WorldState,
   knowledge: KnowledgeDelta | undefined,

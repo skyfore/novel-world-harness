@@ -1,7 +1,7 @@
-import { ActorModelStore, characterGoalHasDevelopmentBoundary, characterModelSchema } from "../world/actors.js";
+import { ActorModelStore, characterGoalHasDevelopmentBoundary, characterModelSchema, evaluateCharacterGoal } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
 import { InitialWorldStore, initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
-import type { CanonicalEvent, ControlledWorldRule, EvidenceRef, Predicate, StoryTime } from "../world/model.js";
+import type { CanonicalEvent, ControlledWorldRule, EvidenceRef, EventRelation, Predicate, StoryTime, WorldState } from "../world/model.js";
 import { SegmentStore } from "./segments.js";
 import { EvidenceVerifier } from "./evidence.js";
 import { WorkspaceStore } from "../storage/workspace-store.js";
@@ -57,7 +57,10 @@ import {
   validateWorldRuleEvidenceAssertions,
   worldRuleEvidence,
 } from "../world/world-rule-ontology.js";
-import { compareStoryTime } from "../world/time.js";
+import { comparableStoryTime, compareStoryTime } from "../world/time.js";
+import { canonicalEventSatisfiedAtGenesis } from "../world/engine.js";
+import { buildFrontier } from "../world/frontier.js";
+import { applyStateDelta, DEFAULT_STATE_FIELDS, emptyWorldState, evaluatePredicate, StateSchemaRegistry } from "../world/state.js";
 import { isNovelScaleCompilation } from "./scale.js";
 import { validateSceneOccurrenceCatalog } from "../world/scene-occurrence.js";
 import { validateEventFrameInstance } from "../world/event-frame.js";
@@ -294,6 +297,7 @@ export type CompilerAuditReport = {
     characterModels: number;
     possibilities: number;
     autonomousWorldDrivers: number;
+    openingActiveWorldDrivers: number;
   };
   evidence: {
     artifactsChecked: number;
@@ -346,6 +350,7 @@ export type CompilerAuditReport = {
     controlledWorldRules: number | null;
     characterDevelopmentCoverage: number | null;
     openingCheckpointDeclared: number | null;
+    openingTimelineComparable: number | null;
     participantPresenceCoverage: number | null;
     readerSummaryCoverage: number | null;
     characterEntryCheckpointCoverage: number | null;
@@ -979,13 +984,13 @@ export async function auditCompiler(
     ? typedRelationshipEntities / relationshipEntities.length
     : null;
 
-  const graph = auditCausalGraph(events);
+  const graph = auditCausalGraph(events, eventRelations);
   const narrativeGraphNavigable = events.length ? graphNavigable(events, graph) : null;
   const eventsWithExplicitDelta = events.filter((event) => event.observedOutcome.operations.length > 0).length;
   const eventsWithExplicitEffect = events.filter((event) =>
     event.observedOutcome.operations.length > 0 || (event.observedKnowledge?.operations.length ?? 0) > 0).length;
   const timelineAnchoring = events.length
-    ? events.filter((event) => event.storyTime.kind !== "unknown").length / events.length
+    ? events.filter((event) => Boolean(comparableStoryTime(event.storyTime))).length / events.length
     : null;
   const eventEffectExplicitness = events.length ? eventsWithExplicitEffect / events.length : null;
   const participationCounts = new Map<string, number>();
@@ -1092,13 +1097,120 @@ export async function auditCompiler(
     .some((action) => (action!.proposedDelta.operations.length > 0)
       || ((action!.proposedKnowledge?.operations.length ?? 0) > 0)));
   const autonomousWorldDrivers = autonomousPossibilities.length + executableGoals.length;
-  const autonomousDriverCoverage = events.length ? (autonomousWorldDrivers > 0 ? 1 : 0) : null;
+  const openingTimelineComparable = initialWorld
+    ? (comparableStoryTime(initialWorld.checkpoint?.storyTime) ? 1 : 0)
+    : null;
+  const openingActiveEntityIds = new Set<string>();
+  for (const operation of initialWorld?.delta.operations ?? []) {
+    if ("entityId" in operation) openingActiveEntityIds.add(operation.entityId);
+  }
+  for (const operation of initialWorld?.knowledge?.operations ?? []) {
+    openingActiveEntityIds.add(operation.actorId);
+    if (operation.op === "learn" && operation.sourceActorId) openingActiveEntityIds.add(operation.sourceActorId);
+  }
+  for (const presence of initialWorld?.participantPresence ?? []) openingActiveEntityIds.add(presence.entityId);
+  for (const observation of initialWorld?.actorObservations ?? []) openingActiveEntityIds.add(observation.actorId);
+
+  let openingState: WorldState | null = null;
+  let openingProjectionError: string | null = null;
+  if (initialWorld) {
+    const emptyOpeningState = emptyWorldState("compiler-audit-genesis", 0);
+    const openingInputState: WorldState = initialWorld.checkpoint?.storyTime
+      ? {
+          ...emptyOpeningState,
+          logicalTime: { ...emptyOpeningState.logicalTime, storyTime: initialWorld.checkpoint.storyTime },
+        }
+      : emptyOpeningState;
+    try {
+      openingState = applyStateDelta(
+        openingInputState,
+        initialWorld.delta,
+        new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+        new Map(entities.map((entity) => [entity.id, entity])),
+        new Map(rules.map((rule) => [rule.id, rule])),
+      );
+    } catch (error) {
+      openingProjectionError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  const knownClaimsByActor = new Map<string, Set<string>>();
+  for (const operation of initialWorld?.knowledge?.operations ?? []) {
+    const known = knownClaimsByActor.get(operation.actorId) ?? new Set<string>();
+    if (operation.op === "learn" && operation.status !== "disbelieves") known.add(operation.claimId);
+    else known.delete(operation.claimId);
+    knownClaimsByActor.set(operation.actorId, known);
+  }
+  const realizedCanonicalEventIds = new Set<string>();
+  const experiencedCanonicalEventIdsByActor = new Map<string, Set<string>>();
+  if (openingState && initialWorld) {
+    for (const event of events) {
+      if (!canonicalEventSatisfiedAtGenesis(event, openingState, initialWorld.knowledge, eventRelations)) continue;
+      realizedCanonicalEventIds.add(event.id);
+      realizedCanonicalEventIds.add(`canon-${event.id}`);
+      for (const participantId of event.participants) {
+        const presence = event.participantPresence?.find((item) => item.entityId === participantId)?.mode;
+        if (presence === "mentioned" || presence === "represented") continue;
+        const experienced = experiencedCanonicalEventIdsByActor.get(participantId) ?? new Set<string>();
+        experienced.add(event.id);
+        experiencedCanonicalEventIdsByActor.set(participantId, experienced);
+      }
+    }
+  }
+  const openingActiveGoals = openingState
+    ? executableGoals.filter((goal) => {
+        const actor = entities.find((entity) => entity.id === goal.actorId);
+        if (actor?.kind !== "character") return false;
+        const action = [goal.candidateAction, ...(goal.actionPatterns ?? [])]
+          .filter((candidate) => Boolean(candidate))
+          .find((candidate) => candidate!.preconditions.every((predicate) => evaluatePredicate(openingState!, predicate)));
+        if (!action || (action.proposedDelta.operations.length === 0
+          && (action.proposedKnowledge?.operations.length ?? 0) === 0)) return false;
+        const phaseSupported = Boolean(goal.activation || goal.requiresKnowledge.length)
+          || (openingActiveEntityIds.has(goal.actorId)
+            && initialWorld?.evidence.some((openingEvidence) => goal.evidence.some((goalEvidence) =>
+              openingEvidence.span.sourceId === goalEvidence.span.sourceId
+              && openingEvidence.span.startLine <= goalEvidence.span.endLine
+              && openingEvidence.span.endLine >= goalEvidence.span.startLine)));
+        if (!phaseSupported) return false;
+        return evaluateCharacterGoal(goal, {
+          state: openingState!,
+          knownClaimIds: knownClaimsByActor.get(goal.actorId) ?? new Set(),
+          realizedCanonicalEventIds,
+          experiencedCanonicalEventIds: experiencedCanonicalEventIdsByActor.get(goal.actorId) ?? new Set(),
+          storyTime: openingState!.logicalTime.storyTime,
+        }).active;
+      })
+    : [];
+  const openingActivePossibilities = openingState
+    ? buildFrontier(
+        "compiler-audit",
+        "compiler-audit-genesis",
+        openingState,
+        autonomousPossibilities.map((possibility) => ({
+          ...possibility,
+          branchId: "compiler-audit",
+          evaluatedAtCommit: "compiler-audit-genesis",
+        })),
+        {
+          realizedIds: realizedCanonicalEventIds,
+          temporalAnchor: openingState.logicalTime.storyTime,
+          activeEntityIds: openingActiveEntityIds,
+          activeEvidence: initialWorld?.evidence,
+        },
+      ).evaluated.filter((entry) => entry.status === "eligible")
+    : [];
+  const openingActiveWorldDrivers = openingActiveGoals.length + openingActivePossibilities.length;
+  const autonomousDriverCoverage = events.length ? (openingActiveWorldDrivers > 0 ? 1 : 0) : null;
   const semanticIssues: string[] = [];
   const semanticRepairEventIds = new Set<string>();
   const semanticRepairCharacterIds: string[] = [];
   const semanticRepairRuleIds = new Set<string>();
   let semanticRepairInitialWorld = false;
   let semanticRepairRequiresFullReparse = worldRuleValidation.length > 0 || executablePolicyValidation.length > 0;
+  for (const eventId of sceneClosureRepairEventIds(sceneValidation, sceneOccurrences)) {
+    semanticRepairEventIds.add(eventId);
+  }
   const novelScale = isNovelScaleCompilation(sourceBytes, events.length);
   for (const issue of worldRuleValidation) {
     const index = issue.path?.match(/^worldRules\.(\d+)(?:\.|$)/u)?.[1];
@@ -1117,8 +1229,8 @@ export async function auditCompiler(
         .forEach((event) => semanticRepairEventIds.add(event.id));
     }
     if ((timelineAnchoring ?? 0) < 0.75) {
-      semanticIssues.push(`Only ${formatRatio(timelineAnchoring)} of canonical events have a story-time anchor (minimum 75%).`);
-      events.filter((event) => event.storyTime.kind === "unknown").forEach((event) => semanticRepairEventIds.add(event.id));
+      semanticIssues.push(`Only ${formatRatio(timelineAnchoring)} of canonical events have a comparable story-time anchor (minimum 75%).`);
+      events.filter((event) => !comparableStoryTime(event.storyTime)).forEach((event) => semanticRepairEventIds.add(event.id));
     }
     if (recurringCharacters.length && (characterDevelopmentCoverage ?? 0) < 0.5) {
       semanticIssues.push(`Only ${formatRatio(characterDevelopmentCoverage)} of recurring characters have phase-bounded goals or evidence-grounded development episodes (minimum 50%).`);
@@ -1133,6 +1245,14 @@ export async function auditCompiler(
     }
     if (initialWorld && !initialWorld.checkpoint) {
       semanticIssues.push("The initial world does not declare a temporal/narrative checkpoint.");
+      semanticRepairInitialWorld = true;
+    }
+    if (initialWorld && openingTimelineComparable !== 1) {
+      semanticIssues.push("The initial world has no deterministic comparable story-time anchor.");
+      semanticRepairInitialWorld = true;
+    }
+    if (openingProjectionError) {
+      semanticIssues.push(`The initial world cannot be projected into a valid opening state: ${openingProjectionError}`);
       semanticRepairInitialWorld = true;
     }
     if (characterParticipantSlots.length && (participantPresenceCoverage ?? 0) < 0.8) {
@@ -1182,9 +1302,16 @@ export async function auditCompiler(
       semanticIssues.push("One or more physically present opening characters lack a direct-perception Genesis observation.");
       semanticRepairInitialWorld = true;
     }
-    if (autonomousWorldDrivers === 0) {
-      semanticIssues.push("The compiled world has no executable actor goal or non-canonical autonomous possibility, so divergence can only wait for canon or repeat local dialogue.");
-      semanticRepairRequiresFullReparse = true;
+    if (openingActiveWorldDrivers === 0) {
+      semanticIssues.push("The compiled world has no executable autonomous driver active at the opening checkpoint, so divergence can only wait for canon or repeat local dialogue.");
+      const driverActorId = [...participationCounts]
+        .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0]
+        ?? [...physicalOpeningActorIds].sort()[0]
+        ?? [...openingActiveEntityIds]
+          .filter((entityId) => entities.find((entity) => entity.id === entityId)?.kind === "character")
+          .sort()[0];
+      if (driverActorId) semanticRepairCharacterIds.push(driverActorId);
+      else semanticRepairRequiresFullReparse = true;
     }
     if (models.length && controlledCharacterModelCoverage !== 1) {
       semanticIssues.push(`Only ${formatRatio(controlledCharacterModelCoverage)} of character models use the controlled ${CHARACTER_ONTOLOGY_VERSION} vocabulary (required 100% for novel-scale publication).`);
@@ -1250,7 +1377,7 @@ export async function auditCompiler(
     openingPhysicalPresence,
     openingActionability,
     autonomousDriverCoverage,
-    ...(novelScale ? [openingReaderContext, openingActorObservation] : []),
+    ...(novelScale ? [openingTimelineComparable, openingReaderContext, openingActorObservation] : []),
   ];
   const runtimeReadiness: CompilerReadinessState = !initialWorld
     ? "not-ready"
@@ -1536,6 +1663,7 @@ export async function auditCompiler(
       characterModels: models.length,
       possibilities: possibilities.length,
       autonomousWorldDrivers,
+      openingActiveWorldDrivers,
     },
     evidence: {
       artifactsChecked: evidenceArtifacts.length,
@@ -1604,6 +1732,7 @@ export async function auditCompiler(
       controlledWorldRules: controlledWorldRuleCoverage,
       characterDevelopmentCoverage,
       openingCheckpointDeclared: initialWorld ? (initialWorld.checkpoint ? 1 : 0) : null,
+      openingTimelineComparable,
       participantPresenceCoverage,
       readerSummaryCoverage,
       characterEntryCheckpointCoverage,
@@ -1715,7 +1844,30 @@ function earliestEvidenceLine(event: CanonicalEvent): number {
   );
 }
 
-function auditCausalGraph(events: readonly CanonicalEvent[]): {
+function sceneClosureRepairEventIds(
+  issues: ReadonlyArray<{ code: string; message: string; path?: string }>,
+  scenes: ReadonlyArray<{ eventIds: readonly string[] }>,
+): string[] {
+  const eventIds = new Set<string>();
+  for (const sceneIssue of issues) {
+    if (!["SCENE_EVENT_BACKLINK_REQUIRED", "UNKNOWN_EVENT_SCENE", "EVENT_SCENE_BACKLINK_REQUIRED"].includes(sceneIssue.code)) {
+      continue;
+    }
+    const scenePath = sceneIssue.path?.match(/^scenes\.(\d+)\.eventIds\.(\d+)$/u);
+    if (scenePath) {
+      const eventId = scenes[Number(scenePath[1])]?.eventIds[Number(scenePath[2])];
+      if (eventId) eventIds.add(eventId);
+    }
+    const eventPath = sceneIssue.path?.match(/^events\.(.+)\.sceneOccurrenceIds(?:\.|$)/u);
+    if (eventPath) eventIds.add(eventPath[1]!);
+    for (const match of sceneIssue.message.matchAll(/\bevent ([A-Za-z0-9][A-Za-z0-9._-]*)/giu)) {
+      eventIds.add(match[1]!);
+    }
+  }
+  return [...eventIds].sort();
+}
+
+function auditCausalGraph(events: readonly CanonicalEvent[], relations: readonly EventRelation[]): {
   cycles: string[][];
   missing: Array<{ eventId: string; parentId: string }>;
   temporalRegressions: Array<{ eventId: string; parentId: string }>;
@@ -1723,9 +1875,23 @@ function auditCausalGraph(events: readonly CanonicalEvent[]): {
   unconditionalRoots: string[];
 } {
   const byId = new Map(events.map((event) => [event.id, event]));
-  const missing: Array<{ eventId: string; parentId: string }> = [];
-  for (const event of events) {
-    for (const parentId of event.causalParents) if (!byId.has(parentId)) missing.push({ eventId: event.id, parentId });
+  // Canonical runtime possibilities always carry typed causalLinks, so the
+  // legacy CanonicalEvent.causalParents projection is intentionally ignored.
+  // Only necessary causes/enables gate eligibility; contributory relations
+  // remain part of cycle/order validation without turning a target conditional.
+  const causalRelations = relations.filter((relation) =>
+    relation.status !== "contested" && (relation.type === "causes" || relation.type === "enables"));
+  const necessaryRelations = causalRelations.filter((relation) => relation.operationality === "necessary");
+  const missing = causalRelations
+    .filter((relation) => !byId.has(relation.fromEventId) || !byId.has(relation.toEventId))
+    .map((relation) => ({ eventId: relation.toEventId, parentId: relation.fromEventId }));
+  const parentsByTarget = new Map<string, string[]>();
+  for (const relation of causalRelations) {
+    if (!byId.has(relation.fromEventId) || !byId.has(relation.toEventId)) continue;
+    parentsByTarget.set(relation.toEventId, [
+      ...(parentsByTarget.get(relation.toEventId) ?? []),
+      relation.fromEventId,
+    ]);
   }
   const cycles: string[][] = [];
   const visited = new Set<string>();
@@ -1741,25 +1907,23 @@ function auditCausalGraph(events: readonly CanonicalEvent[]): {
     visited.add(id);
     active.add(id);
     stack.push(id);
-    for (const parent of byId.get(id)?.causalParents ?? []) if (byId.has(parent)) visit(parent);
+    for (const parent of parentsByTarget.get(id) ?? []) visit(parent);
     stack.pop();
     active.delete(id);
   };
   for (const event of events) visit(event.id);
-  const temporalRegressions: Array<{ eventId: string; parentId: string }> = [];
-  for (const event of events) {
-    for (const parentId of event.causalParents) {
-      const parent = byId.get(parentId);
-      if (parent && storyTimeDefinitelyBefore(event.storyTime, parent.storyTime)) temporalRegressions.push({ eventId: event.id, parentId });
-    }
-  }
+  const temporalRegressions = causalRelations.flatMap((relation) => {
+    const parent = byId.get(relation.fromEventId);
+    const event = byId.get(relation.toEventId);
+    return parent && event && storyTimeDefinitelyBefore(event.storyTime, parent.storyTime)
+      ? [{ eventId: event.id, parentId: parent.id }]
+      : [];
+  });
   const adjacency = new Map(events.map((event) => [event.id, new Set<string>()]));
-  for (const event of events) {
-    for (const parentId of event.causalParents) {
-      if (!byId.has(parentId)) continue;
-      adjacency.get(event.id)!.add(parentId);
-      adjacency.get(parentId)!.add(event.id);
-    }
+  for (const relation of necessaryRelations) {
+    if (!byId.has(relation.fromEventId) || !byId.has(relation.toEventId)) continue;
+    adjacency.get(relation.toEventId)!.add(relation.fromEventId);
+    adjacency.get(relation.fromEventId)!.add(relation.toEventId);
   }
   const components: string[][] = [];
   const assigned = new Set<string>();
@@ -1779,8 +1943,11 @@ function auditCausalGraph(events: readonly CanonicalEvent[]): {
     }
     components.push(component.sort());
   }
+  const necessaryTargets = new Set(necessaryRelations
+    .filter((relation) => byId.has(relation.fromEventId) && byId.has(relation.toEventId))
+    .map((relation) => relation.toEventId));
   const unconditionalRoots = events
-    .filter((event) => event.causalParents.length === 0 && event.preconditions.length === 0)
+    .filter((event) => !necessaryTargets.has(event.id) && event.preconditions.length === 0)
     .map((event) => event.id)
     .sort();
   return { cycles, missing, temporalRegressions, components, unconditionalRoots };

@@ -209,6 +209,18 @@ onto base units:
 - a unit in a proposal-bearing segment without exact coverage is `unresolved`,
   not silently counted as extracted.
 
+Accepted accounting proposals are immutable review history and can repair a
+missing finish marker on retry. If the retry adds exact semantics, host-derived
+`represented` coverage deterministically supersedes only the overlapping
+accepted dispositions; all other decisions replay unchanged. A newly staged
+pending disposition still conflicts with overlapping exact semantics, and the
+diagnostic names its exact proposal ID for withdrawal.
+
+Boundary-calibration requests are transient workflow state and are not part of
+an immutable prepared revision. Materializing a revision clears that queue and
+restores only its stable batch checkpoints; a reparse that performs recovery
+then derives its selected batches again from the restored state.
+
 Audit reports both unit and byte denominators. Missing reviews remain
 `unknown`; fully reviewed unresolved/deferred units are `not-ready`; only full
 accounting without blockers is `ready`.
@@ -280,6 +292,13 @@ several mentions into one entity, or splitting one mention back out, explicit
 and reversible. Failed-batch cleanup restores the preceding current ref while
 retaining revision history.
 
+Recovery keeps current identity separate from creation provenance. A
+superseded accepted `new-entity` revision is never replayed or rebound as the
+current ref, but it may continue to prove how a still-pending entity was
+created when the current resolution for that same mention still selects the
+same identity. Rejected or identity-changing history cannot satisfy this
+check.
+
 The finish handshake validates mention existence, source locality, kind
 compatibility, candidate/evidence IDs, status-specific target authority, and
 the supersession chain. When a source has activated mention inventory, a new
@@ -321,6 +340,11 @@ the superseded cluster. Finish validation rejects dropped members, overlapping
 new clusters, in-place revision IDs, unknown candidates, unresolved
 participants, and cross-source evidence. Failed-batch cleanup restores the
 prior partition without deleting revision history.
+
+As with entity identity, recovery does not reactivate a superseded accepted
+`new-event` cluster. Its immutable revision may prove the creation origin only
+while a current coreferential resolution still affirms at least one of the
+same event mentions and the same canonical event.
 
 When a source has event mentions, every new canonical-event proposal must have
 a same-finish coreferential `new-event` trace. Every canonical participant must

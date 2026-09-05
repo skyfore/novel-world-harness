@@ -725,15 +725,23 @@ export async function validateEventProposalResolutionTrace(
   eventResolutionProposalIdsInput: readonly string[],
 ): Promise<string[]> {
   const sourceId = idSchema.parse(sourceIdInput);
-  const [annotations, identities, resolutions, events] = await Promise.all([
+  const [annotations, identities, resolutions, events, acceptedCreationResolutions] = await Promise.all([
     loadAnnotationCatalog(workspaceRoot, sourceId, annotationProposalIdsInput),
     loadIdentityCatalog(workspaceRoot, sourceId, entityResolutionProposalIdsInput),
     loadEventResolutionCatalog(workspaceRoot, sourceId, eventResolutionProposalIdsInput),
     loadSelectedEventProposals(workspaceRoot, sourceId, worldProposalIdsInput),
+    loadAcceptedNewEventResolutions(workspaceRoot, sourceId),
   ]);
   if (!annotations.eventMentions.size || !events.size) return [];
   const canonicalIds = new Set((await sourceCanonicalEvents(workspaceRoot, sourceId)).map((event) => event.id));
-  return eventTraceIssues(events.values(), annotations.eventMentions, identities, resolutions, canonicalIds);
+  return eventTraceIssues(
+    events.values(),
+    annotations.eventMentions,
+    identities,
+    resolutions,
+    canonicalIds,
+    acceptedCreationResolutions,
+  );
 }
 
 export async function validateCommittedEventResolutionTrace(
@@ -745,10 +753,12 @@ export async function validateCommittedEventResolutionTrace(
   const event = canonicalEventSchema.parse(eventInput);
   const annotations = await loadAnnotationCatalog(workspaceRoot, sourceId, []);
   if (!annotations.eventMentions.size) return [];
-  const [identities, eventResolutions, canonicalEvents] = await Promise.all([
+  const resolutionStore = new EventResolutionStore(workspaceRoot);
+  const [identities, eventResolutions, canonicalEvents, acceptedCreationResolutions] = await Promise.all([
     loadIdentityCatalog(workspaceRoot, sourceId, []),
-    new EventResolutionStore(workspaceRoot).list(sourceId),
+    resolutionStore.list(sourceId),
     sourceCanonicalEvents(workspaceRoot, sourceId),
+    loadAcceptedNewEventResolutions(workspaceRoot, sourceId, resolutionStore),
   ]);
   return eventTraceIssues(
     [event],
@@ -756,6 +766,7 @@ export async function validateCommittedEventResolutionTrace(
     identities,
     indexEventResolutions(eventResolutions),
     new Set(canonicalEvents.map((candidate) => candidate.id)),
+    acceptedCreationResolutions,
   );
 }
 
@@ -850,6 +861,7 @@ function eventTraceIssues(
   identities: ReadonlyMap<string, IdentityResolution>,
   resolutions: ReadonlyMap<string, EventResolution>,
   canonicalIds: ReadonlySet<string>,
+  acceptedCreationResolutions: readonly EventResolution[] = [],
 ): string[] {
   const issues: string[] = [];
   const uniqueResolutions = new Map<string, EventResolution>();
@@ -863,7 +875,15 @@ function eventTraceIssues(
       issues.push(`Canonical event ${event.id} has no coreferential resolved source event mention.`);
       continue;
     }
-    if (!canonicalIds.has(event.id) && !traces.some((resolution) => resolution.status === "new-event")) {
+    if (!canonicalIds.has(event.id)
+      && !traces.some((resolution) => resolution.status === "new-event")
+      && !acceptedCreationResolutions.some((resolution) =>
+        resolution.status === "new-event"
+        && resolution.relation === "coreference"
+        && resolution.canonicalEventId === event.id
+        && resolution.eventMentionIds.some((mentionId) =>
+          mentions.has(mentionId)
+          && traces.some((current) => current.eventMentionIds.includes(mentionId))))) {
       issues.push(`New canonical event ${event.id} must be established by a new-event resolution.`);
     }
     const participantIds = new Set<string>();
@@ -886,6 +906,22 @@ function eventTraceIssues(
     });
   }
   return issues.sort();
+}
+
+/**
+ * Superseded accepted new-event decisions are immutable creation provenance,
+ * not active candidates to replay. Current refs still drive occurrence and
+ * participant trace; this history only proves how a pending event originated.
+ */
+async function loadAcceptedNewEventResolutions(
+  workspaceRoot: string,
+  sourceId: string,
+  store = new EventResolutionStore(workspaceRoot),
+): Promise<EventResolution[]> {
+  const summaries = (await store.listProposals(sourceId, "accepted"))
+    .filter((summary) => summary.status === "new-event");
+  return Promise.all(summaries.map(async (summary) =>
+    (await store.readProposal(sourceId, "accepted", summary.id)).payload));
 }
 
 function validateResolvedEventParticipants(

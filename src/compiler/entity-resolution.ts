@@ -666,14 +666,21 @@ export async function validateEntityProposalResolutionTrace(
   resolutionProposalIdsInput: readonly string[],
 ): Promise<string[]> {
   const sourceId = idSchema.parse(sourceIdInput);
-  const [mentions, resolutions, entities] = await Promise.all([
+  const [mentions, resolutions, entities, acceptedCreationResolutions] = await Promise.all([
     loadMentionCatalog(workspaceRoot, sourceId, annotationProposalIdsInput),
     loadResolutionCatalog(workspaceRoot, sourceId, resolutionProposalIdsInput),
     loadSelectedEntityProposals(workspaceRoot, sourceId, worldProposalIdsInput),
+    loadAcceptedNewEntityResolutions(workspaceRoot, sourceId),
   ]);
   if (!mentions.size || !entities.size) return [];
   const canonicalIds = new Set((await sourceCanonicalEntities(workspaceRoot, sourceId)).map((entity) => entity.id));
-  return entityTraceIssues(entities.values(), mentions, resolutions, canonicalIds);
+  return entityTraceIssues(
+    entities.values(),
+    mentions,
+    resolutions,
+    canonicalIds,
+    acceptedCreationResolutions,
+  );
 }
 
 export async function validateCommittedEntityResolutionTrace(
@@ -689,10 +696,14 @@ export async function validateCommittedEntityResolutionTrace(
       .map((mention) => [mention.id, entityMentionSchema.parse(mention)]),
   );
   if (!mentions.size) return [];
-  const resolutions = new Map((await new EntityResolutionStore(workspaceRoot).list(sourceId))
-    .map((resolution) => [resolution.mentionId, resolution]));
+  const resolutionStore = new EntityResolutionStore(workspaceRoot);
+  const [currentResolutions, acceptedCreationResolutions] = await Promise.all([
+    resolutionStore.list(sourceId),
+    loadAcceptedNewEntityResolutions(workspaceRoot, sourceId, resolutionStore),
+  ]);
+  const resolutions = new Map(currentResolutions.map((resolution) => [resolution.mentionId, resolution]));
   const canonicalIds = new Set((await sourceCanonicalEntities(workspaceRoot, sourceId)).map((candidate) => candidate.id));
-  return entityTraceIssues([entity], mentions, resolutions, canonicalIds);
+  return entityTraceIssues([entity], mentions, resolutions, canonicalIds, acceptedCreationResolutions);
 }
 
 export type EntityResolutionCoverage = {
@@ -779,6 +790,7 @@ function entityTraceIssues(
   mentions: ReadonlyMap<string, EntityMention>,
   resolutions: ReadonlyMap<string, IdentityResolution>,
   canonicalIds: ReadonlySet<string>,
+  acceptedCreationResolutions: readonly IdentityResolution[] = [],
 ): string[] {
   const issues: string[] = [];
   for (const entity of entities) {
@@ -794,7 +806,17 @@ function entityTraceIssues(
     const nameTrace = traces.find(({ mention }) => mention.surface === entity.canonicalName);
     if (!nameTrace) {
       issues.push(`Entity ${entity.id} canonicalName '${entity.canonicalName}' has no resolved source mention.`);
-    } else if (!canonicalIds.has(entity.id) && nameTrace.resolution.status !== "new-entity") {
+    } else if (!canonicalIds.has(entity.id)
+      && nameTrace.resolution.status !== "new-entity"
+      && !acceptedCreationResolutions.some((resolution) => {
+        if (resolution.status !== "new-entity" || resolution.entityId !== entity.id) return false;
+        const mention = mentions.get(resolution.mentionId);
+        const current = resolutions.get(resolution.mentionId);
+        return mention?.surface === entity.canonicalName
+          && mention.kindCandidates.includes(entity.kind)
+          && (current?.status === "resolved" || current?.status === "new-entity")
+          && current.entityId === entity.id;
+      })) {
       issues.push(`New entity ${entity.id} canonicalName must be established by a new-entity resolution.`);
     }
     entity.aliases.forEach((alias, index) => {
@@ -803,6 +825,23 @@ function entityTraceIssues(
     });
   }
   return issues;
+}
+
+/**
+ * A later batch may legitimately supersede a creation decision with a normal
+ * resolved decision once the pending entity becomes checkpointed. The current
+ * ref remains authoritative for identity, while the accepted immutable
+ * new-entity revision remains the provenance that established the entity.
+ */
+async function loadAcceptedNewEntityResolutions(
+  workspaceRoot: string,
+  sourceId: string,
+  store = new EntityResolutionStore(workspaceRoot),
+): Promise<IdentityResolution[]> {
+  const summaries = (await store.listProposals(sourceId, "accepted"))
+    .filter((summary) => summary.status === "new-entity");
+  return Promise.all(summaries.map(async (summary) =>
+    (await store.readProposal(sourceId, "accepted", summary.id)).payload));
 }
 
 async function loadResolutionCatalog(

@@ -417,6 +417,33 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const representedAccountingProposalIds = [...errorText.matchAll(
+    /withdraw source-accounting proposal '([A-Za-z0-9][A-Za-z0-9._-]*)'/giu,
+  )].map((match) => match[1]!);
+  if (toolName === "finish_compiler_batch" && representedAccountingProposalIds.length) {
+    const proposalIds = [...new Set(representedAccountingProposalIds)];
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry once only after withdrawing every exact conflicting accounting proposal named by the host and re-accounting any units that become unresolved.",
+      steps: [
+        `Call withdraw_compiler_proposal once for each exact proposal_id named in the diagnostic: ${proposalIds.join(", ")}. Do not guess a unit-to-proposal mapping.`,
+        "Call find_source_accounting_units with status=unresolved, offset=0, and max_results=20; review and account each returned page, refetching from offset=0 after every successful proposal.",
+        "Do not disposition represented units; host-derived exact semantic coverage already accounts for them.",
+        `Retry ${toolName} once after concrete withdrawal/accounting progress. If the same full diagnostic repeats, stop instead of looping.`,
+      ],
+      suggestedCall: {
+        tool: "withdraw_compiler_proposal",
+        arguments: {
+          proposal_id: proposalIds[0]!,
+          reason: "Recovered accounting dispositions overlap host-derived represented semantics.",
+        },
+      },
+    };
+  }
+
   if (toolName === "finish_compiler_batch" && /source-unit accounting is incomplete/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -438,6 +465,74 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const crossBatchSupersessions = [...errorText.matchAll(
+    /CROSS_BATCH_LOGICAL_SUPERSESSION direction=(previous|next|unknown) prior='([A-Za-z0-9][A-Za-z0-9._-]*)' current='([A-Za-z0-9][A-Za-z0-9._-]*)'/gu,
+  )].map((match) => ({
+    direction: match[1] as "previous" | "next" | "unknown",
+    priorProposalId: match[2]!,
+    currentProposalId: match[3]!,
+  }));
+  if (toolName === "finish_compiler_batch" && crossBatchSupersessions.length) {
+    const currentProposalIds = [...new Set(crossBatchSupersessions.map((item) => item.currentProposalId))];
+    const priorProposalIds = [...new Set(crossBatchSupersessions.map((item) => item.priorProposalId))];
+    const adjacentDirections = [...new Set(crossBatchSupersessions
+      .map((item) => item.direction)
+      .filter((direction): direction is "previous" | "next" => direction !== "unknown"))];
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry finish once only after removing the named current-batch replacements, repairing every one-sided current dependency, and queuing any confirmed adjacent artifact for the existing two-segment calibration workflow.",
+      steps: [
+        `Call withdraw_compiler_proposal for each named current-batch replacement: ${currentProposalIds.join(", ")}. Never try to withdraw the checkpointed prior proposal(s): ${priorProposalIds.join(", ")}.`,
+        adjacentDirections.length
+          ? `For each confirmed direction (${adjacentDirections.join(", ")}), call peek_adjacent_evidence once, then call defer_boundary_artifact in that direction with the exact prior proposal and dependent current artifact IDs. Only the queued boundary-calibration batch may call replace_boundary_proposal.`
+          : "Read the prior proposal payloads and distinguish accidental logical-ID reuse from a genuinely adjacent semantic unit; use a distinct stable logical ID for a distinct artifact, or the peek/defer workflow when it crosses an immediate split.",
+        "Before retrying finish, repair or withdraw every current-batch draft named by the full graph diagnostic that would otherwise leave a one-sided scene/event or other reciprocal link. Preserve unrelated valid drafts.",
+        `Retry ${toolName} once after that concrete progress. If the same full diagnostic repeats, stop instead of attempting the prior proposal ID or looping.`,
+      ],
+      suggestedCall: {
+        tool: "withdraw_compiler_proposal",
+        arguments: {
+          proposal_id: currentProposalIds[0]!,
+          reason: "Ordinary source batches cannot replace a checkpointed cross-boundary proposal; defer it to boundary calibration.",
+        },
+      },
+    };
+  }
+
+  const unknownAnnotationReferences = [...errorText.matchAll(
+    /^-\s+([A-Za-z0-9][A-Za-z0-9._-]*):\s+([A-Za-z][A-Za-z0-9]*) references unknown annotation '([A-Za-z0-9][A-Za-z0-9._-]*)'/gmu,
+  )].map((match) => ({
+    proposalId: match[1]!,
+    field: match[2]!,
+    unknownAnnotationId: match[3]!,
+  }));
+  if (toolName === "finish_compiler_batch" && unknownAnnotationReferences.length) {
+    const proposalIds = [...new Set(unknownAnnotationReferences.map((item) => item.proposalId))];
+    const diagnosedReferences = unknownAnnotationReferences
+      .map((item) => `${item.proposalId}.${item.field} -> ${item.unknownAnnotationId}`)
+      .join(", ");
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry finish once only after correcting or withdrawing each specifically named dangling-reference proposal while preserving every unlisted active draft.",
+      steps: [
+        `Repair only the diagnosed proposals (${proposalIds.join(", ")}); the invalid references are ${diagnosedReferences}. Preserve every unlisted active proposal exactly as recorded.`,
+        "Use the active-ID inventory in the finish diagnostic, or call find_source_annotations as suggested. Copy the exact returned annotationId into the failing reference field; never copy ref/proposalId or invent a prefix variant. For a dependency recorded in this turn, use the exact annotation_id from its successful proposal payload.",
+        "Because active proposals are immutable, submit each corrected annotation under a new unique envelope proposal_id while preserving its stable annotation_id and evidence anchor, then withdraw only its exact defective proposal_id. If the optional relation is unsupported, omit it in the replacement or withdraw only that named invalid proposal.",
+        `Retry ${toolName} once after concrete repair. Use outcome=complete whenever any active proposal remains; never mass-withdraw valid drafts or use no-artifacts to escape validation. If the same full diagnostic repeats, stop instead of looping.`,
+      ],
+      suggestedCall: {
+        tool: "find_source_annotations",
+        arguments: { query: "*", status: "pending", offset: 0, max_results: 200 },
+      },
+    };
+  }
+
   if (toolName === "finish_compiler_batch" && /(?:graph|trace) is incomplete/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -451,6 +546,26 @@ export function buildNwhToolRecoveryAdvice(
         "Use source-scoped finder results only when an exact existing ID is genuinely missing; do not re-propose a checkpointed pending identity or guess a replacement ID.",
         `Retry ${toolName} once after concrete proposal progress. If the same full diagnostic repeats, stop instead of looping.`,
       ],
+    };
+  }
+
+  const exactQuoteSegment = /exact evidence quote was not found in segment ([a-z0-9][a-z0-9._-]*?)(?: with the supplied context)?\./iu.exec(errorText)?.[1];
+  if (COMPILER_PROPOSAL_TOOLS.has(toolName) && exactQuoteSegment) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "lookup-miss",
+      retryable: true,
+      retryCondition: "Retry once only after reading the named active-source segment and copying the selector text verbatim from its returned chunk.",
+      steps: [
+        `Call read_source_evidence with ref source-segment:${exactQuoteSegment}, offset=0, and max_chars=120000. If it returns nextOffset before the intended passage, continue only with that exact nextOffset.`,
+        "Copy the intended non-empty substring verbatim from the returned chunk into the failing evidence selector's exact field, and copy the returned evidence_segment_id into segment_id; do not copy JSON escaping from the prompt or normalize punctuation/whitespace.",
+        `Retry ${toolName} once after changing that selector. If the intended wording is absent after reading the complete segment, remove/reframe the unsupported field or stop; never guess another quote.`,
+      ],
+      suggestedCall: {
+        tool: "read_source_evidence",
+        arguments: { ref: `source-segment:${exactQuoteSegment}`, offset: 0, max_chars: 120_000 },
+      },
     };
   }
 

@@ -238,6 +238,82 @@ describe("source-unit accounting tools", () => {
     expect(summary.blockingUnits).toBe(0);
     expect(summary.statusCounts["background-only"]).toBe(summary.totalUnits);
 
+    // A later recovery may add exact semantics that overlap decisions which
+    // were valid when the accounting proposals were first accepted. The host
+    // must project those units as represented without mutating or replaying a
+    // conflicting model disposition.
+    await accounting.remove(fixture.source.id);
+    const semanticRetry = createCompilerProposalToolset(root, {
+      provider: "test",
+      model: "accounting-semantic-recovery-model",
+    });
+    await semanticRetry.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+    const exactRuleText = "Sentence 001 describes ordinary background texture without a world transition.";
+    await semanticRetry.tools.find((candidate) => candidate.name === "propose_world_rule")!.execute(
+      "recovery-rule",
+      {
+        proposal_id: "rule-accounting-recovery-representation",
+        payload: {
+          ontologyVersion: "world-rule-v2",
+          id: "accounting-recovery-representation",
+          name: exactRuleText,
+          kind: "social",
+          scope: "global",
+          visibility: "public",
+          priority: 1,
+          defeasible: true,
+          clauses: [{
+            id: "accounting-recovery-clause",
+            modality: "forbid",
+            predicate: { op: "elapsed-days-gte", days: 0 },
+            basis: "explicit",
+            status: "supported",
+            confidence: 1,
+          }],
+          exceptions: [],
+          basis: "explicit",
+          status: "supported",
+          confidence: 1,
+        },
+        evidence_segment_ids: [fixture.segmentId],
+        evidence_selectors: [{
+          segment_id: fixture.segmentId,
+          exact: exactRuleText,
+          target_path: "/name",
+          relation: "supports",
+          strength: "explicit",
+        }, {
+          segment_id: fixture.segmentId,
+          exact: exactRuleText,
+          target_path: "/clauses/0/predicate",
+          relation: "supports",
+          strength: "explicit",
+        }],
+      } as never,
+      undefined,
+      undefined,
+      {} as never,
+    );
+    await expect(semanticRetry.tools.find((candidate) => candidate.name === "finish_compiler_batch")!.execute(
+      "finish-after-new-exact-semantics",
+      {
+        outcome: "complete",
+        reviewed_segments: reviewedSegments,
+        summary: "Recovered accepted accounting while exact semantics upgraded one unit to represented.",
+      } as never,
+      undefined,
+      undefined,
+      {} as never,
+    )).resolves.toMatchObject({
+      details: { compilerBatchFinished: true },
+      terminate: true,
+    });
+    await expect(accounting.summarize(await ensureSourceStructure(root, fixture.source))).resolves.toMatchObject({
+      unaccountedUnits: 0,
+      blockingUnits: 0,
+      statusCounts: { represented: 1 },
+    });
+
     expect((await accounting.listProposals(fixture.source.id, "accepted")).map((proposal) => proposal.id).sort())
       .toEqual(["account-partial", "account-remainder"]);
     await expect(accounting.rejectBatchProposals(fixture.source.id, batch.id))

@@ -557,7 +557,14 @@ function assessTemporalCompatibility(
 ): { allowed: boolean; reason?: string } {
   const currentRange = comparableStoryTime(current);
   const candidateRange = comparableStoryTime(candidate);
-  if (!currentRange) return { allowed: true };
+  if (current && !currentRange) {
+    return causallySupported
+      ? { allowed: true, reason: "candidate time is admitted by an already-realized typed causal relation" }
+      : unwindowedIsImmediate && !candidate
+        ? { allowed: true, reason: "an unwindowed non-canonical development is treated as immediate" }
+        : { allowed: false, reason: "the active story-time anchor is present but cannot be compared safely" };
+  }
+  if (!currentRange) return { allowed: true, reason: "the branch has no active story-time anchor" };
   if (!candidateRange || candidateRange.scale !== currentRange.scale) {
     return causallySupported
       ? { allowed: true, reason: "candidate time is admitted by an already-realized typed causal relation" }

@@ -398,7 +398,11 @@ describe("prepare-all command", () => {
         expect(options.prompt).toContain("one explicit world-time cut");
         expect(options.prompt).toContain("Later discourse may establish a pre-checkpoint fact");
         expect(options.prompt).toContain("never counterpart character IDs");
+        expect(options.prompt).toContain("same-finish new-entity resolution");
         expect(options.prompt).toContain("Every proposal envelope ID in this pass must end with -repair-test-run");
+        expect(options.disabledProposalTools).not.toContain("propose_entity_mention");
+        expect(options.disabledProposalTools).not.toContain("propose_entity_resolution");
+        expect(options.disabledProposalTools).toContain("propose_event_mention");
         await new CompilerProposalService(root).submit("initial-world", {
           proposalId: "generated-initial-world-repair-test-run",
           payload: {
@@ -445,8 +449,22 @@ describe("prepare-all command", () => {
         causalParents: index === 1 ? [] : [`opening-first-${index - 1}`],
         confidence: 1,
       });
+      if (index > 1) {
+        await canon.putEventRelation({
+          id: `opening-first-link-${index - 1}-${index}`,
+          fromEventId: `opening-first-${index - 1}`,
+          toEventId: `opening-first-${index}`,
+          type: "enables",
+          operationality: "necessary",
+          status: "explicit",
+          confidence: 1,
+          mechanism: "Each completed story beat enables the next beat.",
+          evidence,
+        });
+      }
     }
     let openingCalls = 0;
+    let repairCalls = 0;
 
     await expect(prepareAllCommand({
       root,
@@ -455,6 +473,14 @@ describe("prepare-all command", () => {
       cacheRoot: path.join(root, "prepared-cache"),
     }, {
       compileInitialWorld: async (options) => {
+        if (options.prompt.includes("<world-semantic-reconciliation")) {
+          repairCalls += 1;
+          expect(openingCalls).toBe(1);
+          await expect(new InitialWorldStore(root).get()).resolves.toMatchObject({
+            participantPresence: [{ entityId: "hero", mode: "physical" }],
+          });
+          return;
+        }
         openingCalls += 1;
         expect(options.prompt).toContain("one explicit world-time cut");
         await new CompilerProposalService(root).submit("initial-world", {
@@ -479,6 +505,7 @@ describe("prepare-all command", () => {
     })).rejects.toThrow("Automatic preparation stopped at 'repair'");
 
     expect(openingCalls).toBe(1);
+    expect(repairCalls).toBeGreaterThan(0);
     await expect(new InitialWorldStore(root).get()).resolves.toMatchObject({
       participantPresence: [{ entityId: "hero", mode: "physical" }],
     });

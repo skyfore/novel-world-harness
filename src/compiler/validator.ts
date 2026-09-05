@@ -1156,8 +1156,30 @@ export class CompilerCommitService {
       "ATTRIBUTION_DEPENDENCY_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "event-frame")) await processCandidate(candidate);
+    const sceneGraphCandidates = eligible.filter((item) =>
+      item.kind === "canonical-event" || item.kind === "scene-occurrence");
+    const sceneGraphPreflight = validateProspectiveSceneEventGraph(catalog, sceneGraphCandidates);
+    const sceneGraphBlockedIds = new Set<string>();
+    for (const [candidateId, errors] of sceneGraphPreflight.candidateErrors) {
+      const candidate = sceneGraphCandidates.find((item) => item.id === candidateId);
+      if (!candidate) continue;
+      sceneGraphBlockedIds.add(candidate.id);
+      blockCandidate(candidate, errors);
+    }
+    if (sceneGraphPreflight.unattributedErrors.length && sceneGraphCandidates.length) {
+      for (const candidate of sceneGraphCandidates) {
+        if (sceneGraphBlockedIds.has(candidate.id)) continue;
+        sceneGraphBlockedIds.add(candidate.id);
+        blockCandidate(candidate, [
+          issue(
+            "CANONICAL_SCENE_EVENT_GRAPH_INVALID",
+            `The existing scene/event graph must be repaired in the same convergence: ${sceneGraphPreflight.unattributedErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+          ),
+        ]);
+      }
+    }
     await processDependencyKind(
-      eligible.filter((item) => item.kind === "canonical-event"),
+      eligible.filter((item) => item.kind === "canonical-event" && !sceneGraphBlockedIds.has(item.id)),
       catalog.events,
       eventDependencies,
       processCandidate,
@@ -1194,7 +1216,30 @@ export class CompilerCommitService {
       "NORM_TEMPLATE_DEPENDENCY_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
-    for (const candidate of eligible.filter((item) => item.kind === "scene-occurrence")) await processCandidate(candidate);
+    const sceneCandidates = eligible.filter((item) =>
+      item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
+    if (sceneCandidates.length) {
+      const prospectiveCatalog = cloneValidationCatalog(catalog);
+      sceneCandidates.forEach((candidate) => addToCatalog(prospectiveCatalog, candidate.kind, candidate.payload));
+      const validations = await Promise.all(
+        sceneCandidates.map((candidate) => validateCandidate(candidate, prospectiveCatalog)),
+      );
+      if (validations.every((validation) => validation.accepted)) {
+        for (const candidate of sceneCandidates) await commitCandidate(candidate);
+      } else {
+        const groupErrors = uniqueIssues(validations.flatMap((validation) => validation.errors));
+        for (const [index, candidate] of sceneCandidates.entries()) {
+          blockCandidate(candidate, validations[index]!.errors.length
+            ? validations[index]!.errors
+            : [
+                issue(
+                  "SCENE_OCCURRENCE_GROUP_BLOCKED",
+                  `Scene occurrence graph is invalid: ${groupErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+                ),
+              ]);
+        }
+      }
+    }
     for (const candidate of eligible.filter((item) => item.kind === "event-participation")) await processCandidate(candidate);
     const relationCandidates: PendingCanonicalProposal[] = [];
     for (const candidate of eligible.filter((item) => item.kind === "event-relation")) {
@@ -1330,8 +1375,25 @@ export class CompilerCommitService {
       "ATTRIBUTION_DEPENDENCY_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "event-frame")) await processCandidate(candidate);
+    const sceneGraphCandidates = eligible.filter((item) =>
+      item.kind === "canonical-event" || item.kind === "scene-occurrence");
+    const sceneGraphPreflight = validateProspectiveSceneEventGraph(catalog, sceneGraphCandidates);
+    const sceneGraphBlockedIds = new Set<string>();
+    for (const [candidateId, errors] of sceneGraphPreflight.candidateErrors) {
+      const candidate = sceneGraphCandidates.find((item) => item.id === candidateId);
+      if (!candidate) continue;
+      sceneGraphBlockedIds.add(candidate.id);
+      blockCandidate(candidate, errors);
+    }
+    if (sceneGraphPreflight.unattributedErrors.length) {
+      blocked.push({
+        id: "canonical-scene-event-graph",
+        kind: "scene-occurrence",
+        errors: uniqueIssues(sceneGraphPreflight.unattributedErrors),
+      });
+    }
     await processDependencyKind(
-      eligible.filter((item) => item.kind === "canonical-event"),
+      eligible.filter((item) => item.kind === "canonical-event" && !sceneGraphBlockedIds.has(item.id)),
       catalog.events,
       eventDependencies,
       processCandidate,
@@ -1359,7 +1421,28 @@ export class CompilerCommitService {
       "NORM_TEMPLATE_DEPENDENCY_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
-    for (const candidate of eligible.filter((item) => item.kind === "scene-occurrence")) await processCandidate(candidate);
+    const sceneCandidates = eligible.filter((item) =>
+      item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
+    if (sceneCandidates.length) {
+      const prospectiveCatalog = cloneValidationCatalog(catalog);
+      sceneCandidates.forEach((candidate) => addToCatalog(prospectiveCatalog, candidate.kind, candidate.payload));
+      const validations = sceneCandidates.map((candidate) => validateCandidate(candidate, prospectiveCatalog));
+      if (validations.every((validation) => validation.accepted)) {
+        sceneCandidates.forEach((candidate) => addToCatalog(catalog, candidate.kind, candidate.payload));
+      } else {
+        const groupErrors = uniqueIssues(validations.flatMap((validation) => validation.errors));
+        for (const [index, candidate] of sceneCandidates.entries()) {
+          blockCandidate(candidate, validations[index]!.errors.length
+            ? validations[index]!.errors
+            : [
+                issue(
+                  "SCENE_OCCURRENCE_GROUP_BLOCKED",
+                  `Scene occurrence graph is invalid: ${groupErrors.map((item) => `${item.code}: ${item.message}`).join("; ")}`,
+                ),
+              ]);
+        }
+      }
+    }
     for (const candidate of eligible.filter((item) => item.kind === "event-participation")) await processCandidate(candidate);
 
     const relationCandidates: PendingCanonicalProposal[] = [];
@@ -1685,6 +1768,88 @@ function cloneValidationCatalog(catalog: CompilerValidationCatalog): CompilerVal
     rules: new Map(catalog.rules),
     goals: new Map(catalog.goals),
   };
+}
+
+function validateProspectiveSceneEventGraph(
+  catalog: CompilerValidationCatalog,
+  candidates: readonly PendingCanonicalProposal[],
+): {
+  candidateErrors: Map<string, ValidationIssue[]>;
+  unattributedErrors: ValidationIssue[];
+} {
+  const prospective = cloneValidationCatalog(catalog);
+  for (const candidate of candidates) addToCatalog(prospective, candidate.kind, candidate.payload);
+  const scenes = [...prospective.sceneOccurrences.values()];
+  const issues = validateSceneOccurrenceCatalog({
+    entities: prospective.entities,
+    events: prospective.events,
+    scenes,
+  });
+  const eventCandidates = new Map(candidates.flatMap((candidate) =>
+    candidate.kind === "canonical-event"
+      ? [[canonicalEventSchema.parse(candidate.payload).id, candidate] as const]
+      : []));
+  const sceneCandidates = new Map(candidates.flatMap((candidate) =>
+    candidate.kind === "scene-occurrence"
+      ? [[sceneOccurrenceSchema.parse(candidate.payload).id, candidate] as const]
+      : []));
+  const candidateErrors = new Map<string, ValidationIssue[]>();
+  const unattributedErrors: ValidationIssue[] = [];
+
+  for (const graphIssue of issues) {
+    const { eventIds, sceneIds } = sceneEventGraphIssueArtifacts(graphIssue, scenes);
+    const implicated = new Map<string, PendingCanonicalProposal>();
+    for (const eventId of eventIds) {
+      const candidate = eventCandidates.get(eventId);
+      if (candidate) implicated.set(candidate.id, candidate);
+    }
+    for (const sceneId of sceneIds) {
+      const candidate = sceneCandidates.get(sceneId);
+      if (candidate) implicated.set(candidate.id, candidate);
+    }
+    if (!implicated.size) {
+      unattributedErrors.push(graphIssue);
+      continue;
+    }
+    for (const candidate of implicated.values()) {
+      candidateErrors.set(candidate.id, uniqueIssues([
+        ...(candidateErrors.get(candidate.id) ?? []),
+        graphIssue,
+      ]));
+    }
+  }
+  return {
+    candidateErrors,
+    unattributedErrors: uniqueIssues(unattributedErrors),
+  };
+}
+
+function sceneEventGraphIssueArtifacts(
+  graphIssue: ValidationIssue,
+  scenes: readonly SceneOccurrence[],
+): { eventIds: Set<string>; sceneIds: Set<string> } {
+  const eventIds = new Set<string>();
+  const sceneIds = new Set<string>();
+  const scenePath = graphIssue.path?.match(/^scenes\.(\d+)(?:\.eventIds\.(\d+))?/u);
+  if (scenePath) {
+    const scene = scenes[Number(scenePath[1])];
+    if (scene) {
+      sceneIds.add(scene.id);
+      if (scenePath[2] !== undefined) {
+        const eventId = scene.eventIds[Number(scenePath[2])];
+        if (eventId) eventIds.add(eventId);
+      }
+    }
+  }
+  const eventPath = graphIssue.path?.match(/^events\.(.+)\.sceneOccurrenceIds\.(\d+)$/u);
+  if (eventPath) eventIds.add(eventPath[1]!);
+  for (const match of graphIssue.message.matchAll(/\b[Ee]vent ([A-Za-z0-9][A-Za-z0-9._-]*)/gu)) {
+    eventIds.add(match[1]!);
+  }
+  for (const match of graphIssue.message.matchAll(/\b[Ss]cene ([A-Za-z0-9][A-Za-z0-9._-]*)/gu)) {
+    sceneIds.add(match[1]!);
+  }
+  return { eventIds, sceneIds };
 }
 
 function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {

@@ -1294,6 +1294,132 @@ describe("CompilerCommitService", () => {
     expect(result.blocked).toEqual([expect.objectContaining({ id: "02-b-before-a-proposal" })]);
   });
 
+  it("previews pending scenes as one graph before validating an unrelated earlier scene", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await proposals.submit("canonical-event", {
+      proposalId: "01-target-event-proposal",
+      payload: {
+        id: "target-event",
+        title: "Target event",
+        participants: [],
+        participantPresence: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        causalParents: [],
+        sceneOccurrenceIds: ["target-scene"],
+        evidence: evidence("曹操"),
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("scene-occurrence", {
+      proposalId: "02-unrelated-scene-proposal",
+      payload: {
+        ontologyVersion: "scene-occurrence-v1",
+        id: "unrelated-scene",
+        discourseSegmentIds: ["unrelated-discourse"],
+        eventIds: [],
+        viewpointActorIds: [],
+        presentActorIds: [],
+        entryConditions: [],
+        exitConditions: [],
+        evidence: evidence("北门"),
+      },
+      generatedBy: { worker: "test" },
+    });
+    await proposals.submit("scene-occurrence", {
+      proposalId: "03-target-scene-proposal",
+      payload: {
+        ontologyVersion: "scene-occurrence-v1",
+        id: "target-scene",
+        discourseSegmentIds: ["target-discourse"],
+        eventIds: ["target-event"],
+        viewpointActorIds: [],
+        presentActorIds: [],
+        entryConditions: [],
+        exitConditions: [],
+        evidence: evidence("曹操，字孟德"),
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    await expect(commits.validatePendingStructure()).resolves.toEqual([]);
+
+    const result = await commits.acceptAllValid();
+    expect(result.blocked).toEqual([]);
+    expect(result.accepted.map((item) => item.id)).toEqual([
+      "01-target-event-proposal",
+      "02-unrelated-scene-proposal",
+      "03-target-scene-proposal",
+    ]);
+  });
+
+  it("blocks an event-only revision that would break a committed scene backlink", async () => {
+    const { proposals, commits, evidence } = await fixture();
+    await commits.canon.putEvent({
+      id: "linked-event",
+      title: "Linked event",
+      participants: [],
+      storyTime: { kind: "unknown" },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [] },
+      causalParents: [],
+      sceneOccurrenceIds: ["linked-scene"],
+      evidence: evidence("曹操"),
+      confidence: 1,
+    });
+    await commits.canon.putSceneOccurrence({
+      ontologyVersion: "scene-occurrence-v1",
+      id: "linked-scene",
+      discourseSegmentIds: ["linked-discourse"],
+      eventIds: ["linked-event"],
+      viewpointActorIds: [],
+      presentActorIds: [],
+      entryConditions: [],
+      exitConditions: [],
+      evidence: evidence("北门"),
+    });
+    await proposals.submit("canonical-event", {
+      proposalId: "linked-event-revision",
+      payload: {
+        id: "linked-event",
+        title: "Linked event revision",
+        participants: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        causalParents: [],
+        evidence: evidence("曹操"),
+        confidence: 1,
+      },
+      generatedBy: { worker: "test" },
+    });
+
+    await expect(commits.validatePendingStructure()).resolves.toEqual([
+      expect.objectContaining({
+        id: "linked-event-revision",
+        errors: expect.arrayContaining([
+          expect.objectContaining({ code: "SCENE_EVENT_BACKLINK_REQUIRED" }),
+        ]),
+      }),
+    ]);
+
+    const result = await commits.acceptAllValid();
+    expect(result.accepted).toEqual([]);
+    expect(result.blocked).toEqual([
+      expect.objectContaining({
+        id: "linked-event-revision",
+        errors: expect.arrayContaining([
+          expect.objectContaining({ code: "SCENE_EVENT_BACKLINK_REQUIRED" }),
+        ]),
+      }),
+    ]);
+    await expect(commits.canon.getEvent("linked-event")).resolves.toMatchObject({
+      sceneOccurrenceIds: ["linked-scene"],
+    });
+  });
+
   it("rejects event relations with unknown endpoints", async () => {
     const { proposals, commits, evidence } = await fixture();
     await proposals.submit("event-relation", {

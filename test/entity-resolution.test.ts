@@ -295,6 +295,83 @@ describe("entity mention resolution", () => {
     await expect(new CanonicalModelStore(root).getEntity("hero")).resolves.toMatchObject({ canonicalName: "Hero" });
   });
 
+  it("retains accepted creation provenance after a later batch supersedes the current identity ref", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-origin-provenance-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Zero arrived.\n");
+    const sourceId = fixture.source.id;
+    const observationBatch = `batch-${sourceId}-00001-observation-origin`;
+    const originBatch = `batch-${sourceId}-00001-semantic-origin`;
+    const laterBatch = `batch-${sourceId}-00002-semantic-origin`;
+    const observation = createCompilerProposalToolset(root);
+    await observation.beginBatch([fixture.segmentId], observationBatch, sourceId);
+    await observation.tools.find((tool) => tool.name === "propose_entity_mention")!.execute("mention", {
+      proposal_id: "proposal-mention-zero-origin",
+      annotation_id: "mention-zero-origin",
+      selector: { segment_id: fixture.segmentId, exact: "Zero" },
+      surface: "Zero",
+      form: "proper",
+      kind_candidates: ["character"],
+      confidence: 1,
+    } as never, undefined, undefined, context);
+    await finishOnly(observation, fixture.segmentId, "Recorded the Zero mention.");
+
+    const origin = createCompilerProposalToolset(root);
+    await origin.beginBatch([fixture.segmentId], originBatch, sourceId);
+    const originTool = (name: string) => origin.tools.find((tool) => tool.name === name)!;
+    await originTool("propose_entity").execute("entity", {
+      proposal_id: "proposal-entity-zero-origin",
+      payload: { id: "zero-origin", kind: "character", canonicalName: "Zero", aliases: [] },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await originTool("propose_entity_resolution").execute("resolution", resolutionInput({
+      proposalId: "proposal-resolution-zero-origin",
+      resolutionId: "resolution-zero-origin",
+      mentionId: "mention-zero-origin",
+      status: "new-entity",
+      entityId: "zero-origin",
+      confidence: 1,
+    }) as never, undefined, undefined, context);
+    await finishOnly(origin, fixture.segmentId, "Introduced Zero with an explicit creation trace.");
+
+    const batches = new CompilerBatchStore(root);
+    await batches.markComplete(sourceId, originBatch);
+    const later = createCompilerProposalToolset(root);
+    await later.beginBatch([fixture.segmentId], laterBatch, sourceId);
+    await later.tools.find((tool) => tool.name === "propose_entity_resolution")!.execute("resolution", {
+      ...resolutionInput({
+        proposalId: "proposal-resolution-zero-later",
+        resolutionId: "resolution-zero-later",
+        mentionId: "mention-zero-origin",
+        status: "resolved",
+        entityId: "zero-origin",
+        confidence: 1,
+      }),
+      supersedes_resolution_id: "resolution-zero-origin",
+    } as never, undefined, undefined, context);
+    await finishOnly(later, fixture.segmentId, "Reused the checkpointed Zero identity.");
+    await batches.markIncomplete(sourceId, [originBatch]);
+
+    const resolutions = new EntityResolutionStore(root);
+    await expect(resolutions.currentForMention(sourceId, "mention-zero-origin"))
+      .resolves.toMatchObject({ id: "resolution-zero-later", status: "resolved" });
+    await expect(resolutions.listRecoverableBatchProposals(sourceId, originBatch)).resolves.toEqual([]);
+
+    const retry = createCompilerProposalToolset(root);
+    await retry.beginBatch([fixture.segmentId], originBatch, sourceId);
+    await expect(retry.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute(
+      "finish-origin-recovery",
+      finishInput(fixture.segmentId, "Recovered the entity without replaying its superseded creation decision."),
+      undefined,
+      undefined,
+      context,
+    )).resolves.toMatchObject({ details: { compilerBatchFinished: true } });
+    await expect(resolutions.currentForMention(sourceId, "mention-zero-origin"))
+      .resolves.toMatchObject({ id: "resolution-zero-later", status: "resolved" });
+    await expect(new CompilerCommitService(root).accept("entity", "proposal-entity-zero-origin"))
+      .resolves.toMatchObject({ accepted: true, errors: [] });
+  });
+
   it("generates deterministic kind-compatible lexical candidates and preserves ambiguity", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-entity-resolution-ambiguous-"));
     roots.push(root);

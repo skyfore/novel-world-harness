@@ -198,14 +198,23 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           }
           if (attempt < MAX_COMPILER_BATCH_RECOVERY_RETRIES && isRecoverableCompilerBatchInterruption(report)) {
             const message = `Compiler batch ${batch.ordinal + 1} had a recoverable interruption (${failure}); `
-              + `retrying the same batch once with its active drafts.`;
+              + `retrying the same immutable evidence batch once.`;
             if (options.onProgress) options.onProgress(message);
             else stderr.write(`${message}\n`);
             const hydrated = await hydrateCompilerBatch(options.root, batch);
+            const abandonedNoArtifactsReview = report.assistantStopReason === "stop"
+              && report.completionOutcome === "no-artifacts"
+              && report.proposalSucceeded === 0
+              && report.proposalFailed > 0;
+            const recoveryInstruction = abandonedNoArtifactsReview
+              ? `The prior attempt abandoned ${report.proposalFailed} failed proposal call(s) and left no active drafts. `
+                + "Re-review every supplied evidence segment from the beginning. Failed or withdrawn envelope IDs may now exist in rejected history, so use fresh unique proposal_id values while preserving each intended stable annotation_id or payload id. "
+                + "Repair only diagnosed defects, retain all other valid work, and finish with outcome=complete whenever any valid proposal remains; never use no-artifacts merely to escape proposal or finish errors. "
+              : "Recover the exact active current-batch proposals shown below instead of duplicating them. Preserve unrelated valid drafts, repair only diagnosed defects, and use outcome=complete whenever any active draft remains. ";
             activeBatch = {
               ...hydrated,
               prompt: `Batch-recovery attempt ${attempt + 1}/${MAX_COMPILER_BATCH_RECOVERY_RETRIES}. `
-                + "Recover the exact active current-batch proposals shown below instead of duplicating them. "
+                + recoveryInstruction
                 + "Use concise analysis, then complete the finish handshake.\n\n"
                 + hydrated.prompt,
             };

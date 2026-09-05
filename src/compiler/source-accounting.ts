@@ -283,7 +283,9 @@ export class SourceAccountingStore {
         span.sourceId === input.structure.sourceId
         && rangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
       if (represented) {
-        issues.push(`Source unit ${decision.unitId} overlaps exact semantic evidence and is host-derived as represented; withdraw its model disposition.`);
+        issues.push(decision.proposalId
+          ? `Source unit ${decision.unitId} overlaps exact semantic evidence and is host-derived as represented; withdraw source-accounting proposal '${decision.proposalId}'.`
+          : `Source unit ${decision.unitId} overlaps exact semantic evidence and is host-derived as represented; withdraw its model disposition.`);
       }
     }
     if (!input.requireExplicitSemanticDisposition) return issues;

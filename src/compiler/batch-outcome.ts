@@ -223,5 +223,16 @@ export function isRecoverableCompilerBatchInterruption(outcome: CompilerBatchOut
     return outcome.blockedReason.startsWith("compiler tool-call safety fuse tripped")
       || outcome.blockedReason.startsWith("compiler tool-call budget exceeded");
   }
-  return outcome.assistantStopReason === "error" || Boolean(outcome.unresolvedToolCalls);
+  return outcome.assistantStopReason === "error"
+    || Boolean(outcome.unresolvedToolCalls)
+    // A successful no-artifacts finish cannot erase earlier failed proposal
+    // attempts.  Treat this as an abandoned bounded review, not as a
+    // deterministic semantic blocker: one fresh turn can re-read the same
+    // immutable slice and retain whatever survives validation.
+    || (
+      outcome.assistantStopReason === "stop"
+      && outcome.completionOutcome === "no-artifacts"
+      && outcome.proposalSucceeded === 0
+      && outcome.proposalFailed > 0
+    );
 }

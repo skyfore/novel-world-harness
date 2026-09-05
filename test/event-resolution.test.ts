@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { auditCompiler } from "../src/compiler/audit.js";
+import { CompilerBatchStore } from "../src/compiler/batches.js";
 import { quarantineInvalidResolutionBindings } from "../src/compiler/converge.js";
 import {
   EventResolutionStore,
@@ -269,6 +270,101 @@ describe("event mention resolution", () => {
       coverage: { majorEventResolution: 1 },
       readiness: { resolution: "ready" },
     });
+  });
+
+  it("retains accepted event creation provenance after a later resolution supersedes the current ref", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-event-resolution-origin-provenance-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Rain began.\n");
+    const sourceId = fixture.source.id;
+    const observationBatch = `batch-${sourceId}-00001-observation-origin`;
+    const originBatch = `batch-${sourceId}-00001-semantic-origin`;
+    const laterBatch = `batch-${sourceId}-00002-semantic-origin`;
+    const observation = createCompilerProposalToolset(root);
+    await observation.beginBatch([fixture.segmentId], observationBatch, sourceId);
+    await proposeEventMention(observation, fixture.segmentId, {
+      proposalId: "proposal-mention-rain-origin",
+      mentionId: "mention-rain-origin",
+      trigger: "began",
+      extent: "Rain began.",
+      types: ["natural-process"],
+      salience: "major",
+    });
+    await finishOnly(observation, fixture.segmentId, "Recorded the rain event mention.");
+
+    const origin = createCompilerProposalToolset(root);
+    await origin.beginBatch([fixture.segmentId], originBatch, sourceId);
+    await origin.tools.find((tool) => tool.name === "propose_canonical_event")!.execute("event", {
+      proposal_id: "proposal-event-rain-origin",
+      payload: {
+        id: "rain-origin",
+        title: "Rain begins",
+        participants: [],
+        participantPresence: [],
+        storyTime: { kind: "unknown" },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        causalParents: [],
+        confidence: 1,
+      },
+      evidence_segment_ids: [fixture.segmentId],
+    } as never, undefined, undefined, context);
+    await origin.tools.find((tool) => tool.name === "propose_event_resolution")!.execute("resolution", eventResolutionInput({
+      proposalId: "proposal-resolution-rain-origin",
+      resolutionId: "resolution-rain-origin",
+      mentionIds: ["mention-rain-origin"],
+      status: "new-event",
+      canonicalEventId: "rain-origin",
+      relation: "coreference",
+    }) as never, undefined, undefined, context);
+    await finishOnly(origin, fixture.segmentId, "Introduced the rain event with an explicit creation trace.");
+
+    const batches = new CompilerBatchStore(root);
+    await batches.markComplete(sourceId, originBatch);
+    const later = createCompilerProposalToolset(root);
+    await later.beginBatch([fixture.segmentId], laterBatch, sourceId);
+    await later.tools.find((tool) => tool.name === "propose_event_resolution")!.execute("resolution", {
+      ...eventResolutionInput({
+        proposalId: "proposal-resolution-rain-later",
+        resolutionId: "resolution-rain-later",
+        mentionIds: ["mention-rain-origin"],
+        status: "resolved",
+        canonicalEventId: "rain-origin",
+        relation: "coreference",
+      }),
+      supersedes_resolution_ids: ["resolution-rain-origin"],
+    } as never, undefined, undefined, context);
+    await finishOnly(later, fixture.segmentId, "Reused the checkpointed rain event.");
+    await batches.markIncomplete(sourceId, [originBatch]);
+
+    const resolutions = new EventResolutionStore(root);
+    await expect(resolutions.listRecoverableBatchProposals(sourceId, originBatch)).resolves.toEqual([]);
+    await expect(resolutions.list(sourceId)).resolves.toEqual([
+      expect.objectContaining({ id: "resolution-rain-later", status: "resolved" }),
+    ]);
+
+    const retry = createCompilerProposalToolset(root);
+    await retry.beginBatch([fixture.segmentId], originBatch, sourceId);
+    await expect(retry.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute(
+      "finish-event-origin-recovery",
+      {
+        outcome: "complete",
+        reviewed_segments: [{
+          segment_id: fixture.segmentId,
+          disposition: "proposed",
+          summary: "Recovered the event without replaying its superseded creation decision.",
+        }],
+        summary: "Recovered the event without replaying its superseded creation decision.",
+      } as never,
+      undefined,
+      undefined,
+      context,
+    )).resolves.toMatchObject({ details: { compilerBatchFinished: true } });
+    await expect(resolutions.list(sourceId)).resolves.toEqual([
+      expect.objectContaining({ id: "resolution-rain-later", status: "resolved" }),
+    ]);
+    await expect(new CompilerCommitService(root).accept("canonical-event", "proposal-event-rain-origin"))
+      .resolves.toMatchObject({ accepted: true, errors: [] });
   });
 
   it("preserves ambiguous candidates instead of merging events from overlap alone", async () => {

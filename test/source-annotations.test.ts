@@ -182,10 +182,28 @@ describe("source annotation compilation", () => {
     const batchId = `batch-${fixture.source.id}-dangling`;
     const toolset = createCompilerProposalToolset(root);
     await toolset.beginBatch([fixture.segmentId], batchId, fixture.source.id);
+    const mention = toolset.tools.find((tool) => tool.name === "propose_entity_mention")!;
     const quotation = toolset.tools.find((tool) => tool.name === "propose_quotation")!;
+    const discourse = toolset.tools.find((tool) => tool.name === "propose_discourse_segment")!;
     const finish = toolset.tools.find((tool) => tool.name === "finish_compiler_batch")!;
     const withdraw = toolset.tools.find((tool) => tool.name === "withdraw_compiler_proposal")!;
 
+    await mention.execute("speaker-mention", {
+      proposal_id: "proposal-mention-someone",
+      annotation_id: "mention-someone",
+      selector: { segment_id: fixture.segmentId, exact: "someone" },
+      surface: "someone",
+      form: "nominal",
+      kind_candidates: ["character"],
+      confidence: 0.8,
+    } as never, undefined, undefined, context);
+    await discourse.execute("scene-observation", {
+      proposal_id: "proposal-scene-observed",
+      annotation_id: "scene-observed",
+      kind: "scene",
+      selectors: [{ segment_id: fixture.segmentId, exact: '"Go," someone said.\n' }],
+      confidence: 0.9,
+    } as never, undefined, undefined, context);
     await quotation.execute("dangling-quote", {
       proposal_id: "proposal-dangling-quote",
       annotation_id: "quote-go",
@@ -196,11 +214,22 @@ describe("source annotation compilation", () => {
       scene_id: "scene-missing",
       attribution_confidence: 0.2,
     } as never, undefined, undefined, context);
-    await expect(finish.execute("finish-dangling", {
-      outcome: "complete",
-      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Quotation needs reference closure." }],
-      summary: "Attempt closure.",
-    } as never, undefined, undefined, context)).rejects.toThrow(/unknown annotation 'scene-missing'.*unknown annotation 'mention-missing-speaker'/s);
+    let finishError: unknown;
+    try {
+      await finish.execute("finish-dangling", {
+        outcome: "complete",
+        reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Quotation needs reference closure." }],
+        summary: "Attempt closure.",
+      } as never, undefined, undefined, context);
+    } catch (error) {
+      finishError = error;
+    }
+    expect(finishError).toBeInstanceOf(Error);
+    const finishMessage = (finishError as Error).message;
+    expect(finishMessage).toMatch(/unknown annotation 'scene-missing'.*unknown annotation 'mention-missing-speaker'/s);
+    expect(finishMessage).toContain("Active source annotation IDs available for exact reference repair");
+    expect(finishMessage).toContain("entity-mention annotation_id values: mention-someone");
+    expect(finishMessage).toContain("discourse-segment annotation_id values: scene-observed");
     await expect(new SourceAnnotationStore(root).list(fixture.source.id)).resolves.toEqual([]);
     await expect(withdraw.execute("withdraw-dangling", {
       proposal_id: "proposal-dangling-quote",
@@ -208,6 +237,21 @@ describe("source annotation compilation", () => {
     } as never, undefined, undefined, context)).resolves.toMatchObject({
       details: { compilerProposalWithdrawn: true },
     });
+    await expect(finish.execute("finish-preserved-valid", {
+      outcome: "complete",
+      reviewed_segments: [{ segment_id: fixture.segmentId, disposition: "proposed", summary: "Preserved valid mention and scene observations." }],
+      summary: "Complete with only the unrelated valid observations retained.",
+    } as never, undefined, undefined, context)).resolves.toMatchObject({
+      details: {
+        compilerBatchFinished: true,
+        outcome: "complete",
+        proposalIds: ["proposal-mention-someone", "proposal-scene-observed"],
+      },
+    });
+    await expect(new SourceAnnotationStore(root).list(fixture.source.id)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "mention-someone", annotationType: "entity-mention" }),
+      expect.objectContaining({ id: "scene-observed", annotationType: "discourse-segment" }),
+    ]));
     await expect(new SourceAnnotationStore(root).listProposals(fixture.source.id, "rejected"))
       .resolves.toContainEqual(expect.objectContaining({ id: "proposal-dangling-quote" }));
   });

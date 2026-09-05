@@ -429,6 +429,57 @@ describe("WorldRuntime", () => {
     expect(advancing.evaluated.find((entry) => entry.possibility.id === "past")?.reasons.join(" ")).toContain("earlier than committed");
   });
 
+  it("fails closed when the active story-time anchor exists but has no comparable order", () => {
+    const state = {
+      ...emptyWorldState("head", 1),
+      logicalTime: {
+        step: 1,
+        storyTime: { kind: "ordinal" as const, label: "opening scene" },
+      },
+    };
+    const canonical = (id: string, causalLinks: Possibility["causalLinks"] = []): Possibility => ({
+      id,
+      branchId: "main",
+      evaluatedAtCommit: "head",
+      kind: "canon-analogue",
+      title: id,
+      candidateWindow: { kind: "ordinal", label: "later scene" },
+      preconditions: [],
+      blockers: [],
+      participants: ["hero"],
+      causalParents: [],
+      causalLinks,
+      canonicalEventId: id,
+      pressure: 1,
+      relevance: 1,
+      proposedDelta: { version: 1, operations: [] },
+      evidence: [],
+    });
+    const immediate: Possibility = {
+      ...canonical("immediate"),
+      kind: "generated",
+      canonicalEventId: undefined,
+      candidateWindow: undefined,
+    };
+    const causallySupported = canonical("supported", [{
+      relationId: "opening-enables-supported",
+      sourceEventId: "opening-event",
+      type: "enables",
+      operationality: "necessary",
+    }]);
+
+    const frontier = buildFrontier("main", "head", state, [canonical("unsafe-future"), immediate, causallySupported], {
+      realizedIds: new Set(["opening-event"]),
+      activeEntityIds: new Set(["hero"]),
+    });
+
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === "unsafe-future")?.status).toBe("latent");
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === "unsafe-future")?.reasons.join(" "))
+      .toContain("active story-time anchor is present but cannot be compared safely");
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === "immediate")?.status).toBe("eligible");
+    expect(frontier.evaluated.find((entry) => entry.possibility.id === "supported")?.status).toBe("eligible");
+  });
+
   it("forks history and keeps a destroyed canonical future blocked", async () => {
     const { engine, runtime } = await fixture();
     const genesis = await engine.createBranch("main", "Main", {

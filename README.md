@@ -43,6 +43,14 @@ For a standalone Chinese competition narrative covering the product thesis, end-
 flows, technical highlights, demo plan, and honest limitations, see the
 [Hackson AI submission guide](docs/hackson-ai-submission.zh-CN.md).
 
+The proposed next phase is documented in the
+[novel-to-play technical design](docs/novel-to-play-technical-design.zh-CN.md),
+[implementation and acceptance plan](docs/novel-to-play-acceptance-plan.zh-CN.md),
+and [ADR 0010](docs/adr/0010-major-character-play-and-world-closure.md).
+It addresses independently verified major-character coverage, compilation
+closure, and consistent action/effect/knowledge handling across play entry points.
+These documents describe planned work, not completed product capabilities.
+
 The browser MVP's requirement-to-code-to-test release gate is recorded in the
 [Web UI MVP acceptance matrix](docs/web-ui-mvp-acceptance.zh-CN.md).
 

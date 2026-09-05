@@ -27,4 +27,14 @@ describe("independent role roster", () => {
     expect(validateRosterReview(roster, review).map((x) => x.code)).toEqual(expect.arrayContaining(["ROSTER_STALE_REVIEW", "ROSTER_INDEPENDENT_REVIEW_REQUIRED", "ROSTER_FULL_SOURCE_REVIEW_REQUIRED"]));
     expect(validateRoleRoster(roster).map((x) => x.code)).toContain("ROSTER_REVIEW_INCOMPLETE");
   });
+
+  it("retains a major person discovered only by independent full-source review", () => {
+    const roster = buildRoleRoster({ ...input, annotations: [] });
+    roster.reviews = ["first", "second"].map((runId) => ({ runId, subjectHash: roster.subjectHash, reviewedUnitIds: input.unitIds,
+      entries: roster.candidates.map((candidate) => ({ candidateId: candidate.id, importance: "major", rationale: "Central", basisUnitIds: ["unit-1"] })),
+      missingMajorCharacters: runId === "second" ? [{ name: "The late queen", rationale: "Determines the ending", basisUnitIds: ["unit-2"] }] : [],
+    }));
+    expect(majorRoleCandidates(roster).map((role) => role.name)).toEqual(["Hero", "The late queen"]);
+    expect(validateRoleRoster(roster)).toContainEqual(expect.objectContaining({ code: "ROSTER_MAJOR_IDENTITY_UNRESOLVED" }));
+  });
 });

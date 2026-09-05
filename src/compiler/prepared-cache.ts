@@ -72,6 +72,8 @@ import { SourceAccountingStore, sourceAccountingManifestSchema } from "./source-
 import { sceneOccurrenceSchema } from "../world/scene-occurrence.js";
 import { eventFrameSchema } from "../world/event-frame.js";
 import { actionSchemaSchema } from "../world/action-ontology.js";
+import { RoleRosterStore, roleRosterSchema } from "./role-roster.js";
+import { assessNovelClosure, assertPreparedReadiness, novelClosureAssessmentSchema } from "./certification.js";
 import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 
 export { COMPILER_PIPELINE_VERSION };
@@ -131,6 +133,7 @@ const preparedCompilerSnapshotSchema = z.object({
   entityResolutions: z.array(identityResolutionSchema),
   eventResolutions: z.array(eventResolutionSchema),
   accounting: sourceAccountingManifestSchema.nullable(),
+  roleRoster: roleRosterSchema.nullable().default(null),
 }).strict();
 
 const preparedBundleCommonShape = {
@@ -147,6 +150,7 @@ export const preparedNovelBundleSchema = z.object({
   ...preparedBundleCommonShape,
   lineage: preparedRevisionLineageSchema.optional(),
   compilerSnapshot: preparedCompilerSnapshotSchema,
+  readiness: novelClosureAssessmentSchema.nullable().default(null),
 }).strict();
 
 export type PreparedNovelBundle = z.infer<typeof preparedNovelBundleSchema>;
@@ -166,6 +170,7 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     throw new Error("Prepared bundle chapter split plan does not match its source identity.");
   }
   const snapshot = bundle.compilerSnapshot;
+  if (snapshot.roleRoster && (snapshot.roleRoster.sourceId !== sourceId || snapshot.roleRoster.sourceSha256 !== bundle.source.contentSha256)) throw new Error("Prepared role roster escapes its source identity");
   if (snapshot.structure.sourceId !== sourceId
     || snapshot.structure.sourceSha256 !== bundle.source.contentSha256) {
     throw new Error("Prepared compiler structure snapshot does not match its source identity.");
@@ -397,6 +402,7 @@ export class PreparedNovelCache {
   async loadFreshActive(source: SourceDocument): Promise<ActivePreparedNovel | null> {
     const active = await this.loadActive(source);
     if (!active) return null;
+    assertPreparedReadiness(active.bundle);
     const issue = await this.freshnessIssue(active.bundle);
     if (issue) {
       throw new Error(
@@ -425,6 +431,7 @@ export class PreparedNovelCache {
       };
     }
 
+    assertPreparedReadiness(cached.bundle);
     const compatibility = await this.assertWorkspaceCanMaterialize(cached.bundle);
     if (!compatibility.compatible) {
       return {
@@ -446,6 +453,17 @@ export class PreparedNovelCache {
     };
   }
 
+  /** Evaluate a candidate through isolated production reducers without activating it. */
+  async candidateSnapshot(source: SourceDocument): Promise<PreparedNovelBundle> {
+    const identity = await sourceIdentity(this.workspaceRoot, source);
+    return this.buildBundle(source, identity, { allowSemanticDebtForRollback: true });
+  }
+
+  async inspectCandidate(source: SourceDocument) {
+    const bundle = await this.candidateSnapshot(source);
+    return { bundle, assessment: await assessNovelClosure(this.workspaceRoot, bundle) };
+  }
+
   async publish(
     source: SourceDocument,
     options: { allowSemanticDebtForRollback?: boolean; lineage?: PreparedRevisionLineage } = {},
@@ -456,7 +474,10 @@ export class PreparedNovelCache {
       );
     }
     const identity = await sourceIdentity(this.workspaceRoot, source);
-    const bundle = await this.buildBundle(source, identity, options);
+    const candidate = await this.buildBundle(source, identity, options);
+    if (options.allowSemanticDebtForRollback) return this.publishBundle(source, identity, candidate, false);
+    const bundle = preparedNovelBundleSchema.parse({ ...candidate, readiness: await assessNovelClosure(this.workspaceRoot, candidate) });
+    assertPreparedReadiness(bundle);
     return this.publishBundle(source, identity, bundle);
   }
 
@@ -481,13 +502,14 @@ export class PreparedNovelCache {
       allowSemanticDebtForRollback: true,
       legacyRollbackCheckpoint: checkpoint,
     });
-    return this.publishBundle(source, identity, bundle);
+    return this.publishBundle(source, identity, bundle, false);
   }
 
   private async publishBundle(
     source: SourceDocument,
     identity: { contentMd5: string; contentSha256: string },
     bundle: PreparedNovelBundle,
+    activate = true,
   ): Promise<PreparedCacheResult> {
     const bundleHash = contentHash(bundle);
     if (bundle.lineage?.parentBundleHash === bundleHash) {
@@ -539,7 +561,7 @@ export class PreparedNovelCache {
       }
       throw error;
     }
-    await this.writeActive(identity.contentMd5, bundleHash);
+    if (activate) await this.writeActive(identity.contentMd5, bundleHash);
     return { status: published ? "published" : "already-cached", contentMd5: identity.contentMd5, cachePath, bundleHash };
   }
 
@@ -636,6 +658,7 @@ export class PreparedNovelCache {
     const cached = await this.readCached(identity.contentMd5, bundleHash);
     if (!cached) throw new Error(`Prepared cache revision not found: ${identity.contentMd5}@${bundleHash}`);
     assertSourceIdentity(cached.bundle, identity);
+    assertPreparedReadiness(cached.bundle);
     const pending = await new ProposalStore(this.workspaceRoot).list("pending", source.id);
     const registeredSource = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(source.id);
     const pendingTitle = registeredSource?.pendingTitleProposal ? 1 : 0;
@@ -808,6 +831,7 @@ export class PreparedNovelCache {
         entityResolutions,
         eventResolutions,
         accounting,
+        roleRoster: await new RoleRosterStore(this.workspaceRoot).read(source.id),
       },
     });
     await this.assertTitleInferenceEvidence(bundle);
@@ -946,6 +970,7 @@ export class PreparedNovelCache {
       || currentCompilerSnapshot.eventResolutions.length
       || currentCompilerSnapshot.evidenceBindings.length
       || currentCompilerSnapshot.accounting
+      || currentCompilerSnapshot.roleRoster
     );
     const hasMaterializedSource = groups.some(([, actual]) => actual.length > 0)
       || Boolean(currentInitialForSource)
@@ -973,6 +998,7 @@ export class PreparedNovelCache {
     entityResolutions: Awaited<ReturnType<EntityResolutionStore["list"]>>;
     eventResolutions: Awaited<ReturnType<EventResolutionStore["list"]>>;
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
+    roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
   }> {
     const sourceId = bundle.source.id;
     const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
@@ -1002,6 +1028,7 @@ export class PreparedNovelCache {
       entityResolutions,
       eventResolutions,
       accounting,
+      roleRoster: await new RoleRosterStore(this.workspaceRoot).read(sourceId),
     };
   }
 
@@ -1075,6 +1102,7 @@ export class PreparedNovelCache {
     await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.entityResolutions);
     await new EventResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.eventResolutions);
     await new SourceAccountingStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.accounting);
+    await new RoleRosterStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.roleRoster);
     const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
     const currentDescriptors = preparedArtifactDescriptors(currentBefore)
       .filter((artifact) => artifactBelongsToSource(artifact.payload, sourceId));

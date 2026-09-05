@@ -26,6 +26,7 @@ export const roleRosterReviewSchema = z.object({
   subjectHash: hashSchema,
   reviewedUnitIds: z.array(idSchema).min(1),
   entries: z.array(roleRosterEntrySchema).min(1),
+  missingMajorCharacters: z.array(z.object({ name: z.string().trim().min(1), rationale: z.string().trim().min(1), basisUnitIds: z.array(idSchema).min(1) }).strict()).default([]),
 }).strict();
 export type RoleRosterReview = z.infer<typeof roleRosterReviewSchema>;
 
@@ -83,13 +84,21 @@ export function validateRosterReview(roster: RoleRoster, review: RoleRosterRevie
   const units = new Set(roster.unitIds);
   if (new Set(review.reviewedUnitIds).size !== units.size || review.reviewedUnitIds.some((id) => !units.has(id))) fail("ROSTER_FULL_SOURCE_REVIEW_REQUIRED", "Review must account for the complete source unit inventory");
   for (const entry of review.entries) if (entry.basisUnitIds.some((id) => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Role ${entry.candidateId} uses an unknown source unit`);
+  for (const omitted of review.missingMajorCharacters ?? []) if (omitted.basisUnitIds.some((id) => !units.has(id))) fail("ROSTER_UNKNOWN_EVIDENCE_UNIT", `Omitted major ${omitted.name} uses an unknown source unit`);
   return issues;
 }
 
 /** Conservative merge: either independent review marking a role major keeps it major. */
 export function majorRoleCandidates(roster: RoleRoster): RoleCandidate[] {
   const major = new Set(roster.reviews.flatMap((review) => review.entries.filter((x) => x.importance === "major").map((x) => x.candidateId)));
-  return roster.candidates.filter((candidate) => major.has(candidate.id));
+  const candidates = roster.candidates.filter((candidate) => major.has(candidate.id));
+  // Independent source reading can discover people absent from both accepted entities and mentions.
+  // Never invent an identity match from a name; unresolved discoveries stay in the denominator.
+  const omissions = roster.reviews.flatMap((review) => (review.missingMajorCharacters ?? []).map((person): RoleCandidate => ({
+    id: `omitted-role-${contentHash({ sourceId: roster.sourceId, name: person.name, units: [...person.basisUnitIds].sort() }).slice(0, 24)}`,
+    name: person.name, mentionIds: [], resolutionIds: [],
+  })));
+  return [...new Map([...candidates, ...omissions].map((candidate) => [candidate.id, candidate])).values()];
 }
 
 export function validateRoleRoster(roster: RoleRoster): ValidationIssue[] {
@@ -118,6 +127,12 @@ export class RoleRosterStore {
     const target = this.file(roster.sourceId), temporary = `${target}.${crypto.randomUUID()}.tmp`;
     try { await fs.writeFile(temporary, `${canonicalJson(roster)}\n`, { encoding: "utf8", mode: 0o600 }); await fs.rename(temporary, target); }
     finally { await fs.rm(temporary, { force: true }); }
+  }
+  async replaceCurrent(sourceId: string, roster: RoleRoster | null): Promise<void> {
+    if (roster) {
+      if (roster.sourceId !== sourceId) throw new Error("Role roster replacement escapes its source");
+      await this.write(roster);
+    } else await fs.rm(this.file(sourceId), { force: true });
   }
   async review(current: RoleRoster, input: RoleRosterReview): Promise<RoleRoster> {
     const review = roleRosterReviewSchema.parse(input), issues = validateRosterReview(current, review);

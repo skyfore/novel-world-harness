@@ -1,3 +1,5 @@
+import { useOfflinePreparationBoundary } from "./helpers/offline-preparation.js";
+useOfflinePreparationBoundary();
 import { installHallCampRoute, hallCampWalkIntent, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";

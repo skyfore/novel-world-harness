@@ -1,3 +1,4 @@
+import { installHallCampRoute, hallCampWalkIntent, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +33,8 @@ async function fixture(options: { withCanon?: boolean } = {}) {
   if (options.withCanon) {
     await canon.putEvent({
       id: "hero-goes-to-camp",
+      action: hallCampWalkAction,
+      timeAdvance: { amount: 1, unit: "minute" },
       title: "林岐按既定轨迹前往营地",
       participants: ["hero"],
       storyTime: { kind: "ordinal", label: "next" },
@@ -42,6 +45,7 @@ async function fixture(options: { withCanon?: boolean } = {}) {
       confidence: 1,
     });
   }
+  await installHallCampRoute(root);
   const { engine } = await openWorkspaceWorld(root);
   const genesis = await engine.createBranch("main", "Main", {
     version: 1,
@@ -72,6 +76,7 @@ describe("play-world command", () => {
       action: "我离开前厅，去营地。",
       translator: () => ({
         title: "林岐离开前厅，抵达营地",
+        intent: hallCampWalkIntent,
         participants: ["camp"],
         preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
         proposedDelta: {

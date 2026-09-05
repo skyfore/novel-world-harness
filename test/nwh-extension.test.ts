@@ -1,3 +1,4 @@
+import { installHallCampRoute, hallCampWalkIntent, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -927,6 +928,7 @@ describe("NWH TUI extension", () => {
   it("routes natural character selection and subsequent input through committed world play", async () => {
     const translator: PlayerActionTranslator = ({ utterance }) => ({
       title: utterance,
+      intent: hallCampWalkIntent,
       participants: ["camp"],
       preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
       proposedDelta: {
@@ -949,6 +951,7 @@ describe("NWH TUI extension", () => {
       epistemicType: "explicit-fact",
       evidence: [],
     });
+    await installHallCampRoute(root);
     const { engine } = await openWorkspaceWorld(root);
     const genesis = await engine.createBranch("main", "Main", {
       version: 1,
@@ -1006,7 +1009,7 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages.join("\n")).toContain("脚下的路已经把林岐带离原处");
     expect(sentVisibleMessages.join("\n")).not.toContain("Committed at step 1");
     expect(widgets.flatMap((widget) => widget ?? []).join("\n")).toContain("正在理解你的行动");
-    expect(notifications).toEqual([]);
+    expect(notifications).toEqual(["Switched to travel-world.txt instance 'main'."]);
     expect(statuses).toContain("NWH · 林岐@main · step 1");
   });
 

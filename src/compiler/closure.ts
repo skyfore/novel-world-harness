@@ -4,6 +4,7 @@ import { validationIssueSchema } from "../world/model.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { annotationAnchors } from "./annotations.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
+import { applyEventExecutions } from "../world/event-execution.js";
 
 export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "action", "event-execution", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry"]);
 export type ClosureKind = z.infer<typeof closureKindSchema>;
@@ -80,7 +81,7 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
     for (const [name, item] of Object.entries(record)) {
       const at = `${pointer}/${name.replace(/~/g, "~0").replace(/\//g, "~1")}`;
       // Literals, descriptions and arbitrary legacy claim objects do not declare references.
-      if (["evidence", "counterEvidence", "derivation", "parameters", "description", "summary", "rationale", "interpretation", "object", "value", "characterEntryCheckpoints", "projectionSeed"].includes(name)) {
+      if (["evidence", "counterEvidence", "derivation", "parameters", "description", "summary", "rationale", "interpretation", "object", "value", "characterEntryCheckpoints", "entryCheckpoint", "projectionSeed"].includes(name)) {
         if (name === "parameters") {
           const specs = Array.isArray(item) ? item : canonical.actionSchemas.find((schema) => schema.id === record.schemaId)?.parameters ?? [];
           for (const [index, spec] of specs.entries()) {
@@ -184,10 +185,12 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
     const event = nodes.get(`event/${binding.canonicalEventId}`);
     if (event) link(event, "event-execution", binding.id);
   }
-  for (const event of canonical.events) for (const checkpoint of event.characterEntryCheckpoints ?? []) {
+  for (const event of applyEventExecutions(canonical.events, canonical.eventExecutions ?? [])) for (const checkpoint of event.characterEntryCheckpoints ?? []) {
     const id = `${checkpoint.actorId}/${event.id}`;
     add("entry", id, checkpoint);
     const node = nodes.get(`entry/${id}`)!;
+    const binding = canonical.eventExecutions?.find((binding) => binding.canonicalEventId === event.id && binding.entryCheckpoint?.actorId === checkpoint.actorId);
+    if (binding) link(nodes.get(`event-execution/${binding.id}`)!, "entry", id, "/entryCheckpoint");
     link(node, "event", event.id); link(node, "entity", checkpoint.actorId); link(node, "initial", bundle.source.id);
     if (snapshot.roleRoster) link(node, "roster", bundle.source.id);
     visit(node, { delta: checkpoint.delta, participantPresence: checkpoint.participantPresence, knowledge: checkpoint.knowledge, ...checkpoint.projectionSeed }, undefined, seedLocals(checkpoint.projectionSeed));

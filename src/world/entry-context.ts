@@ -1,5 +1,6 @@
 import { deriveEntryCut, type EntryCut } from "./entry-cut.js";
 import { timeAdvanceInDays } from "./time.js";
+import { applyEventExecutions } from "./event-execution.js";
 import type { EntryProjectionSeed } from "./model.js";
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 import type {
@@ -94,6 +95,7 @@ export type CharacterEntrySeed = {
  * is not a playable checkpoint.
  */
 export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): CharacterEntryOption[] {
+  bundle = withExecutionEntries(bundle);
   const characters = bundle.canonical.entities.filter((entity) => entity.kind === "character");
   const orderedEvents = eventsInDiscourseOrder(bundle.canonical.events);
   const eventRanks = new Map(orderedEvents.map((event, index) => [event.id, index]));
@@ -156,6 +158,7 @@ export function deriveCharacterEntrySeed(
   bundle: PreparedNovelBundle,
   actorId: string,
 ): CharacterEntrySeed {
+  bundle = withExecutionEntries(bundle);
   const option = deriveCharacterEntryOptions(bundle).find((candidate) => candidate.actorId === actorId);
   if (!option) {
     throw new Error(
@@ -241,6 +244,11 @@ export function deriveCharacterEntrySeed(
         }),
     readerContext: readerContextForEntry(option.entry, priorEvents, bundle.canonical.entities),
   };
+}
+
+function withExecutionEntries(bundle: PreparedNovelBundle): PreparedNovelBundle {
+  if (!bundle.canonical.eventExecutions?.length) return bundle;
+  return { ...bundle, canonical: { ...bundle.canonical, events: applyEventExecutions(bundle.canonical.events, bundle.canonical.eventExecutions) } };
 }
 
 export function readerContextForEntry(

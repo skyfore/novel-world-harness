@@ -169,7 +169,7 @@ describe("CanonicalModelStore revisions", () => {
 
     const first = await contexts.captureCurrent();
     const stored = JSON.parse(await fs.readFile(path.join(contexts.root, `${first.canonicalSnapshotHash}.json`), "utf8")) as { version: number };
-    expect(stored.version).toBe(8);
+    expect(stored.version).toBe(9);
     expect(first.events?.get("hero-enters-gate")?.participants).toEqual(["hero", "gate"]);
     expect(first.eventParticipations).toContainEqual(expect.objectContaining({ id: "hero-enters-gate-hero", role: "agent" }));
     expect(first.eventRelations).toContainEqual(expect.objectContaining({ id: "gate-opens-enables-entry", type: "enables" }));
@@ -300,7 +300,7 @@ describe("CanonicalModelStore revisions", () => {
     const foreignRef = await canon.currentRevision("entities", "foreign-hero");
     if (!foreignRef) throw new Error("missing foreign entity revision");
     const invalidScopedSnapshot = {
-      version: 8 as const,
+      version: 9 as const,
       sourceId: "novel-a",
       entities: [foreignRef],
       propositions: [],
@@ -313,6 +313,7 @@ describe("CanonicalModelStore revisions", () => {
       sceneOccurrences: [],
       eventFrames: [],
       actionSchemas: [],
+      eventExecutions: [],
       actionConstraints: [],
       normTemplates: [],
       processTemplates: [],

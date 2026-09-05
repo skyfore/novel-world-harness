@@ -1,4 +1,4 @@
-import { eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
+import { applyEventExecutions, eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import type { z } from "zod";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
@@ -242,6 +242,20 @@ export class CompilerValidator {
       const binding = eventExecutionSchema.parse(payload);
       const bindings = new Map(catalog.eventExecutions ?? []).set(binding.id, binding);
       errors.push(...validateEventExecutions([...bindings.values()], { entities, events, actionSchemas, participations: [...eventParticipations.values()] }));
+      const occurrence = events.get(binding.canonicalEventId);
+      if (occurrence && binding.entryCheckpoint) {
+        const checkpoint = binding.entryCheckpoint, seed = checkpoint.projectionSeed;
+        const entryPropositions = new Map(propositions), entryAttributions = new Map(attributions), entryClaims = new Map(claims);
+        for (const operation of seed.semantics.operations) {
+          if (operation.op === "record-proposition") entryPropositions.set(operation.proposition.id, operation.proposition);
+          if (operation.op === "record-attribution") entryAttributions.set(operation.attribution.id, operation.attribution);
+          if (operation.op === "record-claim") entryClaims.set(operation.claim.id, operation.claim);
+        }
+        this.validateEvent(applyEventExecutions([occurrence], [binding])[0]!, entities, entryPropositions, entryAttributions, entryClaims, events, eventFrames, actionSchemas, rules, errors);
+        for (const operation of seed.processes.operations) if ("templateId" in operation && !catalog.processTemplates.has(operation.templateId)) errors.push(issue("UNKNOWN_ENTRY_PROCESS_TEMPLATE", `Unknown process template ${operation.templateId}`, "entryCheckpoint.projectionSeed.processes"));
+        for (const operation of seed.norms.operations) if ("templateId" in operation && !catalog.normTemplates.has(operation.templateId)) errors.push(issue("UNKNOWN_ENTRY_NORM_TEMPLATE", `Unknown norm template ${operation.templateId}`, "entryCheckpoint.projectionSeed.norms"));
+        for (const id of seed.activeRuleIds) if (!rules.has(id)) errors.push(issue("UNKNOWN_ENTRY_RULE", `Unknown world rule ${id}`, "entryCheckpoint.projectionSeed.activeRuleIds"));
+      }
     }
     if (kind === "action-schema") {
       const action = actionSchemaSchema.parse(payload);
@@ -498,7 +512,7 @@ export class CompilerValidator {
         errors.push(issue("DUPLICATE_CHARACTER_ENTRY", `Event ${event.id} has multiple entry checkpoints for ${checkpoint.actorId}`, `${prefix}.actorId`));
       }
       entryActors.add(checkpoint.actorId);
-      if (checkpoint.delta.operations.length > 16) {
+      if (!checkpoint.projectionSeed && checkpoint.delta.operations.length > 16) {
         errors.push(issue("OVERSIZED_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} contains more than 16 state operations`, `${prefix}.delta.operations`));
       }
       if (!checkpoint.delta.operations.some((operation) =>
@@ -1200,7 +1214,6 @@ export class CompilerCommitService {
       "CAUSAL_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "action-schema")) await processCandidate(candidate);
-    for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
     await processDependencyKind(
       eligible.filter((item) => item.kind === "action-constraint"),
       catalog.actionConstraints,
@@ -1226,6 +1239,7 @@ export class CompilerCommitService {
       "NORM_TEMPLATE_DEPENDENCY_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
     const sceneCandidates = eligible.filter((item) =>
       item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
     if (sceneCandidates.length) {
@@ -1412,7 +1426,6 @@ export class CompilerCommitService {
       "CAUSAL_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "action-schema")) await processCandidate(candidate);
-    for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
     await processDependencyKind(
       eligible.filter((item) => item.kind === "action-constraint"),
       catalog.actionConstraints,
@@ -1432,6 +1445,7 @@ export class CompilerCommitService {
       "NORM_TEMPLATE_DEPENDENCY_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
     const sceneCandidates = eligible.filter((item) =>
       item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
     if (sceneCandidates.length) {

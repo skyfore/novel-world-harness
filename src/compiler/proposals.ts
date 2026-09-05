@@ -917,8 +917,9 @@ function collectProposalClosureIssues(
     const binding = payload as EventExecution;
     missing("events", binding.canonicalEventId, "canonicalEventId");
     missing("entities", binding.actorId, "actorId");
-    if (binding.action.lane === "schema-bound") missing("actions", binding.action.schemaId, "action.schemaId");
-    binding.action.lane === "schema-bound" && binding.action.roleBindings.forEach((role) => role.entityIds.forEach((id) => missing("entities", id, "action.roleBindings")));
+    if (binding.action?.lane === "schema-bound") missing("actions", binding.action.schemaId, "action.schemaId");
+    binding.action?.lane === "schema-bound" && binding.action.roleBindings.forEach((role) => role.entityIds.forEach((id) => missing("entities", id, "action.roleBindings")));
+    if (binding.entryCheckpoint) collectStateDeltaIssues(binding.entryCheckpoint.delta, "entryCheckpoint.delta", missing, fieldReference);
     return;
   }
   if (proposal.kind === "action-schema") {

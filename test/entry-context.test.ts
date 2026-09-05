@@ -149,6 +149,11 @@ describe("character entry context", () => {
       semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] },
       norms: { version: 1, operations: [{ op: "instantiate", templateId: "promise", instanceId: "existing-promise", subjectEntityId: "opening-actor" }] } } as never;
     expect(() => deriveCharacterEntrySeed(prepared, "later-actor")).toThrow("ENTRY_PROJECTION_SEED_REQUIRED");
+    const event = prepared.canonical.events.find((event) => event.id === "later-actor-enters")!;
+    prepared.canonical.eventExecutions = [{ id: "late-complete-entry", canonicalEventId: event.id, actorId: "later-actor", evidence: event.evidence,
+      entryCheckpoint: { ...event.characterEntryCheckpoints![0]!, projectionSeed: { version: 1, elapsedDays: 6, activeRuleIds: [], semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] } } } }];
+    expect(deriveCharacterEntrySeed(prepared, "later-actor").projectionSeed?.elapsedDays).toBe(6);
+    expect(event.characterEntryCheckpoints![0]!.projectionSeed).toBeUndefined();
   });
   it("gives an unread opening-role player a display-only spoiler-free setup", () => {
     const seed = deriveCharacterEntrySeed(bundle(), "opening-actor");

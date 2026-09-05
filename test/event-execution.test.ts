@@ -11,6 +11,7 @@ import { CompilerValidator } from "../src/compiler/validator.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
 import { canonicalEventSchema } from "../src/world/model.js";
 import { compilerToolAllowedInSemanticStage } from "../src/compiler/proposal-tools.js";
+import { deriveAdHocAction } from "../src/world/action-invocation.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -34,15 +35,27 @@ it("links a later executable proposal to an earlier immutable semantic event and
   expect(await validateCompilerProposalClosure(root, ["link-first"], fixture.source.id)).toEqual([]);
   expect((await new CompilerValidator(canon).validate("event-execution", binding)).errors).toEqual([]);
   await canon.putEventExecution(binding);
+  const entry = eventExecutionSchema.parse({ id: "recipient-entry", canonicalEventId: "first", actorId: "recipient", evidence, entryCheckpoint: {
+    actorId: "recipient", readerSetup: "Recipient is waiting before the first gift.", actorObservation: "Giver is in front of you.", participantPresence: [{ entityId: "recipient", mode: "physical" }],
+    delta: { version: 1, operations: [{ op: "set", entityId: "recipient", field: "character.alive", value: true }, { op: "set", entityId: "recipient", field: "character.plan", value: "consider the gift" }] },
+    projectionSeed: { version: 1, elapsedDays: 7, activeRuleIds: [], semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] } },
+  } });
+  expect((await new CompilerValidator(canon).validate("event-execution", entry)).errors).toEqual([]);
+  await canon.putEventExecution(entry);
   const contexts = new WorldContextStore(root), frozen = await contexts.captureCurrent(fixture.source.id);
   expect(frozen.events!.get("first")!.action).toEqual(binding.action);
   expect((await canon.getEvent("first")).action).toBeUndefined();
+  expect((await canon.getEvent("first")).characterEntryCheckpoints).toBeUndefined();
+  expect(frozen.events!.get("first")!.characterEntryCheckpoints?.[0]?.projectionSeed?.elapsedDays).toBe(7);
   await canon.removeCurrent("event-executions", binding.id);
   expect((await contexts.load(frozen.canonicalSnapshotHash!)).events!.get("first")!.action).toEqual(binding.action);
   const loaded = await new CompilerValidator(canon).loadCatalog();
   const catalog = { ...loaded, participations: [...loaded.eventParticipations.values()] };
+  const adHoc = { ...first, action: deriveAdHocAction({ kind: "give", description: first.title, delta: first.observedOutcome, preconditions: [] }) };
+  expect(validateEventExecutions([binding], { ...catalog, events: new Map(catalog.events).set(first.id, adHoc) })).toEqual([]);
   expect(validateEventExecutions([{ ...binding, actorId: "recipient" }], catalog)).toContainEqual(expect.objectContaining({ code: "ACTION_INITIATOR_MISMATCH" }));
   expect(validateEventExecutions([binding, { ...binding, id: "duplicate" }], catalog)).toContainEqual(expect.objectContaining({ code: "EVENT_EXECUTION_DUPLICATED" }));
+  expect(validateEventExecutions([entry, { ...entry, id: "duplicate-entry" }], catalog)).toContainEqual(expect.objectContaining({ code: "EVENT_ENTRY_DUPLICATED" }));
   expect(compilerToolAllowedInSemanticStage("propose_event_execution", "executable")).toBe(true);
   expect(compilerToolAllowedInSemanticStage("propose_event_execution", "semantic")).toBe(false);
 });

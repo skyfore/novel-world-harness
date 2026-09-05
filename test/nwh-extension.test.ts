@@ -1,3 +1,6 @@
+import { useOfflinePreparationBoundary } from "./helpers/offline-preparation.js";
+useOfflinePreparationBoundary();
+import { installHallCampRoute, hallCampWalkIntent, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -927,6 +930,7 @@ describe("NWH TUI extension", () => {
   it("routes natural character selection and subsequent input through committed world play", async () => {
     const translator: PlayerActionTranslator = ({ utterance }) => ({
       title: utterance,
+      intent: hallCampWalkIntent,
       participants: ["camp"],
       preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],
       proposedDelta: {
@@ -949,6 +953,7 @@ describe("NWH TUI extension", () => {
       epistemicType: "explicit-fact",
       evidence: [],
     });
+    await installHallCampRoute(root);
     const { engine } = await openWorkspaceWorld(root);
     const genesis = await engine.createBranch("main", "Main", {
       version: 1,
@@ -1006,7 +1011,7 @@ describe("NWH TUI extension", () => {
     expect(sentVisibleMessages.join("\n")).toContain("脚下的路已经把林岐带离原处");
     expect(sentVisibleMessages.join("\n")).not.toContain("Committed at step 1");
     expect(widgets.flatMap((widget) => widget ?? []).join("\n")).toContain("正在理解你的行动");
-    expect(notifications).toEqual([]);
+    expect(notifications).toEqual(["Switched to travel-world.txt instance 'main'."]);
     expect(statuses).toContain("NWH · 林岐@main · step 1");
   });
 
@@ -2466,7 +2471,7 @@ describe("NWH TUI extension", () => {
     await commands.get("prepare-all")?.handler(evidence.source.id, preparationContext(notifications, questions));
 
     expect(questions).toEqual(["Accept validated proposals?", "Create playable branch?"]);
-    expect(notifications.some((message) => message.includes("Preparation complete"))).toBe(true);
+    expect(notifications).toContainEqual(expect.stringContaining("Preparation complete"));
     expect(sentHiddenMessages).toEqual([]);
     await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
   });
@@ -2758,7 +2763,7 @@ describe("NWH TUI extension", () => {
         version: 1,
         delta: {
           version: 1,
-          operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "wait at the opening" }],
+          operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait at the opening" }],
         },
       },
       evidence_segment_ids: [segmentId!],
@@ -2783,7 +2788,7 @@ describe("NWH TUI extension", () => {
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
     expect(questions).toEqual(["Generate opening world?", "Accept validated proposals?", "Create playable branch?"]);
-    expect(notifications.some((message) => message.includes("Preparation complete"))).toBe(true);
+    expect(notifications).toContainEqual(expect.stringContaining("Preparation complete"));
     await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
   });
 

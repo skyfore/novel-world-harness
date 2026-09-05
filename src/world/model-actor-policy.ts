@@ -1,3 +1,4 @@
+import { actorOutcomeShape, copyActorOutcome, hasActorOutcome } from "./actor-outcome.js";
 import { z } from "zod";
 import { contentHash } from "./canonical.js";
 import {
@@ -26,6 +27,7 @@ import {
   buildActorScopedActionContext,
   createPlayerActionModelBoundary,
   playerActionCandidateSchema,
+  playerIntentSchema,
   playerActionTranslationContext,
   validatePlayerActionGrounding,
   validatePlayerActionScope,
@@ -49,7 +51,9 @@ export const actorActionTemplateSchema = z
     preconditions: z.array(predicateSchema).default([]),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    ...actorOutcomeShape,
     action: actionInvocationSchema.optional(),
+    intent: playerIntentSchema.optional(),
     coordination: actorCoordinationSchema.optional(),
     rationale: z.string().optional(),
   })
@@ -123,6 +127,7 @@ export type ModelActorWorldView = {
   activeThreads: ActorScopedActionContext["activeThreads"];
   activeNorms: ModelActorNormView[];
   activeProcesses: ModelActorProcessView[];
+  decision?: ActorScopedActionContext["decision"];
 };
 
 /**
@@ -303,6 +308,7 @@ export function modelActorProposalSource(
       const activeNorms = modelVisibleNorms(goal.actorId, knownClaimIds, projection, context.normTemplates ?? new Map());
       const activeProcesses = modelVisibleProcesses(goal.actorId, projection, context.processTemplates ?? new Map());
       const actor: ModelActorWorldView = {
+        ...(modelScoped.decision ? { decision: structuredClone(modelScoped.decision) } : {}),
         actorId: modelScoped.actorId,
         selfState: structuredClone(modelScoped.selfState),
         ownedEntityState: structuredClone(modelScoped.ownedEntityState),
@@ -320,8 +326,8 @@ export function modelActorProposalSource(
         },
         recentVisibleEvents: modelScoped.recentVisibleEvents.map(({ summary }) => ({ summary })),
         activeThreads: structuredClone(modelScoped.activeThreads),
-        activeNorms,
-        activeProcesses,
+        activeNorms: modelScoped.decision?.norms.map(({ id: _id, templateId: _templateId, ...item }) => item) ?? activeNorms,
+        activeProcesses: modelScoped.decision?.processes.map(({ id: _id, templateId: _templateId, ...item }) => item) ?? activeProcesses,
       };
       let output: ActorActionTemplate | null;
       try {
@@ -343,7 +349,7 @@ export function modelActorProposalSource(
                 ...(visibleOntology?.development.length ? { development: structuredClone(visibleOntology.development) } : {}),
                 ...(visibleRelationships?.length ? { relationships: structuredClone(visibleRelationships) } : {}),
                 ...(visibleBranch.branchAppraisals.length ? { branchAppraisals: visibleBranch.branchAppraisals } : {}),
-                ...(visibleBranch.branchRelationships.length ? { branchRelationships: visibleBranch.branchRelationships } : {}),
+                ...(modelScoped.decision?.relationships.length ? { branchRelationships: modelScoped.decision.relationships.map((item) => ({ direction: "outgoing" as const, counterpartyId: item.counterpartyId, dimensions: item.dimensions })) } : {}),
                 ...(visibleBranch.branchObligations.length ? { branchObligations: visibleBranch.branchObligations } : {}),
               }
             : null,
@@ -367,7 +373,10 @@ export function modelActorProposalSource(
           participants: encodedAction.participants,
           preconditions: encodedAction.preconditions,
           proposedDelta: encodedAction.proposedDelta,
+          ...(encodedAction.action ? { action: encodedAction.action } : {}),
+          ...(encodedAction.intent ? { intent: encodedAction.intent } : {}),
           ...(encodedAction.proposedKnowledge ? { proposedKnowledge: encodedAction.proposedKnowledge } : {}),
+          ...copyActorOutcome(encodedAction),
           requiresKnowledge: [],
           forbidsKnowledge: [],
         }));
@@ -377,7 +386,7 @@ export function modelActorProposalSource(
           ...await validatePlayerActionSpatialScope(engine, candidate, goal.actorId, commitId, activeSourceId),
         ];
         if (capabilityIssues.length || !candidateHasMaterialEffect(candidate)) continue;
-        const action = encodedAction.action ? decodeActionInvocation(encodedAction.action, boundary) : undefined;
+        const action = candidate.action;
         if (action && actionEntityIds(action).some((id) => !referenceable.has(id))) continue;
         const participants = [...new Set([goal.actorId, ...candidate.participants])];
         const coordination = decodeCoordination(encodedAction.coordination, boundary);
@@ -485,7 +494,10 @@ async function firstValidCompiledAction(input: {
       participants: action.participants ?? [],
       preconditions: action.preconditions,
       proposedDelta: action.proposedDelta,
+      ...(action.action ? { action: action.action } : {}),
+      ...(action.timeAdvance ? { intent: { kind: "act", summary: action.title, targets: [], requestedTimeAdvance: action.timeAdvance } } : {}),
       ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
+      ...copyActorOutcome(action),
       requiresKnowledge: [],
       forbidsKnowledge: [],
     });
@@ -543,7 +555,9 @@ function actorCandidateFromAction(input: {
       preconditions: input.candidate.preconditions,
       proposedDelta: input.candidate.proposedDelta,
       ...(input.candidate.proposedKnowledge ? { proposedKnowledge: input.candidate.proposedKnowledge } : {}),
+      ...copyActorOutcome(input.candidate),
       ...(input.action ? { action: input.action } : {}),
+      ...(input.candidate.intent?.requestedTimeAdvance ? { timeAdvance: input.candidate.intent.requestedTimeAdvance } : {}),
       causalRelations,
       causalParents: causalRelations.map((relation) => relation.fromEventId),
       evidence: input.goal.evidence,
@@ -552,8 +566,8 @@ function actorCandidateFromAction(input: {
 }
 
 function candidateHasMaterialEffect(candidate: ReturnType<typeof playerActionCandidateSchema.parse>): boolean {
-  return candidate.proposedDelta.operations.length > 0
-    || (candidate.proposedKnowledge?.operations.length ?? 0) > 0;
+  return hasActorOutcome(candidate) || candidate.proposedDelta.operations.length > 0
+    || (candidate.proposedKnowledge?.operations.length ?? 0) > 0 || Boolean(candidate.intent?.requestedTimeAdvance);
 }
 
 function decodeActionInvocation(

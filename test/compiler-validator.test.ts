@@ -106,7 +106,7 @@ describe("CompilerCommitService", () => {
     await proposals.submit("action-schema", {
       proposalId: "policy-travel-action-proposal",
       payload: {
-        ontologyVersion: "action-schema-v1",
+        ontologyVersion: "action-schema-v1", initiatorRoleId: "traveler",
         id: "travel-to-gate",
         name: "Travel to the Gate",
         roles: [{

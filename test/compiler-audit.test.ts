@@ -55,7 +55,7 @@ describe("compiler audit", () => {
       });
     }
     await canon.putActionSchema({
-      ontologyVersion: "action-schema-v1",
+      ontologyVersion: "action-schema-v1", initiatorRoleId: "actor",
       id: "depart",
       name: "Depart",
       roles: [{ id: "actor", label: "departing actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],

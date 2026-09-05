@@ -1,3 +1,5 @@
+import { useOfflinePreparationBoundary } from "./helpers/offline-preparation.js";
+useOfflinePreparationBoundary();
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -153,28 +155,33 @@ describe("character-specific play entry", () => {
       sourceId: local.source.id,
       preparedRevisionHash: "0".repeat(64),
       actorId: "hero",
+      entryCutHash: sourceRoles.roles.find((role) => role.actorId === "hero")!.entryCutHash!,
       clientRequestId: "fresh-hero-stale-base",
     })).rejects.toMatchObject({
       statusCode: 409,
       detail: { code: "FROZEN_BASE_MOVED", retry: { copyField: "preparedRevisionHash" } },
     });
 
+    await expect(webPlay.startFreshPlay({ sourceId: local.source.id, preparedRevisionHash: revision.bundleHash, actorId: "hero", entryCutHash: "0".repeat(64), clientRequestId: "stale-cut" })).rejects.toMatchObject({ statusCode: 409, detail: { code: "ENTRY_CUT_STALE" } });
     const firstHeroPlay = await webPlay.startFreshPlay({
       sourceId: local.source.id,
       preparedRevisionHash: revision.bundleHash,
       actorId: "hero",
+      entryCutHash: sourceRoles.roles.find((role) => role.actorId === "hero")!.entryCutHash!,
       clientRequestId: "fresh-hero-one",
     });
     const repeatedFirstHeroPlay = await webPlay.startFreshPlay({
       sourceId: local.source.id,
       preparedRevisionHash: revision.bundleHash,
       actorId: "hero",
+      entryCutHash: sourceRoles.roles.find((role) => role.actorId === "hero")!.entryCutHash!,
       clientRequestId: "fresh-hero-one",
     });
     const secondHeroPlay = await webPlay.startFreshPlay({
       sourceId: local.source.id,
       preparedRevisionHash: revision.bundleHash,
       actorId: "hero",
+      entryCutHash: sourceRoles.roles.find((role) => role.actorId === "hero")!.entryCutHash!,
       clientRequestId: "fresh-hero-two",
     });
     expect(repeatedFirstHeroPlay.reused).toBe(true);

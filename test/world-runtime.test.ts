@@ -1,3 +1,4 @@
+import { routeContext, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -29,6 +30,7 @@ async function fixture() {
     entities: new Map(entities.map((entity) => [entity.id, entity])),
     rules: new Map(),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    ...routeContext("hall", "camp"),
   };
   const engine = new WorldEngine(root, context);
   const templates = ({ branchId, commitId }: { branchId: string; commitId: string }): Possibility[] => [
@@ -53,6 +55,20 @@ async function fixture() {
 }
 
 describe("WorldRuntime", () => {
+  it("skips a rejected background candidate without spending the successful-commit budget or retrying unchanged inputs", async () => {
+    const { engine } = await fixture();
+    const head = await engine.createBranch("main", "Main", { version: 1, operations: [] });
+    const runtime = new WorldRuntime(engine, ({ branchId, commitId }) => [
+      { id: "bad", branchId, evaluatedAtCommit: commitId, kind: "generated", title: "Invalid numeric effect", participants: ["hero"], preconditions: [], blockers: [], causalParents: [], pressure: 1, relevance: 1, evidence: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.alive", value: "invalid" }] } },
+      { id: "good", branchId, evaluatedAtCommit: commitId, kind: "generated", title: "News arrives", participants: ["hero"], preconditions: [], blockers: [], causalParents: [], pressure: 0.5, relevance: 0.5, evidence: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.title", value: "Commander" }] } },
+    ]);
+    const result = await runtime.move({ branchId: "main", expectedParentCommit: head, maxBackgroundCandidates: 1 });
+    expect(result.rejectedProposals).toHaveLength(1);
+    expect(result.committedEvents).toHaveLength(1);
+    expect((await engine.projector.project(result.newHead)).values.hero?.["character.title"]).toBe("Commander");
+    expect(result.trace.candidates).toHaveLength(2);
+  });
+
   const readPromotionCandidate = (): PlayerActionCandidate => ({
     title: "Read the sealed commission",
     intent: {
@@ -498,6 +514,8 @@ describe("WorldRuntime", () => {
       source: "player",
       actorId: "hero",
       title: "Leave the hall",
+      action: hallCampWalkAction,
+      timeAdvance: { amount: 1, unit: "minute" },
       participants: ["hero"],
       proposedTime: { kind: "ordinal", label: "before promotion" },
       preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],

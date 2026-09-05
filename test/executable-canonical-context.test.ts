@@ -36,7 +36,7 @@ describe("executable canonical context", () => {
       evidence: [evidence],
     });
     await canon.putActionSchema({
-      ontologyVersion: "action-schema-v1",
+      ontologyVersion: "action-schema-v1", initiatorRoleId: "arriver",
       id: "arrive-action",
       name: "Arrive at a place",
       roles: [

@@ -17,7 +17,9 @@ import { prepareCommand } from "./commands/prepare.js";
 import { prepareAllCommand } from "./commands/prepare-all.js";
 import { reparseCommand } from "./commands/reparse.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
-import { activatePreparedCacheRevisionCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
+import { rebuildCommand } from "./commands/rebuild.js";
+import { activatePreparedCacheRevisionCommand, inspectNovelClosureCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
+import { evaluateNovelCommand, freezeNovelEvaluationCommand } from "./commands/novel-evaluation.js";
 import { playWorldCommand } from "./commands/play-world.js";
 import { acceptAllValidProposalsCommand, acceptProposalCommand, listProposalsCommand, rejectProposalCommand, showProposalCommand } from "./commands/proposals.js";
 import {
@@ -292,6 +294,19 @@ program
   });
 
 program
+  .command("rebuild")
+  .option("-c, --config <path>", "configuration file")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "immutable ingested source to rebuild")
+  .option("--chapters <selection>", "rebuild selected chapters and their dependent consumers; omit for the whole novel")
+  .option("--from-revision <bundle-hash>", "start from an exact immutable compiler candidate")
+  .option("--replace-staging", "preserve displaced drafts in rejected history before replacing conflicting staging")
+  .option("--model <model>", "override the Pi compiler model")
+  .description("resume or rebuild the core novel world into an immutable candidate without publishing Play")
+  .action(async (options) => { await rebuildCommand({ root: rootFor(options), configPath: configFor(options), sourceId: options.source, chapters: options.chapters,
+    fromRevision: options.fromRevision, replaceStaging: options.replaceStaging, model: options.model ?? program.opts().model }); });
+
+program
   .command("repair-existing")
   .option("-c, --config <path>", "configuration file")
   .option("--root <path>", "local novel workspace")
@@ -313,6 +328,21 @@ program
   });
 
 const preparedCache = program.command("prepared-cache").description("inspect or activate versioned prepared-novel revisions");
+preparedCache.command("freeze-evaluation")
+  .argument("<plan-json>", "independent semantic gold and per-major scenarios")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id")
+  .action(async (planFile, options) => freezeNovelEvaluationCommand(rootFor(options), planFile, options.source));
+preparedCache.command("evaluate")
+  .argument("<plan-hash>", "previously frozen independent evaluation plan")
+  .option("--root <path>", "local novel workspace")
+  .option("--model <model>", "Pi provider/model override")
+  .action(async (planHash, options) => evaluateNovelCommand(rootFor(options), planHash, configFor(options), options.model ?? program.opts().model));
+preparedCache.command("inspect-closure")
+  .description("inspect current candidate closure, major roles and missing evaluation evidence without publication")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id")
+  .action(async (options) => inspectNovelClosureCommand(rootFor(options), options.source));
 preparedCache.command("list")
   .option("--root <path>", "local novel workspace")
   .option("--source <id>", "ingested source id")

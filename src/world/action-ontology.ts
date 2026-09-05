@@ -97,6 +97,7 @@ export const actionSchemaSchema = z.object({
   id: idSchema,
   name: z.string().trim().min(1).max(300),
   roles: z.array(actionRoleSpecSchema).min(1).max(32),
+  initiatorRoleId: idSchema.describe("The single character role that must be bound to the acting character; binding another role does not grant initiation authority."),
   parameters: z.array(actionParameterSpecSchema).max(32),
   preconditions: z.array(predicateTemplateSchema).max(64),
   stateEffects: z.array(actionStateEffectTemplateSchema).max(64),
@@ -113,6 +114,8 @@ export const actionSchemaSchema = z.object({
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
+  const initiator = value.roles.find((role) => role.id === value.initiatorRoleId);
+  if (!initiator || initiator.minCardinality !== 1 || initiator.maxCardinality !== 1 || !initiator.allowedEntityKinds.includes("character")) ctx.addIssue({ code: "custom", path: ["initiatorRoleId"], message: "Action initiator must reference a single required character role" });
   for (const [field, ids] of [
     ["roles", value.roles.map((role) => role.id)],
     ["parameters", value.parameters.map((parameter) => parameter.id)],
@@ -151,6 +154,7 @@ export function resolveActionInvocation(
   entities: ReadonlyMap<string, Entity>,
   input: {
     participants: readonly string[];
+    actorId?: string;
     proposedDelta: StateDelta;
     hasKnowledge: boolean;
     hasTimeAdvance: boolean;
@@ -174,6 +178,7 @@ export function resolveActionInvocation(
   };
   const issues = validateActionBindings(schema, invocation, entities, input.participants);
   const roles = new Map(invocation.roleBindings.map((binding) => [binding.roleId, binding.entityIds]));
+  if (input.actorId && (roles.get(schema.initiatorRoleId)?.length !== 1 || roles.get(schema.initiatorRoleId)?.[0] !== input.actorId)) issues.push(issue("ACTION_INITIATOR_MISMATCH", "The action initiator role must be bound to the acting character", "action.roleBindings"));
   const parameters = invocation.parameters;
   validateActionParameters(schema, parameters, issues);
   let preconditions: Predicate[] = [];
@@ -266,7 +271,7 @@ export function validateAdHocActionFootprint(
   return issues;
 }
 
-function predicateStateAddresses(predicate: Predicate): ActionStateAddress[] {
+export function predicateStateAddresses(predicate: Predicate): ActionStateAddress[] {
   if (predicate.op === "all" || predicate.op === "any") return predicate.items.flatMap(predicateStateAddresses);
   if (predicate.op === "not") return predicateStateAddresses(predicate.item);
   if ("entityId" in predicate && "field" in predicate) return [{ entityId: predicate.entityId, field: predicate.field }];
@@ -407,16 +412,22 @@ function validateInstantiatedEffects(
   schemaId: string,
   issues: ValidationIssue[],
 ): void {
-  const actual = new Set(delta.operations.map(canonicalJson));
-  const allowed = new Set(allowedEffects.map((effect) => canonicalJson(effect.operation)));
+  const actual = new Map<string, number>(), allowed = new Map<string, number>(), required = new Map<string, number>();
+  for (const effect of allowedEffects) {
+    const key = canonicalJson(effect.operation);
+    allowed.set(key, (allowed.get(key) ?? 0) + 1);
+    if (effect.required) required.set(key, (required.get(key) ?? 0) + 1);
+  }
   delta.operations.forEach((operation, index) => {
-    if (!allowed.has(canonicalJson(operation))) {
+    const key = canonicalJson(operation), count = (actual.get(key) ?? 0) + 1;
+    actual.set(key, count);
+    if (count > (allowed.get(key) ?? 0)) {
       issues.push(issue("ACTION_EFFECT_NOT_DECLARED", `Operation ${index} is not declared by action schema ${schemaId}`, `proposedDelta.operations.${index}`));
     }
   });
-  allowedEffects.forEach((effect, index) => {
-    if (effect.required && !actual.has(canonicalJson(effect.operation))) {
-      issues.push(issue("ACTION_REQUIRED_EFFECT_MISSING", `Required effect ${index} of action schema ${schemaId} is missing`, "proposedDelta.operations"));
+  required.forEach((count, key) => {
+    if ((actual.get(key) ?? 0) < count) {
+      issues.push(issue("ACTION_REQUIRED_EFFECT_MISSING", `A required effect of action schema ${schemaId} is missing`, "proposedDelta.operations"));
     }
   });
 }

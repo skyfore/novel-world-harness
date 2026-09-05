@@ -1,3 +1,4 @@
+import { eventExecutionSchema } from "../world/event-execution.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -72,12 +73,14 @@ import { SourceAccountingStore, sourceAccountingManifestSchema } from "./source-
 import { sceneOccurrenceSchema } from "../world/scene-occurrence.js";
 import { eventFrameSchema } from "../world/event-frame.js";
 import { actionSchemaSchema } from "../world/action-ontology.js";
+import { RoleRosterStore, roleRosterSchema } from "./role-roster.js";
+import { assessNovelClosure, assertPreparedReadiness, novelClosureAssessmentSchema } from "./certification.js";
 import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 
 export { COMPILER_PIPELINE_VERSION };
 
-const CACHE_FORMAT_VERSION = 2;
-export const COMPILER_PROMPT_VERSION = 26;
+const CACHE_FORMAT_VERSION = 3;
+export const COMPILER_PROMPT_VERSION = 28;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 
@@ -114,6 +117,7 @@ const preparedCanonicalSchema = z.object({
   sceneOccurrences: z.array(sceneOccurrenceSchema),
   eventFrames: z.array(eventFrameSchema),
   actionSchemas: z.array(actionSchemaSchema),
+  eventExecutions: z.array(eventExecutionSchema).default([]),
   actionConstraints: z.array(actionConstraintSchema).default([]),
   normTemplates: z.array(normTemplateSchema).default([]),
   processTemplates: z.array(processTemplateSchema).default([]),
@@ -131,6 +135,7 @@ const preparedCompilerSnapshotSchema = z.object({
   entityResolutions: z.array(identityResolutionSchema),
   eventResolutions: z.array(eventResolutionSchema),
   accounting: sourceAccountingManifestSchema.nullable(),
+  roleRoster: roleRosterSchema.nullable().default(null),
 }).strict();
 
 const preparedBundleCommonShape = {
@@ -143,10 +148,11 @@ const preparedBundleCommonShape = {
 };
 
 export const preparedNovelBundleSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(4),
   ...preparedBundleCommonShape,
   lineage: preparedRevisionLineageSchema.optional(),
   compilerSnapshot: preparedCompilerSnapshotSchema,
+  readiness: novelClosureAssessmentSchema.nullable().default(null),
 }).strict();
 
 export type PreparedNovelBundle = z.infer<typeof preparedNovelBundleSchema>;
@@ -166,6 +172,7 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     throw new Error("Prepared bundle chapter split plan does not match its source identity.");
   }
   const snapshot = bundle.compilerSnapshot;
+  if (snapshot.roleRoster && (snapshot.roleRoster.sourceId !== sourceId || snapshot.roleRoster.sourceSha256 !== bundle.source.contentSha256)) throw new Error("Prepared role roster escapes its source identity");
   if (snapshot.structure.sourceId !== sourceId
     || snapshot.structure.sourceSha256 !== bundle.source.contentSha256) {
     throw new Error("Prepared compiler structure snapshot does not match its source identity.");
@@ -217,6 +224,7 @@ function assertPreparedBundleSourceScope(bundle: PreparedNovelBundle): void {
     bundle.canonical.spatialRelations,
     bundle.canonical.sceneOccurrences,
     bundle.canonical.eventFrames,
+    bundle.canonical.eventExecutions,
     bundle.canonical.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
     bundle.canonical.actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
     bundle.canonical.normTemplates.filter((template) => template.induction.kind === "source-pattern"),
@@ -397,6 +405,7 @@ export class PreparedNovelCache {
   async loadFreshActive(source: SourceDocument): Promise<ActivePreparedNovel | null> {
     const active = await this.loadActive(source);
     if (!active) return null;
+    assertPreparedReadiness(active.bundle);
     const issue = await this.freshnessIssue(active.bundle);
     if (issue) {
       throw new Error(
@@ -425,6 +434,7 @@ export class PreparedNovelCache {
       };
     }
 
+    assertPreparedReadiness(cached.bundle);
     const compatibility = await this.assertWorkspaceCanMaterialize(cached.bundle);
     if (!compatibility.compatible) {
       return {
@@ -446,6 +456,22 @@ export class PreparedNovelCache {
     };
   }
 
+  /** Evaluate a candidate through isolated production reducers without activating it. */
+  async candidateSnapshot(source: SourceDocument): Promise<PreparedNovelBundle> {
+    const identity = await sourceIdentity(this.workspaceRoot, source);
+    return this.buildBundle(source, identity, { allowSemanticDebtForRollback: true });
+  }
+
+  async inspectCandidate(source: SourceDocument) {
+    const bundle = await this.candidateSnapshot(source);
+    return { bundle, assessment: await assessNovelClosure(this.workspaceRoot, bundle) };
+  }
+
+  /** Freeze reviewable compiler output while keeping public Play activation unchanged. */
+  async archiveCandidate(source: SourceDocument, options: { lineage?: PreparedRevisionLineage } = {}): Promise<PreparedCacheResult> {
+    return this.publish(source, { ...options, allowSemanticDebtForRollback: true });
+  }
+
   async publish(
     source: SourceDocument,
     options: { allowSemanticDebtForRollback?: boolean; lineage?: PreparedRevisionLineage } = {},
@@ -456,7 +482,10 @@ export class PreparedNovelCache {
       );
     }
     const identity = await sourceIdentity(this.workspaceRoot, source);
-    const bundle = await this.buildBundle(source, identity, options);
+    const candidate = await this.buildBundle(source, identity, options);
+    if (options.allowSemanticDebtForRollback) return this.publishBundle(source, identity, candidate, false);
+    const bundle = preparedNovelBundleSchema.parse({ ...candidate, readiness: await assessNovelClosure(this.workspaceRoot, candidate) });
+    assertPreparedReadiness(bundle);
     return this.publishBundle(source, identity, bundle);
   }
 
@@ -481,13 +510,14 @@ export class PreparedNovelCache {
       allowSemanticDebtForRollback: true,
       legacyRollbackCheckpoint: checkpoint,
     });
-    return this.publishBundle(source, identity, bundle);
+    return this.publishBundle(source, identity, bundle, false);
   }
 
   private async publishBundle(
     source: SourceDocument,
     identity: { contentMd5: string; contentSha256: string },
     bundle: PreparedNovelBundle,
+    activate = true,
   ): Promise<PreparedCacheResult> {
     const bundleHash = contentHash(bundle);
     if (bundle.lineage?.parentBundleHash === bundleHash) {
@@ -539,7 +569,7 @@ export class PreparedNovelCache {
       }
       throw error;
     }
-    await this.writeActive(identity.contentMd5, bundleHash);
+    if (activate) await this.writeActive(identity.contentMd5, bundleHash);
     return { status: published ? "published" : "already-cached", contentMd5: identity.contentMd5, cachePath, bundleHash };
   }
 
@@ -628,6 +658,13 @@ export class PreparedNovelCache {
     };
   }
 
+  /** Restore a compiler checkpoint only. An archive never becomes a published Play revision here. */
+  async restoreCompilerCheckpoint(source: SourceDocument, bundleHash: string): Promise<void> {
+    const checkpoint = await this.loadRevision(source, bundleHash, { allowIncompatible: true });
+    if (!checkpoint) throw new Error(`Compiler checkpoint not found: ${bundleHash}`);
+    await this.materialize(checkpoint.bundle, true);
+  }
+
   async activate(source: SourceDocument, bundleHash: string, options: { allowIncompatibleRollback?: boolean } = {}): Promise<PreparedCacheResult> {
     digestSchema.parse(bundleHash);
     const identity = await sourceIdentity(this.workspaceRoot, source);
@@ -636,6 +673,7 @@ export class PreparedNovelCache {
     const cached = await this.readCached(identity.contentMd5, bundleHash);
     if (!cached) throw new Error(`Prepared cache revision not found: ${identity.contentMd5}@${bundleHash}`);
     assertSourceIdentity(cached.bundle, identity);
+    assertPreparedReadiness(cached.bundle);
     const pending = await new ProposalStore(this.workspaceRoot).list("pending", source.id);
     const registeredSource = await (await WorkspaceStore.create(this.workspaceRoot)).getSource(source.id);
     const pendingTitle = registeredSource?.pendingTitleProposal ? 1 : 0;
@@ -708,7 +746,7 @@ export class PreparedNovelCache {
         if (matches) assertEvidenceExclusiveToSource(item.evidence, source.id, `Prepared artifact ${item.id ?? item.actorId ?? "unknown"}`);
         return matches;
       });
-    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, actionConstraints, normTemplates, processTemplates, rules, goals, models, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, eventExecutions, actionConstraints, normTemplates, processTemplates, rules, goals, models, possibilities] = await Promise.all([
       canonical.listEntities(),
       canonical.listPropositions(),
       canonical.listAttributions(),
@@ -720,6 +758,7 @@ export class PreparedNovelCache {
       canonical.listSceneOccurrences(),
       canonical.listEventFrames(),
       canonical.listActionSchemas(),
+      canonical.listEventExecutions(),
       canonical.listActionConstraints(),
       canonical.listNormTemplates(),
       canonical.listProcessTemplates(),
@@ -740,6 +779,7 @@ export class PreparedNovelCache {
       spatialRelations: fromSource(spatialRelations),
       sceneOccurrences: fromSource(sceneOccurrences),
       eventFrames: fromSource(eventFrames),
+      eventExecutions: fromSource(eventExecutions),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module")
         .concat(fromSource(actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"))),
       actionConstraints: actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module")
@@ -781,7 +821,7 @@ export class PreparedNovelCache {
       new SourceAccountingStore(this.workspaceRoot).read(source.id),
     ]);
     const bundle = preparedNovelBundleSchema.parse({
-      version: 3,
+      version: 4,
       source: {
         id: source.id,
         ...identity,
@@ -808,6 +848,7 @@ export class PreparedNovelCache {
         entityResolutions,
         eventResolutions,
         accounting,
+        roleRoster: await new RoleRosterStore(this.workspaceRoot).read(source.id),
       },
     });
     await this.assertTitleInferenceEvidence(bundle);
@@ -853,6 +894,7 @@ export class PreparedNovelCache {
       ["scene occurrence", current.sceneOccurrences, expected.sceneOccurrences, (item: { id: string }) => item.id],
       ["event frame", current.eventFrames, expected.eventFrames, (item: { id: string }) => item.id],
       ["action schema", current.actionSchemas, expected.actionSchemas, (item: { id: string }) => item.id],
+      ["event execution", current.eventExecutions, expected.eventExecutions, (item: { id: string }) => item.id],
       ["rule", current.rules, expected.rules, (item: { id: string }) => item.id],
       ["goal", current.goals, expected.goals, (item: { id: string }) => item.id],
       ["model", current.models, expected.models, (item: { actorId: string }) => item.actorId],
@@ -917,6 +959,7 @@ export class PreparedNovelCache {
       ["spatial relations", fromSource(current.spatialRelations), bundle.canonical.spatialRelations, (item: { id: string }) => item.id],
       ["scene occurrences", fromSource(current.sceneOccurrences), bundle.canonical.sceneOccurrences, (item: { id: string }) => item.id],
       ["event frames", fromSource(current.eventFrames), bundle.canonical.eventFrames, (item: { id: string }) => item.id],
+      ["event executions", current.eventExecutions.filter((binding) => binding.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.eventExecutions, (item: { id: string }) => item.id],
       ["action schemas", current.actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || schema.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionSchemas, (item: { id: string }) => item.id],
       ["action constraints", current.actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module" || constraint.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.actionConstraints, (item: { id: string }) => item.id],
       ["norm templates", current.normTemplates.filter((template) => template.induction.kind === "domain-module" || template.evidence.some((reference) => reference.span.sourceId === bundle.source.id)), bundle.canonical.normTemplates, (item: { id: string }) => item.id],
@@ -946,6 +989,7 @@ export class PreparedNovelCache {
       || currentCompilerSnapshot.eventResolutions.length
       || currentCompilerSnapshot.evidenceBindings.length
       || currentCompilerSnapshot.accounting
+      || currentCompilerSnapshot.roleRoster
     );
     const hasMaterializedSource = groups.some(([, actual]) => actual.length > 0)
       || Boolean(currentInitialForSource)
@@ -973,6 +1017,7 @@ export class PreparedNovelCache {
     entityResolutions: Awaited<ReturnType<EntityResolutionStore["list"]>>;
     eventResolutions: Awaited<ReturnType<EventResolutionStore["list"]>>;
     accounting: Awaited<ReturnType<SourceAccountingStore["read"]>>;
+    roleRoster: Awaited<ReturnType<RoleRosterStore["read"]>>;
   }> {
     const sourceId = bundle.source.id;
     const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
@@ -1002,6 +1047,7 @@ export class PreparedNovelCache {
       entityResolutions,
       eventResolutions,
       accounting,
+      roleRoster: await new RoleRosterStore(this.workspaceRoot).read(sourceId),
     };
   }
 
@@ -1041,6 +1087,7 @@ export class PreparedNovelCache {
       await removeMissing(current.spatialRelations, new Set(bundle.canonical.spatialRelations.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("spatial-relations", id));
       await removeMissing(current.sceneOccurrences, new Set(bundle.canonical.sceneOccurrences.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("scene-occurrences", id));
       await removeMissing(current.eventFrames, new Set(bundle.canonical.eventFrames.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-frames", id));
+      await removeMissing(current.eventExecutions, new Set(bundle.canonical.eventExecutions.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("event-executions", id));
       await removeMissing(current.actionSchemas, new Set(bundle.canonical.actionSchemas.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-schemas", id));
       await removeMissing(current.actionConstraints, new Set(bundle.canonical.actionConstraints.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("action-constraints", id));
       await removeMissing(current.normTemplates, new Set(bundle.canonical.normTemplates.map((item) => item.id)), (item) => item.id, (id) => canonical.removeCurrent("norm-templates", id));
@@ -1061,6 +1108,7 @@ export class PreparedNovelCache {
     for (const relation of bundle.canonical.spatialRelations) await canonical.putSpatialRelation(relation);
     for (const scene of bundle.canonical.sceneOccurrences) await canonical.putSceneOccurrence(scene);
     for (const frame of bundle.canonical.eventFrames) await canonical.putEventFrame(frame);
+    for (const binding of bundle.canonical.eventExecutions) await canonical.putEventExecution(binding);
     for (const schema of bundle.canonical.actionSchemas) await canonical.putActionSchema(schema);
     for (const constraint of bundle.canonical.actionConstraints) await canonical.putActionConstraint(constraint);
     for (const template of bundle.canonical.normTemplates) await canonical.putNormTemplate(template);
@@ -1075,6 +1123,7 @@ export class PreparedNovelCache {
     await new EntityResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.entityResolutions);
     await new EventResolutionStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.eventResolutions);
     await new SourceAccountingStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.accounting);
+    await new RoleRosterStore(this.workspaceRoot).replaceCurrent(sourceId, snapshot.roleRoster);
     const exactEvidence = new EvidenceAssertionStore(this.workspaceRoot);
     const currentDescriptors = preparedArtifactDescriptors(currentBefore)
       .filter((artifact) => artifactBelongsToSource(artifact.payload, sourceId));
@@ -1247,6 +1296,7 @@ function preparedArtifactDescriptors(canonical: {
   sceneOccurrences: PreparedCanonical["sceneOccurrences"];
   eventFrames: PreparedCanonical["eventFrames"];
   actionSchemas: PreparedCanonical["actionSchemas"];
+  eventExecutions: PreparedCanonical["eventExecutions"];
   actionConstraints: PreparedCanonical["actionConstraints"];
   normTemplates: PreparedCanonical["normTemplates"];
   processTemplates: PreparedCanonical["processTemplates"];
@@ -1267,6 +1317,7 @@ function preparedArtifactDescriptors(canonical: {
     ...canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation", id: payload.id, payload })),
     ...canonical.sceneOccurrences.map((payload) => ({ kind: "scene-occurrence", id: payload.id, payload })),
     ...canonical.eventFrames.map((payload) => ({ kind: "event-frame", id: payload.id, payload })),
+    ...canonical.eventExecutions.map((payload) => ({ kind: "event-execution", id: payload.id, payload })),
     ...canonical.actionSchemas.map((payload) => ({ kind: "action-schema", id: payload.id, payload })),
     ...canonical.actionConstraints.map((payload) => ({ kind: "action-constraint", id: payload.id, payload })),
     ...canonical.normTemplates.map((payload) => ({ kind: "norm-template", id: payload.id, payload })),
@@ -1314,6 +1365,7 @@ async function currentCanonical(workspaceRoot: string) {
     sceneOccurrences: await canonical.listSceneOccurrences(),
     eventFrames: await canonical.listEventFrames(),
     actionSchemas: await canonical.listActionSchemas(),
+    eventExecutions: await canonical.listEventExecutions(),
     actionConstraints: await canonical.listActionConstraints(),
     normTemplates: await canonical.listNormTemplates(),
     processTemplates: await canonical.listProcessTemplates(),
@@ -1497,6 +1549,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     sceneOccurrences: new Map(bundle.canonical.sceneOccurrences.map((item) => [item.id, item])),
     eventFrames: new Map(bundle.canonical.eventFrames.map((item) => [item.id, item])),
     actionSchemas: new Map(bundle.canonical.actionSchemas.map((item) => [item.id, item])),
+    eventExecutions: new Map(bundle.canonical.eventExecutions.map((item) => [item.id, item])),
     actionConstraints: new Map(bundle.canonical.actionConstraints.map((item) => [item.id, item])),
     normTemplates: new Map(bundle.canonical.normTemplates.map((item) => [item.id, item])),
     processTemplates: new Map(bundle.canonical.processTemplates.map((item) => [item.id, item])),
@@ -1515,6 +1568,7 @@ function assertSelfContainedBaseline(bundle: PreparedNovelBundle, canonicalStore
     ...bundle.canonical.eventRelations.map((payload) => ({ kind: "event-relation" as const, label: payload.id, payload })),
     ...bundle.canonical.spatialRelations.map((payload) => ({ kind: "spatial-relation" as const, label: payload.id, payload })),
     ...bundle.canonical.eventFrames.map((payload) => ({ kind: "event-frame" as const, label: payload.id, payload })),
+    ...bundle.canonical.eventExecutions.map((payload) => ({ kind: "event-execution" as const, label: payload.id, payload })),
     ...bundle.canonical.actionSchemas.map((payload) => ({ kind: "action-schema" as const, label: payload.id, payload })),
     ...bundle.canonical.actionConstraints.map((payload) => ({ kind: "action-constraint" as const, label: payload.id, payload })),
     ...bundle.canonical.normTemplates.map((payload) => ({ kind: "norm-template" as const, label: payload.id, payload })),

@@ -1,3 +1,4 @@
+import { actionSchemaSchema } from "../src/world/action-ontology.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -370,6 +371,7 @@ describe("multi-actor footprint adjudication", () => {
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       rules: new Map(),
       actionConstraints: new Map([[hiddenConstraint.id, hiddenConstraint]]),
+      actionSchemas: new Map([["close-door", actionSchemaSchema.parse({ ontologyVersion: "action-schema-v1", id: "close-door", name: "Close a door", initiatorRoleId: "operator", roles: [{ id: "operator", label: "Operator", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }], parameters: [], preconditions: [], stateEffects: [{ op: "set", entity: { kind: "entity", entityId: "door" }, field: "location.open", value: { source: "literal", value: false } }], effectEnvelope: { maxStateOperations: 1, allowedStateFields: ["location.open"], allowsKnowledge: false, allowsTimeAdvance: false, allowsSceneTransition: false }, induction: { kind: "domain-module", moduleId: "test-doors", moduleVersion: "1" }, evidence: [] })]]),
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
     });
     const head = await engine.createBranch("main", "Main", {
@@ -395,6 +397,7 @@ describe("multi-actor footprint adjudication", () => {
         },
       },
     });
+    closesDoor.proposal.action = { lane: "schema-bound", schemaId: "close-door", roleBindings: [{ roleId: "operator", entityIds: ["a"] }], parameters: {} };
     closesDoor.proposal.expectedParentCommit = head;
     crossesDoor.proposal.expectedParentCommit = head;
     const runtime = new WorldRuntime(engine, () => [], undefined, () => [closesDoor, crossesDoor]);

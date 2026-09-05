@@ -1,3 +1,5 @@
+import { useOfflinePreparationBoundary } from "./helpers/offline-preparation.js";
+useOfflinePreparationBoundary();
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -470,7 +472,7 @@ describe("explicit prepared-novel reparsing", () => {
       evidence: exactChapterTwoEvidence,
     });
     await canon.putActionSchema({
-      ontologyVersion: "action-schema-v1",
+      ontologyVersion: "action-schema-v1", initiatorRoleId: "agent",
       id: "villain-action-schema",
       name: "Villain action",
       roles: [{ id: "agent", label: "agent", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],

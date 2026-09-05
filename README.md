@@ -43,6 +43,19 @@ For a standalone Chinese competition narrative covering the product thesis, end-
 flows, technical highlights, demo plan, and honest limitations, see the
 [Hackson AI submission guide](docs/hackson-ai-submission.zh-CN.md).
 
+The novel-to-play work is documented in the
+[novel-to-play technical design](docs/novel-to-play-technical-design.zh-CN.md),
+[implementation and acceptance plan](docs/novel-to-play-acceptance-plan.zh-CN.md),
+and [ADR 0010](docs/adr/0010-major-character-play-and-world-closure.md).
+It addresses independently verified major-character coverage, compilation
+closure, and consistent action/effect/knowledge handling across play entry points.
+The [core compiler and rebuild guide](docs/novel-world-core-and-rebuild.zh-CN.md)
+describes the implemented Pi stages, mechanism bindings, closure diagnostics,
+and resumable candidate rebuild. See the
+[implementation record](docs/novel-to-play-implementation-progress.zh-CN.md)
+for completed changes and remaining acceptance work. Complete-novel live Pi
+certification has not yet been demonstrated by this branch.
+
 The browser MVP's requirement-to-code-to-test release gate is recorded in the
 [Web UI MVP acceptance matrix](docs/web-ui-mvp-acceptance.zh-CN.md).
 

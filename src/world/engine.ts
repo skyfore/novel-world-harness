@@ -1,3 +1,8 @@
+import { entryProjectionSeedSchema, type EntryProjectionSeed } from "./model.js";
+import { emptyBranchSemanticState } from "./semantic-effects.js";
+import { emptyProcessState } from "./process-effects.js";
+import { emptyNormState } from "./norm-effects.js";
+import { validateActorOutcomeOwnership } from "./actor-outcome.js";
 import { contentHash } from "./canonical.js";
 import type { CharacterGoal, CharacterModel } from "./actors.js";
 import {
@@ -45,6 +50,7 @@ import {
   applyStateDelta,
   emptyWorldState,
   evaluatePredicate,
+  evaluatePredicateTruth,
   validateEngineInvariants,
   validateResourceConservation,
   validateResourcePolicyCatalog,
@@ -71,6 +77,8 @@ import { ProjectionService, type ProjectionOptions, type WorldProjectionBundle }
 import { WorldSnapshotStore } from "./snapshot.js";
 import { deriveProgressCertificate, hasMaterialProgress } from "./progress.js";
 import { resolveActionInvocation, type ActionSchema } from "./action-ontology.js";
+import { normalizeActorProposal } from "./action-invocation.js";
+import { validateEffectObligations } from "./effect-obligations.js";
 import type { EventFrame } from "./event-frame.js";
 import type { SceneOccurrence } from "./scene-occurrence.js";
 import type { ActionConstraint } from "./action-constraint.js";
@@ -166,9 +174,9 @@ export function validateEventProposal(
   head: CommitId,
   state: WorldState,
   context: WorldModelContext,
-  options: { branchSemantics?: BranchSemanticState; deferMateriality?: boolean } = {},
+  options: { branchSemantics?: BranchSemanticState; deferMateriality?: boolean; realizedCanonicalEventIds?: ReadonlySet<string> } = {},
 ): { report: ValidationReport; postState?: WorldState } {
-  const proposal = eventProposalSchema.parse(proposalInput);
+  const proposal = normalizeActorProposal(eventProposalSchema.parse(proposalInput));
   const errors: ValidationIssue[] = [];
   const warnings: ValidationIssue[] = [];
   if (proposal.expectedParentCommit !== head) errors.push({ code: "STALE_PARENT", message: `Expected ${proposal.expectedParentCommit}, current head is ${head}` });
@@ -266,7 +274,8 @@ export function validateEventProposal(
   }
   errors.push(...validateCanonicalAdaptationContract(proposal, context));
   for (let index = 0; index < proposal.preconditions.length; index += 1) {
-    if (!evaluatePredicate(evaluationState, proposal.preconditions[index]!)) errors.push({ code: "PRECONDITION_FAILED", message: `Precondition ${index} is false`, path: `preconditions.${index}` });
+    const result = evaluatePredicateTruth(evaluationState, proposal.preconditions[index]!, context.stateSchema);
+    if (result !== "true") errors.push({ code: result === "unknown" ? "PRECONDITION_UNKNOWN" : "PRECONDITION_FAILED", message: `Precondition ${index} is ${result}`, path: `preconditions.${index}` });
   }
   if (proposal.action) {
     const resolvedAction = resolveActionInvocation(
@@ -275,6 +284,7 @@ export function validateEventProposal(
       context.entities,
       {
         participants: proposal.participants,
+        ...(proposal.actorId ? { actorId: proposal.actorId } : {}),
         proposedDelta: proposal.proposedDelta,
         hasKnowledge: Boolean(proposal.proposedKnowledge?.operations.length),
         hasTimeAdvance: Boolean(proposal.timeAdvance),
@@ -284,7 +294,7 @@ export function validateEventProposal(
     );
     errors.push(...resolvedAction.issues);
     resolvedAction.preconditions.forEach((predicate, index) => {
-      if (!evaluatePredicate(evaluationState, predicate)) {
+      if (!evaluatePredicate(evaluationState, predicate, context.stateSchema)) {
         errors.push({
           code: "ACTION_SCHEMA_PRECONDITION_FAILED",
           message: `Action schema precondition ${index} is false`,
@@ -331,7 +341,7 @@ export function validateEventProposal(
   if (!errors.some((error) => error.code === "UNKNOWN_ACTIVE_RULE")) {
     applicableRules.push(...resolveEffectiveWorldRules(context.rules, evaluationState).effective);
     for (const rule of applicableRules.filter((candidate) => isHardStateRule(candidate.rule))) {
-      if (rule.requires.some((predicate) => !evaluatePredicate(evaluationState, predicate))) {
+      if (rule.requires.some((predicate) => !evaluatePredicate(evaluationState, predicate, context.stateSchema))) {
         errors.push({ code: "STATE_RULE_REQUIREMENT_FAILED", message: `State rule ${rule.id} requirement is not satisfied` });
       }
     }
@@ -343,6 +353,8 @@ export function validateEventProposal(
     try {
       const delta = stateDeltaSchema.parse(proposal.proposedDelta);
       postState = applyStateDelta(evaluationState, delta, context.stateSchema, context.entities, context.rules);
+      errors.push(...validateEffectObligations({ proposal, before: state, after: postState, effectBaseline: evaluationState, context,
+        realizedCanonicalEventIds: options.realizedCanonicalEventIds }));
       for (const message of validateEngineInvariants(postState, context.stateSchema, context.entities, context.rules)) errors.push({ code: "POST_STATE_INVARIANT", message });
       for (const rule of applicableRules.filter((candidate) => isHardStateRule(candidate.rule))) {
         const forbidden = rule.forbids.some((predicate) => evaluatePredicate(postState!, predicate));
@@ -434,6 +446,7 @@ export class WorldEngine {
     initialTime: Omit<LogicalTime, "step"> = {},
     genesisOptions: {
       entryActorId?: EntityId;
+      projectionSeed?: EntryProjectionSeed;
       realizesCanonicalEventIds?: readonly string[];
       participantPresence?: readonly ParticipantPresence[];
       actorObservations?: readonly ActorEventObservation[];
@@ -455,8 +468,9 @@ export class WorldEngine {
     }
     stateDeltaSchema.parse(initialDelta);
     const knowledge = initialKnowledge ? knowledgeDeltaSchema.parse(initialKnowledge) : undefined;
-    if (knowledge) validateKnowledgeDeltaForContext(knowledge, this.context);
-    const logicalTime: LogicalTime = { step: 0, ...initialTime };
+    const completeSeed = genesisOptions.projectionSeed ? entryProjectionSeedSchema.parse(genesisOptions.projectionSeed) : undefined;
+    if (completeSeed) initialDelta = { version: 1, operations: [...initialDelta.operations, ...completeSeed.activeRuleIds.map((ruleId) => ({ op: "activate-rule" as const, ruleId }))] };
+    const logicalTime: LogicalTime = { step: 0, ...initialTime, ...(completeSeed ? { elapsedDays: completeSeed.elapsedDays } : {}) };
     if (genesisOptions.entryActorId) {
       const entryActor = this.context.entities.get(genesisOptions.entryActorId);
       if (!entryActor || entryActor.kind !== "character") {
@@ -512,6 +526,23 @@ export class WorldEngine {
     );
     const invariantErrors = validateEngineInvariants(initialState, this.context.stateSchema, this.context.entities, this.context.rules);
     if (invariantErrors.length) throw new Error(`Invalid initial world state: ${invariantErrors.join("; ")}`);
+    const seedProvenance: EffectProvenance = { commitId: "genesis", eventId: "genesis", eventHash: "0".repeat(64) };
+    const semantics = completeSeed ? applyBranchSemanticDelta(emptyBranchSemanticState("genesis"), completeSeed.semantics, {
+      entities: this.context.entities, canonicalPropositionIds: new Set(this.context.propositions?.keys() ?? []),
+      canonicalAttributionIds: new Set(this.context.attributions?.keys() ?? []), canonicalClaimIds: new Set(this.context.claims?.keys() ?? []),
+      canonicalGoalIds: new Set(this.context.actorGoals?.map((goal) => goal.id) ?? []), canonicalEventIds: new Set(this.context.events?.keys() ?? []),
+      knownCommittedEventIds: new Set(),
+    }, seedProvenance) : undefined;
+    if (knowledge) applyKnowledgeDelta(emptyKnowledgeState("genesis"), knowledge, "genesis", {
+      entities: this.context.entities, claims: this.context.claims, propositions: this.context.propositions,
+      attributions: this.context.attributions, branchSemantics: semantics ?? emptyBranchSemanticState("genesis"),
+    });
+    if (completeSeed) {
+      applyProcessDelta(emptyProcessState("genesis"), completeSeed.processes, { entities: this.context.entities, templates: this.context.processTemplates ?? new Map() }, seedProvenance, logicalTime.elapsedDays ?? 0);
+      applyNormDelta(emptyNormState("genesis"), completeSeed.norms, { entities: this.context.entities, templates: this.context.normTemplates ?? new Map(), postState: initialState,
+        normativeRuleIds: new Set([...this.context.rules.values()].filter(isNormativeWorldRule).map((rule) => rule.id)) }, seedProvenance);
+      if (JSON.stringify([...initialState.activeRuleIds].sort()) !== JSON.stringify([...new Set(completeSeed.activeRuleIds)].sort())) throw new Error("Entry seed active rule set disagrees with its state delta");
+    }
     const deltaHash = stateFactsChanged(emptyInitialState, initialState)
       ? await this.objects.putDelta(initialDelta)
       : undefined;
@@ -521,16 +552,25 @@ export class WorldEngine {
     const knowledgeDeltaHash = knowledge && effectiveInitialKnowledgeIndexes.length
       ? await this.objects.putKnowledgeDelta(knowledge)
       : undefined;
+    const semanticDeltaHash = completeSeed?.semantics.operations.length ? await this.objects.putSemanticDelta(completeSeed.semantics) : undefined;
+    const processDeltaHash = completeSeed?.processes.operations.length ? await this.objects.putProcessDelta(completeSeed.processes) : undefined;
+    const normDeltaHash = completeSeed?.norms.operations.length ? await this.objects.putNormDelta(completeSeed.norms) : undefined;
     const effects: CommittedEvent["effects"] = {
       version: 1,
       ...(deltaHash ? { stateDeltaHash: deltaHash } : {}),
       ...(knowledgeDeltaHash ? { knowledgeDeltaHash } : {}),
+      ...(semanticDeltaHash ? { semanticDeltaHash } : {}),
+      ...(processDeltaHash ? { processDeltaHash } : {}),
+      ...(normDeltaHash ? { normDeltaHash } : {}),
     };
     const progressCertificate = deriveProgressCertificate({
       effects,
       loaded: {
         ...(deltaHash ? { stateDelta: initialDelta } : {}),
         ...(knowledgeDeltaHash && knowledge ? { knowledgeDelta: knowledge } : {}),
+        ...(semanticDeltaHash && completeSeed ? { semanticDelta: completeSeed.semantics } : {}),
+        ...(processDeltaHash && completeSeed ? { processDelta: completeSeed.processes } : {}),
+        ...(normDeltaHash && completeSeed ? { normDelta: completeSeed.norms } : {}),
       },
       effectiveStateOperationIndexes: deltaHash
         ? effectiveStateOperationIndexes(emptyInitialState, initialDelta, this.context)
@@ -543,7 +583,7 @@ export class WorldEngine {
       .filter((event) => canonicalEventSatisfiedAtGenesis(event, initialState, knowledge, this.context.eventRelations ?? []))
       .map((event) => event.id);
     const realizesCanonicalEventIds = [...new Set([
-      ...inferredRealizations,
+      ...(genesisOptions.realizesCanonicalEventIds === undefined ? inferredRealizations : []),
       ...(genesisOptions.realizesCanonicalEventIds ?? []),
     ])].sort();
     for (const eventId of realizesCanonicalEventIds) {
@@ -600,8 +640,16 @@ export class WorldEngine {
     });
     return commitHash;
   }
+  async previewProposal(proposal: EventProposal): Promise<CommitProposalResult> {
+    return this.evaluateProposal(proposal, false);
+  }
+
   async commitProposal(proposal: EventProposal): Promise<CommitProposalResult> {
-    let parsed = eventProposalSchema.parse(proposal);
+    return this.evaluateProposal(proposal, true);
+  }
+
+  private async evaluateProposal(proposal: EventProposal, persist: boolean): Promise<CommitProposalResult> {
+    let parsed = normalizeActorProposal(eventProposalSchema.parse(proposal));
     const branch = await this.branches.read(parsed.branchId);
     const head = branch.headCommitId;
     const context = await this.contextForCommit(head);
@@ -632,7 +680,7 @@ export class WorldEngine {
     );
     let semanticDelta: import("./model.js").BranchSemanticDelta | undefined;
     let stagedSemantics = projection.semantics;
-    const semanticErrors: ValidationIssue[] = [];
+    const semanticErrors: ValidationIssue[] = validateActorOutcomeOwnership(parsed, projection);
     if (parsed.proposedSemantics) {
       try {
         const materialized = materializeBranchSemanticProposal(parsed.proposedSemantics, {
@@ -686,6 +734,7 @@ export class WorldEngine {
     const { report: baseReport, postState } = validateEventProposal(parsed, head, state, context, {
       branchSemantics: stagedSemantics,
       deferMateriality: true,
+      realizedCanonicalEventIds: new Set(projection.history.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? [])),
     });
     let report = baseReport;
     if (semanticErrors.length || causalRelationErrors.length) {
@@ -942,6 +991,7 @@ export class WorldEngine {
       };
       return { report, previousHead: head, newHead: head };
     }
+    if (!persist) return { report, previousHead: head, newHead: head };
     const deltaHash = effectiveStateIndexes.length
       ? await this.objects.putDelta(parsed.proposedDelta)
       : undefined;

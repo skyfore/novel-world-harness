@@ -10,6 +10,9 @@ import {
   type PreparationSnapshot,
 } from "../web/contracts.js";
 import { webError } from "../web/errors.js";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { NovelClosureStore, preparedSubjectHash } from "../compiler/certification.js";
+import { describePreparedRoles } from "../world/play-roles.js";
 
 export async function readPreparationSnapshot(
   rootValue: string,
@@ -45,6 +48,21 @@ export async function readPreparationSnapshot(
   }
   const totalBatches = inspection.totalBatches;
   const completedBatches = Math.min(inspection.completedBatches, totalBatches);
+  let closure: PreparationSnapshot["closure"];
+  if (["create-branch", "ready"].includes(inspection.stage)) {
+    try {
+      const bundle = await new PreparedNovelCache(root).candidateSnapshot(source);
+      const subjectSnapshotHash = preparedSubjectHash(bundle);
+      const assessment = await new NovelClosureStore(root).read(sourceId, subjectSnapshotHash);
+      const roles = describePreparedRoles(bundle, assessment);
+      closure = { subjectSnapshotHash, entryReady: assessment?.entryReady ?? false, fullNovelReady: assessment?.fullNovelReady ?? false,
+        majorTotal: assessment?.playability?.majorTotal ?? roles.filter((role) => role.major).length, readyTotal: assessment?.playability?.readyTotal ?? 0,
+        evaluation: !assessment?.quality ? "not-run" : assessment.fullNovelReady ? "passed" : "blocked", roles,
+        issues: assessment?.issues ?? [{ code: "NOVEL_EVALUATION_NOT_RUN", message: "Current inputs have not completed closure and independent play evaluation" }] };
+    } catch (error) {
+      closure = { subjectSnapshotHash: "unavailable", entryReady: false, fullNovelReady: false, majorTotal: 0, readyTotal: 0, evaluation: "blocked", roles: [], issues: [{ code: "CANDIDATE_NOT_READY", message: String(error) }] };
+    }
+  }
   return preparationSnapshotSchema.parse({
     version: 1,
     source: novel,
@@ -63,6 +81,7 @@ export async function readPreparationSnapshot(
       rejected: rejected.length,
     },
     repairReasons: inspection.repairReasons ?? [],
+    ...(closure ? { closure } : {}),
     ...(inspection.audit ? { audit: projectAudit(inspection.audit) } : {}),
     updatedAt: new Date().toISOString(),
   });

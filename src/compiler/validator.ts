@@ -1,3 +1,4 @@
+import { applyEventExecutions, eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import type { z } from "zod";
 import { EvidenceVerifier, validateEntityNameEvidence } from "./evidence.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
@@ -110,7 +111,7 @@ import {
   type ProcessTemplate,
 } from "../world/process-ontology.js";
 
-export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
+export type CanonicalProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model";
 export type CompilerValidation = { accepted: boolean; errors: ValidationIssue[]; warnings: ValidationIssue[] };
 export type CompilerCatalogValidationScope = "catalog" | "record";
 export type CompilerValidationCatalog = {
@@ -125,6 +126,7 @@ export type CompilerValidationCatalog = {
   sceneOccurrences: Map<string, SceneOccurrence>;
   eventFrames: Map<string, EventFrame>;
   actionSchemas: Map<string, ActionSchema>;
+  eventExecutions?: Map<string, EventExecution>;
   actionConstraints: Map<string, ActionConstraint>;
   normTemplates: Map<string, NormTemplate>;
   processTemplates: Map<string, ProcessTemplate>;
@@ -157,7 +159,7 @@ export class CompilerValidator {
   }
 
   async loadCatalog(): Promise<CompilerValidationCatalog> {
-    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, eventRelationList, spatialRelationList, sceneOccurrenceList, eventFrameList, actionSchemaList, actionConstraintList, normTemplateList, processTemplateList, ruleList, goalList] = await Promise.all([
+    const [entityList, propositionList, attributionList, claimList, eventList, eventParticipationList, eventRelationList, spatialRelationList, sceneOccurrenceList, eventFrameList, actionSchemaList, eventExecutionList, actionConstraintList, normTemplateList, processTemplateList, ruleList, goalList] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listPropositions(),
       this.canon.listAttributions(),
@@ -169,6 +171,7 @@ export class CompilerValidator {
       this.canon.listSceneOccurrences(),
       this.canon.listEventFrames(),
       this.canon.listActionSchemas(),
+      this.canon.listEventExecutions(),
       this.canon.listActionConstraints(),
       this.canon.listNormTemplates(),
       this.canon.listProcessTemplates(),
@@ -187,6 +190,7 @@ export class CompilerValidator {
       sceneOccurrences: new Map(sceneOccurrenceList.map((item) => [item.id, item])),
       eventFrames: new Map(eventFrameList.map((item) => [item.id, item])),
       actionSchemas: new Map(actionSchemaList.map((item) => [item.id, item])),
+      eventExecutions: new Map(eventExecutionList.map((item) => [item.id, item])),
       actionConstraints: new Map(actionConstraintList.map((item) => [item.id, item])),
       normTemplates: new Map(normTemplateList.map((item) => [item.id, item])),
       processTemplates: new Map(processTemplateList.map((item) => [item.id, item])),
@@ -233,6 +237,25 @@ export class CompilerValidator {
     if (kind === "event-frame") {
       const frame = eventFrameSchema.parse(payload);
       if (!frame.evidence.length) errors.push(issue("MISSING_EVIDENCE", `Event frame ${frame.id} has no source evidence`, "evidence"));
+    }
+    if (kind === "event-execution") {
+      const binding = eventExecutionSchema.parse(payload);
+      const bindings = new Map(catalog.eventExecutions ?? []).set(binding.id, binding);
+      errors.push(...validateEventExecutions([...bindings.values()], { entities, events, actionSchemas, participations: [...eventParticipations.values()] }));
+      const occurrence = events.get(binding.canonicalEventId);
+      if (occurrence && binding.entryCheckpoint) {
+        const checkpoint = binding.entryCheckpoint, seed = checkpoint.projectionSeed;
+        const entryPropositions = new Map(propositions), entryAttributions = new Map(attributions), entryClaims = new Map(claims);
+        for (const operation of seed.semantics.operations) {
+          if (operation.op === "record-proposition") entryPropositions.set(operation.proposition.id, operation.proposition);
+          if (operation.op === "record-attribution") entryAttributions.set(operation.attribution.id, operation.attribution);
+          if (operation.op === "record-claim") entryClaims.set(operation.claim.id, operation.claim);
+        }
+        this.validateEvent(applyEventExecutions([occurrence], [binding])[0]!, entities, entryPropositions, entryAttributions, entryClaims, events, eventFrames, actionSchemas, rules, errors);
+        for (const operation of seed.processes.operations) if ("templateId" in operation && !catalog.processTemplates.has(operation.templateId)) errors.push(issue("UNKNOWN_ENTRY_PROCESS_TEMPLATE", `Unknown process template ${operation.templateId}`, "entryCheckpoint.projectionSeed.processes"));
+        for (const operation of seed.norms.operations) if ("templateId" in operation && !catalog.normTemplates.has(operation.templateId)) errors.push(issue("UNKNOWN_ENTRY_NORM_TEMPLATE", `Unknown norm template ${operation.templateId}`, "entryCheckpoint.projectionSeed.norms"));
+        for (const id of seed.activeRuleIds) if (!rules.has(id)) errors.push(issue("UNKNOWN_ENTRY_RULE", `Unknown world rule ${id}`, "entryCheckpoint.projectionSeed.activeRuleIds"));
+      }
     }
     if (kind === "action-schema") {
       const action = actionSchemaSchema.parse(payload);
@@ -489,7 +512,7 @@ export class CompilerValidator {
         errors.push(issue("DUPLICATE_CHARACTER_ENTRY", `Event ${event.id} has multiple entry checkpoints for ${checkpoint.actorId}`, `${prefix}.actorId`));
       }
       entryActors.add(checkpoint.actorId);
-      if (checkpoint.delta.operations.length > 16) {
+      if (!checkpoint.projectionSeed && checkpoint.delta.operations.length > 16) {
         errors.push(issue("OVERSIZED_CHARACTER_ENTRY", `Entry checkpoint for ${checkpoint.actorId} contains more than 16 state operations`, `${prefix}.delta.operations`));
       }
       if (!checkpoint.delta.operations.some((operation) =>
@@ -1216,6 +1239,7 @@ export class CompilerCommitService {
       "NORM_TEMPLATE_DEPENDENCY_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
     const sceneCandidates = eligible.filter((item) =>
       item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
     if (sceneCandidates.length) {
@@ -1421,6 +1445,7 @@ export class CompilerCommitService {
       "NORM_TEMPLATE_DEPENDENCY_CYCLE",
     );
     for (const candidate of eligible.filter((item) => item.kind === "process-template")) await processCandidate(candidate);
+    for (const candidate of eligible.filter((item) => item.kind === "event-execution")) await processCandidate(candidate);
     const sceneCandidates = eligible.filter((item) =>
       item.kind === "scene-occurrence" && !sceneGraphBlockedIds.has(item.id));
     if (sceneCandidates.length) {
@@ -1603,6 +1628,7 @@ export class CompilerCommitService {
     else if (kind === "event-relation") await this.canon.putEventRelation(eventRelationSchema.parse(payload));
     else if (kind === "scene-occurrence") await this.canon.putSceneOccurrence(sceneOccurrenceSchema.parse(payload));
     else if (kind === "event-frame") await this.canon.putEventFrame(eventFrameSchema.parse(payload));
+    else if (kind === "event-execution") await this.canon.putEventExecution(eventExecutionSchema.parse(payload));
     else if (kind === "action-schema") await this.canon.putActionSchema(actionSchemaSchema.parse(payload));
     else if (kind === "action-constraint") await this.canon.putActionConstraint(actionConstraintSchema.parse(payload));
     else if (kind === "norm-template") await this.canon.putNormTemplate(normTemplateSchema.parse(payload));
@@ -1740,6 +1766,7 @@ function addToCatalog(catalog: CompilerValidationCatalog, kind: CanonicalProposa
   if (kind === "event-relation") { const value = eventRelationSchema.parse(payload); catalog.eventRelations.set(value.id, value); }
   if (kind === "scene-occurrence") { const value = sceneOccurrenceSchema.parse(payload); catalog.sceneOccurrences.set(value.id, value); }
   if (kind === "event-frame") { const value = eventFrameSchema.parse(payload); catalog.eventFrames.set(value.id, value); }
+  if (kind === "event-execution") { const value = eventExecutionSchema.parse(payload); (catalog.eventExecutions ??= new Map()).set(value.id, value); }
   if (kind === "action-schema") { const value = actionSchemaSchema.parse(payload); catalog.actionSchemas.set(value.id, value); }
   if (kind === "action-constraint") { const value = actionConstraintSchema.parse(payload); catalog.actionConstraints.set(value.id, value); }
   if (kind === "norm-template") { const value = normTemplateSchema.parse(payload); catalog.normTemplates.set(value.id, value); }
@@ -1762,6 +1789,7 @@ function cloneValidationCatalog(catalog: CompilerValidationCatalog): CompilerVal
     sceneOccurrences: new Map(catalog.sceneOccurrences),
     eventFrames: new Map(catalog.eventFrames),
     actionSchemas: new Map(catalog.actionSchemas),
+    eventExecutions: new Map(catalog.eventExecutions ?? []),
     actionConstraints: new Map(catalog.actionConstraints),
     normTemplates: new Map(catalog.normTemplates),
     processTemplates: new Map(catalog.processTemplates),
@@ -1857,7 +1885,7 @@ function uniqueIssues(issues: readonly ValidationIssue[]): ValidationIssue[] {
 }
 
 function isCanonicalKind(kind: string): kind is CanonicalProposalKind {
-  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "action-schema" || kind === "action-constraint" || kind === "norm-template" || kind === "process-template" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
+  return kind === "entity" || kind === "proposition" || kind === "attribution" || kind === "claim" || kind === "canonical-event" || kind === "event-participation" || kind === "event-relation" || kind === "scene-occurrence" || kind === "event-frame" || kind === "action-schema" || kind === "event-execution" || kind === "action-constraint" || kind === "norm-template" || kind === "process-template" || kind === "spatial-relation" || kind === "world-rule" || kind === "initial-world" || kind === "character-goal" || kind === "character-model";
 }
 function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "entity") return entitySchema;
@@ -1869,6 +1897,7 @@ function schemaFor(kind: CanonicalProposalKind): z.ZodTypeAny {
   if (kind === "event-relation") return eventRelationSchema;
   if (kind === "scene-occurrence") return sceneOccurrenceSchema;
   if (kind === "event-frame") return eventFrameSchema;
+  if (kind === "event-execution") return eventExecutionSchema;
   if (kind === "action-schema") return actionSchemaSchema;
   if (kind === "action-constraint") return actionConstraintSchema;
   if (kind === "norm-template") return normTemplateSchema;

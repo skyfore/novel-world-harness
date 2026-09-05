@@ -304,6 +304,7 @@ export const stateFieldSpecSchema = z
     valueType: valueTypeSchema,
     cardinality: z.enum(["one", "many"]),
     visibility: stateFieldVisibilitySchema.optional(),
+    worldAssumption: z.enum(["open", "closed"]).optional(),
     required: z.boolean().optional(),
     exclusive: z.boolean().optional(),
     minimum: z.number().finite().optional(),
@@ -1061,6 +1062,17 @@ export type CanonicalAdaptation = z.infer<typeof canonicalAdaptationSchema>;
  * describe facts already true at the cut, actorObservation is limited to what
  * that character can perceive, and readerSetup is presentation-only context.
  */
+/** Complete nonphysical projection at a source-evidenced pre-event checkpoint. */
+export const entryProjectionSeedSchema = z.object({
+  version: z.literal(1),
+  semantics: branchSemanticDeltaSchema,
+  processes: processDeltaSchema,
+  norms: normDeltaSchema,
+  activeRuleIds: z.array(idSchema),
+  elapsedDays: z.number().finite().nonnegative(),
+}).strict();
+export type EntryProjectionSeed = z.infer<typeof entryProjectionSeedSchema>;
+
 export const characterEntryCheckpointSchema = z
   .object({
     actorId: idSchema,
@@ -1069,6 +1081,7 @@ export const characterEntryCheckpointSchema = z
     participantPresence: z.array(participantPresenceSchema).min(1).max(128),
     delta: stateDeltaSchema,
     knowledge: knowledgeDeltaSchema.optional(),
+    projectionSeed: entryProjectionSeedSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -1261,11 +1274,14 @@ export const actionRoleBindingSchema = z.object({
 });
 export type ActionRoleBinding = z.infer<typeof actionRoleBindingSchema>;
 
+export const actionTravelModeSchema = z.enum(["foot", "mounted", "wheeled", "rail", "water", "air", "climb", "crawl", "portal"]);
+
 const schemaBoundActionInvocationSchema = z.object({
   lane: z.literal("schema-bound"),
   schemaId: idSchema,
   roleBindings: z.array(actionRoleBindingSchema).max(64),
   parameters: z.record(idSchema, stateValueSchema).default({}),
+  travelMode: actionTravelModeSchema.optional(),
 }).strict().superRefine((value, ctx) => {
   const roles = new Set<string>();
   value.roleBindings.forEach((binding, index) => {
@@ -1316,6 +1332,7 @@ export const actionInvocationSchema = z.discriminatedUnion("lane", [
     actionKindId: idSchema,
     description: z.string().trim().min(1).max(1_000),
     footprint: actionFootprintSchema,
+    travelMode: actionTravelModeSchema.optional(),
   }).strict(),
 ]);
 export type ActionInvocation = z.infer<typeof actionInvocationSchema>;
@@ -1833,5 +1850,5 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
-export const WORLD_SCHEMA_VERSION = 2;
-export const WORLD_ENGINE_VERSION = "0.2.0";
+export const WORLD_SCHEMA_VERSION = 3;
+export const WORLD_ENGINE_VERSION = "0.3.0";

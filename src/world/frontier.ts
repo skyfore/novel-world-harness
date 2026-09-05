@@ -18,7 +18,7 @@ import { dueNormInstances, type NormTemplate } from "./norm-ontology.js";
 import type { NormState } from "./norm-effects.js";
 import { dueProcessInstances, processOwnerEntityIds, type ProcessTemplate } from "./process-ontology.js";
 import type { ProcessState } from "./process-effects.js";
-import { evaluatePredicate } from "./state.js";
+import { evaluatePredicate, evaluatePredicateTruth } from "./state.js";
 import { comparableStoryTime } from "./time.js";
 import { worldStorageRoot } from "./paths.js";
 
@@ -176,6 +176,10 @@ export function evaluatePossibility(
     if (activeBlockers.length) {
       status = "blocked";
       reasons.push(`${activeBlockers.length} state blocker(s) are active`);
+      gates.push({ gate: "state-blocker", outcome: "fail", detail: reasons.at(-1)! });
+    } else if (possibility.blockers.some((predicate) => evaluatePredicateTruth(state, predicate) === "unknown")) {
+      status = "latent";
+      reasons.push("A blocking condition is unknown; absence has not been established");
       gates.push({ gate: "state-blocker", outcome: "fail", detail: reasons.at(-1)! });
     } else if (unresolvedNecessary.length) {
       status = "latent";

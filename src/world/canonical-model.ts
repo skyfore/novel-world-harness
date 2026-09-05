@@ -34,8 +34,10 @@ import { actionConstraintSchema, type ActionConstraint } from "./action-constrai
 import { normTemplateSchema, type NormTemplate } from "./norm-ontology.js";
 import { processTemplateSchema, type ProcessTemplate } from "./process-ontology.js";
 
+import { eventExecutionSchema, type EventExecution } from "./event-execution.js";
+
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "event-participations" | "event-relations" | "spatial-relations" | "scene-occurrences" | "event-frames" | "action-schemas" | "action-constraints" | "norm-templates" | "process-templates" | "rules";
+export type CanonicalKind = "entities" | "propositions" | "attributions" | "claims" | "events" | "event-participations" | "event-relations" | "spatial-relations" | "scene-occurrences" | "event-frames" | "action-schemas" | "event-executions" | "action-constraints" | "norm-templates" | "process-templates" | "rules";
 export type CanonicalRevisionRef = { id: string; hash: string };
 type StoredCanonicalRef = { version: 1; id: string; hash: string };
 export type ProposalStatus = "pending" | "accepted" | "rejected";
@@ -83,6 +85,7 @@ export class CanonicalModelStore {
   putSpatialRelation(relation: SpatialRelation): Promise<void> { const value = spatialRelationSchema.parse(relation); return this.put("spatial-relations", value.id, value); }
   putSceneOccurrence(scene: SceneOccurrence): Promise<void> { const value = sceneOccurrenceSchema.parse(scene); return this.put("scene-occurrences", value.id, value); }
   putEventFrame(frame: EventFrame): Promise<void> { const value = eventFrameSchema.parse(frame); return this.put("event-frames", value.id, value); }
+  putEventExecution(value: EventExecution): Promise<void> { const parsed = eventExecutionSchema.parse(value); return this.put("event-executions", parsed.id, parsed); }
   putActionSchema(schema: ActionSchema): Promise<void> { const value = actionSchemaSchema.parse(schema); return this.put("action-schemas", value.id, value); }
   putActionConstraint(constraint: ActionConstraint): Promise<void> { const value = actionConstraintSchema.parse(constraint); return this.put("action-constraints", value.id, value); }
   putNormTemplate(template: NormTemplate): Promise<void> { const value = normTemplateSchema.parse(template); return this.put("norm-templates", value.id, value); }
@@ -98,6 +101,7 @@ export class CanonicalModelStore {
   ensureSpatialRelationRevision(relation: SpatialRelation): Promise<void> { const value = spatialRelationSchema.parse(relation); return this.ensureRevision("spatial-relations", value.id, value); }
   ensureSceneOccurrenceRevision(scene: SceneOccurrence): Promise<void> { const value = sceneOccurrenceSchema.parse(scene); return this.ensureRevision("scene-occurrences", value.id, value); }
   ensureEventFrameRevision(frame: EventFrame): Promise<void> { const value = eventFrameSchema.parse(frame); return this.ensureRevision("event-frames", value.id, value); }
+  ensureEventExecutionRevision(value: EventExecution): Promise<void> { const parsed = eventExecutionSchema.parse(value); return this.ensureRevision("event-executions", parsed.id, parsed); }
   ensureActionSchemaRevision(schema: ActionSchema): Promise<void> { const value = actionSchemaSchema.parse(schema); return this.ensureRevision("action-schemas", value.id, value); }
   ensureActionConstraintRevision(constraint: ActionConstraint): Promise<void> { const value = actionConstraintSchema.parse(constraint); return this.ensureRevision("action-constraints", value.id, value); }
   ensureNormTemplateRevision(template: NormTemplate): Promise<void> { const value = normTemplateSchema.parse(template); return this.ensureRevision("norm-templates", value.id, value); }
@@ -113,6 +117,7 @@ export class CanonicalModelStore {
   getSpatialRelation(id: string): Promise<SpatialRelation> { return this.get("spatial-relations", id, spatialRelationSchema); }
   getSceneOccurrence(id: string): Promise<SceneOccurrence> { return this.get("scene-occurrences", id, sceneOccurrenceSchema); }
   getEventFrame(id: string): Promise<EventFrame> { return this.get("event-frames", id, eventFrameSchema); }
+  getEventExecution(id: string): Promise<EventExecution> { return this.get("event-executions", id, eventExecutionSchema); }
   getActionSchema(id: string): Promise<ActionSchema> { return this.get("action-schemas", id, actionSchemaSchema); }
   getActionConstraint(id: string): Promise<ActionConstraint> { return this.get("action-constraints", id, actionConstraintSchema); }
   getNormTemplate(id: string): Promise<NormTemplate> { return this.get("norm-templates", id, normTemplateSchema); }
@@ -128,6 +133,7 @@ export class CanonicalModelStore {
   getSpatialRelationRevision(id: string, hash: string): Promise<SpatialRelation> { return this.getRevision("spatial-relations", id, hash, spatialRelationSchema); }
   getSceneOccurrenceRevision(id: string, hash: string): Promise<SceneOccurrence> { return this.getRevision("scene-occurrences", id, hash, sceneOccurrenceSchema); }
   getEventFrameRevision(id: string, hash: string): Promise<EventFrame> { return this.getRevision("event-frames", id, hash, eventFrameSchema); }
+  getEventExecutionRevision(id: string, hash: string): Promise<EventExecution> { return this.getRevision("event-executions", id, hash, eventExecutionSchema); }
   getActionSchemaRevision(id: string, hash: string): Promise<ActionSchema> { return this.getRevision("action-schemas", id, hash, actionSchemaSchema); }
   getActionConstraintRevision(id: string, hash: string): Promise<ActionConstraint> { return this.getRevision("action-constraints", id, hash, actionConstraintSchema); }
   getNormTemplateRevision(id: string, hash: string): Promise<NormTemplate> { return this.getRevision("norm-templates", id, hash, normTemplateSchema); }
@@ -143,6 +149,7 @@ export class CanonicalModelStore {
   listSpatialRelations(): Promise<SpatialRelation[]> { return this.list("spatial-relations", spatialRelationSchema); }
   listSceneOccurrences(): Promise<SceneOccurrence[]> { return this.list("scene-occurrences", sceneOccurrenceSchema); }
   listEventFrames(): Promise<EventFrame[]> { return this.list("event-frames", eventFrameSchema); }
+  listEventExecutions(): Promise<EventExecution[]> { return this.list("event-executions", eventExecutionSchema); }
   listActionSchemas(): Promise<ActionSchema[]> { return this.list("action-schemas", actionSchemaSchema); }
   listActionConstraints(): Promise<ActionConstraint[]> { return this.list("action-constraints", actionConstraintSchema); }
   listNormTemplates(): Promise<NormTemplate[]> { return this.list("norm-templates", normTemplateSchema); }

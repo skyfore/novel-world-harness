@@ -131,6 +131,7 @@ const COMPILER_PROPOSAL_TOOLS = new Set([
   "propose_scene_occurrence",
   "propose_event_frame",
   "propose_action_schema",
+  "propose_event_execution",
   "propose_event_resolution",
   "propose_initial_world",
   "propose_novel_title",

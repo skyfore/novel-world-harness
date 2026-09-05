@@ -3,6 +3,7 @@ import path from "node:path";
 import { stdout } from "node:process";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { planClosureRepair } from "../compiler/closure-repair.js";
 import {
   COMPILER_PIPELINE_VERSION,
   CompilerBatchStore,
@@ -91,7 +92,7 @@ export async function reparseCommand(
   const runId = `reparse-${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`;
   options.onStatus?.("Checking active revision and rollback baseline");
   report("Checking the active prepared revision and rollback baseline.");
-  await recoverInterruptedReparse(root, source, batches, selectedBatchIds, cache, report);
+  const recoveredBaselineHash = await recoverInterruptedReparse(root, source, batches, selectedBatchIds, cache, report);
   options.signal?.throwIfAborted();
   // Recovery may materialize a prepared revision. That operation deliberately
   // clears transient boundary-calibration requests, so never continue with
@@ -154,7 +155,9 @@ export async function reparseCommand(
   // Republishing its materialized contents here would stamp those old
   // semantics with the current fingerprint and make a failed upgrade appear
   // complete on the next prepare-all run.
-  const baseline = activeBaseline.requiresReparse && activeBaseline.bundleHash
+  const baseline = recoveredBaselineHash
+    ? { bundleHash: recoveredBaselineHash }
+    : activeBaseline.requiresReparse && activeBaseline.bundleHash
     ? activeBaseline
     : await cache.publish(source, { allowSemanticDebtForRollback: true });
   if (activeBaseline.requiresReparse && activeBaseline.bundleHash) {
@@ -162,6 +165,13 @@ export async function reparseCommand(
   }
   if (!baseline.bundleHash) throw new Error("Current prepared revision was not published.");
   const previousBundleHash = baseline.bundleHash;
+  const baselineRevision = await cache.loadRevision(source, previousBundleHash, { allowIncompatible: true });
+  if (!baselineRevision) throw new Error(`Compiler checkpoint not found: ${previousBundleHash}`);
+  const repair = planClosureRepair(baselineRevision.bundle, chapterBatches, selectedBatchIds);
+  if (repair.batchIds.length > selectedBatchIds.length) report(`Typed dependency closure expands repair from ${selectedBatchIds.length} to ${repair.batchIds.length} batches; dependent artifacts must be recompiled together.`);
+  selectedBatchIds = repair.batchIds;
+  selected = chapterBatches.filter((batch) => selectedBatchIds.includes(batch.id));
+  selectedChapters = [...new Set(selected.map((batch) => batch.chapterOrdinal))].sort((a, b) => a - b);
   report(
     `Starting ${options.all ? "whole-novel" : "chapter"} reparse ${runId} for ${source.id}: `
     + `${selected.length} batch(es), chapter(s) ${selectedChapters.join(", ")}.`,
@@ -170,7 +180,7 @@ export async function reparseCommand(
   try {
     options.onStatus?.("Invalidating selected preparation artifacts");
     await new CompilerBatchStore(root).markIncomplete(source.id, selectedBatchIds);
-    const invalidated = await invalidatePreparationArtifacts(root, source.id, selected, Boolean(options.all));
+    const invalidated = await invalidatePreparationArtifacts(root, source.id, selected, Boolean(options.all), new Set(repair.affectedNodeKeys));
     for (const batchId of selectedBatchIds) await rejectPendingCompilerBatchProposals(root, batchId);
     report(`Invalidated ${invalidated} current preparation artifact(s); immutable revisions and branch snapshots were retained.`);
     options.signal?.throwIfAborted();
@@ -242,7 +252,7 @@ export async function reparseCommand(
     const rejected = await rejectPendingCompilerSourceProposals(root, source.id);
     if (rejected.length) report(`Rejected ${rejected.length} pending source proposal(s) before rollback.`);
     try {
-      await cache.activate(source, previousBundleHash, { allowIncompatibleRollback: true });
+      await cache.restoreCompilerCheckpoint(source, previousBundleHash);
     } catch (rollbackError) {
       throw new AggregateError(
         [error, rollbackError],
@@ -265,7 +275,7 @@ async function recoverInterruptedReparse(
   selectedBatchIds: readonly string[],
   cache: PreparedNovelCache,
   report: (message: string) => void,
-): Promise<void> {
+): Promise<string | undefined> {
   const batchStore = new CompilerBatchStore(root);
   const progress = await batchStore.read(source.id);
   const completed = new Set(progress.completedBatchIds);
@@ -291,7 +301,7 @@ async function recoverInterruptedReparse(
       `Preserved the complete pipeline v${persisted.pipelineVersion} materialization as incompatible rollback revision `
       + `${published.bundleHash} before its first whole-novel reparse.`,
     );
-    active = await cache.lookup(source);
+    active = published;
     bootstrappedLegacyBaseline = true;
   }
   const outsideSelection = bootstrappedLegacyBaseline
@@ -321,10 +331,11 @@ async function recoverInterruptedReparse(
   }
   const rejected = await rejectPendingCompilerSourceProposals(root, source.id);
   if (rejected.length) report(`Rejected ${rejected.length} pending source proposal(s) from the interrupted reparse.`);
-  await cache.activate(source, active.bundleHash, { allowIncompatibleRollback: true });
+  await cache.restoreCompilerCheckpoint(source, active.bundleHash);
   report(bootstrappedLegacyBaseline
     ? "Legacy rollback baseline materialized; starting the whole-novel reparse from a recoverable revision."
     : "Interrupted reparse baseline restored; restarting the selected scope from a clean prepared revision.");
+  return active.bundleHash;
 }
 
 function openingBatchId(batches: readonly CompilerBatch[]): string {
@@ -373,9 +384,11 @@ export async function invalidatePreparationArtifacts(
   sourceId: string,
   selectedBatches: readonly CompilerBatch[],
   whole: boolean,
+  affectedNodeKeys: ReadonlySet<string> = new Set(),
 ): Promise<number> {
   const selectedSpans = selectedBatches.flatMap((batch) => batch.evidence.map((reference) => reference.span));
-  const shouldInvalidate = (item: { evidence: readonly { span: EvidenceSpanKey }[] }) => {
+  const shouldInvalidate = (item: { evidence: readonly { span: EvidenceSpanKey }[] }, kind?: string, id?: string) => {
+    if (kind && id && affectedNodeKeys.has(`${kind}/${id}`)) return true;
     if (!item.evidence.length) return false;
     if (whole) return item.evidence.every((reference) => reference.span.sourceId === sourceId);
     return item.evidence.every((reference) => selectedSpans.some((selected) => spanContains(selected, reference.span)));
@@ -399,6 +412,7 @@ export async function invalidatePreparationArtifacts(
     sceneOccurrences,
     eventFrames,
     actionSchemas,
+    eventExecutions,
     actionConstraints,
     normTemplates,
     processTemplates,
@@ -419,6 +433,7 @@ export async function invalidatePreparationArtifacts(
     canon.listSceneOccurrences(),
     canon.listEventFrames(),
     canon.listActionSchemas(),
+    canon.listEventExecutions(),
     canon.listActionConstraints(),
     canon.listNormTemplates(),
     canon.listProcessTemplates(),
@@ -431,33 +446,34 @@ export async function invalidatePreparationArtifacts(
     await exactEvidence.removeForArtifact(kind, id);
     count += 1;
   };
-  for (const item of entities) if (shouldInvalidate(item)) await invalidate("entity", item.id, () => canon.removeCurrent("entities", item.id));
-  for (const item of propositions) if (shouldInvalidate(item)) await invalidate("proposition", item.id, () => canon.removeCurrent("propositions", item.id));
-  for (const item of attributions) if (shouldInvalidate(item)) await invalidate("attribution", item.id, () => canon.removeCurrent("attributions", item.id));
-  for (const item of claims) if (shouldInvalidate(item)) await invalidate("claim", item.id, () => canon.removeCurrent("claims", item.id));
-  for (const item of events) if (shouldInvalidate(item)) await invalidate("canonical-event", item.id, () => canon.removeCurrent("events", item.id));
-  for (const item of eventParticipations) if (shouldInvalidate(item)) await invalidate("event-participation", item.id, () => canon.removeCurrent("event-participations", item.id));
+  for (const item of entities) if (shouldInvalidate(item, "entity", item.id)) await invalidate("entity", item.id, () => canon.removeCurrent("entities", item.id));
+  for (const item of propositions) if (shouldInvalidate(item, "proposition", item.id)) await invalidate("proposition", item.id, () => canon.removeCurrent("propositions", item.id));
+  for (const item of attributions) if (shouldInvalidate(item, "attribution", item.id)) await invalidate("attribution", item.id, () => canon.removeCurrent("attributions", item.id));
+  for (const item of claims) if (shouldInvalidate(item, "claim", item.id)) await invalidate("claim", item.id, () => canon.removeCurrent("claims", item.id));
+  for (const item of events) if (shouldInvalidate(item, "event", item.id)) await invalidate("canonical-event", item.id, () => canon.removeCurrent("events", item.id));
+  for (const item of eventParticipations) if (shouldInvalidate(item, "participation", item.id)) await invalidate("event-participation", item.id, () => canon.removeCurrent("event-participations", item.id));
   for (const item of eventRelations) {
-    if (shouldInvalidate({ evidence: [...item.evidence, ...(item.counterEvidence ?? [])] })) {
+    if (shouldInvalidate({ evidence: [...item.evidence, ...(item.counterEvidence ?? [])] }, "event-relation", item.id)) {
       await invalidate("event-relation", item.id, () => canon.removeCurrent("event-relations", item.id));
     }
   }
-  for (const item of sceneOccurrences) if (shouldInvalidate(item)) await invalidate("scene-occurrence", item.id, () => canon.removeCurrent("scene-occurrences", item.id));
-  for (const item of eventFrames) if (shouldInvalidate(item)) await invalidate("event-frame", item.id, () => canon.removeCurrent("event-frames", item.id));
-  for (const item of actionSchemas) if (shouldInvalidate(item)) await invalidate("action-schema", item.id, () => canon.removeCurrent("action-schemas", item.id));
-  for (const item of actionConstraints) if (shouldInvalidate(item)) await invalidate("action-constraint", item.id, () => canon.removeCurrent("action-constraints", item.id));
-  for (const item of normTemplates) if (shouldInvalidate(item)) await invalidate("norm-template", item.id, () => canon.removeCurrent("norm-templates", item.id));
-  for (const item of processTemplates) if (shouldInvalidate(item)) await invalidate("process-template", item.id, () => canon.removeCurrent("process-templates", item.id));
-  for (const item of spatialRelations) if (shouldInvalidate({ evidence: spatialRelationEvidence(item) })) await invalidate("spatial-relation", item.id, () => canon.removeCurrent("spatial-relations", item.id));
-  for (const item of rules) if (shouldInvalidate({ evidence: worldRuleEvidence(item) })) await invalidate("world-rule", item.id, () => canon.removeCurrent("rules", item.id));
-  for (const item of goals) if (shouldInvalidate(item)) await invalidate("character-goal", item.id, () => actors.removeGoal(item.id));
+  for (const item of sceneOccurrences) if (shouldInvalidate(item, "scene", item.id)) await invalidate("scene-occurrence", item.id, () => canon.removeCurrent("scene-occurrences", item.id));
+  for (const item of eventFrames) if (shouldInvalidate(item, "frame", item.id)) await invalidate("event-frame", item.id, () => canon.removeCurrent("event-frames", item.id));
+  for (const item of eventExecutions) if (shouldInvalidate(item, "event-execution", item.id)) await invalidate("event-execution", item.id, () => canon.removeCurrent("event-executions", item.id));
+  for (const item of actionSchemas) if (shouldInvalidate(item, "action", item.id)) await invalidate("action-schema", item.id, () => canon.removeCurrent("action-schemas", item.id));
+  for (const item of actionConstraints) if (shouldInvalidate(item, "constraint", item.id)) await invalidate("action-constraint", item.id, () => canon.removeCurrent("action-constraints", item.id));
+  for (const item of normTemplates) if (shouldInvalidate(item, "norm", item.id)) await invalidate("norm-template", item.id, () => canon.removeCurrent("norm-templates", item.id));
+  for (const item of processTemplates) if (shouldInvalidate(item, "process", item.id)) await invalidate("process-template", item.id, () => canon.removeCurrent("process-templates", item.id));
+  for (const item of spatialRelations) if (shouldInvalidate({ evidence: spatialRelationEvidence(item) }, "spatial", item.id)) await invalidate("spatial-relation", item.id, () => canon.removeCurrent("spatial-relations", item.id));
+  for (const item of rules) if (shouldInvalidate({ evidence: worldRuleEvidence(item) }, "rule", item.id)) await invalidate("world-rule", item.id, () => canon.removeCurrent("rules", item.id));
+  for (const item of goals) if (shouldInvalidate(item, "goal", item.id)) await invalidate("character-goal", item.id, () => actors.removeGoal(item.id));
   for (const item of models) {
-    if (shouldInvalidate({ evidence: [...item.evidence, ...characterOntologyEvidence(item)] })) {
+    if (shouldInvalidate({ evidence: [...item.evidence, ...characterOntologyEvidence(item)] }, "model", item.actorId)) {
       await invalidate("character-model", item.actorId, () => actors.removeModel(item.actorId));
     }
   }
-  for (const item of templates) if (shouldInvalidate(item)) await invalidate("possibility", item.id, () => possibilities.remove(item.id));
-  if (opening && shouldInvalidate(opening)) await invalidate("initial-world", "initial-world", () => initial.clear());
+  for (const item of templates) if (shouldInvalidate(item, "possibility", item.id)) await invalidate("possibility", item.id, () => possibilities.remove(item.id));
+  if (opening && shouldInvalidate(opening, "initial", sourceId)) await invalidate("initial-world", "initial-world", () => initial.clear());
   return count;
 }
 

@@ -1,9 +1,11 @@
+import { actorOutcomeShape, copyActorOutcome, hasActorOutcome, mapActorOutcome, validateActorOutcomeScope } from "./actor-outcome.js";
 import { z } from "zod";
 import { commitKnowledgeAwareAction, validateActionKnowledge, type KnowledgeAwareAction } from "./action-gate.js";
 import { contentHash } from "./canonical.js";
 import { validateEventProposal, type WorldEngine, type WorldModelContext } from "./engine.js";
-import { isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
+import { actorKnowledgeBelongsToSource, isActionableKnowledge, KnowledgeProjector } from "./knowledge.js";
 import {
+  actionInvocationSchema,
   claimSchema,
   entityKindSchema,
   eventProposalSchema,
@@ -76,6 +78,9 @@ import {
   spatialTravelModeSchema,
 } from "./spatial-ontology.js";
 import { modelVisibleWorldRules, resolveEffectiveWorldRules } from "./world-rule-ontology.js";
+import { deriveAdHocAction, mapActionInvocationEntities } from "./action-invocation.js";
+import { resolveActionInvocation } from "./action-ontology.js";
+import { actorDecisionViewSchema, buildActorDecisionView, decisionReferenceIds, mapActorDecisionView } from "./actor-decision-view.js";
 
 /**
  * The model-facing action shape deliberately omits every authority-bearing
@@ -176,6 +181,8 @@ export const playerActionCandidateSchema = z
     preconditions: z.array(predicateSchema).default([]),
     proposedDelta: stateDeltaSchema,
     proposedKnowledge: knowledgeDeltaSchema.optional(),
+    ...actorOutcomeShape,
+    action: actionInvocationSchema.optional(),
     requiresKnowledge: z.array(idSchema).default([]),
     forbidsKnowledge: z.array(idSchema).default([]),
   })
@@ -305,7 +312,8 @@ const actorScopedEntitySchema = z
  * action. The isolated Pi adapter strips host-only fields and replaces stable
  * IDs with turn-local opaque handles before crossing the model boundary. It
  * contains no WorldState, frontier, canonical event list, character
- * goals/models, source evidence, or unacquired claims.
+ * source evidence, future goals/models, or unacquired claims. Decision facts
+ * are derived only from the current actor's visible branch projection.
  */
 export const actorScopedActionContextSchema = z
   .object({
@@ -319,6 +327,7 @@ export const actorScopedActionContextSchema = z
     writableEntityIds: z.array(idSchema),
     writableStateFields: z.array(stateFieldSpecSchema),
     spatialRelations: z.array(modelVisibleSpatialRelationSchema).default([]),
+    decision: actorDecisionViewSchema.optional(),
     scene: z.object({
       beat: z.number().int().nonnegative(),
       label: z.string().optional(),
@@ -426,6 +435,7 @@ export function playerActionTranslationContext(
     presentEntities: structuredClone(context.presentEntities),
     referenceableEntities: structuredClone(context.referenceableEntities),
     spatialRelations: structuredClone(context.spatialRelations),
+    ...(context.decision ? { decision: structuredClone(context.decision) } : {}),
     writableEntityIds: [...context.writableEntityIds],
     writableStateFields: structuredClone(context.writableStateFields),
     scene: {
@@ -481,11 +491,14 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
   );
   const reverseEntities = new Map<string, string>([...entityHandles].map(([id, handle]) => [handle, id]));
   const reverseClaims = new Map<string, string>([...claimHandles].map(([id, handle]) => [handle, id]));
+  const semanticHandles = new Map(decisionReferenceIds(context.decision).map((id, index) => [id, `semantic-${String(index + 1).padStart(3, "0")}`]));
+  const reverseSemantics = new Map([...semanticHandles].map(([id, handle]) => [handle, id]));
+  const semanticHandle = (id: string) => id.startsWith("local-") ? id : semanticHandles.get(id) ?? "semantic-unavailable";
   const writableFields = new Map(context.writableStateFields.map((field) => [field.key, field]));
   const entityHandle = (id: string): string => entityHandles.get(id) ?? id;
   const scopedEntityHandle = (id: string): string => entityHandles.get(id) ?? "entity-unavailable";
   const claimHandle = (id: string): string => claimHandles.get(id) ?? id;
-  const scopedClaimHandle = (id: string): string => claimHandles.get(id) ?? "claim-unavailable";
+  const scopedClaimHandle = (id: string): string => id.startsWith("local-") ? id : claimHandles.get(id) ?? "claim-unavailable";
   const mapEntityRefs = (value: unknown, depth = 0): unknown => {
     if (typeof value === "string") return entityHandle(value);
     if (depth >= 8) return "[nested data omitted]";
@@ -518,6 +531,12 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
   };
   const encodeCandidate = (candidateInput: PlayerActionCandidate): PlayerActionCandidate => {
     const candidate = structuredClone(playerActionCandidateSchema.parse(candidateInput));
+    Object.assign(candidate, mapActorOutcome(candidate, scopedEntityHandle, semanticHandle));
+    if (candidate.action) {
+      const schemaId = candidate.action.lane === "schema-bound" ? candidate.action.schemaId : undefined;
+      candidate.action = mapActionInvocationEntities(candidate.action, scopedEntityHandle, context.decision?.capabilities.actions.find((schema) => schema.id === schemaId)?.parameters);
+      if (candidate.action.lane === "schema-bound") candidate.action.schemaId = semanticHandle(candidate.action.schemaId);
+    }
     candidate.participants = candidate.participants.map(scopedEntityHandle);
     candidate.preconditions = candidate.preconditions.map(encodePredicate);
     candidate.proposedDelta.operations = candidate.proposedDelta.operations.map((operation) => {
@@ -531,6 +550,8 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
       candidate.proposedKnowledge.operations = candidate.proposedKnowledge.operations.map((operation) => ({
         ...operation,
         actorId: scopedEntityHandle(operation.actorId),
+        ...(operation.op === "learn" && operation.propositionId ? { propositionId: semanticHandle(operation.propositionId) } : {}),
+        ...(operation.op === "learn" && operation.attributionId ? { attributionId: semanticHandle(operation.attributionId) } : {}),
         claimId: scopedClaimHandle(operation.claimId),
         ...(operation.op === "learn" && operation.sourceActorId
           ? { sourceActorId: scopedEntityHandle(operation.sourceActorId) }
@@ -561,6 +582,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
     return playerActionCandidateSchema.parse(candidate);
   };
   const modelContext: Record<string, unknown> = {
+    ...(context.decision ? { decision: mapActorDecisionView(context.decision, scopedEntityHandle, semanticHandle) } : {}),
     actorId: entityHandle(context.actorId),
     selfState: mapState(context.selfState),
     ownedEntityState: Object.fromEntries(Object.entries(context.ownedEntityState)
@@ -621,6 +643,7 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
     reverseEntities.get(value) ?? (entityHandles.has(value) ? invalidEntityHandle : value);
   const decodeClaim = (value: string): string =>
     reverseClaims.get(value) ?? (claimHandles.has(value) ? invalidClaimHandle : value);
+  const decodeSemantic = (value: string): string => value.startsWith("local-") ? value : reverseSemantics.get(value) ?? "invalid-model-semantic-handle";
   const decodeStateValue = (field: string, value: unknown): unknown => {
     const valueType = writableFields.get(field)?.valueType;
     if (valueType === "entity-ref" && typeof value === "string") return decodeEntity(value);
@@ -657,6 +680,12 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
     decodeClaimId: decodeClaim,
     decodeCandidate(candidateInput) {
       const candidate = structuredClone(candidateInput) as PlayerActionCandidate;
+      Object.assign(candidate, mapActorOutcome(candidate, decodeEntity, decodeSemantic));
+      if (candidate.action) {
+        if (candidate.action.lane === "schema-bound") candidate.action.schemaId = decodeSemantic(candidate.action.schemaId);
+        const schemaId = candidate.action.lane === "schema-bound" ? candidate.action.schemaId : undefined;
+        candidate.action = mapActionInvocationEntities(candidate.action, decodeEntity, context.decision?.capabilities.actions.find((schema) => schema.id === schemaId)?.parameters);
+      }
       candidate.participants = candidate.participants.map(decodeEntity);
       candidate.preconditions = candidate.preconditions
         .map((predicate) => decodePredicate(predicate as unknown as Record<string, unknown>) as never);
@@ -673,6 +702,8 @@ export function createPlayerActionModelBoundary(context: PlayerActionTranslation
         candidate.proposedKnowledge.operations = candidate.proposedKnowledge.operations.map((operation) => ({
           ...operation,
           actorId: decodeEntity(operation.actorId),
+        ...(operation.op === "learn" && operation.propositionId ? { propositionId: decodeSemantic(operation.propositionId) } : {}),
+        ...(operation.op === "learn" && operation.attributionId ? { attributionId: decodeSemantic(operation.attributionId) } : {}),
           claimId: decodeClaim(operation.claimId),
           ...(operation.op === "learn" && operation.sourceActorId
             ? { sourceActorId: decodeEntity(operation.sourceActorId) }
@@ -829,7 +860,7 @@ export async function buildActorScopedActionContext(
   const ownedEntityState: Record<EntityId, Record<string, StateValue>> = {};
   const visibleKnowledge = effectiveSourceId
     ? view.knowledge.filter((entry) => entry.claim
-      && evidenceBelongsExclusivelyToSource(entry.claim.evidence, effectiveSourceId)
+      && actorKnowledgeBelongsToSource(entry, effectiveSourceId)
       && entityIdBelongsToSource(entry.claim.subject, context.entities, effectiveSourceId)
       && (!entry.claim.speaker || entityIdBelongsToSource(entry.claim.speaker, context.entities, effectiveSourceId))
       && claimObjectBelongsToSource(entry.claim.object, context.entities, effectiveSourceId))
@@ -966,12 +997,14 @@ export async function buildActorScopedActionContext(
     .map((event) => ({ kind: "scene" as const, summary: event.title }));
   const plan = view.selfState["character.plan"];
   if (typeof plan === "string" && plan.trim()) activeThreads.push({ kind: "plan", summary: plan.trim() });
+  const decision = await buildActorDecisionView(engine, actorId, commitId, { visibleEntityIds: referenceable, knownClaimIds, sourceId: effectiveSourceId });
   return actorScopedActionContextSchema.parse({
     actorId,
     atCommit: commitId,
     selfState: structuredClone(selfState),
     ownedEntityState,
     knowledge,
+    decision,
     presentEntities,
     referenceableEntities,
     writableEntityIds: [actorId, ...[...writable].filter((id) => id !== actorId).sort()],
@@ -991,8 +1024,8 @@ export async function buildActorScopedActionContext(
 
 /**
  * Fail-closed capability validation for a model candidate. Phase-one player
- * actions may write only the selected character and artifacts currently owned
- * by that character. They may reference only IDs already present in the
+ * actions may write the selected character, owned artifacts, and exact effects
+ * of an available bound mechanism. Mechanism writes do not grant reads. Actions reference only IDs in the
  * actor-scoped context and may not alter world rules.
  */
 export function validatePlayerActionScope(
@@ -1008,6 +1041,20 @@ export function validatePlayerActionScope(
   const visibleClaims = new Set(actorContext.knowledge.map((entry) => entry.claimId));
   const fieldSpecs = new Map(actorContext.writableStateFields.map((spec) => [spec.key, spec]));
   const entityKinds = new Map(actorContext.referenceableEntities.map((entity) => [entity.id, entity.kind]));
+  const mechanismWrites = new Set<string>();
+  if (candidate.action?.lane === "schema-bound") {
+    const invocation = candidate.action;
+    const capability = actorContext.decision?.capabilities.actions.find((schema) => schema.id === invocation.schemaId);
+    if (!capability) issues.push(issue("PLAYER_ACTION_CAPABILITY_UNAVAILABLE", "The action mechanism is not available in this actor's current view", "action.schemaId"));
+    else {
+      for (const binding of invocation.roleBindings) for (const id of binding.entityIds) requireReferenceable(id, "action.roleBindings", referenceable, issues);
+      const schema = { ...capability, ontologyVersion: "action-schema-v1" as const, preconditions: [], induction: { kind: "domain-module" as const, moduleId: "actor-view", moduleVersion: "1" }, evidence: [] };
+      const entities = new Map(actorContext.referenceableEntities.map((entity) => [entity.id, { id: entity.id, kind: entity.kind, canonicalName: entity.name, aliases: [], evidence: [] }]));
+      const resolved = resolveActionInvocation(invocation, new Map([[schema.id, schema]]), entities, { actorId: actorContext.actorId, participants: [...candidate.participants, actorContext.actorId], proposedDelta: candidate.proposedDelta, hasKnowledge: Boolean(candidate.proposedKnowledge?.operations.length), hasTimeAdvance: Boolean(candidate.intent?.requestedTimeAdvance), hasSceneTransition: Boolean(candidate.intent?.sceneTransition) });
+      issues.push(...resolved.issues);
+      if (!resolved.issues.length) for (const effect of resolved.stateEffects) if ("entityId" in effect.operation) mechanismWrites.add(`${effect.operation.entityId}/${effect.operation.field}`);
+    }
+  }
 
   for (let index = 0; index < candidate.participants.length; index += 1) {
     requireReferenceable(candidate.participants[index]!, `participants.${index}`, referenceable, issues);
@@ -1060,7 +1107,7 @@ export function validatePlayerActionScope(
       issues.push(issue("PLAYER_RULE_MUTATION_FORBIDDEN", "Player action translation cannot activate or deactivate world rules", operationPath));
       continue;
     }
-    if (!writable.has(operation.entityId)) {
+    if (!writable.has(operation.entityId) && !mechanismWrites.has(`${operation.entityId}/${operation.field}`)) {
       issues.push(issue("PLAYER_WRITE_OUT_OF_SCOPE", `Player action cannot write entity ${operation.entityId}`, `${operationPath}.entityId`));
     }
     const spec = fieldSpecs.get(operation.field);
@@ -1104,7 +1151,7 @@ export function validatePlayerActionScope(
     if (operation.actorId !== actorContext.actorId) {
       issues.push(issue("PLAYER_KNOWLEDGE_ACTOR_OUT_OF_SCOPE", `Player action cannot mutate knowledge for ${operation.actorId}`, `${operationPath}.actorId`));
     }
-    if (!visibleClaims.has(operation.claimId) && !authorizedKnowledgeClaimIds.has(operation.claimId)) {
+    if (!visibleClaims.has(operation.claimId) && !authorizedKnowledgeClaimIds.has(operation.claimId) && !candidate.proposedSemantics?.operations.some((op) => op.op === "record-claim" && op.localRef === operation.claimId)) {
       issues.push(issue("PLAYER_KNOWLEDGE_CLAIM_OUT_OF_SCOPE", `Claim ${operation.claimId} is not in the actor view`, `${operationPath}.claimId`));
     }
     if (operation.op === "learn" && operation.sourceActorId) {
@@ -1122,6 +1169,7 @@ export function validatePlayerActionScope(
       }
     });
   }
+  issues.push(...validateActorOutcomeScope(candidate, { actorId: actorContext.actorId, visibleEntityIds: referenceable, decision: actorContext.decision }));
   return issues;
 }
 
@@ -1234,10 +1282,10 @@ export async function validatePlayerActionSpatialScope(
         realizedCanonicalEventIds: new Set(history.flatMap((entry) => entry.event.realizesCanonicalEventIds ?? [])),
       })
     : [];
-  const destination = candidate.intent?.sceneTransition?.kind === "arrive"
-    && candidate.intent.sceneTransition.destination?.kind === "entity"
-    ? candidate.intent.sceneTransition.destination.entityId
-    : undefined;
+  const locationWrite = candidate.proposedDelta.operations.findLast((operation) =>
+    "entityId" in operation && operation.entityId === actorId && "field" in operation && operation.field === "character.location");
+  const destination = locationWrite?.op === "set" && typeof locationWrite.value === "string"
+    ? locationWrite.value : undefined;
   if (destination && context.spatialOntologyVersion === "spatial-v1" && destination !== actorLocation) {
     if (typeof actorLocation !== "string") {
       issues.push(issue(
@@ -1246,7 +1294,7 @@ export async function validatePlayerActionSpatialScope(
         "intent.sceneTransition.destination.entityId",
       ));
     } else {
-      const travelMode = candidate.intent?.sceneTransition?.travelMode;
+      const travelMode = candidate.action?.travelMode ?? candidate.intent?.sceneTransition?.travelMode;
       if (!travelMode) {
         issues.push(issue(
           "PLAYER_SPATIAL_MODE_REQUIRED",
@@ -1340,6 +1388,17 @@ export function playerActionToKnowledgeAwareAction(input: {
     expectedParentCommit: input.expectedParentCommit,
     source: "player",
     actorId: input.actorId,
+    action: candidate.action ? {
+      ...candidate.action,
+      ...(candidate.action.travelMode ? {} : candidate.intent?.sceneTransition?.travelMode
+        ? { travelMode: candidate.intent.sceneTransition.travelMode } : {}),
+    } : deriveAdHocAction({
+      kind: candidate.intent?.controlledAct?.interaction?.kind === "speech" ? "speak" : candidate.intent?.kind ?? "act",
+      description: candidate.intent?.summary ?? candidate.title,
+      delta: candidate.proposedDelta,
+      preconditions: candidate.preconditions,
+      travelMode: candidate.intent?.sceneTransition?.travelMode,
+    }),
     title: input.eventTitle ?? playerIntentTitle(input.utterance),
     actorObservations,
     ...(interaction?.kind === "speech"
@@ -1359,6 +1418,7 @@ export function playerActionToKnowledgeAwareAction(input: {
     preconditions: candidate.preconditions,
     proposedDelta: candidate.proposedDelta,
     ...(candidate.proposedKnowledge ? { proposedKnowledge: candidate.proposedKnowledge } : {}),
+      ...copyActorOutcome(candidate),
     causalParents: [],
     evidence: [],
   });
@@ -1606,7 +1666,7 @@ export class PlayerTurnService {
         validatePlayerActionSpatialScope(this.engine, intendedCandidate, input.actorId, previousHead, input.sourceId),
         validateActionKnowledge(this.engine, previewAction),
       ]);
-      const enginePreview = validateEventProposal(previewAction.proposal, previousHead, worldState, worldContext).report;
+      const enginePreview = (await this.engine.previewProposal(previewAction.proposal)).report;
       const deterministicIssues = uniqueIssues([
         ...intentConsistencyIssues,
         ...groundingIssues,
@@ -2055,6 +2115,7 @@ function controlledObservationFallback(
     || intent.requestedTimeAdvance
     || candidate.proposedDelta.operations.length
     || (candidate.proposedKnowledge?.operations.length ?? 0)
+    || hasActorOutcome(candidate)
     || candidate.requiresKnowledge.length
     || candidate.forbidsKnowledge.length
   ) return undefined;

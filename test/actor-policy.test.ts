@@ -1,3 +1,4 @@
+import { routeContext, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -31,6 +32,7 @@ async function fixture() {
     claims: new Map([[invitation.id, invitation]]),
     rules: new Map(),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    ...routeContext("home", "meeting"),
   };
   const engine = new WorldEngine(root, context);
   const head = await engine.createBranch("main", "Main", {
@@ -49,6 +51,8 @@ async function fixture() {
     requiresKnowledge: ["invited"],
     candidateAction: {
       title: "Alice goes to the meeting",
+      action: { ...hallCampWalkAction, footprint: { reads: [{ entityId: "alice", field: "character.location" }], writes: [{ entityId: "alice", field: "character.location" }], resources: [] } },
+      timeAdvance: { amount: 1, unit: "minute" },
       preconditions: [{ op: "fact-equals", entityId: "alice", field: "character.location", value: "home" }],
       proposedDelta: { version: 1, operations: [{ op: "set", entityId: "alice", field: "character.location", value: "meeting" }] },
     },
@@ -183,6 +187,7 @@ describe("actor policy", () => {
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       rules: new Map(),
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    ...routeContext("home", "meeting"),
     };
     const engine = new WorldEngine(root, context);
     const genesis = await engine.createBranch("main", "Main", {

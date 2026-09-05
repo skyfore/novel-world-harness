@@ -5,7 +5,8 @@ import { stateDeltaSchema } from "./model.js";
 import { InitialWorldStore } from "./initial.js";
 import { openWorkspaceWorld } from "./workspace-runtime.js";
 import { assertEvidenceExclusiveToSource } from "./source-scope.js";
-import { deriveCharacterEntrySeed, type ReaderEntryContext } from "./entry-context.js";
+import { type ReaderEntryContext } from "./entry-context.js";
+import { certifiedEntryOptions, requireCertifiedEntry } from "./play-roles.js";
 
 export type CreatedWorldBranch = {
   head: string;
@@ -22,6 +23,7 @@ export async function createWorldBranch(
   cacheRoot?: string,
   entryActorId?: string,
   expectedPreparedRevisionHash?: string,
+  expectedEntryCutHash?: string,
 ): Promise<CreatedWorldBranch> {
   const workspace = await WorkspaceStore.create(root);
   const sources = await workspace.listSources();
@@ -36,6 +38,10 @@ export async function createWorldBranch(
   }
   const effectiveSourceId = source?.id;
   const prepared = source ? await new PreparedNovelCache(root, cacheRoot).loadFreshActive(source) : null;
+  if (source && !prepared) throw new Error("WORLD_CLOSURE_BLOCKED: source-backed play requires a certified prepared revision");
+  if (source && seedPath) throw new Error("WORLD_CLOSURE_BLOCKED: an arbitrary seed cannot replace a certified novel entry");
+  if (prepared && !entryActorId) entryActorId = certifiedEntryOptions(prepared.bundle)[0]?.actorId;
+  if (prepared && !entryActorId) throw new Error("MAJOR_ROLE_NOT_CERTIFIED: no certified role entry is available");
   if (expectedPreparedRevisionHash && prepared?.bundleHash !== expectedPreparedRevisionHash) {
     throw new Error(
       `Active prepared revision changed from ${expectedPreparedRevisionHash} to ${prepared?.bundleHash ?? "none"}; refresh the frozen base before creating an instance.`,
@@ -73,7 +79,7 @@ export async function createWorldBranch(
     throw new Error("Character-specific entry requires an active prepared novel revision.");
   }
   const entrySeed = entryActorId && prepared
-    ? deriveCharacterEntrySeed(prepared.bundle, entryActorId)
+    ? requireCertifiedEntry(prepared.bundle, entryActorId, expectedEntryCutHash)
     : undefined;
   if (!seedPath && !canonicalInitial) {
     throw new Error("No accepted initial world. Review and accept an initial-world proposal before creating a playable branch, or pass --seed explicitly.");
@@ -128,11 +134,12 @@ export async function createWorldBranch(
         : canonicalInitial?.checkpoint?.storyTime
           ? { storyTime: canonicalInitial.checkpoint.storyTime }
           : {}),
-      elapsedDays: 0,
+      elapsedDays: entrySeed?.projectionSeed?.elapsedDays ?? canonicalInitial?.projectionSeed?.elapsedDays ?? 0,
     },
     seedPath ? {} : {
       ...(entryActorId ? { entryActorId } : {}),
-      ...(entrySeed?.realizesCanonicalEventIds.length
+      ...((entrySeed?.projectionSeed ?? canonicalInitial?.projectionSeed) ? { projectionSeed: entrySeed?.projectionSeed ?? canonicalInitial?.projectionSeed } : {}),
+      ...(entrySeed
         ? { realizesCanonicalEventIds: entrySeed.realizesCanonicalEventIds }
         : {}),
       ...(checkpointPresence ? { participantPresence: checkpointPresence } : {}),

@@ -17,6 +17,7 @@ import { WorkspaceStore, type SourceDocument } from "../src/storage/workspace-st
 import { contextSnapshotSchema, type ContextPart } from "../src/trace/schema.js";
 import { TraceStore } from "../src/trace/store.js";
 import { InitialWorldStore } from "../src/world/initial.js";
+import { openWorkspaceWorld } from "../src/world/workspace-runtime.js";
 import { contentHash } from "../src/world/canonical.js";
 import { CanonicalModelStore, ProposalStore } from "../src/world/canonical-model.js";
 import {
@@ -40,6 +41,7 @@ let workspaceRoot: string;
 let app: NwhWebHost;
 let origin: string;
 let traceStore: TraceStore;
+let playService: PlayApplicationService;
 let previousNwhHome: string | undefined;
 
 test.beforeAll(async () => {
@@ -58,7 +60,7 @@ test.beforeAll(async () => {
       compileSource: seedBrowserCompilation,
     },
   });
-  const play = new PlayApplicationService({
+  playService = new PlayApplicationService({
     root: workspaceRoot,
     operations,
     events,
@@ -74,7 +76,7 @@ test.beforeAll(async () => {
     operationManager: operations,
     traceStore,
     preparationService: preparation,
-    playService: play,
+    playService,
     modelCatalogService: { read: async () => ({ providers: [], models: [] }) },
   });
   await app.listen({ host: "127.0.0.1", port: 0 });
@@ -89,7 +91,7 @@ test.afterAll(async () => {
   else process.env.NWH_HOME = previousNwhHome;
 });
 
-test("runs the complete browser harness and exposes a verifiable play trace", async ({ page }) => {
+test("blocks uncertified publication and verifies browser continuation with an internal engine fixture", async ({ page }) => {
   const browserDiagnostics: string[] = [];
   page.on("console", (message) => browserDiagnostics.push(message.text()));
   page.on("pageerror", (error) => browserDiagnostics.push(error.message));
@@ -122,13 +124,13 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await expect(page.getByText("1 pending", { exact: true })).toBeVisible();
   await expect(page.getByText(/proposal-hero-/).first()).toBeVisible();
   await page.getByRole("button", { name: "Validate and accept" }).click();
-  await expect(page.getByText("Ready to publish", { exact: true })).toBeVisible();
+  await expect(page.getByText("New play certification incomplete", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create world instance" })).toBeDisabled();
 
   const branchInput = page.getByLabel("New instance branch ID");
   await expect(branchInput).toHaveValue("main");
-  await page.getByRole("button", { name: "Create world instance" }).click();
-  await expect(page).toHaveURL(/\/instances\/main$/);
-  await expect(page.getByText("Prepared revision", { exact: true })).toBeVisible();
+  const continuation = await seedBrowserContinuation(sourceId, "main");
+  await page.goto(`${origin}/instances/main`);
 
   await page.goto(`${origin}/novels/${sourceId}/compile`);
   const compiledEntities = page.getByRole("table", { name: "Compiled entities" });
@@ -151,16 +153,10 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
   await expect(page.locator(".ontology-inspector")).toContainText("Source evidence");
   await expect(page.locator(".ontology-inspector blockquote").first()).toContainText("Mara waits in the Hall");
 
-  await page.goto(`${origin}/novels/${sourceId}`);
-  await page.getByRole("button", { name: "Play", exact: true }).click();
-  const playLauncher = page.getByRole("dialog", { name: /Enter / });
-  await expect(playLauncher).toBeVisible();
-  await expect(playLauncher).toContainText("Frozen world base");
-  const playableMara = playLauncher.getByRole("radio", { name: /Mara/ });
-  await expect(playableMara).toBeChecked();
-  await expect(playLauncher).toContainText("Every new instance starts from this immutable revision");
-  await playableMara.click();
-  await playLauncher.getByRole("button", { name: "Start an independent instance as Mara" }).click();
+  // Browser fixtures exercise an already committed private world; they never mint a live novel certificate.
+  const rolesResponse = await page.request.get(`${origin}/api/v1/novels/${sourceId}/play-roles`);
+  expect(rolesResponse.ok()).toBe(false);
+  await page.goto(`${origin}/play/${continuation}`);
   await expect(page).toHaveURL(/\/play\/play-[0-9a-f-]{36}$/);
   await expect(page.getByLabel("Play status")).toContainText("step 0");
   const nestedSessionNavigation = page.locator(".nav-tree-session-link").filter({ hasText: "Mara" }).first();
@@ -261,7 +257,7 @@ test("runs the complete browser harness and exposes a verifiable play trace", as
 
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "Remove", exact: true }).click();
-  await expect(page).toHaveURL(/\/instances\/novel-[a-f0-9]{8}$/);
+  await expect(page).toHaveURL(/\/instances\/main$/);
   await expect(page.locator(".metric").filter({ hasText: "Story step" })).toContainText("2");
 
   await page.getByRole("button", { name: "Preview instance removal" }).click();
@@ -288,17 +284,11 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
   await page.getByRole("button", { name: "Compile all remaining" }).click();
   await expect(page.getByText("Review proposals", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Validate and accept" }).click();
-  await expect(page.getByText("Ready to publish", { exact: true })).toBeVisible();
+  await expect(page.getByText("New play certification incomplete", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create world instance" })).toBeDisabled();
 
-  await page.getByLabel("New instance branch ID").fill("trace-drawer");
-  await page.getByRole("button", { name: "Create world instance" }).click();
-  await expect(page).toHaveURL(/\/instances\/trace-drawer$/);
-  await page.goto(`${origin}/novels/${sourceId}`);
-  await page.getByRole("button", { name: "Play", exact: true }).click();
-  const playLauncher = page.getByRole("dialog", { name: /Enter / });
-  await expect(playLauncher).toContainText("Frozen world base");
-  await expect(playLauncher.getByRole("radio", { name: /Mara/ })).toBeChecked();
-  await playLauncher.getByRole("button", { name: "Start an independent instance as Mara" }).click();
+  const continuation = await seedBrowserContinuation(sourceId, "trace-drawer");
+  await page.goto(`${origin}/play/${continuation}`);
   await expect(page).toHaveURL(/\/play\/play-[0-9a-f-]{36}$/);
 
   await expect(page.locator(".message-scene").last()).toContainText("斑驳的窗影");
@@ -353,6 +343,17 @@ test("opens LLM response traces in a side drawer", async ({ page }) => {
   await page.getByRole("button", { name: "Close session controls" }).last().click();
   await expect(openSessionControls).toHaveAttribute("aria-expanded", "false");
 });
+
+/** Internal test setup only: production fresh creation remains behind the unmodified certificate gate. */
+async function seedBrowserContinuation(sourceId: string, branchId: string): Promise<string> {
+  const { engine } = await openWorkspaceWorld(workspaceRoot, undefined, { sourceId });
+  const initial = (await new InitialWorldStore(workspaceRoot).get())!;
+  await engine.createBranch(branchId, "Browser continuation fixture", initial.delta, initial.knowledge, sourceId, undefined, initial.evidence,
+    { storyTime: initial.checkpoint!.storyTime }, { participantPresence: initial.participantPresence, realizesCanonicalEventIds: [] });
+  const result = await playService.createSession({ branchId, sourceId, actorId: `hero-${sourceId.slice(0, 8)}`, clientRequestId: crypto.randomUUID() });
+  await playService.enterSession(result.session.id, { intent: "create" });
+  return result.session.id;
+}
 
 async function submitMove(page: Page, text: string, expectedStep: number): Promise<void> {
   await page.getByPlaceholder("Describe one immediate action, observation, thought, or wait…").fill(text);

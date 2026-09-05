@@ -19,6 +19,7 @@ import { WorkspaceStore } from "../storage/workspace-store.js";
 import type { CanonicalAttachmentResolver } from "../world/canonical-adaptation.js";
 import { readFrozenWorldBase } from "../world/base.js";
 import { deriveCharacterEntryOptions } from "../world/entry-context.js";
+import { describePreparedRoles } from "../world/play-roles.js";
 import type { NpcReactionReasoner } from "../world/npc-reaction.js";
 import type { ActorReasoner } from "../world/model-actor-policy.js";
 import {
@@ -230,17 +231,14 @@ export class PlayApplicationService {
         maxAttempts: 1,
       });
     }
+    const roles = describePreparedRoles(prepared.bundle);
     return sourcePlayRoleListSchema.parse({
       sourceId: source.id,
       sourceTitle: source.title,
       preparedRevisionHash: prepared.bundleHash,
-      roles: deriveCharacterEntryOptions(prepared.bundle).map((entry) => ({
-        id: entry.actorId,
-        canonicalName: entry.canonicalName,
-        aliases: entry.aliases,
-        entryKind: entry.entry.kind,
-        entryTitle: entry.entry.title,
-      })),
+      roles,
+      majorTotal: roles.filter((role) => role.major).length,
+      readyMajorTotal: roles.filter((role) => role.major && role.status === "ready").length,
     });
   }
 
@@ -275,7 +273,8 @@ export class PlayApplicationService {
         maxAttempts: 1,
       });
     }
-    if (!roles.roles.some((role) => role.id === input.actorId)) {
+    const role = roles.roles.find((candidate) => candidate.actorId === input.actorId);
+    if (!role || role.status !== "ready") {
       throw webError(400, "PLAY_ROLE_NOT_IN_FROZEN_BASE", `Role '${input.actorId}' has no grounded entry in the active frozen base.`, {
         kind: "after-refresh",
         discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(input.sourceId)}/play-roles`,
@@ -283,11 +282,15 @@ export class PlayApplicationService {
         maxAttempts: 1,
       });
     }
+    if (role.entryCutHash !== input.entryCutHash) throw webError(409, "ENTRY_CUT_STALE", "The selected entry changed. Refresh the role list before starting play.", {
+      kind: "after-refresh", discoveryEndpoint: `/api/v1/novels/${encodeURIComponent(input.sourceId)}/play-roles`, copyField: "roles[].entryCutHash", maxAttempts: 1,
+    });
     let selection;
     try {
       selection = await choosePlayExperience(this.root, {
         source: input.sourceId,
         expectedPreparedRevisionHash: input.preparedRevisionHash,
+        expectedEntryCutHash: input.entryCutHash,
         character: input.actorId,
         instanceMode: "create",
         preferSavedCharacter: false,

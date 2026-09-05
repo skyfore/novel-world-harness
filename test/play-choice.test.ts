@@ -177,6 +177,9 @@ describe("structured play choices", () => {
       delta: { version: 1, operations: [{ op: "set", entityId: "warlord", field: "character.alive", value: true }] },
       evidence: other.evidence("A warlord waits in the hall."),
     });
+    const otherBatches = await prepareCompilerBatches(root, other.source);
+    await new CompilerBatchStore(root).replaceCompleted(other.source.id, otherBatches.map((batch) => batch.id));
+    await new PreparedNovelCache(root, cacheRoot).publish(other.source);
     await createWorldBranch(root, "main", undefined, other.source.id, cacheRoot);
 
     const lifecycle: Array<{ type: string; branchId: string }> = [];

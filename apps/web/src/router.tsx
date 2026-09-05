@@ -588,6 +588,7 @@ function NovelPlayLauncher({
       sourceId: novel.id,
       preparedRevisionHash: roles.data!.preparedRevisionHash,
       actorId,
+      entryCutHash: selectedRole!.entryCutHash!,
       clientRequestId: requestId("start-fresh-play"),
     }, csrfToken),
     onSuccess: async (result) => {
@@ -600,8 +601,8 @@ function NovelPlayLauncher({
   useEffect(() => {
     if (!open || !roles.data) return;
     setActorId((current) => {
-      if (roles.data.roles.some((role) => role.id === current)) return current;
-      return roles.data.roles[0]?.id ?? "";
+      if (roles.data.roles.some((role) => role.id === current && role.status === "ready")) return current;
+      return roles.data.roles.find((role) => role.status === "ready")?.id ?? "";
     });
   }, [roles.data, open]);
 
@@ -662,15 +663,15 @@ function NovelPlayLauncher({
                   const value = event.target.value;
                   const matches = filterRoles(value);
                   setRoleQuery(value);
-                  if (!matches.some((role) => role.id === actorId)) setActorId(matches[0]?.id ?? "");
+                  if (!matches.some((role) => role.id === actorId && role.status === "ready")) setActorId(matches.find((role) => role.status === "ready")?.id ?? "");
                   startMutation.reset();
                 }} placeholder={t("Search name, alias, or ID")} /></label>
                 {visibleRoles.length ? <div className="character-picker novel-play-character-grid">
                   {visibleRoles.map((role) => (
                     <label key={role.id} className={actorId === role.id ? "character-option character-option-selected" : "character-option"}>
-                      <input type="radio" name={`novel-play-actor-${novel.id}`} value={role.id} checked={actorId === role.id} onChange={() => { setActorId(role.id); startMutation.reset(); }} />
-                      <span><strong>{role.canonicalName}</strong><small>{t("Starts at {entry}", { entry: role.entryTitle })}</small></span>
-                      <span className="novel-play-role-meta"><em>{role.entryKind === "opening" ? t("Novel opening") : t("Character entry")}</em><code>{role.id}</code></span>
+                      <input type="radio" name={`novel-play-actor-${novel.id}`} value={role.id} disabled={role.status !== "ready"} checked={actorId === role.id} onChange={() => { setActorId(role.id); startMutation.reset(); }} />
+                      <span><strong>{role.canonicalName}</strong><small>{role.status === "ready" ? t("Starts at {entry}", { entry: role.entryTitle! }) : role.issues.map((issue) => issue.message).join("; ")}</small></span>
+                      <span className="novel-play-role-meta"><em>{role.status === "ready" ? role.entryKind === "opening" ? t("Novel opening") : t("Character entry") : t(role.status)}</em><code>{role.id}</code></span>
                     </label>
                   ))}
                 </div> : <EmptyState title={t("No matching role")} body={t("Try a character name, alias, or compiled entity ID.")} />}
@@ -685,7 +686,7 @@ function NovelPlayLauncher({
           <footer>
             {(roles.isError || !roles.data?.roles.length) && <Link className="secondary-button" to="/novels/$sourceId/compile" params={{ sourceId: novel.id }} onClick={() => setOpen(false)}>{t("Open compiler workbench")}</Link>}
             <button type="button" className="text-button" disabled={startMutation.isPending} onClick={closeLauncher}>{t("Cancel")}</button>
-            {roles.data?.roles.length ? <button type="button" className="primary-button" disabled={!selectedRole || startMutation.isPending} onClick={() => startMutation.mutate()}>{startMutation.isPending ? t("Creating isolated world…") : actionLabel}<span aria-hidden="true"> →</span></button> : null}
+            {roles.data?.roles.length ? <button type="button" className="primary-button" disabled={selectedRole?.status !== "ready" || startMutation.isPending} onClick={() => startMutation.mutate()}>{startMutation.isPending ? t("Creating isolated world…") : actionLabel}<span aria-hidden="true"> →</span></button> : null}
           </footer>
         </section>
       </div>}

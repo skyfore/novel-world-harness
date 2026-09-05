@@ -17,6 +17,16 @@ const STORAGE_KEY = "novel-world-harness.locale";
 // when a newly added message has not been translated yet, while still giving
 // every shipped surface one shared locale boundary.
 const zhCN: Record<string, string> = {
+  "Novel certification": "小说认证",
+  "Certified for new play": "已通过新建 Play 认证",
+  "New play certification incomplete": "新建 Play 认证尚未完成",
+  "Major entry probes": "主要人物入口探针",
+  "Independent evaluation": "独立评测",
+  "All character readiness": "完整人物可玩状态",
+  "Review roles and inspect closure": "复核人物并检查世界闭合",
+  "Complete role review and independent evaluation before publication.": "发布前需完成人物复核与独立评测。",
+  "unresolved-identity": "身份未解析",
+  "not-run": "尚未运行",
   "Interface language": "界面语言",
   "Open navigation": "打开导航",
   "Close navigation": "关闭导航",

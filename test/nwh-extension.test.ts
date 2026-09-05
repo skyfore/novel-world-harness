@@ -2471,7 +2471,7 @@ describe("NWH TUI extension", () => {
     await commands.get("prepare-all")?.handler(evidence.source.id, preparationContext(notifications, questions));
 
     expect(questions).toEqual(["Accept validated proposals?", "Create playable branch?"]);
-    expect(notifications.some((message) => message.includes("Preparation complete"))).toBe(true);
+    expect(notifications).toContainEqual(expect.stringContaining("Preparation complete"));
     expect(sentHiddenMessages).toEqual([]);
     await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
   });
@@ -2763,7 +2763,7 @@ describe("NWH TUI extension", () => {
         version: 1,
         delta: {
           version: 1,
-          operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "wait at the opening" }],
+          operations: [{ op: "set", entityId: "hero", field: "character.alive", value: true }, { op: "set", entityId: "hero", field: "character.plan", value: "wait at the opening" }],
         },
       },
       evidence_segment_ids: [segmentId!],
@@ -2788,7 +2788,7 @@ describe("NWH TUI extension", () => {
     await events.get("agent_settled")?.({ type: "agent_settled" }, ctx);
 
     expect(questions).toEqual(["Generate opening world?", "Accept validated proposals?", "Create playable branch?"]);
-    expect(notifications.some((message) => message.includes("Preparation complete"))).toBe(true);
+    expect(notifications).toContainEqual(expect.stringContaining("Preparation complete"));
     await expect(new BranchStore(root).read("main")).resolves.toMatchObject({ id: "main" });
   });
 

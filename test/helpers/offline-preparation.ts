@@ -2,6 +2,8 @@ import { afterEach, beforeEach, vi } from "vitest";
 import * as certification from "../../src/compiler/certification.js";
 import * as roleReview from "../../src/workflow/role-review.js";
 import { PreparedNovelCache } from "../../src/compiler/prepared-cache.js";
+import * as playRoles from "../../src/world/play-roles.js";
+import { deriveCharacterEntryOptions, deriveCharacterEntrySeed } from "../../src/world/entry-context.js";
 
 /**
  * Component tests with old hand-authored worlds isolate the new certification boundary.
@@ -12,6 +14,10 @@ import { PreparedNovelCache } from "../../src/compiler/prepared-cache.js";
 export function useOfflinePreparationBoundary(): void {
   const restore: Array<() => void> = [];
   beforeEach(() => {
+    const options = vi.spyOn(playRoles, "certifiedEntryOptions").mockImplementation(deriveCharacterEntryOptions);
+    const entry = vi.spyOn(playRoles, "requireCertifiedEntry").mockImplementation(deriveCharacterEntrySeed);
+    const roles = vi.spyOn(playRoles, "describePreparedRoles").mockImplementation((bundle) => deriveCharacterEntryOptions(bundle).map((entry) => ({ id: entry.actorId, actorId: entry.actorId, rosterEntryId: `fixture-${entry.actorId}`, canonicalName: entry.canonicalName, aliases: entry.aliases, major: true, status: "ready", entryKind: entry.entry.kind, entryTitle: entry.entry.title, entryCutHash: deriveCharacterEntrySeed(bundle, entry.actorId).cut.hash, issues: [] })));
+    restore.push(() => options.mockRestore(), () => entry.mockRestore(), () => roles.mockRestore());
     const review = vi.spyOn(roleReview, "reviewNovelRoles").mockImplementation(async () => undefined);
     const inspection = vi.spyOn(PreparedNovelCache.prototype, "inspectCandidate").mockImplementation(async () => ({ bundle: null, assessment: { fullNovelReady: true, playability: null, issues: [] } }) as never);
     restore.push(() => review.mockRestore(), () => inspection.mockRestore());

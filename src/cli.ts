@@ -17,7 +17,7 @@ import { prepareCommand } from "./commands/prepare.js";
 import { prepareAllCommand } from "./commands/prepare-all.js";
 import { reparseCommand } from "./commands/reparse.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
-import { activatePreparedCacheRevisionCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
+import { activatePreparedCacheRevisionCommand, inspectNovelClosureCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
 import { playWorldCommand } from "./commands/play-world.js";
 import { acceptAllValidProposalsCommand, acceptProposalCommand, listProposalsCommand, rejectProposalCommand, showProposalCommand } from "./commands/proposals.js";
 import {
@@ -313,6 +313,11 @@ program
   });
 
 const preparedCache = program.command("prepared-cache").description("inspect or activate versioned prepared-novel revisions");
+preparedCache.command("inspect-closure")
+  .description("inspect current candidate closure, major roles and missing evaluation evidence without publication")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id")
+  .action(async (options) => inspectNovelClosureCommand(rootFor(options), options.source));
 preparedCache.command("list")
   .option("--root <path>", "local novel workspace")
   .option("--source <id>", "ingested source id")

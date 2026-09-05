@@ -14,6 +14,7 @@ import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { inspectPreparation, resolvePreparationBranchId } from "../workflow/prepare.js";
 import { createWorldBranch } from "./instance.js";
 import { BranchStore } from "./store.js";
+import { certifiedEntryOptions, requireCertifiedEntry } from "./play-roles.js";
 import {
   deriveCharacterEntryOptions,
   deriveCharacterEntrySeed,
@@ -87,6 +88,7 @@ export async function choosePlayExperience(
     createIfMissing?: boolean;
     preparedCacheRoot?: string;
     expectedPreparedRevisionHash?: string;
+    expectedEntryCutHash?: string;
     sessionIdentity?: { id: string; conversationId: string };
     onInstanceLifecycle?: (event: PlayInstanceLifecycleEvent) => void;
   },
@@ -128,19 +130,21 @@ export async function choosePlayExperience(
         `Active prepared revision changed from ${options.expectedPreparedRevisionHash} to ${prepared.bundleHash}; refresh the frozen base before creating an instance.`,
       );
     }
-    const entryOptions = deriveCharacterEntryOptions(prepared.bundle);
+    const entryOptions = certifiedEntryOptions(prepared.bundle);
     if (!entryOptions.length) {
       throw new Error(`Novel '${source.title}' has no grounded embodied character entry with complete prior reader context. Recompile its opening and canonical scenes before play.`);
     }
     createdActorId = await chooseCharacterEntry(entryOptions, options.character, source.title, ask);
     if (!createdActorId) return undefined;
-    createdReaderContext = deriveCharacterEntrySeed(prepared.bundle, createdActorId).readerContext;
+    const selectedSeed = requireCertifiedEntry(prepared.bundle, createdActorId, options.expectedEntryCutHash);
+    createdReaderContext = selectedSeed.readerContext;
     const created = await createSourcePlayInstance(root, catalog, sourceId, {
       ...(mode === "create" ? { alwaysCreate: true } : {}),
       ...(mode === "create" && options.branchId ? { requestedBranchId: options.branchId } : {}),
       ...(options.preparedCacheRoot ? { cacheRoot: options.preparedCacheRoot } : {}),
       expectedPreparedRevisionHash: prepared.bundleHash,
       entryActorId: createdActorId,
+      expectedEntryCutHash: selectedSeed.cut.hash,
     });
     options.onInstanceLifecycle?.({
       type: "created",
@@ -332,6 +336,7 @@ export async function createSourcePlayInstance(
     cacheRoot?: string;
     entryActorId?: string;
     expectedPreparedRevisionHash?: string;
+    expectedEntryCutHash?: string;
   } = {},
 ): Promise<PlayInstanceSummary> {
   const source = catalog.novels.find((novel) => novel.id === sourceId);
@@ -369,6 +374,7 @@ export async function createSourcePlayInstance(
     options.cacheRoot,
     options.entryActorId,
     options.expectedPreparedRevisionHash,
+    options.expectedEntryCutHash,
   );
   const refreshed = await inspectPlayExperience(root);
   const created = refreshed.instances.find((instance) => instance.branchId === branchId);

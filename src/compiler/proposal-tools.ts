@@ -1,3 +1,4 @@
+import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -147,6 +148,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
 
 /** Exact model-tool authority owned by the compiler embedding. */
 export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
+  ...ROLE_ROSTER_TOOL_NAMES,
   "configure_chapter_split",
   "propose_novel_title",
   "find_compiler_artifacts",
@@ -992,6 +994,7 @@ export function createCompilerProposalToolset(
   let pendingChapterSplitPlan: ChapterSplitPlan | undefined;
   let pendingNovelTitleProposal: SourceTitleProposal | undefined;
   let finished = false;
+  const roleRosterTools = createRoleRosterTools(workspaceRoot, () => ({ sourceId: activeSourceId, batchId: compilerBatchId, finished }));
   let circuitBreak: { reason: string; failureCount: number } | undefined;
   let totalFinishFailures = 0;
   let consecutiveFinishFailures = 0;
@@ -2658,6 +2661,7 @@ export function createCompilerProposalToolset(
         ...listedEventResolutions,
         ...listedAccounting,
         ...(pendingNovelTitleProposal ? [pendingNovelTitleProposal.proposalId] : []),
+        ...(roleRosterTools.pendingId() ? [roleRosterTools.pendingId()!] : []),
       ].sort();
       if (new Set(expected).size !== expected.length) {
         return failFinish("World, annotation, and metadata proposals must use distinct proposal IDs.");
@@ -2888,6 +2892,7 @@ export function createCompilerProposalToolset(
         ),
       ];
       if (validationSections.length) return failFinish(validationSections.join("\n\n"));
+      await roleRosterTools.commit();
       if (pendingChapterSplitPlan) {
         if (!activeSourceId) return failFinish("Structure discovery lost its active source identity.");
         const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
@@ -2949,6 +2954,7 @@ export function createCompilerProposalToolset(
   });
   return {
     tools: [
+      ...roleRosterTools.tools,
       configureChapterSplitTool,
       novelTitleTool,
       ...retrievalTools,
@@ -2964,6 +2970,7 @@ export function createCompilerProposalToolset(
       finishTool,
     ],
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
+      roleRosterTools.reset();
       successfulProposalIds.clear();
       successfulAnnotationProposalIds.clear();
       successfulEntityResolutionProposalIds.clear();

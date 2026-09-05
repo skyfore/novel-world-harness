@@ -4,7 +4,7 @@ import type { CanonicalEvent, EventRelation } from "../src/world/model.js";
 
 function event(id: string, day: number | undefined, discourseOrder: number, mode: "scene" | "flashback" | "flashforward" = "scene"): CanonicalEvent {
   return { id, title: id, participants: ["hero"], storyTime: day === undefined ? { kind: "unknown" } : { kind: "ordinal", label: `day ${day}`, orderHint: day },
-    narrativeContext: { mode, layerId: "story", discourseOrder }, preconditions: [], observedOutcome: { version: 1, operations: [{ op: "adjust", entityId: "hero", field: "character.wealth", amount: -1 }] },
+    narrativeContext: { mode, layerId: "story", discourseOrder }, preconditions: [], observedOutcome: { version: 1, operations: [{ op: "adjust-number", entityId: "hero", field: "character.wealth", amount: -1 }] },
     evidence: [], causalParents: [], confidence: 1 };
 }
 

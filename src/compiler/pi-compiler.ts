@@ -1,3 +1,4 @@
+import { ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
 import { PiAgentSession, type PiAgentSessionOptions } from "../agent/pi-session.js";
 import type { LlmProfile } from "../config/schema.js";
 import { LocalFileWorkspace } from "../workspace/local-files.js";
@@ -107,6 +108,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
     || options.compilerBatchId?.startsWith("reconcile-"),
   );
   const disabledProposalTools = new Set([
+    ...(options.compilerBatchId?.startsWith(`role-roster-${options.sourceId}-`) ? [] : ROLE_ROSTER_TOOL_NAMES),
     ...(structureDiscovery
       ? COMPILER_TOOL_NAMES.filter((name) => !["configure_chapter_split", "finish_compiler_batch"].includes(name))
       : ["configure_chapter_split"]),

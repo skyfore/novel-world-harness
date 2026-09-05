@@ -79,6 +79,7 @@ import {
 } from "./spatial-ontology.js";
 import { modelVisibleWorldRules, resolveEffectiveWorldRules } from "./world-rule-ontology.js";
 import { deriveAdHocAction, mapActionInvocationEntities } from "./action-invocation.js";
+import { resolveActionInvocation } from "./action-ontology.js";
 import { actorDecisionViewSchema, buildActorDecisionView, decisionReferenceIds, mapActorDecisionView } from "./actor-decision-view.js";
 
 /**
@@ -1023,8 +1024,8 @@ export async function buildActorScopedActionContext(
 
 /**
  * Fail-closed capability validation for a model candidate. Phase-one player
- * actions may write only the selected character and artifacts currently owned
- * by that character. They may reference only IDs already present in the
+ * actions may write the selected character, owned artifacts, and exact effects
+ * of an available bound mechanism. Mechanism writes do not grant reads. Actions reference only IDs in the
  * actor-scoped context and may not alter world rules.
  */
 export function validatePlayerActionScope(
@@ -1040,6 +1041,20 @@ export function validatePlayerActionScope(
   const visibleClaims = new Set(actorContext.knowledge.map((entry) => entry.claimId));
   const fieldSpecs = new Map(actorContext.writableStateFields.map((spec) => [spec.key, spec]));
   const entityKinds = new Map(actorContext.referenceableEntities.map((entity) => [entity.id, entity.kind]));
+  const mechanismWrites = new Set<string>();
+  if (candidate.action?.lane === "schema-bound") {
+    const invocation = candidate.action;
+    const capability = actorContext.decision?.capabilities.actions.find((schema) => schema.id === invocation.schemaId);
+    if (!capability) issues.push(issue("PLAYER_ACTION_CAPABILITY_UNAVAILABLE", "The action mechanism is not available in this actor's current view", "action.schemaId"));
+    else {
+      for (const binding of invocation.roleBindings) for (const id of binding.entityIds) requireReferenceable(id, "action.roleBindings", referenceable, issues);
+      const schema = { ...capability, ontologyVersion: "action-schema-v1" as const, preconditions: [], induction: { kind: "domain-module" as const, moduleId: "actor-view", moduleVersion: "1" }, evidence: [] };
+      const entities = new Map(actorContext.referenceableEntities.map((entity) => [entity.id, { id: entity.id, kind: entity.kind, canonicalName: entity.name, aliases: [], evidence: [] }]));
+      const resolved = resolveActionInvocation(invocation, new Map([[schema.id, schema]]), entities, { actorId: actorContext.actorId, participants: [...candidate.participants, actorContext.actorId], proposedDelta: candidate.proposedDelta, hasKnowledge: Boolean(candidate.proposedKnowledge?.operations.length), hasTimeAdvance: Boolean(candidate.intent?.requestedTimeAdvance), hasSceneTransition: Boolean(candidate.intent?.sceneTransition) });
+      issues.push(...resolved.issues);
+      if (!resolved.issues.length) for (const effect of resolved.stateEffects) if ("entityId" in effect.operation) mechanismWrites.add(`${effect.operation.entityId}/${effect.operation.field}`);
+    }
+  }
 
   for (let index = 0; index < candidate.participants.length; index += 1) {
     requireReferenceable(candidate.participants[index]!, `participants.${index}`, referenceable, issues);
@@ -1092,7 +1107,7 @@ export function validatePlayerActionScope(
       issues.push(issue("PLAYER_RULE_MUTATION_FORBIDDEN", "Player action translation cannot activate or deactivate world rules", operationPath));
       continue;
     }
-    if (!writable.has(operation.entityId)) {
+    if (!writable.has(operation.entityId) && !mechanismWrites.has(`${operation.entityId}/${operation.field}`)) {
       issues.push(issue("PLAYER_WRITE_OUT_OF_SCOPE", `Player action cannot write entity ${operation.entityId}`, `${operationPath}.entityId`));
     }
     const spec = fieldSpecs.get(operation.field);

@@ -63,6 +63,12 @@ const invocation = {
 };
 
 describe("ActionSchema", () => {
+  it("does not multiply a declared effect by repeating the same operation", () => {
+    const schema = { ...transfer, effectEnvelope: { ...transfer.effectEnvelope, maxStateOperations: 3 } };
+    const operation = { op: "set" as const, entityId: "key", field: "artifact.owner", value: "recipient" };
+    const result = resolveActionInvocation(invocation, new Map([[schema.id, schema]]), entities, { actorId: "giver", participants: ["giver", "recipient", "key"], proposedDelta: { version: 1, operations: [operation, operation] }, hasKnowledge: false, hasTimeAdvance: false, hasSceneTransition: false });
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "ACTION_EFFECT_NOT_DECLARED" }));
+  });
   it("resolves role templates and enforces the declared effect envelope", () => {
     expect(validateActionSchemaCatalog(transfer, entities, new Set())).toEqual([]);
     const resolved = resolveActionInvocation(invocation, new Map([[transfer.id, transfer]]), entities, {

@@ -27,6 +27,7 @@ import {
   buildActorScopedActionContext,
   createPlayerActionModelBoundary,
   playerActionCandidateSchema,
+  playerIntentSchema,
   playerActionTranslationContext,
   validatePlayerActionGrounding,
   validatePlayerActionScope,
@@ -52,6 +53,7 @@ export const actorActionTemplateSchema = z
     proposedKnowledge: knowledgeDeltaSchema.optional(),
     ...actorOutcomeShape,
     action: actionInvocationSchema.optional(),
+    intent: playerIntentSchema.optional(),
     coordination: actorCoordinationSchema.optional(),
     rationale: z.string().optional(),
   })
@@ -372,8 +374,9 @@ export function modelActorProposalSource(
           preconditions: encodedAction.preconditions,
           proposedDelta: encodedAction.proposedDelta,
           ...(encodedAction.action ? { action: encodedAction.action } : {}),
+          ...(encodedAction.intent ? { intent: encodedAction.intent } : {}),
           ...(encodedAction.proposedKnowledge ? { proposedKnowledge: encodedAction.proposedKnowledge } : {}),
-      ...copyActorOutcome(encodedAction),
+          ...copyActorOutcome(encodedAction),
           requiresKnowledge: [],
           forbidsKnowledge: [],
         }));
@@ -492,6 +495,7 @@ async function firstValidCompiledAction(input: {
       preconditions: action.preconditions,
       proposedDelta: action.proposedDelta,
       ...(action.action ? { action: action.action } : {}),
+      ...(action.timeAdvance ? { intent: { kind: "act", summary: action.title, targets: [], requestedTimeAdvance: action.timeAdvance } } : {}),
       ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
       ...copyActorOutcome(action),
       requiresKnowledge: [],
@@ -553,6 +557,7 @@ function actorCandidateFromAction(input: {
       ...(input.candidate.proposedKnowledge ? { proposedKnowledge: input.candidate.proposedKnowledge } : {}),
       ...copyActorOutcome(input.candidate),
       ...(input.action ? { action: input.action } : {}),
+      ...(input.candidate.intent?.requestedTimeAdvance ? { timeAdvance: input.candidate.intent.requestedTimeAdvance } : {}),
       causalRelations,
       causalParents: causalRelations.map((relation) => relation.fromEventId),
       evidence: input.goal.evidence,
@@ -562,7 +567,7 @@ function actorCandidateFromAction(input: {
 
 function candidateHasMaterialEffect(candidate: ReturnType<typeof playerActionCandidateSchema.parse>): boolean {
   return hasActorOutcome(candidate) || candidate.proposedDelta.operations.length > 0
-    || (candidate.proposedKnowledge?.operations.length ?? 0) > 0;
+    || (candidate.proposedKnowledge?.operations.length ?? 0) > 0 || Boolean(candidate.intent?.requestedTimeAdvance);
 }
 
 function decodeActionInvocation(

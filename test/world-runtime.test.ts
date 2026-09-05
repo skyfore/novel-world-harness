@@ -1,3 +1,4 @@
+import { routeContext, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -29,6 +30,7 @@ async function fixture() {
     entities: new Map(entities.map((entity) => [entity.id, entity])),
     rules: new Map(),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    ...routeContext("hall", "camp"),
   };
   const engine = new WorldEngine(root, context);
   const templates = ({ branchId, commitId }: { branchId: string; commitId: string }): Possibility[] => [
@@ -512,6 +514,8 @@ describe("WorldRuntime", () => {
       source: "player",
       actorId: "hero",
       title: "Leave the hall",
+      action: hallCampWalkAction,
+      timeAdvance: { amount: 1, unit: "minute" },
       participants: ["hero"],
       proposedTime: { kind: "ordinal", label: "before promotion" },
       preconditions: [{ op: "fact-equals", entityId: "hero", field: "character.location", value: "hall" }],

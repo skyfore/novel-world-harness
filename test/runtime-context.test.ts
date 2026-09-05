@@ -562,7 +562,7 @@ describe("runtime frozen source corpus", () => {
       sourceId: source.source.id,
       preparedRevisionHash: published.bundleHash,
     });
-    expect(corpus.bundle.version).toBe(3);
+    expect(corpus.bundle.version).toBe(4);
     expect(corpus.passages.some((passage) => passage.text.includes("letter from America"))).toBe(true);
     expect(corpus.passages.flatMap((passage) => passage.artifacts)).toContainEqual({ kind: "entity", id: "hero" });
   });

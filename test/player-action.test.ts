@@ -1,4 +1,4 @@
-import { giftSchema, giftSilverKey } from "./helpers/actions.js";
+import { giftSchema, giftSilverKey, moneyTransferSchema } from "./helpers/actions.js";
 import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
 import { hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
@@ -1126,6 +1126,23 @@ describe("PlayerTurnService", () => {
     expect(result.stage).toBe("adjudication");
     expect(result.issues).toContainEqual(expect.objectContaining({ code: "PLAYER_WORLD_PRIVATE_CONSTRAINT_DISCLOSURE" }));
     expect(await engine.branches.readHead("main")).toBe(head);
+  });
+
+  it("admits exact mechanism effects on a visible counterparty without granting reads of its private state", async () => {
+    const base = await fixture();
+    const engine = new WorldEngine(base.root, { ...base.engine.context, actionSchemas: new Map([[giftSchema.id, giftSchema], [moneyTransferSchema.id, moneyTransferSchema]]) });
+    const funded = await engine.commitProposal({ proposalId: "fund-accounts", branchId: "main", expectedParentCommit: base.head, source: "background", title: "Opening balances", participants: ["hero", "mo-yan"], proposedTime: { kind: "unknown" }, preconditions: [], causalParents: [], evidence: [], proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.wealth", value: 5 }, { op: "set", entityId: "mo-yan", field: "character.wealth", value: 7 }] } });
+    expect(funded.report.accepted).toBe(true);
+    const candidate: PlayerActionCandidate = { title: "Pay three units", participants: ["mo-yan"], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [],
+      action: { lane: "schema-bound", schemaId: moneyTransferSchema.id, parameters: {}, roleBindings: [{ roleId: "payer", entityIds: ["hero"] }, { roleId: "recipient", entityIds: ["mo-yan"] }] },
+      proposedDelta: { version: 1, operations: [{ op: "adjust-number", entityId: "hero", field: "character.wealth", amount: -3 }, { op: "adjust-number", entityId: "mo-yan", field: "character.wealth", amount: 3 }] } };
+    const probing = await new PlayerTurnService(engine, () => ({ ...candidate, preconditions: [{ op: "fact-equals", entityId: "mo-yan", field: "character.wealth", value: 7 }] })).turn({ branchId: "main", actorId: "hero", utterance: "Pay Mo Yan" });
+    expect(probing.accepted).toBe(false);
+    const paid = await new PlayerTurnService(engine, () => candidate).turn({ branchId: "main", actorId: "hero", utterance: "Pay Mo Yan" });
+    expect(paid.issues).toEqual([]);
+    expect(paid.accepted).toBe(true);
+    expect(paid.contextBefore.ownedEntityState["mo-yan"]).toBeUndefined();
+    expect((await engine.projector.project(paid.newHead)).values["mo-yan"]?.["character.wealth"]).toBe(10);
   });
 
   it("allows an actor-owned artifact to be transferred to an explicitly named character", async () => {

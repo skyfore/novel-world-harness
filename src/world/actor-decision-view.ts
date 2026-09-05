@@ -7,11 +7,12 @@ import type { WorldEngine } from "./engine.js";
 import { idSchema } from "./model.js";
 import { processOwnerEntityIds } from "./process-ontology.js";
 import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
+import { DEFAULT_STATE_FIELDS } from "./state.js";
 
 /** Actor-owned decision facts shared by player translation, NPCs and autonomous actors. */
 export const actorDecisionViewSchema = z.object({
   capabilities: z.object({
-    actions: z.array(z.object(actionSchemaSchema.shape).pick({ id: true, name: true, roles: true, initiatorRoleId: true, parameters: true, effectEnvelope: true })),
+    actions: z.array(z.object(actionSchemaSchema.shape).pick({ id: true, name: true, roles: true, initiatorRoleId: true, parameters: true, stateEffects: true, effectEnvelope: true })),
     processes: z.array(z.object(processTemplateSchema.shape).pick({ id: true, name: true, ownerRoles: true, phases: true, initialPhaseId: true, transitions: true, outcomeIds: true })),
     norms: z.array(z.object(normTemplateSchema.shape).pick({ id: true, name: true, modality: true, defaultDeadlineDays: true })),
   }).strict().default({ actions: [], processes: [], norms: [] }),
@@ -88,7 +89,10 @@ export async function buildActorDecisionView(
     item.visibility !== "engine" && item.visibility !== "knowledge" && (item.induction.kind === "domain-module"
       || evidenceBelongsExclusivelyToSource(item.evidence, scope.sourceId) && item.induction.supportingEventIds?.some((id) => experienced.has(id)));
   const capabilities = {
-    actions: [...(context.actionSchemas?.values() ?? [])].filter(usable).map(({ id, name, roles, initiatorRoleId, parameters, effectEnvelope }) => ({ id, name, roles, initiatorRoleId, parameters, effectEnvelope })),
+    actions: [...(context.actionSchemas?.values() ?? [])].filter(usable).filter((schema) => schema.stateEffects.every((effect) =>
+      (effect.entity.kind !== "entity" || visible(effect.entity.entityId)) && (!("member" in effect) || effect.member.kind !== "entity" || visible(effect.member.entityId))
+      && (!(effect.op === "set" && effect.value.source === "literal" && context.stateSchema.get(effect.field)?.valueType === "entity-ref") || typeof effect.value.value === "string" && visible(effect.value.value))))
+      .map(({ id, name, roles, initiatorRoleId, parameters, stateEffects, effectEnvelope }) => ({ id, name, roles, initiatorRoleId, parameters, stateEffects, effectEnvelope })),
     processes: [...(context.processTemplates?.values() ?? [])].filter(usable).map(({ id, name, ownerRoles, phases, initialPhaseId, transitions, outcomeIds }) => ({ id, name, ownerRoles, phases, initialPhaseId, transitions, outcomeIds })),
     norms: [...(context.normTemplates?.values() ?? [])].filter(usable).map(({ id, name, modality, defaultDeadlineDays }) => ({ id, name, modality, defaultDeadlineDays })),
   };
@@ -109,7 +113,14 @@ export function decisionReferenceIds(view?: ActorDecisionView): string[] {
 export function mapActorDecisionView(view: ActorDecisionView, entity: (id: string) => string, ref: (id: string) => string): ActorDecisionView {
   return {
     capabilities: {
-      actions: view.capabilities.actions.map((x) => ({ ...x, id: ref(x.id) })),
+      actions: view.capabilities.actions.map((x) => ({ ...x, id: ref(x.id),
+        parameters: x.parameters.map((parameter) => ({ ...parameter, ...(parameter.allowedValues ? { allowedValues: parameter.allowedValues.map((value) => parameter.valueType === "entity-ref" && typeof value === "string" ? entity(value) : parameter.valueType === "entity-ref-set" && Array.isArray(value) ? value.map((id) => entity(String(id))) : value) } : {}) })),
+        stateEffects: x.stateEffects.map((effect) => ({ ...effect,
+          entity: effect.entity.kind === "entity" ? { ...effect.entity, entityId: entity(effect.entity.entityId) } : effect.entity,
+          ...("member" in effect && effect.member.kind === "entity" ? { member: { ...effect.member, entityId: entity(effect.member.entityId) } } : {}),
+          ...(effect.op === "set" && effect.value.source === "literal" && DEFAULT_STATE_FIELDS.find((field) => field.key === effect.field)?.valueType === "entity-ref" && typeof effect.value.value === "string" ? { value: { source: "literal" as const, value: entity(effect.value.value) } } : {}),
+        })),
+      })),
       processes: view.capabilities.processes.map((x) => ({ ...x, id: ref(x.id) })),
       norms: view.capabilities.norms.map((x) => ({ ...x, id: ref(x.id) })),
     },

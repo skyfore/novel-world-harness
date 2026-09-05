@@ -17,6 +17,7 @@ import {
   predicateSchema,
   storyTimeSchema,
   stateDeltaSchema,
+  timeAdvanceSchema,
   type EventProposal,
   type Entity,
   type NarrativeProgress,
@@ -72,6 +73,7 @@ const goalActionSchema = z
     proposedKnowledge: knowledgeDeltaSchema.optional(),
     ...actorOutcomeShape,
     action: actionInvocationSchema.optional(),
+    timeAdvance: timeAdvanceSchema.optional(),
     coordination: actorCoordinationSchema.optional(),
   })
   .strict();
@@ -626,7 +628,8 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
             preconditions: action.preconditions,
             proposedDelta: action.proposedDelta,
             ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
-      ...copyActorOutcome(action),
+            ...copyActorOutcome(action),
+            ...(action.timeAdvance ? { timeAdvance: structuredClone(action.timeAdvance) } : {}),
             ...(action.action ? { action: structuredClone(action.action) } : {}),
             causalParents: [],
             evidence: goal.evidence,
@@ -709,7 +712,8 @@ export function deterministicActorProposalSource(engine: WorldEngine, actors: Ac
           preconditions: action.preconditions,
           proposedDelta: action.proposedDelta,
           ...(action.proposedKnowledge ? { proposedKnowledge: action.proposedKnowledge } : {}),
-      ...copyActorOutcome(action),
+          ...copyActorOutcome(action),
+          ...(action.timeAdvance ? { timeAdvance: structuredClone(action.timeAdvance) } : {}),
           ...(action.action ? { action: structuredClone(action.action) } : {}),
           causalRelations: [{
             fromEventId: latestPlayerEvent.event.eventId,

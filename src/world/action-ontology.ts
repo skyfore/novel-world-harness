@@ -412,16 +412,22 @@ function validateInstantiatedEffects(
   schemaId: string,
   issues: ValidationIssue[],
 ): void {
-  const actual = new Set(delta.operations.map(canonicalJson));
-  const allowed = new Set(allowedEffects.map((effect) => canonicalJson(effect.operation)));
+  const actual = new Map<string, number>(), allowed = new Map<string, number>(), required = new Map<string, number>();
+  for (const effect of allowedEffects) {
+    const key = canonicalJson(effect.operation);
+    allowed.set(key, (allowed.get(key) ?? 0) + 1);
+    if (effect.required) required.set(key, (required.get(key) ?? 0) + 1);
+  }
   delta.operations.forEach((operation, index) => {
-    if (!allowed.has(canonicalJson(operation))) {
+    const key = canonicalJson(operation), count = (actual.get(key) ?? 0) + 1;
+    actual.set(key, count);
+    if (count > (allowed.get(key) ?? 0)) {
       issues.push(issue("ACTION_EFFECT_NOT_DECLARED", `Operation ${index} is not declared by action schema ${schemaId}`, `proposedDelta.operations.${index}`));
     }
   });
-  allowedEffects.forEach((effect, index) => {
-    if (effect.required && !actual.has(canonicalJson(effect.operation))) {
-      issues.push(issue("ACTION_REQUIRED_EFFECT_MISSING", `Required effect ${index} of action schema ${schemaId} is missing`, "proposedDelta.operations"));
+  required.forEach((count, key) => {
+    if ((actual.get(key) ?? 0) < count) {
+      issues.push(issue("ACTION_REQUIRED_EFFECT_MISSING", `A required effect of action schema ${schemaId} is missing`, "proposedDelta.operations"));
     }
   });
 }

@@ -1,3 +1,4 @@
+import { routeContext, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -53,6 +54,7 @@ describe("temporal world rules", () => {
     const context: WorldModelContext = {
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       rules: new Map([[rule.id, rule]]),
+    ...routeContext("hall", "forbidden"),
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
     };
     const engine = new WorldEngine(root, context);
@@ -134,6 +136,7 @@ describe("temporal world rules", () => {
     const engine = new WorldEngine(root, {
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       rules: new Map([[rule.id, rule]]),
+    ...routeContext("hall", "forbidden"),
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
     });
     const genesis = await engine.createBranch("main", "Main", {
@@ -152,6 +155,8 @@ describe("temporal world rules", () => {
       source: "player",
       actorId: "hero",
       title: "Enter without a permit",
+      action: hallCampWalkAction,
+      timeAdvance: { amount: 1, unit: "minute" },
       participants: ["hero"],
       proposedTime: { kind: "unknown" },
       preconditions: [],
@@ -169,6 +174,8 @@ describe("temporal world rules", () => {
       expectedParentCommit: violated.newHead,
       source: "background",
       title: "Receive a permit",
+      action: { ...hallCampWalkAction, footprint: { reads: [], writes: [{ entityId: "hero", field: "character.location" }, { entityId: "hero", field: "character.plan" }], resources: [] } },
+      timeAdvance: { amount: 1, unit: "minute" },
       participants: ["hero"],
       proposedTime: { kind: "unknown" },
       preconditions: [],
@@ -187,6 +194,8 @@ describe("temporal world rules", () => {
       source: "player",
       actorId: "hero",
       title: "Enter with a permit",
+      action: hallCampWalkAction,
+      timeAdvance: { amount: 1, unit: "minute" },
       participants: ["hero"],
       proposedTime: { kind: "unknown" },
       preconditions: [],

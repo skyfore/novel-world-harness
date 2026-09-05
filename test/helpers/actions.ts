@@ -16,3 +16,13 @@ export const giftSchema = actionSchemaSchema.parse({
 
 export const giftSilverKey: ActionInvocation = { lane: "schema-bound", schemaId: giftSchema.id, parameters: {},
   roleBindings: [{ roleId: "giver", entityIds: ["hero"] }, { roleId: "recipient", entityIds: ["mo-yan"] }, { roleId: "item", entityIds: ["silver-key"] }] };
+
+export const moneyTransferSchema = actionSchemaSchema.parse({
+  ontologyVersion: "action-schema-v1", id: "transfer-money", name: "Transfer three units of money", initiatorRoleId: "payer",
+  roles: ["payer", "recipient"].map((id) => ({ id, label: id, allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 })), parameters: [],
+  preconditions: [{ op: "fact-gte", entity: { kind: "role", roleId: "payer" }, field: "character.wealth", value: 3 }],
+  stateEffects: [{ op: "adjust-number", entity: { kind: "role", roleId: "payer" }, field: "character.wealth", amount: -3 }, { op: "adjust-number", entity: { kind: "role", roleId: "recipient" }, field: "character.wealth", amount: 3 }],
+  effectEnvelope: { maxStateOperations: 2, allowedStateFields: ["character.wealth"], allowsKnowledge: false, allowsTimeAdvance: false, allowsSceneTransition: false },
+  induction: { kind: "domain-module", moduleId: "test-money", moduleVersion: "1" }, evidence: [],
+});
+export const transferThree: ActionInvocation = { lane: "schema-bound", schemaId: moneyTransferSchema.id, parameters: {}, roleBindings: [{ roleId: "payer", entityIds: ["hero"] }, { roleId: "recipient", entityIds: ["rival"] }] };

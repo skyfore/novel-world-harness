@@ -5,7 +5,7 @@ import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { annotationAnchors } from "./annotations.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
 
-export const closureKindSchema = z.enum(["source", "unit", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "action", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry"]);
+export const closureKindSchema = z.enum(["source", "unit", "discourse", "annotation", "entity-resolution", "event-resolution", "entity", "proposition", "attribution", "claim", "event", "participation", "event-relation", "spatial", "scene", "frame", "action", "constraint", "norm", "process", "rule", "goal", "model", "possibility", "initial", "evidence", "roster", "entry"]);
 export type ClosureKind = z.infer<typeof closureKindSchema>;
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const refSchema = z.object({ kind: closureKindSchema, id: z.string().min(1), revisionHash: hashSchema.optional() }).strict();
@@ -25,7 +25,7 @@ const referenceFields: Readonly<Record<string, ClosureKind>> = {
   eventId: "event", canonicalEventId: "event", fromEventId: "event", toEventId: "event", anchorEventId: "event", beforeCanonicalEventId: "event", eventIds: "event", supportingEventIds: "event", establishedByEventIds: "event", retiredByEventIds: "event", causalParents: "event",
   sceneOccurrenceIds: "scene", frameId: "frame", schemaId: "action", ruleId: "rule", activeRuleIds: "rule", overridesRuleIds: "rule", overridesConstraintIds: "constraint", overridesTemplateIds: "norm",
   unitIds: "unit", reviewedUnitIds: "unit", basisUnitIds: "unit", resolutionIds: "entity-resolution",
-  mentionId: "annotation", mentionIds: "annotation", participantMentionIds: "annotation", eventMentionIds: "annotation", quotationIds: "annotation", basisMentionIds: "annotation", basisEventMentionIds: "annotation", discourseSegmentId: "annotation",
+  mentionId: "annotation", mentionIds: "annotation", participantMentionIds: "annotation", eventMentionIds: "annotation", quotationIds: "annotation", basisMentionIds: "annotation", basisEventMentionIds: "annotation", discourseSegmentId: "discourse", discourseSegmentIds: "discourse",
 };
 
 export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph {
@@ -47,6 +47,8 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
   const snapshot = bundle.compilerSnapshot;
   if (snapshot.roleRoster) add("roster", bundle.source.id, snapshot.roleRoster);
   for (const unit of snapshot.structure.units) add("unit", unit.id, unit);
+  const baseUnits = snapshot.structure.units.filter((unit) => snapshot.structure.baseUnitIds?.includes(unit.id));
+  for (const segment of snapshot.structure.discourseSegments ?? []) add("discourse", segment.id, segment);
   for (const annotation of snapshot.annotations) add("annotation", annotation.id, annotation);
   for (const resolution of snapshot.entityResolutions) add("entity-resolution", resolution.id, resolution);
   for (const resolution of snapshot.eventResolutions) add("event-resolution", resolution.id, resolution);
@@ -96,26 +98,52 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
     const node = nodes.get(`annotation/${annotation.id}`)!;
     // Only annotations with schema-valid anchors enter production snapshots.
     if (!("sourceId" in annotation)) continue;
-    for (const anchor of annotationAnchors(annotation)) for (const unit of snapshot.structure.units) {
+    for (const anchor of annotationAnchors(annotation)) for (const unit of baseUnits) {
       if (anchor.startByte < unit.anchor.endByte && anchor.endByte > unit.anchor.startByte) link(node, "unit", unit.id);
     }
   }
-  const artifactKinds: Readonly<Record<string, ClosureKind>> = { entity: "entity", proposition: "proposition", attribution: "attribution", claim: "claim", event: "event", "event-participation": "participation", "event-relation": "event-relation", "spatial-relation": "spatial", "scene-occurrence": "scene", "event-frame": "frame", "action-schema": "action", "action-constraint": "constraint", "norm-template": "norm", "process-template": "process", rule: "rule", goal: "goal", model: "model", possibility: "possibility", "initial-world": "initial" };
+  const artifactKinds: Readonly<Record<string, ClosureKind>> = { entity: "entity", proposition: "proposition", attribution: "attribution", claim: "claim", event: "event", "canonical-event": "event", "event-participation": "participation", "event-relation": "event-relation", "spatial-relation": "spatial", "scene-occurrence": "scene", "event-frame": "frame", "action-schema": "action", "action-constraint": "constraint", "norm-template": "norm", "process-template": "process", rule: "rule", "world-rule": "rule", goal: "goal", "character-goal": "goal", model: "model", "character-model": "model", possibility: "possibility", "initial-world": "initial" };
   for (const binding of snapshot.evidenceBindings) {
     const evidenceId = `${binding.artifactKind}/${binding.artifactId}`, node = nodes.get(`evidence/${evidenceId}`)!;
     const kind = artifactKinds[binding.artifactKind];
     const artifact = kind ? nodes.get(key({ kind, id: kind === "initial" ? bundle.source.id : binding.artifactId })) : undefined;
     if (artifact) link(artifact, "evidence", evidenceId);
-    for (const assertion of binding.assertions) for (const anchor of assertion.anchors) for (const unit of snapshot.structure.units) {
+    for (const assertion of binding.assertions) for (const anchor of assertion.anchors) for (const unit of baseUnits) {
       if (anchor.startByte < unit.anchor.endByte && anchor.endByte > unit.anchor.startByte) link(node, "unit", unit.id);
     }
   }
+  // Legacy evidence and discourse anchors still participate in repair scope;
+  // containment units (e.g. the whole work) must not expand every repair to the whole book.
+  const evidenceUnits = (node: Node, value: unknown): void => {
+    if (Array.isArray(value)) { value.forEach((item) => evidenceUnits(node, item)); return; }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    for (const name of ["evidence", "counterEvidence", ...(node.kind === "discourse" ? ["anchors"] : [])]) {
+      if (!Array.isArray(record[name])) continue;
+      for (const reference of record[name]) {
+        const span = reference?.span ?? reference;
+        if (span?.sourceId !== bundle.source.id) continue;
+        for (const unit of baseUnits) {
+          const overlaps = typeof span.startByte === "number" && typeof span.endByte === "number"
+            ? span.startByte < unit.anchor.endByte && span.endByte > unit.anchor.startByte
+            : typeof span.startLine === "number" && typeof span.endLine === "number" && span.startLine <= unit.anchor.endLine && span.endLine >= unit.anchor.startLine;
+          if (overlaps) link(node, "unit", unit.id);
+        }
+      }
+    }
+    for (const [name, item] of Object.entries(record)) if (!["evidence", "counterEvidence", "anchors", "derivation"].includes(name)) evidenceUnits(node, item);
+  };
+  for (const node of nodes.values()) if (!["source", "unit", "evidence", "roster"].includes(node.kind)) evidenceUnits(node, payloads.get(key(node)));
   // Identity repairs invalidate the semantic identity and all its downstream consumers.
   for (const resolution of snapshot.entityResolutions) {
     if (resolution.entityId) {
       const entity = nodes.get(`entity/${resolution.entityId}`);
       if (entity) link(entity, "entity-resolution", resolution.id);
     }
+  }
+  for (const resolution of snapshot.eventResolutions) {
+    const event = nodes.get(`event/${resolution.canonicalEventId}`);
+    if (event) link(event, "event-resolution", resolution.id);
   }
   for (const event of canonical.events) for (const checkpoint of event.characterEntryCheckpoints ?? []) {
     const id = `${checkpoint.actorId}/${event.id}`;

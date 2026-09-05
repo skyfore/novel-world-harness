@@ -3,6 +3,7 @@ import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { describePreparedRoles } from "../world/play-roles.js";
+import { closureRepairDiagnostics } from "../compiler/closure-repair.js";
 
 export async function listPreparedCacheRevisionsCommand(root: string, sourceId?: string): Promise<void> {
   const source = await resolveSource(root, sourceId);
@@ -31,7 +32,7 @@ export async function inspectNovelClosureCommand(root: string, sourceId?: string
   await withWorkspaceOperationLock(root, "compiler", async () => {
     const source = await resolveSource(root, sourceId);
     const { bundle, assessment } = await new PreparedNovelCache(root).inspectCandidate(source);
-    stdout.write(`${JSON.stringify({ ...assessment, roles: describePreparedRoles(bundle, assessment) }, null, 2)}\n`);
+    stdout.write(`${JSON.stringify({ ...assessment, roles: describePreparedRoles(bundle, assessment), repair: closureRepairDiagnostics(assessment.closure) }, null, 2)}\n`);
   });
 }
 

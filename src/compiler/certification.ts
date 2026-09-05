@@ -12,6 +12,7 @@ import type { PreparedNovelBundle } from "./prepared-cache.js";
 import { NovelPlayQualityStore, novelPlayQualitySchema, validateNovelPlayQuality } from "../eval/novel-play-quality.js";
 import { baseStructuralUnits, validateSourceStructure } from "./structure.js";
 import { deriveCharacterEntrySeed } from "../world/entry-context.js";
+import { annotationAnchors } from "./annotations.js";
 
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 export const novelClosureAssessmentSchema = z.object({
@@ -108,12 +109,25 @@ export function validateFrozenAccounting(bundle: PreparedNovelBundle) {
   catch (error) { return [{ code: "SOURCE_PARTITION_INVALID", message: String(error) }]; }
   if (!accounting || accounting.sourceId !== bundle.source.id || accounting.sourceSha256 !== bundle.source.contentSha256 || accounting.structureVersion !== structure.structureVersion) issues.push({ code: "SOURCE_ACCOUNTING_STALE", message: "Accounting must refer to the frozen source and structure" });
   const records = new Map(accounting?.records.map((record) => [record.unitId, record]) ?? []);
+  const annotations = new Map(bundle.compilerSnapshot.annotations.map((annotation) => [annotation.id, annotation]));
+  const assertions = new Map(bundle.compilerSnapshot.evidenceBindings.flatMap((binding) => binding.assertions.map((assertion) => [assertion.id, assertion] as const)));
   if (records.size !== (accounting?.records.length ?? 0) || [...records.keys()].some((id) => !structure.baseUnitIds.includes(id))) issues.push({ code: "SOURCE_ACCOUNTING_INVENTORY_INVALID", message: "Accounting has duplicate or unknown units" });
   for (const unit of baseStructuralUnits(structure)) {
     const record = records.get(unit.id);
     if (!record || ["unresolved", "intentionally-deferred"].includes(record.status)) issues.push({ code: "SOURCE_UNIT_UNACCOUNTED", message: `Source unit ${unit.id} is missing or unresolved`, path: unit.id });
     else if (record.status === "represented" && !record.annotationIds.length && !record.evidenceAssertionIds.length) issues.push({ code: "SOURCE_REPRESENTATION_UNSUPPORTED", message: `Represented unit ${unit.id} has no annotation or evidence assertion`, path: unit.id });
     else if (record.status !== "represented" && (!record.reason?.trim() || (record.reviewedBy === "deterministic" && !(unit.kind === "non-scene" && record.status === "background-only")))) issues.push({ code: "SOURCE_EXCLUSION_UNREVIEWED", message: `Excluded source unit ${unit.id} requires an explicit model or human disposition`, path: unit.id });
+    if (record?.status === "represented") {
+      const covers = (anchors: Array<{ sourceId: string; startByte: number; endByte: number }>) => anchors.some((anchor) => anchor.sourceId === bundle.source.id && anchor.startByte < unit.anchor.endByte && anchor.endByte > unit.anchor.startByte);
+      for (const id of record.annotationIds) {
+        const annotation = annotations.get(id);
+        if (!annotation || !covers(annotationAnchors(annotation))) issues.push({ code: "SOURCE_REPRESENTATION_REFERENCE_INVALID", message: `Unit ${unit.id} references missing or non-overlapping annotation ${id}`, path: unit.id });
+      }
+      for (const id of record.evidenceAssertionIds) {
+        const assertion = assertions.get(id);
+        if (!assertion || !covers(assertion.anchors)) issues.push({ code: "SOURCE_REPRESENTATION_REFERENCE_INVALID", message: `Unit ${unit.id} references missing or non-overlapping evidence assertion ${id}`, path: unit.id });
+      }
+    }
   }
   return issues;
 }

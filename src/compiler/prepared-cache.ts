@@ -650,6 +650,13 @@ export class PreparedNovelCache {
     };
   }
 
+  /** Restore a compiler checkpoint only. An archive never becomes a published Play revision here. */
+  async restoreCompilerCheckpoint(source: SourceDocument, bundleHash: string): Promise<void> {
+    const checkpoint = await this.loadRevision(source, bundleHash, { allowIncompatible: true });
+    if (!checkpoint) throw new Error(`Compiler checkpoint not found: ${bundleHash}`);
+    await this.materialize(checkpoint.bundle, true);
+  }
+
   async activate(source: SourceDocument, bundleHash: string, options: { allowIncompatibleRollback?: boolean } = {}): Promise<PreparedCacheResult> {
     digestSchema.parse(bundleHash);
     const identity = await sourceIdentity(this.workspaceRoot, source);

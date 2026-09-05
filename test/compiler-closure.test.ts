@@ -1,6 +1,8 @@
 import { expect, it } from "vitest";
 import { buildPreparedClosure, affectedClosureNodes, staleClosureNodes } from "../src/compiler/closure.js";
 import type { PreparedNovelBundle } from "../src/compiler/prepared-cache.js";
+import { closureRepairDiagnostics, planClosureRepair } from "../src/compiler/closure-repair.js";
+import type { CompilerBatch } from "../src/compiler/batches.js";
 
 function bundle(): PreparedNovelBundle {
   return {
@@ -28,4 +30,34 @@ it("identity revision changes invalidate downstream semantics and events through
   input.canonical.entities[0]!.aliases = ["The Regent"];
   expect(staleClosureNodes(graph, buildPreparedClosure(input))).toEqual(expect.arrayContaining(["entity/hero", "event/e", "entity-resolution/resolution"]));
   expect(staleClosureNodes(graph, graph)).toEqual([]);
+});
+
+it("repairs cross-chapter identity consumers without dragging in an unrelated chapter or whole-work containment", () => {
+  const input = bundle();
+  const span = (startByte: number, endByte: number) => ({ sourceId: "source", startByte, endByte, startLine: startByte + 1, endLine: endByte, quoteHash: "a".repeat(64) });
+  input.compilerSnapshot.structure = { ...input.compilerSnapshot.structure, baseUnitIds: ["one", "two", "three"], discourseSegments: [], units: [
+    { id: "work", kind: "work", anchor: span(0, 30) },
+    ...["one", "two", "three"].map((id, i) => ({ id, kind: "sentence", anchor: span(i * 10, (i + 1) * 10) })),
+  ] } as PreparedNovelBundle["compilerSnapshot"]["structure"];
+  input.canonical.entities[0]!.evidence = [{ span: span(0, 10) }];
+  input.canonical.events[0]!.evidence = [{ span: span(10, 20) }];
+  const batches = ["one", "two", "three"].map((id, i) => ({ id, purpose: "semantic", chapterOrdinal: i + 1, evidence: [{ span: span(i * 10, (i + 1) * 10) }] })) as unknown as CompilerBatch[];
+  const repair = planClosureRepair(input, batches, ["one"]);
+  expect(repair.batchIds).toEqual(["one", "two"]);
+  expect(repair.affectedNodeKeys).toContain("event/e");
+  expect(repair.sourceUnitIds).toEqual(["one", "two"]);
+  expect(planClosureRepair(input, batches, ["one"])).toEqual(repair);
+  input.canonical.events[0]!.participants.push("missing");
+  const diagnostics = closureRepairDiagnostics(buildPreparedClosure(input));
+  expect(diagnostics).toContainEqual(expect.objectContaining({ stage: "identity", severity: "blocking", missingReferences: expect.arrayContaining([expect.objectContaining({ kind: "entity", id: "missing" })]) }));
+});
+
+it("indexes discourse and event resolution as their own typed dependencies", () => {
+  const input = bundle();
+  input.compilerSnapshot.structure.discourseSegments = [{ id: "flashback", anchors: [] }] as never;
+  input.compilerSnapshot.annotations[0] = { ...input.compilerSnapshot.annotations[0], discourseSegmentId: "flashback" } as never;
+  input.compilerSnapshot.eventResolutions = [{ id: "event-resolution", canonicalEventId: "e", eventMentionIds: ["mention"] }] as never;
+  const graph = buildPreparedClosure(input);
+  expect(graph.issues).toEqual([]);
+  expect(affectedClosureNodes(graph, [{ kind: "discourse", id: "flashback" }])).toContain("event/e");
 });

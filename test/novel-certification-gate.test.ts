@@ -29,6 +29,12 @@ it("keeps an unreviewed candidate unpublished and rejects an uncertified archive
   expect(await cache.listRevisions(fixture.source)).toEqual([]);
   const archive = await cache.publish(fixture.source, { allowSemanticDebtForRollback: true });
   expect((await cache.lookup(fixture.source)).status).toBe("miss");
+  const canonical = new CanonicalModelStore(root);
+  const original = (await canonical.listEntities())[0]!;
+  await canonical.putEntity({ ...original, aliases: ["Staging repair"] });
+  await cache.restoreCompilerCheckpoint(fixture.source, archive.bundleHash!);
+  expect((await canonical.listEntities())[0]!.aliases).toEqual([]);
+  expect((await cache.lookup(fixture.source)).status).toBe("miss");
   await expect(cache.activate(fixture.source, archive.bundleHash!)).rejects.toThrow("WORLD_CLOSURE_BLOCKED");
   // A replaced on-disk pointer is not a certificate and cannot bypass any public read gate.
   const activeFile = path.join(path.dirname(path.dirname(archive.cachePath)), "active.json");

@@ -18,6 +18,7 @@ import { prepareAllCommand } from "./commands/prepare-all.js";
 import { reparseCommand } from "./commands/reparse.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
 import { activatePreparedCacheRevisionCommand, inspectNovelClosureCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
+import { evaluateNovelCommand, freezeNovelEvaluationCommand } from "./commands/novel-evaluation.js";
 import { playWorldCommand } from "./commands/play-world.js";
 import { acceptAllValidProposalsCommand, acceptProposalCommand, listProposalsCommand, rejectProposalCommand, showProposalCommand } from "./commands/proposals.js";
 import {
@@ -313,6 +314,16 @@ program
   });
 
 const preparedCache = program.command("prepared-cache").description("inspect or activate versioned prepared-novel revisions");
+preparedCache.command("freeze-evaluation")
+  .argument("<plan-json>", "independent semantic gold and per-major scenarios")
+  .option("--root <path>", "local novel workspace")
+  .option("--source <id>", "ingested source id")
+  .action(async (planFile, options) => freezeNovelEvaluationCommand(rootFor(options), planFile, options.source));
+preparedCache.command("evaluate")
+  .argument("<plan-hash>", "previously frozen independent evaluation plan")
+  .option("--root <path>", "local novel workspace")
+  .option("--model <model>", "Pi provider/model override")
+  .action(async (planHash, options) => evaluateNovelCommand(rootFor(options), planHash, configFor(options), options.model ?? program.opts().model));
 preparedCache.command("inspect-closure")
   .description("inspect current candidate closure, major roles and missing evaluation evidence without publication")
   .option("--root <path>", "local novel workspace")

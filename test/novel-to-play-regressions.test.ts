@@ -69,6 +69,32 @@ function spatialFixture() {
 }
 
 describe("novel-to-play review regressions", () => {
+  it("R6: beneficiary receipts normalize explicit and implicit identity and replay both identities", async () => {
+    const norm = normTemplateSchema.parse({ ontologyVersion: "norm-template-v1", id: "receipt", name: "Delivery receipt", modality: "obligation",
+      actionPattern: { kind: "ad-hoc", actionKindId: "deliver" }, priority: 1, defeasible: false, status: "supported", visibility: "public",
+      induction: { kind: "domain-module", moduleId: "test", moduleVersion: "1" }, evidence: [] });
+    const { engine, head } = await fixture({ normTemplates: new Map([[norm.id, norm]]) });
+    const seed = await engine.commitProposal({ proposalId: "seed-receipt", branchId: "main", expectedParentCommit: head, source: "background", title: "Duty accepted",
+      participants: ["hero", "rival"], proposedTime: { kind: "ordinal", orderHint: 1, label: "accepted" }, preconditions: [], proposedDelta: { version: 1, operations: [] }, causalParents: [], evidence: [],
+      proposedNorms: { version: 1, operations: [{ op: "instantiate-norm", localRef: "local-duty", norm: { templateId: norm.id, subjectActorId: "hero", beneficiaryActorId: "rival", description: "Delivery" } }] } });
+    expect(seed.report.errors).toEqual([]);
+    const id = Object.keys((await engine.projections.project(seed.newHead)).norms.instances)[0]!;
+    const proposal = (actorId: string, explicit: boolean) => playerActionToKnowledgeAwareAction({ branchId: "main", actorId, expectedParentCommit: seed.newHead, utterance: "Received", candidate: {
+      title: "Acknowledge delivery", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [], proposedDelta: { version: 1, operations: [] },
+      proposedNorms: { version: 1, operations: [{ op: "satisfy-norm", normRef: id, ...(explicit ? { byActorId: actorId } : {}) }] },
+    } }).proposal;
+    for (const explicit of [false, true]) {
+      expect((await engine.previewProposal(proposal("hero", explicit))).report.errors).toContainEqual(expect.objectContaining({ code: "ACTOR_OUTCOME_AUTHORITY_REQUIRED" }));
+      expect((await engine.previewProposal(proposal("rival", explicit))).report.errors).toEqual([]);
+    }
+    const committed = await engine.commitProposal(proposal("rival", true));
+    expect(committed.report.errors).toEqual([]);
+    const replay = await engine.projections.project(committed.newHead);
+    expect(replay.norms.instances[id]).toMatchObject({ status: "satisfied", resolvedByActorId: "hero", acknowledgedByActorId: "rival" });
+    expect(replay.history.at(-1)?.normDelta?.operations).toContainEqual({ op: "satisfy-norm", normId: id, byActorId: "hero", acknowledgedByActorId: "rival" });
+    expect(await engine.branches.readHead("main")).toBe(committed.newHead);
+  });
+
   it("does not expose hidden entity choices in capabilities and encodes custom entity-set literals", async () => {
     const schema = (id: string, value: string[]) => actionSchemaSchema.parse({ ontologyVersion: "action-schema-v1", id, name: id,
       roles: [{ id: "initiator", label: "Initiator", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }], initiatorRoleId: "initiator", parameters: [], preconditions: [],

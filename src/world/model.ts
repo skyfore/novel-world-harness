@@ -939,9 +939,9 @@ export const normOperationSchema = z.discriminatedUnion("op", [
       dueAtElapsedDays: z.number().finite().nonnegative().optional(),
     }).strict(),
   }).strict(),
-  z.object({ op: z.literal("satisfy-norm"), normId: idSchema, byActorId: idSchema.optional() }).strict(),
+  z.object({ op: z.literal("satisfy-norm"), normId: idSchema, byActorId: idSchema.optional(), acknowledgedByActorId: idSchema.optional() }).strict(),
   z.object({ op: z.literal("violate-norm"), normId: idSchema, byActorId: idSchema.optional(), reasonId: idSchema.optional() }).strict(),
-  z.object({ op: z.literal("repair-norm"), normId: idSchema, byActorId: idSchema.optional(), reparationId: idSchema }).strict(),
+  z.object({ op: z.literal("repair-norm"), normId: idSchema, byActorId: idSchema.optional(), acknowledgedByActorId: idSchema.optional(), reparationId: idSchema }).strict(),
 ]);
 export type NormOperation = z.infer<typeof normOperationSchema>;
 export const normDeltaSchema = z.object({ version: z.literal(1), operations: z.array(normOperationSchema).max(256) }).strict();

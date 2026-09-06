@@ -118,7 +118,7 @@ export function validateActorOutcomeScope(value: ActorOutcome, scope: {
 }
 
 /** Final authority check also covers direct actor proposals, outside model adapters. */
-export function validateActorOutcomeOwnership(proposal: EventProposal, projection: WorldProjectionBundle): ValidationIssue[] {
+export function validateActorOutcomeOwnership(proposal: EventProposal, projection: WorldProjectionBundle, normTemplates?: ReadonlyMap<string, import("./norm-ontology.js").NormTemplate>): ValidationIssue[] {
   if (!proposal.actorId || (proposal.source !== "player" && proposal.source !== "actor")) return [];
   const actor = proposal.actorId;
   const errors: ValidationIssue[] = [];
@@ -160,15 +160,17 @@ export function validateActorOutcomeOwnership(proposal: EventProposal, projectio
       processes.add(op.localRef);
     } else owned(processes.has(op.processRef), path);
   }
-  const norms = new Map(Object.values(projection.norms.instances).map((item) => [item.id, { subject: item.subjectActorId, beneficiary: item.beneficiaryActorId }]));
+  const norms = new Map(Object.values(projection.norms.instances).map((item) => [item.id, { subject: item.subjectActorId, beneficiary: item.beneficiaryActorId, templateId: item.templateId }]));
   for (const [index, op] of (proposal.proposedNorms?.operations ?? []).entries()) {
     const path = `proposedNorms.operations.${index}`;
-    if (op.op === "instantiate-norm") { owned(op.norm.subjectActorId === actor, path); norms.set(op.localRef, { subject: op.norm.subjectActorId, beneficiary: op.norm.beneficiaryActorId }); }
+    if (op.op === "instantiate-norm") { owned(op.norm.subjectActorId === actor, path); norms.set(op.localRef, { subject: op.norm.subjectActorId, beneficiary: op.norm.beneficiaryActorId, templateId: op.norm.templateId }); }
     else {
       const norm = norms.get(op.normRef);
       // A debtor's declaration is not a receipt. Deterministic norm evaluation
       // can still recognize a qualifying action; manual discharge needs its counterparty.
-      owned(Boolean(norm) && (op.op === "satisfy-norm" || op.op === "repair-norm" ? norm?.beneficiary === actor : norm?.subject === actor)
+      owned(Boolean(norm) && (op.op === "satisfy-norm" || op.op === "repair-norm"
+        ? norm?.subject !== actor && (norm?.beneficiary === actor || normTemplates?.get(norm!.templateId)?.authorityEntityId === actor)
+        : norm?.subject === actor)
         && (!op.byActorId || op.byActorId === actor), path);
     }
   }

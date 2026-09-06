@@ -680,7 +680,7 @@ export class WorldEngine {
     );
     let semanticDelta: import("./model.js").BranchSemanticDelta | undefined;
     let stagedSemantics = projection.semantics;
-    const semanticErrors: ValidationIssue[] = validateActorOutcomeOwnership(parsed, projection);
+    const semanticErrors: ValidationIssue[] = validateActorOutcomeOwnership(parsed, projection, context.normTemplates);
     if (parsed.proposedSemantics) {
       try {
         const materialized = materializeBranchSemanticProposal(parsed.proposedSemantics, {
@@ -792,6 +792,9 @@ export class WorldEngine {
             parentCommitId: head,
             elapsedDays: postState.logicalTime.elapsedDays ?? 0,
             templates: context.normTemplates ?? new Map(),
+            ...((parsed.source === "player" || parsed.source === "actor") && parsed.actorId
+              ? { acknowledgingActorId: parsed.actorId, existingSubjects: new Map(Object.values(projection.norms.instances).map((norm) => [norm.id, norm.subjectActorId])) }
+              : {}),
             proposalHash: contentHash({
               proposalId: parsed.proposalId,
               branchId: parsed.branchId,

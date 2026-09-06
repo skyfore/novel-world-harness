@@ -7,7 +7,7 @@ import { actionSchemaSchema } from "../src/world/action-ontology.js";
 import { buildActorDecisionView, mapActorDecisionView } from "../src/world/actor-decision-view.js";
 import { WorldEngine, type WorldModelContext } from "../src/world/engine.js";
 import { actorKnowledgeBelongsToSource, KnowledgeProjector } from "../src/world/knowledge.js";
-import type { Entity, EvidenceRef } from "../src/world/model.js";
+import { worldRuleSchema, type Entity, type EvidenceRef } from "../src/world/model.js";
 import {
   buildActorScopedActionContext,
   createPlayerActionModelBoundary,
@@ -69,6 +69,39 @@ function spatialFixture() {
 }
 
 describe("novel-to-play review regressions", () => {
+  it("R5: injects visible executable contracts with opaque references while preserving hidden host checks", async () => {
+    const schema = actionSchemaSchema.parse({ ontologyVersion: "action-schema-v1", id: "pay-action", name: "Pay", visibility: "public",
+      roles: [{ id: "payer", label: "Payer", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }], initiatorRoleId: "payer", parameters: [],
+      preconditions: [{ op: "fact-gte", entity: { kind: "role", roleId: "payer" }, field: "character.wealth", value: 3 },
+        { op: "not", item: { op: "fact-equals", entity: { kind: "entity", entityId: "rival" }, field: "character.plan", value: { source: "literal", value: "sealed-secret" } } }],
+      stateEffects: [{ op: "set", entity: { kind: "role", roleId: "payer" }, field: "character.plan", value: { source: "literal", value: "pay" } }],
+      effectEnvelope: { maxStateOperations: 1, allowedStateFields: ["character.plan"], allowsKnowledge: false, allowsTimeAdvance: false, allowsSceneTransition: false },
+      induction: { kind: "domain-module", moduleId: "test", moduleVersion: "1" }, evidence: [] });
+    const constraint = actionConstraintSchema.parse({ ontologyVersion: "action-constraint-v1", id: "payment-constraint", name: "Payment requires funds", actionPattern: { kind: "schema", schemaId: schema.id },
+      clauses: [{ id: "funds", timing: "before", modality: "require", predicate: { op: "fact-gte", entity: { kind: "role", roleId: "payer" }, field: "character.wealth", value: 3 } }],
+      priority: 1, defeasible: false, status: "supported", visibility: "public", induction: schema.induction, evidence: [] });
+    const rule = worldRuleSchema.parse({ ontologyVersion: "world-rule-v2", id: "living-rule", name: "Living participants", kind: "physical", scope: "global", visibility: "public", priority: 1, defeasible: false,
+      clauses: [{ id: "life", modality: "require", predicate: { op: "fact-equals", entityId: "hero", field: "character.alive", value: true }, basis: "explicit", status: "supported", confidence: 1, evidence }],
+      basis: "explicit", status: "supported", confidence: 1, evidence });
+    const norm = normTemplateSchema.parse({ ontologyVersion: "norm-template-v1", id: "pay-duty", name: "Pay duty", modality: "obligation", actionPattern: { kind: "schema", schemaId: schema.id },
+      appliesWhen: [{ op: "rule-active", ruleId: rule.id }], exceptions: [{ id: "waiver", appliesWhen: [{ op: "fact-gte", entityId: "hero", field: "character.wealth", value: 10 }] }],
+      reparations: [{ id: "late-payment", description: "Pay later", actionPattern: { kind: "schema", schemaId: schema.id }, requiresAfter: [{ op: "fact-equals", entityId: "hero", field: "character.plan", value: "pay" }] }],
+      priority: 1, defeasible: false, status: "supported", visibility: "public", induction: schema.induction, evidence: [] });
+    const hiddenRule = worldRuleSchema.parse({ ...rule, id: "hidden-rule", name: "Hidden law", visibility: "engine" });
+    const { engine, head } = await fixture({ actionSchemas: new Map([[schema.id, schema]]), actionConstraints: new Map([[constraint.id, constraint]]), normTemplates: new Map([[norm.id, norm]]), rules: new Map([rule, hiddenRule].map((item) => [item.id, item])) });
+    const context = await buildActorScopedActionContext(engine, "hero", head, undefined, "novel");
+    const view = context.decision!;
+    expect(view.capabilities.actions[0]).toMatchObject({ preconditions: [schema.preconditions[0]], hostChecksRequired: true });
+    expect(view.constraints.actions[0]).toMatchObject({ clauses: constraint.clauses, hostChecksRequired: false });
+    expect(view.constraints.worldRules.map((item) => item.id)).toEqual([rule.id]);
+    expect(view.capabilities.norms[0]).toMatchObject({ actionPattern: norm.actionPattern, appliesWhen: norm.appliesWhen, exceptions: norm.exceptions, reparations: norm.reparations });
+    const encoded = createPlayerActionModelBoundary(playerActionTranslationContext(context)).context.decision!;
+    expect(encoded.capabilities.norms[0]?.actionPattern).toEqual({ kind: "schema", schemaId: encoded.capabilities.actions[0]!.id });
+    expect(encoded.capabilities.norms[0]?.appliesWhen).toEqual([{ op: "rule-active", ruleId: encoded.constraints.worldRules[0]!.id }]);
+    expect(JSON.stringify(encoded)).not.toMatch(/sealed-secret|hidden-rule|Hidden law|pay-action|living-rule/);
+    expect((encoded.capabilities.norms[0]?.reparations[0]?.requiresAfter[0] as any).entityId).not.toBe("hero");
+  });
+
   it("R2: source-induced public actions work before their first supporting occurrence; knowledge gates stay actor-specific", async () => {
     const schema = actionSchemaSchema.parse({ ontologyVersion: "action-schema-v1", id: "plan", name: "Plan", visibility: "public",
       roles: [{ id: "actor", label: "Actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }], initiatorRoleId: "actor", parameters: [], preconditions: [],

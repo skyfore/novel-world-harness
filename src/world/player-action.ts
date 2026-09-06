@@ -997,7 +997,7 @@ export async function buildActorScopedActionContext(
     .map((event) => ({ kind: "scene" as const, summary: event.title }));
   const plan = view.selfState["character.plan"];
   if (typeof plan === "string" && plan.trim()) activeThreads.push({ kind: "plan", summary: plan.trim() });
-  const decision = await buildActorDecisionView(engine, actorId, commitId, { visibleEntityIds: referenceable, knownClaimIds, sourceId: effectiveSourceId });
+  const decision = await buildActorDecisionView(engine, actorId, commitId, { visibleEntityIds: referenceable, observableEntityIds: new Set([...presentEntities.map((entity) => entity.id), ...(scene.locationId ? [scene.locationId] : [])]), knownClaimIds, sourceId: effectiveSourceId });
   return actorScopedActionContextSchema.parse({
     actorId,
     atCommit: commitId,

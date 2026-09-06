@@ -24,6 +24,25 @@ it("records explicit typed missing references and never treats proposition prose
   expect(buildPreparedClosure(input).issues).toContainEqual(expect.objectContaining({ code: "CLOSURE_DANGLING_REFERENCE", message: expect.stringContaining("entity/missing-location") }));
 });
 
+it("propagates membership-only identities through seed and predicate consumers without interpreting prose", () => {
+  const input = bundle();
+  input.canonical.entities.push({ id: "member", kind: "character", canonicalName: "Member", aliases: [], evidence: [] });
+  input.canonical.initialWorld.delta.operations = [
+    { op: "add-member", entityId: "hero", field: "character.relationships", member: "member" },
+    { op: "remove-member", entityId: "hero", field: "character.relationships", member: "member" },
+    { op: "set", entityId: "hero", field: "character.plan", value: "only-prose" },
+  ];
+  input.canonical.events[0]!.preconditions = [{ op: "not", item: { op: "entity-in", entityId: "hero", field: "character.relationships", member: "member" } }];
+  const graph = buildPreparedClosure(input);
+  expect(graph.issues).toEqual([]);
+  expect(affectedClosureNodes(graph, [{ kind: "entity", id: "member" }])).toEqual(expect.arrayContaining(["initial/source", "event/e"]));
+  expect(graph.nodes.find((node) => node.kind === "initial")!.dependsOn).toContainEqual(expect.objectContaining({ id: "member", uses: expect.arrayContaining([expect.objectContaining({ pointer: "/delta/operations/0/member" })]) }));
+  input.canonical.entities.pop();
+  const next = buildPreparedClosure(input);
+  expect(next.issues).toContainEqual(expect.objectContaining({ message: expect.stringContaining("entity/member") }));
+  expect(staleClosureNodes(graph, next)).toEqual(expect.arrayContaining(["initial/source", "event/e"]));
+});
+
 it("identity revision changes invalidate downstream semantics and events through cyclic dependencies", () => {
   const input = bundle(), graph = buildPreparedClosure(input);
   expect(affectedClosureNodes(graph, [{ kind: "entity-resolution", id: "resolution" }])).toEqual(expect.arrayContaining(["entity/hero", "proposition/p", "event/e"]));

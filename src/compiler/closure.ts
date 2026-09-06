@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { contentHash } from "../world/canonical.js";
-import { validationIssueSchema } from "../world/model.js";
+import { predicateSchema, stateOperationSchema, validationIssueSchema } from "../world/model.js";
+import { predicateReferences, stateOperationReferences } from "../world/state-references.js";
 import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import { annotationAnchors } from "./annotations.js";
 import type { PreparedNovelBundle } from "./prepared-cache.js";
@@ -78,6 +79,16 @@ export function buildPreparedClosure(bundle: PreparedNovelBundle): ClosureGraph 
     if (Array.isArray(value)) { value.forEach((item, index) => visit(node, item, channel, locals, `${pointer}/${index}`)); return; }
     if (!value || typeof value !== "object") return;
     const record = value as Record<string, unknown>;
+    if (typeof record.op === "string") {
+      const operation = stateOperationSchema.safeParse(record);
+      const predicate = operation.success ? undefined : predicateSchema.safeParse(record);
+      const references = operation.success ? stateOperationReferences(operation.data, fields, pointer)
+        : predicate?.success ? predicateReferences(predicate.data, fields, pointer) : undefined;
+      if (references) {
+        for (const ref of references) if (!locals.has(`${ref.kind}/${ref.id}`)) link(node, ref.kind, ref.id, ref.pointer);
+        return;
+      }
+    }
     for (const [name, item] of Object.entries(record)) {
       const at = `${pointer}/${name.replace(/~/g, "~0").replace(/\//g, "~1")}`;
       // Literals, descriptions and arbitrary legacy claim objects do not declare references.

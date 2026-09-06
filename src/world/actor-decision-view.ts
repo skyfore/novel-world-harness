@@ -8,6 +8,7 @@ import { idSchema, valueTypeSchema, type StateValue, type ValueType } from "./mo
 import { processOwnerEntityIds } from "./process-ontology.js";
 import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
 import { DEFAULT_STATE_FIELDS } from "./state.js";
+import { mechanismIsDisclosed } from "./mechanism-visibility.js";
 
 /** Actor-owned decision facts shared by player translation, NPCs and autonomous actors. */
 export const actorDecisionViewSchema = z.object({
@@ -65,17 +66,14 @@ export async function buildActorDecisionView(
     if (item.status !== "active" && item.status !== "violated") return [];
     const role = item.subjectActorId === actorId ? "subject" : item.beneficiaryActorId === actorId ? "beneficiary" : undefined;
     const template = context.normTemplates?.get(item.templateId);
-    if (!role || !template || template.visibility === "engine") return [];
-    if (template.induction.kind === "source-pattern" && !evidenceBelongsExclusivelyToSource(template.evidence, scope.sourceId)) return [];
-    if (template.visibility === "knowledge" && !template.knownByClaimIds.every((id) => scope.knownClaimIds.has(id))) return [];
+    if (!role || !template || !mechanismIsDisclosed(template, scope)) return [];
     return [{ id: item.id, templateId: template.id, name: template.name, modality: template.modality, role, status: item.status,
       ...(item.dueAtElapsedDays !== undefined ? { dueInDays: item.dueAtElapsedDays - elapsed } : {}) }];
   });
   const processes = Object.values(projection.processes.instances).flatMap((item): ActorDecisionView["processes"] => {
     if (item.status === "finished" || !processOwnerEntityIds(item).includes(actorId)) return [];
     const template = context.processTemplates?.get(item.templateId);
-    if (!template || template.visibility === "engine" || template.visibility === "knowledge") return [];
-    if (template.induction.kind === "source-pattern" && !evidenceBelongsExclusivelyToSource(template.evidence, scope.sourceId)) return [];
+    if (!template || !mechanismIsDisclosed(template, scope)) return [];
     const phase = template.phases.find((entry) => entry.id === item.phaseId)?.label;
     if (!phase) return [];
     return [{ id: item.id, templateId: template.id, name: template.name, phase, status: item.status, progress: item.progress,
@@ -83,11 +81,7 @@ export async function buildActorDecisionView(
   });
   norms.sort((a, b) => a.id.localeCompare(b.id));
   processes.sort((a, b) => a.id.localeCompare(b.id));
-  const experienced = new Set(projection.history.filter(({ event }) => event.participants.includes(actorId)
-    || event.actorObservations?.some((x) => x.actorId === actorId)).flatMap(({ event }) => event.realizesCanonicalEventIds ?? []));
-  const usable = (item: { induction: { kind: string; supportingEventIds?: string[] }; evidence: Parameters<typeof evidenceBelongsExclusivelyToSource>[0]; visibility?: string }) =>
-    item.visibility !== "engine" && item.visibility !== "knowledge" && (item.induction.kind === "domain-module"
-      || evidenceBelongsExclusivelyToSource(item.evidence, scope.sourceId) && item.induction.supportingEventIds?.some((id) => experienced.has(id)));
+  const usable = (item: Parameters<typeof mechanismIsDisclosed>[0]) => mechanismIsDisclosed(item, scope);
   const visibleValue = (value: StateValue, type: ValueType) => type === "entity-ref" ? typeof value === "string" && visible(value)
     : type === "entity-ref-set" ? Array.isArray(value) && value.every((id) => typeof id === "string" && visible(id)) : true;
   const capabilities = {

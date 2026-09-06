@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { canonicalJson } from "./canonical.js";
+import { mechanismVisibilityFields, validateMechanismVisibility } from "./mechanism-visibility.js";
 import {
   actionInvocationSchema,
   entityKindSchema,
@@ -93,6 +94,7 @@ const actionStateEffectTemplateSchema = z.discriminatedUnion("op", [
 export type ActionStateEffectTemplate = z.infer<typeof actionStateEffectTemplateSchema>;
 
 export const actionSchemaSchema = z.object({
+  ...mechanismVisibilityFields,
   ontologyVersion: z.literal(ACTION_ONTOLOGY_VERSION),
   id: idSchema,
   name: z.string().trim().min(1).max(300),
@@ -114,6 +116,7 @@ export const actionSchemaSchema = z.object({
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
+  validateMechanismVisibility(value, ctx);
   const initiator = value.roles.find((role) => role.id === value.initiatorRoleId);
   if (!initiator || initiator.minCardinality !== 1 || initiator.maxCardinality !== 1 || !initiator.allowedEntityKinds.includes("character")) ctx.addIssue({ code: "custom", path: ["initiatorRoleId"], message: "Action initiator must reference a single required character role" });
   for (const [field, ids] of [

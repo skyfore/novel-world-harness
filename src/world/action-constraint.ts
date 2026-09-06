@@ -14,6 +14,7 @@ import {
 } from "./model.js";
 import { evaluatePredicate } from "./state.js";
 import type { ActionSchema } from "./action-ontology.js";
+import { mechanismVisibilityFields, validateMechanismVisibility } from "./mechanism-visibility.js";
 
 export const ACTION_CONSTRAINT_ONTOLOGY_VERSION = "action-constraint-v1" as const;
 
@@ -77,12 +78,14 @@ export const actionConstraintSchema = z.object({
   overridesConstraintIds: z.array(idSchema).max(64).default([]),
   status: z.enum(["supported", "contested"]),
   visibility: z.enum(["public", "observable", "knowledge", "engine"]),
+  knownByClaimIds: mechanismVisibilityFields.knownByClaimIds,
   induction: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("source-pattern"), supportingEventIds: z.array(idSchema).min(1).max(64) }).strict(),
     z.object({ kind: z.literal("domain-module"), moduleId: idSchema, moduleVersion: z.string().trim().min(1).max(120) }).strict(),
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
+  validateMechanismVisibility(value, ctx);
   for (const [path, ids] of [
     ["clauses", value.clauses.map((item) => item.id)],
     ["exceptions", value.exceptions.map((item) => item.id)],

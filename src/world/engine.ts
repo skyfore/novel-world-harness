@@ -87,6 +87,7 @@ import type { NormTemplate } from "./norm-ontology.js";
 import type { ProcessTemplate } from "./process-ontology.js";
 import { materializeProcessProposal, validateProcessTemplateCatalog } from "./process-ontology.js";
 import { validateActorProcessDelta } from "./process-authority.js";
+import { mechanismIsDisclosed } from "./mechanism-visibility.js";
 import { applyProcessDelta } from "./process-effects.js";
 import { deriveAutomaticNormDelta, materializeNormProposal, validateNormTemplateCatalog } from "./norm-ontology.js";
 import { applyNormDelta } from "./norm-effects.js";
@@ -682,6 +683,15 @@ export class WorldEngine {
     let semanticDelta: import("./model.js").BranchSemanticDelta | undefined;
     let stagedSemantics = projection.semantics;
     const semanticErrors: ValidationIssue[] = validateActorOutcomeOwnership(parsed, projection, context.normTemplates);
+    if ((parsed.source === "player" || parsed.source === "actor") && parsed.actorId) {
+      const knownClaimIds = new Set(Object.values(projection.knowledge.actors[parsed.actorId] ?? {}).filter((fact) => fact.status !== "disbelieves").map((fact) => fact.claimId));
+      const check = (mechanism: Parameters<typeof mechanismIsDisclosed>[0] | undefined, path: string) => {
+        if (mechanism && !mechanismIsDisclosed(mechanism, { knownClaimIds, sourceId: context.sourceId })) semanticErrors.push({ code: "ACTOR_MECHANISM_UNAVAILABLE", message: "The actor has not acquired this mechanism", path });
+      };
+      if (parsed.action?.lane === "schema-bound") check(context.actionSchemas?.get(parsed.action.schemaId), "action");
+      for (const op of parsed.proposedProcesses?.operations ?? []) if (op.op === "start-process") check(context.processTemplates?.get(op.process.templateId), "proposedProcesses");
+      for (const op of parsed.proposedNorms?.operations ?? []) if (op.op === "instantiate-norm") check(context.normTemplates?.get(op.norm.templateId), "proposedNorms");
+    }
     if (parsed.proposedSemantics) {
       try {
         const materialized = materializeBranchSemanticProposal(parsed.proposedSemantics, {

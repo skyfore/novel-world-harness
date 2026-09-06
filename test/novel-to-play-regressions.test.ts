@@ -69,6 +69,30 @@ function spatialFixture() {
 }
 
 describe("novel-to-play review regressions", () => {
+  it("R2: source-induced public actions work before their first supporting occurrence; knowledge gates stay actor-specific", async () => {
+    const schema = actionSchemaSchema.parse({ ontologyVersion: "action-schema-v1", id: "plan", name: "Plan", visibility: "public",
+      roles: [{ id: "actor", label: "Actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }], initiatorRoleId: "actor", parameters: [], preconditions: [],
+      stateEffects: [{ op: "set", entity: { kind: "role", roleId: "actor" }, field: "character.plan", value: { source: "literal", value: "leave" } }],
+      effectEnvelope: { maxStateOperations: 1, allowedStateFields: ["character.plan"], allowsKnowledge: false, allowsTimeAdvance: false, allowsSceneTransition: false },
+      induction: { kind: "source-pattern", supportingEventIds: ["future-first", "future-second"] }, evidence });
+    const secret = actionSchemaSchema.parse({ ...schema, id: "secret", visibility: "knowledge", knownByClaimIds: ["learned-secret"] });
+    const hidden = actionSchemaSchema.parse({ ...schema, id: "hidden", visibility: "engine" });
+    const { engine, head } = await fixture({ actionSchemas: new Map([schema, secret, hidden].map((item) => [item.id, item])) });
+    const context = await buildActorScopedActionContext(engine, "hero", head, undefined, "novel");
+    expect(context.decision?.capabilities.actions.map((item) => item.id)).toEqual(["plan"]);
+    const informed = await buildActorDecisionView(engine, "hero", head, { visibleEntityIds: new Set(["hero"]), knownClaimIds: new Set(["learned-secret"]), sourceId: "novel" });
+    expect(informed.capabilities.actions.map((item) => item.id)).toEqual(["plan", "secret"]);
+    expect((await buildActorDecisionView(engine, "rival", head, { visibleEntityIds: new Set(["rival"]), knownClaimIds: new Set(), sourceId: "novel" })).capabilities.actions.map((item) => item.id)).toEqual(["plan"]);
+    const candidate: PlayerActionCandidate = { title: "Plan", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [],
+      action: { lane: "schema-bound", schemaId: schema.id, roleBindings: [{ roleId: "actor", entityIds: ["hero"] }], parameters: {} },
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "leave" }] } };
+    expect(validatePlayerActionScope(candidate, context)).toEqual([]);
+    const proposal = playerActionToKnowledgeAwareAction({ branchId: "main", actorId: "hero", expectedParentCommit: head, utterance: "Plan", candidate }).proposal;
+    expect((await engine.previewProposal(proposal)).report.errors).toEqual([]);
+    expect((await engine.previewProposal({ ...proposal, action: { ...candidate.action!, schemaId: "secret" } })).report.errors).toContainEqual(expect.objectContaining({ code: "ACTOR_MECHANISM_UNAVAILABLE" }));
+    expect((await engine.commitProposal(proposal)).report.accepted).toBe(true);
+  });
+
   it("R1: actor progress needs action, time and state proof, with atomic rejection and a per-turn limit", async () => {
     const control = { actionPattern: { kind: "ad-hoc", actionKindId: "deliver" }, minimumElapsedDays: 1,
       requiresBefore: [{ op: "fact-equals", entity: { kind: "role", roleId: "courier" }, field: "character.alive", value: true }],

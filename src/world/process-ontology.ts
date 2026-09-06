@@ -15,6 +15,7 @@ import {
 import { actionRoleSpecSchema } from "./action-ontology.js";
 import type { ProcessInstance, ProcessState } from "./process-effects.js";
 import { actionPatternSchema, constraintPredicateSchema } from "./action-constraint.js";
+import { mechanismVisibilityFields, validateMechanismVisibility } from "./mechanism-visibility.js";
 
 export const PROCESS_ONTOLOGY_VERSION = "process-template-v1" as const;
 
@@ -67,12 +68,14 @@ export const processTemplateSchema = z.object({
   cadence: z.object({ kind: z.literal("elapsed-days"), intervalDays: z.number().finite().positive() }).strict().optional(),
   outcomeIds: z.array(idSchema).min(1).max(64),
   visibility: z.enum(["public", "observable", "knowledge", "engine"]),
+  knownByClaimIds: mechanismVisibilityFields.knownByClaimIds,
   induction: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("source-pattern"), supportingEventIds: z.array(idSchema).min(1).max(64) }).strict(),
     z.object({ kind: z.literal("domain-module"), moduleId: idSchema, moduleVersion: z.string().trim().min(1).max(120) }).strict(),
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
+  validateMechanismVisibility(value, ctx);
   for (const [path, ids] of [
     ["ownerRoles", value.ownerRoles.map((item) => item.id)],
     ["phases", value.phases.map((item) => item.id)],

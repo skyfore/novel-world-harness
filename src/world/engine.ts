@@ -86,6 +86,7 @@ import { resolveActionConstraints, validateActionConstraintCatalog } from "./act
 import type { NormTemplate } from "./norm-ontology.js";
 import type { ProcessTemplate } from "./process-ontology.js";
 import { materializeProcessProposal, validateProcessTemplateCatalog } from "./process-ontology.js";
+import { validateActorProcessDelta } from "./process-authority.js";
 import { applyProcessDelta } from "./process-effects.js";
 import { deriveAutomaticNormDelta, materializeNormProposal, validateNormTemplateCatalog } from "./norm-ontology.js";
 import { applyNormDelta } from "./norm-effects.js";
@@ -768,6 +769,8 @@ export class WorldEngine {
               proposedProcesses: parsed.proposedProcesses,
             }),
           }).delta;
+          validateActorProcessDelta(parsed, processDelta, projection.processes,
+            { entities: context.entities, templates: context.processTemplates ?? new Map() }, state, postState, provisionalProvenance);
           applyProcessDelta(
             projection.processes,
             processDelta,
@@ -1321,6 +1324,7 @@ function resolveContext(context: WorldModelContext): ResolvedWorldModelContext {
     ...validateProcessTemplateCatalog(
       context.processTemplates?.values() ?? [],
       new Set(context.events?.keys() ?? []),
+      { entities: context.entities, actionSchemas: context.actionSchemas ?? new Map() },
     ),
   ];
   const resourceIssues = validateResourcePolicyCatalog(

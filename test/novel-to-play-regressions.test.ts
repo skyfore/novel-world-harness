@@ -69,6 +69,47 @@ function spatialFixture() {
 }
 
 describe("novel-to-play review regressions", () => {
+  it("R1: actor progress needs action, time and state proof, with atomic rejection and a per-turn limit", async () => {
+    const control = { actionPattern: { kind: "ad-hoc", actionKindId: "deliver" }, minimumElapsedDays: 1,
+      requiresBefore: [{ op: "fact-equals", entity: { kind: "role", roleId: "courier" }, field: "character.alive", value: true }],
+      requiresAfter: [{ op: "fact-equals", entity: { kind: "actor" }, field: "character.plan", value: "delivered" }] };
+    const process = processTemplateSchema.parse({ ontologyVersion: "process-template-v1", id: "delivery", name: "Delivery",
+      ownerRoles: [{ id: "courier", label: "Courier", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
+      phases: [{ id: "started", label: "Started", terminal: false }, { id: "delivered", label: "Delivered", terminal: true }], initialPhaseId: "started",
+      transitions: [{ fromPhaseId: "started", toPhaseId: "delivered", minimumProgress: 0.5 }], outcomeIds: ["received"], visibility: "public",
+      actorControls: [{ ...control, op: "advance-process", maximumAdvance: 0.5, fromPhaseId: "started", toPhaseId: "delivered" }, { ...control, op: "finish-process", fromPhaseId: "delivered", outcomeId: "received" }],
+      induction: { kind: "domain-module", moduleId: "test", moduleVersion: "1" }, evidence: [] });
+    const { engine, head } = await fixture({ processTemplates: new Map([[process.id, process]]) });
+    const base: PlayerActionCandidate = { title: "Take delivery", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [], proposedDelta: { version: 1, operations: [] },
+      proposedProcesses: { version: 1, operations: [{ op: "start-process", localRef: "local-job", process: { templateId: process.id, ownerBindings: [{ roleId: "courier", entityIds: ["hero"] }], progress: 0 } }] } };
+    type TimedCandidate = PlayerActionCandidate & { timeAdvance?: { amount: number; unit: "day" } };
+    const convert = ({ timeAdvance, ...candidate }: TimedCandidate, at: string) => playerActionToKnowledgeAwareAction({ branchId: "main", actorId: "hero", expectedParentCommit: at, utterance: "Deliver", candidate, timeAdvance }).proposal;
+    const accelerated = structuredClone(base);
+    (accelerated.proposedProcesses!.operations[0] as any).process.progress = 0.5;
+    expect((await engine.previewProposal(convert(accelerated, head))).report.errors).toContainEqual(expect.objectContaining({ code: "INVALID_PROCESS_DELTA" }));
+    const start = await engine.commitProposal(convert(base, head));
+    expect(start.report.errors).toEqual([]);
+    const id = Object.keys((await engine.projections.project(start.newHead)).processes.instances)[0]!;
+    const work: TimedCandidate = { ...base, title: "Deliver", timeAdvance: { amount: 1, unit: "day" },
+      action: { lane: "ad-hoc", actionKindId: "deliver", description: "Deliver shipment", footprint: { reads: [{ entityId: "hero", field: "character.alive" }], writes: [{ entityId: "hero", field: "character.plan" }], resources: [] } },
+      proposedDelta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: "delivered" }] },
+      proposedProcesses: { version: 1, operations: [{ op: "advance-process", processRef: id, amount: 0.5, phaseId: "delivered" }, { op: "finish-process", processRef: id, outcomeId: "received" }] } };
+    const noTime = structuredClone(work); delete noTime.timeAdvance;
+    const noState = structuredClone(work); noState.proposedDelta.operations = []; if (noState.action?.lane === "ad-hoc") noState.action.footprint.writes = [];
+    const wait = structuredClone(work); (wait.action as any).actionKindId = "wait";
+    const split = structuredClone(work); split.proposedProcesses!.operations.splice(1, 0, { op: "advance-process", processRef: id, amount: 0.25, phaseId: "delivered" });
+    for (const invalid of [noTime, noState, wait, split]) {
+      const rejected = await engine.commitProposal(convert(invalid, start.newHead));
+      expect(rejected.report.errors).toContainEqual(expect.objectContaining({ code: "INVALID_PROCESS_DELTA" }));
+      expect(rejected.newHead).toBe(start.newHead);
+    }
+    const accepted = await engine.commitProposal(convert(work, start.newHead));
+    expect(accepted.report.errors).toEqual([]);
+    const replay = await engine.projections.project(accepted.newHead, { fresh: true });
+    expect(replay.processes.instances[id]).toMatchObject({ status: "finished", outcomeId: "received" });
+    expect(replay.state.logicalTime.elapsedDays).toBe(1);
+  });
+
   it("R6: beneficiary receipts normalize explicit and implicit identity and replay both identities", async () => {
     const norm = normTemplateSchema.parse({ ontologyVersion: "norm-template-v1", id: "receipt", name: "Delivery receipt", modality: "obligation",
       actionPattern: { kind: "ad-hoc", actionKindId: "deliver" }, priority: 1, defeasible: false, status: "supported", visibility: "public",

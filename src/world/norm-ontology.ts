@@ -145,9 +145,11 @@ export function materializeNormProposal(
       return;
     }
     const normId = resolve(operation.normRef);
-    const resolution = options.acknowledgingActorId && operation.op !== "violate-norm"
+    const acknowledgement = options.acknowledgingActorId && operation.op !== "violate-norm"
+      && !(operation.op === "repair-norm" && subjects.get(normId) === options.acknowledgingActorId);
+    const resolution = acknowledgement
       ? { byActorId: subjects.get(normId), acknowledgedByActorId: options.acknowledgingActorId }
-      : operation.byActorId ? { byActorId: operation.byActorId } : {};
+      : operation.byActorId || options.acknowledgingActorId ? { byActorId: operation.byActorId ?? options.acknowledgingActorId } : {};
     if (options.acknowledgingActorId && operation.op !== "violate-norm" && !subjects.has(normId)) throw new Error(`Unknown norm subject ${normId}`);
     if (operation.op === "satisfy-norm") operations.push({ op: operation.op, normId, ...resolution });
     if (operation.op === "violate-norm") operations.push({ op: operation.op, normId, ...(operation.byActorId ? { byActorId: operation.byActorId } : {}), ...(operation.reasonId ? { reasonId: operation.reasonId } : {}) });
@@ -281,6 +283,7 @@ export function validateNormReparation(
 ): void {
   const reparation = template.reparations.find((item) => item.id === reparationId);
   if (!reparation) throw new Error(`Norm ${instance.id} has no reparation ${reparationId}`);
+  if ((!reparation.actionPattern || reparation.actionPattern.kind === "any") && !reparation.requiresAfter.length) throw new Error(`Norm reparation ${reparationId} requires an executable action or state condition`);
   if (reparation.actionPattern && (!action || !actionPatternMatches(reparation.actionPattern, action))) {
     throw new Error(`Norm reparation ${reparationId} requires a matching action`);
   }

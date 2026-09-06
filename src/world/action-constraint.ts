@@ -10,6 +10,7 @@ import {
   type StateValue,
   type ValidationIssue,
   type WorldState,
+  type Predicate,
 } from "./model.js";
 import { evaluatePredicate } from "./state.js";
 import type { ActionSchema } from "./action-ontology.js";
@@ -254,18 +255,15 @@ function evaluateConstraintPredicate(
   predicate: ConstraintPredicate,
   binding: ConstraintBinding,
 ): boolean {
-  if (predicate.op === "all") return predicate.items.every((item) => evaluateConstraintPredicate(state, item, binding));
-  if (predicate.op === "any") return predicate.items.some((item) => evaluateConstraintPredicate(state, item, binding));
-  if (predicate.op === "not") return !evaluateConstraintPredicate(state, predicate.item, binding);
-  const entityId = resolveConstraintEntity(predicate.entity, binding);
-  const fields = state.values[entityId];
-  if (predicate.op === "fact-exists") return fields !== undefined
-    && Object.prototype.hasOwnProperty.call(fields, predicate.field)
-    && fields[predicate.field] !== null;
-  const value = fields?.[predicate.field];
-  if (predicate.op === "fact-equals") return JSON.stringify(value) === JSON.stringify(predicate.value);
-  if (predicate.op === "fact-gte") return typeof value === "number" && value >= predicate.value;
-  return typeof value === "number" && value <= predicate.value;
+  return evaluatePredicate(state, bindConstraintPredicate(predicate, binding));
+}
+
+/** Binding preserves boolean structure so unknown facts remain unknown under NOT. */
+export function bindConstraintPredicate(predicate: ConstraintPredicate, binding: ConstraintBinding): Predicate {
+  if (predicate.op === "all" || predicate.op === "any") return { op: predicate.op, items: predicate.items.map((item) => bindConstraintPredicate(item, binding)) };
+  if (predicate.op === "not") return { op: "not", item: bindConstraintPredicate(predicate.item, binding) };
+  const { entity, ...fact } = predicate;
+  return { ...fact, entityId: resolveConstraintEntity(entity, binding) };
 }
 
 function resolveConstraintEntity(reference: ConstraintEntityRef, binding: ConstraintBinding): string {

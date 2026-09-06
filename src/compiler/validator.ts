@@ -303,7 +303,7 @@ export class CompilerValidator {
       const prospectiveProcesses = options.graphScope === "record"
         ? [process]
         : new Map(processTemplates).set(process.id, process).values();
-      errors.push(...validateProcessTemplateCatalog(prospectiveProcesses, new Set(events.keys())));
+      errors.push(...validateProcessTemplateCatalog(prospectiveProcesses, new Set(events.keys()), { entities, actionSchemas }));
     }
     if (kind === "spatial-relation") {
       const relation = spatialRelationSchema.parse(payload);

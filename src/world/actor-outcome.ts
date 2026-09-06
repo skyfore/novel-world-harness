@@ -169,7 +169,8 @@ export function validateActorOutcomeOwnership(proposal: EventProposal, projectio
       // A debtor's declaration is not a receipt. Deterministic norm evaluation
       // can still recognize a qualifying action; manual discharge needs its counterparty.
       owned(Boolean(norm) && (op.op === "satisfy-norm" || op.op === "repair-norm"
-        ? norm?.subject !== actor && (norm?.beneficiary === actor || normTemplates?.get(norm!.templateId)?.authorityEntityId === actor)
+        ? (op.op === "repair-norm" && norm?.subject === actor)
+          || norm?.subject !== actor && (norm?.beneficiary === actor || normTemplates?.get(norm!.templateId)?.authorityEntityId === actor)
         : norm?.subject === actor)
         && (!op.byActorId || op.byActorId === actor), path);
     }

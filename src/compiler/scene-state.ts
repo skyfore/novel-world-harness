@@ -50,7 +50,14 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
   let knowledge = emptyKnowledgeState(state.atCommit);
   const initialKnowledge = checkpoint?.knowledge ?? (!checkpoint ? opening.knowledge : undefined);
   if (initialKnowledge) knowledge = applyKnowledgeDelta(knowledge, initialKnowledge, state.atCommit, knowledgeContext);
-  const realized = new Set(cut.completedEventIds.filter((id) => !cut.replayEventIds.includes(id)));
+  const aliases = new Map(events.map((occurrence) => [occurrence.id, new Set([occurrence.id])]));
+  for (const relation of c.eventRelations.filter((item) => item.type === "coreference" && item.status !== "contested")) {
+    const group = new Set([...(aliases.get(relation.fromEventId) ?? []), ...(aliases.get(relation.toEventId) ?? [])]);
+    for (const id of group) aliases.set(id, group);
+  }
+  // Every alias of a replayed occurrence is still future until that occurrence executes.
+  const pendingIds = new Set(cut.replayEventIds.flatMap((id) => [...(aliases.get(id) ?? [id])]));
+  const realized = new Set(cut.completedEventIds.filter((id) => !pendingIds.has(id)));
   const execute = (occurrence: CanonicalEvent, before: WorldState) => {
     const schema = occurrence.action?.lane === "schema-bound" ? context.actionSchemas?.get(occurrence.action.schemaId) : undefined;
     const initiator = occurrence.action?.lane === "schema-bound" ? occurrence.action.roleBindings.find((role) => role.roleId === schema?.initiatorRoleId)?.entityIds[0]
@@ -65,7 +72,7 @@ export function executeSceneEvent(bundle: PreparedNovelBundle, target: Canonical
     if (occurrence.observedKnowledge) knowledge = applyKnowledgeDelta(knowledge, occurrence.observedKnowledge, before.atCommit, knowledgeContext);
     return result.postState;
   };
-  for (const id of cut.replayEventIds) { state = execute(context.events!.get(id)!, state); realized.add(id); }
+  for (const id of cut.replayEventIds) { state = execute(context.events!.get(id)!, state); for (const alias of aliases.get(id) ?? [id]) realized.add(alias); }
   const before = state, after = execute(event, before);
   return { cut, before, after, context, knowledge, hash: contentHash({ cut, before, actorId: actorId ?? null }) };
 }

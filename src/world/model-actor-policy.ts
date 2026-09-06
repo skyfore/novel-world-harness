@@ -99,7 +99,7 @@ type RuntimeActorGoal = {
 export type ModelActorNormView = {
   name: string;
   modality: "obligation" | "prohibition" | "permission";
-  role: "subject" | "beneficiary";
+  role: "subject" | "beneficiary" | "authority";
   status: "active" | "violated";
   dueInDays?: number;
 };
@@ -633,10 +633,10 @@ function modelVisibleNorms(
   const elapsedDays = projection.state.logicalTime.elapsedDays ?? 0;
   return Object.values(projection.norms.instances).flatMap((instance): ModelActorNormView[] => {
     if (instance.status !== "active" && instance.status !== "violated") return [];
-    const role = instance.subjectActorId === actorId ? "subject" as const
-      : instance.beneficiaryActorId === actorId ? "beneficiary" as const : undefined;
-    if (!role) return [];
     const template = templates.get(instance.templateId);
+    const role = instance.subjectActorId === actorId ? "subject" as const
+      : instance.beneficiaryActorId === actorId ? "beneficiary" as const : template?.authorityEntityId === actorId ? "authority" as const : undefined;
+    if (!role) return [];
     if (!template || template.visibility === "engine") return [];
     if (template.visibility === "knowledge" && !template.knownByClaimIds.every((claimId) => knownClaimIds.has(claimId))) return [];
     return [{

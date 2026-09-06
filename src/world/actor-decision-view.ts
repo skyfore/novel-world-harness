@@ -36,7 +36,7 @@ export const actorDecisionViewSchema = z.object({
   appraisals: z.array(z.object({ id: idSchema, targetKind: z.enum(["entity", "event", "proposition"]), targetId: idSchema.optional(), dimensionId: idSchema, value: z.number() }).strict()),
   relationships: z.array(z.object({ id: idSchema, counterpartyId: idSchema, dimensions: z.record(z.string(), z.number()) }).strict()),
   obligations: z.array(z.object({ id: idSchema, role: z.enum(["debtor", "creditor"]), counterpartyId: idSchema.optional(), kindId: idSchema, description: z.string(), status: z.string() }).strict()),
-  norms: z.array(z.object({ id: idSchema, templateId: idSchema, name: z.string(), modality: z.enum(["obligation", "prohibition", "permission"]), role: z.enum(["subject", "beneficiary"]), status: z.enum(["active", "violated"]), dueInDays: z.number().optional() }).strict()),
+  norms: z.array(z.object({ id: idSchema, templateId: idSchema, name: z.string(), modality: z.enum(["obligation", "prohibition", "permission"]), role: z.enum(["subject", "beneficiary", "authority"]), status: z.enum(["active", "violated"]), dueInDays: z.number().optional() }).strict()),
   processes: z.array(z.object({ id: idSchema, templateId: idSchema, name: z.string(), phase: z.string(), status: z.enum(["running", "paused"]), progress: z.number(), dueInDays: z.number().optional() }).strict()),
 }).strict();
 export type ActorDecisionView = z.infer<typeof actorDecisionViewSchema>;
@@ -79,8 +79,8 @@ export async function buildActorDecisionView(
   });
   const norms = Object.values(projection.norms.instances).flatMap((item): ActorDecisionView["norms"] => {
     if (item.status !== "active" && item.status !== "violated") return [];
-    const role = item.subjectActorId === actorId ? "subject" : item.beneficiaryActorId === actorId ? "beneficiary" : undefined;
     const template = context.normTemplates?.get(item.templateId);
+    const role = item.subjectActorId === actorId ? "subject" : item.beneficiaryActorId === actorId ? "beneficiary" : template?.authorityEntityId === actorId ? "authority" : undefined;
     if (!role || !template || !mechanismIsDisclosed(template, scope)) return [];
     return [{ id: item.id, templateId: template.id, name: template.name, modality: template.modality, role, status: item.status,
       ...(item.dueAtElapsedDays !== undefined ? { dueInDays: item.dueAtElapsedDays - elapsed } : {}) }];

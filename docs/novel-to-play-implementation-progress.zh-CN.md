@@ -2,6 +2,12 @@
 
 本记录对应 [技术设计](novel-to-play-technical-design.zh-CN.md) 与 [验收计划](novel-to-play-acceptance-plan.zh-CN.md)。仅有明确代码和验证记录的项目才标记完成。
 
+## 2026-09-06：深度 Review R1–R7 修复
+
+七项 finding 已逐组修复，详见 [PR #3 Review 修复记录](pr3-review-fixes.zh-CN.md)。核心改动包括类型化成员依赖、已发布世界与 rebuild staging 隔离、按场景事件构建并执行前态、过程推进的机制依据、规范履行与确认身份分离、来源归纳与角色学习分离，以及完整的角色可见规则注入。
+
+本轮排除 Web UI 测试后，149 文件 / 848 项核心回归通过；服务端 TypeScript 构建通过。运行契约更新为 engine 0.4.0、pipeline 33、prompt 29，并更新认证 fingerprint。此前记录的旧版本数字保留为历史里程碑。本轮没有运行真实 provider 整本解析和长程 Play 认证。
+
 ## W0：反例基线
 
 - 主线基准：`b2c010548edc519ea957e0ddc9fffdb47c297a5d`；设计提交：`12d9bb39d75ed2d17d841f7d18e941d09f8966ad`。

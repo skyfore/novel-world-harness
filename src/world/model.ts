@@ -1851,4 +1851,4 @@ export const artifactProposalSchema = <T extends z.ZodTypeAny>(payload: T) =>
 export type ArtifactProposal<T> = { id: ProposalId; kind: string; schemaVersion: number; payload: T; evidence: EvidenceRef[]; evidenceAssertions?: EvidenceAssertion[]; generatedBy: { worker: string; provider?: string; model?: string; promptHash?: string; compilerBatchId?: string }; createdAt: string };
 
 export const WORLD_SCHEMA_VERSION = 3;
-export const WORLD_ENGINE_VERSION = "0.3.0";
+export const WORLD_ENGINE_VERSION = "0.4.0";

@@ -134,7 +134,7 @@ describe("novel-to-play review regressions", () => {
       ownerRoles: [{ id: "courier", label: "Courier", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],
       phases: [{ id: "started", label: "Started", terminal: false }, { id: "delivered", label: "Delivered", terminal: true }], initialPhaseId: "started",
       transitions: [{ fromPhaseId: "started", toPhaseId: "delivered", minimumProgress: 0.5 }], outcomeIds: ["received"], visibility: "public",
-      actorControls: [{ ...control, op: "advance-process", maximumAdvance: 0.5, fromPhaseId: "started", toPhaseId: "delivered" }, { ...control, op: "finish-process", fromPhaseId: "delivered", outcomeId: "received" }],
+      actorControls: [{ ...control, op: "advance-process", maximumAdvance: 0.5, toPhaseId: "delivered" }, { ...control, op: "finish-process", fromPhaseId: "delivered", outcomeId: "received" }],
       induction: { kind: "domain-module", moduleId: "test", moduleVersion: "1" }, evidence: [] });
     const { engine, head } = await fixture({ processTemplates: new Map([[process.id, process]]) });
     const base: PlayerActionCandidate = { title: "Take delivery", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [], proposedDelta: { version: 1, operations: [] },
@@ -168,15 +168,19 @@ describe("novel-to-play review regressions", () => {
   });
 
   it("R6: beneficiary receipts normalize explicit and implicit identity and replay both identities", async () => {
-    const norm = normTemplateSchema.parse({ ontologyVersion: "norm-template-v1", id: "receipt", name: "Delivery receipt", modality: "obligation",
+    const norm = normTemplateSchema.parse({ ontologyVersion: "norm-template-v1", id: "receipt", name: "Delivery receipt", modality: "obligation", authorityEntityId: "rival",
       actionPattern: { kind: "ad-hoc", actionKindId: "deliver" }, priority: 1, defeasible: false, status: "supported", visibility: "public",
       induction: { kind: "domain-module", moduleId: "test", moduleVersion: "1" }, evidence: [] });
     const { engine, head } = await fixture({ normTemplates: new Map([[norm.id, norm]]) });
     const seed = await engine.commitProposal({ proposalId: "seed-receipt", branchId: "main", expectedParentCommit: head, source: "background", title: "Duty accepted",
       participants: ["hero", "rival"], proposedTime: { kind: "ordinal", orderHint: 1, label: "accepted" }, preconditions: [], proposedDelta: { version: 1, operations: [] }, causalParents: [], evidence: [],
-      proposedNorms: { version: 1, operations: [{ op: "instantiate-norm", localRef: "local-duty", norm: { templateId: norm.id, subjectActorId: "hero", beneficiaryActorId: "rival", description: "Delivery" } }] } });
+      proposedNorms: { version: 1, operations: [{ op: "instantiate-norm", localRef: "local-duty", norm: { templateId: norm.id, subjectActorId: "hero", beneficiaryActorId: "rival", description: "Delivery" } },
+        { op: "instantiate-norm", localRef: "local-authority-duty", norm: { templateId: norm.id, subjectActorId: "hero", description: "Duty to authority" } }] } });
     expect(seed.report.errors).toEqual([]);
-    const id = Object.keys((await engine.projections.project(seed.newHead)).norms.instances)[0]!;
+    const instances = Object.values((await engine.projections.project(seed.newHead)).norms.instances);
+    const id = instances.find((item) => item.beneficiaryActorId === "rival")!.id;
+    const authorityId = instances.find((item) => !item.beneficiaryActorId)!.id;
+    expect((await buildActorScopedActionContext(engine, "rival", seed.newHead, undefined, "novel")).decision?.norms).toContainEqual(expect.objectContaining({ id: authorityId, role: "authority" }));
     const proposal = (actorId: string, explicit: boolean) => playerActionToKnowledgeAwareAction({ branchId: "main", actorId, expectedParentCommit: seed.newHead, utterance: "Received", candidate: {
       title: "Acknowledge delivery", participants: [], preconditions: [], requiresKnowledge: [], forbidsKnowledge: [], proposedDelta: { version: 1, operations: [] },
       proposedNorms: { version: 1, operations: [{ op: "satisfy-norm", normRef: id, ...(explicit ? { byActorId: actorId } : {}) }] },
@@ -184,6 +188,9 @@ describe("novel-to-play review regressions", () => {
     for (const explicit of [false, true]) {
       expect((await engine.previewProposal(proposal("hero", explicit))).report.errors).toContainEqual(expect.objectContaining({ code: "ACTOR_OUTCOME_AUTHORITY_REQUIRED" }));
       expect((await engine.previewProposal(proposal("rival", explicit))).report.errors).toEqual([]);
+      const authorityReceipt = proposal("rival", explicit);
+      authorityReceipt.proposedNorms!.operations = [{ op: "satisfy-norm", normRef: authorityId, ...(explicit ? { byActorId: "rival" } : {}) }];
+      expect((await engine.previewProposal(authorityReceipt)).report.errors).toEqual([]);
     }
     const committed = await engine.commitProposal(proposal("rival", true));
     expect(committed.report.errors).toEqual([]);

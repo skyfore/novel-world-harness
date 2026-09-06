@@ -773,6 +773,7 @@ export async function validateCompilerProposalClosure(
   for (const processIssue of validateProcessTemplateCatalog(
     processTemplateCatalog.values(),
     new Set(participationCatalog.events.keys()),
+    { entities: executableEntityCatalog, actionSchemas: executableActionCatalog },
   )) {
     issues.add(`process-template: ${processIssue.code} at ${processIssue.path ?? "payload"}: ${processIssue.message}`);
   }
@@ -924,6 +925,7 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "action-schema") {
     const action = payload as ActionSchema;
+    action.knownByClaimIds?.forEach((id, index) => missing("claims", id, `knownByClaimIds.${index}`));
     if (action.induction.kind === "source-pattern") {
       action.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
     }
@@ -931,6 +933,7 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "action-constraint") {
     const constraint = payload as ActionConstraint;
+    constraint.knownByClaimIds?.forEach((id, index) => missing("claims", id, `knownByClaimIds.${index}`));
     if (constraint.actionPattern.kind === "schema") missing("actions", constraint.actionPattern.schemaId, "actionPattern.schemaId");
     constraint.induction.kind === "source-pattern"
       && constraint.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
@@ -966,6 +969,12 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "process-template") {
     const process = payload as ProcessTemplate;
+    process.knownByClaimIds?.forEach((id, index) => missing("claims", id, `knownByClaimIds.${index}`));
+    process.actorControls?.forEach((control, index) => {
+      if (control.actionPattern.kind === "schema") missing("actions", control.actionPattern.schemaId, `actorControls.${index}.actionPattern.schemaId`);
+      control.requiresBefore.forEach((predicate, predicateIndex) => collectConstraintPredicateIssues(predicate, `actorControls.${index}.requiresBefore.${predicateIndex}`, missing));
+      control.requiresAfter.forEach((predicate, predicateIndex) => collectConstraintPredicateIssues(predicate, `actorControls.${index}.requiresAfter.${predicateIndex}`, missing));
+    });
     if (process.induction.kind === "source-pattern") {
       process.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
     }

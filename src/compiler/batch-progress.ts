@@ -4,7 +4,7 @@ import path from "node:path";
 import { worldStorageRoot } from "../world/paths.js";
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 32;
+export const COMPILER_PIPELINE_VERSION = 33;
 const SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION = 30;
 
 export type BatchProgress = {

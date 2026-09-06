@@ -4,6 +4,25 @@ import { actionSchemaSchema } from "../src/world/action-ontology.js";
 import type { PreparedNovelBundle } from "../src/compiler/prepared-cache.js";
 import { canonicalEventSchema } from "../src/world/model.js";
 import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
+import { executeSceneEvent } from "../src/compiler/scene-state.js";
+
+it("does not activate a future route through a coreferent alias while replaying a scene cut", () => {
+  const evidence = [{ span: { sourceId: "book", startLine: 1, endLine: 1, quoteHash: "a".repeat(64) }, strength: "explicit" as const }];
+  const event = (id: string, orderHint: number) => canonicalEventSchema.parse({ id, title: id, participants: ["hero"], storyTime: { kind: "ordinal", label: id, orderHint },
+    preconditions: [], causalParents: [], confidence: 1, evidence, observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.plan", value: id }] } });
+  const walk = canonicalEventSchema.parse({ ...event("walk", 1),
+    action: { lane: "ad-hoc", actionKindId: "walk", description: "Walk", footprint: { reads: [], writes: [{ entityId: "hero", field: "character.location" }], resources: [] }, travelMode: "foot" }, timeAdvance: { amount: 2, unit: "hour" },
+    observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "port" }] } });
+  const bridge = event("bridge", 2), alias = { ...bridge, id: "bridge-alias" }, target = event("target", 3);
+  const route = spatialRelationSchema.parse({ ontologyVersion: "spatial-v1", id: "road", kind: "route", basis: "explicit", fromLocationId: "village", toLocationId: "port", direction: "two-way", modes: ["foot"], duration: { minimum: 2, unit: "hour" }, evidence, confidence: 1, status: "supported", visibility: "public", establishedByEventIds: [alias.id] });
+  const bundle = { source: { id: "book" }, canonical: {
+    entities: ["hero", "village", "port"].map((id) => ({ id, kind: id === "hero" ? "character" : "location", canonicalName: id, aliases: [], evidence })),
+    events: [walk, bridge, alias, target], eventRelations: [{ type: "coreference", fromEventId: bridge.id, toEventId: alias.id, status: "supported" }], rules: [], spatialRelations: [route],
+    initialWorld: { checkpoint: { beforeCanonicalEventId: walk.id, storyTime: walk.storyTime }, delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "village" }] } },
+    propositions: [], attributions: [], claims: [], eventParticipations: [], actionSchemas: [], eventExecutions: [], actionConstraints: [], processTemplates: [], normTemplates: [], goals: [],
+  } } as unknown as PreparedNovelBundle;
+  expect(() => executeSceneEvent(bundle, target)).toThrow(/SPATIAL/);
+});
 
 it("executes scene preconditions at distinct historical cuts and proves entry and exit conditions", () => {
   const evidence = [{ span: { sourceId: "book", startLine: 1, endLine: 1, quoteHash: "a".repeat(64) }, strength: "explicit" as const }];

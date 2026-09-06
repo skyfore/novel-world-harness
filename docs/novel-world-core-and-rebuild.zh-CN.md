@@ -119,6 +119,8 @@ nwh prepared-cache evaluate <plan-hash> --root ./novel-workspace
 
 核心接线、可恢复候选重建、类型化依赖、场景机制与证据支持已实现并分批提交。核心检查结果见[实施记录](novel-to-play-implementation-progress.zh-CN.md)。Web 浏览器回归按当前优先级暂缓。
 
-运行契约为 prepared V4、world schema V3、engine 0.3.0、storage v3、cache V3、canonical snapshot V9、pipeline 32、prompt 28。旧语义版本不能仅凭完成批次标记冒充新版本。
+运行契约为 prepared V4、world schema V3、engine 0.4.0、storage v3、cache V3、canonical snapshot V9、pipeline 33、prompt 29。旧语义版本不能仅凭完成批次标记冒充新版本。
+
+深度 review 的七项修复见 [修复记录](pr3-review-fixes.zh-CN.md)。Play 读取已发布的不可变 revision，候选编译区的实体/批次/checkpoint 变化不会使同版本旧 publication 失效；显式 publish 才切换。场景认证按每个事件自己的 cut 执行真实前置条件与 entry/exit，角色获得公开机制不再依赖亲历原著示例，过程控制与可见规则均进入运行链路。
 
 当前没有可用 Pi provider 凭据与完整独立 gold，未运行真实整本解析和全体 major 长程认证。通用 branch entity create／identify／retire、统一四值冲突投影及多作品聚合验收也尚未完成。需要这些机制的小说不能被宣布完全可玩；本轮没有通过放宽发布门掩盖这一点。

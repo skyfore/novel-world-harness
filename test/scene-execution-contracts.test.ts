@@ -1,8 +1,35 @@
 import { expect, it } from "vitest";
-import { validateSceneTravel } from "../src/compiler/scene-execution-contracts.js";
+import { buildSceneExecutionContracts, validateSceneTravel } from "../src/compiler/scene-execution-contracts.js";
+import { actionSchemaSchema } from "../src/world/action-ontology.js";
 import type { PreparedNovelBundle } from "../src/compiler/prepared-cache.js";
 import { canonicalEventSchema } from "../src/world/model.js";
 import { spatialRelationSchema } from "../src/world/spatial-ontology.js";
+
+it("executes scene preconditions at distinct historical cuts and proves entry and exit conditions", () => {
+  const evidence = [{ span: { sourceId: "book", startLine: 1, endLine: 1, quoteHash: "a".repeat(64) }, strength: "explicit" as const }];
+  const action = actionSchemaSchema.parse({ ontologyVersion: "action-schema-v1", id: "spend", name: "Spend", initiatorRoleId: "actor",
+    roles: [{ id: "actor", label: "Actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }], parameters: [],
+    preconditions: [{ op: "fact-gte", entity: { kind: "role", roleId: "actor" }, field: "character.wealth", value: 1 }],
+    stateEffects: [{ op: "adjust-number", entity: { kind: "role", roleId: "actor" }, field: "character.wealth", amount: -1 }],
+    effectEnvelope: { maxStateOperations: 1, allowedStateFields: ["character.wealth"], allowsKnowledge: false, allowsTimeAdvance: false, allowsSceneTransition: false },
+    induction: { kind: "domain-module", moduleId: "money", moduleVersion: "1" }, evidence: [] });
+  const events = [1, 2].map((n) => canonicalEventSchema.parse({ id: `e${n}`, title: "Spend", participants: ["hero"],
+    participantPresence: [{ entityId: "hero", mode: "physical" }], storyTime: { kind: "ordinal", label: `${n}`, orderHint: n }, preconditions: [],
+    observedOutcome: { version: 1, operations: [{ op: "adjust-number", entityId: "hero", field: "character.wealth", amount: -1 }] },
+    action: { lane: "schema-bound", schemaId: "spend", roleBindings: [{ roleId: "actor", entityIds: ["hero"] }], parameters: {} },
+    sceneOccurrenceIds: [`s${n}`], evidence, causalParents: [], confidence: 1 }));
+  const input = { source: { id: "book" }, canonical: { entities: [{ id: "hero", kind: "character", canonicalName: "Hero", aliases: [], evidence }],
+    events, actionSchemas: [action], sceneOccurrences: events.map((event, i) => ({ ontologyVersion: "scene-occurrence-v1", id: `s${i + 1}`, discourseSegmentIds: ["discourse"], eventIds: [event.id], viewpointActorIds: ["hero"], presentActorIds: ["hero"],
+      entryConditions: [{ op: "fact-equals", entityId: "hero", field: "character.wealth", value: 3 - i }], exitConditions: [{ op: "fact-equals", entityId: "hero", field: "character.wealth", value: 2 - i }], evidence })),
+    initialWorld: { delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.wealth", value: 3 }] }, checkpoint: { beforeCanonicalEventId: "e1", storyTime: events[0]!.storyTime } },
+    propositions: [], attributions: [], claims: [], eventParticipations: [], eventRelations: [], spatialRelations: [], eventFrames: [], eventExecutions: [], actionConstraints: [], normTemplates: [], processTemplates: [], rules: [], goals: [], models: [], possibilities: [] },
+    compilerSnapshot: { roleRoster: null, structure: { units: [], baseUnitIds: [], discourseSegments: [{ id: "discourse" }] }, annotations: [], entityResolutions: [], eventResolutions: [], evidenceBindings: [] } } as unknown as PreparedNovelBundle;
+  const result = buildSceneExecutionContracts(input);
+  expect(result.issues).toEqual([]);
+  expect(result.contracts[0]!.entryCutIds).not.toEqual(result.contracts[1]!.entryCutIds);
+  input.canonical.initialWorld.delta.operations[0] = { op: "set", entityId: "hero", field: "character.wealth", value: 0 };
+  expect(buildSceneExecutionContracts(input).issues).toContainEqual(expect.objectContaining({ code: "SCENE_EXECUTION_INVALID", message: expect.stringContaining("ACTION_SCHEMA_PRECONDITION_FAILED") }));
+});
 
 it("uses the actual pre-event route mechanism and rejects impossible duration or unrelated effects", () => {
   const evidence = [{ span: { sourceId: "book", startLine: 1, endLine: 1, quoteHash: "a".repeat(64) }, strength: "explicit" as const }];

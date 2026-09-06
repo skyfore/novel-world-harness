@@ -2,11 +2,11 @@ import { applyEventExecutions, validateEventExecutions } from "../world/event-ex
 import { z } from "zod";
 import { resolveActionInvocation } from "../world/action-ontology.js";
 import { contentHash } from "../world/canonical.js";
-import { deriveCharacterEntrySeed } from "../world/entry-context.js";
+import { executeSceneEvent } from "./scene-state.js";
 import { deriveEntryCut } from "../world/entry-cut.js";
 import { validateEffectObligations } from "../world/effect-obligations.js";
 import { predicateSchema, type CanonicalEvent, type ValidationIssue } from "../world/model.js";
-import { applyStateDelta, DEFAULT_STATE_FIELDS, emptyWorldState, StateSchemaRegistry } from "../world/state.js";
+import { applyStateDelta, DEFAULT_STATE_FIELDS, emptyWorldState, StateSchemaRegistry, evaluatePredicateTruth } from "../world/state.js";
 import { findSpatialRoute, resolveActiveSpatialRelations } from "../world/spatial-ontology.js";
 import { timeAdvanceInDays } from "../world/time.js";
 import { validateSceneOccurrenceCatalog } from "../world/scene-occurrence.js";
@@ -37,9 +37,19 @@ export function buildSceneExecutionContracts(bundle: PreparedNovelBundle, roster
     const local: ValidationIssue[] = [], fail = (code: string, message: string) => local.push({ code, message, path: `scene/${scene.id}` });
     const participantIds = [...new Set([...scene.presentActorIds, ...sceneEvents.flatMap((event) => event.participants)])].sort();
     const entryCutIds: string[] = [], mechanisms = new Set<string>();
-    for (const actor of participantIds.filter((id) => major.has(id))) {
-      try { const seed = deriveCharacterEntrySeed(bundle, actor); entryCutIds.push(seed.cut.hash); local.push(...seed.cut.issues); }
-      catch (error) { fail("SCENE_MAJOR_ENTRY_MISSING", `${actor}: ${String(error)}`); }
+    const executions: ReturnType<typeof executeSceneEvent>[] = [];
+    for (const event of sceneEvents) {
+      const actors = event.participants.filter((id) => major.has(id));
+      for (const actor of actors.length ? actors : [undefined]) {
+        try { const execution = executeSceneEvent(bundle, event, actor); executions.push(execution); entryCutIds.push(execution.hash); }
+        catch (error) { fail("SCENE_EXECUTION_INVALID", `${event.id}${actor ? `/${actor}` : ""}: ${String(error)}`); }
+      }
+    }
+    const ordered = executions.sort((a, b) => a.cut.completedEventIds.length - b.cut.completedEventIds.length);
+    for (const [conditions, state, label] of [[scene.entryConditions, ordered[0]?.before, "ENTRY"], [scene.exitConditions, ordered.at(-1)?.after, "EXIT"]] as const) {
+      conditions.forEach((predicate, index) => {
+        if (!state || evaluatePredicateTruth(state, predicate, ordered[0]!.context.stateSchema) !== "true") fail(`SCENE_${label}_CONDITION_UNPROVEN`, `${scene.id} ${label.toLowerCase()} condition ${index} is false or unknown`);
+      });
     }
     if (participantIds.some((id) => major.has(id)) && !scene.exitConditions.length) fail("SCENE_TERMINATION_UNSPECIFIED", `Major scene ${scene.id} requires explicit exit conditions`);
     for (const event of sceneEvents) {

@@ -73,6 +73,7 @@ import { validateCommittedEventResolutionTrace } from "./event-resolution.js";
 import {
   findKnowledgeDeltas,
   isCommunicatingKnowledgeSource,
+  projectPropositionObject,
   validateKnowledgeSemanticReferences,
 } from "../world/knowledge-semantics.js";
 import {
@@ -247,13 +248,20 @@ export class CompilerValidator {
         const checkpoint = binding.entryCheckpoint, seed = checkpoint.projectionSeed;
         const entryPropositions = new Map(propositions), entryAttributions = new Map(attributions), entryClaims = new Map(claims);
         for (const operation of seed.semantics.operations) {
-          if (operation.op === "record-proposition") entryPropositions.set(operation.proposition.id, operation.proposition);
-          if (operation.op === "record-attribution") entryAttributions.set(operation.attribution.id, operation.attribution);
-          if (operation.op === "record-claim") entryClaims.set(operation.claim.id, operation.claim);
+          if (operation.op === "record-proposition") entryPropositions.set(operation.proposition.id, { ...operation.proposition, evidence: [] });
+          if (operation.op === "record-attribution") entryAttributions.set(operation.attribution.id, { ...operation.attribution, evidence: [] });
+          if (operation.op === "record-claim") {
+            const proposition = entryPropositions.get(operation.claim.propositionId);
+            const attribution = operation.claim.attributionId ? entryAttributions.get(operation.claim.attributionId) : undefined;
+            if (proposition) entryClaims.set(operation.claim.id, { id: operation.claim.id, subject: proposition.subjectEntityId,
+              predicate: proposition.relationId, object: projectPropositionObject(proposition.object),
+              epistemicType: attribution?.holderKind === "character" ? "character-claim" : "inference", evidence: [],
+              ...(attribution?.holderKind === "character" && attribution.holderEntityId ? { speaker: attribution.holderEntityId } : {}) });
+          }
         }
         this.validateEvent(applyEventExecutions([occurrence], [binding])[0]!, entities, entryPropositions, entryAttributions, entryClaims, events, eventFrames, actionSchemas, rules, errors);
-        for (const operation of seed.processes.operations) if ("templateId" in operation && !catalog.processTemplates.has(operation.templateId)) errors.push(issue("UNKNOWN_ENTRY_PROCESS_TEMPLATE", `Unknown process template ${operation.templateId}`, "entryCheckpoint.projectionSeed.processes"));
-        for (const operation of seed.norms.operations) if ("templateId" in operation && !catalog.normTemplates.has(operation.templateId)) errors.push(issue("UNKNOWN_ENTRY_NORM_TEMPLATE", `Unknown norm template ${operation.templateId}`, "entryCheckpoint.projectionSeed.norms"));
+        for (const operation of seed.processes.operations) if (operation.op === "start-process" && !catalog.processTemplates.has(operation.process.templateId)) errors.push(issue("UNKNOWN_ENTRY_PROCESS_TEMPLATE", `Unknown process template ${operation.process.templateId}`, "entryCheckpoint.projectionSeed.processes"));
+        for (const operation of seed.norms.operations) if (operation.op === "instantiate-norm" && !catalog.normTemplates.has(operation.norm.templateId)) errors.push(issue("UNKNOWN_ENTRY_NORM_TEMPLATE", `Unknown norm template ${operation.norm.templateId}`, "entryCheckpoint.projectionSeed.norms"));
         for (const id of seed.activeRuleIds) if (!rules.has(id)) errors.push(issue("UNKNOWN_ENTRY_RULE", `Unknown world rule ${id}`, "entryCheckpoint.projectionSeed.activeRuleIds"));
       }
     }

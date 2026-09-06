@@ -356,8 +356,8 @@ export class PreparedNovelCache {
     if (!cached) return null;
     assertSourceIdentity(cached.bundle, identity);
     await this.assertTitleInferenceEvidence(cached.bundle);
-    const layoutIssue = await this.batchLayoutIssue(source, cached.bundle);
-    if (layoutIssue) throw new Error(layoutIssue);
+    // A published read model is immutable. Compiler layout and accepted
+    // staging revisions are checked by lookup/publish, never by Play reads.
     return {
       bundleHash: cached.manifest.bundleHash,
       bundle: cached.bundle,
@@ -396,23 +396,11 @@ export class PreparedNovelCache {
     return this.freshnessIssue(cached.bundle);
   }
 
-  /**
-   * Branch creation must not silently prefer an older immutable bundle over
-   * newer accepted compiler artifacts. Explicit revision activation first
-   * materializes that revision, so a deliberate rollback remains fresh while
-   * an un-published accepted opening or goal change is rejected here.
-   */
+  /** Fresh instances use the last certified publication, independently of rebuild staging. */
   async loadFreshActive(source: SourceDocument): Promise<ActivePreparedNovel | null> {
     const active = await this.loadActive(source);
     if (!active) return null;
     assertPreparedReadiness(active.bundle);
-    const issue = await this.freshnessIssue(active.bundle);
-    if (issue) {
-      throw new Error(
-        `Active prepared revision ${active.bundleHash} is stale relative to accepted workspace artifacts: ${issue} `
-        + "Run prepare-all to publish a new immutable revision, then create a fresh instance; existing branches remain pinned.",
-      );
-    }
     return active;
   }
 

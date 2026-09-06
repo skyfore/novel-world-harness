@@ -3,7 +3,7 @@ useOfflinePreparationBoundary();
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { BoundaryCalibrationStore } from "../src/compiler/boundary-calibration.js";
 import { convergeWorldProposals } from "../src/compiler/converge.js";
@@ -692,7 +692,7 @@ describe("versioned prepared novel cache", () => {
       .resolves.toMatchObject({ status: "restored", bundleHash: published.bundleHash });
   });
 
-  it("refuses to create from an active bundle after newer accepted source artifacts make it stale", async () => {
+  it("keeps published Play reads isolated from accepted rebuild staging until publication", async () => {
     const cacheRoot = await temporaryRoot("nwh-prepared-fresh-cache-");
     const sourceRoot = await temporaryRoot("nwh-prepared-fresh-source-");
     const fixture = await createEvidenceFixture(sourceRoot, "Hero waits at the opening.\n");
@@ -730,8 +730,17 @@ describe("versioned prepared novel cache", () => {
       heroBinding?.assertions ?? [],
     );
 
-    await expect(cache.loadFreshActive(fixture.source)).rejects.toThrow("stale relative to accepted workspace artifacts");
-    await expect(cache.loadFreshActive(fixture.source)).rejects.toThrow("entities differ");
+    expect(await cache.workspaceDifferenceFromRevision(fixture.source, published.bundleHash!)).toContain("entities differ");
+    const retained = await cache.loadFreshActive(fixture.source);
+    expect(retained?.bundleHash).toBe(published.bundleHash);
+    expect(retained?.bundle.canonical.entities.find((entity) => entity.id === "hero")?.aliases).toEqual(hero.aliases);
+    expect((await canon.getEntity("hero")).aliases).toEqual(["The Hero"]);
+    // Exercise production archive semantics, not the legacy fixture's auto-activation helper.
+    vi.mocked(PreparedNovelCache.prototype.publish).mockRestore();
+    const candidate = await cache.archiveCandidate(fixture.source);
+    expect(candidate.bundleHash).not.toBe(published.bundleHash);
+    await cache.restoreCompilerCheckpoint(fixture.source, candidate.bundleHash!);
+    expect((await cache.loadFreshActive(fixture.source))?.bundleHash).toBe(published.bundleHash);
     const revised = await cache.publish(fixture.source);
     await expect(cache.loadFreshActive(fixture.source)).resolves.toMatchObject({ bundleHash: revised.bundleHash });
   });

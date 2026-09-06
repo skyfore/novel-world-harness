@@ -1,3 +1,4 @@
+import { moneyTransferSchema, transferThree } from "./helpers/actions.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -80,7 +81,7 @@ const transferConstraint: ActionConstraint = {
   ontologyVersion: "action-constraint-v1",
   id: "transfer-requires-funds",
   name: "A transfer requires available funds",
-  actionPattern: { kind: "ad-hoc", actionKindId: "transfer-money" },
+  actionPattern: { kind: "schema", schemaId: "transfer-money" },
   appliesWhen: [],
   clauses: [{
     id: "funds-at-least-three",
@@ -104,6 +105,7 @@ async function fixture(overrides: Partial<WorldModelContext> = {}) {
   const context: WorldModelContext = {
     entities: new Map(entities.map((entity) => [entity.id, entity])),
     rules: new Map(),
+    actionSchemas: new Map([[moneyTransferSchema.id, moneyTransferSchema]]),
     actionConstraints: new Map([[transferConstraint.id, transferConstraint]]),
     normTemplates: new Map([[repayDebt.id, repayDebt], [doNotSteal.id, doNotSteal]]),
     processTemplates: new Map([[journey.id, journey]]),
@@ -261,6 +263,7 @@ describe("executable state rules, constraints, norms, and processes", () => {
     roots.push(root);
     const canonical = new CanonicalModelStore(root);
     for (const entity of entities) await canonical.putEntity(entity);
+    await canonical.putActionSchema(moneyTransferSchema);
     await canonical.putActionConstraint(transferConstraint);
     await canonical.putNormTemplate(repayDebt);
     await canonical.putProcessTemplate(journey);
@@ -283,13 +286,7 @@ describe("executable state rules, constraints, norms, and processes", () => {
       source: "player",
       actorId: "hero",
       participants: ["hero", "rival"],
-      action: adHoc("transfer-money", [
-        { entityId: "hero", field: "character.wealth" },
-        { entityId: "rival", field: "character.wealth" },
-      ], [
-        { entityId: "hero", field: "character.wealth", mode: "transfer-out", amount: 3 },
-        { entityId: "rival", field: "character.wealth", mode: "transfer-in", amount: 3 },
-      ]),
+      action: transferThree,
       proposedDelta: { version: 1, operations: [
         { op: "adjust-number", entityId: "hero", field: "character.wealth", amount: -3 },
         { op: "adjust-number", entityId: "rival", field: "character.wealth", amount: 3 },
@@ -302,19 +299,13 @@ describe("executable state rules, constraints, norms, and processes", () => {
       source: "player",
       actorId: "hero",
       participants: ["hero", "rival"],
-      action: adHoc("transfer-money", [
-        { entityId: "hero", field: "character.wealth" },
-        { entityId: "rival", field: "character.wealth" },
-      ], [
-        { entityId: "hero", field: "character.wealth", mode: "transfer-out", amount: 3 },
-        { entityId: "rival", field: "character.wealth", mode: "transfer-in", amount: 3 },
-      ]),
+      action: transferThree,
       proposedDelta: { version: 1, operations: [
         { op: "adjust-number", entityId: "hero", field: "character.wealth", amount: -3 },
         { op: "adjust-number", entityId: "rival", field: "character.wealth", amount: 3 },
       ] },
     }));
-    expect(insufficient.report.errors).toContainEqual(expect.objectContaining({ code: "ACTION_CONSTRAINT_REQUIREMENT_FAILED" }));
+    expect(insufficient.report.errors).toContainEqual(expect.objectContaining({ code: "ACTION_SCHEMA_PRECONDITION_FAILED" }));
 
     const minted = await engine.commitProposal(proposal(transfer.newHead, {
       proposalId: "unmodeled-mint",

@@ -216,7 +216,7 @@ export function baseStructuralUnits(manifest: SourceStructureManifest): Structur
   return manifest.baseUnitIds.map((id) => byId.get(id)!);
 }
 
-function validateSourceStructure(value: unknown): SourceStructureManifest {
+export function validateSourceStructure(value: unknown): SourceStructureManifest {
   const manifest = sourceStructureManifestSchema.parse(value);
   const byId = new Map<string, StructuralUnit>();
   const ordinals = new Set<number>();

@@ -2,6 +2,8 @@ import { stdout } from "node:process";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { describePreparedRoles } from "../world/play-roles.js";
+import { closureRepairDiagnostics } from "../compiler/closure-repair.js";
 
 export async function listPreparedCacheRevisionsCommand(root: string, sourceId?: string): Promise<void> {
   const source = await resolveSource(root, sourceId);
@@ -23,6 +25,14 @@ export async function activatePreparedCacheRevisionCommand(root: string, bundleH
     const source = await resolveSource(root, sourceId);
     const result = await new PreparedNovelCache(root).activate(source, bundleHash);
     stdout.write(`Activated prepared revision ${result.bundleHash} for ${result.contentMd5}; existing branches remain pinned to their captured preparation context.\n`);
+  });
+}
+
+export async function inspectNovelClosureCommand(root: string, sourceId?: string): Promise<void> {
+  await withWorkspaceOperationLock(root, "compiler", async () => {
+    const source = await resolveSource(root, sourceId);
+    const { bundle, assessment } = await new PreparedNovelCache(root).inspectCandidate(source);
+    stdout.write(`${JSON.stringify({ ...assessment, roles: describePreparedRoles(bundle, assessment), repair: closureRepairDiagnostics(assessment.closure) }, null, 2)}\n`);
   });
 }
 

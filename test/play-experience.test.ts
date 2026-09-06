@@ -187,7 +187,7 @@ describe("play experience catalog", () => {
         { op: "set", entityId: "hero", field: "character.alive", value: true },
         { op: "set", entityId: "rival", field: "character.alive", value: true },
       ],
-    });
+    }, undefined, first.source.id);
 
     const before = await inspectPlayExperience(root);
     expect(before.project?.name).toBe("Two Stories");

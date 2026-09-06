@@ -109,6 +109,13 @@ export {
 } from "./compiler/source-accounting.js";
 export { PossibilityCommitService, type PossibilityValidation } from "./compiler/possibility-commit.js";
 export { PreparedNovelCache, preparedNovelBundleSchema, type PreparedCacheResult, type PreparedCacheRevision, type PreparedNovelBundle } from "./compiler/prepared-cache.js";
+export { rebuildCommand } from "./commands/rebuild.js";
+export { repairExistingCommand, type RepairExistingCommandOptions, type RepairExistingCommandResult } from "./commands/repair-existing.js";
+export { eventExecutionSchema, applyEventExecutions, validateEventExecutions, type EventExecution } from "./world/event-execution.js";
+export { buildPreparedClosure, affectedClosureNodes, staleClosureNodes, closureGraphSchema, type ClosureGraph, type ClosureKind } from "./compiler/closure.js";
+export { planClosureRepair, closureRepairDiagnostics } from "./compiler/closure-repair.js";
+export { buildSceneExecutionContracts, sceneExecutionContractSchema, type SceneExecutionContract } from "./compiler/scene-execution-contracts.js";
+export { assessSemanticSupport, supportAssessmentSchema, supportReviewSchema, type SupportAssessment, type SupportReview } from "./compiler/semantic-support.js";
 export { buildWorldReconciliationPrompt, semanticRepairIsIsolated } from "./compiler/reconcile-world.js";
 export {
   backfillLegacyProposalRejectionDiagnostics,

@@ -1,3 +1,4 @@
+import { routeContext, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -54,6 +55,7 @@ describe("dynamic in-world rules", () => {
       entities: new Map(entities.map((entity) => [entity.id, entity])),
       rules: new Map([[rule.id, rule]]),
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    ...routeContext("hall", "garden"),
     } satisfies WorldModelContext);
     const genesis = await engine.createBranch("main", "Main", {
       version: 1,
@@ -71,6 +73,8 @@ describe("dynamic in-world rules", () => {
       source: "player",
       actorId: "hero",
       title: "Enter garden",
+      action: hallCampWalkAction,
+      timeAdvance: { amount: 1, unit: "minute" },
       participants: ["hero"],
       proposedTime: { kind: "unknown" },
       preconditions: [],
@@ -104,6 +108,8 @@ describe("dynamic in-world rules", () => {
       source: "player",
       actorId: "hero",
       title: "Enter garden",
+      action: hallCampWalkAction,
+      timeAdvance: { amount: 1, unit: "minute" },
       participants: ["hero"],
       proposedTime: { kind: "unknown" },
       preconditions: [],

@@ -33,9 +33,8 @@ describe("canonical initial world", () => {
 
     await expect(worldCreateCommand(root, "ambiguous", seedPath))
       .rejects.toThrow("Multiple sources are registered; specify --source");
-    await expect(worldCreateCommand(root, "first", seedPath, first.source.id)).resolves.toBeUndefined();
-    await expect(new BranchStore(root).read("first"))
-      .resolves.toMatchObject({ sourceId: first.source.id });
+    await expect(worldCreateCommand(root, "first", seedPath, first.source.id)).rejects.toThrow("WORLD_CLOSURE_BLOCKED");
+    expect(await new BranchStore(root).listIds()).toEqual([]);
   });
 
   it("requires canonical entities before accepting the seed and replays it as genesis", async () => {
@@ -114,11 +113,12 @@ describe("canonical initial world", () => {
       evidence: source.evidence("Hero watches a grey avatar flicker."),
     });
 
-    await worldCreateCommand(root, "main", undefined, source.source.id);
+    await expect(worldCreateCommand(root, "main", undefined, source.source.id)).rejects.toThrow("WORLD_CLOSURE_BLOCKED");
     const { engine } = await loadWorldContext(root).then((context) => ({
       engine: new WorldEngine(root, context.context),
     }));
-    const head = await engine.branches.readHead("main");
+    const initial = (await new InitialWorldStore(root).get())!;
+    const head = await engine.createBranch("main", "Internal Genesis projection", initial.delta, initial.knowledge, source.source.id, undefined, initial.evidence, {}, { participantPresence: initial.participantPresence, actorObservations: initial.actorObservations });
     const commit = await engine.objects.getCommit(head);
     const genesis = await engine.objects.getEvent(commit.eventHashes[0]!);
     expect(genesis.actorObservations).toEqual([

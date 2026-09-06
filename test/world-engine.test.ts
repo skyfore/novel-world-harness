@@ -1,3 +1,4 @@
+import { routeContext, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,6 +21,7 @@ async function fixture(): Promise<{ root: string; engine: WorldEngine; context: 
     entities: new Map(entities.map((entity) => [entity.id, entity])),
     rules: new Map(),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    ...routeContext("hall", "camp"),
   };
   return { root, engine: new WorldEngine(root, context), context };
 }
@@ -48,6 +50,8 @@ describe("WorldEngine", () => {
       source: "player",
       actorId: "cao-cao",
       title: "曹操离开大厅",
+      action: { ...hallCampWalkAction, footprint: { reads: [{ entityId: "cao-cao", field: "character.location" }], writes: [{ entityId: "cao-cao", field: "character.location" }], resources: [] } },
+      timeAdvance: { amount: 1, unit: "minute" },
       participants: ["cao-cao"],
       proposedTime: { kind: "ordinal", label: "after meeting" },
       preconditions: [{ op: "fact-equals", entityId: "cao-cao", field: "character.location", value: "hall" }],

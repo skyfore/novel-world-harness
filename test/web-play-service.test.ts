@@ -1,3 +1,4 @@
+import { installHallCampRoute, hallCampWalkIntent, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -35,6 +36,7 @@ async function fixture() {
     epistemicType: "explicit-fact",
     evidence: [],
   });
+  await installHallCampRoute(root);
   const { engine } = await openWorkspaceWorld(root);
   const genesis = await engine.createBranch("main", "主时间线", {
     version: 1,
@@ -64,6 +66,7 @@ const narrator: PlayerOpeningNarrator = (frame, purpose, observer) => {
 function moveCandidate() {
   return {
     title: "林岐离开前厅前往营地",
+    intent: hallCampWalkIntent,
     participants: ["camp"],
     preconditions: [{ op: "fact-equals" as const, entityId: "hero", field: "character.location", value: "hall" }],
     proposedDelta: {

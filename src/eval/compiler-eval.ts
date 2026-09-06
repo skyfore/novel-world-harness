@@ -17,6 +17,7 @@ import { EventResolutionStore, type EventResolution } from "../compiler/event-re
 import { EvidenceAssertionStore } from "../compiler/evidence-assertions.js";
 import type { EvidenceRef, StateOperation } from "../world/model.js";
 import { worldRuleEvidence } from "../world/world-rule-ontology.js";
+import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 
 const edgeSchema = z.object({ from: z.string().min(1), to: z.string().min(1) }).strict();
 
@@ -482,6 +483,7 @@ export type CompilerEvaluationReport = {
 export async function evaluateCompilerAgainstGold(
   workspaceRoot: string,
   goldInput: unknown,
+  frozen?: PreparedNovelBundle,
 ): Promise<CompilerEvaluationReport> {
   const gold = compilerGoldSchema.parse(goldInput);
   const canon = new CanonicalModelStore(workspaceRoot);
@@ -504,7 +506,9 @@ export async function evaluateCompilerAgainstGold(
     models,
     initialWorld,
     possibilities,
-  ] = await Promise.all([
+  ] = frozen ? [frozen.canonical.entities, frozen.canonical.propositions, frozen.canonical.attributions, frozen.canonical.claims, frozen.canonical.events,
+    frozen.canonical.eventParticipations, frozen.canonical.eventRelations, frozen.canonical.sceneOccurrences, frozen.canonical.actionSchemas, frozen.canonical.actionConstraints,
+    frozen.canonical.normTemplates, frozen.canonical.processTemplates, frozen.canonical.rules, frozen.canonical.goals, frozen.canonical.models, frozen.canonical.initialWorld, frozen.canonical.possibilities] as const : await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -544,7 +548,7 @@ export async function evaluateCompilerAgainstGold(
       models,
       initialWorld,
       possibilities,
-    });
+    }, frozen?.compilerSnapshot);
   const report: CompilerEvaluationReport = {
     version: 1,
     goldVersion: gold.version,
@@ -664,17 +668,18 @@ async function evaluateSemanticLayers(
   workspaceRoot: string,
   gold: CompilerSemanticGold,
   catalog: SemanticCatalog,
+  frozen?: PreparedNovelBundle["compilerSnapshot"],
 ): Promise<Record<SemanticLayerName, SemanticLayerMetric>> {
   const sourceIds = semanticGoldSourceIds(gold);
-  const registered = await (await WorkspaceStore.create(workspaceRoot)).listSources();
+  const registered = frozen ? [{ id: frozen.structure.sourceId }] : await (await WorkspaceStore.create(workspaceRoot)).listSources();
   const selectedSourceIds = sourceIds.size
     ? registered.map((source) => source.id).filter((sourceId) => sourceIds.has(sourceId))
     : registered.map((source) => source.id);
-  const annotations = (await Promise.all(selectedSourceIds.map((sourceId) =>
+  const annotations = frozen ? frozen.annotations : (await Promise.all(selectedSourceIds.map((sourceId) =>
     new SourceAnnotationStore(workspaceRoot).list(sourceId)))).flat();
-  const entityResolutions = (await Promise.all(selectedSourceIds.map((sourceId) =>
+  const entityResolutions = frozen ? frozen.entityResolutions : (await Promise.all(selectedSourceIds.map((sourceId) =>
     new EntityResolutionStore(workspaceRoot).list(sourceId)))).flat();
-  const eventResolutions = (await Promise.all(selectedSourceIds.map((sourceId) =>
+  const eventResolutions = frozen ? frozen.eventResolutions : (await Promise.all(selectedSourceIds.map((sourceId) =>
     new EventResolutionStore(workspaceRoot).list(sourceId)))).flat();
 
   const actualMentions = annotations.flatMap(actualMentionRecords);
@@ -830,7 +835,7 @@ async function evaluateSemanticLayers(
   const actualStateEffects = catalog.events
     .filter((event) => sourceEventIds.has(event.id))
     .flatMap((event) => event.observedOutcome.operations.map((operation) => ({ eventId: event.id, operation })));
-  const actualCharacterAssertions = await collectCharacterAssertions(workspaceRoot, catalog, sourceIds);
+  const actualCharacterAssertions = await collectCharacterAssertions(workspaceRoot, catalog, sourceIds, frozen?.evidenceBindings);
 
   return {
     mentions: evaluatedLayer(gold.semantic.mentions, actualMentions, (expected, actual) =>
@@ -1094,6 +1099,7 @@ async function collectCharacterAssertions(
   workspaceRoot: string,
   catalog: Pick<SemanticCatalog, "goals" | "models">,
   sourceIds: ReadonlySet<string>,
+  frozenBindings?: PreparedNovelBundle["compilerSnapshot"]["evidenceBindings"],
 ): Promise<Array<{
   actorId: string;
   kind: CompilerSemanticGold["semantic"]["characterAssertions"][number]["kind"];
@@ -1111,7 +1117,7 @@ async function collectCharacterAssertions(
     prefix: string,
     fallback: readonly EvidenceRef[],
   ): Promise<GoldByteSpan[]> => {
-    const binding = await exactEvidence.bindingForArtifact(artifactKind, artifactId);
+    const binding = frozenBindings ? frozenBindings.find((binding) => binding.artifactKind === artifactKind && binding.artifactId === artifactId) : await exactEvidence.bindingForArtifact(artifactKind, artifactId);
     const exact = binding?.assertions
       .filter((assertion) => assertion.target.jsonPointer === prefix
         || assertion.target.jsonPointer.startsWith(`${prefix}/`))

@@ -24,6 +24,9 @@ import { webError } from "../web/errors.js";
 import { OperationManager, type OperationRunContext } from "../web/operation-manager.js";
 import { inspectPreparation } from "../workflow/prepare.js";
 import { readPreparationSnapshot } from "./preparation-projection.js";
+import { reviewNovelRoles } from "../workflow/role-review.js";
+import { PreparedNovelCache } from "../compiler/prepared-cache.js";
+import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 
 const OPENING_DISABLED_TOOLS = [
   "propose_state_delta",
@@ -226,7 +229,19 @@ export class PreparationApplicationService {
       }
       progress.flush();
       await recorder.finishStage(stage, { compilerBatchId: openingBatch.id });
-    } else if (["review", "repair", "create-branch", "ready"].includes(inspection.stage)) {
+    }
+    if (["create-branch", "ready"].includes(inspection.stage)) {
+      await withWorkspaceOperationLock(this.root, "compiler", async () => {
+        progress.phase("reviewing-major-roles");
+        await reviewNovelRoles({ root: this.root, sourceId, configPath: this.options.configPath ?? path.join(this.root, "novel-harness.yaml"), allowMissingConfig: true,
+          ...(input.model ?? this.options.model ? { model: input.model ?? this.options.model } : {}), signal: context.signal, ...progress.callbacks() }, this.dependencies.compileOpening);
+        progress.phase("evaluating-world-closure");
+        const { assessment } = await new PreparedNovelCache(this.root).inspectCandidate(source);
+        progress.log(`Major entry probes: ${assessment.playability?.readyTotal ?? 0}/${assessment.playability?.majorTotal ?? 0}; full novel certified: ${assessment.fullNovelReady}`);
+        if (!assessment.fullNovelReady) progress.log(assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
+        progress.flush();
+      });
+    } else if (["review", "repair"].includes(inspection.stage)) {
       progress.phase(`barrier-${inspection.stage}`, { stage: inspection.stage });
       progress.log(`No model call was started because '${inspection.stage}' is a browser decision barrier.`);
     }

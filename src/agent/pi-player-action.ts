@@ -31,6 +31,12 @@ export {
 } from "../world/player-action.js";
 
 const PLAYER_ACTION_SYSTEM_PROMPT = `You translate one player's natural-language action into one strict candidate for a deterministic novel-world engine.
+- Five outcome channels are available: proposedDelta, proposedKnowledge, proposedSemantics, proposedProcesses, proposedNorms. All are proposals until one atomic engine commit succeeds.
+- Physical, property and identity changes require an available schema-bound mechanism. Copy its roles, initiator, parameters and exact stateEffects. Bound effects may target a visible non-owned entity; that permission never reveals its private state. Ad-hoc names and footprints cannot authorize those changes.
+- Use decision goals, relationships, obligations, norms, processes and capabilities. Existing references must use their current opaque handles; introduce new semantic/process/norm objects with unique local-* refs. Never guess persistent IDs.
+- Use capability preconditions, process actorControls and decision.constraints when choosing actions. Public mechanisms can be used before their source examples occur. A hostChecksRequired flag means this contract is only partially visible: missing conditions are unknown, not satisfied. Visible rule definitions describe conditional obligations or restrictions; their presence does not prove that they currently apply. Process ownership permits accepting a zero-progress job, not arbitrary progress: use only declared controls with their action, time, state, phase and per-turn bounds. Satisfying a norm manually requires an independent beneficiary or authority; the host records performer and acknowledger separately. A subject may perform a declared reparation only when its executable action/state conditions pass.
+- Only set your own goals, appraisals and outgoing attitudes. Create an obligation only when you, its debtor, accept it; a creditor's request alone creates no duty. Only a creditor can acknowledge fulfilment or waive a duty. Use only admitted process/norm templates and owned instances.
+- New propositions are asserted content, not physical truth. Ground personal belief in an attribution held by yourself; do not give another person knowledge or goals.
 
 Security and truth boundaries:
 - The bounded actor-scoped projection plus exact find_actor_context/read_actor_context results are the complete host-provided turn context available to this translator. They contain actor-visible data and capabilities, not global world truth.

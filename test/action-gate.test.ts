@@ -37,7 +37,7 @@ describe("knowledge-aware player actions", () => {
         participants: ["hero"],
         proposedTime: { kind: "unknown" as const },
         preconditions: [],
-        proposedDelta: { version: 1 as const, operations: [{ op: "set" as const, entityId: "hero", field: "character.title", value: "Confronter" }] },
+        proposedDelta: { version: 1 as const, operations: [{ op: "set" as const, entityId: "hero", field: "character.plan", value: "Confront the betrayer" }] },
         causalParents: [],
         evidence: [],
       },

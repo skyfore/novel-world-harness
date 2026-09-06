@@ -1,4 +1,5 @@
 import path from "node:path";
+import { reviewNovelRoles } from "../workflow/role-review.js";
 import { stdout } from "node:process";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { convergeWorldProposals, quarantineUncommittableProposals, type WorldProposalConvergence } from "../compiler/converge.js";
@@ -43,6 +44,8 @@ export type PrepareAllCommandOptions = {
   acquireLock?: boolean;
   cacheRoot?: string;
   createBranch?: boolean;
+  /** Finish compilation and archive the candidate; independent Play certification can follow later. */
+  candidateOnly?: boolean;
   restoreCache?: boolean;
   /** Active immutable revision that an enclosing reparse is using as its rollback baseline. */
   reparseBaselineBundleHash?: string;
@@ -78,7 +81,7 @@ const defaultDependencies: PrepareAllDependencies = {
   reparse: async (options) => (await import("./reparse.js")).reparseCommand(options),
 };
 
-export const INITIAL_WORLD_PROMPT = `Inspect the selected opening evidence, whole-source evidence retrieval, and existing artifact catalog, then propose one evidence-backed initial world representing one explicit world-time cut, not merely the facts stated in the opening passage. Treat the player as a human who has never read the novel. Add a concise readerSetup and a structured readerContext whose facts establish the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, completed pre-checkpoint beats, the actual holder and direction of relevant attitudes or social pressure, and the immediate unresolved situation. Add an entityGloss for every non-focal character referenced by those facts, explaining who that person is relative to the focal actor and why they matter now. Reader context is presentation-only and never character knowledge. Add one actorObservation for each physically present opening character, limited to that actor's direct checkpoint perception. readerSetup, every readerContext fact summary, entity-gloss relationship/relevance field, immediate-situation summary, and actorObservation summary requires its own exact explicit or strong-inference evidence_selector JSON Pointer; weak inference is not sufficient. Use find_source_evidence/read_source_evidence only to recover context that later discourse establishes as already true at or before the checkpoint; mark it later-discourse-preexisting. Never import the result of the unresolved opening situation, any later development, or later-acquired character knowledge. Set participantPresence explicitly for every character represented at the checkpoint; only bodily co-presence is physical, while mention, memory, dream, remote contact, or representation never establishes an opening role. Separate textual narrator frames, recollections, flashbacks, and lived chronology. Prefer the earliest playable chronological scene when it is present in the supplied evidence; otherwise mark a textual-frame checkpoint. Include checkpoint.mode and rationale, plus storyTime, narrativeLayerId, and beforeCanonicalEventId whenever supported. Never merge old-age frame facts with a younger remembered self. Retrieve exact existing artifact payloads as needed and seed grounded actionable state only for source characters bodily present at this checkpoint, including location, plan, momentum, and actor-known active relationships when supported. Do not create a catalog-wide alive inventory: later characters become playable through separate source-backed checkpoints attached to their first embodied canonical events. Store relationship entity IDs, never counterpart character IDs, in character.relationships. When the opening requires a genuinely missing entity, stage its exact source entity mention and same-finish new-entity resolution as well as the entity proposal; an untraced entity cannot pass the finish barrier. Propose genuinely missing referenced entities or base claims first. Finish the compiler batch explicitly after all proposal calls succeed.`;
+export const INITIAL_WORLD_PROMPT = `Inspect the selected opening evidence, whole-source evidence retrieval, and existing artifact catalog, then propose one evidence-backed initial world representing one explicit world-time cut, not merely the facts stated in the opening passage. Treat the player as a human who has never read the novel. Add a concise readerSetup and a structured readerContext whose facts establish the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, completed pre-checkpoint beats, the actual holder and direction of relevant attitudes or social pressure, and the immediate unresolved situation. Add an entityGloss for every non-focal character referenced by those facts, explaining who that person is relative to the focal actor and why they matter now. Reader context is presentation-only and never character knowledge. Add one actorObservation for each physically present opening character, limited to that actor's direct checkpoint perception. Include projectionSeed with explicit semantics, processes, norms, activeRuleIds and elapsedDays, including empty channels when source-supported. Use the same complete seed contract on every later major character entry checkpoint. Unknown required past state must be reported as blocked, never filled from a future ending. readerSetup, every readerContext fact summary, entity-gloss relationship/relevance field, immediate-situation summary, and actorObservation summary requires its own exact explicit or strong-inference evidence_selector JSON Pointer; weak inference is not sufficient. Use find_source_evidence/read_source_evidence only to recover context that later discourse establishes as already true at or before the checkpoint; mark it later-discourse-preexisting. Never import the result of the unresolved opening situation, any later development, or later-acquired character knowledge. Set participantPresence explicitly for every character represented at the checkpoint; only bodily co-presence is physical, while mention, memory, dream, remote contact, or representation never establishes an opening role. Separate textual narrator frames, recollections, flashbacks, and lived chronology. Prefer the earliest playable chronological scene when it is present in the supplied evidence; otherwise mark a textual-frame checkpoint. Include checkpoint.mode and rationale, plus storyTime, narrativeLayerId, and beforeCanonicalEventId whenever supported. Never merge old-age frame facts with a younger remembered self. Retrieve exact existing artifact payloads as needed and seed grounded actionable state only for source characters bodily present at this checkpoint, including location, plan, momentum, and actor-known active relationships when supported. Do not create a catalog-wide alive inventory: later characters become playable through separate source-backed checkpoints attached to their first embodied canonical events. Store relationship entity IDs, never counterpart character IDs, in character.relationships. When the opening requires a genuinely missing entity, stage its exact source entity mention and same-finish new-entity resolution as well as the entity proposal; an untraced entity cannot pass the finish barrier. Propose genuinely missing referenced entities or base claims first. Finish the compiler batch explicitly after all proposal calls succeed.`;
 
 export async function prepareAllCommand(
   options: PrepareAllCommandOptions,
@@ -455,6 +458,29 @@ export async function prepareAllCommand(
         && !semanticRepairIsIsolated(inspection.audit)
       ) throw preparationFailure(inspection);
     }
+  }
+
+  if (["create-branch", "ready"].includes(inspection.stage) && !cacheVerified) {
+    report("Reviewing the independent major-character roster before candidate certification.");
+    try { await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
+      ...(options.model ? { model: options.model } : {}), signal: options.signal,
+      onStatus: options.onStatus, onModelText: options.onModelText, onModelThinking: options.onModelThinking,
+      onModelToolCall: options.onModelToolCall, onModelToolResult: options.onModelToolResult, onModelEvent: options.onModelEvent,
+    }, dependencies.compileInitialWorld); } catch (error) {
+      if (!options.candidateOnly || !(error instanceof Error) || !error.message.startsWith("WORLD_CLOSURE_BLOCKED:")) throw error;
+      report(error.message);
+    }
+    options.signal?.throwIfAborted();
+    const evaluated = await preparedCache.inspectCandidate(inspection.source!);
+    report(`Entry probes: ${evaluated.assessment.playability?.readyTotal ?? 0}/${evaluated.assessment.playability?.majorTotal ?? 0} major roles ready.`);
+    if (!evaluated.assessment.fullNovelReady && !options.candidateOnly) throw new Error(`WORLD_CLOSURE_BLOCKED: ${evaluated.assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
+    if (options.candidateOnly && evaluated.assessment.issues.length) report(`Candidate diagnostics: ${evaluated.assessment.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; ")}`);
+  }
+
+  if (options.candidateOnly && ["create-branch", "ready"].includes(inspection.stage)) {
+    const archived = await preparedCache.archiveCandidate(inspection.source!, preparedRevisionPublishOptions(options));
+    report(`Archived compiled candidate ${archived.bundleHash}. Public Play activation is unchanged; inspect closure to review remaining semantic or certification work.`);
+    return inspection;
   }
 
   if (inspection.stage === "create-branch") {

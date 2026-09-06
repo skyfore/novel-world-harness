@@ -75,7 +75,7 @@ describe("compiler artifact retrieval", () => {
       evidence: fixture.evidence("The Hall opens. Hero enters the Hall."),
     });
     await canon.putActionSchema({
-      ontologyVersion: "action-schema-v1",
+      ontologyVersion: "action-schema-v1", initiatorRoleId: "entrant",
       id: "enter-hall",
       name: "Enter the Hall",
       roles: [{ id: "entrant", label: "entrant", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],

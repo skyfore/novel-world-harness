@@ -340,12 +340,22 @@ export function CompilerWorkbenchPage({
           {snapshot.stage === "review" && <button className="primary-button" disabled={!snapshot.proposalCounts.pending || convergeMutation.isPending} onClick={() => window.confirm(t("Accept every proposal that passes deterministic validation? Blocked proposals will remain pending for review.")) && convergeMutation.mutate()}>{t("Converge all valid")}</button>}
           {snapshot.stage === "create-branch" && <>
             <input className="branch-id-input" aria-label={t("New instance branch ID")} value={branchId} onChange={(event) => setBranchId(event.target.value)} />
-            <button className="primary-button" disabled={!branchId || instanceMutation.isPending} onClick={() => instanceMutation.mutate()}>{t("Create world instance")}</button>
+            <button className="primary-button" disabled={!branchId || instanceMutation.isPending || !snapshot.closure?.fullNovelReady} onClick={() => instanceMutation.mutate()}>{t("Create world instance")}</button>
           </>}
         </div>
       </section>}
 
       {snapshot.stage === "repair" && <section className="repair-barrier"><span>{t("Repair barrier")}</span><div><strong>{t("Publication is blocked by deterministic checks")}</strong>{snapshot.repairReasons.map((reason) => <p key={reason}>{reason}</p>)}</div></section>}
+      {snapshot.closure && <section className="repair-barrier" aria-label={t("Novel certification")}>
+        <span>{t("Novel certification")}</span>
+        <div>
+          <strong>{t(snapshot.closure.fullNovelReady ? "Certified for new play" : "New play certification incomplete")}</strong>
+          <p>{t("Major entry probes")}: {snapshot.closure.readyTotal}/{snapshot.closure.majorTotal} · {t("Independent evaluation")}: {t(snapshot.closure.evaluation)}</p>
+          {snapshot.closure.issues.map((issue, index) => <p key={`${issue.code}-${index}`}>{issue.message}</p>)}
+          <details><summary>{t("All character readiness")}</summary>{snapshot.closure.roles.map((role) => <p key={role.rosterEntryId}><strong>{role.canonicalName}</strong> · {t(role.status)} — {role.issues.map((issue) => issue.message).join("; ")}</p>)}</details>
+          {!snapshot.closure.fullNovelReady && <button className="secondary-button" disabled={busy || prepareMutation.isPending} onClick={() => prepareMutation.mutate("all")}>{t("Review roles and inspect closure")}</button>}
+        </div>
+      </section>}
 
       {snapshot.stage === "ready" && <nav className="compile-ready-tabs" aria-label={t("Compiled result views")}>
         <button type="button" className={readyView === "entities" ? "selected" : ""} aria-pressed={readyView === "entities"} onClick={() => setReadyView("entities")}>
@@ -702,7 +712,7 @@ function PreparationHeader({ snapshot }: { snapshot: PreparationSnapshot }) {
     <section className="preparation-header">
       <div className="preparation-stage-card">
         <span className={`stage-glyph stage-${snapshot.stage}`}>{stageNumber(snapshot.stage)}</span>
-        <div><small>{t("Current barrier")}</small><strong>{stageLabel(snapshot.stage, t)}</strong><p>{nextActionCopy(snapshot, t)}</p></div>
+        <div><small>{t("Current barrier")}</small><strong>{snapshot.stage === "create-branch" && !snapshot.closure?.fullNovelReady ? t("New play certification incomplete") : stageLabel(snapshot.stage, t)}</strong><p>{nextActionCopy(snapshot, t)}</p></div>
       </div>
       <div className="preparation-progress-card">
         <span><small>{t("Evidence batches")}</small><strong>{snapshot.progress.completedBatches}/{snapshot.progress.totalBatches}</strong></span>
@@ -714,7 +724,7 @@ function PreparationHeader({ snapshot }: { snapshot: PreparationSnapshot }) {
         <span><small>{t("Entities")}</small><strong>{audit?.canonical.entities ?? "—"}</strong></span>
         <span><small>{t("Events")}</small><strong>{audit?.canonical.events ?? "—"}</strong></span>
         <span><small>{t("Rules")}</small><strong>{audit?.canonical.rules ?? "—"}</strong></span>
-        <span><small>{t("Publication")}</small><strong>{t(audit?.readiness.publication ?? "unknown")}</strong></span>
+        <span><small>{t("Publication")}</small><strong>{t(snapshot.closure ? snapshot.closure.fullNovelReady ? "passed" : "blocked" : "unknown")}</strong></span>
       </div>
     </section>
   );
@@ -758,7 +768,7 @@ function nextActionCopy(snapshot: PreparationSnapshot, t: ReturnType<typeof useI
   if (snapshot.stage === "compile") return t("{count} evidence batch(es) remain.", { count: snapshot.progress.remainingBatches });
   if (snapshot.stage === "review") return t("Inspect proposal payloads and commit only validated artifacts.");
   if (snapshot.stage === "needs-initial-world") return t("Generate one evidence-backed playable checkpoint.");
-  if (snapshot.stage === "create-branch") return t("Publish a revision and create branch '{branch}'.", { branch: snapshot.branchId });
+  if (snapshot.stage === "create-branch") return !snapshot.closure?.fullNovelReady ? t("Complete role review and independent evaluation before publication.") : t("Publish a revision and create branch '{branch}'.", { branch: snapshot.branchId });
   if (snapshot.stage === "ready") return t("Branch '{branch}' is pinned to committed history.", { branch: snapshot.branchId });
   if (snapshot.stage === "repair") return t("Resolve the listed deterministic blockers before publication.");
   return t("Next action: {action}.", { action: snapshot.nextAction });

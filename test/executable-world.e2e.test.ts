@@ -1,3 +1,4 @@
+import { installHallCampRoute, hallCampWalkIntent, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -19,7 +20,7 @@ describe("executable world vertical slice", () => {
   it("compiles canon, replays it, then preserves a durable counterfactual divergence", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-e2e-"));
     roots.push(root);
-    const source = await createEvidenceFixture(root, "Hero\nHall\nCamp\nHero begins in the hall\nHero is promoted in the hall\n");
+    const source = await createEvidenceFixture(root, "Hero\nHall\nCamp\nHero begins in the hall\nHero is promoted in the hall\nHall and Camp have a one-minute footpath.\n");
     const proposals = new CompilerProposalService(root);
     const commits = new CompilerCommitService(root);
 
@@ -74,6 +75,7 @@ describe("executable world vertical slice", () => {
     expect(accepted.accepted.map((item) => item.kind)).toContain("initial-world");
     expect(accepted.accepted.map((item) => item.kind)).toContain("canonical-event");
 
+    await installHallCampRoute(root, source.evidence("Hall and Camp have a one-minute footpath."));
     const { canon, context } = await loadWorldContext(root);
     const initial = await new InitialWorldStore(root).get();
     expect(initial).not.toBeNull();
@@ -97,6 +99,8 @@ describe("executable world vertical slice", () => {
       branchId: "alternate",
       playerProposal: {
         proposalId: "leave-hall",
+        action: hallCampWalkAction,
+        timeAdvance: { amount: 1, unit: "minute" },
         branchId: "alternate",
         expectedParentCommit: branchGenesis,
         source: "player",

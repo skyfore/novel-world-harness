@@ -391,13 +391,16 @@ export class WorldRuntime {
     );
     const temporalMode = backgroundLimit > 0 ? input.temporalMode ?? "advance" : "current-window";
     let latestFrontier = await this.refreshFrontier(input.branchId, currentHead, { temporalMode });
-    for (let index = 0; index < backgroundLimit; index += 1) {
+    const rejectedAtHead = new Set<string>();
+    let backgroundCommits = 0;
+    for (let attempt = 0; attempt < MAX_CALLBACK_CANDIDATES && backgroundCommits < backgroundLimit; attempt += 1) {
       const candidate = selectEligible(
         backgroundKinds
           ? {
               ...latestFrontier,
               evaluated: latestFrontier.evaluated.filter((entry) =>
                 !excludedBackgroundPossibilityIds.has(entry.possibility.id)
+                && !rejectedAtHead.has(entry.possibility.id)
                 && backgroundKinds.has(entry.possibility.kind)
                 && Boolean(possibilityToProposal(entry))),
             }
@@ -405,6 +408,7 @@ export class WorldRuntime {
               ...latestFrontier,
               evaluated: latestFrontier.evaluated.filter((entry) =>
                 !excludedBackgroundPossibilityIds.has(entry.possibility.id)
+                && !rejectedAtHead.has(entry.possibility.id)
                 && Boolean(possibilityToProposal(entry))),
             },
         1,
@@ -424,8 +428,11 @@ export class WorldRuntime {
       }));
       if (!result.report.accepted) {
         rejectedProposals.push(proposal.proposalId);
-        break;
+        rejectedAtHead.add(candidate.possibility.id);
+        continue;
       }
+      backgroundCommits += 1;
+      rejectedAtHead.clear();
       currentHead = result.newHead;
       if (result.eventHash) committedEvents.push(result.eventHash);
       latestFrontier = await this.refreshFrontier(input.branchId, currentHead, { temporalMode });

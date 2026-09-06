@@ -1,3 +1,4 @@
+import { reviewNovelRoles } from "../workflow/role-review.js";
 import path from "node:path";
 import { getMarkdownTheme, type AgentSessionEvent, type ExtensionAPI, type ExtensionContext, type ExtensionFactory, type TransientAssistantStream } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
@@ -1737,6 +1738,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
       if (inspection.stage === "create-branch") {
         prepareAllHostActivity?.update("Publishing the prepared revision");
+        await reviewNovelRoles({ root: workspace.root, sourceId: inspection.source!.id, configPath: path.join(workspace.root, "novel-harness.yaml"), allowMissingConfig: true, ...(ctx.model ? { model: modelLabel(ctx.model) } : {}), onStatus: (message) => prepareAllHostActivity?.update(message) });
         const cached = await preparedCache.publish(inspection.source!);
         state.preparedCacheVerified = true;
         ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
@@ -1790,7 +1792,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (inspection.stage === "ready") {
         prepareAllHostActivity?.update("Verifying the playable revision");
         if (!state.preparedCacheVerified) {
-          const cached = await preparedCache.publish(inspection.source!);
+          await reviewNovelRoles({ root: workspace.root, sourceId: inspection.source!.id, configPath: path.join(workspace.root, "novel-harness.yaml"), allowMissingConfig: true, ...(ctx.model ? { model: modelLabel(ctx.model) } : {}), onStatus: (message) => prepareAllHostActivity?.update(message) });
+        const cached = await preparedCache.publish(inspection.source!);
           ctx.ui.notify(`${cached.status === "published" ? "Published" : "Verified"} prepared revision ${cached.bundleHash} for ${cached.contentMd5}.`, "info");
         }
         await stopPrepareAll(ctx, `Preparation complete. Run /play to choose a character on '${state.branchId}'.`, "info");

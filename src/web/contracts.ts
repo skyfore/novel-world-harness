@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { frozenWorldBaseSchema } from "../world/base-schema.js";
+import { preparedPlayRoleSchema } from "../world/play-role-schema.js";
 
 export const WEB_API_VERSION = "v1" as const;
 
@@ -417,6 +418,12 @@ export const preparationSnapshotSchema = z.object({
     rejected: z.number().int().nonnegative(),
   }).strict(),
   repairReasons: z.array(z.string()),
+  closure: z.object({
+    subjectSnapshotHash: z.string(), entryReady: z.boolean(), fullNovelReady: z.boolean(),
+    majorTotal: z.number().int().nonnegative(), readyTotal: z.number().int().nonnegative(),
+    evaluation: z.enum(["not-run", "blocked", "passed"]), roles: z.array(preparedPlayRoleSchema),
+    issues: z.array(z.object({ code: z.string(), message: z.string(), path: z.string().optional() }).strict()),
+  }).strict().optional(),
   audit: compilerAuditSummarySchema.optional(),
   updatedAt: z.string().datetime({ offset: true }),
 }).strict();
@@ -743,18 +750,14 @@ export const createPlaySessionRequestSchema = z.object({
 }).strict();
 
 /** Roles grounded in the active immutable base, independent of any branch head. */
-export const sourcePlayRoleSchema = z.object({
-  id: z.string().min(1),
-  canonicalName: z.string().min(1),
-  aliases: z.array(z.string()),
-  entryKind: z.enum(["opening", "canonical-scene"]),
-  entryTitle: z.string().min(1),
-}).strict();
+export const sourcePlayRoleSchema = preparedPlayRoleSchema;
 
 export const sourcePlayRoleListSchema = z.object({
   sourceId: z.string().min(1),
   sourceTitle: z.string().min(1),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/),
+  majorTotal: z.number().int().nonnegative(),
+  readyMajorTotal: z.number().int().nonnegative(),
   roles: z.array(sourcePlayRoleSchema),
 }).strict();
 
@@ -762,6 +765,7 @@ export const startFreshPlayRequestSchema = z.object({
   sourceId: z.string().min(1),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/),
   actorId: z.string().min(1),
+  entryCutHash: z.string().regex(/^[a-f0-9]{64}$/),
   title: z.string().trim().min(1).max(200).optional(),
   clientRequestId: z.string().min(1).max(200),
 }).strict();

@@ -98,11 +98,15 @@ export function materializeNormProposal(
     elapsedDays: number;
     templates: ReadonlyMap<string, NormTemplate>;
     proposalHash?: ObjectHash;
+    /** Supplied by the host after actor ownership checks, never by the model. */
+    acknowledgingActorId?: string;
+    existingSubjects?: ReadonlyMap<string, string>;
   },
 ): MaterializedNormProposal {
   const proposal = normProposalDeltaSchema.parse(input);
   const proposalHash = options.proposalHash ?? contentHash(proposal);
   const localBindings = new Map<string, string>();
+  const subjects = new Map(options.existingSubjects);
   const resolve = (ref: string): string => {
     if (!ref.startsWith("local-")) return ref;
     const id = localBindings.get(ref);
@@ -125,6 +129,7 @@ export function materializeNormProposal(
         payload: operation.norm,
       }).slice(0, 32)}`;
       localBindings.set(operation.localRef, id);
+      subjects.set(id, operation.norm.subjectActorId);
       operations.push({
         op: operation.op,
         norm: {
@@ -140,9 +145,15 @@ export function materializeNormProposal(
       return;
     }
     const normId = resolve(operation.normRef);
-    if (operation.op === "satisfy-norm") operations.push({ op: operation.op, normId, ...(operation.byActorId ? { byActorId: operation.byActorId } : {}) });
+    const acknowledgement = options.acknowledgingActorId && operation.op !== "violate-norm"
+      && !(operation.op === "repair-norm" && subjects.get(normId) === options.acknowledgingActorId);
+    const resolution = acknowledgement
+      ? { byActorId: subjects.get(normId), acknowledgedByActorId: options.acknowledgingActorId }
+      : operation.byActorId || options.acknowledgingActorId ? { byActorId: operation.byActorId ?? options.acknowledgingActorId } : {};
+    if (options.acknowledgingActorId && operation.op !== "violate-norm" && !subjects.has(normId)) throw new Error(`Unknown norm subject ${normId}`);
+    if (operation.op === "satisfy-norm") operations.push({ op: operation.op, normId, ...resolution });
     if (operation.op === "violate-norm") operations.push({ op: operation.op, normId, ...(operation.byActorId ? { byActorId: operation.byActorId } : {}), ...(operation.reasonId ? { reasonId: operation.reasonId } : {}) });
-    if (operation.op === "repair-norm") operations.push({ op: operation.op, normId, ...(operation.byActorId ? { byActorId: operation.byActorId } : {}), reparationId: operation.reparationId });
+    if (operation.op === "repair-norm") operations.push({ op: operation.op, normId, ...resolution, reparationId: operation.reparationId });
   });
   return { delta: normDeltaSchema.parse({ version: 1, operations }), proposalHash, localBindings };
 }
@@ -272,6 +283,7 @@ export function validateNormReparation(
 ): void {
   const reparation = template.reparations.find((item) => item.id === reparationId);
   if (!reparation) throw new Error(`Norm ${instance.id} has no reparation ${reparationId}`);
+  if ((!reparation.actionPattern || reparation.actionPattern.kind === "any") && !reparation.requiresAfter.length) throw new Error(`Norm reparation ${reparationId} requires an executable action or state condition`);
   if (reparation.actionPattern && (!action || !actionPatternMatches(reparation.actionPattern, action))) {
     throw new Error(`Norm reparation ${reparationId} requires a matching action`);
   }

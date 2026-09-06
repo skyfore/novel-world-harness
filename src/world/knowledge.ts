@@ -11,7 +11,8 @@ import type {
 } from "./model.js";
 import type { WorldEngine } from "./engine.js";
 import { knownStateFieldKeys, projectActorVisibleState } from "./actor-visible.js";
-import { evidenceBelongsExclusivelyToSource } from "./source-scope.js";
+import { evidenceBelongsExclusivelyToSource, resolveCommitSourceId } from "./source-scope.js";
+import { contentHash } from "./canonical.js";
 import { isCommunicatingKnowledgeSource, projectPropositionObject } from "./knowledge-semantics.js";
 import type { BranchSemanticState } from "./semantic-effects.js";
 
@@ -26,6 +27,20 @@ export type ActorWorldView = {
   selfState: Record<string, unknown>;
   knowledge: Array<{ fact: KnowledgeFact; claim?: Claim; proposition?: Proposition; attribution?: Attribution; branchGrounded?: boolean }>;
 };
+
+// Only projector-created entries can use committed-event provenance. A serialized
+// or model-provided branchGrounded flag is never an admission credential.
+const committedKnowledge = new WeakMap<object, { sourceId?: string; hash: string }>();
+
+export function actorKnowledgeBelongsToSource(entry: ActorWorldView["knowledge"][number], sourceId?: string): boolean {
+  if (!entry.claim) return false;
+  if (!sourceId) return true;
+  if (entry.branchGrounded) {
+    const authority = committedKnowledge.get(entry);
+    return authority?.sourceId === sourceId && authority.hash === contentHash(entry);
+  }
+  return evidenceBelongsExclusivelyToSource(entry.claim.evidence, sourceId);
+}
 
 export type KnowledgeReducerContext = {
   entities: ReadonlyMap<EntityId, Entity>;
@@ -116,7 +131,7 @@ export function actionableKnowledgeEntries(
   return view.knowledge.filter((entry): entry is ActorWorldView["knowledge"][number] & { claim: Claim } =>
     Boolean(entry.claim)
     && isActionableKnowledge(entry.fact)
-    && (entry.branchGrounded || evidenceBelongsExclusivelyToSource(entry.claim?.evidence ?? [], sourceId)));
+    && actorKnowledgeBelongsToSource(entry, sourceId));
 }
 
 export function actionableKnowledgeClaimIds(view: ActorWorldView, sourceId?: string): Set<string> {
@@ -138,18 +153,21 @@ export class KnowledgeProjector {
     if (state.atCommit !== commitId) throw new Error(`World state ${state.atCommit} does not match requested commit ${commitId}`);
     const projection = await this.engine.projections.project(commitId);
     const knowledge = projection.knowledge;
+    const sourceId = await resolveCommitSourceId(this.engine, context, commitId);
     const facts = Object.values(knowledge.actors[actorId] ?? {})
       .sort((left, right) => left.claimId.localeCompare(right.claimId))
       .map((fact) => {
-        const branchProposition = fact.propositionId ? projection.semantics.propositions[fact.propositionId] : undefined;
-        const proposition = fact.propositionId
-          ? context.propositions?.get(fact.propositionId) ?? (branchProposition ? stripIntroduced(branchProposition) : undefined)
-          : undefined;
-        const branchAttribution = fact.attributionId ? projection.semantics.attributions[fact.attributionId] : undefined;
-        const attribution = fact.attributionId
-          ? context.attributions?.get(fact.attributionId) ?? (branchAttribution ? stripIntroduced(branchAttribution) : undefined)
-          : undefined;
         const branchClaim = projection.semantics.claims[fact.claimId];
+        const propositionId = fact.propositionId ?? branchClaim?.propositionId;
+        const attributionId = fact.attributionId ?? branchClaim?.attributionId;
+        const branchProposition = propositionId ? projection.semantics.propositions[propositionId] : undefined;
+        const proposition = propositionId
+          ? context.propositions?.get(propositionId) ?? (branchProposition ? stripIntroduced(branchProposition) : undefined)
+          : undefined;
+        const branchAttribution = attributionId ? projection.semantics.attributions[attributionId] : undefined;
+        const attribution = attributionId
+          ? context.attributions?.get(attributionId) ?? (branchAttribution ? stripIntroduced(branchAttribution) : undefined)
+          : undefined;
         const claim = context.claims?.get(fact.claimId) ?? (branchClaim && proposition
           ? {
               id: branchClaim.id,
@@ -172,6 +190,9 @@ export class KnowledgeProjector {
         ...(attribution ? { attribution } : {}),
         ...(branchGrounded ? { branchGrounded: true } : {}),
       }));
+    for (const entry of facts) {
+      if (entry.branchGrounded) committedKnowledge.set(entry, { sourceId, hash: contentHash(entry) });
+    }
     const stateKnowledge = knownStateFieldKeys(
       actorId,
       facts

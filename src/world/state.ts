@@ -9,7 +9,7 @@ import type {
   WorldState,
   WorldRule,
 } from "./model.js";
-import { storyTimeAtOrAfter, storyTimeBefore } from "./time.js";
+import { compareStoryTime } from "./time.js";
 import { RELATIONSHIP_TYPE_IDS } from "./relationship-ontology.js";
 
 export class StateSchemaRegistry {
@@ -272,46 +272,57 @@ export function emptyWorldState(atCommit: string, step = 0): WorldState {
   return { atCommit, logicalTime: { step }, values: {}, activeRuleIds: [] };
 }
 
-export function evaluatePredicate(state: WorldState, predicate: Predicate): boolean {
+export type PredicateTruth = "true" | "false" | "unknown";
+
+/** Negation preserves missing information; only declared closed-world fields imply absence. */
+export function evaluatePredicateTruth(state: WorldState, predicate: Predicate, registry?: StateSchemaRegistry): PredicateTruth {
+  const truth = (value: boolean): PredicateTruth => value ? "true" : "false";
   const fields = "entityId" in predicate ? state.values[predicate.entityId] : undefined;
+  if ("entityId" in predicate && "field" in predicate && (!fields || !Object.hasOwn(fields, predicate.field) || fields[predicate.field] === null)) {
+    const spec = registry?.list().find((field) => field.key === predicate.field)
+      ?? DEFAULT_STATE_FIELDS.find((field) => field.key === predicate.field);
+    return spec?.worldAssumption === "closed" ? "false" : "unknown";
+  }
   switch (predicate.op) {
-    case "fact-equals":
-      return deepEqual(fields?.[predicate.field], predicate.value);
-    case "fact-gte": {
-      const value = fields?.[predicate.field];
-      return typeof value === "number" && value >= predicate.value;
-    }
+    case "fact-equals": return truth(deepEqual(fields?.[predicate.field], predicate.value));
+    case "fact-gte":
     case "fact-lte": {
       const value = fields?.[predicate.field];
-      return typeof value === "number" && value <= predicate.value;
+      return typeof value === "number" ? truth(predicate.op === "fact-gte" ? value >= predicate.value : value <= predicate.value) : "unknown";
     }
-    case "fact-exists":
-      return fields !== undefined && Object.prototype.hasOwnProperty.call(fields, predicate.field) && fields[predicate.field] !== null;
+    case "fact-exists": return "true";
     case "entity-in": {
       const value = fields?.[predicate.field];
-      return Array.isArray(value) && value.includes(predicate.member);
+      return Array.isArray(value) ? truth(value.includes(predicate.member)) : "unknown";
     }
-    case "rule-active":
-      return state.activeRuleIds.includes(predicate.ruleId);
-    case "after-step":
-      return state.logicalTime.step > predicate.step;
-    case "before-step":
-      return state.logicalTime.step < predicate.step;
-    case "elapsed-days-gte":
-      return (state.logicalTime.elapsedDays ?? 0) >= predicate.days;
-    case "elapsed-days-lte":
-      return (state.logicalTime.elapsedDays ?? 0) <= predicate.days;
+    // These inventories are complete committed engine projections, hence closed-world.
+    case "rule-active": return truth(state.activeRuleIds.includes(predicate.ruleId));
+    case "after-step": return truth(state.logicalTime.step > predicate.step);
+    case "before-step": return truth(state.logicalTime.step < predicate.step);
+    case "elapsed-days-gte": return truth((state.logicalTime.elapsedDays ?? 0) >= predicate.days);
+    case "elapsed-days-lte": return truth((state.logicalTime.elapsedDays ?? 0) <= predicate.days);
     case "story-time-at-or-after":
-      return storyTimeAtOrAfter(state.logicalTime.storyTime, predicate.time);
-    case "story-time-before":
-      return storyTimeBefore(state.logicalTime.storyTime, predicate.time);
-    case "all":
-      return predicate.items.every((item) => evaluatePredicate(state, item));
-    case "any":
-      return predicate.items.some((item) => evaluatePredicate(state, item));
-    case "not":
-      return !evaluatePredicate(state, predicate.item);
+    case "story-time-before": {
+      const order = compareStoryTime(state.logicalTime.storyTime, predicate.time);
+      return order === undefined ? "unknown" : truth(predicate.op === "story-time-before" ? order === -1 : order >= 0);
+    }
+    case "all": {
+      const items = predicate.items.map((item) => evaluatePredicateTruth(state, item, registry));
+      return items.includes("false") ? "false" : items.includes("unknown") ? "unknown" : "true";
+    }
+    case "any": {
+      const items = predicate.items.map((item) => evaluatePredicateTruth(state, item, registry));
+      return items.includes("true") ? "true" : items.includes("unknown") ? "unknown" : "false";
+    }
+    case "not": {
+      const item = evaluatePredicateTruth(state, predicate.item, registry);
+      return item === "unknown" ? item : item === "true" ? "false" : "true";
+    }
   }
+}
+
+export function evaluatePredicate(state: WorldState, predicate: Predicate, registry?: StateSchemaRegistry): boolean {
+  return evaluatePredicateTruth(state, predicate, registry) === "true";
 }
 
 export function applyStateDelta(

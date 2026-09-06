@@ -1,3 +1,4 @@
+import { applyEventExecutions, validateEventExecutions, type EventExecution } from "./event-execution.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -32,7 +33,7 @@ const validatePreparedSnapshotScope = (
   }
 };
 export const canonicalSnapshotSchema = z.object({
-  version: z.literal(8),
+  version: z.literal(9),
   sourceId: idSchema.optional(),
   preparedRevisionHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   entities: z.array(revisionRefSchema),
@@ -46,6 +47,7 @@ export const canonicalSnapshotSchema = z.object({
   sceneOccurrences: z.array(revisionRefSchema),
   eventFrames: z.array(revisionRefSchema),
   actionSchemas: z.array(revisionRefSchema),
+  eventExecutions: z.array(revisionRefSchema),
   actionConstraints: z.array(revisionRefSchema),
   normTemplates: z.array(revisionRefSchema),
   processTemplates: z.array(revisionRefSchema),
@@ -69,6 +71,7 @@ export type ScopedWorldArtifacts = {
   sceneOccurrences: readonly SceneOccurrence[];
   eventFrames: readonly EventFrame[];
   actionSchemas: readonly ActionSchema[];
+  eventExecutions?: readonly EventExecution[];
   actionConstraints?: readonly ActionConstraint[];
   normTemplates?: readonly NormTemplate[];
   processTemplates?: readonly ProcessTemplate[];
@@ -89,7 +92,7 @@ export class WorldContextStore {
   }
 
   async captureCurrent(sourceId?: string): Promise<WorldModelContext> {
-    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, actionConstraints, normTemplates, processTemplates, rules, goals, models, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, eventExecutions, actionConstraints, normTemplates, processTemplates, rules, goals, models, possibilities] = await Promise.all([
       this.canon.listEntities(),
       this.canon.listPropositions(),
       this.canon.listAttributions(),
@@ -101,6 +104,7 @@ export class WorldContextStore {
       this.canon.listSceneOccurrences(),
       this.canon.listEventFrames(),
       this.canon.listActionSchemas(),
+      this.canon.listEventExecutions(),
       this.canon.listActionConstraints(),
       this.canon.listNormTemplates(),
       this.canon.listProcessTemplates(),
@@ -122,6 +126,7 @@ export class WorldContextStore {
       spatialRelations: spatialRelations.filter(belongsToSource),
       sceneOccurrences: sceneOccurrences.filter(belongsToSource),
       eventFrames: eventFrames.filter(belongsToSource),
+      eventExecutions: eventExecutions.filter(belongsToSource),
       actionSchemas: actionSchemas.filter((schema) => schema.induction.kind === "domain-module" || belongsToSource(schema)),
       actionConstraints: actionConstraints.filter((constraint) => constraint.induction.kind === "domain-module" || belongsToSource(constraint)),
       normTemplates: normTemplates.filter((template) => template.induction.kind === "domain-module" || belongsToSource(template)),
@@ -157,6 +162,7 @@ export class WorldContextStore {
       ...artifacts.sceneOccurrences.map((item) => this.canon.ensureSceneOccurrenceRevision(item)),
       ...artifacts.eventFrames.map((item) => this.canon.ensureEventFrameRevision(item)),
       ...artifacts.actionSchemas.map((item) => this.canon.ensureActionSchemaRevision(item)),
+      ...(artifacts.eventExecutions ?? []).map((item) => this.canon.ensureEventExecutionRevision(item)),
       ...(artifacts.actionConstraints ?? []).map((item) => this.canon.ensureActionConstraintRevision(item)),
       ...(artifacts.normTemplates ?? []).map((item) => this.canon.ensureNormTemplateRevision(item)),
       ...(artifacts.processTemplates ?? []).map((item) => this.canon.ensureProcessTemplateRevision(item)),
@@ -194,6 +200,7 @@ export class WorldContextStore {
         artifacts.spatialRelations,
         artifacts.sceneOccurrences,
         artifacts.eventFrames,
+        artifacts.eventExecutions ?? [],
         artifacts.actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
         actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
         normTemplates.filter((template) => template.induction.kind === "source-pattern"),
@@ -217,7 +224,7 @@ export class WorldContextStore {
         ? items.map((item) => ({ id: item.id, hash: contentHash(item) })).sort((left, right) => left.id.localeCompare(right.id))
         : this.possibilityRefs(items.map((item) => item.id));
     const snapshot = canonicalSnapshotSchema.parse({
-      version: 8,
+      version: 9,
       ...(sourceId ? { sourceId } : {}),
       ...(preparedRevisionHash ? { preparedRevisionHash } : {}),
       entities: await canonicalRefs("entities", artifacts.entities),
@@ -231,6 +238,7 @@ export class WorldContextStore {
       sceneOccurrences: await canonicalRefs("scene-occurrences", artifacts.sceneOccurrences),
       eventFrames: await canonicalRefs("event-frames", artifacts.eventFrames),
       actionSchemas: await canonicalRefs("action-schemas", artifacts.actionSchemas),
+      eventExecutions: await canonicalRefs("event-executions", artifacts.eventExecutions ?? []),
       actionConstraints: await canonicalRefs("action-constraints", actionConstraints),
       normTemplates: await canonicalRefs("norm-templates", normTemplates),
       processTemplates: await canonicalRefs("process-templates", processTemplates),
@@ -280,7 +288,7 @@ export class WorldContextStore {
   }
 
   private async hydrate(snapshotHash: string, snapshot: CanonicalSnapshot): Promise<WorldModelContext> {
-    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, actionConstraints, normTemplates, processTemplates, rules, actorGoals, actorModels, possibilities] = await Promise.all([
+    const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, spatialRelations, sceneOccurrences, eventFrames, actionSchemas, eventExecutions, actionConstraints, normTemplates, processTemplates, rules, actorGoals, actorModels, possibilities] = await Promise.all([
       Promise.all(snapshot.entities.map((ref) => this.canon.getEntityRevision(ref.id, ref.hash))),
       Promise.all(snapshot.propositions.map((ref) => this.canon.getPropositionRevision(ref.id, ref.hash))),
       Promise.all(snapshot.attributions.map((ref) => this.canon.getAttributionRevision(ref.id, ref.hash))),
@@ -292,6 +300,7 @@ export class WorldContextStore {
       Promise.all(snapshot.sceneOccurrences.map((ref) => this.canon.getSceneOccurrenceRevision(ref.id, ref.hash))),
       Promise.all(snapshot.eventFrames.map((ref) => this.canon.getEventFrameRevision(ref.id, ref.hash))),
       Promise.all(snapshot.actionSchemas.map((ref) => this.canon.getActionSchemaRevision(ref.id, ref.hash))),
+      Promise.all(snapshot.eventExecutions.map((ref) => this.canon.getEventExecutionRevision(ref.id, ref.hash))),
       Promise.all(snapshot.actionConstraints.map((ref) => this.canon.getActionConstraintRevision(ref.id, ref.hash))),
       Promise.all(snapshot.normTemplates.map((ref) => this.canon.getNormTemplateRevision(ref.id, ref.hash))),
       Promise.all(snapshot.processTemplates.map((ref) => this.canon.getProcessTemplateRevision(ref.id, ref.hash))),
@@ -312,6 +321,7 @@ export class WorldContextStore {
         spatialRelations,
         sceneOccurrences,
         eventFrames,
+        eventExecutions,
         actionSchemas.filter((schema) => schema.induction.kind === "source-pattern"),
         actionConstraints.filter((constraint) => constraint.induction.kind === "source-pattern"),
         normTemplates.filter((template) => template.induction.kind === "source-pattern"),
@@ -336,7 +346,9 @@ export class WorldContextStore {
       processTemplates,
     });
     const participationIndex = eventParticipationsByEvent(eventParticipations);
-    const projectedEvents = events.map((event) =>
+    const executionIssues = validateEventExecutions(eventExecutions, { participations: eventParticipations, events: new Map(events.map((event) => [event.id, event])), entities: new Map(entities.map((entity) => [entity.id, entity])), actionSchemas: new Map(actionSchemas.map((schema) => [schema.id, schema])) });
+    if (executionIssues.length) throw new Error(executionIssues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
+    const projectedEvents = applyEventExecutions(events, eventExecutions).map((event) =>
       projectEventParticipations(event, participationIndex.get(event.id) ?? []));
     return {
       canonicalSnapshotHash: snapshotHash,

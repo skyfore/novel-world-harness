@@ -14,6 +14,8 @@ import {
 } from "./model.js";
 import { actionRoleSpecSchema } from "./action-ontology.js";
 import type { ProcessInstance, ProcessState } from "./process-effects.js";
+import { actionPatternSchema, constraintPredicateSchema } from "./action-constraint.js";
+import { mechanismVisibilityFields, validateMechanismVisibility } from "./mechanism-visibility.js";
 
 export const PROCESS_ONTOLOGY_VERSION = "process-template-v1" as const;
 
@@ -35,6 +37,25 @@ export const processTransitionSchema = z.object({
 }).strict();
 export type ProcessTransition = z.infer<typeof processTransitionSchema>;
 
+/** Actor changes need a declared mechanism, independent of process ownership. */
+export const processActorControlSchema = z.object({
+  op: z.enum(["start-process", "advance-process", "pause-process", "resume-process", "finish-process"]),
+  actionPattern: actionPatternSchema,
+  fromPhaseId: idSchema.optional(),
+  toPhaseId: idSchema.optional(),
+  outcomeId: idSchema.optional(),
+  maximumAdvance: z.number().finite().positive().max(1).optional(),
+  minimumElapsedDays: z.number().finite().nonnegative().default(0),
+  requiresBefore: z.array(constraintPredicateSchema).max(32).default([]),
+  requiresAfter: z.array(constraintPredicateSchema).max(32).default([]),
+}).strict().superRefine((value, ctx) => {
+  if (value.op === "advance-process" && value.maximumAdvance === undefined) ctx.addIssue({ code: "custom", path: ["maximumAdvance"], message: "Actor progress requires a per-turn maximum" });
+  if ((value.op === "advance-process" || value.op === "finish-process") && value.actionPattern.kind === "any"
+    && value.minimumElapsedDays === 0 && !value.requiresBefore.length && !value.requiresAfter.length) {
+    ctx.addIssue({ code: "custom", message: "Progress and completion require a named action, elapsed time or state conditions" });
+  }
+});
+
 export const processTemplateSchema = z.object({
   ontologyVersion: z.literal(PROCESS_ONTOLOGY_VERSION),
   id: idSchema,
@@ -43,15 +64,18 @@ export const processTemplateSchema = z.object({
   phases: z.array(processPhaseSchema).min(2).max(64),
   initialPhaseId: idSchema,
   transitions: z.array(processTransitionSchema).min(1).max(128),
+  actorControls: z.array(processActorControlSchema).max(128).optional(),
   cadence: z.object({ kind: z.literal("elapsed-days"), intervalDays: z.number().finite().positive() }).strict().optional(),
   outcomeIds: z.array(idSchema).min(1).max(64),
   visibility: z.enum(["public", "observable", "knowledge", "engine"]),
+  knownByClaimIds: mechanismVisibilityFields.knownByClaimIds,
   induction: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("source-pattern"), supportingEventIds: z.array(idSchema).min(1).max(64) }).strict(),
     z.object({ kind: z.literal("domain-module"), moduleId: idSchema, moduleVersion: z.string().trim().min(1).max(120) }).strict(),
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
+  validateMechanismVisibility(value, ctx);
   for (const [path, ids] of [
     ["ownerRoles", value.ownerRoles.map((item) => item.id)],
     ["phases", value.phases.map((item) => item.id)],
@@ -81,6 +105,10 @@ export const processTemplateSchema = z.object({
     transitions.add(key);
   });
   if (!value.phases.some((phase) => phase.terminal)) ctx.addIssue({ code: "custom", path: ["phases"], message: "A process template requires a terminal phase" });
+  value.actorControls?.forEach((control, index) => {
+    for (const key of ["fromPhaseId", "toPhaseId"] as const) if (control[key] && !phases.has(control[key]!)) ctx.addIssue({ code: "custom", path: ["actorControls", index, key], message: "Unknown process control phase" });
+    if (control.outcomeId && !value.outcomeIds.includes(control.outcomeId)) ctx.addIssue({ code: "custom", path: ["actorControls", index, "outcomeId"], message: "Unknown process control outcome" });
+  });
   if (value.induction.kind === "source-pattern" && !value.evidence.length) ctx.addIssue({ code: "custom", path: ["evidence"], message: "A source process template requires evidence" });
   if (value.induction.kind === "domain-module" && value.evidence.length) ctx.addIssue({ code: "custom", path: ["evidence"], message: "Domain processes use module provenance, not novel EvidenceRefs" });
 });
@@ -160,6 +188,7 @@ export function materializeProcessProposal(
 export function validateProcessTemplateCatalog(
   templatesInput: Iterable<ProcessTemplate>,
   canonicalEventIds: ReadonlySet<string> = new Set(),
+  catalog?: { entities: ReadonlyMap<string, Entity>; actionSchemas: ReadonlyMap<string, import("./action-ontology.js").ActionSchema> },
 ): ValidationIssue[] {
   const templates = [...templatesInput].map((item) => processTemplateSchema.parse(item));
   const issues: ValidationIssue[] = [];
@@ -167,6 +196,18 @@ export function validateProcessTemplateCatalog(
     issues.push(issue("DUPLICATE_PROCESS_TEMPLATE", "Process template IDs must be unique", "processTemplates"));
   }
   templates.forEach((template, templateIndex) => {
+    template.actorControls?.forEach((control, controlIndex) => {
+      const path = `processTemplates.${templateIndex}.actorControls.${controlIndex}`;
+      if (catalog && control.actionPattern.kind === "schema" && !catalog.actionSchemas.has(control.actionPattern.schemaId)) issues.push(issue("UNKNOWN_PROCESS_CONTROL_ACTION", `Unknown process action ${control.actionPattern.schemaId}`, path));
+      const inspect = (predicate: import("./action-constraint.js").ConstraintPredicate): void => {
+        if (predicate.op === "all" || predicate.op === "any") return predicate.items.forEach(inspect);
+        if (predicate.op === "not") return inspect(predicate.item);
+        const reference = predicate.entity;
+        if (reference.kind === "role" && !template.ownerRoles.some((role) => role.id === reference.roleId && role.maxCardinality === 1)) issues.push(issue("UNKNOWN_PROCESS_CONTROL_ROLE", "Process control predicates require a single declared owner role", path));
+        if (catalog && predicate.entity.kind === "entity" && !catalog.entities.has(predicate.entity.entityId)) issues.push(issue("UNKNOWN_PROCESS_CONTROL_ENTITY", `Unknown process control entity ${predicate.entity.entityId}`, path));
+      };
+      [...control.requiresBefore, ...control.requiresAfter].forEach(inspect);
+    });
     if (template.induction.kind === "source-pattern") template.induction.supportingEventIds.forEach((eventId, eventIndex) => {
       if (!canonicalEventIds.has(eventId)) issues.push(issue("UNKNOWN_PROCESS_SUPPORT_EVENT", `Process template ${template.id} cites unknown event ${eventId}`, `processTemplates.${templateIndex}.induction.supportingEventIds.${eventIndex}`));
     });

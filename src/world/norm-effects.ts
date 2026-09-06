@@ -9,6 +9,7 @@ export type NormInstance = InstantiatedNorm & {
   instantiatedBy: EffectProvenance;
   updatedBy: EffectProvenance;
   resolvedByActorId?: EntityId;
+  acknowledgedByActorId?: EntityId;
   violationReasonId?: string;
   reparationId?: string;
 };
@@ -63,12 +64,14 @@ export function applyNormDelta(
       case "satisfy-norm": {
         const norm = requireNorm(output, operation.normId);
         if (norm.status !== "active") throw new Error(`Norm ${norm.id} cannot be satisfied while ${norm.status}`);
+        validateAcknowledgement(norm, operation.acknowledgedByActorId, context);
         if (operation.byActorId) {
           requireCharacter(context.entities, operation.byActorId, `Norm ${norm.id} resolver`);
           if (operation.byActorId !== norm.subjectActorId) throw new Error(`Norm ${norm.id} can only be satisfied by its subject`);
         }
         norm.status = "satisfied";
         if (operation.byActorId) norm.resolvedByActorId = operation.byActorId;
+        if (operation.acknowledgedByActorId) norm.acknowledgedByActorId = operation.acknowledgedByActorId;
         norm.updatedBy = provenance;
         break;
       }
@@ -88,6 +91,7 @@ export function applyNormDelta(
       case "repair-norm": {
         const norm = requireNorm(output, operation.normId);
         if (norm.status !== "violated") throw new Error(`Norm ${norm.id} cannot be repaired while ${norm.status}`);
+        validateAcknowledgement(norm, operation.acknowledgedByActorId, context);
         if (operation.byActorId) requireCharacter(context.entities, operation.byActorId, `Norm ${norm.id} repair actor`);
         const template = context.templates.get(norm.templateId);
         if (!template) throw new Error(`Norm ${norm.id} cannot be repaired without an executable norm template`);
@@ -95,6 +99,7 @@ export function applyNormDelta(
         validateNormReparation(norm, template, operation.reparationId, context.action, context.postState);
         norm.status = "repaired";
         if (operation.byActorId) norm.resolvedByActorId = operation.byActorId;
+        if (operation.acknowledgedByActorId) norm.acknowledgedByActorId = operation.acknowledgedByActorId;
         norm.reparationId = operation.reparationId;
         norm.updatedBy = provenance;
         break;
@@ -102,6 +107,15 @@ export function applyNormDelta(
     }
   }
   return output;
+}
+
+function validateAcknowledgement(norm: NormInstance, actorId: string | undefined, context: NormReducerContext): void {
+  if (!actorId) return;
+  requireCharacter(context.entities, actorId, `Norm ${norm.id} acknowledger`);
+  if (actorId === norm.subjectActorId || (actorId !== norm.beneficiaryActorId
+    && actorId !== context.templates.get(norm.templateId)?.authorityEntityId)) {
+    throw new Error(`Norm ${norm.id} acknowledgement requires an independent beneficiary or authority`);
+  }
 }
 
 function requireNorm(state: NormState, normId: string): NormInstance {

@@ -311,7 +311,7 @@ describe("compiler gold evaluation", () => {
       evidence: fixture.evidence("Hero tells Friend to run. Friend leaves for Road."),
     });
     await canon.putActionSchema({
-      ontologyVersion: "action-schema-v1",
+      ontologyVersion: "action-schema-v1", initiatorRoleId: "actor",
       id: "action-depart",
       name: "Depart after instruction",
       roles: [{ id: "actor", label: "departing actor", allowedEntityKinds: ["character"], minCardinality: 1, maxCardinality: 1 }],

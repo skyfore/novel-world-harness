@@ -10,9 +10,11 @@ import {
   type StateValue,
   type ValidationIssue,
   type WorldState,
+  type Predicate,
 } from "./model.js";
 import { evaluatePredicate } from "./state.js";
 import type { ActionSchema } from "./action-ontology.js";
+import { mechanismVisibilityFields, validateMechanismVisibility } from "./mechanism-visibility.js";
 
 export const ACTION_CONSTRAINT_ONTOLOGY_VERSION = "action-constraint-v1" as const;
 
@@ -76,12 +78,14 @@ export const actionConstraintSchema = z.object({
   overridesConstraintIds: z.array(idSchema).max(64).default([]),
   status: z.enum(["supported", "contested"]),
   visibility: z.enum(["public", "observable", "knowledge", "engine"]),
+  knownByClaimIds: mechanismVisibilityFields.knownByClaimIds,
   induction: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("source-pattern"), supportingEventIds: z.array(idSchema).min(1).max(64) }).strict(),
     z.object({ kind: z.literal("domain-module"), moduleId: idSchema, moduleVersion: z.string().trim().min(1).max(120) }).strict(),
   ]),
   evidence: z.array(evidenceRefSchema),
 }).strict().superRefine((value, ctx) => {
+  validateMechanismVisibility(value, ctx);
   for (const [path, ids] of [
     ["clauses", value.clauses.map((item) => item.id)],
     ["exceptions", value.exceptions.map((item) => item.id)],
@@ -254,18 +258,15 @@ function evaluateConstraintPredicate(
   predicate: ConstraintPredicate,
   binding: ConstraintBinding,
 ): boolean {
-  if (predicate.op === "all") return predicate.items.every((item) => evaluateConstraintPredicate(state, item, binding));
-  if (predicate.op === "any") return predicate.items.some((item) => evaluateConstraintPredicate(state, item, binding));
-  if (predicate.op === "not") return !evaluateConstraintPredicate(state, predicate.item, binding);
-  const entityId = resolveConstraintEntity(predicate.entity, binding);
-  const fields = state.values[entityId];
-  if (predicate.op === "fact-exists") return fields !== undefined
-    && Object.prototype.hasOwnProperty.call(fields, predicate.field)
-    && fields[predicate.field] !== null;
-  const value = fields?.[predicate.field];
-  if (predicate.op === "fact-equals") return JSON.stringify(value) === JSON.stringify(predicate.value);
-  if (predicate.op === "fact-gte") return typeof value === "number" && value >= predicate.value;
-  return typeof value === "number" && value <= predicate.value;
+  return evaluatePredicate(state, bindConstraintPredicate(predicate, binding));
+}
+
+/** Binding preserves boolean structure so unknown facts remain unknown under NOT. */
+export function bindConstraintPredicate(predicate: ConstraintPredicate, binding: ConstraintBinding): Predicate {
+  if (predicate.op === "all" || predicate.op === "any") return { op: predicate.op, items: predicate.items.map((item) => bindConstraintPredicate(item, binding)) };
+  if (predicate.op === "not") return { op: "not", item: bindConstraintPredicate(predicate.item, binding) };
+  const { entity, ...fact } = predicate;
+  return { ...fact, entityId: resolveConstraintEntity(entity, binding) };
 }
 
 function resolveConstraintEntity(reference: ConstraintEntityRef, binding: ConstraintBinding): string {

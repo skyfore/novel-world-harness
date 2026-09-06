@@ -7,6 +7,7 @@ import { worldStorageRoot } from "./paths.js";
 import {
   actorEventObservationSchema,
   evidenceRefSchema,
+  entryProjectionSeedSchema,
   idSchema,
   knowledgeDeltaSchema,
   participantPresenceSchema,
@@ -202,6 +203,7 @@ export const initialWorldSchema = z
     actorObservations: z.array(actorEventObservationSchema).max(128).optional(),
     delta: stateDeltaSchema,
     knowledge: knowledgeDeltaSchema.optional(),
+    projectionSeed: entryProjectionSeedSchema.optional(),
     checkpoint: openingCheckpointSchema.optional(),
     evidence: z.array(evidenceRefSchema).min(1),
   })

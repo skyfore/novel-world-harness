@@ -1,3 +1,4 @@
+import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -132,10 +133,11 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
   "event-relation": { name: "propose_event_relation", label: "Propose event relation", description: "Submit one independently evidenced temporal, causal, explanatory, subevent, coreference, or narrative-continuation relation. Typed operationality is authoritative at runtime; narrative sequence and legacy causalParents never imply causation." },
   "scene-occurrence": { name: "propose_scene_occurrence", label: "Propose scene occurrence", description: "Submit one evidence-backed canonical scene occurrence with discourse segments, event membership, location, viewpoint, physical presence, story interval, and entry/exit conditions. It describes source canon and never activates a future runtime scene." },
   "event-frame": { name: "propose_event_frame", label: "Propose event frame", description: "Submit one reusable evidence-backed event frame with typed semantic roles, kind/cardinality constraints, and temporal shape. A frame classifies occurrences; it is not itself an event or world change." },
-  "action-schema": { name: "propose_action_schema", label: "Propose action schema", description: "Submit a source-induced reusable action schema only when at least two canonical events support the pattern. Declare role and parameter binding, preconditions, typed effects, and a strict effect envelope; a single occurrence must remain ad hoc, and domain modules are host-managed." },
+  "event-execution": { name: "propose_event_execution", label: "Propose event execution binding", description: "Bind an existing canonical occurrence to an action mechanism and/or a complete character entryCheckpoint. An action requires typed agency and exact effects; an entry-only binding requires embodied presence and never grants action authority. Complete entryCheckpoint includes projectionSeed for semantic, norm, process, active rules and elapsed time; create it after its referenced templates. Never rewrite the original occurrence or copy its outcome into a pre-event entry." },
+  "action-schema": { name: "propose_action_schema", label: "Propose action schema", description: "Submit a source-induced reusable action schema only when at least two canonical events support the pattern. Declare role and parameter binding, preconditions, typed effects, and a strict effect envelope; a single occurrence must remain ad hoc, and domain modules are host-managed. Declare visibility explicitly: supportingEventIds are induction evidence, never actor experience prerequisites; knowledge visibility requires exact knownByClaimIds." },
   "action-constraint": { name: "propose_action_constraint", label: "Propose action constraint", description: "Submit a source-induced capability or action restriction with explicit before/after clauses, exceptions, priority, visibility, and override edges. It constrains matching actions only after validation; domain constraints are host-managed." },
   "norm-template": { name: "propose_norm_template", label: "Propose norm template", description: "Submit an evidence-backed obligation, prohibition, or permission template with authority, applicability, exceptions, deadlines, reparations, visibility, and defeasible overrides. A template does not instantiate a branch norm by itself." },
-  "process-template": { name: "propose_process_template", label: "Propose process template", description: "Submit an evidence-backed multi-phase process pattern with owner roles, legal transitions, cadence, outcomes, visibility, and supporting canonical events. A template does not start a branch process by itself." },
+  "process-template": { name: "propose_process_template", label: "Propose process template", description: "Submit an evidence-backed multi-phase process pattern with owner roles, legal transitions, cadence, outcomes, visibility, and supporting canonical events. Declare actorControls for actor progression: actionPattern, phase/outcome bounds, per-turn maximumAdvance, minimumElapsedDays, requiresBefore and requiresAfter over actor/owner-role bindings. Without controls actors can only accept a zero-progress job; onDue is host-driven. A template does not start a branch process by itself." },
   "spatial-relation": { name: "propose_spatial_relation", label: "Propose spatial relation", description: "Submit one exact-evidence-backed contains, adjacency, or traversable-route relation. Adjacency never implies passage; route activation, visibility, direction, and duration remain explicit." },
   "world-rule": { name: "propose_world_rule", label: "Propose world rule", description: "Submit a world-rule-v2 candidate with typed kind/scope, explicit authority and jurisdiction, per-clause modality/evidence, exceptions, visibility, defeasibility, and explicit priority overrides. Engine invariants cannot be modified through this tool." },
   "initial-world": { name: "propose_initial_world", label: "Propose initial world", description: "Submit the evidence-backed canonical seed plus structured unread-reader context and physically present actors' direct Genesis observations." },
@@ -147,6 +149,7 @@ const labels: Record<CompilerProposalKind, { name: string; label: string; descri
 
 /** Exact model-tool authority owned by the compiler embedding. */
 export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
+  ...ROLE_ROSTER_TOOL_NAMES,
   "configure_chapter_split",
   "propose_novel_title",
   "find_compiler_artifacts",
@@ -229,6 +232,7 @@ const SEMANTIC_STAGE_PROPOSAL_TOOLS: Record<CompilerSemanticStage, ReadonlySet<s
     "propose_event_frame",
   ]),
   executable: new Set([
+    "propose_event_execution",
     "propose_action_schema",
     "propose_action_constraint",
     "propose_norm_template",
@@ -992,6 +996,7 @@ export function createCompilerProposalToolset(
   let pendingChapterSplitPlan: ChapterSplitPlan | undefined;
   let pendingNovelTitleProposal: SourceTitleProposal | undefined;
   let finished = false;
+  const roleRosterTools = createRoleRosterTools(workspaceRoot, () => ({ sourceId: activeSourceId, batchId: compilerBatchId, finished }));
   let circuitBreak: { reason: string; failureCount: number } | undefined;
   let totalFinishFailures = 0;
   let consecutiveFinishFailures = 0;
@@ -2658,6 +2663,7 @@ export function createCompilerProposalToolset(
         ...listedEventResolutions,
         ...listedAccounting,
         ...(pendingNovelTitleProposal ? [pendingNovelTitleProposal.proposalId] : []),
+        ...(roleRosterTools.pendingId() ? [roleRosterTools.pendingId()!] : []),
       ].sort();
       if (new Set(expected).size !== expected.length) {
         return failFinish("World, annotation, and metadata proposals must use distinct proposal IDs.");
@@ -2888,6 +2894,7 @@ export function createCompilerProposalToolset(
         ),
       ];
       if (validationSections.length) return failFinish(validationSections.join("\n\n"));
+      await roleRosterTools.commit();
       if (pendingChapterSplitPlan) {
         if (!activeSourceId) return failFinish("Structure discovery lost its active source identity.");
         const source = await (await WorkspaceStore.create(workspaceRoot)).getSource(activeSourceId);
@@ -2949,6 +2956,7 @@ export function createCompilerProposalToolset(
   });
   return {
     tools: [
+      ...roleRosterTools.tools,
       configureChapterSplitTool,
       novelTitleTool,
       ...retrievalTools,
@@ -2964,6 +2972,7 @@ export function createCompilerProposalToolset(
       finishTool,
     ],
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
+      roleRosterTools.reset();
       successfulProposalIds.clear();
       successfulAnnotationProposalIds.clear();
       successfulEntityResolutionProposalIds.clear();

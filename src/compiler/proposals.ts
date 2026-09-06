@@ -1,3 +1,4 @@
+import { eventExecutionSchema, validateEventExecutions, type EventExecution } from "../world/event-execution.js";
 import { z } from "zod";
 import { ActorModelStore, characterGoalSchema, characterModelSchema, type CharacterGoal, type CharacterModel } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
@@ -174,7 +175,7 @@ const compilerPossibilitySchema = possibilityTemplateSchema.safeExtend({ evidenc
     });
   }
 });
-export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
+export type CompilerProposalKind = "entity" | "proposition" | "attribution" | "claim" | "canonical-event" | "event-participation" | "event-relation" | "scene-occurrence" | "event-frame" | "action-schema" | "event-execution" | "action-constraint" | "norm-template" | "process-template" | "spatial-relation" | "world-rule" | "initial-world" | "character-goal" | "character-model" | "state-delta" | "possibility";
 export const COMPILER_STATE_FIELDS = DEFAULT_STATE_FIELDS.map((field) => field.key);
 const compilerStateFieldMap = new Map(DEFAULT_STATE_FIELDS.map((field) => [field.key, field]));
 const compilerStateFieldSet = new Set(COMPILER_STATE_FIELDS);
@@ -193,6 +194,7 @@ export const compilerProposalSchemas = {
   "scene-occurrence": sceneOccurrenceSchema,
   "event-frame": compilerEventFrameSchema,
   "action-schema": compilerActionSchema,
+  "event-execution": eventExecutionSchema,
   "action-constraint": compilerActionConstraintSchema,
   "norm-template": compilerNormTemplateSchema,
   "process-template": compilerProcessTemplateSchema,
@@ -460,7 +462,7 @@ export async function validateCompilerProposalClosure(
   const possibilities = new PossibilityTemplateStore(workspaceRoot);
   const actors = new ActorModelStore(workspaceRoot);
   const evidenceVerifier = new EvidenceVerifier(workspaceRoot);
-  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalSpatialRelations, canonicalScenes, canonicalFrames, canonicalActions, canonicalActionConstraints, canonicalNorms, canonicalProcesses, canonicalRules, canonicalGoals, canonicalPossibilities, pending] = await Promise.all([
+  const [canonicalEntities, canonicalPropositions, canonicalAttributions, canonicalClaims, canonicalEvents, canonicalEventParticipations, canonicalEventRelations, canonicalSpatialRelations, canonicalScenes, canonicalFrames, canonicalActions, canonicalEventExecutions, canonicalActionConstraints, canonicalNorms, canonicalProcesses, canonicalRules, canonicalGoals, canonicalPossibilities, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -472,6 +474,7 @@ export async function validateCompilerProposalClosure(
     canon.listSceneOccurrences(),
     canon.listEventFrames(),
     canon.listActionSchemas(),
+    canon.listEventExecutions(),
     canon.listActionConstraints(),
     canon.listNormTemplates(),
     canon.listProcessTemplates(),
@@ -659,7 +662,10 @@ export async function validateCompilerProposalClosure(
     }
   }
 
+  const executionBindings = new Map(canonicalEventExecutions.filter(fromActiveSource).map((binding) => [binding.id, binding]));
+  for (const proposal of staged.values()) if (proposal.kind === "event-execution") { const binding = eventExecutionSchema.parse(proposal.payload); executionBindings.set(binding.id, binding); }
   const issues = new Set<string>();
+  for (const issue of validateEventExecutions([...executionBindings.values()], { participations: [...participationCatalog.participations.values()], entities: executableEntityCatalog, events: participationCatalog.events, actionSchemas: executableActionCatalog })) issues.add(`${issue.path}: ${issue.code}: ${issue.message}`);
   for (const proposalId of proposalIds) {
     const proposal = staged.get(proposalId);
     if (!proposal) {
@@ -767,6 +773,7 @@ export async function validateCompilerProposalClosure(
   for (const processIssue of validateProcessTemplateCatalog(
     processTemplateCatalog.values(),
     new Set(participationCatalog.events.keys()),
+    { entities: executableEntityCatalog, actionSchemas: executableActionCatalog },
   )) {
     issues.add(`process-template: ${processIssue.code} at ${processIssue.path ?? "payload"}: ${processIssue.message}`);
   }
@@ -907,8 +914,18 @@ function collectProposalClosureIssues(
     return;
   }
   if (proposal.kind === "event-frame") return;
+  if (proposal.kind === "event-execution") {
+    const binding = payload as EventExecution;
+    missing("events", binding.canonicalEventId, "canonicalEventId");
+    missing("entities", binding.actorId, "actorId");
+    if (binding.action?.lane === "schema-bound") missing("actions", binding.action.schemaId, "action.schemaId");
+    binding.action?.lane === "schema-bound" && binding.action.roleBindings.forEach((role) => role.entityIds.forEach((id) => missing("entities", id, "action.roleBindings")));
+    if (binding.entryCheckpoint) collectStateDeltaIssues(binding.entryCheckpoint.delta, "entryCheckpoint.delta", missing, fieldReference);
+    return;
+  }
   if (proposal.kind === "action-schema") {
     const action = payload as ActionSchema;
+    action.knownByClaimIds?.forEach((id, index) => missing("claims", id, `knownByClaimIds.${index}`));
     if (action.induction.kind === "source-pattern") {
       action.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
     }
@@ -916,6 +933,7 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "action-constraint") {
     const constraint = payload as ActionConstraint;
+    constraint.knownByClaimIds?.forEach((id, index) => missing("claims", id, `knownByClaimIds.${index}`));
     if (constraint.actionPattern.kind === "schema") missing("actions", constraint.actionPattern.schemaId, "actionPattern.schemaId");
     constraint.induction.kind === "source-pattern"
       && constraint.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
@@ -951,6 +969,12 @@ function collectProposalClosureIssues(
   }
   if (proposal.kind === "process-template") {
     const process = payload as ProcessTemplate;
+    process.knownByClaimIds?.forEach((id, index) => missing("claims", id, `knownByClaimIds.${index}`));
+    process.actorControls?.forEach((control, index) => {
+      if (control.actionPattern.kind === "schema") missing("actions", control.actionPattern.schemaId, `actorControls.${index}.actionPattern.schemaId`);
+      control.requiresBefore.forEach((predicate, predicateIndex) => collectConstraintPredicateIssues(predicate, `actorControls.${index}.requiresBefore.${predicateIndex}`, missing));
+      control.requiresAfter.forEach((predicate, predicateIndex) => collectConstraintPredicateIssues(predicate, `actorControls.${index}.requiresAfter.${predicateIndex}`, missing));
+    });
     if (process.induction.kind === "source-pattern") {
       process.induction.supportingEventIds.forEach((id, index) => missing("events", id, `induction.supportingEventIds.${index}`));
     }

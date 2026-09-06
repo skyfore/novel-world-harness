@@ -19,7 +19,7 @@ const entityList: Entity[] = [
 ];
 const entities = new Map(entityList.map((entity) => [entity.id, entity]));
 const transfer: ActionSchema = {
-  ontologyVersion: "action-schema-v1",
+  ontologyVersion: "action-schema-v1", initiatorRoleId: "giver",
   id: "transfer-item",
   name: "Transfer an item",
   roles: [
@@ -63,6 +63,12 @@ const invocation = {
 };
 
 describe("ActionSchema", () => {
+  it("does not multiply a declared effect by repeating the same operation", () => {
+    const schema = { ...transfer, effectEnvelope: { ...transfer.effectEnvelope, maxStateOperations: 3 } };
+    const operation = { op: "set" as const, entityId: "key", field: "artifact.owner", value: "recipient" };
+    const result = resolveActionInvocation(invocation, new Map([[schema.id, schema]]), entities, { actorId: "giver", participants: ["giver", "recipient", "key"], proposedDelta: { version: 1, operations: [operation, operation] }, hasKnowledge: false, hasTimeAdvance: false, hasSceneTransition: false });
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "ACTION_EFFECT_NOT_DECLARED" }));
+  });
   it("resolves role templates and enforces the declared effect envelope", () => {
     expect(validateActionSchemaCatalog(transfer, entities, new Set())).toEqual([]);
     const resolved = resolveActionInvocation(invocation, new Map([[transfer.id, transfer]]), entities, {
@@ -153,6 +159,7 @@ describe("ActionSchema", () => {
         },
       },
     });
-    expect(adHoc.report.accepted).toBe(true);
+    expect(adHoc.report.accepted).toBe(false);
+    expect(adHoc.report.errors).toContainEqual(expect.objectContaining({ code: "ACTOR_EFFECT_REQUIRES_MECHANISM" }));
   });
 });

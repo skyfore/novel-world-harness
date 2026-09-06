@@ -1,3 +1,4 @@
+import { routeContext, hallCampWalkAction } from "./helpers/travel.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -83,6 +84,7 @@ async function fixture() {
     events: new Map([[leave.id, leave]]),
     rules: new Map(),
     stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    ...routeContext("hall", "camp"),
     actorGoals: [hiddenPolicyGoal],
   };
   const engine = new WorldEngine(root, context);
@@ -204,6 +206,7 @@ describe("narrative scene director", () => {
       events: new Map(),
       rules: new Map(),
       stateSchema: new StateSchemaRegistry(DEFAULT_STATE_FIELDS),
+    ...routeContext("hall", "camp"),
     };
     const engine = new WorldEngine(root, context);
     const head = await engine.createBranch("main", "Main", {
@@ -309,6 +312,8 @@ describe("narrative scene director", () => {
       source: "player",
       actorId: "hero",
       title: "Hero leaves for Camp",
+      action: hallCampWalkAction,
+      timeAdvance: { amount: 1, unit: "minute" },
       participants: ["hero", "camp"],
       proposedTime: { kind: "unknown" },
       preconditions: [],

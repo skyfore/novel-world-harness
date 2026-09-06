@@ -30,6 +30,7 @@ export const COMPILER_ARTIFACT_KINDS = [
   "scene-occurrence",
   "event-frame",
   "action-schema",
+  "event-execution",
   "action-constraint",
   "norm-template",
   "process-template",
@@ -138,7 +139,7 @@ export async function loadCompilerArtifactRecords(
   const initial = new InitialWorldStore(workspaceRoot);
   const proposals = new ProposalStore(workspaceRoot);
   const exactEvidence = new EvidenceAssertionStore(workspaceRoot);
-  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, sceneOccurrences, eventFrames, actionSchemas, actionConstraints, normTemplates, processTemplates, spatialRelations, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
+  const [entities, propositions, attributions, claims, events, eventParticipations, eventRelations, sceneOccurrences, eventFrames, actionSchemas, eventExecutions, actionConstraints, normTemplates, processTemplates, spatialRelations, rules, goals, models, templates, initialWorld, pending] = await Promise.all([
     canon.listEntities(),
     canon.listPropositions(),
     canon.listAttributions(),
@@ -149,6 +150,7 @@ export async function loadCompilerArtifactRecords(
     canon.listSceneOccurrences(),
     canon.listEventFrames(),
     canon.listActionSchemas(),
+    canon.listEventExecutions(),
     canon.listActionConstraints(),
     canon.listNormTemplates(),
     canon.listProcessTemplates(),
@@ -183,6 +185,7 @@ export async function loadCompilerArtifactRecords(
   addCanonical(eventRelations, "event-relation", (value) => ({ id: value.id, label: `${value.fromEventId} ${value.type} ${value.toEventId}` }));
   addCanonical(sceneOccurrences, "scene-occurrence", (value) => ({ id: value.id, label: `Scene ${value.id}` }));
   addCanonical(eventFrames, "event-frame", (value) => ({ id: value.id, label: value.name }));
+  addCanonical(eventExecutions, "event-execution", (value) => ({ id: value.id, label: `${value.canonicalEventId}: ${value.actorId}` }));
   addCanonical(actionSchemas.filter((value) => value.induction.kind === "source-pattern"), "action-schema", (value) => ({ id: value.id, label: value.name }));
   for (const action of actionSchemas.filter((value) => value.induction.kind === "domain-module")) {
     records.push(canonicalRecord("action-schema", action.id, action.name, structuredClone(action), []));

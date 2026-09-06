@@ -1,3 +1,7 @@
+import { deriveEntryCut, type EntryCut } from "./entry-cut.js";
+import { timeAdvanceInDays } from "./time.js";
+import { applyEventExecutions } from "./event-execution.js";
+import type { EntryProjectionSeed } from "./model.js";
 import type { PreparedNovelBundle } from "../compiler/prepared-cache.js";
 import type {
   CanonicalEvent,
@@ -72,6 +76,8 @@ export type ReaderEntryContext = {
 };
 
 export type CharacterEntrySeed = {
+  cut: EntryCut;
+  projectionSeed?: EntryProjectionSeed;
   delta: StateDelta;
   knowledge?: KnowledgeDelta;
   evidence: EvidenceRef[];
@@ -89,6 +95,7 @@ export type CharacterEntrySeed = {
  * is not a playable checkpoint.
  */
 export function deriveCharacterEntryOptions(bundle: PreparedNovelBundle): CharacterEntryOption[] {
+  bundle = withExecutionEntries(bundle);
   const characters = bundle.canonical.entities.filter((entity) => entity.kind === "character");
   const orderedEvents = eventsInDiscourseOrder(bundle.canonical.events);
   const eventRanks = new Map(orderedEvents.map((event, index) => [event.id, index]));
@@ -151,6 +158,7 @@ export function deriveCharacterEntrySeed(
   bundle: PreparedNovelBundle,
   actorId: string,
 ): CharacterEntrySeed {
+  bundle = withExecutionEntries(bundle);
   const option = deriveCharacterEntryOptions(bundle).find((candidate) => candidate.actorId === actorId);
   if (!option) {
     throw new Error(
@@ -160,35 +168,58 @@ export function deriveCharacterEntrySeed(
   const orderedEvents = eventsInDiscourseOrder(bundle.canonical.events);
   const baselineOrder = openingDiscourseOrder(bundle, orderedEvents);
   const priorEvents = orderedEvents.slice(0, option.entry.discourseOrder);
-  const forwardEvents = priorEvents.filter((event, index) =>
-    index >= baselineOrder && eventAdvancesMainTimeline(event));
   const targetEvent = option.entry.canonicalEventId
     ? orderedEvents.find((event) => event.id === option.entry.canonicalEventId)
     : undefined;
   const entryCheckpoint = targetEvent ? entryCheckpointFor(targetEvent, actorId) : undefined;
+  let projectionSeed = entryCheckpoint?.projectionSeed ?? (option.entry.kind === "opening" ? bundle.canonical.initialWorld.projectionSeed : undefined);
+  const openingSeed = bundle.canonical.initialWorld.projectionSeed;
+  if (option.entry.kind !== "opening" && !entryCheckpoint?.projectionSeed && openingSeed
+    && [openingSeed.semantics, openingSeed.processes, openingSeed.norms].some((delta) => delta.operations.length)) {
+    throw new Error("ENTRY_PROJECTION_SEED_REQUIRED: a later entry must explicitly restore its semantic, process and norm state; opening obligations cannot silently disappear or be assumed unchanged.");
+  }
+  const cut = deriveEntryCut({
+    events: bundle.canonical.events, relations: bundle.canonical.eventRelations ?? [],
+    beforeEventId: targetEvent?.id ?? bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId,
+    storyTime: option.entry.storyTime,
+    baselineEventId: bundle.canonical.initialWorld.checkpoint?.beforeCanonicalEventId,
+    baselineTime: bundle.canonical.initialWorld.checkpoint?.storyTime,
+    completeCheckpoint: Boolean(projectionSeed),
+  });
+  if (cut.issues.length) throw new Error(cut.issues.map((issue) => `${issue.code}: ${issue.message}`).join("; "));
+  const forwardEvents = cut.replayEventIds.map((id) => bundle.canonical.events.find((event) => event.id === id)!);
+  const useOpening = !entryCheckpoint?.projectionSeed;
   const stateOperations = [
-    ...structuredClone(bundle.canonical.initialWorld.delta.operations),
+    ...(useOpening ? structuredClone(bundle.canonical.initialWorld.delta.operations) : []),
     ...forwardEvents.flatMap((event) => structuredClone(event.observedOutcome.operations)),
     ...structuredClone(entryCheckpoint?.delta.operations ?? []),
   ];
   const knowledgeOperations = [
-    ...structuredClone(bundle.canonical.initialWorld.knowledge?.operations ?? []),
+    ...(useOpening ? structuredClone(bundle.canonical.initialWorld.knowledge?.operations ?? []) : []),
     ...forwardEvents.flatMap((event) => structuredClone(event.observedKnowledge?.operations ?? [])),
     ...structuredClone(entryCheckpoint?.knowledge?.operations ?? []),
   ];
+  if (!projectionSeed) {
+    const activeRuleIds = new Set(openingSeed?.activeRuleIds ?? []);
+    for (const operation of stateOperations) {
+      if (operation.op === "activate-rule") activeRuleIds.add(operation.ruleId);
+      if (operation.op === "deactivate-rule") activeRuleIds.delete(operation.ruleId);
+    }
+    projectionSeed = { version: 1, semantics: { version: 1, operations: [] }, processes: { version: 1, operations: [] }, norms: { version: 1, operations: [] },
+      activeRuleIds: [...activeRuleIds].sort(), elapsedDays: (openingSeed?.elapsedDays ?? 0) + forwardEvents.reduce((days, event) => days + timeAdvanceInDays(event.timeAdvance), 0) };
+  }
   const evidence = uniqueEvidence([
     ...bundle.canonical.initialWorld.evidence,
     ...priorEvents.flatMap((event) => event.evidence),
     ...option.entry.evidence,
   ]);
-  const realizesCanonicalEventIds = priorEvents
-    .filter((event) => event.narrativeContext?.mode !== "hypothetical"
-      && event.narrativeContext?.mode !== "flashforward")
-    .map((event) => event.id);
+  const realizesCanonicalEventIds = cut.completedEventIds;
 
   const initialActorObservation = bundle.canonical.initialWorld.actorObservations
     ?.find((observation) => observation.actorId === actorId)?.summary;
   return {
+    cut,
+    ...(projectionSeed ? { projectionSeed: structuredClone(projectionSeed) } : {}),
     delta: { version: 1, operations: stateOperations },
     ...(knowledgeOperations.length ? { knowledge: { version: 1, operations: knowledgeOperations } } : {}),
     evidence,
@@ -213,6 +244,11 @@ export function deriveCharacterEntrySeed(
         }),
     readerContext: readerContextForEntry(option.entry, priorEvents, bundle.canonical.entities),
   };
+}
+
+function withExecutionEntries(bundle: PreparedNovelBundle): PreparedNovelBundle {
+  if (!bundle.canonical.eventExecutions?.length) return bundle;
+  return { ...bundle, canonical: { ...bundle.canonical, events: applyEventExecutions(bundle.canonical.events, bundle.canonical.eventExecutions) } };
 }
 
 export function readerContextForEntry(

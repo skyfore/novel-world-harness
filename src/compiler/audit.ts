@@ -1214,6 +1214,13 @@ export async function auditCompiler(
   for (const eventId of sceneClosureRepairEventIds(sceneValidation, sceneOccurrences)) {
     semanticRepairEventIds.add(eventId);
   }
+  // Comparable anchors may be added after an event relation was committed.
+  // Keep a now-regressing child in semantic repair even when aggregate
+  // timeline coverage already passes, because graph adjudication cannot alter
+  // the event's story-time.
+  for (const { eventId } of graph.temporalRegressions) {
+    semanticRepairEventIds.add(eventId);
+  }
   const novelScale = isNovelScaleCompilation(sourceBytes, events.length);
   for (const issue of worldRuleValidation) {
     const index = issue.path?.match(/^worldRules\.(\d+)(?:\.|$)/u)?.[1];

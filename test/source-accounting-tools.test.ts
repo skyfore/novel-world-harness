@@ -17,6 +17,53 @@ afterEach(async () => {
 });
 
 describe("source-unit accounting tools", () => {
+  it("accepts a matching background decision for a no-artifacts review but rejects a conflicting status", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-no-artifacts-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Quiet decorative rain crosses the empty courtyard.");
+    const [structure, sourceBytes, segments] = await Promise.all([
+      ensureSourceStructure(root, fixture.source),
+      readSourceMaterial(root, fixture.source),
+      new SegmentStore(root).list(fixture.source.id),
+    ]);
+    const unit = baseStructuralUnits(structure).find((candidate) => candidate.kind !== "non-scene");
+    if (!unit) throw new Error("Missing semantic source unit");
+    const reviews = segments.map((segment) => ({
+      startByte: segment.startByte,
+      endByte: segment.endByte,
+      disposition: "no-artifacts" as const,
+    }));
+    const accounting = new SourceAccountingStore(root);
+
+    expect(accounting.validateBatchReview({
+      structure,
+      sourceBytes,
+      reviews,
+      unitDecisions: [{
+        unitId: unit.id,
+        status: "background-only",
+        reason: "Reviewed as non-material scene texture.",
+        proposalId: "account-background",
+      }],
+      requireExplicitSemanticDisposition: true,
+    })).toEqual([]);
+
+    expect(accounting.validateBatchReview({
+      structure,
+      sourceBytes,
+      reviews,
+      unitDecisions: [{
+        unitId: unit.id,
+        status: "paratext",
+        reason: "Incorrect conflicting classification.",
+        proposalId: "account-conflict",
+      }],
+      requireExplicitSemanticDisposition: true,
+    })).toContain(
+      `Source unit ${unit.id} is inside a no-artifacts segment and is already host-classified as background-only; withdraw source-accounting proposal 'account-conflict'.`,
+    );
+  });
+
   it("expands a fresh unresolved-page token into exact per-unit decisions without copying unit IDs", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-page-tool-"));
     roots.push(root);

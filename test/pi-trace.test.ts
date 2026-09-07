@@ -157,13 +157,13 @@ describe("Pi trace conformance", () => {
     }, ctx);
     await harness.emit("tool_execution_start", {
       type: "tool_execution_start",
-      toolCallId: "tool-call-1",
+      toolCallId: "call-1|fc_provider-item-1",
       toolName: "propose_player_action",
       args: { password: "canary-tool-password", title: "Open the door" },
     }, ctx);
     await harness.emit("tool_execution_end", {
       type: "tool_execution_end",
-      toolCallId: "tool-call-1",
+      toolCallId: "call-1|fc_provider-item-1",
       toolName: "propose_player_action",
       result: { credential: "canary-tool-credential", accepted: true },
       isError: false,
@@ -213,6 +213,8 @@ describe("Pi trace conformance", () => {
       cost: 0.03,
     });
     const events = await store.readEvents(manifest.id);
+    expect(events.filter((event) => event.type.startsWith("tool.call.")).map((event) => event.toolCallId))
+      .toEqual(["call-1|fc_provider-item-1", "call-1|fc_provider-item-1"]);
     expect(events.map((event) => event.type)).toEqual(expect.arrayContaining([
       "context.assembled",
       "context.finalized",

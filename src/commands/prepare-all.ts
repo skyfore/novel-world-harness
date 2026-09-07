@@ -47,7 +47,7 @@ export type PrepareAllCommandOptions = {
   /** Finish compilation and archive the candidate; independent Play certification can follow later. */
   candidateOnly?: boolean;
   restoreCache?: boolean;
-  /** Active immutable revision that an enclosing reparse is using as its rollback baseline. */
+  /** Immutable revision that an enclosing reparse/repair is using as its rollback baseline. */
   reparseBaselineBundleHash?: string;
   /** Stable identifier for resumable proposal namespaces inside an enclosing reparse. */
   reparseRunId?: string;
@@ -161,11 +161,28 @@ export async function prepareAllCommand(
   const cachedBeforePreparation = await preparedCache.lookup(inspection.source!);
   if (
     options.reparseBaselineBundleHash
+    && cachedBeforePreparation.bundleHash
     && cachedBeforePreparation.bundleHash !== options.reparseBaselineBundleHash
   ) {
     throw new Error(
       `Cannot finalize reparse against baseline ${options.reparseBaselineBundleHash}: `
       + `active prepared revision is ${cachedBeforePreparation.bundleHash ?? "missing"}.`,
+    );
+  }
+  if (options.reparseBaselineBundleHash && !cachedBeforePreparation.bundleHash) {
+    const baseline = await preparedCache.loadRevision(
+      inspection.source!,
+      options.reparseBaselineBundleHash,
+      { allowIncompatible: true },
+    );
+    if (!baseline) {
+      throw new Error(
+        `Cannot finalize reparse against baseline ${options.reparseBaselineBundleHash}: `
+        + "the immutable baseline revision is missing.",
+      );
+    }
+    report(
+      `No active prepared revision is currently published; finalizing against immutable baseline ${options.reparseBaselineBundleHash}.`,
     );
   }
   if (!options.reparseBaselineBundleHash && cachedBeforePreparation.requiresReparse) {
@@ -360,7 +377,10 @@ export async function prepareAllCommand(
     return inspection;
   }
 
-  if (inspection.audit && narrativeGraphRepairIsTargetable(inspection.audit)) {
+  if (
+    inspection.audit
+    && narrativeGraphRepairIsTargetable(inspection.audit)
+  ) {
     const plannedIterations = narrativeGraphRepairIterations(inspection.audit);
     const decision = await ask({
       header: "Event graph",
@@ -391,9 +411,15 @@ export async function prepareAllCommand(
       });
       inspection = await inspectPreparation(root, { sourceId, branchId });
     }
-    if (inspection.audit?.consistency.narrativeGraphNavigable === false) {
-      throw preparationFailure(inspection);
-    }
+  }
+  if (inspection.audit?.consistency.narrativeGraphNavigable === false) {
+    const canReconcile = semanticRepairIsIsolated(inspection.audit)
+      || (Boolean(options.reparseBaselineBundleHash) && semanticRepairRequiresReparse(inspection.audit));
+    if (!canReconcile) throw preparationFailure(inspection);
+    report(
+      "Narrative-graph adjudication has not reached the publication threshold; "
+      + "continuing with the available semantic repair targets, then rechecking the graph before finalization.",
+    );
   }
 
   if (inspection.audit && semanticRepairIsIsolated(inspection.audit)) {
@@ -435,7 +461,8 @@ export async function prepareAllCommand(
     report(`Whole-novel reparse needs ${plannedIterations} bounded semantic finalization shard(s).`);
     for (
       let iteration = 1;
-      iteration <= plannedIterations && inspection.audit?.consistency.semanticReady === false;
+      iteration <= plannedIterations && inspection.audit
+        && (semanticRepairRequiresReparse(inspection.audit) || semanticRepairIsIsolated(inspection.audit));
       iteration += 1
     ) {
       report(`Running reparse semantic finalization shard ${iteration}/${plannedIterations}.`);
@@ -453,12 +480,19 @@ export async function prepareAllCommand(
       });
       inspection = await inspectPreparation(root, { sourceId, branchId });
       if (
-        inspection.audit?.consistency.semanticReady === false
+        inspection.audit
+        && (inspection.audit.consistency.semanticReady === false || inspection.audit.consistency.causalGraphValid === false)
         && !semanticRepairRequiresReparse(inspection.audit)
         && !semanticRepairIsIsolated(inspection.audit)
       ) throw preparationFailure(inspection);
     }
   }
+
+  if (inspection.audit && (
+    inspection.audit.consistency.narrativeGraphNavigable === false
+    || inspection.audit.consistency.causalGraphValid === false
+    || inspection.audit.consistency.semanticReady === false
+  )) throw preparationFailure(inspection);
 
   if (["create-branch", "ready"].includes(inspection.stage) && !cacheVerified) {
     report("Reviewing the independent major-character roster before candidate certification.");

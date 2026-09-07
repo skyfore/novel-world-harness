@@ -276,8 +276,11 @@ export class SourceAccountingStore {
       const overlappingReviews = input.reviews.filter((review) =>
         rangesOverlap(reviewRange.startByte, reviewRange.endByte, review.startByte, review.endByte));
       if (overlappingReviews.length > 0
-        && overlappingReviews.every((review) => review.disposition === "no-artifacts")) {
-        issues.push(`Source unit ${decision.unitId} is inside a no-artifacts segment and is already host-classified as background-only.`);
+        && overlappingReviews.every((review) => review.disposition === "no-artifacts")
+        && decision.status !== "background-only") {
+        issues.push(decision.proposalId
+          ? `Source unit ${decision.unitId} is inside a no-artifacts segment and is already host-classified as background-only; withdraw source-accounting proposal '${decision.proposalId}'.`
+          : `Source unit ${decision.unitId} is inside a no-artifacts segment and is already host-classified as background-only; withdraw its model disposition.`);
       }
       const represented = [...evidenceSpans, ...annotationSpans].some((span) =>
         span.sourceId === input.structure.sourceId

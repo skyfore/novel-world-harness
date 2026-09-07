@@ -4,7 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { ActorModelStore, characterGoalHasDevelopmentBoundary } from "../world/actors.js";
 import { CanonicalModelStore, ProposalStore } from "../world/canonical-model.js";
-import { InitialWorldStore } from "../world/initial.js";
+import { InitialWorldStore, initialWorldSchema, type InitialWorld } from "../world/initial.js";
 import type { CompilerAuditReport } from "./audit.js";
 import { contentHash } from "../world/canonical.js";
 import { promptJson } from "../util/prompt-data.js";
@@ -135,6 +135,112 @@ export function graphAdjudicationIterationFromBatchId(
   return Number.isSafeInteger(iteration) && iteration >= 1 ? iteration : undefined;
 }
 
+export function semanticReconciliationBatchFromBatchId(
+  compilerBatchId: string | undefined,
+  sourceId: string | undefined,
+): boolean {
+  if (!compilerBatchId || !sourceId) return false;
+  return compilerBatchId.startsWith(`reconcile-${sourceId}-bounded-`)
+    || compilerBatchId.startsWith(`reconcile-${sourceId}-reparse-finalization-`);
+}
+
+function completeEntryActorIds(event: CanonicalEvent): Set<string> {
+  const actionableFields = new Set(["character.location", "character.plan", "character.momentum"]);
+  return new Set(event.characterEntryCheckpoints
+    ?.filter((checkpoint) => checkpoint.participantPresence.some((presence) =>
+      presence.entityId === checkpoint.actorId && presence.mode === "physical")
+      && checkpoint.delta.operations.some((operation) =>
+        "entityId" in operation
+        && operation.entityId === checkpoint.actorId
+        && actionableFields.has(operation.field)))
+    .map((checkpoint) => checkpoint.actorId) ?? []);
+}
+
+/** Semantic reconciliation may add or refine semantics, but it must not erase
+ * readiness already established by an earlier validated repair pass. */
+export function semanticEventRegressionIssues(current: CanonicalEvent, candidate: CanonicalEvent): string[] {
+  const issues: string[] = [];
+  const currentHasEffect = current.observedOutcome.operations.length > 0
+    || (current.observedKnowledge?.operations.length ?? 0) > 0;
+  const candidateHasEffect = candidate.observedOutcome.operations.length > 0
+    || (candidate.observedKnowledge?.operations.length ?? 0) > 0;
+  if (comparableStoryTime(current.storyTime) && !comparableStoryTime(candidate.storyTime)) {
+    issues.push("removes an existing comparable story-time anchor");
+  }
+  if (currentHasEffect && !candidateHasEffect) issues.push("removes all existing typed state/knowledge effects");
+  if (current.readerSummary?.trim() && !candidate.readerSummary?.trim()) issues.push("removes the existing reader summary");
+  if ((current.participantPresence?.length ?? 0) > 0 && (candidate.participantPresence?.length ?? 0) === 0) {
+    issues.push("removes all existing participant-presence records");
+  }
+  const candidateEntryActors = completeEntryActorIds(candidate);
+  for (const actorId of completeEntryActorIds(current)) {
+    if (!candidateEntryActors.has(actorId)) issues.push(`removes the complete entry checkpoint for ${actorId}`);
+  }
+  return issues;
+}
+
+export function semanticInitialWorldRegressionIssues(current: InitialWorld, candidate: InitialWorld): string[] {
+  const issues: string[] = [];
+  const currentComparable = comparableStoryTime(current.checkpoint?.storyTime);
+  const candidateComparable = comparableStoryTime(candidate.checkpoint?.storyTime);
+  if (!currentComparable && !candidateComparable) {
+    issues.push("does not establish the required comparable opening story-time anchor");
+  } else if (currentComparable && !candidateComparable) {
+    issues.push("removes the existing comparable opening story-time anchor");
+  }
+  if (current.readerSetup?.trim() && !candidate.readerSetup?.trim()) issues.push("removes the opening reader setup");
+  if (current.readerContext && !candidate.readerContext) issues.push("removes the structured opening reader context");
+  if (current.participantPresence?.some((presence) => presence.mode === "physical")
+    && !candidate.participantPresence?.some((presence) => presence.mode === "physical")) {
+    issues.push("removes all physical opening participation");
+  }
+  if ((current.actorObservations?.length ?? 0) > (candidate.actorObservations?.length ?? 0)) {
+    issues.push("removes existing opening actor observations");
+  }
+  return issues;
+}
+
+export async function validateSemanticReconciliationProposalMonotonicity(
+  workspaceRoot: string,
+  proposalIds: readonly string[],
+): Promise<string[]> {
+  if (!proposalIds.length) return [];
+  const canon = new CanonicalModelStore(workspaceRoot);
+  const proposalStore = new ProposalStore(workspaceRoot);
+  const [events, initialWorld] = await Promise.all([
+    canon.listEvents(),
+    new InitialWorldStore(workspaceRoot).get(),
+  ]);
+  const eventsById = new Map(events.map((event) => [event.id, event]));
+  const issues: string[] = [];
+  for (const proposalId of proposalIds) {
+    const envelope = await proposalStore.readEnvelope("pending", proposalId);
+    if (envelope.kind === "initial-world") {
+      if (!initialWorld) continue;
+      const regressions = semanticInitialWorldRegressionIssues(initialWorld, initialWorldSchema.parse(envelope.payload));
+      if (regressions.length) {
+        issues.push(
+          `${proposalId}: semantic reconciliation ${regressions.join("; ")}. `
+          + "A seasonal or day-part phrase is not an exact calendar value; preserve the opening fields and use a source-grounded ordinal storyTime with a deterministic orderHint when no parseable date exists.",
+        );
+      }
+      continue;
+    }
+    if (envelope.kind !== "canonical-event") continue;
+    const candidate = canonicalEventSchema.parse(envelope.payload);
+    const current = eventsById.get(candidate.id);
+    if (!current) continue;
+    const regressions = semanticEventRegressionIssues(current, candidate);
+    if (regressions.length) {
+      issues.push(
+        `${proposalId}: semantic reconciliation ${regressions.join("; ")}. `
+        + "Read the current canonical event, preserve every already-valid readiness field, and retry at most once with an additive/refining replacement.",
+      );
+    }
+  }
+  return issues;
+}
+
 function eventOutsideGraphRepairFields(event: CanonicalEvent): Omit<CanonicalEvent, "evidence" | "preconditions" | "sceneOccurrenceIds"> {
   const {
     evidence: _evidence,
@@ -143,6 +249,18 @@ function eventOutsideGraphRepairFields(event: CanonicalEvent): Omit<CanonicalEve
     ...preserved
   } = event;
   return preserved;
+}
+
+function changedEventFieldsOutsideGraphRepair(current: CanonicalEvent, candidate: CanonicalEvent): string[] {
+  const left = eventOutsideGraphRepairFields(current) as Record<string, unknown>;
+  const right = eventOutsideGraphRepairFields(candidate) as Record<string, unknown>;
+  return [...new Set([...Object.keys(left), ...Object.keys(right)])]
+    .filter((field) => {
+      const leftHas = Object.hasOwn(left, field);
+      const rightHas = Object.hasOwn(right, field);
+      return leftHas !== rightHas || (leftHas && contentHash(left[field]) !== contentHash(right[field]));
+    })
+    .sort();
 }
 
 function sameDirectedRelation(left: EventRelation, right: EventRelation): boolean {
@@ -189,7 +307,11 @@ export async function validateGraphAdjudicationProposalScope(
         continue;
       }
       if (contentHash(eventOutsideGraphRepairFields(candidate)) !== contentHash(eventOutsideGraphRepairFields(current))) {
-        issues.push(`${proposalId}: graph adjudication changed canonical event fields outside preconditions/sceneOccurrenceIds; preserve the exact current payload, withdraw this draft, and retry at most once with only the authorized graph repair.`);
+        const changedFields = changedEventFieldsOutsideGraphRepair(current, candidate);
+        issues.push(
+          `${proposalId}: graph adjudication changed canonical event fields outside preconditions/sceneOccurrenceIds: ${changedFields.join(", ")}. `
+          + "Preserve both the exact values and the presence or absence of those fields from the current payload, withdraw this draft, and retry at most once with only the authorized graph repair.",
+        );
         continue;
       }
       const preconditionsChanged = contentHash(candidate.preconditions) !== contentHash(current.preconditions);
@@ -352,7 +474,15 @@ export async function buildWorldReconciliationPrompt(
         "entityId" in operation
         && operation.entityId === actorId
         && actionableCheckpointFields.has(operation.field))) ?? false;
+  const temporallyRegressingEventIds = new Set(
+    audit.consistency.temporalRegressions.map(({ eventId }) => eventId),
+  );
+  const temporalOnlyRepair = audit.consistency.semanticReady !== false
+    && temporallyRegressingEventIds.size > 0;
   const eventWeaknesses = (event: (typeof sourceEvents)[number]): string[] => {
+    if (temporalOnlyRepair) {
+      return temporallyRegressingEventIds.has(event.id) ? ["story-time-precedes-causal-parent"] : [];
+    }
     const presenceIds = new Set(event.participantPresence?.map((presence) => presence.entityId) ?? []);
     const missingPresence = event.participants.filter((participantId) =>
       characterIds.has(participantId) && !presenceIds.has(participantId));
@@ -367,6 +497,9 @@ export async function buildWorldReconciliationPrompt(
         && audit.coverage.characterEntryCheckpointCoverage !== 1
         && missingEntryCheckpoints.length
         ? [`missing-character-entry-checkpoint:${missingEntryCheckpoints.join(",")}`]
+        : []),
+      ...(temporallyRegressingEventIds.has(event.id)
+        ? ["story-time-precedes-causal-parent"]
         : []),
       ...((audit.coverage.timelineAnchoring ?? 1) < 0.75 && !comparableStoryTime(event.storyTime)
         ? [event.storyTime.kind === "unknown" ? "story-time-unknown" : "story-time-incomparable"]
@@ -409,18 +542,20 @@ export async function buildWorldReconciliationPrompt(
   const requiredDevelopedActors = Math.ceil(recurringActors.length * 0.5);
   const currentlyDevelopedActors = recurringActors.filter(([actorId]) => developed.has(actorId)).length;
   const neededDevelopmentTargets = Math.max(0, requiredDevelopedActors - currentlyDevelopedActors);
-  const allWeakActors: Array<[string, number]> = mode !== "graph-adjudication" && (audit.coverage.characterDevelopmentCoverage ?? 1) < 0.5
+  const allWeakActors: Array<[string, number]> = mode !== "graph-adjudication" && !temporalOnlyRepair
+    && (audit.coverage.characterDevelopmentCoverage ?? 1) < 0.5
     ? recurringActors
     .filter(([actorId, count]) => count >= 3 && !developed.has(actorId))
     .slice(0, neededDevelopmentTargets)
     : [];
-  if (mode !== "graph-adjudication") {
+  if (mode !== "graph-adjudication" && !temporalOnlyRepair) {
     for (const actorId of audit.semanticRepairTargets.characterIds) {
       if (!characterIds.has(actorId) || allWeakActors.some(([candidateId]) => candidateId === actorId)) continue;
       allWeakActors.push([actorId, participation.get(actorId) ?? 0]);
     }
   }
-  const requireAutonomousDriver = mode !== "graph-adjudication" && audit.coverage.autonomousDriverCoverage === 0;
+  const requireAutonomousDriver = mode !== "graph-adjudication" && !temporalOnlyRepair
+    && audit.coverage.autonomousDriverCoverage === 0;
   if (requireAutonomousDriver && allWeakActors.length === 0) {
     const driverActor = recurringActors[0] ?? [...participation]
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]
@@ -431,7 +566,7 @@ export async function buildWorldReconciliationPrompt(
     throw new Error("Semantic repair needs an autonomous driver, but no evidence-backed character is available in the compiled event graph or opening checkpoint.");
   }
 
-  const initialWorldNeedsRepair = mode !== "graph-adjudication" && Boolean(sourceInitialWorld && (
+  const initialWorldNeedsRepair = mode !== "graph-adjudication" && !temporalOnlyRepair && Boolean(sourceInitialWorld && (
     !sourceInitialWorld.checkpoint
     || audit.coverage.openingTimelineComparable !== 1
     || !sourceInitialWorld.readerSetup?.trim()
@@ -614,7 +749,7 @@ export async function buildWorldReconciliationPrompt(
   const graphAdjudicationPolicy = mode === "graph-adjudication"
     ? `
 - This pass adjudicates only the listed unconditional-disconnected-root and executable-graph-error targets. For each target, read its complete canonical payload and exact evidence, then inspect only plausible earlier events/dependencies using their exact refs and source evidence.
-- A canonical-event proposal is a full replacement, not a patch. Preserve every existing field outside the exact repair, especially sceneOccurrenceIds, participantPresence, characterEntryCheckpoints, effects, knowledge, action/frame bindings, narrative context, summaries, and evidence. For an executable-graph-error:SCENE_EVENT_BACKLINK_REQUIRED target, restore the scene ID named by the diagnostic in sceneOccurrenceIds. If the finish diagnostic identifies the reciprocal event outside the listed roots, that exact closure repair is authorized in the same finish.
+- A canonical-event proposal is a full replacement, not a patch. Preserve every existing field outside the exact repair, including its exact presence or absence; do not add empty/default optional fields. Especially preserve sceneOccurrenceIds, participantPresence, characterEntryCheckpoints, effects, knowledge, action/frame bindings, narrative context, summaries, and evidence. For an executable-graph-error:SCENE_EVENT_BACKLINK_REQUIRED target, restore the scene ID named by the diagnostic in sceneOccurrenceIds. If the finish diagnostic identifies the reciprocal event outside the listed roots, that exact closure repair is authorized in the same finish.
 - Typed event-relation records are the runtime authority for causality. A non-contested causes/enables relation with operationality=necessary makes its target conditional; a contributory relation supplies support but does not gate the target. Add either only when the source independently supports the exact mechanism and endpoints.
 - A causal relation repairs a listed root only when its toEventId is that root and operationality=necessary. An outgoing relation from a root does not make that root conditional. Do not propose a relation aimed at an unlisted event merely because the listed root caused it.
 - causalParents is a non-authoritative compatibility field. Do not add, remove, or change causalParents merely to mirror a typed relation, and do not treat an existing legacy parent as proof of causation. A causal repair normally submits the supported event-relation alone; replace the canonical event only for an evidence-backed precondition or an executable graph closure repair.
@@ -639,6 +774,7 @@ ${graphAdjudicationPolicy}
 - For each recurring character target, propose exactly one evidence-backed character-model with a real developmentPhase or one phase-bounded character-goal. Preserve the baseline. Activate later phases/goals only through cited world predicates, personally experienced events, acquired knowledge, or story time. Use afterExperiencedCanonicalEventIds when an experience is personal; use afterCanonicalEventIds only for an objective social/world transition. A future phase or goal must not affect the opening self.
 - When a weakCharacterCandidate has needsExecutableDriver=true, propose a character-goal rather than only a model. It must have a development boundary and at least one concrete candidateAction/actionPattern whose proposedDelta or proposedKnowledge is executable under source-grounded activation/precondition gates at the initial-world checkpoint; a later-phase goal does not satisfy this repair. Use only state and character knowledge already true at that checkpoint, and never leak future canon backward to activate it. Do not invent an action merely to pass the audit; leave the target unchanged if the source cannot support one.
 - If the initial world appears below and lacks a checkpoint, a comparable storyTime, readerSetup, structured readerContext, one direct actorObservation per physical opening role, or explicit physical participantPresence for its actionable opening role, replace it only when exact source evidence supports one coherent chronological or textual-frame checkpoint. Treat the player as an unread reader: readerContext must establish focal identity, time/place, every needed first-use character gloss, causal premises, the actual holder/direction of relevant stance or pressure, completed pre-checkpoint beats, and the unresolved immediate situation. Give readerSetup and every fact/gloss/situation/observation field an exact explicit or strong-inference evidence selector; weak inference is insufficient. Later discourse may supply only facts already true by the checkpoint; mark them later-discourse-preexisting and never import a later outcome or acquired knowledge. readerSetup/readerContext are presentation-only, never actor knowledge. Never merge narrator-frame and flashback selves.
+- A seasonal or day-part phrase such as "spring afternoon" is not an exact calendar value. When the source establishes it as the opening ordering point but supplies no parseable year/date, encode storyTime as ordinal with a deterministic numeric orderHint; never label natural-language relative time as exact merely to satisfy the audit.
 - Submit at most ${repairTargetCount} high-value replacements, one per listed target. It is valid to leave an unsupported target unchanged; deterministic quality gates will report what remains.
 - Do not use propose_state_delta. Finish with reviewed_segments=[] and outcome=complete if proposals were recorded, otherwise outcome=no-artifacts.
 
@@ -689,12 +825,38 @@ export function narrativeGraphRepairIterations(audit: CompilerAuditReport): numb
   return iterations;
 }
 
+/**
+ * A graph that is one root beyond the unchanged publication threshold may be
+ * handed to full semantic finalization after the narrow graph pass stalls.
+ * That pass can add a source-backed precondition while repairing the same
+ * event's time/effect semantics. Publication still uses the original audit
+ * threshold; this does not certify or weaken the graph requirement.
+ */
+export function narrativeGraphNearNavigable(audit: CompilerAuditReport): boolean {
+  if (audit.consistency.narrativeGraphNavigable !== false || audit.canonical.events <= 8) return false;
+  const rootLimit = Math.max(8, Math.ceil(audit.canonical.events * 0.4));
+  return audit.consistency.unconditionalRootEvents.length <= rootLimit + 1;
+}
+
 function semanticRepairHasHealthyStructure(audit: CompilerAuditReport): boolean {
-  return audit.consistency.semanticReady === false
+  const onlyTargetedTemporalRegressions = audit.consistency.causalGraphValid === false
+    && audit.consistency.causalCycles.length === 0
+    && audit.consistency.missingCausalParents.length === 0
+    && audit.consistency.temporalRegressions.length > 0
+    && audit.consistency.temporalRegressions.every(({ eventId }) =>
+      audit.semanticRepairTargets.eventIds.includes(eventId));
+  return (audit.consistency.semanticReady === false || onlyTargetedTemporalRegressions)
     && audit.sources.changedSinceIngest.length === 0
     && audit.evidence.invalidReferences === 0
-    && audit.consistency.causalGraphValid !== false
-    && audit.consistency.narrativeGraphNavigable !== false;
+    && (audit.consistency.causalGraphValid !== false || onlyTargetedTemporalRegressions)
+    && (
+      audit.consistency.narrativeGraphNavigable !== false
+      || narrativeGraphNearNavigable(audit)
+      // A bounded graph may still need the richer semantic pass after the
+      // graph-only shards reject unsupported standalone links. Publication
+      // continues to use the unchanged narrative-graph audit threshold.
+      || narrativeGraphRepairIsTargetable(audit)
+    );
 }
 
 export function semanticRepairIsIsolated(audit: CompilerAuditReport): boolean {

@@ -178,6 +178,18 @@ describe("compiler batches", () => {
       completionSignaled: true,
       completionOutcome: "no-artifacts",
     })).toBe(true);
+    expect(isRecoverableCompilerBatchInterruption({
+      assistantStopReason: "stop",
+      proposalSucceeded: 7,
+      proposalFailed: 1,
+      completionSignaled: false,
+    })).toBe(true);
+    expect(isRecoverableCompilerBatchInterruption({
+      assistantStopReason: "stop",
+      proposalSucceeded: 0,
+      proposalFailed: 1,
+      completionSignaled: false,
+    })).toBe(false);
     expect(isRecoverableCompilerBatchInterruption({ ...outcome, blockedReason: "proposal graph remains incomplete" })).toBe(false);
   });
 

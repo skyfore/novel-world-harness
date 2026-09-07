@@ -109,7 +109,9 @@ import {
 } from "./limits.js";
 import {
   graphAdjudicationIterationFromBatchId,
+  semanticReconciliationBatchFromBatchId,
   validateGraphAdjudicationProposalScope,
+  validateSemanticReconciliationProposalMonotonicity,
 } from "./reconcile-world.js";
 
 function proposalResult(
@@ -2699,6 +2701,7 @@ export function createCompilerProposalToolset(
       const stage = activeSemanticStage();
       const recordsSourceAccounting = !stage || stage === "executable";
       const graphAdjudicationIteration = graphAdjudicationIterationFromBatchId(compilerBatchId, activeSourceId);
+      const semanticReconciliationBatch = semanticReconciliationBatchFromBatchId(compilerBatchId, activeSourceId);
       if (recordsSourceAccounting && activeSourceId && compilerBatchId && input.reviewed_segments.length) {
         const workspace = await WorkspaceStore.create(workspaceRoot);
         accountingSource = await workspace.getSource(activeSourceId) ?? undefined;
@@ -2746,6 +2749,7 @@ export function createCompilerProposalToolset(
         eventResolutionClosureIssues,
         eventTraceIssues,
         graphAdjudicationIssues,
+        semanticReconciliationIssues,
         canonicalStructureIssues,
       ] = await Promise.all([
         validateCompilerProposalClosure(workspaceRoot, listed, activeSourceId),
@@ -2816,6 +2820,9 @@ export function createCompilerProposalToolset(
             listed,
           )
           : Promise.resolve([]),
+        semanticReconciliationBatch
+          ? validateSemanticReconciliationProposalMonotonicity(workspaceRoot, listed)
+          : Promise.resolve([]),
         new CompilerCommitService(workspaceRoot).validatePendingStructure(activeSourceId),
       ]);
       const annotationReferenceInventory = annotationClosureIssues.some((issue) =>
@@ -2885,6 +2892,7 @@ export function createCompilerProposalToolset(
         ...finishIssueSection("Event-resolution graph", eventResolutionClosureIssues),
         ...finishIssueSection("Canonical event proposal trace", eventTraceIssues),
         ...finishIssueSection("Graph-adjudication mutation scope", graphAdjudicationIssues),
+        ...finishIssueSection("Semantic-reconciliation monotonicity", semanticReconciliationIssues),
         ...finishAccountingIssueSection(accountingIssues),
         ...finishIssueSection("Cross-batch proposal lifecycle", crossBatchLifecycleIssues),
         ...finishIssueSection(

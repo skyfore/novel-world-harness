@@ -6,9 +6,12 @@ import { auditCompiler, type CompilerAuditReport } from "../src/compiler/audit.j
 import {
   buildWorldReconciliationPrompt,
   graphAdjudicationIterationFromBatchId,
+  narrativeGraphNearNavigable,
   narrativeGraphRepairIsTargetable,
   narrativeGraphRepairIterations,
   reparseReconciliationIterations,
+  semanticEventRegressionIssues,
+  semanticInitialWorldRegressionIssues,
   semanticRepairIsIsolated,
   semanticRepairRequiresReparse,
   validateGraphAdjudicationProposalScope,
@@ -43,6 +46,143 @@ function reconciliationContext(prompt: string): ReconciliationContext {
 }
 
 describe("world semantic reconciliation", () => {
+  it("rejects semantic event replacements that erase established readiness", () => {
+    const current = {
+      id: "arrival",
+      title: "Arrival",
+      participants: ["hero"],
+      storyTime: { kind: "ordinal", orderHint: 2 },
+      preconditions: [],
+      observedOutcome: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "hall" }] },
+      readerSummary: "Hero arrives.",
+      participantPresence: [{ entityId: "hero", mode: "physical" }],
+      characterEntryCheckpoints: [{
+        actorId: "hero",
+        participantPresence: [{ entityId: "hero", mode: "physical" }],
+        delta: { version: 1, operations: [{ op: "set", entityId: "hero", field: "character.location", value: "hall" }] },
+      }],
+      evidence: [],
+      causalParents: [],
+      confidence: 1,
+    } as Parameters<typeof semanticEventRegressionIssues>[0];
+    const candidate = {
+      ...current,
+      storyTime: { kind: "unknown" },
+      observedOutcome: { version: 1, operations: [] },
+      readerSummary: undefined,
+      participantPresence: [],
+      characterEntryCheckpoints: [],
+    } as Parameters<typeof semanticEventRegressionIssues>[1];
+
+    expect(semanticEventRegressionIssues(current, candidate)).toEqual(expect.arrayContaining([
+      "removes an existing comparable story-time anchor",
+      "removes all existing typed state/knowledge effects",
+      "removes the existing reader summary",
+      "removes all existing participant-presence records",
+      "removes the complete entry checkpoint for hero",
+    ]));
+  });
+
+  it("requires an initial-world repair to establish a deterministically comparable time", () => {
+    const current = {
+      version: 1,
+      checkpoint: { mode: "chronological", storyTime: { kind: "exact", value: "春天下午" } },
+      delta: { version: 1, operations: [] },
+      evidence: [],
+    } as Parameters<typeof semanticInitialWorldRegressionIssues>[0];
+    const stillIncomparable = structuredClone(current);
+    const ordinal = {
+      ...current,
+      checkpoint: { ...current.checkpoint, storyTime: { kind: "ordinal", label: "opening", orderHint: 0 } },
+    } as Parameters<typeof semanticInitialWorldRegressionIssues>[1];
+
+    expect(semanticInitialWorldRegressionIssues(current, stillIncomparable)).toContain(
+      "does not establish the required comparable opening story-time anchor",
+    );
+    expect(semanticInitialWorldRegressionIssues(current, ordinal)).toEqual([]);
+  });
+
+  it("routes a temporal causal regression to semantic event repair above the timeline threshold", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-reconcile-temporal-regression-"));
+    roots.push(root);
+    const fixture = await createEvidenceFixture(root, "The train arrives before the examination begins.\n");
+    const canon = new CanonicalModelStore(root);
+    const evidence = fixture.evidence("The train arrives before the examination begins.");
+    for (const event of [
+      { id: "train", title: "Train arrives", orderHint: 5 },
+      { id: "exam", title: "Examination begins", orderHint: 1 },
+    ]) {
+      await canon.putEvent({
+        id: event.id,
+        title: event.title,
+        participants: [],
+        storyTime: { kind: "ordinal", label: event.title, orderHint: event.orderHint },
+        preconditions: [],
+        observedOutcome: { version: 1, operations: [] },
+        evidence,
+        causalParents: [],
+        confidence: 1,
+      });
+    }
+    await canon.putEventRelation({
+      id: "train-enables-exam",
+      fromEventId: "train",
+      toEventId: "exam",
+      type: "enables",
+      operationality: "necessary",
+      status: "explicit",
+      confidence: 1,
+      mechanism: "Arrival enables the examination to begin.",
+      evidence,
+    });
+
+    const audit = await auditCompiler(root, { sourceId: fixture.source.id });
+    expect(audit.coverage.timelineAnchoring).toBe(1);
+    expect(audit.consistency.temporalRegressions).toEqual([{ eventId: "exam", parentId: "train" }]);
+    expect(audit.semanticRepairTargets.eventIds).toContain("exam");
+    expect(audit.consistency.semanticReady).toBeNull();
+    expect(semanticRepairIsIsolated(audit)).toBe(true);
+    expect(semanticRepairIsIsolated({
+      ...audit,
+      consistency: { ...audit.consistency, semanticReady: true },
+    })).toBe(true);
+    const context = reconciliationContext(await buildWorldReconciliationPrompt(
+      root,
+      fixture.source.id,
+      audit,
+      1,
+    ));
+    expect(context.weakEventCandidates).toContainEqual(expect.objectContaining({
+      id: "exam",
+      weaknesses: expect.arrayContaining(["story-time-precedes-causal-parent"]),
+    }));
+    expect(context.weakEventCandidates).toHaveLength(1);
+    expect(context.weakCharacterCandidates).toEqual([]);
+    expect(context.repairPlan).toMatchObject({ targetCount: 1, requireAutonomousDriver: false });
+    expect(context).not.toHaveProperty("initialWorld");
+
+    for (const invalidConsistency of [
+      { causalCycles: [["train", "exam", "train"]] },
+      { missingCausalParents: [{ eventId: "exam", parentId: "missing" }] },
+    ]) {
+      const blocked = { ...audit, consistency: { ...audit.consistency, ...invalidConsistency } };
+      expect(semanticRepairIsIsolated(blocked)).toBe(false);
+      expect(semanticRepairRequiresReparse(blocked)).toBe(false);
+    }
+
+    const largeTemporalRepair = {
+      ...audit,
+      consistency: { ...audit.consistency, semanticReady: true },
+      semanticRepairTargets: {
+        ...audit.semanticRepairTargets,
+        eventIds: ["exam", ...Array.from({ length: 160 }, (_, index) => `child-${index}`)],
+      },
+    };
+    expect(semanticRepairIsIsolated(largeTemporalRepair)).toBe(false);
+    expect(semanticRepairRequiresReparse(largeTemporalRepair)).toBe(true);
+    expect(reparseReconciliationIterations(largeTemporalRepair)).toBe(11);
+  });
+
   it("persists two disjoint bounded target shards and budgets direct exact reads", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-reconcile-plan-"));
     roots.push(root);
@@ -237,6 +377,15 @@ describe("world semantic reconciliation", () => {
       payload: events[0],
       generatedBy: { worker: "test" },
     });
+    await proposals.submit("canonical-event", {
+      proposalId: "outside-field-change",
+      payload: {
+        ...events[0],
+        title: "Changed title",
+        preconditions: [{ op: "after-step", step: 1 }],
+      },
+      generatedBy: { worker: "test" },
+    });
     await proposals.submit("event-relation", {
       proposalId: "outgoing-only-link",
       payload: {
@@ -272,10 +421,11 @@ describe("world semantic reconciliation", () => {
       root,
       fixture.source.id,
       1,
-      ["no-op-root-replacement", "outgoing-only-link", "duplicate-link"],
+      ["no-op-root-replacement", "outside-field-change", "outgoing-only-link", "duplicate-link"],
     );
     expect(issues).toEqual(expect.arrayContaining([
       expect.stringContaining("changes neither preconditions nor sceneOccurrenceIds"),
+      expect.stringContaining("outside preconditions/sceneOccurrenceIds: title"),
       expect.stringContaining("outgoing relation from a listed root does not condition that root"),
       expect.stringContaining("already exists as existing-contributory-link"),
     ]));
@@ -389,5 +539,26 @@ describe("world semantic reconciliation", () => {
     };
     expect(semanticRepairIsIsolated(ruleMigration)).toBe(false);
     expect(semanticRepairRequiresReparse(ruleMigration)).toBe(true);
+
+    const nearGraph = {
+      ...systemic,
+      canonical: { ...systemic.canonical, events: 47 },
+      consistency: {
+        ...systemic.consistency,
+        narrativeGraphNavigable: false,
+        unconditionalRootEvents: Array.from({ length: 20 }, (_value, index) => `root-${index + 1}`),
+      },
+    };
+    expect(narrativeGraphNearNavigable(nearGraph)).toBe(true);
+    expect(semanticRepairRequiresReparse(nearGraph)).toBe(true);
+    const boundedGraphFallback = {
+      ...nearGraph,
+      consistency: {
+        ...nearGraph.consistency,
+        unconditionalRootEvents: [...nearGraph.consistency.unconditionalRootEvents, "root-21"],
+      },
+    };
+    expect(narrativeGraphNearNavigable(boundedGraphFallback)).toBe(false);
+    expect(semanticRepairRequiresReparse(boundedGraphFallback)).toBe(true);
   });
 });

@@ -34,6 +34,7 @@ describe("agent tool recovery", () => {
     const advice = buildNwhToolRecoveryAdvice(
       "propose_initial_world",
       `Evidence selector 7 for target_path '/readerSetup' failed: Exact evidence quote was not found in segment ${segmentId}.`,
+      { activeToolNames: ["propose_initial_world", "read_source_evidence"] },
     );
 
     expect(advice).toMatchObject({
@@ -48,6 +49,81 @@ describe("agent tool recovery", () => {
     expect(advice.steps.join(" ")).toContain("evidence_segment_id");
     expect(advice.steps.join(" ")).toContain("do not copy JSON escaping");
     expect(advice.steps.join(" ")).toContain("Retry propose_initial_world once");
+  });
+
+  it("disambiguates repeated source wording without losing annotation identity", () => {
+    const segmentId = "source-1-00009-acde1234";
+    const diagnostic = `Exact evidence quote is ambiguous in segment ${segmentId}: 5 occurrences match. Supply prefix/suffix or a one-based occurrence.`;
+    const advice = buildNwhToolRecoveryAdvice("propose_entity_mention", diagnostic, {
+      activeToolNames: ["propose_entity_mention", "read_source_evidence"],
+    });
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "read_source_evidence",
+        arguments: { ref: `source-segment:${segmentId}`, offset: 0, max_chars: 120_000 },
+      },
+    });
+    const steps = advice.steps.join(" ");
+    expect(steps).toContain("evidence_segment_id");
+    expect(steps).toContain("never from an individual page");
+    expect(steps).toContain("retain the intended logical annotation ID");
+    expect(steps).toContain("Retry propose_entity_mention once");
+    expect(steps).toContain("same diagnostic repeats, stop");
+    expect(formatNwhToolError("propose_entity_mention", new Error(diagnostic))).toContain(diagnostic);
+  });
+
+  it.each([
+    "Exact evidence quote is ambiguous in segment source-1-00009: 2 occurrences match.",
+    "Exact evidence quote was not found in segment source-1-00009.",
+  ])("uses supplied evidence for bounded quote recovery: %s", async (diagnostic) => {
+    const scope = { activeToolNames: ["propose_entity_mention", "finish_compiler_batch"] };
+    const tool = withNwhToolRecovery(defineTool({
+      name: "propose_entity_mention",
+      label: "Propose entity mention",
+      description: "Test the model-facing recovery boundary.",
+      parameters: Type.Object({}),
+      async execute() { throw new Error(diagnostic); },
+    }), () => scope);
+    let failure: Error | undefined;
+    try {
+      await tool.execute("quote-failure", {}, undefined, undefined, {} as ExtensionContext);
+    } catch (error) {
+      failure = error as Error;
+    }
+    expect(failure?.message).toContain(diagnostic);
+    const recovered = recoverNwhToolResult({
+      type: "tool_result",
+      toolName: tool.name,
+      toolCallId: "quote-failure",
+      input: {},
+      content: [{ type: "text", text: failure!.message }],
+      isError: true,
+    }, scope);
+    const advice = buildNwhToolRecoveryAdvice(tool.name, diagnostic, scope);
+    expect(recovered).toMatchObject({ isError: true, details: { nwhToolRecovery: advice } });
+    expect(advice.suggestedCall).toBeUndefined();
+    expect(advice.steps.join(" ")).toContain('complete host-supplied <source-segment id="source-1-00009">');
+    expect(advice.steps.join(" ")).toContain("stop and report the missing evidence");
+    expect(failure?.message).not.toContain("read_source_evidence");
+    expect(advice.steps.join(" ")).toContain("Retry propose_entity_mention once");
+
+    scope.activeToolNames.push("read_source_evidence");
+    await expect(tool.execute("quote-with-retrieval", {}, undefined, undefined, {} as ExtensionContext))
+      .rejects.toThrow("Call read_source_evidence");
+  });
+
+  it("classifies a schema failure without treating echoed proposal text as the diagnostic", () => {
+    const diagnostic = 'Validation failed for tool "propose_canonical_event":\n  - payload.narrativeContext.mode: must be equal to one of the allowed values';
+    const echoed = `${diagnostic}\n\nReceived arguments:\n${JSON.stringify({
+      evidence_segment_ids: ["source-1-00002"],
+      payload: { narrativeContext: { mode: "dream" }, readerSummary: "Unknown identity; offset remains unknown." },
+    })}`;
+    const expected = buildNwhToolRecoveryAdvice("propose_canonical_event", diagnostic);
+    expect(expected.category).toBe("invalid-arguments");
+    expect(buildNwhToolRecoveryAdvice("propose_canonical_event", echoed)).toEqual(expected);
+    expect(formatNwhToolError("propose_canonical_event", new Error(echoed))).toContain(echoed);
   });
 
   it("keeps runtime source-ref recovery inside the frozen consultation scope", () => {
@@ -207,6 +283,58 @@ describe("agent tool recovery", () => {
     });
     expect(representedConflict.steps.join(" ")).toContain("accounting-page-1");
     expect(representedConflict.steps.join(" ")).toContain("Do not guess a unit-to-proposal mapping");
+
+    const noArtifactsConflict = buildNwhToolRecoveryAdvice(
+      "finish_compiler_batch",
+      "Source-unit accounting is incomplete:\n- Source unit sentence-11 is inside a no-artifacts segment and is already host-classified as background-only; withdraw source-accounting proposal 'accounting-page-2'.",
+    );
+    expect(noArtifactsConflict).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "withdraw_compiler_proposal",
+        arguments: { proposal_id: "accounting-page-2" },
+      },
+    });
+    expect(noArtifactsConflict.steps.join(" ")).toContain("units in no-artifacts segments");
+  });
+
+  it("keeps recovery metadata consistent when an actionable error is wrapped again", () => {
+    const diagnostic = "Source annotation closure failed:\n- obs-event: participantMentionIds references unknown annotation 'missing-mention'";
+    const toolName = "finish_compiler_batch";
+    const expected = buildNwhToolRecoveryAdvice(toolName, diagnostic);
+    expect(expected.category).toBe("invalid-arguments");
+    const content = [{ type: "text" as const, text: formatNwhToolError(toolName, new Error(diagnostic)) }];
+    const recovered = recoverNwhToolResult({
+      type: "tool_result", toolName, toolCallId: "wrapped-finish", input: {}, content, isError: true,
+    });
+    expect(recovered).toMatchObject({ isError: true, content, details: { nwhToolRecovery: expected } });
+    expect(buildNwhToolRecoveryAdvice(toolName, content[0]!.text)).toEqual(expected);
+  });
+
+  it("completes participant mention identity selection before retrying finish", () => {
+    const advice = buildNwhToolRecoveryAdvice(
+      "finish_compiler_batch",
+      "Canonical event proposal trace is incomplete:\n- Canonical event evt-hatchling participant 'artifact-bottle' at participants.4 has no resolved participant mention in its event trace.",
+    );
+    expect(advice).toMatchObject({
+      category: "invalid-arguments",
+      retryable: true,
+      suggestedCall: {
+        tool: "find_source_annotations",
+        arguments: { query: "*", status: "pending", offset: 0, max_results: 200 },
+      },
+    });
+    const steps = advice.steps.join(" ");
+    expect(steps).toContain("evt-hatchling -> artifact-bottle");
+    expect(steps).toContain("eventMentionIds");
+    expect(steps).toContain("participantMentionIds");
+    expect(steps).toContain("event-mention revision");
+    expect(steps).toContain("add the missing mention ID to participant_mention_ids");
+    expect(steps).toContain("Creating an unreferenced entity mention alone cannot change the event trace");
+    expect(steps).toContain("propose_entity_resolution");
+    expect(steps).toContain("Merely creating the mention or merely calling the finder does not select an identity");
+    expect(steps).toContain("Only after all 1 selected resolution(s) succeed");
   });
 
   it("marks terminate-style retrieval budget results as errors and appends the stop SOP", () => {

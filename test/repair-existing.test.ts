@@ -201,9 +201,16 @@ describe("historical prepared-revision repair", () => {
       async compileSource(options) {
         runId = options.promptTransform?.("base", batches[0]!)
           .match(/repair-\d{14}-[a-f0-9]{8}/)?.[0] ?? "";
+        const versionedRunId = runId.replace("repair-", "repair-v2-");
+        const compactVersionedRunId = runId.replace("repair-", "repair2-");
         await proposals.submit("entity", {
-          proposalId: `hero-resume-${runId}`,
+          proposalId: `hero-resume-${versionedRunId}`,
           payload: { id: "hero", kind: "character", canonicalName: "Hero", aliases: ["Hero"], evidence: batches[0]!.evidence },
+          generatedBy: { worker: "test", compilerBatchId: batches[0]!.id },
+        });
+        await proposals.submit("entity", {
+          proposalId: `hero-resume-${compactVersionedRunId}`,
+          payload: { id: "hero-compact", kind: "character", canonicalName: "Compact Hero", aliases: ["Compact Hero"], evidence: batches[0]!.evidence },
           generatedBy: { worker: "test", compilerBatchId: batches[0]!.id },
         });
         await new CompilerBatchStore(root).replaceCompleted(
@@ -232,7 +239,10 @@ describe("historical prepared-revision repair", () => {
     }, {
       async compileSource() {
         await expect(new ProposalStore(root).list("pending", fixture.source.id)).resolves.toContainEqual(
-          expect.objectContaining({ id: `hero-resume-${runId}` }),
+          expect.objectContaining({ id: `hero-resume-${runId.replace("repair-", "repair-v2-")}` }),
+        );
+        await expect(new ProposalStore(root).list("pending", fixture.source.id)).resolves.toContainEqual(
+          expect.objectContaining({ id: `hero-resume-${runId.replace("repair-", "repair2-")}` }),
         );
         await expect(new CompilerBatchStore(root).read(fixture.source.id)).resolves.toMatchObject({
           completedBatchIds: completedChapterOneIds,

@@ -776,10 +776,12 @@ export class PiAgentSession {
         : undefined;
       const selectedModelValue = overrideModel ?? savedModel ?? this.resolvedModel;
       const selectedModel = selectedModelValue;
-      const configuredTools = [
+      const toolDefinitions = [
         ...(this.options.includeLocalTools === false ? [] : localTools(this.options.workspace)),
         ...(this.options.additionalTools ?? []),
-      ].map((tool) => withNwhToolRecovery(tool));
+      ];
+      const recoveryScope = { activeToolNames: toolDefinitions.map((tool) => tool.name) };
+      const configuredTools = toolDefinitions.map((tool) => withNwhToolRecovery(tool, () => recoveryScope));
       const contextContract = buildNwhContextContract(this.options, configuredTools);
       const services = await createAgentSessionServices({
         cwd,

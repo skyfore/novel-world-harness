@@ -32,6 +32,10 @@ export type NwhToolRecoveryAdvice = {
   };
 };
 
+export type NwhToolRecoveryScope = {
+  activeToolNames: readonly string[];
+};
+
 type NwhToolResultRecovery = {
   content?: ToolResultEvent["content"];
   details?: unknown;
@@ -310,7 +314,14 @@ function lookupAdvice(toolName: string, lower: string): NwhToolRecoveryAdvice | 
 export function buildNwhToolRecoveryAdvice(
   toolName: string,
   errorText: string,
+  scope?: NwhToolRecoveryScope,
 ): NwhToolRecoveryAdvice {
+  // Thrown tool errors may already contain host recovery instructions. Classify
+  // only the original diagnostic, never words such as "offset" in that SOP.
+  errorText = errorText.split(NWH_TOOL_RECOVERY_MARKER, 1)[0]!;
+  // Pi schema errors echo model arguments after the diagnostic. Those values
+  // can contain arbitrary novel wording, including "unknown" or "offset".
+  errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
 
   if (/tool-call budget|tool call budget|tool-call safety fuse|circuit breaker|circuit-breaker/u.test(lower)) {
@@ -418,11 +429,11 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
-  const representedAccountingProposalIds = [...errorText.matchAll(
+  const conflictingAccountingProposalIds = [...errorText.matchAll(
     /withdraw source-accounting proposal '([A-Za-z0-9][A-Za-z0-9._-]*)'/giu,
   )].map((match) => match[1]!);
-  if (toolName === "finish_compiler_batch" && representedAccountingProposalIds.length) {
-    const proposalIds = [...new Set(representedAccountingProposalIds)];
+  if (toolName === "finish_compiler_batch" && conflictingAccountingProposalIds.length) {
+    const proposalIds = [...new Set(conflictingAccountingProposalIds)];
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
@@ -432,14 +443,14 @@ export function buildNwhToolRecoveryAdvice(
       steps: [
         `Call withdraw_compiler_proposal once for each exact proposal_id named in the diagnostic: ${proposalIds.join(", ")}. Do not guess a unit-to-proposal mapping.`,
         "Call find_source_accounting_units with status=unresolved, offset=0, and max_results=20; review and account each returned page, refetching from offset=0 after every successful proposal.",
-        "Do not disposition represented units; host-derived exact semantic coverage already accounts for them.",
+        "Do not disposition represented units or units in no-artifacts segments; their host-derived states already account for them.",
         `Retry ${toolName} once after concrete withdrawal/accounting progress. If the same full diagnostic repeats, stop instead of looping.`,
       ],
       suggestedCall: {
         tool: "withdraw_compiler_proposal",
         arguments: {
           proposal_id: proposalIds[0]!,
-          reason: "Recovered accounting dispositions overlap host-derived represented semantics.",
+          reason: "Recovered accounting dispositions conflict with host-derived source-unit states.",
         },
       },
     };
@@ -534,6 +545,32 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const unresolvedEventParticipants = [...errorText.matchAll(
+    /Canonical event ([A-Za-z0-9][A-Za-z0-9._-]*) participant '([A-Za-z0-9][A-Za-z0-9._-]*)' at participants\.\d+ has no resolved participant mention in its event trace\./gu,
+  )].map((match) => ({ eventId: match[1]!, entityId: match[2]! }));
+  if (toolName === "finish_compiler_batch" && unresolvedEventParticipants.length) {
+    const pairs = unresolvedEventParticipants.map((item) => `${item.eventId} -> ${item.entityId}`);
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry finish once only after every named canonical participant has a source mention in that event trace and that mention has a successful selected identity resolution.",
+      steps: [
+        `Repair each exact event/participant pair named by the host: ${pairs.join(", ")}. Preserve unrelated active proposals.`,
+        "Call find_source_annotations for the affected event and participant surfaces and inspect every active event resolution's eventMentionIds plus each event mention's participantMentionIds. Reuse an exact existing entity mention ID when present; otherwise propose one exact evidence-backed entity mention in the event extent.",
+        "If none of the resolved event mention(s) includes that entity mention ID, submit a corrected event-mention revision under a new envelope proposal_id while preserving its stable annotation_id, trigger, anchors, and other participants, and add the missing mention ID to participant_mention_ids. Creating an unreferenced entity mention alone cannot change the event trace.",
+        "For every affected mention, call find_entity_resolution_candidates with that exact mention ID, then complete the sequence by calling propose_entity_resolution. Merely creating the mention or merely calling the finder does not select an identity and cannot close the event trace.",
+        "The successful resolution must select the named canonical participant through the finder-authorized resolutionMode. If the finder does not authorize that identity, correct the canonical event participant or preserve the ambiguity; never guess or force the link.",
+        `Only after all ${unresolvedEventParticipants.length} selected resolution(s) succeed, retry ${toolName} once. If the same diagnostic repeats, stop instead of looping.`,
+      ],
+      suggestedCall: {
+        tool: "find_source_annotations",
+        arguments: { query: "*", status: "pending", offset: 0, max_results: 200 },
+      },
+    };
+  }
+
   if (toolName === "finish_compiler_batch" && /(?:graph|trace) is incomplete/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -550,23 +587,40 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const ambiguousQuoteSegment = /exact evidence quote is ambiguous in segment ([a-z0-9][a-z0-9._-]*): \d+ occurrences match\./iu.exec(errorText)?.[1];
+  if (COMPILER_PROPOSAL_TOOLS.has(toolName) && ambiguousQuoteSegment) {
+    const sourceRead = exactSourceRecovery(ambiguousQuoteSegment, scope);
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry once only after locating the intended occurrence in the named active-source segment.",
+      steps: [
+        ...sourceRead.steps,
+        "Keep the intended exact quote and disambiguate it with verbatim surrounding prefix/suffix, or a one-based occurrence counted from the complete segment, never from an individual page. Do not guess which occurrence supports this annotation.",
+        "This failed selector did not create the proposed annotation. Correct the selector and retain the intended logical annotation ID; do not create new logical IDs or withdraw dependent supported annotations to bypass ambiguity.",
+        `Retry ${toolName} once after that correction. If the intended occurrence cannot be identified or the same diagnostic repeats, stop and report the unresolved selector.`,
+      ],
+      ...(sourceRead.suggestedCall ? { suggestedCall: sourceRead.suggestedCall } : {}),
+    };
+  }
+
   const exactQuoteSegment = /exact evidence quote was not found in segment ([a-z0-9][a-z0-9._-]*?)(?: with the supplied context)?\./iu.exec(errorText)?.[1];
   if (COMPILER_PROPOSAL_TOOLS.has(toolName) && exactQuoteSegment) {
+    const sourceRead = exactSourceRecovery(exactQuoteSegment, scope);
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
       failedTool: toolName,
       category: "lookup-miss",
       retryable: true,
-      retryCondition: "Retry once only after reading the named active-source segment and copying the selector text verbatim from its returned chunk.",
+      retryCondition: "Retry once only after reading the named active-source segment and copying the selector text verbatim.",
       steps: [
-        `Call read_source_evidence with ref source-segment:${exactQuoteSegment}, offset=0, and max_chars=120000. If it returns nextOffset before the intended passage, continue only with that exact nextOffset.`,
-        "Copy the intended non-empty substring verbatim from the returned chunk into the failing evidence selector's exact field, and copy the returned evidence_segment_id into segment_id; do not copy JSON escaping from the prompt or normalize punctuation/whitespace.",
+        ...sourceRead.steps,
+        "Copy the intended non-empty substring verbatim into the failing evidence selector's exact field; do not copy JSON escaping from the prompt or normalize punctuation/whitespace.",
         `Retry ${toolName} once after changing that selector. If the intended wording is absent after reading the complete segment, remove/reframe the unsupported field or stop; never guess another quote.`,
       ],
-      suggestedCall: {
-        tool: "read_source_evidence",
-        arguments: { ref: `source-segment:${exactQuoteSegment}`, offset: 0, max_chars: 120_000 },
-      },
+      ...(sourceRead.suggestedCall ? { suggestedCall: sourceRead.suggestedCall } : {}),
     };
   }
 
@@ -604,17 +658,38 @@ export function buildNwhToolRecoveryAdvice(
   };
 }
 
-export function formatNwhToolError(toolName: string, error: unknown): string {
+function exactSourceRecovery(segmentId: string, scope: NwhToolRecoveryScope | undefined): Pick<NwhToolRecoveryAdvice, "steps" | "suggestedCall"> {
+  if (scope?.activeToolNames.includes("read_source_evidence")) {
+    return {
+      steps: [
+        `Call read_source_evidence with ref source-segment:${segmentId}, offset=0, and max_chars=120000. Continue pages only with the exact returned nextOffset.`,
+        "Use the returned chunk as verbatim source text and copy its evidence_segment_id into segment_id.",
+      ],
+      suggestedCall: {
+        tool: "read_source_evidence",
+        arguments: { ref: `source-segment:${segmentId}`, offset: 0, max_chars: 120_000 },
+      },
+    };
+  }
+  return {
+    steps: [
+      `Re-read the complete host-supplied <source-segment id="${segmentId}"> block in the current prompt and copy that exact id into segment_id.`,
+      "Use only the supplied segment text. If the complete named segment is unavailable, stop and report the missing evidence to the host; do not call unavailable retrieval tools or widen the source slice.",
+    ],
+  };
+}
+
+export function formatNwhToolError(toolName: string, error: unknown, scope?: NwhToolRecoveryScope): string {
   const message = errorMessage(error);
   if (hasNwhToolRecovery(message)) return message;
-  const advice = buildNwhToolRecoveryAdvice(toolName, message);
+  const advice = buildNwhToolRecoveryAdvice(toolName, message, scope);
   return `${message}\n\n${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice, null, 2)}\n${NWH_TOOL_RECOVERY_END_MARKER}`;
 }
 
-export function actionableToolError(toolName: string, error: unknown): Error {
+export function actionableToolError(toolName: string, error: unknown, scope?: NwhToolRecoveryScope): Error {
   const original = error instanceof Error ? error : undefined;
   if (original && hasNwhToolRecovery(original.message)) return original;
-  const wrapped = new Error(formatNwhToolError(toolName, error), original ? { cause: original } : undefined);
+  const wrapped = new Error(formatNwhToolError(toolName, error, scope), original ? { cause: original } : undefined);
   wrapped.name = "NwhActionableToolError";
   return wrapped;
 }
@@ -633,11 +708,11 @@ function toolResultErrorText(event: ToolResultEvent): string {
 }
 
 /** Add recovery metadata to both thrown failures and terminate=true blocked results. */
-export function recoverNwhToolResult(event: ToolResultEvent): NwhToolResultRecovery | undefined {
+export function recoverNwhToolResult(event: ToolResultEvent, scope?: NwhToolRecoveryScope): NwhToolResultRecovery | undefined {
   const blocked = toolResultWasBlocked(event.details);
   if (!event.isError && !blocked) return undefined;
   const message = toolResultErrorText(event);
-  const advice = buildNwhToolRecoveryAdvice(event.toolName, message);
+  const advice = buildNwhToolRecoveryAdvice(event.toolName, message, scope);
   const content = hasNwhToolRecovery(message)
     ? event.content
     : [
@@ -660,7 +735,7 @@ export function recoverNwhToolResult(event: ToolResultEvent): NwhToolResultRecov
 /** Always-on adapter, including isolated sessions that disable the main NWH extension. */
 export function createNwhToolRecoveryExtension(): ExtensionFactory {
   return (pi) => {
-    pi.on("tool_result", (event) => recoverNwhToolResult(event));
+    pi.on("tool_result", (event) => recoverNwhToolResult(event, { activeToolNames: pi.getActiveTools() }));
   };
 }
 
@@ -676,7 +751,7 @@ function isAbortFailure(error: unknown, signal: AbortSignal | undefined): boolea
  * as a preflight so schema failures receive the same guidance as execute-time
  * failures; Pi still performs its authoritative validation afterwards.
  */
-export function withNwhToolRecovery(tool: ToolDefinition): ToolDefinition {
+export function withNwhToolRecovery(tool: ToolDefinition, getScope?: () => NwhToolRecoveryScope): ToolDefinition {
   if ((tool as unknown as { [WRAPPED_TOOL]?: boolean })[WRAPPED_TOOL]) return tool;
   const originalPrepare = tool.prepareArguments;
   const prepareArguments: NonNullable<ToolDefinition["prepareArguments"]> = (raw: unknown) => {
@@ -689,7 +764,7 @@ export function withNwhToolRecovery(tool: ToolDefinition): ToolDefinition {
         arguments: prepared as Record<string, unknown>,
       } satisfies ToolCall) as never;
     } catch (error) {
-      throw actionableToolError(tool.name, error);
+      throw actionableToolError(tool.name, error, getScope?.());
     }
   };
   const execute: ToolDefinition["execute"] = async (toolCallId, params, signal, onUpdate, context) => {
@@ -697,7 +772,7 @@ export function withNwhToolRecovery(tool: ToolDefinition): ToolDefinition {
       return await tool.execute(toolCallId, params, signal, onUpdate, context);
     } catch (error) {
       if (isAbortFailure(error, signal)) throw error;
-      throw actionableToolError(tool.name, error);
+      throw actionableToolError(tool.name, error, getScope?.());
     }
   };
   const wrapped: ToolDefinition = {

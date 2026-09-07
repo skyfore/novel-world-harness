@@ -1469,7 +1469,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         const generatedBy = ctx.model ? { provider: ctx.model.provider, model: ctx.model.id } : {};
         registeredCompilerToolset = createCompilerProposalToolset(workspace.root, generatedBy);
         for (const tool of registeredCompilerToolset.tools) {
-          if (!SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name)) pi.registerTool(withNwhToolRecovery(tool));
+          if (!SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS.has(tool.name)) {
+            pi.registerTool(withNwhToolRecovery(tool, () => ({ activeToolNames: pi.getActiveTools() })));
+          }
         }
         compilerToolsRegistered = true;
       }

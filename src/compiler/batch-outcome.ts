@@ -225,6 +225,15 @@ export function isRecoverableCompilerBatchInterruption(outcome: CompilerBatchOut
   }
   return outcome.assistantStopReason === "error"
     || Boolean(outcome.unresolvedToolCalls)
+    // A model can stop after a rejected finish while leaving valid, active
+    // drafts behind (for example, after only partially draining paged source
+    // accounting). The finish handshake still protects the checkpoint; give a
+    // fresh session one bounded chance to hydrate those drafts and continue.
+    || (
+      outcome.assistantStopReason === "stop"
+      && !outcome.completionSignaled
+      && outcome.proposalSucceeded > 0
+    )
     // A successful no-artifacts finish cannot erase earlier failed proposal
     // attempts.  Treat this as an abandoned bounded review, not as a
     // deterministic semantic blocker: one fresh turn can re-read the same

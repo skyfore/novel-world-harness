@@ -157,7 +157,7 @@ export async function repairExistingCommand(
       );
     }
     const foreignProposalIds = (await pendingSourceProposalIds(root, source))
-      .filter((id) => !id.endsWith(`-${run!.runId}`));
+      .filter((id) => !proposalBelongsToRepairNamespace(id, run!.runId));
     if (foreignProposalIds.length) {
       throw new Error(
         `Cannot resume repair ${run.runId}: pending proposal(s) do not belong to this repair namespace: `
@@ -371,6 +371,40 @@ export async function repairExistingCommand(
       { cause: error },
     );
   }
+}
+
+function proposalBelongsToRepairNamespace(proposalId: string, runId: string): boolean {
+  const namespaceSuffix = `-${runId}`;
+  if (proposalId.endsWith(namespaceSuffix)) return true;
+  // Corrected proposals conventionally retain the repair namespace and append
+  // a bounded revision suffix (for example `...-repair-<run>-v2`). Treat those
+  // as descendants of the same repair, while continuing to reject arbitrary
+  // text after the durable run id.
+  const versionMarker = `${namespaceSuffix}-v`;
+  const markerIndex = proposalId.lastIndexOf(versionMarker);
+  if (markerIndex >= 0 && /^[1-9]\d*$/.test(proposalId.slice(markerIndex + versionMarker.length))) return true;
+
+  // Some corrected envelopes place the version immediately after the repair
+  // prefix: `...-repair-v2-<timestamp>-<nonce>`. Match the complete immutable
+  // timestamp/nonce tail so a proposal from another repair still cannot pass.
+  const repairMatch = /^repair-(\d{14}-[a-f0-9]{8})$/.exec(runId);
+  if (!repairMatch) return false;
+  const insertedVersionMarker = `-repair-v`;
+  const insertedMarkerIndex = proposalId.lastIndexOf(insertedVersionMarker);
+  if (insertedMarkerIndex >= 0) {
+    const insertedSuffix = proposalId.slice(insertedMarkerIndex + insertedVersionMarker.length);
+    if (new RegExp(`^[1-9]\\d*-${repairMatch[1]}$`).test(insertedSuffix)) return true;
+  }
+
+  // Models also occasionally compact the same convention to
+  // `...-repair2-<timestamp>-<nonce>`. Accept only a positive numeric version
+  // followed by this run's exact immutable tail; a similarly named proposal
+  // from another repair remains foreign.
+  const compactVersionMarker = `-repair`;
+  const compactMarkerIndex = proposalId.lastIndexOf(compactVersionMarker);
+  if (compactMarkerIndex < 0) return false;
+  const compactSuffix = proposalId.slice(compactMarkerIndex + compactVersionMarker.length);
+  return new RegExp(`^[1-9]\\d*-${repairMatch[1]}$`).test(compactSuffix);
 }
 
 async function validateRepairResume(

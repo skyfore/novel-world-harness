@@ -38,7 +38,11 @@ export type CompileSourceOptions = {
   traceParent?: TraceContext;
 };
 
-const MAX_COMPILER_BATCH_RECOVERY_RETRIES = 1;
+// Large executable batches can require several fresh provider turns to drain
+// paged source accounting. Each turn is still gated by a recoverable outcome,
+// hydrates exact active drafts, while the partial-stop recovery path requires
+// typed proposal progress. Deterministic finish and loop breakers are unchanged.
+const MAX_COMPILER_BATCH_RECOVERY_RETRIES = 3;
 
 export function isRecoverableCompilerSessionException(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -198,7 +202,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           }
           if (attempt < MAX_COMPILER_BATCH_RECOVERY_RETRIES && isRecoverableCompilerBatchInterruption(report)) {
             const message = `Compiler batch ${batch.ordinal + 1} had a recoverable interruption (${failure}); `
-              + `retrying the same immutable evidence batch once.`;
+              + `starting bounded recovery ${attempt + 1}/${MAX_COMPILER_BATCH_RECOVERY_RETRIES} for the same immutable evidence batch.`;
             if (options.onProgress) options.onProgress(message);
             else stderr.write(`${message}\n`);
             const hydrated = await hydrateCompilerBatch(options.root, batch);
@@ -230,7 +234,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           if (attempt < MAX_COMPILER_BATCH_RECOVERY_RETRIES && isRecoverableCompilerSessionException(error)) {
             const failure = error instanceof Error ? error.message : String(error);
             const message = `Compiler batch ${batch.ordinal + 1} had a recoverable session interruption (${failure}); `
-              + `retrying the same batch once with its active drafts.`;
+              + `starting bounded recovery ${attempt + 1}/${MAX_COMPILER_BATCH_RECOVERY_RETRIES} with its active drafts.`;
             if (options.onProgress) options.onProgress(message);
             else stderr.write(`${message}\n`);
             const hydrated = await hydrateCompilerBatch(options.root, batch);

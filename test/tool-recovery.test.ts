@@ -312,6 +312,56 @@ describe("agent tool recovery", () => {
     expect(buildNwhToolRecoveryAdvice(toolName, content[0]!.text)).toEqual(expected);
   });
 
+  it("returns an actionable exact-name repair while preserving the failed finish status", async () => {
+    const diagnostic = "Canonical entity proposal trace is incomplete:\n- Entity artifact-copper-urn-00012 canonicalName '铜罐' has no resolved source mention.";
+    const tool = withNwhToolRecovery(defineTool({
+      name: "finish_compiler_batch",
+      label: "Finish compiler batch",
+      description: "Exercise failed finish recovery as the model receives it.",
+      parameters: Type.Object({}),
+      async execute() { throw new Error(diagnostic); },
+    }));
+    let failure: Error | undefined;
+    try {
+      await tool.execute("finish-name-trace", {}, undefined, undefined, {} as ExtensionContext);
+    } catch (error) {
+      failure = error as Error;
+    }
+    expect(failure?.message).toContain(diagnostic);
+    const recovered = recoverNwhToolResult({
+      type: "tool_result", toolName: tool.name, toolCallId: "finish-name-trace", input: {},
+      content: [{ type: "text", text: failure!.message }], isError: true,
+    });
+    expect(recovered).toMatchObject({
+      isError: true,
+      details: { nwhToolRecovery: {
+        category: "invalid-arguments", retryable: true,
+        suggestedCall: { tool: "find_source_annotations", arguments: {
+          query: "铜罐", annotation_type: "entity-mention", offset: 0, max_results: 20,
+        } },
+      } },
+    });
+    const advice = buildNwhToolRecoveryAdvice(tool.name, failure!.message);
+    expect(advice.suggestedCall?.arguments).not.toHaveProperty("status");
+    const steps = advice.steps.join(" ");
+    for (const text of ["artifact-copper-urn-00012", "surface === canonicalName", "annotationId, never ref/proposalId",
+      "find_entity_resolution_candidates", "propose_entity_resolution", "new-entity", "all reported sections",
+      "same full diagnostic repeats, stop", "Preserve unrelated valid drafts"]) {
+      expect(steps).toContain(text);
+    }
+    const blocked = buildNwhToolRecoveryAdvice(tool.name, `Compiler batch stopped by its circuit breaker. Reason: ${diagnostic}`);
+    expect(blocked).toMatchObject({ category: "budget-or-circuit-breaker", retryable: false });
+    expect(blocked.suggestedCall).toBeUndefined();
+  });
+
+  it("includes every missing name and keeps discovery arguments within tool limits", () => {
+    const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch",
+      `Canonical entity proposal trace is incomplete:\n- Entity urn canonicalName '${"罐".repeat(501)}' has no resolved source mention.\n- Entity person canonicalName 'O'Brien' has no resolved source mention.\n\nCanonical event proposal trace is incomplete:\n- Missing event dependency.`);
+    expect(advice.suggestedCall?.arguments.query).toBe("*");
+    expect(advice.steps.join(" ")).toContain('person -> "O\'Brien"');
+    expect(advice.retryCondition).toContain("every reported graph/trace section");
+  });
+
   it("completes participant mention identity selection before retrying finish", () => {
     const advice = buildNwhToolRecoveryAdvice(
       "finish_compiler_batch",

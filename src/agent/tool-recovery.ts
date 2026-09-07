@@ -545,6 +545,31 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  const missingEntityNames = [...errorText.matchAll(
+    /^-\s+Entity ([A-Za-z0-9][A-Za-z0-9._-]*) canonicalName '([^\r\n]*)' has no resolved source mention\.$/gmu,
+  )].map((match) => ({ entityId: match[1]!, canonicalName: match[2]! }));
+  if (toolName === "finish_compiler_batch" && missingEntityNames.length) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-arguments",
+      retryable: true,
+      retryCondition: "Retry finish once only after repairing every reported graph/trace section, including an exact-name identity resolution for each diagnosed entity.",
+      steps: [
+        `Repair these entity/name pairs: ${missingEntityNames.map((item) => `${item.entityId} -> ${JSON.stringify(item.canonicalName)}`).join(", ")}. Preserve unrelated valid drafts.`,
+        "For each name, call find_source_annotations with annotation_type=entity-mention and query equal to that name (use * if the name exceeds the 500-character query limit). Omit status to search both committed and pending mentions; follow exact returned nextOffset values when paging. Copy the returned ref to read_source_annotation and inspect payload.surface, kindCandidates, and the source context. Copy annotationId, never ref/proposalId, as the mention_id; do not guess IDs.",
+        "The trace requires surface === canonicalName, a compatible entity kind, and a selected resolution to the diagnosed entity. A substring or similar wording is insufficient: resolving a longer surface containing the name does not establish the exact canonicalName. An existing exact-name mention still needs identity resolution; creating another mention alone cannot repair this error.",
+        "For a context-supported exact-name mention, call find_entity_resolution_candidates with its mention_id, inspect the returned mention.surface, and then call propose_entity_resolution, copying the source-supported candidate.entityId into entity_id and its resolutionMode into status. For a same-finish new entity use new-entity; resolved is for canonical/checkpointed identity. Lexical matches alone do not prove identity; do not force an unsupported link.",
+        "If no suitable mention exists, inspect the immutable evidence before proposing an exact anchored mention. If the entity name itself is defective, submit a source-supported corrected entity proposal under a fresh envelope proposal_id while preserving its logical entity id, then withdraw only the defective current-batch proposal. Never alter mention text without a matching source anchor, duplicate an entity to bypass the guard, or withdraw checkpointed work.",
+        "Include every successful repair in the finish handshake. Retry finish_compiler_batch once only after concrete proposal progress and all reported sections are repaired; do not use no-artifacts to escape validation. If the same full diagnostic repeats, stop instead of looping.",
+      ],
+      suggestedCall: {
+        tool: "find_source_annotations",
+        arguments: { query: missingEntityNames[0]!.canonicalName.length <= 500 ? missingEntityNames[0]!.canonicalName || "*" : "*", annotation_type: "entity-mention", offset: 0, max_results: 20 },
+      },
+    };
+  }
+
   const unresolvedEventParticipants = [...errorText.matchAll(
     /Canonical event ([A-Za-z0-9][A-Za-z0-9._-]*) participant '([A-Za-z0-9][A-Za-z0-9._-]*)' at participants\.\d+ has no resolved participant mention in its event trace\./gu,
   )].map((match) => ({ eventId: match[1]!, entityId: match[2]! }));

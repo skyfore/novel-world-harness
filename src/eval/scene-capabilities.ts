@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { contentHash } from "../world/canonical.js";
-import { idSchema, textAnchorSchema, stateDeltaSchema, predicateSchema, schemaBoundActionInvocationSchema,
+import { idSchema, textAnchorSchema, stateDeltaSchema, predicateSchema, schemaBoundActionInvocationSchema, knowledgeStatusSchema,
   type StateDelta, type WorldState } from "../world/model.js";
 import { resolveActionInvocation } from "../world/action-ontology.js";
 import { validateEventExecutions } from "../world/event-execution.js";
@@ -25,6 +25,7 @@ export const sceneCapabilityCaseSchema = z.discriminatedUnion("kind", [
     requiresMechanism: z.boolean(), expectation: effectExpectation }).strict(),
   z.object({ ...basis, kind: z.literal("knowledge-cut"), actorId: idSchema, acquisitionEventId: idSchema,
     claimId: idSchema.optional(), contentExpectation: z.string().trim().min(1),
+    expectedStatus: knowledgeStatusSchema.optional(),
     beforeEventIds: z.array(idSchema), afterEventIds: z.array(idSchema).min(1),
     expectedBefore: z.boolean(), expectedAfter: z.boolean() }).strict(),
   z.object({ ...basis, kind: z.literal("norm-scope"), normId: idSchema, scenarios: z.array(z.object({
@@ -83,6 +84,7 @@ export function evaluateSceneCapabilities(specInput: unknown, sourceBytes: Uint8
           observations.observedDelta = event.observedOutcome;
           observations.resolvedEffects = resolved?.stateEffects ?? null;
           if (test.expectation.kind === "delta") {
+            if (!isDeepStrictEqual(event.observedOutcome, test.expectation.delta)) fail("SCENE_SOURCE_OUTCOME_MISMATCH", "The full source-reviewed delta differs from the occurrence (including operation order or extra changes).", "semantic", [event.id]);
             for (const expected of test.expectation.delta.operations) {
               if (!event.observedOutcome.operations.some((actual) => isDeepStrictEqual(actual, expected))) fail("SCENE_SOURCE_OUTCOME_MISSING", `Independent source expectation is absent from the occurrence: ${JSON.stringify(expected)}`, "semantic", [event.id]);
               if (test.requiresMechanism && !resolved?.stateEffects.some((effect) => isDeepStrictEqual(effect.operation, expected))) fail("SCENE_SOURCE_EFFECT_UNBOUND", "The mechanism does not produce the independently expected state operation.", "executable", [event.id, ...(action ? [action.schemaId] : [])]);
@@ -103,7 +105,7 @@ export function evaluateSceneCapabilities(specInput: unknown, sourceBytes: Uint8
         else {
           if (!catalog.claims.has(test.claimId)) throw new Error(`Unknown expected claim ${test.claimId}`);
           if (!test.afterEventIds.includes(test.acquisitionEventId) || test.beforeEventIds.includes(test.acquisitionEventId)
-            || test.beforeEventIds.some((id) => !test.afterEventIds.includes(id))) throw new Error("Knowledge cuts must extend the before history with the acquisition event.");
+            || test.beforeEventIds.some((id, index) => test.afterEventIds[index] !== id)) throw new Error("Knowledge cuts must extend the before history in the same order with the acquisition event.");
           const project = (ids: string[]) => {
             if (new Set(ids).size !== ids.length) throw new Error("A knowledge cut cannot replay the same event twice.");
             let knowledge = emptyKnowledgeState(contentHash(ids));
@@ -117,7 +119,9 @@ export function evaluateSceneCapabilities(specInput: unknown, sourceBytes: Uint8
             return knowledge;
           };
           const before = project(test.beforeEventIds), after = project(test.afterEventIds);
-          const known = (state: typeof before) => Boolean(state.actors[test.actorId]?.[test.claimId!] && state.actors[test.actorId]![test.claimId!]!.status !== "disbelieves");
+          const expectedStatus = test.expectedStatus ?? "knows";
+          const known = (state: typeof before) => state.actors[test.actorId]?.[test.claimId!]?.status === expectedStatus;
+          observations.expectedKnowledgeStatus = expectedStatus;
           observations.beforeKnown = known(before); observations.afterKnown = known(after);
           observations.afterAcquisition = after.actors[test.actorId]?.[test.claimId] ?? null;
           if (known(before) !== test.expectedBefore || known(after) !== test.expectedAfter) fail("SCENE_KNOWLEDGE_CUT_MISMATCH", "Actor knowledge does not match the independently reviewed before/after cuts.", "semantic", [...test.afterEventIds]);

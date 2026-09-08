@@ -1,4 +1,7 @@
 import { reviewNovelRoles } from "../workflow/role-review.js";
+import { CompilerFinishReceipts, finishHostError } from "../compiler/finish-receipts.js";
+import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
+import { recoverCompilerFinish } from "../compiler/finish-recovery.js";
 import path from "node:path";
 import { getMarkdownTheme, type AgentSessionEvent, type ExtensionAPI, type ExtensionContext, type ExtensionFactory, type TransientAssistantStream } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, AssistantMessageEvent } from "@earendil-works/pi-ai";
@@ -1446,6 +1449,8 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
     };
 
     const resetCompilerBatch = async (segmentIds: readonly string[], compilerBatchId: string, sourceId: string) => {
+      new CompilerProposalObligations(workspace.root, sourceId, compilerBatchId).assertModelRecoveryAllowed();
+      if (await new CompilerFinishReceipts(workspace.root, sourceId, compilerBatchId).read()) throw finishHostError("resume the saved finish through the host before an interactive model turn");
       await registeredCompilerToolset?.beginBatch(segmentIds, compilerBatchId, sourceId);
       await options.resetCompilerProposalTools?.(segmentIds, compilerBatchId, sourceId);
       compilerCircuitBroken = false;
@@ -1594,6 +1599,9 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       if (!state) return;
       try {
       prepareAllHostActivity?.update("Checking deterministic preparation state");
+      for (const receipt of await CompilerFinishReceipts.list(workspace.root, state.sourceId)) {
+        if (receipt.state === "prepared") await recoverCompilerFinish(workspace.root, state.sourceId, receipt.identity.batchId);
+      }
       let inspection = await inspectPreparation(workspace.root, {
         sourceId: state.sourceId,
         branchId: state.branchId,
@@ -1631,7 +1639,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           state.compileAllApproved = true;
         }
         const preparation = await prepareNextSourceLoopTurn(workspace.root, state.sourceId);
-        if (!preparation || preparation.status === "complete") {
+        if (preparation?.status === "complete") {
+          await advancePrepareAll(ctx);
+          return;
+        }
+        if (!preparation) {
           await stopPrepareAll(ctx, "Could not resolve the next compiler batch.", "error");
           return;
         }
@@ -2172,6 +2184,12 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           const specialBatchId = reconciliationRequest
             ? prepareAllState!.reconciliationBatchId
             : prepareAllState!.initialWorldBatchId;
+          if (specialBatchId && (outcome.hostReviewReason
+            || new CompilerProposalObligations(workspace.root, prepareAllState!.sourceId, specialBatchId).requiringHostReview().length
+            || await new CompilerFinishReceipts(workspace.root, prepareAllState!.sourceId, specialBatchId).read())) {
+            await stopPrepareAll(ctx, `Compiler scope requires host recovery (${failure}). Preserve the saved intent, failure journal and drafts; resume the same source/batch through the host compiler.`, "error");
+            return;
+          }
           const rejected = specialBatchId
             ? await rejectPendingCompilerBatchProposals(workspace.root, specialBatchId)
             : [];
@@ -2222,7 +2240,14 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
       }
       pendingTurn = undefined;
       pendingTurnInitiatedByUserInput = false;
-      await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id);
+      try {
+        await markSourceLoopBatchComplete(workspace.root, completedTurn.source.id, completedTurn.batch.id, { requireFinishReceipt: true });
+      } catch (error) {
+        const message = `Compiler batch was not checkpointed: ${error instanceof Error ? error.message : String(error)}`;
+        if (prepareAllState) await stopPrepareAll(ctx, message, "error");
+        else { ctx.ui.notify(message, "error"); await releaseCompilerOperationLock(); }
+        return;
+      }
       const refreshedSource = await (await WorkspaceStore.create(workspace.root)).getSource(completedTurn.source.id);
       if (refreshedSource?.titleInference) {
         setContextSessionName(

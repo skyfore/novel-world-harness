@@ -15,6 +15,8 @@ import { WorkspaceStore } from "../src/storage/workspace-store.js";
 import { withNwhToolRecovery } from "../src/agent/tool-recovery.js";
 import { worldStorageRoot } from "../src/world/paths.js";
 import { inspectCompilerStatus } from "../src/compiler/status.js";
+import { prepareNextSourceLoopTurn } from "../src/compiler/source-loop.js";
+import { withWorkspaceOperationLock } from "../src/util/workspace-lock.js";
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -127,4 +129,17 @@ it("archives only the explicitly replaced batch, preserving its receipt and audi
   const [directory] = await fs.readdir(history), [file] = await fs.readdir(path.join(history, directory!));
   expect(JSON.parse(await fs.readFile(path.join(history, directory!, file!), "utf8"))).toMatchObject({ receipt: original, reason: "Explicit scoped reparse" });
   expect(await CompilerFinishReceipts.list(f.root, f.source.id)).toEqual([]);
+});
+
+it("recovers an interrupted TUI source finish before offering the next model turn", async () => {
+  const f = await fixture("observation");
+  vi.spyOn(CompilerFinishReceipts.prototype, "complete").mockRejectedValueOnce(new Error("injected TUI interruption"));
+  await expect(f.call("finish_compiler_batch", f.input)).rejects.toThrow("injected TUI interruption");
+  const next = await withWorkspaceOperationLock(f.root, "compiler", () => prepareNextSourceLoopTurn(f.root, f.source.id));
+  expect(next?.status).toBe("ready");
+  if (next?.status !== "ready") throw new Error("Expected next source turn");
+  expect(next.batch.id).not.toBe(f.batch.id);
+  expect(next.batch.semanticStage).toBe("semantic");
+  expect(next.completedBatches).toBe(1);
+  expect((await f.receipts.read())?.state).toBe("completed");
 });

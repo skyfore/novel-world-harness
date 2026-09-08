@@ -2840,7 +2840,7 @@ describe("NWH TUI extension", () => {
   });
 
   it("continues with the next compiler batch automatically during /prepare-all", async () => {
-    const { commands, events, root, sentHiddenMessages } = await fixture();
+    const { commands, events, root, sentHiddenMessages, registeredToolDefinitions } = await fixture();
     const content = Array.from({ length: 8 }, (_, index) => `第${index + 1}章\n人物${index + 1}进入城池。\n`).join("\n");
     const evidence = await createEvidenceFixture(root, content, "all-batches.txt");
     const notifications: string[] = [];
@@ -2862,6 +2862,7 @@ describe("NWH TUI extension", () => {
       reviewed_segments: segmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No supported facts." })),
       summary: "No supported facts.",
     };
+    await registeredToolDefinitions.get("finish_compiler_batch")!.execute("finish-all", finishInput as never, undefined, undefined, ctx);
     await events.get("agent_end")?.({
       type: "agent_end",
       messages: [
@@ -2978,8 +2979,8 @@ describe("NWH TUI extension", () => {
     expect(notifications).toContainEqual(expect.stringContaining(`nwh audit --source ${evidence.source.id}`));
   });
 
-  it("checkpoints a successful compiler batch before /compile-next advances", async () => {
-    const { commands, events, root, sentUserMessages, sentHiddenMessages, getActiveTools } = await fixture();
+  it.each([true, false])("requires a durable finish before /compile-next advances (receipt=%s)", async (durable) => {
+    const { commands, events, root, sentUserMessages, sentHiddenMessages, getActiveTools, registeredToolDefinitions } = await fixture();
     const novelPath = path.join(root, "long-novel.txt");
     await fs.writeFile(
       novelPath,
@@ -3002,12 +3003,14 @@ describe("NWH TUI extension", () => {
       { type: "input", text: novelPath, source: "interactive" } as InputEvent,
       ctx as unknown as ExtensionContext,
     );
+    const prompt = await events.get("before_agent_start")?.({ type: "before_agent_start", prompt: "compile", systemPrompt: "system", systemPromptOptions: {} });
+    const segmentIds = [...String((prompt as { message?: { content?: string } } | undefined)?.message?.content).matchAll(/<source-segment id="([^"]+)">/g)].map((match) => match[1]!);
+    const finishInput = { outcome: "no-artifacts", reviewed_segments: segmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "Reviewed fixture source" })), summary: "Reviewed fixture source" };
+    if (durable) await registeredToolDefinitions.get("finish_compiler_batch")!.execute("finish-1", finishInput as never, undefined, undefined, ctx);
     await events.get("agent_end")?.({
       type: "agent_end",
       messages: [
-        { role: "assistant", content: [{ type: "toolCall", id: "proposal-1", name: "propose_entity", arguments: { proposal_id: "entity-1" } }], stopReason: "toolUse" },
-        { role: "toolResult", toolCallId: "proposal-1", toolName: "propose_entity", content: [], isError: false },
-        { role: "assistant", content: [{ type: "toolCall", id: "finish-1", name: "finish_compiler_batch", arguments: { outcome: "complete", proposal_ids: ["entity-1"], summary: "done" } }], stopReason: "toolUse" },
+        { role: "assistant", content: [{ type: "toolCall", id: "finish-1", name: "finish_compiler_batch", arguments: finishInput }], stopReason: "toolUse" },
         { role: "toolResult", toolCallId: "finish-1", toolName: "finish_compiler_batch", content: [], isError: false },
         { role: "assistant", content: [{ type: "text", text: "batch complete" }], stopReason: "stop" },
       ],
@@ -3025,7 +3028,8 @@ describe("NWH TUI extension", () => {
     expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);
     expect(sentUserMessages).toEqual([]);
     expect(sentHiddenMessages).toHaveLength(1);
-    expect(sentHiddenMessages[0]).toMatch(/batch 2\/\d+/);
+    expect(sentHiddenMessages[0]).toMatch(durable ? /batch 2\/\d+/ : /batch 1\/\d+/);
+    if (!durable) expect(notifications).toContainEqual(expect.stringContaining("checkpoint requires a completed durable finish receipt"));
     expect(sentHiddenMessages[0]).toContain("<source-segment");
   });
 
@@ -3152,7 +3156,6 @@ describe("NWH TUI extension", () => {
     const firstSegmentIds = [...String((firstPrompt as { message?: { content?: string } } | undefined)?.message?.content).matchAll(/<source-segment id="([^"]+)">/g)].map((match) => match[1]!);
     const finishInput = {
       outcome: "no-artifacts",
-      proposal_ids: [],
       reviewed_segments: firstSegmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No supported facts." })),
       summary: "No supported facts.",
     };

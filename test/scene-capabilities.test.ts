@@ -50,6 +50,8 @@ it("routes an experiencer/initiator mismatch back to semantic repair, then accep
   expect(review(c, [eventCase]).repairTasks).toContainEqual(expect.objectContaining({ stage: "semantic", artifactIds: ["gift", "role"] }));
   c.eventParticipations.set(part.id, { ...part, role: "agent" });
   expect(review(c, [eventCase]).verified).toBe(true);
+  c.events.set("gift", event("gift", { version: 1, operations: [...gift.operations, { op: "set", entityId: "silver-key", field: "artifact.owner", value: "hero" }] }));
+  expect(review(c, [eventCase]).cases[0]!.issues).toContainEqual(expect.objectContaining({ code: "SCENE_SOURCE_OUTCOME_MISMATCH" }));
 });
 
 it("allows explicitly reviewed no-change scenes, and keeps unmapped effects unsupported", () => {
@@ -84,6 +86,10 @@ it("isolates knowledge to the actor and selected history rather than activating 
   const test = { ...basis, kind: "knowledge-cut", actorId: "hero", acquisitionEventId: "reveal", claimId: "open-claim", contentExpectation: "Gate open", beforeEventIds: ["earlier"], afterEventIds: ["earlier", "reveal"], expectedBefore: false, expectedAfter: true };
   expect(review(c, [test]).verified).toBe(true);
   expect(review(c, [test]).cases[0]!.observations).toMatchObject({ beforeKnown: false, afterKnown: true });
+  expect(review(c, [{ ...test, afterEventIds: ["reveal", "earlier"] }]).verified).toBe(false);
+  c.events.set("reveal", { ...reveal, observedKnowledge: { version: 1, operations: [{ ...reveal.observedKnowledge.operations[0]!, status: "believes" }] } });
+  expect(review(c, [test]).verified).toBe(false);
+  expect(review(c, [{ ...test, expectedStatus: "believes" }]).verified).toBe(true);
   c.events.set("reveal", { ...reveal, observedKnowledge: { version: 1, operations: [{ ...reveal.observedKnowledge.operations[0]!, actorId: "rival" }] } });
   expect(review(c, [test]).cases[0]!.observations.afterKnown).toBe(false);
   expect(review(c, [{ ...test, claimId: undefined }]).cases[0]!.status).toBe("unknown");

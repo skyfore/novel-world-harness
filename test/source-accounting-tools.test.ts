@@ -10,6 +10,9 @@ import { SourceAccountingStore, sourceUnitReviewRange } from "../src/compiler/so
 import { baseStructuralUnits, ensureSourceStructure } from "../src/compiler/structure.js";
 import { readSourceMaterial } from "../src/storage/source-material-store.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { CompilerAccountingPages } from "../src/compiler/accounting-pages.js";
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
+import { withNwhToolRecovery } from "../src/agent/tool-recovery.js";
 
 const roots: string[] = [];
 
@@ -18,6 +21,52 @@ afterEach(async () => {
 });
 
 describe("source-unit accounting tools", () => {
+  it("preserves a 20-unit failed page across sessions and permits one same-ID correction after a 19+1 rebase", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-rebase-")); roots.push(root);
+    const ruleText = "Entry requires day zero or later.";
+    const text = Array.from({ length: 21 }, (_, index) => index === 19 ? ruleText : `Traveler ${index + 1} waits quietly at the gate.`).join("\n");
+    const fixture = await createEvidenceFixture(root, text);
+    const batch = (await prepareCompilerBatches(root, fixture.source)).find((item) => item.semanticStage === "executable")!;
+    const create = async () => { const set = createCompilerProposalToolset(root); await set.beginBatch(batch.segmentIds, batch.id, fixture.source.id); return set; };
+    const call = (set: ReturnType<typeof createCompilerProposalToolset>, name: string, input: unknown) =>
+      withNwhToolRecovery(set.tools.find((tool) => tool.name === name)!).execute(name, input as never, undefined, undefined, {} as never);
+    const discover = async (set: ReturnType<typeof createCompilerProposalToolset>) => {
+      const result = await call(set, "find_source_accounting_units", { status: "unresolved", offset: 0, max_results: 20 });
+      return JSON.parse((result.content[0] as { text: string }).text) as { pageToken: string; units: Array<{ unitId: string }> };
+    };
+    const set = await create();
+    const oldPage = await discover(set);
+    expect(oldPage.units).toHaveLength(20);
+    await call(set, "propose_world_rule", { proposal_id: "new-evidence", payload: {
+      ontologyVersion: "world-rule-v2", id: "entry", name: ruleText, kind: "social", scope: "global", visibility: "public",
+      priority: 1, defeasible: true, clauses: [{ id: "entry-day", modality: "require", predicate: { op: "elapsed-days-gte", days: 0 },
+        basis: "explicit", status: "supported", confidence: 1 }], exceptions: [], basis: "explicit", status: "supported", confidence: 1,
+    }, evidence_segment_ids: batch.segmentIds, evidence_selectors: ["/name", "/clauses/0/predicate"].map((target_path) => ({
+      segment_id: batch.segmentIds[0], exact: ruleText, target_path, relation: "supports", strength: "explicit",
+    })) });
+    const originalInput = { proposal_id: "p07", page_token: oldPage.pageToken,
+      page_default: { status: "background-only", reason: "Individually reviewed descriptive context." } };
+    let diagnostic = "";
+    try { await call(set, "account_source_units", originalInput); }
+    catch (error) { diagnostic = (error as Error).message; }
+    expect(diagnostic).toContain('"category": "coverage-changed"');
+    expect(diagnostic).toContain(`"representedUnitIds":["${oldPage.units[19]!.unitId}"]`);
+    expect(diagnostic).toContain("same exact proposal_id");
+    expect(diagnostic).toContain("empty decisions");
+    await expect(new SourceAccountingStore(root).readProposal(fixture.source.id, "pending", "p07")).rejects.toMatchObject({ code: "ENOENT" });
+    const pages = new CompilerAccountingPages(root, fixture.source.id, batch.id);
+    expect(pages.read(oldPage.pageToken)).toMatchObject({ sourceSha256: fixture.source.contentSha256, unitIds: oldPage.units.map((unit) => unit.unitId) });
+    expect(new CompilerAccountingPages(root, fixture.source.id, "other-batch").read(oldPage.pageToken)).toBeUndefined();
+    expect(new CompilerAccountingPages(root, "other-source", batch.id).read(oldPage.pageToken)).toBeUndefined();
+    const resumed = await create();
+    const rebased = await discover(resumed);
+    expect(rebased.units.filter((unit) => oldPage.units.some((old) => old.unitId === unit.unitId))).toHaveLength(19);
+    await call(resumed, "account_source_units", { ...originalInput, page_token: rebased.pageToken });
+    expect(new CompilerProposalObligations(root, fixture.source.id, batch.id).unresolved()).toEqual([]);
+    expect(pages.read(rebased.pageToken)?.consumedBy).toBe("p07");
+    await expect(call(await create(), "account_source_units", { ...originalInput, proposal_id: "reuse", page_token: rebased.pageToken })).rejects.toThrow("Unknown or stale");
+  });
+
   it("inherits checkpointed same-slice observations without treating them as executable artifacts", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-stages-")); roots.push(root);
     const fixture = await createEvidenceFixture(root, "Hero waits at the gate.\nRain falls quietly on the empty road.");

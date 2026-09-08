@@ -1,5 +1,6 @@
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
+import { CompilerAccountingPages } from "./accounting-pages.js";
 import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import crypto from "node:crypto";
@@ -986,11 +987,6 @@ export function createCompilerProposalToolset(
   const successfulEntityResolutionProposalIds = new Set<string>();
   const successfulEventResolutionProposalIds = new Set<string>();
   const successfulAccountingProposalIds = new Set<string>();
-  const issuedAccountingPages = new Map<string, {
-    sourceId: string;
-    compilerBatchId: string;
-    unitIds: string[];
-  }>();
   const peekedDirections = new Set<"previous" | "next">();
   let expectedSegmentIds: string[] = [];
   let boundedSliceSegments: SourceSegment[] = [];
@@ -1841,15 +1837,10 @@ export function createCompilerProposalToolset(
       const page = candidates.slice(offset, offset + maxResults);
       const nextOffset = offset + page.length < candidates.length ? offset + page.length : null;
       const pageToken = statusFilter === "unresolved" && page.length
-        ? `acctpg-${crypto.randomBytes(8).toString("hex")}`
-        : undefined;
-      if (pageToken) {
-        issuedAccountingPages.set(pageToken, {
-          sourceId: source.id,
-          compilerBatchId: compilerBatchId!,
+        ? new CompilerAccountingPages(workspaceRoot, source.id, compilerBatchId!).issue({
+          sourceSha256: source.contentSha256, segmentIds: targetSegments.map((segment) => segment.id),
           unitIds: page.map((unit) => unit.unitId),
-        });
-      }
+        }).token : undefined;
       return {
         content: [{ type: "text" as const, text: promptJson({
           type: "source-accounting-units",
@@ -1938,8 +1929,9 @@ export function createCompilerProposalToolset(
             "Page accounting requires both page_token and page_default. Call find_source_accounting_units with status=unresolved and copy its exact pageToken; do not guess.",
           );
         }
-        const issued = issuedAccountingPages.get(input.page_token);
-        if (!issued || issued.sourceId !== source.id || issued.compilerBatchId !== compilerBatchId) {
+        const issued = new CompilerAccountingPages(workspaceRoot, source.id, compilerBatchId!).read(input.page_token);
+        if (!issued || issued.consumedBy || issued.sourceSha256 !== source.contentSha256
+          || issued.segmentIds.some((id) => !expectedSegmentIds.includes(id))) {
           throw new Error(
             `Unknown or stale accounting page token ${input.page_token}. Call find_source_accounting_units with status=unresolved in this same active batch, copy the exact returned pageToken, and retry once; do not guess or reuse an earlier token.`,
           );
@@ -1969,6 +1961,8 @@ export function createCompilerProposalToolset(
         ...semanticCoverage.assertions.flatMap((assertion) => assertion.anchors),
         ...semanticCoverage.annotations.flatMap((annotation) => annotation.anchors),
       ];
+      const representedUnitIds: string[] = [];
+      const accountedUnits: Array<{ unitId: string; proposalId: string }> = [];
       for (const decision of decisions) {
         const unit = byId.get(decision.unitId);
         if (!unit) throw new Error(`Unknown deterministic source unit ${decision.unitId}; call find_source_accounting_units and copy unitId exactly.`);
@@ -1981,12 +1975,21 @@ export function createCompilerProposalToolset(
         }
         if (semanticSpans.some((span) => span.sourceId === source.id
           && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte))) {
-          throw new Error(`Source unit ${decision.unitId} is represented by exact current-batch semantics and cannot receive a model disposition.`);
+          representedUnitIds.push(decision.unitId);
         }
         const priorProposalId = alreadyDecided.get(decision.unitId);
         if (priorProposalId && priorProposalId !== input.proposal_id) {
-          throw new Error(`Source unit ${decision.unitId} is already dispositioned by active proposal ${priorProposalId}; withdraw it before replacing the decision.`);
+          accountedUnits.push({ unitId: decision.unitId, proposalId: priorProposalId });
         }
+      }
+      if (representedUnitIds.length || accountedUnits.length) {
+        const covered = new Set([...representedUnitIds, ...accountedUnits.map((item) => item.unitId)]);
+        throw new Error("Source accounting coverage changed: no decisions were staged. "
+          + "Represented units cannot receive a model disposition; retain existing valid accounting.\n"
+          + JSON.stringify({ sourceId: source.id, compilerBatchId, proposal_id: input.proposal_id,
+            ...(input.page_token ? { pageToken: input.page_token } : {}), representedUnitIds, accountedUnits,
+            remainingUnitIds: decisions.filter((item) => !covered.has(item.unitId)).map((item) => item.unitId) })
+          + `\nKeep proposal_id=${input.proposal_id}. Call find_source_accounting_units with status=unresolved and offset=0; copy its exact pageToken and review the new page for one corrected retry. If none remain, stop for host coverage review; never submit empty decisions, invent a new identity, or withdraw valid coverage.`);
       }
       const proposal: SourceAccountingProposal = {
         version: 1,
@@ -1999,7 +2002,7 @@ export function createCompilerProposalToolset(
       };
       await accountingStore.stageProposal(proposal);
       successfulAccountingProposalIds.add(proposal.id);
-      if (input.page_token) issuedAccountingPages.delete(input.page_token);
+      if (input.page_token) new CompilerAccountingPages(workspaceRoot, source.id, compilerBatchId!).consume(input.page_token, proposal.id);
       recordProposalProgress();
       return proposalResult(
         `Pending source-accounting proposal ${proposal.id} recorded for ${decisions.length} unit(s). These review dispositions do not create world truth.`,
@@ -3065,7 +3068,6 @@ export function createCompilerProposalToolset(
       successfulEntityResolutionProposalIds.clear();
       successfulEventResolutionProposalIds.clear();
       successfulAccountingProposalIds.clear();
-      issuedAccountingPages.clear();
       peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];

@@ -17,6 +17,7 @@ export type NwhToolRecoveryCategory =
   | "scope-or-lifecycle"
   | "budget-or-circuit-breaker"
   | "host-repair-required"
+  | "coverage-changed"
   | "unexpected-failure";
 
 export type NwhToolRecoveryAdvice = {
@@ -351,6 +352,20 @@ export function buildNwhToolRecoveryAdvice(
   // can contain arbitrary novel wording, including "unknown" or "offset".
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
+
+  if (toolName === "account_source_units" && lower.startsWith("source accounting coverage changed:")) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "coverage-changed", retryable: true,
+      retryCondition: "Retry once under the same exact proposal_id only after refreshing and reviewing the page; if all original units are covered, stop for host coverage review.",
+      steps: [
+        "Keep the exact proposal_id in the diagnostic. Inspect representedUnitIds, accountedUnits and remainingUnitIds; no decisions from the failed call were staged.",
+        "Call find_source_accounting_units in this same batch with status=unresolved and offset=0. Copy its exact pageToken; review every returned unit and use only exact returned unitIndex values for overrides.",
+        "Make at most one corrected account_source_units call using the same proposal_id and the fresh pageToken. Do not reuse old indexes, guess IDs or repeat unchanged input.",
+        "If discovery returns no remaining units, do not submit empty decisions or create a new identity. Stop for host coverage review; preserve all valid drafts and the original failure journal.",
+      ],
+      suggestedCall: { tool: "find_source_accounting_units", arguments: { status: "unresolved", offset: 0, max_results: 20 } },
+    };
+  }
 
   if (lower.startsWith("compiler proposal obligation requires host review")) {
     return {

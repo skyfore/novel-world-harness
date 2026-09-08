@@ -42,3 +42,9 @@
 ## 后续授权
 
 用户在深度审计之后明确要求 “record this case and make tech plan split tasks and complete step by step with commit”。这授权本轮记录与代码修复；此前全量编译 guardian 文本保留为历史上下文，不继续把旧轮次的“发现 block 后不改源码”当成本轮修复禁令。
+
+## 实施结果，2026-09-08 17:18 UTC
+
+T0–T7 已完成并分步提交；最终代码 `4439559` 通过 984 项测试和三套 TypeScript 检查。恢复协议、页回执、host coverage review、只读状态、独立场景验收和 finish 中断恢复均已实现，CLI 与 TUI 均有持久完成检查。详细变更、验证记录和时间线见[实施结果](../../run-records/2026-09-07-longzu1-full-rebuild/remediation-2026-09-08/implementation-results.zh-CN.md)。
+
+现场仅做只读复核：旧 p07 的 20 单元完整覆盖证明可建立，但尚未 apply。真实状态仍为 52/71、无 candidate，入学 agency、枪击实质性效果、规范范围和知识获取仍需后续受限语义返修。代码修复已交付，不能把真实 incident 状态标成“全书已恢复／可玩”。

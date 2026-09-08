@@ -1,0 +1,10 @@
+$ vitest run
+
+ RUN  v4.1.10 /root/workplace/novel-world-harness
+
+
+ Test Files  169 passed (169)
+      Tests  984 passed (984)
+   Start at  13:14:42
+   Duration  17.47s (transform 8.07s, setup 0ms, import 80.64s, tests 90.72s, environment 10ms)
+

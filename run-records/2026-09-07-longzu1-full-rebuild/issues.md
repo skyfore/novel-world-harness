@@ -58,3 +58,10 @@
 - 判断：block。源码 `WorkspaceOperationLock` 明确禁止自动夺取 stale lock；没有 CLI 或公开 recovery API，唯一释放路径是原持有者的 token-verified `release()`。手动删除锁会绕过并发/恢复保障。
 - 已执行动作：仅做进程、锁、日志、检查点和源码恢复入口的只读核对；未删除锁、未重启、未修改 world/compiler state。
 - 建议：提供/实现受 token、owner 元数据和死 PID 复核保护的项目级 stale-lock recovery 命令或 API；之后从 batch 52 的 active drafts 和 checkpoint 恢复。
+
+## 2026-09-08T17:18Z — 工程修复已交付，真实编译仍暂停
+
+- 新用户要求记录案例、拆分技术任务并逐步实现提交。T0–T7 已完成，代码集成到 `4439559`；169 个测试文件、984 项测试及三套 TypeScript 检查通过。
+- 修复覆盖：持久义务停止模型重试、accounting 页回执与 coverage 差分、宿主完整覆盖裁定、只读状态、来源独立场景验收、finish 中断恢复及 CLI/TUI checkpoint 证明。
+- 实例只读复核仍为 52/71、403 pending、96 rejected、无 candidate。p07 的 20 单元证明已预览，未 apply；原文及基线选定的用户状态文件哈希未改变。不能据工程测试通过宣称全书恢复或具备可玩性。
+- [案例实施结果、提交时间线与验证证据](remediation-2026-09-08/implementation-results.zh-CN.md)。原始研究分析保留在 [深度审计](deep-review-2026-09-08/report.zh-CN.md)。

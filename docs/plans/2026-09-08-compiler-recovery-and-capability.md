@@ -9,13 +9,13 @@
 | ID | 依赖 | 技术任务 | 完成条件 | 状态 |
 | --- | --- | --- | --- | --- |
 | T0 | — | 固定案例、原始审计与技术计划 | timeline 与证据可追溯，历史和实施结果分离 | 完成，`867a887` |
-| T1 | T0 | 将需要宿主裁定的错误传递到调度器 | 工具结果或持久 journal 任一表明禁止重试，均不新建 recovery session；一次可修正失败仍可恢复 | 完成 |
-| T2 | T1 | 持久化账本页身份并诊断 coverage 变化 | 返回精确差分、同作用域 discovery、原 proposal ID 和一次修正 SOP；失败无部分 staging | 完成 |
-| T3 | T2 | 基于完整覆盖证明消解旧 accounting 义务 | 宿主验证每个旧单元和依赖；保留失败历史；跨源/跨批/缺单元/撤回依赖均不能通过 | 完成 |
-| T4 | T3 | 从实际工件生成编译状态 | source hash、版本、有效 completed set、stage counts、持久 blocker、run 与 candidate/closure 分别可见 | 完成 |
-| T5 | T0 | 增加来源独立的场景能力验收及受限返修诊断 | 入学 agency、空效果、规范适用域和知识 cut 分别检查；不足明确 blocked/unknown；不能由 schema 自证正确 | 完成 |
-| T6 | T3 | 给 finish 跨文件副作用增加恢复回执 | 指纹绑定一次 finish；中断后幂等恢复 acceptance/review，checkpoint 必须有完成证明 | 完成 |
-| T7 | T1–T6 | 集成回归、现场只读复核与实施结果记录 | 类型检查和相关/全量测试通过，提交逐项可审查；如实记录实际小说状态 | 待实施 |
+| T1 | T0 | 将需要宿主裁定的错误传递到调度器 | 工具结果或持久 journal 任一表明禁止重试，均不新建 recovery session；一次可修正失败仍可恢复 | 完成，`3572811` |
+| T2 | T1 | 持久化账本页身份并诊断 coverage 变化 | 返回精确差分、同作用域 discovery、原 proposal ID 和一次修正 SOP；失败无部分 staging | 完成，`135ad1f` |
+| T3 | T2 | 基于完整覆盖证明消解旧 accounting 义务 | 宿主验证每个旧单元和依赖；保留失败历史；跨源/跨批/缺单元/撤回依赖均不能通过 | 完成，`48dcb19` |
+| T4 | T3 | 从实际工件生成编译状态 | source hash、版本、有效 completed set、stage counts、持久 blocker、run 与 candidate/closure 分别可见 | 完成，`013a7c2` |
+| T5 | T0 | 增加来源独立的场景能力验收及受限返修诊断 | 入学 agency、空效果、规范适用域和知识 cut 分别检查；不足明确 blocked/unknown；不能由 schema 自证正确 | 完成，`2076d62` |
+| T6 | T3 | 给 finish 跨文件副作用增加恢复回执 | 指纹绑定一次 finish；中断后幂等恢复 acceptance/review，checkpoint 必须有完成证明 | 完成，`1251915` |
+| T7 | T1–T6 | 集成回归、现场只读复核与实施结果记录 | 类型检查和相关/全量测试通过，提交逐项可审查；如实记录实际小说状态 | 完成，代码集成 `4439559`，结果记录见下 |
 
 ## 设计边界
 
@@ -42,3 +42,4 @@
 - T6 验证：10 个相关测试文件、102 项通过，服务端类型检查通过；另新增章节 manifest 已写而 split plan 未写的中断测试后，该文件 5 项通过。故障注入覆盖 annotation acceptance、accounting acceptance、review 写入、完成回执前、checkpoint 前和标题已接受的窗口；重复恢复不重排 review 时间，不增加接受记录，改输入/撤回依赖不能恢复。正常章节和角色复核也能幂等恢复。显式 reparse、resume=false 与缓存 materialization 归档被替换回执及原因，保留历史；legacy 无回执恢复输入仍受原有校验。本轮不声称提供断电级多文件事务。
 - T7 集成补齐：全量测试首先检出 5 个使用旧 finish 协议的用例，进一步复核后将 TUI source-loop 也接入宿主恢复与持久 checkpoint 校验；仅有模型成功消息不能前进，host fatal 或 prepared 回执不能触发特殊阶段草稿清空。显式迁移旧批次时归档回执，测试确认不重新激活被后续解析替代的身份/事件决议。场景验收进一步要求完整操作顺序，知识 cut 保持有序历史前缀，并区分 knows 与 believes/heard 等状态。
 - 2026-09-08 17:14:42 UTC：最终全量回归开始，169 个测试文件、984 项测试全部通过（17.47 秒）；服务端、Web、E2E 三套 TypeScript 检查通过。Playwright 浏览器执行和真实模型全书续跑不在本次验证范围。原始审计指纹集包含代码文件，因此实现涉及的 5 个代码哈希按预期改变；集内 7 个原文/用户状态文件全部保持原哈希。
+- T7 结果归档：[实施结果与完整提交时间线](../../run-records/2026-09-07-longzu1-full-rebuild/remediation-2026-09-08/implementation-results.zh-CN.md)、最终 status／scene review、验证日志与完整性比较均保存。两项历史义务的关键字段投影未变化。现场仍为 52/71、无 candidate，p07 preview 未 apply；本轮任务完成不等于现场全书编译或语义返修已完成。

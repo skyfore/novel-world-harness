@@ -1,0 +1,1 @@
+$ tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit && tsc -p e2e/tsconfig.json --noEmit

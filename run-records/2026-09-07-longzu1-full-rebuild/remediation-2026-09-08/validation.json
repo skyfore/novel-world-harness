@@ -1,0 +1,56 @@
+{
+  "recordedAt": "2026-09-08T17:18:06.890734+00:00",
+  "codeHead": "4439559d1a77c3f1581177dafb28c9a8badb9002",
+  "runtime": {
+    "node": "v22.19.0",
+    "pnpm": "11.21.0"
+  },
+  "initialFullSuite": {
+    "startedAt": "2026-09-08T17:06:33Z",
+    "files": 169,
+    "tests": 982,
+    "failed": 5,
+    "passed": 977,
+    "log": "validation-initial-tests.log",
+    "context": "Exposed obsolete finish replay/argument fixtures; review also found the TUI checkpoint path needed the durable guard."
+  },
+  "finalFullSuite": {
+    "command": "pnpm test",
+    "startedAt": "2026-09-08T17:14:42Z",
+    "exitCode": 0,
+    "files": 169,
+    "tests": 984,
+    "passed": 984,
+    "failed": 0,
+    "durationSeconds": 17.47,
+    "log": "validation-final-tests.log"
+  },
+  "typeChecks": {
+    "command": "pnpm run check",
+    "exitCode": 0,
+    "projects": [
+      "server",
+      "web",
+      "e2e"
+    ],
+    "log": "validation-final-check.log"
+  },
+  "readOnlyRealCase": {
+    "statusCommandExitCode": 0,
+    "sceneReviewCommandExitCode": 2,
+    "sceneReviewExpectedExitCode": 2,
+    "coverageSettlementApplied": false,
+    "modelRunResumed": false,
+    "candidatePublished": false
+  },
+  "notExecuted": [
+    "Playwright browser execution",
+    "live-provider full-book compilation",
+    "live-provider counterfactual branch evaluation"
+  ],
+  "integritySummary": {
+    "sourceAndStateFiles": 7,
+    "sourceAndStateUnchanged": true,
+    "historicalObligationProjectionsUnchanged": true
+  }
+}

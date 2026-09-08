@@ -1,0 +1,753 @@
+{
+  "version": 1,
+  "capturedAt": "2026-09-08T17:16:47.781Z",
+  "workspace": "/root/workplace/novel-world-harness",
+  "stateDirectory": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d",
+  "compilerFingerprint": {
+    "pipelineVersion": 34,
+    "promptVersion": 31,
+    "engineVersion": "0.4.0",
+    "stateSchemaHash": "40665eeae701ef10f2d902ea6eaf1c754123b000f247fce3387652d4960c8b74"
+  },
+  "compilerLock": {
+    "present": false,
+    "processLiveness": "not-checked"
+  },
+  "sources": [
+    {
+      "sourceId": "a28585b1cf867f3e3a16",
+      "sourcePath": "fixtures/corpus/longzu_1.txt",
+      "sourceSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+      "bytes": 798095,
+      "sourceIntegrity": "verified",
+      "persistedPipelineVersion": 34,
+      "effectivePipelineVersion": 34,
+      "checkpointUpdatedAt": "2026-09-08T13:47:16.178Z",
+      "checkpointReadStable": true,
+      "plan": {
+        "available": true,
+        "basis": "source-verified-segment-plan",
+        "batches": [
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00001-observation-23902a13002c",
+            "ordinal": 1,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00001-ad1f59d1acf3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00002-observation-684389ad80a1",
+            "ordinal": 2,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00002-16e2c6da87f3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+            "ordinal": 3,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00003-5c70d7864d11"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+            "ordinal": 4,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00004-f50b153c1580"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00005-observation-cf55bbf2a951",
+            "ordinal": 5,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00005-12c9137e67cf"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+            "ordinal": 6,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00006-dfcdc0eeafc7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00007-observation-e1327f875a22",
+            "ordinal": 7,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+            "ordinal": 8,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00008-1fb8ac99a307"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+            "ordinal": 9,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00009-6677e8830ee3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+            "ordinal": 10,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00010-4539f49e0b67"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00011-observation-3b75ad587862",
+            "ordinal": 11,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00012-observation-f959f2526287",
+            "ordinal": 12,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00012-1f6706579fb4"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00013-observation-d88837bd383a",
+            "ordinal": 13,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+            "ordinal": 14,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00014-4a34c47d2ef5"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+            "ordinal": 15,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00015-c98e6792a5ae"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+            "ordinal": 16,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00016-a5fa7ec5e791"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00017-observation-b5864fa86dcb",
+            "ordinal": 17,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00018-observation-03bedebd6807",
+            "ordinal": 18,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00018-5b35ba4d844e"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00019-observation-16c74a7cd7a6",
+            "ordinal": 19,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00019-7707f11fa946"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00020-observation-8727d8b4e3a3",
+            "ordinal": 20,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00020-710f6db124e7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+            "ordinal": 21,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00021-0343cf842992"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+            "ordinal": 22,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00022-c0d6642068d7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00023-observation-3096697b31ba",
+            "ordinal": 23,
+            "stage": "observation",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00023-109cf3454cd4"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c",
+            "ordinal": 24,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00001-ad1f59d1acf3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00002-semantic-684389ad80a1",
+            "ordinal": 25,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00002-16e2c6da87f3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4",
+            "ordinal": 26,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00003-5c70d7864d11"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1",
+            "ordinal": 27,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00004-f50b153c1580"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951",
+            "ordinal": 28,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00005-12c9137e67cf"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb",
+            "ordinal": 29,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00006-dfcdc0eeafc7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22",
+            "ordinal": 30,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b",
+            "ordinal": 31,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00008-1fb8ac99a307"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7",
+            "ordinal": 32,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00009-6677e8830ee3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6",
+            "ordinal": 33,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00010-4539f49e0b67"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862",
+            "ordinal": 34,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00012-semantic-f959f2526287",
+            "ordinal": 35,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00012-1f6706579fb4"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a",
+            "ordinal": 36,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d",
+            "ordinal": 37,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00014-4a34c47d2ef5"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720",
+            "ordinal": 38,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00015-c98e6792a5ae"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00016-semantic-8f66a92675d6",
+            "ordinal": 39,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00016-a5fa7ec5e791"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb",
+            "ordinal": 40,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00018-semantic-03bedebd6807",
+            "ordinal": 41,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00018-5b35ba4d844e"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00019-semantic-16c74a7cd7a6",
+            "ordinal": 42,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00019-7707f11fa946"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00020-semantic-8727d8b4e3a3",
+            "ordinal": 43,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00020-710f6db124e7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae",
+            "ordinal": 44,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00021-0343cf842992"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae",
+            "ordinal": 45,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00022-c0d6642068d7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba",
+            "ordinal": 46,
+            "stage": "semantic",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00023-109cf3454cd4"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00001-executable-23902a13002c",
+            "ordinal": 47,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00001-ad1f59d1acf3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00002-executable-684389ad80a1",
+            "ordinal": 48,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00002-16e2c6da87f3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00003-executable-2bbbc70ac8d4",
+            "ordinal": 49,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00003-5c70d7864d11"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00004-executable-e6468d63d6d1",
+            "ordinal": 50,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00004-f50b153c1580"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00005-executable-cf55bbf2a951",
+            "ordinal": 51,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00005-12c9137e67cf"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00006-executable-91a6ca318dcb",
+            "ordinal": 52,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00006-dfcdc0eeafc7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+            "ordinal": 53,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00007-26df32014434"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00008-executable-5f11f49f932b",
+            "ordinal": 54,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00008-1fb8ac99a307"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00009-executable-87cd9bc1ceb7",
+            "ordinal": 55,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00009-6677e8830ee3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00010-executable-8bc1558cfbd6",
+            "ordinal": 56,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00010-4539f49e0b67"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00011-executable-3b75ad587862",
+            "ordinal": 57,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00011-80174f0bd7d3"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00012-executable-f959f2526287",
+            "ordinal": 58,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00012-1f6706579fb4"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00013-executable-d88837bd383a",
+            "ordinal": 59,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00013-2df5b1eb46fa"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00014-executable-c51c406ff46d",
+            "ordinal": 60,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00014-4a34c47d2ef5"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00015-executable-1caaccc3b720",
+            "ordinal": 61,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00015-c98e6792a5ae"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00016-executable-8f66a92675d6",
+            "ordinal": 62,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00016-a5fa7ec5e791"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00017-executable-b5864fa86dcb",
+            "ordinal": 63,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00018-executable-03bedebd6807",
+            "ordinal": 64,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00018-5b35ba4d844e"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00019-executable-16c74a7cd7a6",
+            "ordinal": 65,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00019-7707f11fa946"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00020-executable-8727d8b4e3a3",
+            "ordinal": 66,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00020-710f6db124e7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00021-executable-8275c0fcbeae",
+            "ordinal": 67,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00021-0343cf842992"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00022-executable-b05f2704b4ae",
+            "ordinal": 68,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00022-c0d6642068d7"
+            ]
+          },
+          {
+            "id": "batch-a28585b1cf867f3e3a16-00023-executable-3096697b31ba",
+            "ordinal": 69,
+            "stage": "executable",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00023-109cf3454cd4"
+            ]
+          },
+          {
+            "id": "boundary-a28585b1cf867f3e3a16-161c3f42206e119e",
+            "ordinal": 70,
+            "stage": "boundary",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00016-a5fa7ec5e791",
+              "a28585b1cf867f3e3a16-00017-3111c3cc2bb7"
+            ]
+          },
+          {
+            "id": "boundary-a28585b1cf867f3e3a16-3ae0eae40ede0e49",
+            "ordinal": 71,
+            "stage": "boundary",
+            "segmentIds": [
+              "a28585b1cf867f3e3a16-00018-5b35ba4d844e",
+              "a28585b1cf867f3e3a16-00019-7707f11fa946"
+            ]
+          }
+        ]
+      },
+      "stages": {
+        "structure": {
+          "total": 0,
+          "completed": 0,
+          "remaining": 0
+        },
+        "observation": {
+          "total": 23,
+          "completed": 23,
+          "remaining": 0
+        },
+        "semantic": {
+          "total": 23,
+          "completed": 23,
+          "remaining": 0
+        },
+        "executable": {
+          "total": 23,
+          "completed": 6,
+          "remaining": 17
+        },
+        "boundary": {
+          "total": 2,
+          "completed": 0,
+          "remaining": 2
+        }
+      },
+      "completedBatchIds": [
+        "batch-a28585b1cf867f3e3a16-00001-executable-23902a13002c",
+        "batch-a28585b1cf867f3e3a16-00001-observation-23902a13002c",
+        "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c",
+        "batch-a28585b1cf867f3e3a16-00002-executable-684389ad80a1",
+        "batch-a28585b1cf867f3e3a16-00002-observation-684389ad80a1",
+        "batch-a28585b1cf867f3e3a16-00002-semantic-684389ad80a1",
+        "batch-a28585b1cf867f3e3a16-00003-executable-2bbbc70ac8d4",
+        "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+        "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4",
+        "batch-a28585b1cf867f3e3a16-00004-executable-e6468d63d6d1",
+        "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+        "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1",
+        "batch-a28585b1cf867f3e3a16-00005-executable-cf55bbf2a951",
+        "batch-a28585b1cf867f3e3a16-00005-observation-cf55bbf2a951",
+        "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951",
+        "batch-a28585b1cf867f3e3a16-00006-executable-91a6ca318dcb",
+        "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+        "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb",
+        "batch-a28585b1cf867f3e3a16-00007-observation-e1327f875a22",
+        "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22",
+        "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+        "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b",
+        "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+        "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7",
+        "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+        "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6",
+        "batch-a28585b1cf867f3e3a16-00011-observation-3b75ad587862",
+        "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862",
+        "batch-a28585b1cf867f3e3a16-00012-observation-f959f2526287",
+        "batch-a28585b1cf867f3e3a16-00012-semantic-f959f2526287",
+        "batch-a28585b1cf867f3e3a16-00013-observation-d88837bd383a",
+        "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a",
+        "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+        "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d",
+        "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+        "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720",
+        "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+        "batch-a28585b1cf867f3e3a16-00016-semantic-8f66a92675d6",
+        "batch-a28585b1cf867f3e3a16-00017-observation-b5864fa86dcb",
+        "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb",
+        "batch-a28585b1cf867f3e3a16-00018-observation-03bedebd6807",
+        "batch-a28585b1cf867f3e3a16-00018-semantic-03bedebd6807",
+        "batch-a28585b1cf867f3e3a16-00019-observation-16c74a7cd7a6",
+        "batch-a28585b1cf867f3e3a16-00019-semantic-16c74a7cd7a6",
+        "batch-a28585b1cf867f3e3a16-00020-observation-8727d8b4e3a3",
+        "batch-a28585b1cf867f3e3a16-00020-semantic-8727d8b4e3a3",
+        "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+        "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae",
+        "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+        "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae",
+        "batch-a28585b1cf867f3e3a16-00023-observation-3096697b31ba",
+        "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+      ],
+      "ignoredCheckpointIds": [],
+      "totalBatches": 71,
+      "completedBatches": 52,
+      "remainingBatches": 19,
+      "batchReviewComplete": false,
+      "nextUncheckpointedBatch": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+      "obligations": [
+        {
+          "batchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+          "planOrdinal": 53,
+          "stage": "executable",
+          "tool": "account_source_units",
+          "proposalId": "acct-00007-p07",
+          "status": "failed",
+          "updatedAt": "2026-09-08T13:58:45.625Z",
+          "diagnostic": "Validation failed for tool \"account_source_units\":\n  - decisions: must not have fewer than 1 items\n\nReceived arguments:\n{\n  \"proposal_id\": \"acct-00007-p07\",\n  \"decisions\": []\n}",
+          "requiresHostReview": true,
+          "checkpointed": false
+        }
+      ],
+      "finish": {
+        "inspection": "verified",
+        "receipts": [],
+        "interpretation": "Receipt checksums only; host recovery revalidates dependencies and the original finish before checkpointing."
+      },
+      "worldProposalInventory": {
+        "pending": 403,
+        "accepted": 0,
+        "rejected": 96
+      },
+      "latestRun": {
+        "id": "run-mtspxkmt-b07940f0-e82c-4592-b24e-9172c0fc67ea",
+        "startedAt": "2026-09-08T13:41:47.573Z",
+        "endedAt": "2026-09-08T14:00:25.425Z",
+        "status": "failed",
+        "counts": {
+          "llmRequests": 75,
+          "toolCalls": 106,
+          "retries": 0
+        },
+        "usage": {
+          "input": 705173,
+          "output": 15912,
+          "cacheRead": 11836928,
+          "cacheWrite": 0,
+          "reasoning": 5695,
+          "totalTokens": 12558013,
+          "cost": 0.39686755999999995
+        },
+        "model": {
+          "provider": "openai-codex",
+          "id": "gpt-5.6-luna",
+          "thinking": "medium"
+        },
+        "error": {
+          "code": "COMPILER_RUN_FAILED",
+          "message": "Compiler batch 53 was not checkpointed: 1 proposal tool call(s) failed.",
+          "retryable": false
+        }
+      },
+      "candidates": {
+        "inspection": "verified",
+        "archived": false,
+        "revisions": []
+      },
+      "diagnostics": []
+    }
+  ],
+  "interpretation": "Batch checkpoints are review progress. Candidate archival, recorded closure, full-novel readiness and executable capability are separate results. This snapshot runs no new evaluation."
+}

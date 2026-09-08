@@ -1,0 +1,240 @@
+{
+  "capturedAt": "2026-09-08T17:18:06.889638+00:00",
+  "codeHead": "4439559d1a77c3f1581177dafb28c9a8badb9002",
+  "baselineCapturedAt": "2026-09-08T14:32:27.237151+00:00",
+  "baselineGitHead": "e00eb9d9e7c02be45c7027026719a1c277d860ed",
+  "scope": "Finite original audit fingerprints plus source files; repository code is expected to change. Critical journal history is compared as a semantic projection, not as a baseline full-file hash. This is not an all-files integrity scan.",
+  "checked": 24,
+  "unchanged": 19,
+  "sourceAndStateFiles": 7,
+  "sourceAndStateUnchanged": true,
+  "changed": [
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/proposal-tools.ts",
+      "category": "repository",
+      "baselineSha256": "11ec940ed98cf767683a353a9fab4e9b5c362cca39824953c8c7278e00c18f50",
+      "currentSha256": "0a1a84103ed84625858ec48588b66f01a7ec48901870968475d3ffce8a92b441",
+      "unchanged": false
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/proposal-obligations.ts",
+      "category": "repository",
+      "baselineSha256": "8f7596f450ff2e8fd9267661f97784f5dad71df7affc7f2542edb3791dd62357",
+      "currentSha256": "f6191feb9c0a7e864b2dbd64980c2e1bd814025c71492e2235ba2485f6a92fcb",
+      "unchanged": false
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/batch-outcome.ts",
+      "category": "repository",
+      "baselineSha256": "f6cf584a64a366c485b6f651181820e0053f562a30c7491b935cd2de8361fc3e",
+      "currentSha256": "f1e5122501b018c3b033cbf2fd0278ee93219c6f19001b5335584e1469c67db9",
+      "unchanged": false
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/commands/compile-source.ts",
+      "category": "repository",
+      "baselineSha256": "56099e9d52429850fba06323e13380f8e3f01207fa3e957724849baf93707750",
+      "currentSha256": "f20c8815f1ff65c14490d5c6f4da27a8948d554206c508861e397bfb863fab66",
+      "unchanged": false
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/batches.ts",
+      "category": "repository",
+      "baselineSha256": "66cc6338a152e9e16e8387761812204cd63fe2613a83b2d0cc7295fc2aaaf03b",
+      "currentSha256": "95d13026e3f676e8711d501386edfc356de56452ddf28176e9461b42ed1659ca",
+      "unchanged": false
+    }
+  ],
+  "files": [
+    {
+      "path": "/root/workplace/novel-world-harness/AGENTS.md",
+      "category": "repository",
+      "baselineSha256": "1ded2e501ec0a44cf06db89d400b80ec841c393f44ac3a252a57787fe8b10e83",
+      "currentSha256": "1ded2e501ec0a44cf06db89d400b80ec841c393f44ac3a252a57787fe8b10e83",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/docs/adr/0001-world-truth-history-and-possibility-space.md",
+      "category": "repository",
+      "baselineSha256": "d9168f9ddb7d15e5b9597924b193e4ff1e0a8edacf1227d34650c83f25b7adf3",
+      "currentSha256": "d9168f9ddb7d15e5b9597924b193e4ff1e0a8edacf1227d34650c83f25b7adf3",
+      "unchanged": true
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/batches/a28585b1cf867f3e3a16.json",
+      "category": "source-or-user-state",
+      "baselineSha256": "d92e1e056d54a55885c5c42f28e2d5a47fb48190eb658d56fd9d70c5bc593406",
+      "currentSha256": "d92e1e056d54a55885c5c42f28e2d5a47fb48190eb658d56fd9d70c5bc593406",
+      "unchanged": true
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/observations/v1/accounting/a28585b1cf867f3e3a16.json",
+      "category": "source-or-user-state",
+      "baselineSha256": "9e904c1fe4925ac5d928c9ba2d937ae7d047ed98c275be6dcc4acac9273b6a37",
+      "currentSha256": "9e904c1fe4925ac5d928c9ba2d937ae7d047ed98c275be6dcc4acac9273b6a37",
+      "unchanged": true
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/boundary-calibrations/a28585b1cf867f3e3a16.json",
+      "category": "source-or-user-state",
+      "baselineSha256": "0ef4b7bd4f1c1e3ad097f098a307ec5044a309da89aa4f1b5efc980969d0d4c9",
+      "currentSha256": "0ef4b7bd4f1c1e3ad097f098a307ec5044a309da89aa4f1b5efc980969d0d4c9",
+      "unchanged": true
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/runs/2026-09/run-mtspxkmt-b07940f0-e82c-4592-b24e-9172c0fc67ea/events.jsonl",
+      "category": "source-or-user-state",
+      "baselineSha256": "e2d27ab82f23eb4594a53350db1c6dfda8431ef618cbb07f81a3efe8faaa1693",
+      "currentSha256": "e2d27ab82f23eb4594a53350db1c6dfda8431ef618cbb07f81a3efe8faaa1693",
+      "unchanged": true
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/runs/2026-09/run-mtspxkmt-b07940f0-e82c-4592-b24e-9172c0fc67ea/manifest.json",
+      "category": "source-or-user-state",
+      "baselineSha256": "fe46472922ad7c1a7108da49996160d33d359dc9df7d46d35062119ce0554e3b",
+      "currentSha256": "fe46472922ad7c1a7108da49996160d33d359dc9df7d46d35062119ce0554e3b",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/guardian-prompt-original.md",
+      "category": "repository",
+      "baselineSha256": "31c87197b4bc1afd14c1f734e2ba50b4e6e3e4084dfce2eb56ac323e03a65a90",
+      "currentSha256": "31c87197b4bc1afd14c1f734e2ba50b4e6e3e4084dfce2eb56ac323e03a65a90",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/issues.md",
+      "category": "repository",
+      "baselineSha256": "9efea10982c61eef16cedcc9b580bd94c1ed46335e175e07d4b2d9b4814d7079",
+      "currentSha256": "9efea10982c61eef16cedcc9b580bd94c1ed46335e175e07d4b2d9b4814d7079",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/fix-results-2026-09-08.md",
+      "category": "repository",
+      "baselineSha256": "3aea43a5da05327e8dbcbe47ea525949be6fbd84b298e0fdeebc6640195f3910",
+      "currentSha256": "3aea43a5da05327e8dbcbe47ea525949be6fbd84b298e0fdeebc6640195f3910",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/new-run-analysis-2026-09-08.md",
+      "category": "repository",
+      "baselineSha256": "0c513e4188e978f24c4b0d9339824292fedeec9ad953f94f0781f35b84d1ee36",
+      "currentSha256": "0c513e4188e978f24c4b0d9339824292fedeec9ad953f94f0781f35b84d1ee36",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/block-analysis-2026-09-08.md",
+      "category": "repository",
+      "baselineSha256": "b6c3a0ca24bd55aac9189b7bdeb8339f2a3392a4acca00725639ba11af41370a",
+      "currentSha256": "b6c3a0ca24bd55aac9189b7bdeb8339f2a3392a4acca00725639ba11af41370a",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/obligation-fix-results-2026-09-08.md",
+      "category": "repository",
+      "baselineSha256": "b1ded499e3a31d23dde3b6d1f7fa14c508e52f221774ce94ca11258d4b30bbfe",
+      "currentSha256": "b1ded499e3a31d23dde3b6d1f7fa14c508e52f221774ce94ca11258d4b30bbfe",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/status.md",
+      "category": "repository",
+      "baselineSha256": "c2142e4da90d450e8e4e68274ae09dcf4e3900f4d368bb03bd7e8d10d0918fdd",
+      "currentSha256": "c2142e4da90d450e8e4e68274ae09dcf4e3900f4d368bb03bd7e8d10d0918fdd",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/proposal-tools.ts",
+      "category": "repository",
+      "baselineSha256": "11ec940ed98cf767683a353a9fab4e9b5c362cca39824953c8c7278e00c18f50",
+      "currentSha256": "0a1a84103ed84625858ec48588b66f01a7ec48901870968475d3ffce8a92b441",
+      "unchanged": false
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/proposal-obligations.ts",
+      "category": "repository",
+      "baselineSha256": "8f7596f450ff2e8fd9267661f97784f5dad71df7affc7f2542edb3791dd62357",
+      "currentSha256": "f6191feb9c0a7e864b2dbd64980c2e1bd814025c71492e2235ba2485f6a92fcb",
+      "unchanged": false
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/batch-outcome.ts",
+      "category": "repository",
+      "baselineSha256": "f6cf584a64a366c485b6f651181820e0053f562a30c7491b935cd2de8361fc3e",
+      "currentSha256": "f1e5122501b018c3b033cbf2fd0278ee93219c6f19001b5335584e1469c67db9",
+      "unchanged": false
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/commands/compile-source.ts",
+      "category": "repository",
+      "baselineSha256": "56099e9d52429850fba06323e13380f8e3f01207fa3e957724849baf93707750",
+      "currentSha256": "f20c8815f1ff65c14490d5c6f4da27a8948d554206c508861e397bfb863fab66",
+      "unchanged": false
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/batches.ts",
+      "category": "repository",
+      "baselineSha256": "66cc6338a152e9e16e8387761812204cd63fe2613a83b2d0cc7295fc2aaaf03b",
+      "currentSha256": "95d13026e3f676e8711d501386edfc356de56452ddf28176e9461b42ed1659ca",
+      "unchanged": false
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/world/event-execution.ts",
+      "category": "repository",
+      "baselineSha256": "5f19afe4b5e8c8d40cf7b7197171e6cbcdea37481bcd4a5fa7e76e9eedbc9da2",
+      "currentSha256": "5f19afe4b5e8c8d40cf7b7197171e6cbcdea37481bcd4a5fa7e76e9eedbc9da2",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/world/action-ontology.ts",
+      "category": "repository",
+      "baselineSha256": "430edcc6b5614065ec03079558577c4797aaa63d3d68d3e2c5844f92b9632549",
+      "currentSha256": "430edcc6b5614065ec03079558577c4797aaa63d3d68d3e2c5844f92b9632549",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/world/norm-ontology.ts",
+      "category": "repository",
+      "baselineSha256": "b8036abba6ff77554bcaddec92fb3cfe1be87276343ae583802eac655bcbe425",
+      "currentSha256": "b8036abba6ff77554bcaddec92fb3cfe1be87276343ae583802eac655bcbe425",
+      "unchanged": true
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/fixtures/corpus/longzu_1.txt",
+      "category": "source-or-user-state",
+      "baselineSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+      "currentSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+      "unchanged": true
+    },
+    {
+      "path": "/root/.novel-harness/sources/v1/a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0/source.utf8",
+      "category": "source-or-user-state",
+      "baselineSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+      "currentSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+      "unchanged": true
+    }
+  ],
+  "historicalObligations": [
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/proposal-obligations/b4ee9d64fa100f087b226c40034f55ef5153eb65c5c1326759310d36c6d4d9d5/0fca004932d09c3d70eaab91387b73eb26a2228d823d670f7d3383bc022e09e6.json",
+      "batchId": "batch-a28585b1cf867f3e3a16-00004-executable-e6468d63d6d1",
+      "proposalId": "schema-remote-communication-00004",
+      "baselineAttemptCount": 2,
+      "currentAttemptCount": 2,
+      "projectedHistoryUnchanged": true,
+      "currentFileSha256": "cb0d681222a0d147a0c0b03add78338e9843d2c1b5aee36fcb20b91fd17d8833",
+      "comparisonScope": "Status, inputHash, updatedAt, diagnostic and hostReview; the baseline did not retain a full-file hash for this journal."
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/proposal-obligations/1bb6fc42bd37e2b6c8ce7c794a4f0729638241a50be429d630a8fc2aa2e5f037/64d0211d0652392452ccc45478fd786d278f302c8b51efb4f0264c2b1e2b2f4c.json",
+      "batchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+      "proposalId": "acct-00007-p07",
+      "baselineAttemptCount": 3,
+      "currentAttemptCount": 3,
+      "projectedHistoryUnchanged": true,
+      "currentFileSha256": "fbcee65ef02dbdd99e2bcf369d34f40fb49be6c0f4ca26d10504017444740f3a",
+      "comparisonScope": "Status, inputHash, updatedAt, diagnostic and hostReview; the baseline did not retain a full-file hash for this journal."
+    }
+  ]
+}

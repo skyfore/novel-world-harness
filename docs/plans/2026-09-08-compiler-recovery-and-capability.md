@@ -11,7 +11,7 @@
 | T0 | — | 固定案例、原始审计与技术计划 | timeline 与证据可追溯，历史和实施结果分离 | 完成，`867a887` |
 | T1 | T0 | 将需要宿主裁定的错误传递到调度器 | 工具结果或持久 journal 任一表明禁止重试，均不新建 recovery session；一次可修正失败仍可恢复 | 完成 |
 | T2 | T1 | 持久化账本页身份并诊断 coverage 变化 | 返回精确差分、同作用域 discovery、原 proposal ID 和一次修正 SOP；失败无部分 staging | 完成 |
-| T3 | T2 | 基于完整覆盖证明消解旧 accounting 义务 | 宿主验证每个旧单元和依赖；保留失败历史；跨源/跨批/缺单元/撤回依赖均不能通过 | 待实施 |
+| T3 | T2 | 基于完整覆盖证明消解旧 accounting 义务 | 宿主验证每个旧单元和依赖；保留失败历史；跨源/跨批/缺单元/撤回依赖均不能通过 | 完成 |
 | T4 | T3 | 从实际工件生成编译状态 | source hash、版本、有效 completed set、stage counts、持久 blocker、run 与 candidate/closure 分别可见 | 待实施 |
 | T5 | T0 | 增加来源独立的场景能力验收及受限返修诊断 | 入学 agency、空效果、规范适用域和知识 cut 分别检查；不足明确 blocked/unknown；不能由 schema 自证正确 | 待实施 |
 | T6 | T3 | 给 finish 跨文件副作用增加恢复回执 | 指纹绑定一次 finish；中断后幂等恢复 acceptance/review，checkpoint 必须有完成证明 | 待实施 |
@@ -32,3 +32,5 @@
 - T0：写入案例与本计划；保存前一轮审计作为历史记录。
 - T1：宿主读取结构化 recovery 与旧 Pi tagged JSON；创建会话、处理报告、处理网络异常时均检查持久义务。修正 source/prompt recovery 中错误建议换 proposal ID 的文字。6 个相关测试文件、74 项测试通过；服务端 TypeScript 检查通过。回归直接确认原有 blocker 创建 0 次会话，运行中新 blocker 只创建 1 次，可纠正失败仍能创建第 2 次并完成。
 - T2：保存单次使用页回执并添加 `coverage-changed` 差分与同身份 SOP。21 句隔离 fixture 重现旧 20 单元中 1 个新增证据覆盖、新页 19+1 的顺序；验证零部分 staging、跨 session 正确修复及消费后的 token 不可复用。3 个相关文件、34 项测试通过；服务端类型检查通过。
+- T3：增加默认只读、显式 `--apply` 且持有 compiler 锁的 host accounting review。证明逐项绑定源哈希、原始失败输入、原单元、依赖内容和审计链；原失败不删除，依赖失效会重新阻塞。补纯读取 Workspace/Trace 入口，防止审计读取触发初始化和运行中断标记。6 个相关文件、51 项测试通过；服务端类型检查通过。
+- 2026-09-08 16:18:42.222 UTC：在 T3 工作树上只读运行真实 p07 review，已从原审计 seq 395→412→413 验证完整 20 单元：19 来自 `acct-00007-p07b`，1 来自 `prop-norm-freedom-day-00007`。预览保存在 `run-records/2026-09-07-longzu1-full-rebuild/remediation-2026-09-08/coverage-preview.json`；未对真实小说使用 `--apply`，无新模型调用、checkpoint 或 candidate。

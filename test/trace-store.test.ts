@@ -18,6 +18,20 @@ async function workspace(prefix = "nwh-trace-store-"): Promise<string> {
 }
 
 describe("append-only trace storage", () => {
+  it("inspects a running audit without turning it into a host-restart interruption", async () => {
+    const root = await workspace();
+    const writer = new TraceStore(root);
+    const run = await writer.createRun({ kind: "prepare", sourceId: "source-1" });
+    const blob = await writer.putBlob({ message: "read-only inspection" });
+    const before = await readDirectoryTree(writer.root);
+    const reader = new TraceStore(root);
+    expect((await reader.peekRun(run.id)).status).toBe("running");
+    expect(await reader.peekRuns({ sourceId: "source-1" })).toHaveLength(1);
+    expect(await reader.peekEvents(run.id)).toEqual([]);
+    expect(await reader.peekBlob(blob)).toEqual({ message: "read-only inspection" });
+    expect(await readDirectoryTree(writer.root)).toBe(before);
+  });
+
   it("redacts secrets at every event, blob, and manifest persistence boundary", async () => {
     const root = await workspace("nwh-trace-redaction-");
     const store = new TraceStore(root);

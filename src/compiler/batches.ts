@@ -1,4 +1,5 @@
 import { CompilerProposalObligations } from "./proposal-obligations.js";
+import { COMPILER_MAX_SEGMENTS_PER_BATCH } from "./limits.js";
 import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { SEGMENTER_VERSION, SegmentStore, readSegmentText, segmentEvidenceRef, segmentSource, type SourceSegment } from "./segments.js";
@@ -243,7 +244,6 @@ const MAX_CATALOG_JSON_CHARS = 80_000;
 // A segment is an evidence-addressing unit, not necessarily a model turn. Join
 // small continuation pieces from one author chapter while the aggregate byte
 // and prompt bounds remain authoritative.
-const MAX_SEGMENTS_PER_BATCH = 8;
 const STRUCTURE_DISCOVERY_MIN_SOURCE_BYTES = 24 * 1024;
 
 export async function prepareCompilerBatches(
@@ -277,7 +277,7 @@ export async function prepareCompilerBatches(
     const chapter = chapterMetadata.get(segment.id)!.ordinal;
     if (current.length && (
       chapter !== currentChapter
-      || current.length >= MAX_SEGMENTS_PER_BATCH
+      || current.length >= COMPILER_MAX_SEGMENTS_PER_BATCH
       || promptCharacters + estimated > MAX_BATCH_PROMPT_CHARS
       || sourceBytes + segment.bytes > MAX_BATCH_SOURCE_BYTES
     )) {

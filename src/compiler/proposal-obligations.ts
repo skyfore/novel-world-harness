@@ -3,12 +3,16 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { z } from "zod";
 import { worldStorageRoot } from "../world/paths.js";
+import { accountingCoverageProofSchema, accountingCoverageProofFailure, type AccountingCoverageProof } from "./accounting-coverage-proof.js";
+import { CompilerAccountingPages } from "./accounting-pages.js";
+import { contentHash } from "../world/canonical.js";
 
 const attemptSchema = z.object({
   tool: z.string(), proposalId: z.string(), inputHash: z.string(), input: z.unknown(),
-  status: z.enum(["running", "failed", "succeeded", "unsupported"]),
+  status: z.enum(["running", "failed", "succeeded", "unsupported", "superseded-by-coverage"]),
   diagnostic: z.string(), updatedAt: z.string(),
   hostReview: z.object({ reason: z.string().min(1), auditRef: z.string().min(1) }).optional(),
+  coverageProof: accountingCoverageProofSchema.optional(),
 }).strict();
 const ledgerSchema = z.object({
   version: z.literal(1), sourceId: z.string(), batchId: z.string(),
@@ -71,11 +75,18 @@ export class CompilerProposalObligations {
   unresolved(): ProposalAttempt[] {
     const latest = new Map<string, ProposalAttempt>();
     for (const attempt of this.read().attempts) latest.set(JSON.stringify([attempt.tool, attempt.proposalId]), attempt);
-    return [...latest.values()].filter((item) => item.status === "failed" || item.status === "running");
+    return [...latest.values()].flatMap((item) => {
+      if (item.status === "superseded-by-coverage") {
+        const failure = item.coverageProof ? accountingCoverageProofFailure(this.root, item.coverageProof) : "missing coverage proof";
+        return failure ? [{ ...item, status: "failed" as const, diagnostic: `Coverage proof invalidated: ${failure}; host review is required.` }] : [];
+      }
+      return item.status === "failed" || item.status === "running" ? [item] : [];
+    });
   }
+  history(tool: string, proposalId: string): ProposalAttempt[] { return this.read({ tool, proposalId }).attempts; }
   requiringHostReview(): ProposalAttempt[] {
     return this.unresolved().filter((item) => {
-      if (item.status === "running") return true;
+      if (item.status === "running" || item.coverageProof) return true;
       const history = this.read(item).attempts;
       const lastResolution = history.findLastIndex((attempt) => attempt.status === "succeeded" || attempt.status === "unsupported");
       return new Set(history.slice(lastResolution + 1).filter((attempt) => attempt.status === "failed").map((attempt) => attempt.inputHash)).size >= 2;
@@ -90,6 +101,9 @@ export class CompilerProposalObligations {
   assertRetryAllowed(tool: string, input: unknown) {
     const identity = CompilerProposalObligations.identity(tool, input);
     const history = this.read(identity).attempts;
+    if (history.at(-1)?.status === "superseded-by-coverage") {
+      throw new CompilerHostReviewRequiredError("this accounting identity has a host coverage settlement; do not reuse it, even after dependency withdrawal");
+    }
     if (history.at(-1)?.status === "running") {
       throw new CompilerHostReviewRequiredError("interrupted tool result; the host must inspect durable drafts before resolving this attempt");
     }
@@ -126,6 +140,39 @@ export class CompilerProposalObligations {
     if (!previous) throw new Error("No unresolved obligation with that exact tool/proposal ID in this source/batch.");
     const ledger = this.read({ tool, proposalId });
     ledger.attempts.push({ ...previous, status: "unsupported", updatedAt: new Date().toISOString(), hostReview: { reason, auditRef } });
+    this.write(ledger);
+  }
+  /** Called only by the host coverage reviewer after reconstructing all failed inputs. */
+  recordCoverageSettlement(proofInput: AccountingCoverageProof, reason: string, auditRef: string) {
+    const proof = accountingCoverageProofSchema.parse(proofInput);
+    if (!reason.trim() || !auditRef.trim() || proof.sourceId !== this.sourceId || proof.batchId !== this.batchId) {
+      throw new Error("Host coverage review requires the exact source/batch, reason and audit reference.");
+    }
+    const current = this.history("account_source_units", proof.proposalId).at(-1);
+    if (current?.status === "superseded-by-coverage" && current.coverageProof
+      && contentHash(current.coverageProof) === contentHash(proof) && current.hostReview?.reason === reason && current.hostReview.auditRef === auditRef
+      && !accountingCoverageProofFailure(this.root, proof)) return;
+    const previous = this.unresolved().find((item) => item.tool === "account_source_units" && item.proposalId === proof.proposalId);
+    if (!previous) throw new Error("No unresolved accounting obligation with that exact source/batch/proposal ID.");
+    const failure = accountingCoverageProofFailure(this.root, proof);
+    if (failure) throw new Error(`Host coverage review failed: ${failure}`);
+    const ledger = this.read(previous);
+    const lastResolution = ledger.attempts.findLastIndex((item) => item.status === "succeeded" || item.status === "unsupported");
+    const failed = ledger.attempts.slice(lastResolution + 1).filter((item) => item.status === "failed");
+    const hashes = [...new Set(failed.map((item) => item.inputHash))].sort();
+    if (JSON.stringify(hashes) !== JSON.stringify([...proof.failedInputHashes].sort())) throw new Error("Coverage proof omits or changes failed inputs.");
+    const units = new Set<string>();
+    for (const item of failed) {
+      const input = item.input as { page_token?: string; decisions?: Array<{ unit_id: string }> };
+      if (input.page_token) {
+        const page = new CompilerAccountingPages(this.root, this.sourceId, this.batchId).read(input.page_token);
+        if (!page || page.sourceSha256 !== proof.sourceSha256) throw new Error("Original accounting page lacks verified provenance.");
+        page.unitIds.forEach((id) => units.add(id));
+      } else input.decisions?.forEach((decision) => units.add(decision.unit_id));
+    }
+    if (JSON.stringify([...units].sort()) !== JSON.stringify(proof.units.map((unit) => unit.unitId).sort())) throw new Error("Coverage proof must include every original unit and no unrelated units.");
+    ledger.attempts.push({ ...previous, status: "superseded-by-coverage", diagnostic: "Every original unit has verified current-batch coverage; this does not certify executable world semantics.",
+      updatedAt: new Date().toISOString(), hostReview: { reason, auditRef }, coverageProof: proof });
     this.write(ledger);
   }
 }

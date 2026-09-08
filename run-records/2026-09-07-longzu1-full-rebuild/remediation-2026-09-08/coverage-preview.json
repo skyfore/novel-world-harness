@@ -1,0 +1,245 @@
+{
+  "status": "verified-preview",
+  "executableCertification": false,
+  "proof": {
+    "version": 1,
+    "sourceId": "a28585b1cf867f3e3a16",
+    "sourceSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+    "batchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+    "proposalId": "acct-00007-p07",
+    "failedInputHashes": [
+      "b6e1f0fb4069938f2a0a85ccc186ee8bfed8fd6a33c16ff713461dfec6b4a914",
+      "f117c78235b1046830b1b57a5d71ef27516d9c1e720f326541dda81ed2e7555d"
+    ],
+    "units": [
+      {
+        "unitId": "unit-sentence-cb15ad852448a5b0ef5fd441",
+        "unitHash": "058f0019ff2f0f558e7602f6ff763d62f1fcc306d8b3dfd101788a52e2848924",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-cb15ad852448a5b0ef5fd441"
+      },
+      {
+        "unitId": "unit-sentence-e3f8e8de0ba33d4b9015e419",
+        "unitHash": "fa1c01dd323364a0d2f9afd3429304706f752fe863192701d18482fcaaf31112",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-e3f8e8de0ba33d4b9015e419"
+      },
+      {
+        "unitId": "unit-sentence-3b1c4991917b4ffe632968bb",
+        "unitHash": "ef9fba0cf65fe9d037ad6b88796cdea67f36c88b4fe1ca1a7c0a52d6d0e91d66",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-3b1c4991917b4ffe632968bb"
+      },
+      {
+        "unitId": "unit-sentence-a3b02f83fd282a5e797fb799",
+        "unitHash": "4c84d816942217d3f934ed32f945efa88b26b681b59679396601cd78dcbca61f",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-a3b02f83fd282a5e797fb799"
+      },
+      {
+        "unitId": "unit-sentence-d9a5ab13672074f68f427b33",
+        "unitHash": "3db2027c75dde013ffffcfa2f2d7a2d284df9431d744ec855e5a3e7d89f1ffb9",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-d9a5ab13672074f68f427b33"
+      },
+      {
+        "unitId": "unit-sentence-7ecd8fa62113fb32afde6aa7",
+        "unitHash": "4e96ec143937f70cee4dbfc11c45d9ee6fed2ef4907e913f36869c328c5f0c09",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-7ecd8fa62113fb32afde6aa7"
+      },
+      {
+        "unitId": "unit-sentence-28cb66356f07e33842ff890e",
+        "unitHash": "b06bf9f3156344836b3ab0eaa39cc8c1afd19fea350f284c2301fb320290e42b",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-28cb66356f07e33842ff890e"
+      },
+      {
+        "unitId": "unit-sentence-49b2e449b01adbda8d25b45c",
+        "unitHash": "e88ad868d73e2329dd9b0561da7f2dbd299bbd5713ef8cc177c70df7196d780d",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-49b2e449b01adbda8d25b45c"
+      },
+      {
+        "unitId": "unit-sentence-5ba0ca3b69621baa57442a8a",
+        "unitHash": "600a71d19a75cbac9dcb54436e8207295d81a020376e2a93fa5dd96013cdad3c",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-5ba0ca3b69621baa57442a8a"
+      },
+      {
+        "unitId": "unit-sentence-6fede16b0b9a87594ef49d1e",
+        "unitHash": "e35645e4445ae5d0b129f850ffc0d7ae7bfc2a9e13f7c1efc3f885f3a10bdb0a",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-6fede16b0b9a87594ef49d1e"
+      },
+      {
+        "unitId": "unit-sentence-91f43b36258f57f8f93deb75",
+        "unitHash": "c1a4326ba5cf1496eb71710d4002f0c89349e92f81646d78b681d4a749ad94b3",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-91f43b36258f57f8f93deb75"
+      },
+      {
+        "unitId": "unit-sentence-8eb7ed50efc251ebb60b0cb4",
+        "unitHash": "14240236019f99735552d1d69ef95c3b9560c5d99b331f812d0bac2f301dd5fc",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-8eb7ed50efc251ebb60b0cb4"
+      },
+      {
+        "unitId": "unit-sentence-4db6c377464aaf3550673997",
+        "unitHash": "e3910922700b86138035666ef0f065c7910c14c82766c88e64bf4130c8a89e02",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-4db6c377464aaf3550673997"
+      },
+      {
+        "unitId": "unit-sentence-9279eb065b88727a1b7212d7",
+        "unitHash": "151c51a8f5f5278e80e5987febbbf4e0ddad4427d04540c296c02769514dc2ed",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-9279eb065b88727a1b7212d7"
+      },
+      {
+        "unitId": "unit-sentence-4aa420bfa6f72d116c7db9ba",
+        "unitHash": "5d8fe86f83f26183ac0f6ab1e7cef7bbf662f4b440122018e2ba3a7a952dedd9",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-4aa420bfa6f72d116c7db9ba"
+      },
+      {
+        "unitId": "unit-sentence-67f83a17e990e0e91acd2231",
+        "unitHash": "79dcb4080ee14e7a7c23e3bc801b07232559dbd4caef243b872b7afa3c5e9d43",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-67f83a17e990e0e91acd2231"
+      },
+      {
+        "unitId": "unit-sentence-648375f8a7928797da5bcdc7",
+        "unitHash": "cfad6bcec233c13850df505674c24d9673ff0c5d214ab6fb763788263aeaa72d",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-648375f8a7928797da5bcdc7"
+      },
+      {
+        "unitId": "unit-sentence-94b5988d2b386b427cc82162",
+        "unitHash": "603a5253acfd60d910ec8ce38edb4fdc59cb9ea2a1fafd8b8de8609fabd0f88e",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-94b5988d2b386b427cc82162"
+      },
+      {
+        "unitId": "unit-sentence-b210d4908f56a1d8ee9ac520",
+        "unitHash": "1cc8a004a4c8602c05b9e1490f5239e0168e49b58ea2e396516bad4e584f81bd",
+        "dependency": {
+          "store": "accounting",
+          "proposalId": "acct-00007-p07b",
+          "contentHash": "805a0017e8ecf30444f135f7ba3b842e2e4abaab1831214a01ebe6c7e9bda119"
+        },
+        "kind": "decision",
+        "coverageId": "unit-sentence-b210d4908f56a1d8ee9ac520"
+      },
+      {
+        "unitId": "unit-sentence-340dcd6070b1aa62ea04c578",
+        "unitHash": "a621e4c07d7240531472427be902a76bd8603771ddbfcaced5783ae0642e9b22",
+        "dependency": {
+          "store": "world",
+          "proposalId": "prop-norm-freedom-day-00007",
+          "contentHash": "dfef317ad58a253de44d1381b58739f670ea8838165189b52d639f327701f429"
+        },
+        "kind": "evidence",
+        "coverageId": "evidence-4083ea4076df5ae2df56f49176e8301e"
+      }
+    ],
+    "originalPageTokens": [
+      "acctpg-d822695e76f3f23a"
+    ],
+    "auditRefs": [
+      "docs/incidents/2026-09-08-accounting-obligation-rebase.md",
+      "run-mtspxkmt-b07940f0-e82c-4592-b24e-9172c0fc67ea:discovery=395:failed-call=412:blob=592c0c389d53e13df018a5419d8455b95d62fa63dd6db18742f22cde46f93c24"
+    ],
+    "verifiedAt": "2026-09-08T16:18:42.222Z"
+  }
+}

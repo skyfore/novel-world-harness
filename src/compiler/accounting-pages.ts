@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { idSchema } from "../world/model.js";
 import { worldStorageRoot } from "../world/paths.js";
+import { isDeepStrictEqual } from "node:util";
 
 export const accountingPageSchema = z.object({
   version: z.literal(1),
@@ -51,6 +52,16 @@ export class CompilerAccountingPages {
       token: `acctpg-${crypto.randomBytes(8).toString("hex")}`, issuedAt: new Date().toISOString() });
     this.write(page);
     return page;
+  }
+  /** Host reviewer has verified the immutable discovery/call/result trace chain. */
+  restoreFromAudit(input: AccountingPage) {
+    const page = accountingPageSchema.parse(input);
+    if (!page.auditRef || page.sourceId !== this.sourceId || page.compilerBatchId !== this.batchId || page.consumedBy) {
+      throw new Error("Audited accounting page requires exact scope and original discovery provenance.");
+    }
+    const existing = this.read(page.token);
+    if (existing && !isDeepStrictEqual(existing, page)) throw new Error("An audited page cannot replace an existing receipt.");
+    if (!existing) this.write(page);
   }
   consume(token: string, proposalId: string) {
     const page = this.read(token);

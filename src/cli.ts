@@ -8,6 +8,8 @@ import { initCommand } from "./commands/init.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
+import { reviewAccountingObligation } from "./compiler/accounting-review.js";
+import { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
 import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
 import { resumeCommand } from "./commands/resume.js";
 import { playCommand } from "./commands/play.js";
@@ -73,6 +75,24 @@ compilerLock.command("recover")
 function rootFor(options: { root?: string }): string {
   return options.root ?? program.opts().root ?? process.cwd();
 }
+
+const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and review exact accounting coverage on the host");
+compilerObligations.command("inspect").requiredOption("--source <id>", "registered source ID").requiredOption("--batch <id>", "exact compiler batch ID")
+  .action((options) => {
+    const journal = new CompilerProposalObligations(rootFor({}), options.source, options.batch);
+    console.log(JSON.stringify({ unresolved: journal.unresolved(), requiringHostReview: journal.requiringHostReview() }, null, 2));
+  });
+compilerObligations.command("review-accounting")
+  .requiredOption("--source <id>", "registered source ID").requiredOption("--batch <id>", "exact executable batch ID")
+  .requiredOption("--proposal <id>", "failed account_source_units proposal ID")
+  .requiredOption("--reason <text>", "host review rationale").requiredOption("--audit-ref <ref>", "incident or review reference")
+  .option("--from-run <id>", "original audit run when legacy page receipts are missing")
+  .option("--apply", "record the verified settlement under the compiler lock; default is read-only")
+  .action(async (options) => {
+    const proof = await reviewAccountingObligation(rootFor({}), { sourceId: options.source, batchId: options.batch, proposalId: options.proposal,
+      reason: options.reason, auditRef: options.auditRef, ...(options.fromRun ? { fromRun: options.fromRun } : {}) }, options.apply === true);
+    console.log(JSON.stringify({ status: options.apply ? "superseded-by-coverage" : "verified-preview", executableCertification: false, proof }, null, 2));
+  });
 function configFor(options: { root?: string; config?: string }): string {
   return options.config ? resolveConfigPath(options.config) : path.resolve(rootFor(options), "novel-harness.yaml");
 }

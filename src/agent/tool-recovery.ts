@@ -367,7 +367,9 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
-  if (lower.startsWith("compiler proposal obligation requires host review")) {
+  if (lower.startsWith("compiler proposal obligation requires host review")
+    || lower.startsWith("compiler accounting page scope mismatch")
+    || lower.startsWith("accounting page is missing or already consumed")) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
       retryCondition: "Do not retry in this or a fresh session until host adjudication.",

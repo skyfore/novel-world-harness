@@ -1,0 +1,1827 @@
+{
+  "capturedAt": "2026-09-08T14:32:27.237151+00:00",
+  "scope": "Read-only local source/workspace audit. Memory probes call pure validators only. No compiler run, host adjudication, checkpoint edit, candidate publication, or Play certification.",
+  "repository": "/root/workplace/novel-world-harness",
+  "workspace": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d",
+  "gitHead": "e00eb9d9e7c02be45c7027026719a1c277d860ed",
+  "gitTimeline": [
+    "e00eb9d|2026-09-08T09:32:53-04:00|2026-09-08T09:32:53-04:00|fix: persist compiler proposal failures before batch completion",
+    "fb76c04|2026-09-08T05:08:15-04:00|2026-09-08T05:08:15-04:00|fix: recover blocked compiler batches without losing evidence",
+    "44669a8|2026-09-07T11:04:39-04:00|2026-09-07T11:04:39-04:00|Add recovery guidance for unresolved canonical entity mentions",
+    "3cf6287|2026-09-07T02:48:12-04:00|2026-09-07T02:48:12-04:00|fix: preserve compiler recovery and reconciliation failure boundaries",
+    "3ac1a3d|2026-09-06T12:44:23+08:00|2026-09-06T12:44:23+08:00|Merge pull request #3 from skyfore/design/novel-to-play-closure-20260905",
+    "44d09a9|2026-09-06T12:34:17+08:00|2026-09-06T12:34:17+08:00|fix: close review contracts across Pi compilation and runtime certification",
+    "0a986f7|2026-09-06T12:34:15+08:00|2026-09-06T12:34:15+08:00|fix: inject scoped executable rules into actor decision context",
+    "68c9605|2026-09-06T12:34:12+08:00|2026-09-06T12:34:12+08:00|fix: separate mechanism provenance from actor acquisition"
+  ],
+  "source": {
+    "version": 1,
+    "id": "a28585b1cf867f3e3a16",
+    "title": "龙族1·火之晨曦",
+    "sourcePath": "fixtures/corpus/longzu_1.txt",
+    "contentMd5": "963b3d0001584408cee54556677c3397",
+    "contentSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+    "bytes": 798095,
+    "registeredAt": "2026-09-07T09:29:34.048Z",
+    "updatedAt": "2026-09-07T09:37:11.421Z",
+    "titleInference": {
+      "version": 1,
+      "sourceId": "a28585b1cf867f3e3a16",
+      "title": "龙族1·火之晨曦",
+      "evidence": {
+        "span": {
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 0,
+          "endByte": 797,
+          "startLine": 1,
+          "endLine": 5,
+          "quoteHash": "ad1f59d1acf39f7c96ceb1e0b06a5e37fdecb18f1a32bfd456bc4d4f3d357521"
+        },
+        "strength": "explicit"
+      },
+      "generatedBy": {
+        "worker": "propose_novel_title",
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-observation-23902a13002c"
+      },
+      "inferredAt": "2026-09-07T09:37:11.421Z"
+    }
+  },
+  "sourceFiles": [
+    {
+      "path": "/root/workplace/novel-world-harness/fixtures/corpus/longzu_1.txt",
+      "bytes": 798095,
+      "sha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+      "mtimeUtc": "2026-09-05T06:04:13.074719+00:00"
+    },
+    {
+      "path": "/root/.novel-harness/sources/v1/a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0/source.utf8",
+      "bytes": 798095,
+      "sha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+      "mtimeUtc": "2026-08-26T13:47:28.925258+00:00"
+    }
+  ],
+  "state": {
+    "pipelineVersion": 34,
+    "promptVersion": 31,
+    "completedBatches": 52,
+    "checkpointUpdatedAt": "2026-09-08T13:47:16.178Z",
+    "completedByStage": {
+      "executable": 6,
+      "observation": 23,
+      "semantic": 23
+    },
+    "completedBatchIds": [
+      "batch-a28585b1cf867f3e3a16-00001-executable-23902a13002c",
+      "batch-a28585b1cf867f3e3a16-00001-observation-23902a13002c",
+      "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c",
+      "batch-a28585b1cf867f3e3a16-00002-executable-684389ad80a1",
+      "batch-a28585b1cf867f3e3a16-00002-observation-684389ad80a1",
+      "batch-a28585b1cf867f3e3a16-00002-semantic-684389ad80a1",
+      "batch-a28585b1cf867f3e3a16-00003-executable-2bbbc70ac8d4",
+      "batch-a28585b1cf867f3e3a16-00003-observation-2bbbc70ac8d4",
+      "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4",
+      "batch-a28585b1cf867f3e3a16-00004-executable-e6468d63d6d1",
+      "batch-a28585b1cf867f3e3a16-00004-observation-e6468d63d6d1",
+      "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1",
+      "batch-a28585b1cf867f3e3a16-00005-executable-cf55bbf2a951",
+      "batch-a28585b1cf867f3e3a16-00005-observation-cf55bbf2a951",
+      "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951",
+      "batch-a28585b1cf867f3e3a16-00006-executable-91a6ca318dcb",
+      "batch-a28585b1cf867f3e3a16-00006-observation-91a6ca318dcb",
+      "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb",
+      "batch-a28585b1cf867f3e3a16-00007-observation-e1327f875a22",
+      "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22",
+      "batch-a28585b1cf867f3e3a16-00008-observation-5f11f49f932b",
+      "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b",
+      "batch-a28585b1cf867f3e3a16-00009-observation-87cd9bc1ceb7",
+      "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7",
+      "batch-a28585b1cf867f3e3a16-00010-observation-8bc1558cfbd6",
+      "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6",
+      "batch-a28585b1cf867f3e3a16-00011-observation-3b75ad587862",
+      "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862",
+      "batch-a28585b1cf867f3e3a16-00012-observation-f959f2526287",
+      "batch-a28585b1cf867f3e3a16-00012-semantic-f959f2526287",
+      "batch-a28585b1cf867f3e3a16-00013-observation-d88837bd383a",
+      "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a",
+      "batch-a28585b1cf867f3e3a16-00014-observation-c51c406ff46d",
+      "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d",
+      "batch-a28585b1cf867f3e3a16-00015-observation-1caaccc3b720",
+      "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720",
+      "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+      "batch-a28585b1cf867f3e3a16-00016-semantic-8f66a92675d6",
+      "batch-a28585b1cf867f3e3a16-00017-observation-b5864fa86dcb",
+      "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb",
+      "batch-a28585b1cf867f3e3a16-00018-observation-03bedebd6807",
+      "batch-a28585b1cf867f3e3a16-00018-semantic-03bedebd6807",
+      "batch-a28585b1cf867f3e3a16-00019-observation-16c74a7cd7a6",
+      "batch-a28585b1cf867f3e3a16-00019-semantic-16c74a7cd7a6",
+      "batch-a28585b1cf867f3e3a16-00020-observation-8727d8b4e3a3",
+      "batch-a28585b1cf867f3e3a16-00020-semantic-8727d8b4e3a3",
+      "batch-a28585b1cf867f3e3a16-00021-observation-8275c0fcbeae",
+      "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae",
+      "batch-a28585b1cf867f3e3a16-00022-observation-b05f2704b4ae",
+      "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae",
+      "batch-a28585b1cf867f3e3a16-00023-observation-3096697b31ba",
+      "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    ],
+    "plannedBatches": 71,
+    "worldTopDirectories": [
+      "compiler",
+      "evidence",
+      "proposals"
+    ],
+    "compilerLockExists": false,
+    "preparedSourceDirectory": "/root/.novel-harness/prepared-novels/v3/963b3d0001584408cee54556677c3397",
+    "preparedSourceDirectoryExists": false,
+    "annotationCurrentRefs": 949,
+    "baseUnits": 10957
+  },
+  "proposalCounts": {
+    "pending": {
+      "count": 403,
+      "byKind": {
+        "canonical-event": 75,
+        "event-participation": 183,
+        "scene-occurrence": 36,
+        "entity": 69,
+        "norm-template": 1,
+        "claim": 4,
+        "attribution": 5,
+        "proposition": 6,
+        "event-relation": 19,
+        "event-execution": 2,
+        "action-schema": 2,
+        "event-frame": 1
+      }
+    },
+    "accepted": {
+      "count": 0,
+      "byKind": {}
+    },
+    "rejected": {
+      "count": 96,
+      "byKind": {
+        "entity": 7,
+        "event-participation": 20,
+        "scene-occurrence": 5,
+        "canonical-event": 58,
+        "action-schema": 2,
+        "event-execution": 1,
+        "claim": 3
+      }
+    }
+  },
+  "accounting": {
+    "recordCount": 2216,
+    "byStatus": {
+      "background-only": 578,
+      "duplicate-description": 1406,
+      "represented": 229,
+      "paratext": 3
+    },
+    "reviews": [
+      {
+        "batchId": "batch-a28585b1cf867f3e3a16-00006-executable-91a6ca318dcb",
+        "reviewedAt": "2026-09-08T07:41:42.562Z",
+        "segments": [
+          {
+            "disposition": "proposed",
+            "endByte": 166800,
+            "segmentId": "a28585b1cf867f3e3a16-00006-dfcdc0eeafc7",
+            "startByte": 117806,
+            "summary": "Executable-stage recovery reviewed. Source supports travel by CC1000, bloodline/dragon evidence, magical concealment, combat, injury/death, and institutional training/mission mechanisms; active recovered proposals retained."
+          }
+        ],
+        "evidenceSpanCount": 9,
+        "annotationSpanCount": 60,
+        "unitDecisionCount": 592
+      },
+      {
+        "batchId": "batch-a28585b1cf867f3e3a16-00001-executable-23902a13002c",
+        "reviewedAt": "2026-09-08T10:21:13.929Z",
+        "segments": [
+          {
+            "disposition": "proposed",
+            "endByte": 797,
+            "segmentId": "a28585b1cf867f3e3a16-00001-ad1f59d1acf3",
+            "startByte": 0,
+            "summary": "Exact synopsis/title coverage is retained by source accounting; no new executable mechanism is induced from this paratext slice."
+          }
+        ],
+        "evidenceSpanCount": 14,
+        "annotationSpanCount": 40,
+        "unitDecisionCount": 0
+      },
+      {
+        "batchId": "batch-a28585b1cf867f3e3a16-00002-executable-684389ad80a1",
+        "reviewedAt": "2026-09-08T10:21:39.431Z",
+        "segments": [
+          {
+            "disposition": "proposed",
+            "endByte": 5290,
+            "segmentId": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "startByte": 797,
+            "summary": "Executable-stage review completed; prior accepted source-accounting proposals remain active. No unresolved accounting units remain."
+          }
+        ],
+        "evidenceSpanCount": 9,
+        "annotationSpanCount": 32,
+        "unitDecisionCount": 51
+      },
+      {
+        "batchId": "batch-a28585b1cf867f3e3a16-00003-executable-2bbbc70ac8d4",
+        "reviewedAt": "2026-09-08T10:22:12.389Z",
+        "segments": [
+          {
+            "disposition": "proposed",
+            "endByte": 54279,
+            "segmentId": "a28585b1cf867f3e3a16-00003-5c70d7864d11",
+            "startByte": 5290,
+            "summary": "Executable-stage review completed; existing semantic events cover the source. No reusable action schema, execution binding, constraint, spatial relation, norm, process, goal/model, or possibility is independently supported without new semantic artifacts."
+          }
+        ],
+        "evidenceSpanCount": 29,
+        "annotationSpanCount": 42,
+        "unitDecisionCount": 520
+      },
+      {
+        "batchId": "batch-a28585b1cf867f3e3a16-00004-executable-e6468d63d6d1",
+        "reviewedAt": "2026-09-08T13:42:43.349Z",
+        "segments": [
+          {
+            "disposition": "proposed",
+            "endByte": 103369,
+            "segmentId": "a28585b1cf867f3e3a16-00004-f50b153c1580",
+            "startByte": 54279,
+            "summary": "Executable review completed. No reusable action schema, execution binding, constraint, spatial relation, rule, norm, process, goal, model, or possibility was added: the slice supplies isolated actions and already represented semantic events without sufficient repeated explicit mechanism support."
+          }
+        ],
+        "evidenceSpanCount": 16,
+        "annotationSpanCount": 44,
+        "unitDecisionCount": 661
+      },
+      {
+        "batchId": "batch-a28585b1cf867f3e3a16-00005-executable-cf55bbf2a951",
+        "reviewedAt": "2026-09-08T13:47:16.109Z",
+        "segments": [
+          {
+            "disposition": "proposed",
+            "endByte": 117806,
+            "segmentId": "a28585b1cf867f3e3a16-00005-12c9137e67cf",
+            "startByte": 103369,
+            "summary": "Source accounting was represented. Staged the evidence-backed enrollment-choice schema; the attempted event binding was withdrawn because typed agent participation was absent."
+          }
+        ],
+        "evidenceSpanCount": 47,
+        "annotationSpanCount": 52,
+        "unitDecisionCount": 151
+      }
+    ],
+    "batch53PendingPages": 19,
+    "batch53PendingUnitDecisions": 373
+  },
+  "boundaryRequests": {
+    "version": 1,
+    "sourceId": "a28585b1cf867f3e3a16",
+    "requests": [
+      {
+        "version": 1,
+        "id": "boundary-a28585b1cf867f3e3a16-161c3f42206e119e",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "leftSegmentId": "a28585b1cf867f3e3a16-00016-a5fa7ec5e791",
+        "rightSegmentId": "a28585b1cf867f3e3a16-00017-3111c3cc2bb7",
+        "requestedBy": [
+          {
+            "batchId": "batch-a28585b1cf867f3e3a16-00016-observation-8f66a92675d6",
+            "segmentId": "a28585b1cf867f3e3a16-00016-a5fa7ec5e791",
+            "direction": "next",
+            "reason": "The active Valhalla intrusion scene and its dependent confrontation continue into the next source segment, so a fresh two-segment calibration is required rather than a partial current-batch observation.",
+            "artifactIds": [
+              "ds-valhalla-intrusion"
+            ],
+            "requestedAt": "2026-09-07T10:34:30.302Z"
+          }
+        ],
+        "updatedAt": "2026-09-07T10:34:30.302Z"
+      },
+      {
+        "version": 1,
+        "id": "boundary-a28585b1cf867f3e3a16-3ae0eae40ede0e49",
+        "sourceId": "a28585b1cf867f3e3a16",
+        "leftSegmentId": "a28585b1cf867f3e3a16-00018-5b35ba4d844e",
+        "rightSegmentId": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+        "requestedBy": [
+          {
+            "batchId": "batch-a28585b1cf867f3e3a16-00019-observation-16c74a7cd7a6",
+            "segmentId": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+            "direction": "previous",
+            "reason": "The opening is a direct continuation of the prior swimming-pool refuge scene: prior dialogue establishes the three characters treading water, the PPK, and the water-based concealment plan, while this slice continues that same scene and action sequence. A complete calibration is needed rather than one-sided scene/event observations.",
+            "artifactIds": [],
+            "requestedAt": "2026-09-07T10:46:21.764Z"
+          }
+        ],
+        "updatedAt": "2026-09-07T10:46:21.764Z"
+      }
+    ],
+    "updatedAt": "2026-09-07T10:46:21.764Z"
+  },
+  "runManifests": [
+    {
+      "version": 1,
+      "id": "run-mtsc7r3l-6d0cf25b-c424-4bf2-ae2f-530d93ac9352",
+      "kind": "prepare",
+      "status": "succeeded",
+      "sourceId": "a28585b1cf867f3e3a16",
+      "startedAt": "2026-09-08T07:17:47.889Z",
+      "endedAt": "2026-09-08T07:20:15.904Z",
+      "presentationMessageIds": [],
+      "rootSpanId": "span-mtsc7r3l-755e9cde-a723-46f1-bbb4-519feb2dfadc",
+      "lastSeq": 102,
+      "counts": {
+        "llmRequests": 6,
+        "toolCalls": 26,
+        "retries": 0
+      },
+      "usage": {
+        "input": 160360,
+        "output": 3820,
+        "cacheRead": 722432,
+        "cacheWrite": 0,
+        "reasoning": 458,
+        "totalTokens": 886612,
+        "cost": 0.05110464000000001
+      }
+    },
+    {
+      "version": 1,
+      "id": "run-mtscfy68-6256d05e-4859-4fbf-a5e3-5d3a5ede9369",
+      "kind": "prepare",
+      "status": "cancelled",
+      "sourceId": "a28585b1cf867f3e3a16",
+      "startedAt": "2026-09-08T07:24:10.304Z",
+      "endedAt": "2026-09-08T07:34:10.314Z",
+      "presentationMessageIds": [],
+      "rootSpanId": "span-mtscfy68-ba5336be-47cd-44ab-aa43-e8f7debd5697",
+      "lastSeq": 423,
+      "counts": {
+        "llmRequests": 44,
+        "toolCalls": 54,
+        "retries": 0
+      },
+      "usage": {
+        "input": 212539,
+        "output": 5417,
+        "cacheRead": 7087104,
+        "cacheWrite": 0,
+        "reasoning": 1396,
+        "totalTokens": 7305060,
+        "cost": 0.19075028
+      },
+      "error": {
+        "code": "COMPILER_RUN_FAILED",
+        "message": "The operation was aborted due to timeout",
+        "retryable": false
+      }
+    },
+    {
+      "version": 1,
+      "id": "run-mtsd1fkp-3ea5e2ef-33bf-460d-b244-0420ff06b78e",
+      "kind": "prepare",
+      "status": "succeeded",
+      "sourceId": "a28585b1cf867f3e3a16",
+      "startedAt": "2026-09-08T07:40:52.633Z",
+      "endedAt": "2026-09-08T07:40:52.651Z",
+      "presentationMessageIds": [],
+      "rootSpanId": "span-mtsd1fkp-2b101fde-0448-4854-b597-73a7cc00a0e4",
+      "lastSeq": 4,
+      "counts": {
+        "llmRequests": 0,
+        "toolCalls": 0,
+        "retries": 0
+      },
+      "usage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 0,
+        "cost": 0
+      }
+    },
+    {
+      "version": 1,
+      "id": "run-mtsd1rab-88d6aa4e-293a-458a-9bac-1e23b5eeb54b",
+      "kind": "prepare",
+      "status": "succeeded",
+      "sourceId": "a28585b1cf867f3e3a16",
+      "startedAt": "2026-09-08T07:41:07.811Z",
+      "endedAt": "2026-09-08T07:41:43.437Z",
+      "presentationMessageIds": [],
+      "rootSpanId": "span-mtsd1rab-9efca8ca-0e97-4614-a34a-f9525b473f51",
+      "lastSeq": 26,
+      "counts": {
+        "llmRequests": 2,
+        "toolCalls": 2,
+        "retries": 0
+      },
+      "usage": {
+        "input": 150720,
+        "output": 200,
+        "cacheRead": 148992,
+        "cacheWrite": 0,
+        "reasoning": 29,
+        "totalTokens": 299912,
+        "cost": 0.033363840000000006
+      }
+    },
+    {
+      "version": 1,
+      "id": "run-mtsiqp45-33329f86-0903-440a-a2f2-1e1f5f6d208e",
+      "kind": "prepare",
+      "status": "failed",
+      "sourceId": "a28585b1cf867f3e3a16",
+      "startedAt": "2026-09-08T10:20:29.477Z",
+      "endedAt": "2026-09-08T10:24:25.993Z",
+      "presentationMessageIds": [],
+      "rootSpanId": "span-mtsiqp45-8bf9f562-fd6a-422b-b0de-bfbfd0778c2a",
+      "lastSeq": 154,
+      "counts": {
+        "llmRequests": 13,
+        "toolCalls": 22,
+        "retries": 0
+      },
+      "usage": {
+        "input": 628449,
+        "output": 4428,
+        "cacheRead": 1442304,
+        "cacheWrite": 0,
+        "reasoning": 2421,
+        "totalTokens": 2075181,
+        "cost": 0.15984948000000002
+      },
+      "error": {
+        "code": "COMPILER_RUN_FAILED",
+        "message": "Compiler batch 50 was not checkpointed: 1 proposal tool call(s) failed before accounting-only completion; source accounting cannot clear executable proposal failures.",
+        "retryable": false
+      }
+    },
+    {
+      "version": 1,
+      "id": "run-mtspxkmt-b07940f0-e82c-4592-b24e-9172c0fc67ea",
+      "kind": "prepare",
+      "status": "failed",
+      "sourceId": "a28585b1cf867f3e3a16",
+      "startedAt": "2026-09-08T13:41:47.573Z",
+      "endedAt": "2026-09-08T14:00:25.425Z",
+      "presentationMessageIds": [],
+      "rootSpanId": "span-mtspxkmt-ff750dc8-6e7b-4325-bcf4-7ad746f2bce2",
+      "lastSeq": 764,
+      "counts": {
+        "llmRequests": 75,
+        "toolCalls": 106,
+        "retries": 0
+      },
+      "usage": {
+        "input": 705173,
+        "output": 15912,
+        "cacheRead": 11836928,
+        "cacheWrite": 0,
+        "reasoning": 5695,
+        "totalTokens": 12558013,
+        "cost": 0.39686755999999995
+      },
+      "error": {
+        "code": "COMPILER_RUN_FAILED",
+        "message": "Compiler batch 53 was not checkpointed: 1 proposal tool call(s) failed.",
+        "retryable": false
+      }
+    }
+  ],
+  "latestRunStages": [
+    {
+      "label": "source-review · executable · batch 50",
+      "startedAt": "2026-09-08T13:41:49.100Z",
+      "requests": 3,
+      "toolCalls": 6,
+      "toolErrors": 0,
+      "maxInputPlusCacheRead": 156879,
+      "maxInputSeq": 35,
+      "endedAt": "2026-09-08T13:42:43.420Z"
+    },
+    {
+      "label": "source-review · executable · batch 51",
+      "startedAt": "2026-09-08T13:42:44.598Z",
+      "requests": 16,
+      "toolCalls": 25,
+      "toolErrors": 5,
+      "maxInputPlusCacheRead": 156418,
+      "maxInputSeq": 201,
+      "endedAt": "2026-09-08T13:47:16.176Z"
+    },
+    {
+      "label": "source-review · executable · batch 53",
+      "startedAt": "2026-09-08T13:47:17.357Z",
+      "requests": 51,
+      "toolCalls": 63,
+      "toolErrors": 4,
+      "maxInputPlusCacheRead": 196108,
+      "maxInputSeq": 697,
+      "endedAt": "2026-09-08T13:59:15.840Z"
+    },
+    {
+      "label": "source-review · executable · batch 53",
+      "startedAt": "2026-09-08T13:59:16.229Z",
+      "requests": 5,
+      "toolCalls": 12,
+      "toolErrors": 1,
+      "maxInputPlusCacheRead": 154741,
+      "maxInputSeq": 761,
+      "endedAt": "2026-09-08T14:00:25.423Z"
+    }
+  ],
+  "latestRunFirstRequest": {
+    "seq": 9,
+    "toolCount": 26,
+    "toolSchemaCharactersCompactJson": 310301,
+    "firstInputTokens": 150492
+  },
+  "latestRunTimeline": [
+    {
+      "seq": 3,
+      "observedAt": "2026-09-08T13:41:49.100Z",
+      "type": "stage.started",
+      "data": {
+        "label": "source-review · executable · batch 50",
+        "kind": "pi-invocation"
+      }
+    },
+    {
+      "seq": 38,
+      "observedAt": "2026-09-08T13:42:43.412Z",
+      "type": "stage.finished",
+      "data": {
+        "label": "LLM turn 3",
+        "kind": "llm-turn",
+        "status": "completed",
+        "turnIndex": 2,
+        "toolResultCount": 1,
+        "callId": "call-mtspy8ur-64553ec8-a2eb-4e92-a521-ed18b5495efd",
+        "requestAttempts": 1,
+        "durationMs": 24450
+      }
+    },
+    {
+      "seq": 40,
+      "observedAt": "2026-09-08T13:42:44.598Z",
+      "type": "stage.started",
+      "data": {
+        "label": "source-review · executable · batch 51",
+        "kind": "pi-invocation"
+      }
+    },
+    {
+      "seq": 94,
+      "observedAt": "2026-09-08T13:43:59.155Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "propose_action_schema",
+        "inputHash": "21ddd5ea72a9e4b2ad522095e094873aa70b8637d4d62694a4fc223f1e0c685c"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/21/21ddd5ea72a9e4b2ad522095e094873aa70b8637d4d62694a4fc223f1e0c685c.json"
+    },
+    {
+      "seq": 95,
+      "observedAt": "2026-09-08T13:43:59.170Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "propose_action_schema",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/71/71d670716ebab3759f52dd91b68b9f7ff007dff16635f7e8606232bd25845727.json"
+    },
+    {
+      "seq": 103,
+      "observedAt": "2026-09-08T13:44:19.485Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "propose_action_schema",
+        "inputHash": "d1804f6c256ff2aa44604681217e5dfa647f2ee46547e273b141eeb11011c5e4"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/d1/d1804f6c256ff2aa44604681217e5dfa647f2ee46547e273b141eeb11011c5e4.json"
+    },
+    {
+      "seq": 104,
+      "observedAt": "2026-09-08T13:44:19.493Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "propose_action_schema",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/71/71d670716ebab3759f52dd91b68b9f7ff007dff16635f7e8606232bd25845727.json"
+    },
+    {
+      "seq": 113,
+      "observedAt": "2026-09-08T13:44:35.505Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "finish_compiler_batch",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/f7/f7af58988a2da59204011c4c84ac2e7ba9207b082e00dd5556f9b125a49ab36d.json"
+    },
+    {
+      "seq": 167,
+      "observedAt": "2026-09-08T13:46:15.378Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "propose_event_execution",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/13/139b0bcaff72042f9bcaffc311e6e6636a47c916a5f009cce6e0f613351cd20b.json"
+    },
+    {
+      "seq": 176,
+      "observedAt": "2026-09-08T13:46:31.465Z",
+      "type": "tool.call.completed",
+      "data": {
+        "toolName": "propose_event_execution",
+        "isError": false
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/a8/a894f267527cd69dd5f75aacbf1b0f18cb7cb04632955bd57c51f580882eb902.json"
+    },
+    {
+      "seq": 185,
+      "observedAt": "2026-09-08T13:46:48.034Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "finish_compiler_batch",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/cb/cbc4837a864a95c79dfac50f74b0a6e818f469982cd4e729c70d63d3f35c0e01.json"
+    },
+    {
+      "seq": 193,
+      "observedAt": "2026-09-08T13:46:59.936Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "withdraw_compiler_proposal",
+        "inputHash": "4187ee5742ae99992e23cdff0013bf893eadd3681e804b9ca3295eccb344e31f"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/41/4187ee5742ae99992e23cdff0013bf893eadd3681e804b9ca3295eccb344e31f.json"
+    },
+    {
+      "seq": 194,
+      "observedAt": "2026-09-08T13:46:59.945Z",
+      "type": "tool.call.completed",
+      "data": {
+        "toolName": "withdraw_compiler_proposal",
+        "isError": false
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/bb/bb104fab0c6fdd6291e67d1b3d08c2053d854bbaa985465d7e3783362a81f3ff.json"
+    },
+    {
+      "seq": 203,
+      "observedAt": "2026-09-08T13:47:16.168Z",
+      "type": "tool.call.completed",
+      "data": {
+        "toolName": "finish_compiler_batch",
+        "isError": false
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/3b/3b24579ef3fb6f20f5971622afc25520b64312828b5eea3322bf76a0f8e3cbec.json"
+    },
+    {
+      "seq": 206,
+      "observedAt": "2026-09-08T13:47:17.357Z",
+      "type": "stage.started",
+      "data": {
+        "label": "source-review · executable · batch 53",
+        "kind": "pi-invocation"
+      }
+    },
+    {
+      "seq": 280,
+      "observedAt": "2026-09-08T13:48:58.179Z",
+      "type": "llm.request.started",
+      "data": {
+        "invocationName": "source-review · executable · batch 53",
+        "turnIndex": 5,
+        "requestAttempt": 1,
+        "providerId": "openai-codex",
+        "modelId": "gpt-5.6-luna",
+        "thinkingLevel": "medium"
+      }
+    },
+    {
+      "seq": 395,
+      "observedAt": "2026-09-08T13:51:46.308Z",
+      "type": "tool.call.completed",
+      "data": {
+        "toolName": "find_source_accounting_units",
+        "isError": false
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/59/592c0c389d53e13df018a5419d8455b95d62fa63dd6db18742f22cde46f93c24.json"
+    },
+    {
+      "seq": 403,
+      "observedAt": "2026-09-08T13:52:09.116Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "propose_norm_template",
+        "inputHash": "196d1ab4eb746c940a15a14503cce78c73468877468e38b46a15d437cea265df"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/19/196d1ab4eb746c940a15a14503cce78c73468877468e38b46a15d437cea265df.json"
+    },
+    {
+      "seq": 404,
+      "observedAt": "2026-09-08T13:52:09.143Z",
+      "type": "tool.call.completed",
+      "data": {
+        "toolName": "propose_norm_template",
+        "isError": false
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/db/db80e4a1a9eab1d7416ccced00b92a80e7f7509de62c7636afd1fb4ba8777ce8.json"
+    },
+    {
+      "seq": 412,
+      "observedAt": "2026-09-08T13:52:20.173Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "account_source_units",
+        "inputHash": "37b2c19e28f28b78eabbc3e528864de88608813c06263da5d4b9e4db50c7ff87"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/37/37b2c19e28f28b78eabbc3e528864de88608813c06263da5d4b9e4db50c7ff87.json"
+    },
+    {
+      "seq": 413,
+      "observedAt": "2026-09-08T13:52:20.952Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "account_source_units",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/49/49b94ba1d08b360ab91d47ebb3722a917438b2306d920996a845e97eba184a16.json"
+    },
+    {
+      "seq": 421,
+      "observedAt": "2026-09-08T13:52:32.051Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "find_source_accounting_units",
+        "inputHash": "86a96686b7c16646814d31d49e997b3865a542cc692f6d7a0159e22f541647d1"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/86/86a96686b7c16646814d31d49e997b3865a542cc692f6d7a0159e22f541647d1.json"
+    },
+    {
+      "seq": 422,
+      "observedAt": "2026-09-08T13:52:32.821Z",
+      "type": "tool.call.completed",
+      "data": {
+        "toolName": "find_source_accounting_units",
+        "isError": false
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/69/69b6b02c4ad32e10c948291864baf75d09b5227147ac1c1342746a6bc1e62b07.json"
+    },
+    {
+      "seq": 430,
+      "observedAt": "2026-09-08T13:52:46.092Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "account_source_units",
+        "inputHash": "10cfa11bdca427e60b37a8296b812a3d3b063bd2565d4c21d16de6cb0129356d"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/10/10cfa11bdca427e60b37a8296b812a3d3b063bd2565d4c21d16de6cb0129356d.json"
+    },
+    {
+      "seq": 431,
+      "observedAt": "2026-09-08T13:52:47.262Z",
+      "type": "tool.call.completed",
+      "data": {
+        "toolName": "account_source_units",
+        "isError": false
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/3d/3dc0fa29dd45e1e6f1838b79fede5b8b307e6ed691d28b814912d4f4482db610.json"
+    },
+    {
+      "seq": 656,
+      "observedAt": "2026-09-08T13:58:12.104Z",
+      "type": "tool.call.completed",
+      "data": {
+        "toolName": "find_source_accounting_units",
+        "isError": false
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/6b/6b26d900806ee1967419af884ca8790568b3245e63607efc88ca1a34283e083d.json"
+    },
+    {
+      "seq": 664,
+      "observedAt": "2026-09-08T13:58:26.762Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "finish_compiler_batch",
+        "inputHash": "d3f3ab866c87fed5d8f4e24c7ce1377dd93b541e804173063da2665455f408d0"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/d3/d3f3ab866c87fed5d8f4e24c7ce1377dd93b541e804173063da2665455f408d0.json"
+    },
+    {
+      "seq": 665,
+      "observedAt": "2026-09-08T13:58:26.773Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "finish_compiler_batch",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/96/96613c749025934d1fc58f61b7fb16fa6be8d53276c8661f0d99954ef4181e65.json"
+    },
+    {
+      "seq": 673,
+      "observedAt": "2026-09-08T13:58:45.616Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "account_source_units",
+        "inputHash": "53df9a3241471e90499a833b4abc298fced91774f46fd7afb756130a960c5532"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/53/53df9a3241471e90499a833b4abc298fced91774f46fd7afb756130a960c5532.json"
+    },
+    {
+      "seq": 674,
+      "observedAt": "2026-09-08T13:58:45.626Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "account_source_units",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/0e/0e1f8a5e5fef25a8c2c6468c497c33754a14dc919ca3b2804eefe598fe4a48d9.json"
+    },
+    {
+      "seq": 682,
+      "observedAt": "2026-09-08T13:59:05.778Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "account_source_units",
+        "inputHash": "e3555fc9b2002519ed866ff5823c02a9751a01fa1bbc40be0784ee6cd2a55f00"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/e3/e3555fc9b2002519ed866ff5823c02a9751a01fa1bbc40be0784ee6cd2a55f00.json"
+    },
+    {
+      "seq": 683,
+      "observedAt": "2026-09-08T13:59:05.779Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "account_source_units",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/c0/c05a67e7ba1d2291595243c49ab2b4cc2c174d19fe85b80589d8b5f62f712a2f.json"
+    },
+    {
+      "seq": 700,
+      "observedAt": "2026-09-08T13:59:16.229Z",
+      "type": "stage.started",
+      "data": {
+        "label": "source-review · executable · batch 53",
+        "kind": "pi-invocation"
+      }
+    },
+    {
+      "seq": 701,
+      "observedAt": "2026-09-08T13:59:16.232Z",
+      "type": "context.assembled",
+      "data": {
+        "invocationName": "source-review · executable · batch 53",
+        "assemblyVersion": "nwh-pi-context/v1",
+        "declaredPartCount": 1,
+        "hostAttempt": 1,
+        "metadata": {
+          "sourceId": "a28585b1cf867f3e3a16",
+          "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+          "purpose": "source-review",
+          "semanticStage": "executable",
+          "ordinal": 52,
+          "chapterOrdinal": 4,
+          "startLine": 1066,
+          "endLine": 1252,
+          "segmentIds": [
+            "a28585b1cf867f3e3a16-00007-26df32014434"
+          ]
+        }
+      }
+    },
+    {
+      "seq": 752,
+      "observedAt": "2026-09-08T14:00:12.948Z",
+      "type": "tool.call.started",
+      "data": {
+        "toolName": "account_source_units",
+        "inputHash": "5c2d350d35fe18af2b617c8be9949bd79497296fa093d51b1dbcb7c95ec3e183"
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/5c/5c2d350d35fe18af2b617c8be9949bd79497296fa093d51b1dbcb7c95ec3e183.json"
+    },
+    {
+      "seq": 753,
+      "observedAt": "2026-09-08T14:00:12.957Z",
+      "type": "tool.call.failed",
+      "data": {
+        "toolName": "account_source_units",
+        "isError": true
+      },
+      "blobPath": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/blobs/sha256/c0/c05a67e7ba1d2291595243c49ab2b4cc2c174d19fe85b80589d8b5f62f712a2f.json"
+    },
+    {
+      "seq": 764,
+      "observedAt": "2026-09-08T14:00:25.425Z",
+      "type": "run.failed",
+      "data": {
+        "status": "failed",
+        "error": {
+          "code": "COMPILER_RUN_FAILED",
+          "message": "Compiler batch 53 was not checkpointed: 1 proposal tool call(s) failed.",
+          "retryable": false
+        }
+      }
+    }
+  ],
+  "pageRebase": {
+    "oldReadSeq": 395,
+    "newReadSeq": 422,
+    "oldUnresolvedTotal": 254,
+    "newUnresolvedTotal": 253,
+    "oldPageToken": "acctpg-d822695e76f3f23a",
+    "newPageToken": "acctpg-1e8d99da75422fb6",
+    "intersectionCount": 19,
+    "removedUnitIds": [
+      "unit-sentence-340dcd6070b1aa62ea04c578"
+    ],
+    "addedUnitIds": [
+      "unit-sentence-ea08aef3a6eeb6ec2e163761"
+    ],
+    "finalUnresolvedDiscoverySeq": 656,
+    "finalUnresolvedTotal": 0
+  },
+  "obligationStatusCounts": {
+    "unsupported": 1,
+    "succeeded": 27,
+    "failed": 1
+  },
+  "nonSuccessfulObligations": [
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/proposal-obligations/b4ee9d64fa100f087b226c40034f55ef5153eb65c5c1326759310d36c6d4d9d5/0fca004932d09c3d70eaab91387b73eb26a2228d823d670f7d3383bc022e09e6.json",
+      "batchId": "batch-a28585b1cf867f3e3a16-00004-executable-e6468d63d6d1",
+      "tool": "propose_action_schema",
+      "proposalId": "schema-remote-communication-00004",
+      "latestStatus": "unsupported",
+      "attempts": [
+        {
+          "status": "failed",
+          "inputHash": "8920450f5990df93cb7ed4860f09911229c6c564962d5c7b956fe74c13414b95",
+          "updatedAt": "2026-09-08T13:30:25.273Z",
+          "diagnostic": "Imported from run-mtsiqp45-33329f86-0903-440a-a2f2-1e1f5f6d208e events 132–133. Exact evidence quote was not found; host replay also verified invalid selectors 3 and 4."
+        },
+        {
+          "status": "unsupported",
+          "inputHash": "8920450f5990df93cb7ed4860f09911229c6c564962d5c7b956fe74c13414b95",
+          "updatedAt": "2026-09-08T13:30:25.274Z",
+          "diagnostic": "Imported from run-mtsiqp45-33329f86-0903-440a-a2f2-1e1f5f6d208e events 132–133. Exact evidence quote was not found; host replay also verified invalid selectors 3 and 4.",
+          "hostReview": {
+            "reason": "Host verified against immutable source lines 335–692: selector 2 omits literal quotation marks; selectors 3 and 4 belong to lines 180 and 152 outside this batch. This exact submitted schema is unsupported in its declared evidence scope. This adjudication does not rule out a separately evidenced communication mechanism, create a binding, or certify executable coverage.",
+            "auditRef": "run-mtsiqp45-33329f86-0903-440a-a2f2-1e1f5f6d208e:132-133;run-records/2026-09-07-longzu1-full-rebuild/new-run-analysis-2026-09-08.md"
+          }
+        }
+      ]
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/proposal-obligations/1bb6fc42bd37e2b6c8ce7c794a4f0729638241a50be429d630a8fc2aa2e5f037/64d0211d0652392452ccc45478fd786d278f302c8b51efb4f0264c2b1e2b2f4c.json",
+      "batchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+      "tool": "account_source_units",
+      "proposalId": "acct-00007-p07",
+      "latestStatus": "failed",
+      "attempts": [
+        {
+          "status": "running",
+          "inputHash": "f117c78235b1046830b1b57a5d71ef27516d9c1e720f326541dda81ed2e7555d",
+          "updatedAt": "2026-09-08T13:52:20.182Z",
+          "diagnostic": "Tool result not yet verified; interrupted calls require host inspection before retry."
+        },
+        {
+          "status": "failed",
+          "inputHash": "f117c78235b1046830b1b57a5d71ef27516d9c1e720f326541dda81ed2e7555d",
+          "updatedAt": "2026-09-08T13:52:20.940Z",
+          "diagnostic": "Source unit unit-sentence-340dcd6070b1aa62ea04c578 is represented by exact current-batch semantics and cannot receive a model disposition."
+        },
+        {
+          "status": "failed",
+          "inputHash": "b6e1f0fb4069938f2a0a85ccc186ee8bfed8fd6a33c16ff713461dfec6b4a914",
+          "updatedAt": "2026-09-08T13:58:45.625Z",
+          "diagnostic": "Validation failed for tool \"account_source_units\":\n  - decisions: must not have fewer than 1 items\n\nReceived arguments:\n{\n  \"proposal_id\": \"acct-00007-p07\",\n  \"decisions\": []\n}"
+        }
+      ]
+    }
+  ],
+  "pendingArtifactSamples": [
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/event-accept-00005-v2.json",
+      "kind": "canonical-event",
+      "proposalId": "event-accept-00005-v2",
+      "createdAt": "2026-09-07T11:35:43.606Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951",
+        "worker": "propose_canonical_event"
+      },
+      "payload": {
+        "causalParents": [
+          "event-car-stop-00005"
+        ],
+        "confidence": 0.99,
+        "evidence": [
+          {
+            "span": {
+              "endByte": 117806,
+              "endLine": 788,
+              "quoteHash": "12c9137e67cf1ac156f43d522649c25da31ed78a52bd87a9dd9036407ef8781a",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 103369,
+              "startLine": 693
+            },
+            "strength": "explicit"
+          }
+        ],
+        "id": "event-accept-00005",
+        "observedOutcome": {
+          "operations": [
+            {
+              "entityId": "char-lumingfei",
+              "field": "character.plan",
+              "op": "set",
+              "value": "接受卡塞尔学院入学"
+            }
+          ],
+          "version": 1
+        },
+        "participantPresence": [
+          {
+            "entityId": "char-lumingfei",
+            "mode": "physical"
+          },
+          {
+            "entityId": "char-nuonuo",
+            "mode": "physical"
+          }
+        ],
+        "participants": [
+          "char-lumingfei",
+          "char-nuonuo"
+        ],
+        "preconditions": [],
+        "readerSummary": "在诺诺说明这是最后一次选择后，路明非说自己想好了并接受入学。这个决定把他从犹豫推向了卡塞尔学院的正式手续。",
+        "sceneOccurrenceIds": [
+          "scene-roadside-00005"
+        ],
+        "storyTime": {
+          "kind": "ordinal",
+          "label": "药店门前等待接应时"
+        },
+        "title": "路明非决定接受卡塞尔学院入学"
+      }
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/event-enrollment-decision-00004-v2.json",
+      "kind": "canonical-event",
+      "proposalId": "event-enrollment-decision-00004-v2",
+      "createdAt": "2026-09-07T11:29:59.445Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1",
+        "worker": "propose_canonical_event"
+      },
+      "payload": {
+        "causalParents": [],
+        "confidence": 0.99,
+        "evidence": [
+          {
+            "span": {
+              "endByte": 103369,
+              "endLine": 692,
+              "quoteHash": "f50b153c1580df980f09365dab07aac0efe32f5371769e8af90f69f9620e7d7e",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 54279,
+              "startLine": 335
+            },
+            "strength": "explicit"
+          }
+        ],
+        "id": "event-enrollment-decision-00004",
+        "narrativeContext": {
+          "discourseOrder": 1,
+          "layerId": "ds-online-chat",
+          "mode": "scene",
+          "viewpointActorId": "char-lumingfei"
+        },
+        "observedOutcome": {
+          "operations": [],
+          "version": 1
+        },
+        "participantPresence": [
+          {
+            "entityId": "char-lumingfei",
+            "mode": "physical"
+          },
+          {
+            "entityId": "char-nuonuo",
+            "mode": "remote"
+          },
+          {
+            "entityId": "char-gudeli-an",
+            "mode": "mentioned"
+          }
+        ],
+        "participants": [
+          "char-lumingfei",
+          "char-nuonuo",
+          "char-gudeli-an"
+        ],
+        "preconditions": [],
+        "readerSummary": "诺诺告知路明非入学名额即将截止，要求他当晚决定。路明非想到次日的表白计划后说“就算咯”，暂时拒绝了学院的机会。",
+        "sceneOccurrenceIds": [
+          "scene-enrollment-decision-00004"
+        ],
+        "storyTime": {
+          "kind": "ordinal",
+          "label": "表白前夜"
+        },
+        "title": "路明非在电话中拒绝立即接受卡塞尔学院入学"
+      }
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/event-lu-shoot-caesar-00007-v2.json",
+      "kind": "canonical-event",
+      "proposalId": "event-lu-shoot-caesar-00007-v2",
+      "createdAt": "2026-09-07T11:57:26.835Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22",
+        "worker": "propose_canonical_event"
+      },
+      "payload": {
+        "causalParents": [],
+        "confidence": 0.99,
+        "evidence": [
+          {
+            "span": {
+              "endByte": 197256,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "startLine": 1066
+            },
+            "strength": "explicit"
+          }
+        ],
+        "id": "event-lu-shoot-caesar-00007",
+        "narrativeContext": {
+          "discourseOrder": 1115,
+          "layerId": "ds-battle",
+          "mode": "scene",
+          "viewpointActorId": "char-lumingfei"
+        },
+        "observedOutcome": {
+          "operations": [],
+          "version": 1
+        },
+        "participantPresence": [
+          {
+            "entityId": "char-lumingfei",
+            "mode": "physical"
+          },
+          {
+            "entityId": "char-caesar",
+            "mode": "physical"
+          }
+        ],
+        "participants": [
+          "char-lumingfei",
+          "char-caesar"
+        ],
+        "preconditions": [],
+        "readerSummary": "路明非从窄道出口出现并拿起狙击枪，正面射击恺撒，使他倒地。",
+        "sceneOccurrenceIds": [
+          "scene-campus-battle-00007"
+        ],
+        "storyTime": {
+          "kind": "ordinal",
+          "label": "诺诺中枪之后的校园战场"
+        },
+        "title": "路明非用狙击枪击倒恺撒"
+      }
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/event-lu-shoot-chu-00007-v2.json",
+      "kind": "canonical-event",
+      "proposalId": "event-lu-shoot-chu-00007-v2",
+      "createdAt": "2026-09-07T11:57:26.840Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22",
+        "worker": "propose_canonical_event"
+      },
+      "payload": {
+        "causalParents": [],
+        "confidence": 0.99,
+        "evidence": [
+          {
+            "span": {
+              "endByte": 197256,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "startLine": 1066
+            },
+            "strength": "explicit"
+          }
+        ],
+        "id": "event-lu-shoot-chu-00007",
+        "narrativeContext": {
+          "discourseOrder": 1128,
+          "layerId": "ds-battle",
+          "mode": "scene",
+          "viewpointActorId": "char-lumingfei"
+        },
+        "observedOutcome": {
+          "operations": [],
+          "version": 1
+        },
+        "participantPresence": [
+          {
+            "entityId": "char-lumingfei",
+            "mode": "physical"
+          },
+          {
+            "entityId": "char-chuzi-hang",
+            "mode": "physical"
+          }
+        ],
+        "participants": [
+          "char-lumingfei",
+          "char-chuzi-hang"
+        ],
+        "preconditions": [],
+        "readerSummary": "楚子航认负后，路明非再次抬枪并扣动扳机，子弹击穿楚子航胸口。",
+        "sceneOccurrenceIds": [
+          "scene-campus-battle-00007"
+        ],
+        "storyTime": {
+          "kind": "ordinal",
+          "label": "恺撒倒地并认负之后"
+        },
+        "title": "路明非开枪击穿楚子航胸口"
+      }
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/event-medical-reveal-00007-v2.json",
+      "kind": "canonical-event",
+      "proposalId": "event-medical-reveal-00007-v2",
+      "createdAt": "2026-09-07T11:57:26.845Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22",
+        "worker": "propose_canonical_event"
+      },
+      "payload": {
+        "causalParents": [],
+        "confidence": 0.99,
+        "evidence": [
+          {
+            "span": {
+              "endByte": 197256,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "startLine": 1066
+            },
+            "strength": "explicit"
+          }
+        ],
+        "id": "event-medical-reveal-00007",
+        "narrativeContext": {
+          "discourseOrder": 1132,
+          "layerId": "ds-battle",
+          "mode": "scene",
+          "viewpointActorId": "char-lumingfei"
+        },
+        "observedOutcome": {
+          "operations": [],
+          "version": 1
+        },
+        "participantPresence": [
+          {
+            "entityId": "char-gudeli-an",
+            "mode": "physical"
+          },
+          {
+            "entityId": "char-manshtein",
+            "mode": "physical"
+          },
+          {
+            "entityId": "char-lumingfei",
+            "mode": "physical"
+          }
+        ],
+        "participants": [
+          "char-gudeli-an",
+          "char-manshtein",
+          "char-lumingfei"
+        ],
+        "preconditions": [],
+        "readerSummary": "医生护士为战场上的学生注射并救治，古德里安解释血迹来自会汽化且含麻醉剂的弗里嘉子弹。路明非得知这场战斗并未造成真正伤亡。",
+        "sceneOccurrenceIds": [
+          "scene-campus-battle-00007"
+        ],
+        "storyTime": {
+          "kind": "ordinal",
+          "label": "自由一日枪战结束后"
+        },
+        "title": "学院医护人员揭示自由一日的非致命弹药"
+      }
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/prop-exec-lu-shoot-caesar-00007.json",
+      "kind": "event-execution",
+      "proposalId": "prop-exec-lu-shoot-caesar-00007",
+      "createdAt": "2026-09-08T13:49:25.160Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+        "worker": "propose_event_execution"
+      },
+      "payload": {
+        "action": {
+          "lane": "schema-bound",
+          "parameters": {
+            "weaponType": "狙击之王"
+          },
+          "roleBindings": [
+            {
+              "entityIds": [
+                "char-lumingfei"
+              ],
+              "roleId": "initiator"
+            },
+            {
+              "entityIds": [
+                "char-caesar"
+              ],
+              "roleId": "target"
+            }
+          ],
+          "schemaId": "schema-rifle-fire-00007"
+        },
+        "actorId": "char-lumingfei",
+        "canonicalEventId": "event-lu-shoot-caesar-00007",
+        "evidence": [
+          {
+            "span": {
+              "endByte": 197256,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "startLine": 1066
+            },
+            "strength": "explicit"
+          }
+        ],
+        "id": "exec-lu-shoot-caesar-00007"
+      }
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/prop-exec-lu-shoot-chu-00007.json",
+      "kind": "event-execution",
+      "proposalId": "prop-exec-lu-shoot-chu-00007",
+      "createdAt": "2026-09-08T13:49:25.187Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+        "worker": "propose_event_execution"
+      },
+      "payload": {
+        "action": {
+          "lane": "schema-bound",
+          "parameters": {
+            "weaponType": "狙击之王"
+          },
+          "roleBindings": [
+            {
+              "entityIds": [
+                "char-lumingfei"
+              ],
+              "roleId": "initiator"
+            },
+            {
+              "entityIds": [
+                "char-chuzi-hang"
+              ],
+              "roleId": "target"
+            }
+          ],
+          "schemaId": "schema-rifle-fire-00007"
+        },
+        "actorId": "char-lumingfei",
+        "canonicalEventId": "event-lu-shoot-chu-00007",
+        "evidence": [
+          {
+            "span": {
+              "endByte": 197256,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "startLine": 1066
+            },
+            "strength": "explicit"
+          }
+        ],
+        "id": "exec-lu-shoot-chu-00007"
+      }
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/prop-norm-freedom-day-00007.json",
+      "kind": "norm-template",
+      "proposalId": "prop-norm-freedom-day-00007",
+      "createdAt": "2026-09-08T13:52:09.141Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+        "worker": "propose_norm_template"
+      },
+      "payload": {
+        "actionPattern": {
+          "kind": "any"
+        },
+        "appliesWhen": [],
+        "authorityEntityId": "inst-cassel-academy",
+        "defeasible": true,
+        "evidence": [
+          {
+            "span": {
+              "endByte": 197256,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "startLine": 1066
+            },
+            "strength": "explicit"
+          }
+        ],
+        "exceptions": [],
+        "id": "norm-freedom-day-00007",
+        "induction": {
+          "kind": "source-pattern",
+          "supportingEventIds": [
+            "event-medical-reveal-00007"
+          ]
+        },
+        "knownByClaimIds": [],
+        "modality": "permission",
+        "name": "自由一日活动豁免校规处罚",
+        "ontologyVersion": "norm-template-v1",
+        "overridesTemplateIds": [],
+        "priority": 100,
+        "reparations": [],
+        "status": "supported",
+        "visibility": "public"
+      }
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/prop-schema-rifle-fire-00007-v2.json",
+      "kind": "action-schema",
+      "proposalId": "prop-schema-rifle-fire-00007-v2",
+      "createdAt": "2026-09-08T13:48:44.715Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22",
+        "worker": "propose_action_schema"
+      },
+      "payload": {
+        "effectEnvelope": {
+          "allowedStateFields": [],
+          "allowsKnowledge": false,
+          "allowsSceneTransition": false,
+          "allowsTimeAdvance": false,
+          "maxStateOperations": 0
+        },
+        "evidence": [
+          {
+            "span": {
+              "endByte": 197256,
+              "endLine": 1252,
+              "quoteHash": "26df32014434834e7de13e2f015a314842842f14fc69b5afd56c471f8a5c0b89",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 166800,
+              "startLine": 1066
+            },
+            "strength": "explicit"
+          }
+        ],
+        "id": "schema-rifle-fire-00007",
+        "induction": {
+          "kind": "source-pattern",
+          "supportingEventIds": [
+            "event-lu-shoot-caesar-00007",
+            "event-lu-shoot-chu-00007"
+          ]
+        },
+        "initiatorRoleId": "initiator",
+        "name": "使用枪械射击目标",
+        "ontologyVersion": "action-schema-v1",
+        "parameters": [
+          {
+            "allowedValues": [
+              "PPK",
+              "狙击之王"
+            ],
+            "id": "weaponType",
+            "required": true,
+            "valueType": "string"
+          }
+        ],
+        "preconditions": [],
+        "roles": [
+          {
+            "allowedEntityKinds": [
+              "character"
+            ],
+            "id": "initiator",
+            "label": "开枪者",
+            "maxCardinality": 1,
+            "minCardinality": 1
+          },
+          {
+            "allowedEntityKinds": [
+              "character"
+            ],
+            "id": "target",
+            "label": "被射击目标",
+            "maxCardinality": 1,
+            "minCardinality": 1
+          },
+          {
+            "allowedEntityKinds": [
+              "artifact"
+            ],
+            "id": "weapon",
+            "label": "枪械",
+            "maxCardinality": 1,
+            "minCardinality": 0
+          }
+        ],
+        "stateEffects": [],
+        "visibility": "observable"
+      }
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/proposals/pending/schema-enrollment-choice-00005.json",
+      "kind": "action-schema",
+      "proposalId": "schema-enrollment-choice-00005",
+      "createdAt": "2026-09-08T13:45:01.069Z",
+      "generatedBy": {
+        "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-executable-cf55bbf2a951",
+        "worker": "propose_action_schema"
+      },
+      "payload": {
+        "effectEnvelope": {
+          "allowedStateFields": [
+            "character.plan"
+          ],
+          "allowsKnowledge": false,
+          "allowsSceneTransition": false,
+          "allowsTimeAdvance": false,
+          "maxStateOperations": 1
+        },
+        "evidence": [
+          {
+            "span": {
+              "endByte": 117806,
+              "endLine": 788,
+              "quoteHash": "12c9137e67cf1ac156f43d522649c25da31ed78a52bd87a9dd9036407ef8781a",
+              "sourceId": "a28585b1cf867f3e3a16",
+              "startByte": 103369,
+              "startLine": 693
+            },
+            "strength": "explicit"
+          }
+        ],
+        "id": "schema-enrollment-choice-00005",
+        "induction": {
+          "kind": "source-pattern",
+          "supportingEventIds": [
+            "event-enrollment-decision-00004",
+            "event-accept-00005"
+          ]
+        },
+        "initiatorRoleId": "initiator",
+        "name": "作出卡塞尔学院入学选择",
+        "ontologyVersion": "action-schema-v1",
+        "parameters": [
+          {
+            "allowedValues": [
+              "接受卡塞尔学院入学"
+            ],
+            "id": "choice",
+            "required": true,
+            "valueType": "string"
+          }
+        ],
+        "preconditions": [],
+        "roles": [
+          {
+            "allowedEntityKinds": [
+              "character"
+            ],
+            "id": "initiator",
+            "label": "作出选择的人",
+            "maxCardinality": 1,
+            "minCardinality": 1
+          },
+          {
+            "allowedEntityKinds": [
+              "institution"
+            ],
+            "id": "institution",
+            "label": "入学机构",
+            "maxCardinality": 1,
+            "minCardinality": 0
+          }
+        ],
+        "stateEffects": [
+          {
+            "entity": {
+              "kind": "role",
+              "roleId": "initiator"
+            },
+            "field": "character.plan",
+            "op": "set",
+            "required": true,
+            "value": {
+              "parameterId": "choice",
+              "source": "parameter"
+            }
+          }
+        ],
+        "visibility": "observable"
+      }
+    }
+  ],
+  "memoryProbes": {
+    "capturedAt": "2026-09-08T14:27:56.347Z",
+    "probeScope": "Pure in-memory validation of current pending catalogs; no finish, compilation, commit, or world state write.",
+    "bindingIds": [
+      "exec-lu-shoot-caesar-00007",
+      "exec-lu-shoot-chu-00007"
+    ],
+    "validationIssues": [],
+    "normEffectiveWithoutStatePredicates": [
+      "norm-freedom-day-00007"
+    ],
+    "eventMetrics": {
+      "total": 75,
+      "emptyObservedOutcome": 62,
+      "nonemptyObservedKnowledge": 0,
+      "emptyPreconditions": 75,
+      "emptyCausalParents": 57,
+      "withTimeAdvance": 0
+    }
+  },
+  "fingerprints": [
+    {
+      "path": "/root/workplace/novel-world-harness/AGENTS.md",
+      "bytes": 3742,
+      "sha256": "1ded2e501ec0a44cf06db89d400b80ec841c393f44ac3a252a57787fe8b10e83",
+      "mtimeUtc": "2026-09-05T06:04:13.062719+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/docs/adr/0001-world-truth-history-and-possibility-space.md",
+      "bytes": 15279,
+      "sha256": "d9168f9ddb7d15e5b9597924b193e4ff1e0a8edacf1227d34650c83f25b7adf3",
+      "mtimeUtc": "2026-09-05T06:04:13.066719+00:00"
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/batches/a28585b1cf867f3e3a16.json",
+      "bytes": 3459,
+      "sha256": "d92e1e056d54a55885c5c42f28e2d5a47fb48190eb658d56fd9d70c5bc593406",
+      "mtimeUtc": "2026-09-08T13:47:16.175842+00:00"
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/observations/v1/accounting/a28585b1cf867f3e3a16.json",
+      "bytes": 1481473,
+      "sha256": "9e904c1fe4925ac5d928c9ba2d937ae7d047ed98c275be6dcc4acac9273b6a37",
+      "mtimeUtc": "2026-09-08T13:47:16.163842+00:00"
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/world/v3/compiler/boundary-calibrations/a28585b1cf867f3e3a16.json",
+      "bytes": 2010,
+      "sha256": "0ef4b7bd4f1c1e3ad097f098a307ec5044a309da89aa4f1b5efc980969d0d4c9",
+      "mtimeUtc": "2026-09-07T10:46:21.761109+00:00"
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/runs/2026-09/run-mtspxkmt-b07940f0-e82c-4592-b24e-9172c0fc67ea/events.jsonl",
+      "bytes": 480687,
+      "sha256": "e2d27ab82f23eb4594a53350db1c6dfda8431ef618cbb07f81a3efe8faaa1693",
+      "mtimeUtc": "2026-09-08T14:00:25.421423+00:00"
+    },
+    {
+      "path": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d/observability/v1/runs/2026-09/run-mtspxkmt-b07940f0-e82c-4592-b24e-9172c0fc67ea/manifest.json",
+      "bytes": 804,
+      "sha256": "fe46472922ad7c1a7108da49996160d33d359dc9df7d46d35062119ce0554e3b",
+      "mtimeUtc": "2026-09-08T14:00:25.425423+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/guardian-prompt-original.md",
+      "bytes": 9019,
+      "sha256": "31c87197b4bc1afd14c1f734e2ba50b4e6e3e4084dfce2eb56ac323e03a65a90",
+      "mtimeUtc": "2026-09-07T15:05:31.313362+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/issues.md",
+      "bytes": 7106,
+      "sha256": "9efea10982c61eef16cedcc9b580bd94c1ed46335e175e07d4b2d9b4814d7079",
+      "mtimeUtc": "2026-09-08T14:19:47.395110+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/fix-results-2026-09-08.md",
+      "bytes": 6259,
+      "sha256": "3aea43a5da05327e8dbcbe47ea525949be6fbd84b298e0fdeebc6640195f3910",
+      "mtimeUtc": "2026-09-08T07:44:46.993531+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/new-run-analysis-2026-09-08.md",
+      "bytes": 12940,
+      "sha256": "0c513e4188e978f24c4b0d9339824292fedeec9ad953f94f0781f35b84d1ee36",
+      "mtimeUtc": "2026-09-08T12:12:20.391539+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/block-analysis-2026-09-08.md",
+      "bytes": 11185,
+      "sha256": "b6c3a0ca24bd55aac9189b7bdeb8339f2a3392a4acca00725639ba11af41370a",
+      "mtimeUtc": "2026-09-08T06:31:20.530146+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/obligation-fix-results-2026-09-08.md",
+      "bytes": 3524,
+      "sha256": "b1ded499e3a31d23dde3b6d1f7fa14c508e52f221774ce94ca11258d4b30bbfe",
+      "mtimeUtc": "2026-09-08T13:31:33.658935+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/run-records/2026-09-07-longzu1-full-rebuild/status.md",
+      "bytes": 4717,
+      "sha256": "c2142e4da90d450e8e4e68274ae09dcf4e3900f4d368bb03bd7e8d10d0918fdd",
+      "mtimeUtc": "2026-09-08T13:32:04.207613+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/proposal-tools.ts",
+      "bytes": 170426,
+      "sha256": "11ec940ed98cf767683a353a9fab4e9b5c362cca39824953c8c7278e00c18f50",
+      "mtimeUtc": "2026-09-08T13:24:46.109928+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/proposal-obligations.ts",
+      "bytes": 7237,
+      "sha256": "8f7596f450ff2e8fd9267661f97784f5dad71df7affc7f2542edb3791dd62357",
+      "mtimeUtc": "2026-09-08T13:27:58.170163+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/batch-outcome.ts",
+      "bytes": 12480,
+      "sha256": "f6cf584a64a366c485b6f651181820e0053f562a30c7491b935cd2de8361fc3e",
+      "mtimeUtc": "2026-09-08T13:19:28.174980+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/commands/compile-source.ts",
+      "bytes": 17441,
+      "sha256": "56099e9d52429850fba06323e13380f8e3f01207fa3e957724849baf93707750",
+      "mtimeUtc": "2026-09-08T07:10:59.158348+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/compiler/batches.ts",
+      "bytes": 115455,
+      "sha256": "66cc6338a152e9e16e8387761812204cd63fe2613a83b2d0cc7295fc2aaaf03b",
+      "mtimeUtc": "2026-09-08T13:19:28.174980+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/world/event-execution.ts",
+      "bytes": 6061,
+      "sha256": "5f19afe4b5e8c8d40cf7b7197171e6cbcdea37481bcd4a5fa7e76e9eedbc9da2",
+      "mtimeUtc": "2026-09-08T07:20:49.735612+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/world/action-ontology.ts",
+      "bytes": 26979,
+      "sha256": "430edcc6b5614065ec03079558577c4797aaa63d3d68d3e2c5844f92b9632549",
+      "mtimeUtc": "2026-09-06T05:14:55.305459+00:00"
+    },
+    {
+      "path": "/root/workplace/novel-world-harness/src/world/norm-ontology.ts",
+      "bytes": 16980,
+      "sha256": "b8036abba6ff77554bcaddec92fb3cfe1be87276343ae583802eac655bcbe425",
+      "mtimeUtc": "2026-09-06T05:14:55.305459+00:00"
+    }
+  ],
+  "limitations": [
+    "2026-09-07 original process exit trigger/signal remains unknown.",
+    "Git commit timestamps do not prove an earlier uncommitted source state.",
+    "Manifest retry counts are not a complete count of host recovery turns.",
+    "Pending artifact statistics do not certify canonical fidelity or executable closure.",
+    "Source reads were direct file reads; no host process-namespace liveness attestation was performed."
+  ]
+}

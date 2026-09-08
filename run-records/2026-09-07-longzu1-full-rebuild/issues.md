@@ -1,5 +1,13 @@
 # 问题清单
 
+## 2026-09-08 — block：executable batch 53 的 source-accounting obligation 需要宿主裁定
+
+- 阶段/批次/source：executable，batch 53/71，`a28585b1cf867f3e3a16`。
+- 事实：`account_source_units` 的 `acct-00007-p07` 起初因 `unit-sentence-340dcd6070b1aa62ea04c578` 已被 current-batch exact semantics represented 而不能再取得 model disposition；随后模型提交空 `decisions`，违反最小长度 schema。持久化 obligation 将同一 tool/proposal identity 标为两次失败。
+- 保护结果：后续相同 identity 获得 `Compiler proposal obligation requires host review`，不可在当前或新 session 重试。编译器的一次有界恢复回合仍读取了当前资料，但没有绕过该保护；结束时 batch 53 未 checkpoint。
+- 判断：block。进程已退出，`status` 报告 `completedBatches=52`、403 pending、96 rejected。有效 drafts、审计、obligation journal、账本页和检查点均保留；未删除或重新开始该批。
+- 现场：`rebuild.log` 的 batch 53 段；持久化 `world/v3/compiler/proposal-obligations/`；此次运行审计及当前 compiler batch/proposal 工件。
+
 ## 2026-09-08 — batch 50 恢复协议已修复，实际检查点待续跑
 
 - 精确复核修正下方“过期 ref”判断：discovery 返回的 ref 正确，模型把 logicalId 拼成了另一个读取 ref。

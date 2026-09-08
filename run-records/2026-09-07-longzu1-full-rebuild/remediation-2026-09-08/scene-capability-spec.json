@@ -1,0 +1,222 @@
+{
+  "version": 1,
+  "sourceId": "a28585b1cf867f3e3a16",
+  "sourceSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+  "review": {
+    "method": "independent-source-review",
+    "reviewer": "Codex source review; human review pending",
+    "reviewedAt": "2026-09-08T16:47:23.000Z",
+    "auditRef": "docs/incidents/2026-09-08-accounting-obligation-rebase.md; deep-review-2026-09-08/report.zh-CN.md source scene analysis"
+  },
+  "cases": [
+    {
+      "id": "enrollment-agency",
+      "scene": "入学决定",
+      "rationale": "L765–767 明确由路明非作出接受的选择；此处预期仅为计划改变，电话确认及正式生效是后续情节。agent 与计划效果来自独立原文阅读，未从候选 schema 推导。",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 114647,
+          "endByte": 115148,
+          "startLine": 765,
+          "endLine": 768,
+          "exactHash": "57846fc7e314e895edc7ebcc393dd00b30023ab8c9bf30f0d8e795cd6bbb8746",
+          "prefixHash": "390faec48951583b785a0b11a95ede365e5cbb1317c8ec43d01d888f110259ed",
+          "suffixHash": "87daf3434701677722cf5f4e30f91883d07dfd13be156944f86f7e924291c0de",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "kind": "event-effects",
+      "eventId": "event-accept-00005",
+      "initiatorId": "char-lumingfei",
+      "requiresMechanism": true,
+      "expectation": {
+        "kind": "delta",
+        "delta": {
+          "version": 1,
+          "operations": [
+            {
+              "op": "set",
+              "entityId": "char-lumingfei",
+              "field": "character.plan",
+              "value": "接受卡塞尔学院入学"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "shot-caesar",
+      "scene": "自由一日枪击",
+      "rationale": "枪击结果须结合 L1144–1147 的非致命麻醉弹解释；不能把倒地或夸张伤口直接编码为死亡。当前没有已核准的暂时失能状态字段，需显式设计后才能认证该转移。",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 176126,
+          "endByte": 176213,
+          "startLine": 1115,
+          "endLine": 1116,
+          "exactHash": "ae108feb13e57b1142a671f216f5eb030b6077b61e4b7cdae7fffd505515e408",
+          "prefixHash": "2904e4e734607e2efad9b0e751e4588e5e8f6f88d5bd172061b4f0a22bcd54ee",
+          "suffixHash": "8116e72c62047ce5616a8a0a08e58739aa91714cccce7bdcf1c152fd7b39586d",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 180259,
+          "endByte": 181297,
+          "startLine": 1144,
+          "endLine": 1148,
+          "exactHash": "2c548cf9434655c8d78e488cf60e234d07b84cdd95ed7209f93f07bf5d168f78",
+          "prefixHash": "37af20cfefcb84d0c7c70596cd6faa86e2db7573202e78202d87188904de685f",
+          "suffixHash": "f9b8bfee61d0cad1f3ca2b252939106ed4e10173d1c4e73f268d6f0a1ff5fa0f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "kind": "event-effects",
+      "eventId": "event-lu-shoot-caesar-00007",
+      "initiatorId": "char-lumingfei",
+      "requiresMechanism": true,
+      "expectation": {
+        "kind": "unmapped",
+        "concept": "非致命麻醉弹造成暂时昏迷、失去即时行动能力，随后救治恢复",
+        "affectedEntityIds": [
+          "char-caesar"
+        ]
+      }
+    },
+    {
+      "id": "shot-chu",
+      "scene": "自由一日枪击",
+      "rationale": "枪击结果须结合 L1144–1147 的非致命麻醉弹解释；不能把倒地或夸张伤口直接编码为死亡。当前没有已核准的暂时失能状态字段，需显式设计后才能认证该转移。",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 177842,
+          "endByte": 177953,
+          "startLine": 1128,
+          "endLine": 1129,
+          "exactHash": "0d9967de79942e6fa936c5eb9891137ec829fba85c84788db2b53d5fe9705b30",
+          "prefixHash": "20637ac342b75ffa81212e818841eed4505cf53e65c1c5d9c650ae70eac6de8d",
+          "suffixHash": "40283911a6c3b5d13bfc1b33a2f66716627e569f6943ea064fe44b59662b6fd9",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 180259,
+          "endByte": 181297,
+          "startLine": 1144,
+          "endLine": 1148,
+          "exactHash": "2c548cf9434655c8d78e488cf60e234d07b84cdd95ed7209f93f07bf5d168f78",
+          "prefixHash": "37af20cfefcb84d0c7c70596cd6faa86e2db7573202e78202d87188904de685f",
+          "suffixHash": "f9b8bfee61d0cad1f3ca2b252939106ed4e10173d1c4e73f268d6f0a1ff5fa0f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "kind": "event-effects",
+      "eventId": "event-lu-shoot-chu-00007",
+      "initiatorId": "char-lumingfei",
+      "requiresMechanism": true,
+      "expectation": {
+        "kind": "unmapped",
+        "concept": "非致命麻醉弹造成暂时昏迷、失去即时行动能力，随后救治恢复",
+        "affectedEntityIds": [
+          "char-chuzi-hang"
+        ]
+      }
+    },
+    {
+      "id": "freedom-day-scope",
+      "scene": "自由一日规范范围",
+      "rationale": "L1142 限定今天、学院学生和校规处罚。这里以 0 为活动开始、2 为两日后的合成时钟作范围探针，不声称它们是实际 branch 的 elapsedDays。只检查模板适用性，不能证明最终 permission adjudication、行为类别或主体辖域已经正确。",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 179969,
+          "endByte": 180205,
+          "startLine": 1142,
+          "endLine": 1143,
+          "exactHash": "0b2c5a3e0298df5c7f282874db650f18442f440c3facb7fdad7ecb0cdd7795a9",
+          "prefixHash": "7ab945dbb40114dab896312699994afe6f718a493e8af724735815fe550eac79",
+          "suffixHash": "83e5325a27f1681c075a6e67e1f3fa6482fd12f0770ae691b8826afd764b38d3",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "kind": "norm-scope",
+      "normId": "norm-freedom-day-00007",
+      "scenarios": [
+        {
+          "label": "合成活动当日",
+          "actorId": "char-lumingfei",
+          "seed": {
+            "delta": {
+              "version": 1,
+              "operations": []
+            },
+            "elapsedDays": 0
+          },
+          "expectedEffective": true
+        },
+        {
+          "label": "合成活动两日后",
+          "actorId": "char-lumingfei",
+          "seed": {
+            "delta": {
+              "version": 1,
+              "operations": []
+            },
+            "elapsedDays": 2
+          },
+          "expectedEffective": false
+        }
+      ]
+    },
+    {
+      "id": "nonlethal-knowledge-cut",
+      "scene": "弹药解释前后的角色知识",
+      "rationale": "L1137–1143 路明非惊慌与追问，L1144–1146 解释及回应建立获知路径。当前未确认可消费的 claim/proposition 身份；保留 unknown 并要求同源发现，禁止猜测新 ID。选定历史仅是局部 cut 探针。",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 179504,
+          "endByte": 181213,
+          "startLine": 1137,
+          "endLine": 1147,
+          "exactHash": "33d00c2ac9f5d607dfe4b457d1f28013f2bb6c92e6985d9052611e716eed5fb0",
+          "prefixHash": "371dddf2446e6efa4fed3781ea3cc0c72d374b3f804a2767b8999a642de70860",
+          "suffixHash": "a51b48308db123aa15b7850f7bde849d071622cc277f806e2c6845065040395f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "kind": "knowledge-cut",
+      "actorId": "char-lumingfei",
+      "acquisitionEventId": "event-medical-reveal-00007",
+      "contentExpectation": "弗里嘉子弹不会造成真实伤口，会迅速汽化并以麻醉剂使人昏迷",
+      "beforeEventIds": [
+        "event-lu-shoot-caesar-00007",
+        "event-lu-shoot-chu-00007"
+      ],
+      "afterEventIds": [
+        "event-lu-shoot-caesar-00007",
+        "event-lu-shoot-chu-00007",
+        "event-medical-reveal-00007"
+      ],
+      "expectedBefore": false,
+      "expectedAfter": true
+    }
+  ]
+}

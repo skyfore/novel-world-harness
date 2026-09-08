@@ -1,0 +1,12 @@
+# Independent scene capability review
+
+`nwh review-scenes --spec <path.json>` reads the registered immutable source and overlays unambiguous source-scoped pending revisions on the canonical catalog. It verifies the source hash and exact anchors, prints JSON, and exits 2 when any case is blocked, unknown or unsupported. It writes no proposals, state, checkpoints or candidate certificates.
+
+The version-1 spec records the reviewer, review time and audit reference. Expectations must come from a separate source reading; do not copy the candidate schema's effects as the expected answer. `src/eval/scene-capabilities.ts` defines the strict schema. The incident's `scene-capability-spec.json` and synthetic tests provide examples.
+
+- `event-effects` compares an independent nonempty state delta with both the observed event and its executable mechanism. It separately checks typed initiator participation. Explicitly justified `no-change` events remain legal; unrepresentable concepts remain `unsupported` with an ontology design task.
+- `knowledge-cut` projects only the selected before/after event histories using the knowledge reducer. It requires an actor, exact claim/proposition and acquisition path, never compiler omniscience. Without a confirmed claim identity it returns `unknown` and a semantic repair task.
+- `norm-scope` checks actual template applicability in explicitly seeded scenarios. Synthetic clock values must state their assumed origin. This does not certify all subject jurisdictions, action patterns, exceptions or final norm adjudication.
+- `action-probe` instantiates required effects from the action schema, checks three-valued prerequisites, and compares the result with independent post-state predicates. False/unknown prerequisites never apply the action. Probes are finite in-memory transitions, not complete engine turns or branch certificates.
+
+The report binds the spec and catalog hashes, exact source anchors, pending proposal creation times and compiler batch provenance. Repair tasks name the phase, artifact IDs and missing evidence/mechanism. A semantic prerequisite requires a bounded semantic repair followed by dependent executable revalidation; these tasks do not authorize a model to rewrite checkpointed drafts from another batch. Independent expectations themselves remain reviewable judgments, not automatically established truth.

@@ -1,0 +1,3027 @@
+{
+  "version": 1,
+  "sourceId": "a28585b1cf867f3e3a16",
+  "sourceSha256": "a28585b1cf867f3e3a1679a09558658338637efd2f0bf15e8d5878b7f9e44fe0",
+  "reviewedAt": "2026-09-08T16:47:23.936Z",
+  "specHash": "b26a05b58d0037a164dd1895c924504a216a469522e02aeb88e6751c097e95bc",
+  "catalogHash": "a388668d2e5a4aa7112d9a3bd55ef534226ce2a9674ad9da79a00f2a4f775788",
+  "review": {
+    "method": "independent-source-review",
+    "reviewer": "Codex source review; human review pending",
+    "reviewedAt": "2026-09-08T16:47:23.000Z",
+    "auditRef": "docs/incidents/2026-09-08-accounting-obligation-rebase.md; deep-review-2026-09-08/report.zh-CN.md source scene analysis"
+  },
+  "verified": false,
+  "cases": [
+    {
+      "id": "enrollment-agency",
+      "scene": "入学决定",
+      "kind": "event-effects",
+      "status": "blocked",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 114647,
+          "endByte": 115148,
+          "startLine": 765,
+          "endLine": 768,
+          "exactHash": "57846fc7e314e895edc7ebcc393dd00b30023ab8c9bf30f0d8e795cd6bbb8746",
+          "prefixHash": "390faec48951583b785a0b11a95ede365e5cbb1317c8ec43d01d888f110259ed",
+          "suffixHash": "87daf3434701677722cf5f4e30f91883d07dfd13be156944f86f7e924291c0de",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "observations": {
+        "formalBindingIssues": [],
+        "observedDelta": {
+          "version": 1,
+          "operations": [
+            {
+              "op": "set",
+              "entityId": "char-lumingfei",
+              "field": "character.plan",
+              "value": "接受卡塞尔学院入学"
+            }
+          ]
+        },
+        "resolvedEffects": null
+      },
+      "issues": [
+        {
+          "code": "SCENE_INITIATOR_ROLE_UNPROVEN",
+          "message": "char-lumingfei requires evidence-backed agent participation before an execution binding.",
+          "stage": "semantic",
+          "artifactIds": [
+            "event-accept-00005",
+            "part-accept-lu-00005"
+          ]
+        },
+        {
+          "code": "SCENE_MECHANISM_MISSING",
+          "message": "Create a supported mechanism/binding after repairing semantic dependencies.",
+          "stage": "executable",
+          "artifactIds": [
+            "event-accept-00005"
+          ]
+        },
+        {
+          "code": "SCENE_SOURCE_EFFECT_UNBOUND",
+          "message": "The mechanism does not produce the independently expected state operation.",
+          "stage": "executable",
+          "artifactIds": [
+            "event-accept-00005"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shot-caesar",
+      "scene": "自由一日枪击",
+      "kind": "event-effects",
+      "status": "unsupported",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 176126,
+          "endByte": 176213,
+          "startLine": 1115,
+          "endLine": 1116,
+          "exactHash": "ae108feb13e57b1142a671f216f5eb030b6077b61e4b7cdae7fffd505515e408",
+          "prefixHash": "2904e4e734607e2efad9b0e751e4588e5e8f6f88d5bd172061b4f0a22bcd54ee",
+          "suffixHash": "8116e72c62047ce5616a8a0a08e58739aa91714cccce7bdcf1c152fd7b39586d",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 180259,
+          "endByte": 181297,
+          "startLine": 1144,
+          "endLine": 1148,
+          "exactHash": "2c548cf9434655c8d78e488cf60e234d07b84cdd95ed7209f93f07bf5d168f78",
+          "prefixHash": "37af20cfefcb84d0c7c70596cd6faa86e2db7573202e78202d87188904de685f",
+          "suffixHash": "f9b8bfee61d0cad1f3ca2b252939106ed4e10173d1c4e73f268d6f0a1ff5fa0f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "observations": {
+        "formalBindingIssues": [],
+        "observedDelta": {
+          "version": 1,
+          "operations": []
+        },
+        "resolvedEffects": []
+      },
+      "issues": [
+        {
+          "code": "SCENE_EFFECT_REPRESENTATION_REQUIRED",
+          "message": "Map the source concept explicitly before certification: 非致命麻醉弹造成暂时昏迷、失去即时行动能力，随后救治恢复. Do not substitute an unrelated registered field.",
+          "stage": "ontology",
+          "artifactIds": [
+            "event-lu-shoot-caesar-00007",
+            "char-caesar"
+          ]
+        },
+        {
+          "code": "SCENE_SOURCE_OUTCOME_EMPTY",
+          "message": "A source-reviewed material transition has an empty occurrence outcome.",
+          "stage": "semantic",
+          "artifactIds": [
+            "event-lu-shoot-caesar-00007"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shot-chu",
+      "scene": "自由一日枪击",
+      "kind": "event-effects",
+      "status": "unsupported",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 177842,
+          "endByte": 177953,
+          "startLine": 1128,
+          "endLine": 1129,
+          "exactHash": "0d9967de79942e6fa936c5eb9891137ec829fba85c84788db2b53d5fe9705b30",
+          "prefixHash": "20637ac342b75ffa81212e818841eed4505cf53e65c1c5d9c650ae70eac6de8d",
+          "suffixHash": "40283911a6c3b5d13bfc1b33a2f66716627e569f6943ea064fe44b59662b6fd9",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 180259,
+          "endByte": 181297,
+          "startLine": 1144,
+          "endLine": 1148,
+          "exactHash": "2c548cf9434655c8d78e488cf60e234d07b84cdd95ed7209f93f07bf5d168f78",
+          "prefixHash": "37af20cfefcb84d0c7c70596cd6faa86e2db7573202e78202d87188904de685f",
+          "suffixHash": "f9b8bfee61d0cad1f3ca2b252939106ed4e10173d1c4e73f268d6f0a1ff5fa0f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "observations": {
+        "formalBindingIssues": [],
+        "observedDelta": {
+          "version": 1,
+          "operations": []
+        },
+        "resolvedEffects": []
+      },
+      "issues": [
+        {
+          "code": "SCENE_EFFECT_REPRESENTATION_REQUIRED",
+          "message": "Map the source concept explicitly before certification: 非致命麻醉弹造成暂时昏迷、失去即时行动能力，随后救治恢复. Do not substitute an unrelated registered field.",
+          "stage": "ontology",
+          "artifactIds": [
+            "event-lu-shoot-chu-00007",
+            "char-chuzi-hang"
+          ]
+        },
+        {
+          "code": "SCENE_SOURCE_OUTCOME_EMPTY",
+          "message": "A source-reviewed material transition has an empty occurrence outcome.",
+          "stage": "semantic",
+          "artifactIds": [
+            "event-lu-shoot-chu-00007"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "freedom-day-scope",
+      "scene": "自由一日规范范围",
+      "kind": "norm-scope",
+      "status": "blocked",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 179969,
+          "endByte": 180205,
+          "startLine": 1142,
+          "endLine": 1143,
+          "exactHash": "0b2c5a3e0298df5c7f282874db650f18442f440c3facb7fdad7ecb0cdd7795a9",
+          "prefixHash": "7ab945dbb40114dab896312699994afe6f718a493e8af724735815fe550eac79",
+          "suffixHash": "83e5325a27f1681c075a6e67e1f3fa6482fd12f0770ae691b8826afd764b38d3",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "observations": {
+        "scenarios": [
+          {
+            "label": "合成活动当日",
+            "effective": true,
+            "expected": true
+          },
+          {
+            "label": "合成活动两日后",
+            "effective": true,
+            "expected": false
+          }
+        ]
+      },
+      "issues": [
+        {
+          "code": "SCENE_NORM_SCOPE_MISMATCH",
+          "message": "合成活动两日后: expected effective=false, observed true; review time, subject/jurisdiction and exceptions from source.",
+          "stage": "executable",
+          "artifactIds": [
+            "norm-freedom-day-00007"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "nonlethal-knowledge-cut",
+      "scene": "弹药解释前后的角色知识",
+      "kind": "knowledge-cut",
+      "status": "unknown",
+      "evidence": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 179504,
+          "endByte": 181213,
+          "startLine": 1137,
+          "endLine": 1147,
+          "exactHash": "33d00c2ac9f5d607dfe4b457d1f28013f2bb6c92e6985d9052611e716eed5fb0",
+          "prefixHash": "371dddf2446e6efa4fed3781ea3cc0c72d374b3f804a2767b8999a642de70860",
+          "suffixHash": "a51b48308db123aa15b7850f7bde849d071622cc277f806e2c6845065040395f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "observations": {},
+      "issues": [
+        {
+          "code": "SCENE_KNOWLEDGE_ACQUISITION_MISSING",
+          "message": "No acquisition path for char-lumingfei: 弗里嘉子弹不会造成真实伤口，会迅速汽化并以麻醉剂使人昏迷",
+          "stage": "semantic",
+          "artifactIds": [
+            "event-medical-reveal-00007"
+          ]
+        },
+        {
+          "code": "SCENE_KNOWLEDGE_IDENTITY_UNRESOLVED",
+          "message": "Resolve the expected content to an exact claim/proposition via same-source discovery; do not invent a claim ID.",
+          "stage": "semantic",
+          "artifactIds": [
+            "event-medical-reveal-00007"
+          ]
+        }
+      ]
+    }
+  ],
+  "repairTasks": [
+    {
+      "id": "scene-repair-7bd35198ebdf72d91f75",
+      "caseId": "enrollment-agency",
+      "stage": "semantic",
+      "artifactIds": [
+        "event-accept-00005",
+        "part-accept-lu-00005"
+      ],
+      "diagnostic": "SCENE_INITIATOR_ROLE_UNPROVEN: char-lumingfei requires evidence-backed agent participation before an execution binding.",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 114647,
+          "endByte": 115148,
+          "startLine": 765,
+          "endLine": 768,
+          "exactHash": "57846fc7e314e895edc7ebcc393dd00b30023ab8c9bf30f0d8e795cd6bbb8746",
+          "prefixHash": "390faec48951583b785a0b11a95ede365e5cbb1317c8ec43d01d888f110259ed",
+          "suffixHash": "87daf3434701677722cf5f4e30f91883d07dfd13be156944f86f7e924291c0de",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Schedule a bounded semantic repair using these source anchors and exact artifact IDs; preserve the prior revision. Revalidate the dependent execution after semantic repair."
+    },
+    {
+      "id": "scene-repair-c1bc73543df653af9765",
+      "caseId": "enrollment-agency",
+      "stage": "executable",
+      "artifactIds": [
+        "event-accept-00005"
+      ],
+      "diagnostic": "SCENE_MECHANISM_MISSING: Create a supported mechanism/binding after repairing semantic dependencies.",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 114647,
+          "endByte": 115148,
+          "startLine": 765,
+          "endLine": 768,
+          "exactHash": "57846fc7e314e895edc7ebcc393dd00b30023ab8c9bf30f0d8e795cd6bbb8746",
+          "prefixHash": "390faec48951583b785a0b11a95ede365e5cbb1317c8ec43d01d888f110259ed",
+          "suffixHash": "87daf3434701677722cf5f4e30f91883d07dfd13be156944f86f7e924291c0de",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Inspect the named source-scoped dependencies and repair only this diagnosed gap in the indicated phase; retain valid drafts."
+    },
+    {
+      "id": "scene-repair-3b5809ee3fb15c555723",
+      "caseId": "enrollment-agency",
+      "stage": "executable",
+      "artifactIds": [
+        "event-accept-00005"
+      ],
+      "diagnostic": "SCENE_SOURCE_EFFECT_UNBOUND: The mechanism does not produce the independently expected state operation.",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 114647,
+          "endByte": 115148,
+          "startLine": 765,
+          "endLine": 768,
+          "exactHash": "57846fc7e314e895edc7ebcc393dd00b30023ab8c9bf30f0d8e795cd6bbb8746",
+          "prefixHash": "390faec48951583b785a0b11a95ede365e5cbb1317c8ec43d01d888f110259ed",
+          "suffixHash": "87daf3434701677722cf5f4e30f91883d07dfd13be156944f86f7e924291c0de",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Inspect the named source-scoped dependencies and repair only this diagnosed gap in the indicated phase; retain valid drafts."
+    },
+    {
+      "id": "scene-repair-2fde3d00afef0402d42a",
+      "caseId": "shot-caesar",
+      "stage": "ontology",
+      "artifactIds": [
+        "event-lu-shoot-caesar-00007",
+        "char-caesar"
+      ],
+      "diagnostic": "SCENE_EFFECT_REPRESENTATION_REQUIRED: Map the source concept explicitly before certification: 非致命麻醉弹造成暂时昏迷、失去即时行动能力，随后救治恢复. Do not substitute an unrelated registered field.",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 176126,
+          "endByte": 176213,
+          "startLine": 1115,
+          "endLine": 1116,
+          "exactHash": "ae108feb13e57b1142a671f216f5eb030b6077b61e4b7cdae7fffd505515e408",
+          "prefixHash": "2904e4e734607e2efad9b0e751e4588e5e8f6f88d5bd172061b4f0a22bcd54ee",
+          "suffixHash": "8116e72c62047ce5616a8a0a08e58739aa91714cccce7bdcf1c152fd7b39586d",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 180259,
+          "endByte": 181297,
+          "startLine": 1144,
+          "endLine": 1148,
+          "exactHash": "2c548cf9434655c8d78e488cf60e234d07b84cdd95ed7209f93f07bf5d168f78",
+          "prefixHash": "37af20cfefcb84d0c7c70596cd6faa86e2db7573202e78202d87188904de685f",
+          "suffixHash": "f9b8bfee61d0cad1f3ca2b252939106ed4e10173d1c4e73f268d6f0a1ff5fa0f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Host design review is required before encoding this source concept. Keep it explicitly unsupported; never substitute another field or certify an empty effect."
+    },
+    {
+      "id": "scene-repair-5d5655bd6df45de37212",
+      "caseId": "shot-caesar",
+      "stage": "semantic",
+      "artifactIds": [
+        "event-lu-shoot-caesar-00007"
+      ],
+      "diagnostic": "SCENE_SOURCE_OUTCOME_EMPTY: A source-reviewed material transition has an empty occurrence outcome.",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 176126,
+          "endByte": 176213,
+          "startLine": 1115,
+          "endLine": 1116,
+          "exactHash": "ae108feb13e57b1142a671f216f5eb030b6077b61e4b7cdae7fffd505515e408",
+          "prefixHash": "2904e4e734607e2efad9b0e751e4588e5e8f6f88d5bd172061b4f0a22bcd54ee",
+          "suffixHash": "8116e72c62047ce5616a8a0a08e58739aa91714cccce7bdcf1c152fd7b39586d",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 180259,
+          "endByte": 181297,
+          "startLine": 1144,
+          "endLine": 1148,
+          "exactHash": "2c548cf9434655c8d78e488cf60e234d07b84cdd95ed7209f93f07bf5d168f78",
+          "prefixHash": "37af20cfefcb84d0c7c70596cd6faa86e2db7573202e78202d87188904de685f",
+          "suffixHash": "f9b8bfee61d0cad1f3ca2b252939106ed4e10173d1c4e73f268d6f0a1ff5fa0f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Schedule a bounded semantic repair using these source anchors and exact artifact IDs; preserve the prior revision. Revalidate the dependent execution after semantic repair."
+    },
+    {
+      "id": "scene-repair-918942b11e9ad5da5d53",
+      "caseId": "shot-chu",
+      "stage": "ontology",
+      "artifactIds": [
+        "event-lu-shoot-chu-00007",
+        "char-chuzi-hang"
+      ],
+      "diagnostic": "SCENE_EFFECT_REPRESENTATION_REQUIRED: Map the source concept explicitly before certification: 非致命麻醉弹造成暂时昏迷、失去即时行动能力，随后救治恢复. Do not substitute an unrelated registered field.",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 177842,
+          "endByte": 177953,
+          "startLine": 1128,
+          "endLine": 1129,
+          "exactHash": "0d9967de79942e6fa936c5eb9891137ec829fba85c84788db2b53d5fe9705b30",
+          "prefixHash": "20637ac342b75ffa81212e818841eed4505cf53e65c1c5d9c650ae70eac6de8d",
+          "suffixHash": "40283911a6c3b5d13bfc1b33a2f66716627e569f6943ea064fe44b59662b6fd9",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 180259,
+          "endByte": 181297,
+          "startLine": 1144,
+          "endLine": 1148,
+          "exactHash": "2c548cf9434655c8d78e488cf60e234d07b84cdd95ed7209f93f07bf5d168f78",
+          "prefixHash": "37af20cfefcb84d0c7c70596cd6faa86e2db7573202e78202d87188904de685f",
+          "suffixHash": "f9b8bfee61d0cad1f3ca2b252939106ed4e10173d1c4e73f268d6f0a1ff5fa0f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Host design review is required before encoding this source concept. Keep it explicitly unsupported; never substitute another field or certify an empty effect."
+    },
+    {
+      "id": "scene-repair-ea0f7bdc3f8123af254a",
+      "caseId": "shot-chu",
+      "stage": "semantic",
+      "artifactIds": [
+        "event-lu-shoot-chu-00007"
+      ],
+      "diagnostic": "SCENE_SOURCE_OUTCOME_EMPTY: A source-reviewed material transition has an empty occurrence outcome.",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 177842,
+          "endByte": 177953,
+          "startLine": 1128,
+          "endLine": 1129,
+          "exactHash": "0d9967de79942e6fa936c5eb9891137ec829fba85c84788db2b53d5fe9705b30",
+          "prefixHash": "20637ac342b75ffa81212e818841eed4505cf53e65c1c5d9c650ae70eac6de8d",
+          "suffixHash": "40283911a6c3b5d13bfc1b33a2f66716627e569f6943ea064fe44b59662b6fd9",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        },
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 180259,
+          "endByte": 181297,
+          "startLine": 1144,
+          "endLine": 1148,
+          "exactHash": "2c548cf9434655c8d78e488cf60e234d07b84cdd95ed7209f93f07bf5d168f78",
+          "prefixHash": "37af20cfefcb84d0c7c70596cd6faa86e2db7573202e78202d87188904de685f",
+          "suffixHash": "f9b8bfee61d0cad1f3ca2b252939106ed4e10173d1c4e73f268d6f0a1ff5fa0f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Schedule a bounded semantic repair using these source anchors and exact artifact IDs; preserve the prior revision. Revalidate the dependent execution after semantic repair."
+    },
+    {
+      "id": "scene-repair-d8d34fafc5ea88b1c10c",
+      "caseId": "freedom-day-scope",
+      "stage": "executable",
+      "artifactIds": [
+        "norm-freedom-day-00007"
+      ],
+      "diagnostic": "SCENE_NORM_SCOPE_MISMATCH: 合成活动两日后: expected effective=false, observed true; review time, subject/jurisdiction and exceptions from source.",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 179969,
+          "endByte": 180205,
+          "startLine": 1142,
+          "endLine": 1143,
+          "exactHash": "0b2c5a3e0298df5c7f282874db650f18442f440c3facb7fdad7ecb0cdd7795a9",
+          "prefixHash": "7ab945dbb40114dab896312699994afe6f718a493e8af724735815fe550eac79",
+          "suffixHash": "83e5325a27f1681c075a6e67e1f3fa6482fd12f0770ae691b8826afd764b38d3",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Inspect the named source-scoped dependencies and repair only this diagnosed gap in the indicated phase; retain valid drafts."
+    },
+    {
+      "id": "scene-repair-8b7646f28dc8d4d7626a",
+      "caseId": "nonlethal-knowledge-cut",
+      "stage": "semantic",
+      "artifactIds": [
+        "event-medical-reveal-00007"
+      ],
+      "diagnostic": "SCENE_KNOWLEDGE_ACQUISITION_MISSING: No acquisition path for char-lumingfei: 弗里嘉子弹不会造成真实伤口，会迅速汽化并以麻醉剂使人昏迷",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 179504,
+          "endByte": 181213,
+          "startLine": 1137,
+          "endLine": 1147,
+          "exactHash": "33d00c2ac9f5d607dfe4b457d1f28013f2bb6c92e6985d9052611e716eed5fb0",
+          "prefixHash": "371dddf2446e6efa4fed3781ea3cc0c72d374b3f804a2767b8999a642de70860",
+          "suffixHash": "a51b48308db123aa15b7850f7bde849d071622cc277f806e2c6845065040395f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Schedule a bounded semantic repair using these source anchors and exact artifact IDs; preserve the prior revision. Revalidate the dependent execution after semantic repair."
+    },
+    {
+      "id": "scene-repair-7ab3f0e145301b8d122c",
+      "caseId": "nonlethal-knowledge-cut",
+      "stage": "semantic",
+      "artifactIds": [
+        "event-medical-reveal-00007"
+      ],
+      "diagnostic": "SCENE_KNOWLEDGE_IDENTITY_UNRESOLVED: Resolve the expected content to an exact claim/proposition via same-source discovery; do not invent a claim ID.",
+      "sourceAnchors": [
+        {
+          "version": 1,
+          "sourceId": "a28585b1cf867f3e3a16",
+          "startByte": 179504,
+          "endByte": 181213,
+          "startLine": 1137,
+          "endLine": 1147,
+          "exactHash": "33d00c2ac9f5d607dfe4b457d1f28013f2bb6c92e6985d9052611e716eed5fb0",
+          "prefixHash": "371dddf2446e6efa4fed3781ea3cc0c72d374b3f804a2767b8999a642de70860",
+          "suffixHash": "a51b48308db123aa15b7850f7bde849d071622cc277f806e2c6845065040395f",
+          "contextBytes": 64,
+          "normalization": "source-bytes-v1"
+        }
+      ],
+      "instruction": "Schedule a bounded semantic repair using these source anchors and exact artifact IDs; preserve the prior revision. Revalidate the dependent execution after semantic repair."
+    }
+  ],
+  "scope": "Independent finite scene checks over a read-only catalog. Probes use explicit fixture states and selected event histories; no branch truth, candidate certificate, or full-book playability is written.",
+  "catalogMode": "pending-overlay-on-canonical",
+  "pendingRevisions": [
+    {
+      "proposalId": "artifact-letter-parents-00004",
+      "kind": "entity",
+      "artifactId": "artifact-letter-parents",
+      "createdAt": "2026-09-07T11:23:58.722Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "artifact-photo-parents-00004",
+      "kind": "entity",
+      "artifactId": "artifact-photo-parents",
+      "createdAt": "2026-09-07T11:23:58.729Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "attr-eva-guigu-00008-v2",
+      "kind": "attribution",
+      "artifactId": "attr-eva-guigu-00008",
+      "createdAt": "2026-09-07T12:04:01.499Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "attr-parents-love-00004",
+      "kind": "attribution",
+      "artifactId": "attr-parents-love-00004",
+      "createdAt": "2026-09-07T11:26:24.895Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "claim-mans-guigu-00008",
+      "kind": "claim",
+      "artifactId": "claim-mans-guigu-00008",
+      "createdAt": "2026-09-07T12:03:50.825Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "ent-adams-00008",
+      "kind": "entity",
+      "artifactId": "artifact-adams-00008",
+      "createdAt": "2026-09-07T12:01:05.408Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "ent-amber-hall-00008",
+      "kind": "entity",
+      "artifactId": "loc-amber-hall-00008",
+      "createdAt": "2026-09-07T12:01:05.440Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "ent-baby-00010",
+      "kind": "entity",
+      "artifactId": "char-key-baby-00010",
+      "createdAt": "2026-09-07T12:18:43.762Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "ent-black-box-00010",
+      "kind": "entity",
+      "artifactId": "artifact-destruction-box-00010",
+      "createdAt": "2026-09-07T12:18:43.780Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "ent-bronze-city-00010",
+      "kind": "entity",
+      "artifactId": "loc-bronze-city-00010",
+      "createdAt": "2026-09-07T12:18:43.768Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "ent-cc1000-00006",
+      "kind": "entity",
+      "artifactId": "artifact-cc1000-train",
+      "createdAt": "2026-09-07T11:44:52.466Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb"
+    },
+    {
+      "proposalId": "ent-chendouwen-00003",
+      "kind": "entity",
+      "artifactId": "char-chendouwen",
+      "createdAt": "2026-09-07T11:16:04.090Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-conductor-00006",
+      "kind": "entity",
+      "artifactId": "char-conductor-00006",
+      "createdAt": "2026-09-07T11:44:52.472Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb"
+    },
+    {
+      "proposalId": "ent-eva-00008-v2",
+      "kind": "entity",
+      "artifactId": "char-eva-00008",
+      "createdAt": "2026-09-07T12:05:52.425Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "ent-ferrari-00005",
+      "kind": "entity",
+      "artifactId": "artifact-ferrari-599",
+      "createdAt": "2026-09-07T11:32:27.667Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "ent-fingel-00006-v2",
+      "kind": "entity",
+      "artifactId": "char-fingel",
+      "createdAt": "2026-09-07T11:47:19.227Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb"
+    },
+    {
+      "proposalId": "ent-guardian-00010-v2",
+      "kind": "entity",
+      "artifactId": "concept-bronze-living-spirit-00010",
+      "createdAt": "2026-09-07T12:24:56.465Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "ent-jiudeyaji-00003",
+      "kind": "entity",
+      "artifactId": "char-jiudeyaji",
+      "createdAt": "2026-09-07T11:16:04.086Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-laotang-00003",
+      "kind": "entity",
+      "artifactId": "char-laotang",
+      "createdAt": "2026-09-07T11:16:04.050Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-lumingze-00003",
+      "kind": "entity",
+      "artifactId": "char-lumingze",
+      "createdAt": "2026-09-07T11:16:04.062Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-mai-00016",
+      "kind": "entity",
+      "artifactId": "char-sake-mai-00016",
+      "createdAt": "2026-09-07T15:48:47.403Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-semantic-8f66a92675d6"
+    },
+    {
+      "proposalId": "ent-makeup-girls-00005-v2",
+      "kind": "entity",
+      "artifactId": "group-makeup-staff-00005",
+      "createdAt": "2026-09-07T11:39:01.641Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "ent-man-01",
+      "kind": "entity",
+      "artifactId": "char-unnamed-man-00009",
+      "createdAt": "2026-09-07T12:10:12.689Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "ent-n96-00003",
+      "kind": "entity",
+      "artifactId": "artifact-n96-phone",
+      "createdAt": "2026-09-07T11:16:04.078Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-norma-00003",
+      "kind": "entity",
+      "artifactId": "char-norma-lawrence",
+      "createdAt": "2026-09-07T11:16:04.073Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-norton-00010",
+      "kind": "entity",
+      "artifactId": "char-norton-00010",
+      "createdAt": "2026-09-07T12:18:54.456Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "ent-norton-hall-00008",
+      "kind": "entity",
+      "artifactId": "loc-norton-hall-00008",
+      "createdAt": "2026-09-07T12:01:05.424Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "ent-nuonuo-00003",
+      "kind": "entity",
+      "artifactId": "char-nuonuo",
+      "createdAt": "2026-09-07T11:16:04.067Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-pharmacy-00005",
+      "kind": "entity",
+      "artifactId": "loc-pharmacy-24h",
+      "createdAt": "2026-09-07T11:32:27.672Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "ent-pottery-00010",
+      "kind": "entity",
+      "artifactId": "artifact-ancient-pottery-00010",
+      "createdAt": "2026-09-07T12:18:43.774Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "ent-qilan-00010",
+      "kind": "entity",
+      "artifactId": "char-qilan-00010",
+      "createdAt": "2026-09-07T12:18:43.744Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "ent-selma-00010",
+      "kind": "entity",
+      "artifactId": "char-selma-00010",
+      "createdAt": "2026-09-07T12:18:43.750Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "ent-shenshen-00003",
+      "kind": "entity",
+      "artifactId": "char-shenshen",
+      "createdAt": "2026-09-07T11:16:04.054Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-ship-00010",
+      "kind": "entity",
+      "artifactId": "artifact-monigar-00010",
+      "createdAt": "2026-09-07T12:18:43.756Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "ent-shushu-00003",
+      "kind": "entity",
+      "artifactId": "char-shushu",
+      "createdAt": "2026-09-07T11:16:04.059Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-student-council-00008",
+      "kind": "entity",
+      "artifactId": "inst-student-council-00008",
+      "createdAt": "2026-09-07T12:01:05.430Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "ent-suxiaoqiang-00003-v2",
+      "kind": "entity",
+      "artifactId": "char-suxiaoqiang",
+      "createdAt": "2026-09-07T11:16:33.886Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-yesheng-00003",
+      "kind": "entity",
+      "artifactId": "char-yesheng",
+      "createdAt": "2026-09-07T11:16:04.082Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "ent-zhaomenghua-00003",
+      "kind": "entity",
+      "artifactId": "char-zhaomenghua",
+      "createdAt": "2026-09-07T11:16:04.106Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "entity-aki-00007",
+      "kind": "entity",
+      "artifactId": "char-aki",
+      "createdAt": "2026-09-07T11:48:45.367Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "entity-angier-00007",
+      "kind": "entity",
+      "artifactId": "char-angier",
+      "createdAt": "2026-09-07T11:48:45.356Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "entity-bugatti-00014",
+      "kind": "entity",
+      "artifactId": "artifact-bugatti-00014",
+      "createdAt": "2026-09-07T15:37:09.120Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "entity-caesar-00007-v2",
+      "kind": "entity",
+      "artifactId": "char-caesar",
+      "createdAt": "2026-09-07T11:49:02.233Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "entity-chuzi-00007-v2",
+      "kind": "entity",
+      "artifactId": "char-chuzi-hang",
+      "createdAt": "2026-09-07T11:49:02.238Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "entity-diving-bell-00022-v2",
+      "kind": "entity",
+      "artifactId": "artifact-diving-bell-00022",
+      "createdAt": "2026-09-07T16:23:20.163Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "entity-gude-00004",
+      "kind": "entity",
+      "artifactId": "char-gudeli-an",
+      "createdAt": "2026-09-07T11:24:17.290Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "entity-hotel-00004",
+      "kind": "entity",
+      "artifactId": "loc-lijing-hotel",
+      "createdAt": "2026-09-07T11:23:58.715Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "entity-leonardo-00019",
+      "kind": "entity",
+      "artifactId": "char-leonardo-00019",
+      "createdAt": "2026-09-07T16:06:55.237Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00019-semantic-16c74a7cd7a6"
+    },
+    {
+      "proposalId": "entity-mans-00007",
+      "kind": "entity",
+      "artifactId": "char-mans",
+      "createdAt": "2026-09-07T11:48:45.362Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "entity-manshtein-00007-v2",
+      "kind": "entity",
+      "artifactId": "char-manshtein",
+      "createdAt": "2026-09-07T11:49:02.243Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "entity-sanwu-00017",
+      "kind": "entity",
+      "artifactId": "char-sanwu-girl-00017",
+      "createdAt": "2026-09-07T15:55:43.243Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "entity-seven-sins-00022",
+      "kind": "entity",
+      "artifactId": "artifact-seven-sins-00022",
+      "createdAt": "2026-09-07T16:23:06.190Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "entity-sniper-00007",
+      "kind": "entity",
+      "artifactId": "char-black-sniper-00007",
+      "createdAt": "2026-09-07T11:48:45.347Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "entity-storm-torpedo-00023-v2",
+      "kind": "entity",
+      "artifactId": "artifact-storm-torpedo-00023",
+      "createdAt": "2026-09-07T16:23:20.172Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "entity-zero-00014-v3",
+      "kind": "entity",
+      "artifactId": "char-zero-00014",
+      "createdAt": "2026-09-07T15:37:39.096Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "event-13-knockout-00017-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-13-knockout-00017",
+      "createdAt": "2026-09-07T15:57:56.267Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "event-accept-00005-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-accept-00005",
+      "createdAt": "2026-09-07T11:35:43.606Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "event-angier-call-00007-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-angier-call-00007",
+      "createdAt": "2026-09-07T11:57:26.850Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "event-angier-invites-caesar-00019",
+      "kind": "canonical-event",
+      "artifactId": "event-angier-invites-caesar-00019",
+      "createdAt": "2026-09-07T16:07:46.619Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00019-semantic-16c74a7cd7a6"
+    },
+    {
+      "proposalId": "event-blood-open-00022-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-lumingfei-blood-opens-00022",
+      "createdAt": "2026-09-07T16:36:21.075Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "event-breakfast-00004",
+      "kind": "canonical-event",
+      "artifactId": "event-breakfast-meeting-00004",
+      "createdAt": "2026-09-07T11:25:13.697Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "event-car-stop-00005-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-car-stop-00005",
+      "createdAt": "2026-09-07T11:36:01.549Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "event-cc1000-arrival-00006-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-cc1000-arrival-00006",
+      "createdAt": "2026-09-07T11:46:18.061Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb"
+    },
+    {
+      "proposalId": "event-chen-acceptance-00004",
+      "kind": "canonical-event",
+      "artifactId": "event-chen-acceptance-00004",
+      "createdAt": "2026-09-07T11:26:46.688Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "event-church-sanwu-destruction-00017-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-church-sanwu-destruction-00017",
+      "createdAt": "2026-09-07T15:57:56.244Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "event-departure-00005-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-departure-00005",
+      "createdAt": "2026-09-07T11:35:43.593Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "event-dragontext-00007-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-dragontext-00007",
+      "createdAt": "2026-09-07T11:57:26.855Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "event-duel-00007-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-duel-00007",
+      "createdAt": "2026-09-07T11:57:26.823Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "event-enrollment-decision-00004-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-enrollment-decision-00004",
+      "createdAt": "2026-09-07T11:29:59.445Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "event-eva-activation-00008-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-eva-activation-00008",
+      "createdAt": "2026-09-07T12:06:12.286Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "event-helicopter-00005-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-helicopter-00005",
+      "createdAt": "2026-09-07T11:35:43.628Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "event-lu-shoot-caesar-00007-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-lu-shoot-caesar-00007",
+      "createdAt": "2026-09-07T11:57:26.835Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "event-lu-shoot-chu-00007-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-lu-shoot-chu-00007",
+      "createdAt": "2026-09-07T11:57:26.840Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "event-makeover-00005-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-makeover-00005",
+      "createdAt": "2026-09-07T11:40:07.316Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "event-medical-reveal-00007-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-medical-reveal-00007",
+      "createdAt": "2026-09-07T11:57:26.845Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "event-near-crash-00014",
+      "kind": "canonical-event",
+      "artifactId": "event-near-crash-00014",
+      "createdAt": "2026-09-07T15:38:30.827Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "event-nono-entry-00005-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-nono-entry-00005",
+      "createdAt": "2026-09-07T11:35:43.578Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "event-nono-pulls-tail-00022-v4",
+      "kind": "canonical-event",
+      "artifactId": "event-nono-pulls-tail-00022",
+      "createdAt": "2026-09-07T16:36:21.104Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "event-nono-shot-00007-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-nono-shot-00007",
+      "createdAt": "2026-09-07T11:57:26.830Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "event-nono-stabbed-00022-v4",
+      "kind": "canonical-event",
+      "artifactId": "event-norton-stabs-nono-00022",
+      "createdAt": "2026-09-07T16:36:21.095Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "event-norma-activation-00005-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-norma-activation-00005",
+      "createdAt": "2026-09-07T11:35:43.623Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "event-norton-capture-00017-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-norton-capture-00017",
+      "createdAt": "2026-09-07T15:57:56.252Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "event-norton-nmr-scan-00017-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-norton-nmr-scan-00017",
+      "createdAt": "2026-09-07T15:57:56.260Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "event-phone-enrollment-00005-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-phone-enrollment-00005",
+      "createdAt": "2026-09-07T11:35:43.614Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "event-suit-exchange-00022-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-nono-exchanges-suit-00022",
+      "createdAt": "2026-09-07T16:36:21.085Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "event-torpedo-hit-00022-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-torpedo-hits-norton-00022",
+      "createdAt": "2026-09-07T16:36:21.115Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "event-torpedo-launch-00022-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-zero-launches-torpedo-00022",
+      "createdAt": "2026-09-07T16:36:21.124Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "event-zero-dance-00014-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-zero-dance-00014",
+      "createdAt": "2026-09-07T15:40:38.147Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "event-zhao-confession-00004",
+      "kind": "canonical-event",
+      "artifactId": "event-zhao-confession-00004",
+      "createdAt": "2026-09-07T11:26:46.683Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "evt-adams-gives-coins-00009-v4",
+      "kind": "canonical-event",
+      "artifactId": "event-adams-gives-coins-00009",
+      "createdAt": "2026-09-07T12:16:19.269Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "evt-adams-reforms-00009-v4",
+      "kind": "canonical-event",
+      "artifactId": "event-adams-reforms-00009",
+      "createdAt": "2026-09-07T12:16:19.280Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "evt-caesar-bets-00009-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-caesar-bets-00009",
+      "createdAt": "2026-09-07T12:16:19.286Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "evt-city-found-00010-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-bronze-city-discovered-00010",
+      "createdAt": "2026-09-07T12:24:15.057Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "evt-earthquake-00010-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-underwater-earthquake-00010",
+      "createdAt": "2026-09-07T12:24:15.050Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "evt-eva-orders-coins-00009-v4",
+      "kind": "canonical-event",
+      "artifactId": "event-eva-orders-coins-00009",
+      "createdAt": "2026-09-07T12:16:19.262Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "evt-exam-answer-00010-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-exam-answer-00010",
+      "createdAt": "2026-09-07T12:24:15.036Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "evt-gate-00016-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-thirteen-opens-aquatic-gate-00016",
+      "createdAt": "2026-09-07T15:51:53.737Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-semantic-8f66a92675d6"
+    },
+    {
+      "proposalId": "evt-gate-open-00010-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-bronze-city-gate-opened-00010",
+      "createdAt": "2026-09-07T12:25:12.491Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "evt-laotang-coaching-00003-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-laotang-coaching-00003",
+      "createdAt": "2026-09-07T11:20:29.788Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "evt-lu-copies-answer-00009-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-lu-copies-answer-00009",
+      "createdAt": "2026-09-07T12:16:19.291Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "evt-lumingfei-interview-00003-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-lumingfei-interview-00003",
+      "createdAt": "2026-09-07T11:20:49.917Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "evt-man-asks-coins-00009-v4",
+      "kind": "canonical-event",
+      "artifactId": "event-man-asks-coins-00009",
+      "createdAt": "2026-09-07T12:16:19.256Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "evt-man-strikes-adams-00009-v4",
+      "kind": "canonical-event",
+      "artifactId": "event-man-strikes-adams-00009",
+      "createdAt": "2026-09-07T12:16:19.275Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "evt-nuonuo-game-00003-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-nuonuo-game-00003",
+      "createdAt": "2026-09-07T11:18:35.215Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "evt-valhalla-battle-00016-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-caesar-mai-valhalla-battle-00016",
+      "createdAt": "2026-09-07T15:51:53.758Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-semantic-8f66a92675d6"
+    },
+    {
+      "proposalId": "evt-vision-fall-00010-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-lumingfei-vision-fall-00010",
+      "createdAt": "2026-09-07T12:24:15.043Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00010-semantic-8bc1558cfbd6"
+    },
+    {
+      "proposalId": "p-ent-13-001-v2",
+      "kind": "entity",
+      "artifactId": "char-thirteen-00015",
+      "createdAt": "2026-09-07T15:42:52.102Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-ent-fireworks-001",
+      "kind": "entity",
+      "artifactId": "artifact-fireworks-00015",
+      "createdAt": "2026-09-07T15:42:42.245Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-entity-sampson-21",
+      "kind": "entity",
+      "artifactId": "char-sampson-00021",
+      "createdAt": "2026-09-07T16:14:52.299Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-ev-door-001-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-thirteen-opens-control-door-00015",
+      "createdAt": "2026-09-07T15:44:06.306Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-ev-eva-warning-001-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-eva-warns-thirteen-00015",
+      "createdAt": "2026-09-07T15:44:17.643Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-ev-fireworks-001-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-nono-birthday-fireworks-00015",
+      "createdAt": "2026-09-07T15:44:06.315Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-event-city-collapse-21-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-bronze-city-self-destruction-00021",
+      "createdAt": "2026-09-07T16:16:18.279Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-event-norton-fusion-21-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-norton-fuses-sampson-00021",
+      "createdAt": "2026-09-07T16:16:18.313Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-event-rescue-signal-21-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-lumingfei-emergency-signal-00021",
+      "createdAt": "2026-09-07T16:20:20.581Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-city-loc-21",
+      "kind": "event-participation",
+      "artifactId": "part-city-loc-21",
+      "createdAt": "2026-09-07T16:17:11.850Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-city-lu-21",
+      "kind": "event-participation",
+      "artifactId": "part-city-lu-21",
+      "createdAt": "2026-09-07T16:17:11.829Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-city-nono-21",
+      "kind": "event-participation",
+      "artifactId": "part-city-nono-21",
+      "createdAt": "2026-09-07T16:17:11.841Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-door-13-001",
+      "kind": "event-participation",
+      "artifactId": "part-door-13-00015",
+      "createdAt": "2026-09-07T15:45:01.879Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-part-fireworks-artifact-001",
+      "kind": "event-participation",
+      "artifactId": "part-fireworks-artifact-00015",
+      "createdAt": "2026-09-07T15:45:01.905Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-part-fireworks-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-fireworks-lu-00015",
+      "createdAt": "2026-09-07T15:45:01.895Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-part-fireworks-nono-001-v2",
+      "kind": "event-participation",
+      "artifactId": "part-fireworks-nono-00015",
+      "createdAt": "2026-09-07T15:45:17.716Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-part-fusion-caesar-21",
+      "kind": "event-participation",
+      "artifactId": "part-fusion-caesar-21",
+      "createdAt": "2026-09-07T16:17:11.905Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-fusion-norton-21",
+      "kind": "event-participation",
+      "artifactId": "part-fusion-norton-21",
+      "createdAt": "2026-09-07T16:17:11.885Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-fusion-sampson-21",
+      "kind": "event-participation",
+      "artifactId": "part-fusion-sampson-21",
+      "createdAt": "2026-09-07T16:17:11.895Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-signal-fingel-21",
+      "kind": "event-participation",
+      "artifactId": "part-signal-fingel-21",
+      "createdAt": "2026-09-07T16:17:11.868Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-signal-lu-21",
+      "kind": "event-participation",
+      "artifactId": "part-signal-lu-21",
+      "createdAt": "2026-09-07T16:17:11.859Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-signal-mans-21-v2",
+      "kind": "event-participation",
+      "artifactId": "part-signal-mans-21",
+      "createdAt": "2026-09-07T16:20:30.572Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00021-semantic-8275c0fcbeae"
+    },
+    {
+      "proposalId": "p-part-warning-13-001",
+      "kind": "event-participation",
+      "artifactId": "part-warning-13-00015",
+      "createdAt": "2026-09-07T15:45:01.888Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "p-part-warning-eva-001-v2",
+      "kind": "event-participation",
+      "artifactId": "part-warning-eva-00015",
+      "createdAt": "2026-09-07T15:45:17.708Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00015-semantic-1caaccc3b720"
+    },
+    {
+      "proposalId": "pa-dragons-exist",
+      "kind": "attribution",
+      "artifactId": "attr-dragons-exist",
+      "createdAt": "2026-09-07T11:07:35.074Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pa-lumingfei-mission-v2",
+      "kind": "attribution",
+      "artifactId": "attr-lumingfei-mission",
+      "createdAt": "2026-09-07T11:07:44.678Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pa-lumingfei-student",
+      "kind": "attribution",
+      "artifactId": "attr-lumingfei-student",
+      "createdAt": "2026-09-07T11:07:35.070Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "part-13-knockout-00017",
+      "kind": "event-participation",
+      "artifactId": "part-13-knockout-00017",
+      "createdAt": "2026-09-07T15:58:43.321Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "part-accept-lu-00005",
+      "kind": "event-participation",
+      "artifactId": "part-accept-lu-00005",
+      "createdAt": "2026-09-07T11:37:48.806Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-accept-nono-00005",
+      "kind": "event-participation",
+      "artifactId": "part-accept-nono-00005",
+      "createdAt": "2026-09-07T11:37:48.811Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-act-cassel-00005",
+      "kind": "event-participation",
+      "artifactId": "part-act-cassel-00005",
+      "createdAt": "2026-09-07T11:37:48.837Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-act-lu-00005",
+      "kind": "event-participation",
+      "artifactId": "part-act-lu-00005",
+      "createdAt": "2026-09-07T11:37:48.826Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-act-norma-00005",
+      "kind": "event-participation",
+      "artifactId": "part-act-norma-00005",
+      "createdAt": "2026-09-07T11:37:48.832Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-alarm-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-alarm-lu-001",
+      "createdAt": "2026-09-07T12:30:30.201Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-angier-invites-angier-00019",
+      "kind": "event-participation",
+      "artifactId": "part-angier-invites-angier-00019",
+      "createdAt": "2026-09-07T16:09:09.209Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00019-semantic-16c74a7cd7a6"
+    },
+    {
+      "proposalId": "part-angier-invites-caesar-00019",
+      "kind": "event-participation",
+      "artifactId": "part-angier-invites-caesar-00019",
+      "createdAt": "2026-09-07T16:09:09.225Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00019-semantic-16c74a7cd7a6"
+    },
+    {
+      "proposalId": "part-battle-caesar-00016",
+      "kind": "event-participation",
+      "artifactId": "part-battle-caesar-00016",
+      "createdAt": "2026-09-07T15:50:54.747Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-semantic-8f66a92675d6"
+    },
+    {
+      "proposalId": "part-battle-mai-00016",
+      "kind": "event-participation",
+      "artifactId": "part-battle-mai-00016",
+      "createdAt": "2026-09-07T15:50:54.755Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-semantic-8f66a92675d6"
+    },
+    {
+      "proposalId": "part-blood-lu-00022",
+      "kind": "event-participation",
+      "artifactId": "part-blood-lu-00022",
+      "createdAt": "2026-09-07T16:27:08.846Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-breakfast-gude-00004",
+      "kind": "event-participation",
+      "artifactId": "part-breakfast-gude-00004",
+      "createdAt": "2026-09-07T11:25:47.671Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-breakfast-hotel-00004",
+      "kind": "event-participation",
+      "artifactId": "part-breakfast-hotel-00004",
+      "createdAt": "2026-09-07T11:25:47.681Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-breakfast-lu-00004",
+      "kind": "event-participation",
+      "artifactId": "part-breakfast-lu-00004",
+      "createdAt": "2026-09-07T11:25:47.673Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-breakfast-lumingze-00004",
+      "kind": "event-participation",
+      "artifactId": "part-breakfast-lumingze-00004",
+      "createdAt": "2026-09-07T11:25:47.680Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-breakfast-shenshen-00004",
+      "kind": "event-participation",
+      "artifactId": "part-breakfast-shenshen-00004",
+      "createdAt": "2026-09-07T11:25:47.679Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-breakfast-shushu-00004",
+      "kind": "event-participation",
+      "artifactId": "part-breakfast-shushu-00004",
+      "createdAt": "2026-09-07T11:25:47.678Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-breakfast-yaji-00004",
+      "kind": "event-participation",
+      "artifactId": "part-breakfast-yaji-00004",
+      "createdAt": "2026-09-07T11:25:47.677Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-breakfast-yesheng-00004",
+      "kind": "event-participation",
+      "artifactId": "part-breakfast-yesheng-00004",
+      "createdAt": "2026-09-07T11:25:47.675Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-briefing-caesar-001",
+      "kind": "event-participation",
+      "artifactId": "part-briefing-caesar-001",
+      "createdAt": "2026-09-07T12:30:51.689Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-briefing-chu-001",
+      "kind": "event-participation",
+      "artifactId": "part-briefing-chu-001",
+      "createdAt": "2026-09-07T12:30:51.691Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-briefing-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-briefing-lu-001",
+      "createdAt": "2026-09-07T12:30:51.687Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-briefing-schneider-001",
+      "kind": "event-participation",
+      "artifactId": "part-briefing-schneider-001",
+      "createdAt": "2026-09-07T12:30:51.685Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-caesar-bet-agent-00009",
+      "kind": "event-participation",
+      "artifactId": "part-caesar-bet-agent-00009",
+      "createdAt": "2026-09-07T12:13:56.615Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-caesar-bet-theme-00009",
+      "kind": "event-participation",
+      "artifactId": "part-caesar-bet-theme-00009",
+      "createdAt": "2026-09-07T12:13:56.621Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-call-angier-00007",
+      "kind": "event-participation",
+      "artifactId": "part-call-angier-00007",
+      "createdAt": "2026-09-07T11:53:17.040Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-call-caesar-00007",
+      "kind": "event-participation",
+      "artifactId": "part-call-caesar-00007",
+      "createdAt": "2026-09-07T11:53:17.047Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-call-lu-00007",
+      "kind": "event-participation",
+      "artifactId": "part-call-lu-00007",
+      "createdAt": "2026-09-07T11:59:00.521Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-call-mans-00007",
+      "kind": "event-participation",
+      "artifactId": "part-call-mans-00007",
+      "createdAt": "2026-09-07T11:53:17.032Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-capture-ang-00017",
+      "kind": "event-participation",
+      "artifactId": "part-capture-ang-00017",
+      "createdAt": "2026-09-07T15:58:43.273Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "part-capture-norton-00017",
+      "kind": "event-participation",
+      "artifactId": "part-capture-norton-00017",
+      "createdAt": "2026-09-07T15:58:43.282Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "part-capture-urn-00017",
+      "kind": "event-participation",
+      "artifactId": "part-capture-urn-00017",
+      "createdAt": "2026-09-07T15:58:43.292Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "part-car-ferrari-00005",
+      "kind": "event-participation",
+      "artifactId": "part-car-ferrari-00005",
+      "createdAt": "2026-09-07T11:36:43.484Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-car-lu-00005-v2",
+      "kind": "event-participation",
+      "artifactId": "part-car-lu-00005",
+      "createdAt": "2026-09-07T11:37:48.801Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-car-nono-00005",
+      "kind": "event-participation",
+      "artifactId": "part-car-nono-00005",
+      "createdAt": "2026-09-07T11:36:43.480Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-car-pharmacy-00005",
+      "kind": "event-participation",
+      "artifactId": "part-car-pharmacy-00005",
+      "createdAt": "2026-09-07T11:36:43.489Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-cc1000-conductor-00006",
+      "kind": "event-participation",
+      "artifactId": "part-cc1000-conductor-00006",
+      "createdAt": "2026-09-07T11:45:51.676Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb"
+    },
+    {
+      "proposalId": "part-cc1000-fingel-00006",
+      "kind": "event-participation",
+      "artifactId": "part-cc1000-fingel-00006",
+      "createdAt": "2026-09-07T11:45:51.657Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb"
+    },
+    {
+      "proposalId": "part-cc1000-lu-00006",
+      "kind": "event-participation",
+      "artifactId": "part-cc1000-lu-00006",
+      "createdAt": "2026-09-07T11:45:51.649Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb"
+    },
+    {
+      "proposalId": "part-cc1000-train-00006",
+      "kind": "event-participation",
+      "artifactId": "part-cc1000-train-00006",
+      "createdAt": "2026-09-07T11:45:51.669Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00006-semantic-91a6ca318dcb"
+    },
+    {
+      "proposalId": "part-cheatmap-caesar-001",
+      "kind": "event-participation",
+      "artifactId": "part-cheatmap-caesar-001",
+      "createdAt": "2026-09-07T12:37:02.772Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-cheatmap-chu-001",
+      "kind": "event-participation",
+      "artifactId": "part-cheatmap-chu-001",
+      "createdAt": "2026-09-07T12:37:02.774Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-cheatmap-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-cheatmap-lu-001",
+      "createdAt": "2026-09-07T12:30:51.694Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-chen-acceptance-agent-00004",
+      "kind": "event-participation",
+      "artifactId": "part-chen-acceptance-agent-00004",
+      "createdAt": "2026-09-07T11:27:22.888Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-chen-acceptance-lu-00004",
+      "kind": "event-participation",
+      "artifactId": "part-chen-acceptance-lu-00004",
+      "createdAt": "2026-09-07T11:27:22.890Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-chen-acceptance-su-00004",
+      "kind": "event-participation",
+      "artifactId": "part-chen-acceptance-su-00004",
+      "createdAt": "2026-09-07T11:27:22.891Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-chen-acceptance-target-00004",
+      "kind": "event-participation",
+      "artifactId": "part-chen-acceptance-target-00004",
+      "createdAt": "2026-09-07T11:27:22.889Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-church-chu-00017",
+      "kind": "event-participation",
+      "artifactId": "part-church-chu-00017",
+      "createdAt": "2026-09-07T15:58:43.257Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "part-church-sanwu-00017",
+      "kind": "event-participation",
+      "artifactId": "part-church-sanwu-00017",
+      "createdAt": "2026-09-07T15:58:43.265Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "part-coach-agent-00003",
+      "kind": "event-participation",
+      "artifactId": "part-coach-agent-00003",
+      "createdAt": "2026-09-07T11:19:27.625Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "part-coach-beneficiary-00003",
+      "kind": "event-participation",
+      "artifactId": "part-coach-beneficiary-00003",
+      "createdAt": "2026-09-07T11:19:27.629Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "part-coach-lumingze-00003-v2",
+      "kind": "event-participation",
+      "artifactId": "part-coach-lumingze-00003",
+      "createdAt": "2026-09-07T11:21:13.511Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "part-config-eva-001",
+      "kind": "event-participation",
+      "artifactId": "part-config-eva-001",
+      "createdAt": "2026-09-07T12:30:51.691Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-config-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-config-lu-001",
+      "createdAt": "2026-09-07T12:30:51.693Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-copy-agent-00009",
+      "kind": "event-participation",
+      "artifactId": "part-copy-agent-00009",
+      "createdAt": "2026-09-07T12:13:56.627Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-crash-car-00014",
+      "kind": "event-participation",
+      "artifactId": "part-crash-car-00014",
+      "createdAt": "2026-09-07T15:39:05.950Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "part-crash-lu-00014",
+      "kind": "event-participation",
+      "artifactId": "part-crash-lu-00014",
+      "createdAt": "2026-09-07T15:39:05.928Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "part-crash-lz-00014",
+      "kind": "event-participation",
+      "artifactId": "part-crash-lz-00014",
+      "createdAt": "2026-09-07T15:39:05.943Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "part-crash-nono-00014",
+      "kind": "event-participation",
+      "artifactId": "part-crash-nono-00014",
+      "createdAt": "2026-09-07T15:39:05.935Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "part-depart-lu-00005",
+      "kind": "event-participation",
+      "artifactId": "part-depart-lu-00005",
+      "createdAt": "2026-09-07T11:36:43.470Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-depart-nono-00005",
+      "kind": "event-participation",
+      "artifactId": "part-depart-nono-00005",
+      "createdAt": "2026-09-07T11:36:43.474Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-dragontext-fingel-00007-v2",
+      "kind": "event-participation",
+      "artifactId": "part-dragontext-fingel-00007",
+      "createdAt": "2026-09-07T11:53:28.841Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-dragontext-gude-00007",
+      "kind": "event-participation",
+      "artifactId": "part-dragontext-gude-00007",
+      "createdAt": "2026-09-07T11:53:17.056Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-dragontext-lu-00007",
+      "kind": "event-participation",
+      "artifactId": "part-dragontext-lu-00007",
+      "createdAt": "2026-09-07T11:53:17.062Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-duel-caesar-00007",
+      "kind": "event-participation",
+      "artifactId": "part-duel-caesar-00007",
+      "createdAt": "2026-09-07T11:51:07.962Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-duel-chu-00007-v3",
+      "kind": "event-participation",
+      "artifactId": "part-duel-chu-00007",
+      "createdAt": "2026-09-07T11:51:36.553Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-duel-lu-00007",
+      "kind": "event-participation",
+      "artifactId": "part-duel-lu-00007",
+      "createdAt": "2026-09-07T11:51:07.970Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-enrollment-gude-00004",
+      "kind": "event-participation",
+      "artifactId": "part-enrollment-gude-00004",
+      "createdAt": "2026-09-07T11:30:19.168Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-enrollment-lu-00004",
+      "kind": "event-participation",
+      "artifactId": "part-enrollment-lu-00004",
+      "createdAt": "2026-09-07T11:28:22.045Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-enrollment-nuo-00004",
+      "kind": "event-participation",
+      "artifactId": "part-enrollment-nuo-00004",
+      "createdAt": "2026-09-07T11:28:22.047Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-entry-lu-00005",
+      "kind": "event-participation",
+      "artifactId": "part-entry-lu-00005",
+      "createdAt": "2026-09-07T11:36:43.451Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-entry-nono-00005",
+      "kind": "event-participation",
+      "artifactId": "part-entry-nono-00005",
+      "createdAt": "2026-09-07T11:36:43.446Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-eva-eva-00008",
+      "kind": "event-participation",
+      "artifactId": "part-eva-eva-00008",
+      "createdAt": "2026-09-07T12:03:28.022Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "part-eva-orders-agent-00009",
+      "kind": "event-participation",
+      "artifactId": "part-eva-orders-agent-00009",
+      "createdAt": "2026-09-07T12:13:56.556Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-eva-orders-benef-00009",
+      "kind": "event-participation",
+      "artifactId": "part-eva-orders-benef-00009",
+      "createdAt": "2026-09-07T12:13:56.568Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-eva-orders-theme-00009-v2",
+      "kind": "event-participation",
+      "artifactId": "part-eva-orders-theme-00009",
+      "createdAt": "2026-09-07T12:17:01.988Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-gate-13-00016",
+      "kind": "event-participation",
+      "artifactId": "part-gate-13-00016",
+      "createdAt": "2026-09-07T15:50:54.739Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00016-semantic-8f66a92675d6"
+    },
+    {
+      "proposalId": "part-gather-caesar-001",
+      "kind": "event-participation",
+      "artifactId": "part-gather-caesar-001",
+      "createdAt": "2026-09-07T12:30:30.205Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-gather-chu-001",
+      "kind": "event-participation",
+      "artifactId": "part-gather-chu-001",
+      "createdAt": "2026-09-07T12:30:30.205Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-gather-fingel-001",
+      "kind": "event-participation",
+      "artifactId": "part-gather-fingel-001",
+      "createdAt": "2026-09-07T12:30:30.204Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-gather-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-gather-lu-001",
+      "createdAt": "2026-09-07T12:30:30.202Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-gather-nono-001",
+      "kind": "event-participation",
+      "artifactId": "part-gather-nono-001",
+      "createdAt": "2026-09-07T12:30:30.203Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-gearactivate-yaji-001",
+      "kind": "event-participation",
+      "artifactId": "part-gearactivate-yaji-001",
+      "createdAt": "2026-09-07T12:30:30.194Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-gearactivate-yesheng-001",
+      "kind": "event-participation",
+      "artifactId": "part-gearactivate-yesheng-001",
+      "createdAt": "2026-09-07T12:30:30.192Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-gearjam-yaji-001",
+      "kind": "event-participation",
+      "artifactId": "part-gearjam-yaji-001",
+      "createdAt": "2026-09-07T12:30:30.197Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-gearjam-yesheng-001",
+      "kind": "event-participation",
+      "artifactId": "part-gearjam-yesheng-001",
+      "createdAt": "2026-09-07T12:30:30.195Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-gives-agent-00009-v2",
+      "kind": "event-participation",
+      "artifactId": "part-gives-agent-00009",
+      "createdAt": "2026-09-07T12:17:01.994Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-gives-benef-00009",
+      "kind": "event-participation",
+      "artifactId": "part-gives-benef-00009",
+      "createdAt": "2026-09-07T12:13:56.579Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-heli-artifact-00005",
+      "kind": "event-participation",
+      "artifactId": "part-heli-artifact-00005",
+      "createdAt": "2026-09-07T11:37:48.841Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-heli-lu-00005",
+      "kind": "event-participation",
+      "artifactId": "part-heli-lu-00005",
+      "createdAt": "2026-09-07T11:37:48.846Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-heli-nono-00005",
+      "kind": "event-participation",
+      "artifactId": "part-heli-nono-00005",
+      "createdAt": "2026-09-07T11:37:48.851Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-hit-norton-00022",
+      "kind": "event-participation",
+      "artifactId": "part-hit-norton-00022",
+      "createdAt": "2026-09-07T16:27:08.917Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-hit-torpedo-00022",
+      "kind": "event-participation",
+      "artifactId": "part-hit-torpedo-00022",
+      "createdAt": "2026-09-07T16:27:08.904Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-interview-applicant-00003",
+      "kind": "event-participation",
+      "artifactId": "part-interview-applicant-00003",
+      "createdAt": "2026-09-07T11:19:27.634Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "part-interview-jiudeyaji-00003",
+      "kind": "event-participation",
+      "artifactId": "part-interview-jiudeyaji-00003",
+      "createdAt": "2026-09-07T11:19:27.642Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "part-interview-yesheng-00003",
+      "kind": "event-participation",
+      "artifactId": "part-interview-yesheng-00003",
+      "createdAt": "2026-09-07T11:19:27.638Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "part-launch-caesar-00022",
+      "kind": "event-participation",
+      "artifactId": "part-launch-caesar-00022",
+      "createdAt": "2026-09-07T16:27:08.882Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-launch-norton-00022",
+      "kind": "event-participation",
+      "artifactId": "part-launch-norton-00022",
+      "createdAt": "2026-09-07T16:27:08.894Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-launch-torpedo-00022-v3",
+      "kind": "event-participation",
+      "artifactId": "part-launch-torpedo-00022",
+      "createdAt": "2026-09-07T16:27:56.451Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-launch-zero-00022",
+      "kind": "event-participation",
+      "artifactId": "part-launch-zero-00022",
+      "createdAt": "2026-09-07T16:27:08.873Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-lz-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-lz-lu-001",
+      "createdAt": "2026-09-07T12:30:30.198Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-lz-lz-001",
+      "kind": "event-participation",
+      "artifactId": "part-lz-lz-001",
+      "createdAt": "2026-09-07T12:30:30.199Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "part-make-girls-00005-v2",
+      "kind": "event-participation",
+      "artifactId": "part-make-girls-00005",
+      "createdAt": "2026-09-07T11:42:27.870Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-make-lu-00005",
+      "kind": "event-participation",
+      "artifactId": "part-make-lu-00005",
+      "createdAt": "2026-09-07T11:36:43.461Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-make-nono-00005",
+      "kind": "event-participation",
+      "artifactId": "part-make-nono-00005",
+      "createdAt": "2026-09-07T11:36:43.456Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-man-asks-agent-00009",
+      "kind": "event-participation",
+      "artifactId": "part-man-asks-agent-00009",
+      "createdAt": "2026-09-07T12:13:56.545Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-man-asks-theme-00009-v2",
+      "kind": "event-participation",
+      "artifactId": "part-man-asks-theme-00009",
+      "createdAt": "2026-09-07T12:17:01.982Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-med-gude-00007",
+      "kind": "event-participation",
+      "artifactId": "part-med-gude-00007",
+      "createdAt": "2026-09-07T11:51:08.006Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-med-lu-00007",
+      "kind": "event-participation",
+      "artifactId": "part-med-lu-00007",
+      "createdAt": "2026-09-07T11:51:08.016Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-med-mans-00007",
+      "kind": "event-participation",
+      "artifactId": "part-med-mans-00007",
+      "createdAt": "2026-09-07T11:51:08.011Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-nono-shot-lu-00007",
+      "kind": "event-participation",
+      "artifactId": "part-nono-shot-lu-00007",
+      "createdAt": "2026-09-07T11:55:42.251Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-nono-shot-nono-00007-v4",
+      "kind": "event-participation",
+      "artifactId": "part-nono-shot-nono-00007",
+      "createdAt": "2026-09-07T11:51:47.268Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-nono-shot-sniper-00007",
+      "kind": "event-participation",
+      "artifactId": "part-nono-shot-sniper-00007",
+      "createdAt": "2026-09-07T11:51:07.980Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-nuonuo-agent-00003",
+      "kind": "event-participation",
+      "artifactId": "part-nuonuo-agent-00003",
+      "createdAt": "2026-09-07T11:19:27.616Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "part-nuonuo-patient-00003",
+      "kind": "event-participation",
+      "artifactId": "part-nuonuo-patient-00003",
+      "createdAt": "2026-09-07T11:19:27.620Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00003-semantic-2bbbc70ac8d4"
+    },
+    {
+      "proposalId": "part-phone-gude-00005",
+      "kind": "event-participation",
+      "artifactId": "part-phone-gude-00005",
+      "createdAt": "2026-09-07T11:37:48.821Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-phone-lu-00005",
+      "kind": "event-participation",
+      "artifactId": "part-phone-lu-00005",
+      "createdAt": "2026-09-07T11:37:48.816Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-semantic-cf55bbf2a951"
+    },
+    {
+      "proposalId": "part-pull-lu-00022",
+      "kind": "event-participation",
+      "artifactId": "part-pull-lu-00022",
+      "createdAt": "2026-09-07T16:27:08.962Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-pull-nono-00022",
+      "kind": "event-participation",
+      "artifactId": "part-pull-nono-00022",
+      "createdAt": "2026-09-07T16:27:08.953Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-reforms-exp-00009",
+      "kind": "event-participation",
+      "artifactId": "part-reforms-exp-00009",
+      "createdAt": "2026-09-07T12:13:56.605Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-reforms-theme-00009-v2",
+      "kind": "event-participation",
+      "artifactId": "part-reforms-theme-00009",
+      "createdAt": "2026-09-07T12:17:02.005Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-scan-ang-00017",
+      "kind": "event-participation",
+      "artifactId": "part-scan-ang-00017",
+      "createdAt": "2026-09-07T15:58:54.582Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "part-scan-norton-00017",
+      "kind": "event-participation",
+      "artifactId": "part-scan-norton-00017",
+      "createdAt": "2026-09-07T15:58:43.305Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "part-scan-urn-00017",
+      "kind": "event-participation",
+      "artifactId": "part-scan-urn-00017",
+      "createdAt": "2026-09-07T15:58:43.313Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00017-semantic-b5864fa86dcb"
+    },
+    {
+      "proposalId": "part-shootcaesar-lu-00007",
+      "kind": "event-participation",
+      "artifactId": "part-shootcaesar-lu-00007",
+      "createdAt": "2026-09-07T11:51:07.985Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-shootcaesar-target-00007",
+      "kind": "event-participation",
+      "artifactId": "part-shootcaesar-target-00007",
+      "createdAt": "2026-09-07T11:51:07.990Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-shootchu-lu-00007",
+      "kind": "event-participation",
+      "artifactId": "part-shootchu-lu-00007",
+      "createdAt": "2026-09-07T11:51:07.995Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-shootchu-target-00007",
+      "kind": "event-participation",
+      "artifactId": "part-shootchu-target-00007",
+      "createdAt": "2026-09-07T11:51:08.000Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-semantic-e1327f875a22"
+    },
+    {
+      "proposalId": "part-stab-lu-00022",
+      "kind": "event-participation",
+      "artifactId": "part-stab-lu-00022",
+      "createdAt": "2026-09-07T16:27:08.944Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-stab-nono-00022",
+      "kind": "event-participation",
+      "artifactId": "part-stab-nono-00022",
+      "createdAt": "2026-09-07T16:27:08.935Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-stab-norton-00022",
+      "kind": "event-participation",
+      "artifactId": "part-stab-norton-00022",
+      "createdAt": "2026-09-07T16:27:08.926Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-strikes-agent-00009",
+      "kind": "event-participation",
+      "artifactId": "part-strikes-agent-00009",
+      "createdAt": "2026-09-07T12:13:56.584Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-strikes-patient-00009-v2",
+      "kind": "event-participation",
+      "artifactId": "part-strikes-patient-00009",
+      "createdAt": "2026-09-07T12:17:01.999Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00009-semantic-87cd9bc1ceb7"
+    },
+    {
+      "proposalId": "part-suit-lu-00022",
+      "kind": "event-participation",
+      "artifactId": "part-suit-lu-00022",
+      "createdAt": "2026-09-07T16:27:08.865Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-suit-nono-00022",
+      "kind": "event-participation",
+      "artifactId": "part-suit-nono-00022",
+      "createdAt": "2026-09-07T16:27:08.856Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00022-semantic-b05f2704b4ae"
+    },
+    {
+      "proposalId": "part-zero-agent-00014",
+      "kind": "event-participation",
+      "artifactId": "part-zero-agent-00014",
+      "createdAt": "2026-09-07T15:39:05.906Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "part-zero-patient-00014",
+      "kind": "event-participation",
+      "artifactId": "part-zero-patient-00014",
+      "createdAt": "2026-09-07T15:39:05.913Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00014-semantic-c51c406ff46d"
+    },
+    {
+      "proposalId": "part-zhao-confession-su-00004",
+      "kind": "event-participation",
+      "artifactId": "part-zhao-confession-su-00004",
+      "createdAt": "2026-09-07T11:27:22.886Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-zhao-confession-target-00004",
+      "kind": "event-participation",
+      "artifactId": "part-zhao-confession-target-00004",
+      "createdAt": "2026-09-07T11:27:22.884Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-zhao-confession-witness-00004",
+      "kind": "event-participation",
+      "artifactId": "part-zhao-confession-witness-00004",
+      "createdAt": "2026-09-07T11:27:22.885Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "part-zhao-confessor-00004",
+      "kind": "event-participation",
+      "artifactId": "part-zhao-confessor-00004",
+      "createdAt": "2026-09-07T11:27:22.882Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "pc-dragons-exist-v2",
+      "kind": "claim",
+      "artifactId": "claim-dragons-exist",
+      "createdAt": "2026-09-07T11:08:10.126Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pc-lumingfei-mission-v3",
+      "kind": "claim",
+      "artifactId": "claim-lumingfei-mission",
+      "createdAt": "2026-09-07T11:08:10.131Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pc-lumingfei-student-v2",
+      "kind": "claim",
+      "artifactId": "claim-lumingfei-student",
+      "createdAt": "2026-09-07T11:08:10.121Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pe-artifact-copper-urn-00012-v2",
+      "kind": "entity",
+      "artifactId": "artifact-copper-urn-00012",
+      "createdAt": "2026-09-07T12:44:55.117Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00012-semantic-f959f2526287"
+    },
+    {
+      "proposalId": "pe-artifact-helicopter-00012-v2",
+      "kind": "entity",
+      "artifactId": "artifact-maritime-helicopter-00012",
+      "createdAt": "2026-09-07T12:45:05.558Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00012-semantic-f959f2526287"
+    },
+    {
+      "proposalId": "pe-cassel",
+      "kind": "entity",
+      "artifactId": "inst-cassel-academy",
+      "createdAt": "2026-09-07T11:05:59.264Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pe-dragons-v2",
+      "kind": "entity",
+      "artifactId": "faction-dragons",
+      "createdAt": "2026-09-07T11:06:12.979Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pe-grey-tin-bottle-00018-v2",
+      "kind": "entity",
+      "artifactId": "artifact-grey-tin-bottle-00018",
+      "createdAt": "2026-09-07T16:05:18.005Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00018-semantic-03bedebd6807"
+    },
+    {
+      "proposalId": "pe-heli",
+      "kind": "entity",
+      "artifactId": "artifact-black-helicopter",
+      "createdAt": "2026-09-07T11:05:59.271Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pe-lumingfei-v2",
+      "kind": "entity",
+      "artifactId": "char-lumingfei",
+      "createdAt": "2026-09-07T11:06:12.974Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pp-dragons-exist",
+      "kind": "proposition",
+      "artifactId": "prop-dragons-exist",
+      "createdAt": "2026-09-07T11:07:01.067Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pp-lumingfei-mission",
+      "kind": "proposition",
+      "artifactId": "prop-lumingfei-mission",
+      "createdAt": "2026-09-07T11:07:01.071Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pp-lumingfei-student",
+      "kind": "proposition",
+      "artifactId": "prop-lumingfei-student",
+      "createdAt": "2026-09-07T11:07:01.063Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00001-semantic-23902a13002c"
+    },
+    {
+      "proposalId": "pr-entity-diary-00023",
+      "kind": "entity",
+      "artifactId": "artifact-lumingfei-diary-00023",
+      "createdAt": "2026-09-07T16:44:31.324Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-entity-iphone-00023-v2",
+      "kind": "entity",
+      "artifactId": "artifact-iphone-00023",
+      "createdAt": "2026-09-07T16:38:47.797Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-entity-knife-00023",
+      "kind": "entity",
+      "artifactId": "artifact-dark-gold-short-knife-00023",
+      "createdAt": "2026-09-07T16:38:29.967Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-event-angier-tea-00023-v4",
+      "kind": "canonical-event",
+      "artifactId": "event-angier-tea-lumingfei-00023",
+      "createdAt": "2026-09-07T16:41:45.436Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-event-caesar-rescues-nono-00023-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-caesar-rescues-nono-00023",
+      "createdAt": "2026-09-07T16:41:19.088Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-event-lu-stabs-norton-00023-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-lumingfei-stabs-norton-00023",
+      "createdAt": "2026-09-07T16:41:19.063Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-event-mai-kills-norton-00023-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-mai-shoots-norton-00023",
+      "createdAt": "2026-09-07T16:44:55.240Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-event-nono-chocolate-00023",
+      "kind": "canonical-event",
+      "artifactId": "event-nono-gives-lumingfei-chocolate-00023",
+      "createdAt": "2026-09-07T16:40:48.146Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-angier-tea",
+      "kind": "event-participation",
+      "artifactId": "part-angier-tea-00023",
+      "createdAt": "2026-09-07T16:42:39.529Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-caesar-rescue",
+      "kind": "event-participation",
+      "artifactId": "part-caesar-rescue-00023",
+      "createdAt": "2026-09-07T16:42:39.525Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-knife-stab",
+      "kind": "event-participation",
+      "artifactId": "part-knife-stab-00023",
+      "createdAt": "2026-09-07T16:42:39.524Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-lu-choc",
+      "kind": "event-participation",
+      "artifactId": "part-lu-choc-00023",
+      "createdAt": "2026-09-07T16:42:39.532Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-lu-stab",
+      "kind": "event-participation",
+      "artifactId": "part-lu-stab-00023",
+      "createdAt": "2026-09-07T16:42:39.522Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-lu-tea",
+      "kind": "event-participation",
+      "artifactId": "part-lu-tea-00023",
+      "createdAt": "2026-09-07T16:42:39.530Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-mai-shoot",
+      "kind": "event-participation",
+      "artifactId": "part-mai-shoot-00023",
+      "createdAt": "2026-09-07T16:42:39.527Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-nono-choc",
+      "kind": "event-participation",
+      "artifactId": "part-nono-choc-00023",
+      "createdAt": "2026-09-07T16:42:39.531Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-nono-rescue",
+      "kind": "event-participation",
+      "artifactId": "part-nono-rescue-00023",
+      "createdAt": "2026-09-07T16:42:39.526Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-norton-shot",
+      "kind": "event-participation",
+      "artifactId": "part-norton-shot-00023",
+      "createdAt": "2026-09-07T16:42:39.528Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-norton-stab",
+      "kind": "event-participation",
+      "artifactId": "part-norton-stab-00023",
+      "createdAt": "2026-09-07T16:42:39.523Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "pr-part-torpedo-mai-00023",
+      "kind": "event-participation",
+      "artifactId": "part-torpedo-mai-00023",
+      "createdAt": "2026-09-07T16:45:05.516Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00023-semantic-3096697b31ba"
+    },
+    {
+      "proposalId": "prop-ent-baidi-00002",
+      "kind": "entity",
+      "artifactId": "loc-baidi",
+      "createdAt": "2026-09-07T11:09:55.999Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00002-semantic-684389ad80a1"
+    },
+    {
+      "proposalId": "prop-ent-constantin-00002",
+      "kind": "entity",
+      "artifactId": "char-constantin",
+      "createdAt": "2026-09-07T11:09:55.995Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00002-semantic-684389ad80a1"
+    },
+    {
+      "proposalId": "prop-entity-lionheart-001",
+      "kind": "entity",
+      "artifactId": "faction-lionheart-001",
+      "createdAt": "2026-09-07T15:34:24.253Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-entity-schneider-002",
+      "kind": "entity",
+      "artifactId": "char-schneider",
+      "createdAt": "2026-09-07T12:36:15.817Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "prop-event-alarm-001-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-academy-emergency-alarm-001",
+      "createdAt": "2026-09-07T12:38:55.239Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "prop-event-briefing-001-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-rescue-briefing-001",
+      "createdAt": "2026-09-07T12:39:30.495Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "prop-event-cheatmap-002-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-cheatmap-001",
+      "createdAt": "2026-09-07T12:40:40.335Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "prop-event-chu-invite-001-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-chu-invite-001",
+      "createdAt": "2026-09-07T15:34:54.165Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-event-config-001-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-eva-config-001",
+      "createdAt": "2026-09-07T12:40:03.090Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "prop-event-email-open-001-v3",
+      "kind": "canonical-event",
+      "artifactId": "event-email-open-001",
+      "createdAt": "2026-09-07T15:35:15.537Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-event-gather-001-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-library-gathering-001",
+      "createdAt": "2026-09-07T12:39:11.399Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "prop-event-gearactivate-001-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-gears-activate-001",
+      "createdAt": "2026-09-07T12:40:55.440Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "prop-event-gearjam-001-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-gear-jam-001",
+      "createdAt": "2026-09-07T12:41:11.698Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "prop-event-lzvisit-001",
+      "kind": "canonical-event",
+      "artifactId": "event-lumingze-visit-001",
+      "createdAt": "2026-09-07T12:29:33.971Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00011-semantic-3b75ad587862"
+    },
+    {
+      "proposalId": "prop-event-nono-appears-001-v2",
+      "kind": "canonical-event",
+      "artifactId": "event-nono-appears-001",
+      "createdAt": "2026-09-07T15:31:02.366Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-event-nono-pull-001",
+      "kind": "canonical-event",
+      "artifactId": "event-nono-pull-001",
+      "createdAt": "2026-09-07T15:30:45.669Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-event-sacrifice-vision-00002-v5",
+      "kind": "canonical-event",
+      "artifactId": "event-sacrifice-vision-00002",
+      "createdAt": "2026-09-07T11:12:51.569Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00002-semantic-684389ad80a1"
+    },
+    {
+      "proposalId": "prop-exec-lu-shoot-caesar-00007",
+      "kind": "event-execution",
+      "artifactId": "exec-lu-shoot-caesar-00007",
+      "createdAt": "2026-09-08T13:49:25.160Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22"
+    },
+    {
+      "proposalId": "prop-exec-lu-shoot-chu-00007",
+      "kind": "event-execution",
+      "artifactId": "exec-lu-shoot-chu-00007",
+      "createdAt": "2026-09-08T13:49:25.187Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22"
+    },
+    {
+      "proposalId": "prop-mans-guigu-00008",
+      "kind": "proposition",
+      "artifactId": "prop-mans-guigu-00008",
+      "createdAt": "2026-09-07T12:03:50.813Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00008-semantic-5f11f49f932b"
+    },
+    {
+      "proposalId": "prop-norm-freedom-day-00007",
+      "kind": "norm-template",
+      "artifactId": "norm-freedom-day-00007",
+      "createdAt": "2026-09-08T13:52:09.141Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22"
+    },
+    {
+      "proposalId": "prop-parents-love-00004",
+      "kind": "proposition",
+      "artifactId": "prop-parents-love-00004",
+      "createdAt": "2026-09-07T11:26:14.553Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "prop-part-appears-fingel-001",
+      "kind": "event-participation",
+      "artifactId": "part-appears-fingel-001",
+      "createdAt": "2026-09-07T15:31:58.254Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-appears-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-appears-lu-001",
+      "createdAt": "2026-09-07T15:31:58.247Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-appears-nono-001",
+      "kind": "event-participation",
+      "artifactId": "part-appears-nono-001",
+      "createdAt": "2026-09-07T15:31:58.240Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-chu-invite-agent-001",
+      "kind": "event-participation",
+      "artifactId": "part-chu-invite-agent-001",
+      "createdAt": "2026-09-07T15:33:37.743Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-chu-invite-lionheart-001",
+      "kind": "event-participation",
+      "artifactId": "part-chu-invite-lionheart-001",
+      "createdAt": "2026-09-07T15:35:30.826Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-chu-invite-lu-001-v2",
+      "kind": "event-participation",
+      "artifactId": "part-chu-invite-lu-001",
+      "createdAt": "2026-09-07T15:34:54.152Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-email-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-email-lu-001",
+      "createdAt": "2026-09-07T15:31:58.232Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-email-nono-001",
+      "kind": "event-participation",
+      "artifactId": "part-email-nono-001",
+      "createdAt": "2026-09-07T15:35:30.819Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-pull-amber-001",
+      "kind": "event-participation",
+      "artifactId": "part-pull-amber-001",
+      "createdAt": "2026-09-07T15:31:58.281Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-pull-fingel-001",
+      "kind": "event-participation",
+      "artifactId": "part-pull-fingel-001",
+      "createdAt": "2026-09-07T15:31:58.275Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-pull-lu-001",
+      "kind": "event-participation",
+      "artifactId": "part-pull-lu-001",
+      "createdAt": "2026-09-07T15:31:58.268Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-pull-nono-001",
+      "kind": "event-participation",
+      "artifactId": "part-pull-nono-001",
+      "createdAt": "2026-09-07T15:31:58.261Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00013-semantic-d88837bd383a"
+    },
+    {
+      "proposalId": "prop-part-sacrifice-baidi-00002",
+      "kind": "event-participation",
+      "artifactId": "part-sacrifice-baidi-00002",
+      "createdAt": "2026-09-07T11:10:48.535Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00002-semantic-684389ad80a1"
+    },
+    {
+      "proposalId": "prop-part-sacrifice-constantin-00002",
+      "kind": "event-participation",
+      "artifactId": "part-sacrifice-constantin-00002",
+      "createdAt": "2026-09-07T11:10:48.531Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00002-semantic-684389ad80a1"
+    },
+    {
+      "proposalId": "prop-schema-rifle-fire-00007-v2",
+      "kind": "action-schema",
+      "artifactId": "schema-rifle-fire-00007",
+      "createdAt": "2026-09-08T13:48:44.715Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00007-executable-e1327f875a22"
+    },
+    {
+      "proposalId": "prop-scholarship-00004",
+      "kind": "proposition",
+      "artifactId": "prop-scholarship-00004",
+      "createdAt": "2026-09-07T11:26:14.557Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00004-semantic-e6468d63d6d1"
+    },
+    {
+      "proposalId": "schema-enrollment-choice-00005",
+      "kind": "action-schema",
+      "artifactId": "schema-enrollment-choice-00005",
+      "createdAt": "2026-09-08T13:45:01.069Z",
+      "compilerBatchId": "batch-a28585b1cf867f3e3a16-00005-executable-cf55bbf2a951"
+    }
+  ]
+}

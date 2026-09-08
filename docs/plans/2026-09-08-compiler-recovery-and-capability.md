@@ -13,7 +13,7 @@
 | T2 | T1 | 持久化账本页身份并诊断 coverage 变化 | 返回精确差分、同作用域 discovery、原 proposal ID 和一次修正 SOP；失败无部分 staging | 完成 |
 | T3 | T2 | 基于完整覆盖证明消解旧 accounting 义务 | 宿主验证每个旧单元和依赖；保留失败历史；跨源/跨批/缺单元/撤回依赖均不能通过 | 完成 |
 | T4 | T3 | 从实际工件生成编译状态 | source hash、版本、有效 completed set、stage counts、持久 blocker、run 与 candidate/closure 分别可见 | 完成 |
-| T5 | T0 | 增加来源独立的场景能力验收及受限返修诊断 | 入学 agency、空效果、规范适用域和知识 cut 分别检查；不足明确 blocked/unknown；不能由 schema 自证正确 | 待实施 |
+| T5 | T0 | 增加来源独立的场景能力验收及受限返修诊断 | 入学 agency、空效果、规范适用域和知识 cut 分别检查；不足明确 blocked/unknown；不能由 schema 自证正确 | 完成 |
 | T6 | T3 | 给 finish 跨文件副作用增加恢复回执 | 指纹绑定一次 finish；中断后幂等恢复 acceptance/review，checkpoint 必须有完成证明 | 待实施 |
 | T7 | T1–T6 | 集成回归、现场只读复核与实施结果记录 | 类型检查和相关/全量测试通过，提交逐项可审查；如实记录实际小说状态 | 待实施 |
 
@@ -36,3 +36,5 @@
 - 2026-09-08 16:18:42.222 UTC：在 T3 工作树上只读运行真实 p07 review，已从原审计 seq 395→412→413 验证完整 20 单元：19 来自 `acct-00007-p07b`，1 来自 `prop-norm-freedom-day-00007`。预览保存在 `run-records/2026-09-07-longzu1-full-rebuild/remediation-2026-09-08/coverage-preview.json`；未对真实小说使用 `--apply`，无新模型调用、checkpoint 或 candidate。
 - T4：增加 `nwh status --json --source <id>`；状态与编译器共享分组、批次身份和阶段顺序，检查原文与 segment manifest 是否一致，只统计当前版本/计划中的 checkpoint。候选归档、既存 closure、全书 readiness 分开显示。类型检查通过；状态、批次与分段的 53 项回归通过，另验证 candidate 存在但无 assessment 时明确输出 not-run。
 - 2026-09-08 16:29:48.422 UTC：实际 `status --json` 确认为 52/71、observation 23/23、semantic 23/23、executable 6/23、boundary 0/2；仅 p07 当前义务需要 host review。原文校验通过，无 compiler lock，无 candidate。只读状态保存在同一 remediation 目录的 `compiler-status.json`。
+- T5：新增只读 `review-scenes --spec <JSON>`。预期文件绑定独立来源审查身份、原文哈希和 exact anchors；事件效果与机制分别对照预期，使用真实范式解释器执行显式状态探针、规范时限和角色知识 cut。诊断生成限定阶段/工件/原文的返修任务，不提交世界事实。4 个相关测试文件共 18 项通过，类型检查通过；包含空 schema 自证陷阱、agency、合法无变化、未知状态、不存在的效果映射和知识隔离。
+- 2026-09-08 16:47 UTC：完成 5 项真实场景只读检查并保存 spec 与 review。入学和规范范围为 blocked，两起枪击为 unsupported（暂时失能概念需本体设计），知识 cut 为 unknown（缺获知操作及已确认 claim 身份）；命令按设计退出 2。独立审查由本次 Codex 原文阅读建立，尚无人类复核；规范时间是显式合成探针，不冒充实际 branch 时间。

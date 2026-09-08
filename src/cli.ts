@@ -10,6 +10,7 @@ import { ingestCommand, ingestContentCommand } from "./commands/ingest.js";
 import { statusCommand } from "./commands/status.js";
 import { reviewAccountingObligation } from "./compiler/accounting-review.js";
 import { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
+import { reviewScenesCommand } from "./commands/review-scenes.js";
 import { charactersCommand, instancesCommand, novelsCommand, progressCommand } from "./commands/catalog.js";
 import { resumeCommand } from "./commands/resume.js";
 import { playCommand } from "./commands/play.js";
@@ -77,6 +78,9 @@ function rootFor(options: { root?: string }): string {
 }
 
 const compilerObligations = program.command("compiler-obligations").description("Inspect durable compiler failures and review exact accounting coverage on the host");
+program.command("review-scenes").requiredOption("--spec <path>", "independent source-review JSON with exact evidence anchors")
+  .description("check pending/canonical scene capabilities without writing world truth; exits 2 for unresolved checks")
+  .action(async (options) => reviewScenesCommand(rootFor({}), options.spec));
 compilerObligations.command("inspect").requiredOption("--source <id>", "registered source ID").requiredOption("--batch <id>", "exact compiler batch ID")
   .action((options) => {
     const journal = new CompilerProposalObligations(rootFor({}), options.source, options.batch);

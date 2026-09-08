@@ -16,6 +16,13 @@ const ledgerSchema = z.object({
 }).strict();
 export type ProposalAttempt = z.infer<typeof attemptSchema>;
 
+export class CompilerHostReviewRequiredError extends Error {
+  constructor(detail: string) {
+    super(`Compiler proposal obligation requires host review: ${detail}. Do not retry in this or a fresh session; preserve drafts and request host adjudication.`);
+    this.name = "CompilerHostReviewRequiredError";
+  }
+}
+
 /** Compiler-lock-owned journal. Synchronous writes also cover synchronous Pi argument preflight. */
 export class CompilerProposalObligations {
   constructor(private readonly root: string, readonly sourceId: string, readonly batchId: string) {}
@@ -66,16 +73,30 @@ export class CompilerProposalObligations {
     for (const attempt of this.read().attempts) latest.set(JSON.stringify([attempt.tool, attempt.proposalId]), attempt);
     return [...latest.values()].filter((item) => item.status === "failed" || item.status === "running");
   }
+  requiringHostReview(): ProposalAttempt[] {
+    return this.unresolved().filter((item) => {
+      if (item.status === "running") return true;
+      const history = this.read(item).attempts;
+      const lastResolution = history.findLastIndex((attempt) => attempt.status === "succeeded" || attempt.status === "unsupported");
+      return new Set(history.slice(lastResolution + 1).filter((attempt) => attempt.status === "failed").map((attempt) => attempt.inputHash)).size >= 2;
+    });
+  }
+  /** Consult durable state before creating a model session, including after timeouts. */
+  assertModelRecoveryAllowed() {
+    const blocked = this.requiringHostReview();
+    if (blocked.length) throw new CompilerHostReviewRequiredError(blocked.map((item) =>
+      `${item.tool} proposal_id=${item.proposalId}: ${item.status === "running" ? "interrupted tool result" : "the original and corrected inputs both failed"}: ${item.diagnostic}`).join("\n"));
+  }
   assertRetryAllowed(tool: string, input: unknown) {
     const identity = CompilerProposalObligations.identity(tool, input);
     const history = this.read(identity).attempts;
     if (history.at(-1)?.status === "running") {
-      throw new Error("Compiler proposal obligation requires host review: interrupted tool result. Do not retry; the host must inspect durable drafts before resolving this attempt.");
+      throw new CompilerHostReviewRequiredError("interrupted tool result; the host must inspect durable drafts before resolving this attempt");
     }
     const lastResolution = history.findLastIndex((item) => item.status === "succeeded" || item.status === "unsupported");
     const failedInputs = new Set(history.slice(lastResolution + 1).filter((item) => item.status === "failed").map((item) => item.inputHash));
     if (failedInputs.size >= 2) {
-      throw new Error("Compiler proposal obligation requires host review: the original and corrected inputs both failed. Do not retry in this or a fresh session; preserve drafts and request host adjudication.");
+      throw new CompilerHostReviewRequiredError("the original and corrected inputs both failed");
     }
   }
   record(tool: string, input: unknown, status: ProposalAttempt["status"], diagnostic = "") {
@@ -91,6 +112,7 @@ export class CompilerProposalObligations {
     this.write(ledger);
   }
   assertFinishable() {
+    this.assertModelRecoveryAllowed();
     const pending = this.unresolved();
     if (!pending.length) return;
     throw new Error("Unresolved compiler proposal obligations (persisted across sessions):\n"

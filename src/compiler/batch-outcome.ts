@@ -1,3 +1,5 @@
+import { readNwhToolRecovery } from "../agent/tool-recovery.js";
+
 export type CompilerBatchOutcome = {
   assistantStopReason?: string;
   assistantErrorMessage?: string;
@@ -6,6 +8,7 @@ export type CompilerBatchOutcome = {
   completionSignaled: boolean;
   completionOutcome?: "complete" | "no-artifacts";
   blockedReason?: string;
+  hostReviewReason?: string;
   /** Compiler mutation/control calls that never received a tool result and were not superseded by a verified retry. */
   unresolvedToolCalls?: number;
   artifactCounts?: { world: number; annotations: number; resolutions: number; accounting: number };
@@ -27,6 +30,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
   let terminalFinishCallId: string | undefined;
   let completionOutcome: "complete" | "no-artifacts" | undefined;
   let blockedReason: string | undefined;
+  let hostReviewReason: string | undefined;
   let artifactCounts: CompilerBatchOutcome["artifactCounts"];
 
   for (const value of messages) {
@@ -79,6 +83,10 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     resultCallIds.add(message.toolCallId);
     const call = calls.get(message.toolCallId);
     const toolName = call?.toolName ?? (typeof message.toolName === "string" ? message.toolName : "");
+    const recovery = message.isError === true ? readNwhToolRecovery(message, toolName) : undefined;
+    if (recovery?.category === "host-repair-required" && !recovery.retryable) {
+      hostReviewReason = `${toolName}: ${recovery.retryCondition}`;
+    }
     const details = message.details && typeof message.details === "object" && !Array.isArray(message.details)
       ? message.details as Record<string, unknown>
       : undefined;
@@ -155,6 +163,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     completionSignaled: completionOutcome !== undefined,
     ...(completionOutcome ? { completionOutcome } : {}),
     ...(blockedReason ? { blockedReason } : {}),
+    ...(hostReviewReason ? { hostReviewReason } : {}),
     ...(unresolvedToolCalls ? { unresolvedToolCalls } : {}),
   };
 }
@@ -194,6 +203,7 @@ function proposalEnvelopeIdentity(argsValue: unknown): string | undefined {
 }
 
 export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | undefined {
+  if (outcome.hostReviewReason) return `compiler requires host review: ${outcome.hostReviewReason}`;
   if (outcome.blockedReason) return `compiler circuit breaker stopped the batch: ${outcome.blockedReason}`;
   if (outcome.assistantStopReason !== "stop") {
     const detail = outcome.assistantErrorMessage ? `: ${outcome.assistantErrorMessage}` : "";
@@ -222,6 +232,7 @@ export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | un
 }
 
 export function isRecoverableCompilerBatchInterruption(outcome: CompilerBatchOutcome): boolean {
+  if (outcome.hostReviewReason) return false;
   if (outcome.blockedReason) {
     // The tool-call breaker protects one model turn, not the immutable batch.
     // A fresh turn can hydrate the exact active drafts, reset the per-turn

@@ -27,6 +27,7 @@ import { characterGoalSchema, characterModelSchema } from "../src/world/actors.j
 import { SourceAccountingStore } from "../src/compiler/source-accounting.js";
 import { CompilerProposalService } from "../src/compiler/proposals.js";
 import { EntityResolutionStore } from "../src/compiler/entity-resolution.js";
+import { buildNwhToolRecoveryAdvice, NWH_TOOL_RECOVERY_MARKER } from "../src/agent/tool-recovery.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -207,6 +208,21 @@ describe("compiler batches", () => {
       completionSignaled: false,
     })).toBe(false);
     expect(isRecoverableCompilerBatchInterruption({ ...outcome, blockedReason: "proposal graph remains incomplete" })).toBe(false);
+  });
+
+  it.each(["details", "tagged-text"])("never recovers host review hidden behind successful drafts or a timeout (%s)", (encoding) => {
+    const advice = buildNwhToolRecoveryAdvice("account_source_units", "Compiler proposal obligation requires host review: corrected input failed.");
+    const outcome = compilerBatchOutcomeFromMessages([
+      { role: "toolResult", toolCallId: "failure", toolName: "account_source_units", isError: true,
+        ...(encoding === "details" ? { details: { nwhToolRecovery: advice } }
+          : { content: [{ type: "text", text: `${NWH_TOOL_RECOVERY_MARKER}\n${JSON.stringify(advice)}\n</nwh-tool-recovery>` }] }) },
+      { role: "toolResult", toolCallId: "valid", toolName: "propose_entity", isError: false },
+      { role: "assistant", stopReason: "error", errorMessage: "request timed out", content: [] },
+    ]);
+    expect(outcome.proposalSucceeded).toBe(1);
+    expect(compilerBatchFailure(outcome)).toContain("host review");
+    expect(isRecoverableCompilerBatchInterruption(outcome)).toBe(false);
+    expect(isRecoverableCompilerBatchInterruption({ ...outcome, blockedReason: "compiler tool-call safety fuse tripped" })).toBe(false);
   });
 
   it("treats a successful retry of the same proposal id as resolving its earlier tool error", () => {

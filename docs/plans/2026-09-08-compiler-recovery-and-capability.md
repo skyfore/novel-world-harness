@@ -8,8 +8,8 @@
 
 | ID | 依赖 | 技术任务 | 完成条件 | 状态 |
 | --- | --- | --- | --- | --- |
-| T0 | — | 固定案例、原始审计与技术计划 | timeline 与证据可追溯，历史和实施结果分离 | 进行中 |
-| T1 | T0 | 将需要宿主裁定的错误传递到调度器 | 工具结果或持久 journal 任一表明禁止重试，均不新建 recovery session；一次可修正失败仍可恢复 | 待实施 |
+| T0 | — | 固定案例、原始审计与技术计划 | timeline 与证据可追溯，历史和实施结果分离 | 完成，`867a887` |
+| T1 | T0 | 将需要宿主裁定的错误传递到调度器 | 工具结果或持久 journal 任一表明禁止重试，均不新建 recovery session；一次可修正失败仍可恢复 | 完成 |
 | T2 | T1 | 持久化账本页身份并诊断 coverage 变化 | 返回精确差分、同作用域 discovery、原 proposal ID 和一次修正 SOP；失败无部分 staging | 待实施 |
 | T3 | T2 | 基于完整覆盖证明消解旧 accounting 义务 | 宿主验证每个旧单元和依赖；保留失败历史；跨源/跨批/缺单元/撤回依赖均不能通过 | 待实施 |
 | T4 | T3 | 从实际工件生成编译状态 | source hash、版本、有效 completed set、stage counts、持久 blocker、run 与 candidate/closure 分别可见 | 待实施 |
@@ -30,3 +30,4 @@
 
 - 开始：确认分支 `codex/compiler-recovery-fixes`，当前 HEAD 与审计一致。未提交改动只有本案例的审计报告、证据快照、历史 guardian 原文与 issues 更新。
 - T0：写入案例与本计划；保存前一轮审计作为历史记录。
+- T1：宿主读取结构化 recovery 与旧 Pi tagged JSON；创建会话、处理报告、处理网络异常时均检查持久义务。修正 source/prompt recovery 中错误建议换 proposal ID 的文字。6 个相关测试文件、74 项测试通过；服务端 TypeScript 检查通过。回归直接确认原有 blocker 创建 0 次会话，运行中新 blocker 只创建 1 次，可纠正失败仍能创建第 2 次并完成。

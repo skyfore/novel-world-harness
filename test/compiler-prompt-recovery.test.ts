@@ -53,7 +53,7 @@ describe("compiler prompt recovery", () => {
     expect(createPiCompilerSession).toHaveBeenCalledTimes(2);
     expect(prompts[0]).toBe("Review this immutable reconciliation shard.");
     expect(prompts[1]).toContain("Compiler-prompt recovery attempt 1/3");
-    expect(prompts[1]).toContain("use fresh unique proposal_id values");
+    expect(prompts[1]).toContain("Repair persisted failures with the same exact tool and proposal_id");
     expect(prompts[1]).toContain("Review this immutable reconciliation shard.");
   });
 

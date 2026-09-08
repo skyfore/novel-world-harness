@@ -36,6 +36,34 @@ export type NwhToolRecoveryScope = {
   activeToolNames: readonly string[];
 };
 
+/** Read host-produced metadata; older Pi error paths preserve only its tagged JSON. */
+export function readNwhToolRecovery(result: { details?: unknown; content?: unknown }, toolName: string): NwhToolRecoveryAdvice | undefined {
+  const valid = (value: unknown): value is NwhToolRecoveryAdvice => {
+    if (!value || typeof value !== "object") return false;
+    const advice = value as NwhToolRecoveryAdvice;
+    return advice.version === NWH_TOOL_RECOVERY_VERSION && advice.failedTool === toolName
+      && typeof advice.category === "string" && typeof advice.retryable === "boolean"
+      && typeof advice.retryCondition === "string" && Array.isArray(advice.steps)
+      && advice.steps.every((step) => typeof step === "string");
+  };
+  if (result.details && typeof result.details === "object") {
+    const value = (result.details as Record<string, unknown>).nwhToolRecovery;
+    if (valid(value)) return value;
+  }
+  if (!Array.isArray(result.content)) return undefined;
+  for (const part of result.content) {
+    if (!part || part.type !== "text" || typeof part.text !== "string") continue;
+    const start = part.text.lastIndexOf(NWH_TOOL_RECOVERY_MARKER);
+    const end = part.text.indexOf(NWH_TOOL_RECOVERY_END_MARKER, start);
+    if (start < 0 || end < 0) continue;
+    try {
+      const value: unknown = JSON.parse(part.text.slice(start + NWH_TOOL_RECOVERY_MARKER.length, end));
+      if (valid(value)) return value;
+    } catch { /* An incomplete tag is not authoritative recovery metadata. */ }
+  }
+  return undefined;
+}
+
 type NwhToolResultRecovery = {
   content?: ToolResultEvent["content"];
   details?: unknown;

@@ -12,6 +12,7 @@ import {
 } from "./proposal-tools.js";
 import { SOURCE_EVIDENCE_TOOL_NAMES } from "./source-evidence-retrieval.js";
 import { CHAPTER_SPLIT_DISCOVERY_VERSION } from "./chapter-split.js";
+import { CompilerProposalObligations } from "./proposal-obligations.js";
 
 export const SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS = new Set(["propose_state_delta"]);
 export const BOUNDED_SLICE_DISABLED_TOOLS = new Set(SOURCE_EVIDENCE_TOOL_NAMES);
@@ -86,6 +87,9 @@ export function resolvePiCompilerSessionLifecycle(
 
 export async function createPiCompilerSession(options: PiCompilerOptions): Promise<PiAgentSession> {
   const lifecycle = resolvePiCompilerSessionLifecycle(options);
+  if (options.sourceId && options.compilerBatchId) {
+    new CompilerProposalObligations(options.root, options.sourceId, options.compilerBatchId).assertModelRecoveryAllowed();
+  }
   const workspace = await LocalFileWorkspace.create(options.root);
   const generatedBy: { provider?: string; model?: string } = {};
   if (options.profile?.provider) generatedBy.provider = options.profile.provider;

@@ -7,6 +7,7 @@ import { COMPILER_PROMPT_TIMEOUT_MS } from "../compiler/limits.js";
 import { loadConfig, profileForRole } from "../config/load.js";
 import { startElapsedStatus } from "../util/elapsed-status.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
+import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
 
 export type CompileCommandOptions = {
   root: string;
@@ -57,7 +58,10 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
   const profile = config ? profileForRole(config, "controller").profile : undefined;
   const printMode = options.prompt !== undefined;
   const maxAttempts = printMode ? MAX_COMPILER_PROMPT_RECOVERY_RETRIES + 1 : 1;
+  const obligations = options.sourceId && options.compilerBatchId
+    ? new CompilerProposalObligations(options.root, options.sourceId, options.compilerBatchId) : undefined;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    obligations?.assertModelRecoveryAllowed();
     let wroteText = false;
     let reasoningStreamed = false;
     let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
@@ -123,7 +127,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
       options.signal?.throwIfAborted();
       if (options.prompt !== undefined) {
         const recoveryPrefix = attempt
-          ? `Compiler-prompt recovery attempt ${attempt}/${MAX_COMPILER_PROMPT_RECOVERY_RETRIES}. The prior attempt ended with failed or interrupted proposal calls. Re-review the same immutable evidence. Failed or withdrawn envelope IDs may exist in rejected history, so use fresh unique proposal_id values while preserving intended stable artifact IDs. Repair only diagnosed defects, retain valid active drafts, and complete the finish handshake; never use no-artifacts merely to escape proposal or finish errors.\n\n`
+          ? `Compiler-prompt recovery attempt ${attempt}/${MAX_COMPILER_PROMPT_RECOVERY_RETRIES}. The prior attempt ended with failed or interrupted proposal calls. Re-review the same immutable evidence. Repair persisted failures with the same exact tool and proposal_id; changing IDs cannot clear an obligation. Use a fresh envelope ID only to replace an explicitly withdrawn successful draft, preserving its intended stable artifact ID. Repair only diagnosed defects, retain valid active drafts, and complete the finish handshake; never use no-artifacts merely to escape proposal or finish errors.\n\n`
           : "";
         elapsed = startElapsedStatus({
           label: "Compiler prompt",
@@ -141,6 +145,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
           wroteText = true;
         }
         const failure = compilerBatchFailure(report);
+        obligations?.assertModelRecoveryAllowed();
         if (failure) {
           if (attempt < MAX_COMPILER_PROMPT_RECOVERY_RETRIES && isRecoverableCompilerBatchInterruption(report)) {
             const message = `Compiler prompt had a recoverable interruption (${failure}); starting bounded recovery ${attempt + 1}/${MAX_COMPILER_PROMPT_RECOVERY_RETRIES}.`;

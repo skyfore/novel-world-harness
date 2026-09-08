@@ -16,6 +16,7 @@ import type { TraceContext } from "../trace/recorder.js";
 import { TraceRecorder } from "../trace/recorder.js";
 import { TraceStore } from "../trace/store.js";
 import { redactTraceSecrets } from "../trace/redaction.js";
+import { CompilerHostReviewRequiredError, CompilerProposalObligations } from "../compiler/proposal-obligations.js";
 
 export type CompileSourceOptions = {
   root: string;
@@ -49,6 +50,7 @@ const MAX_COMPILER_BATCH_RECOVERY_RETRIES = 3;
 
 export function isRecoverableCompilerSessionException(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+  if (error instanceof CompilerHostReviewRequiredError) return false;
   const message = error.message;
   if (/wall-clock limit|timed? out|timeout/i.test(message)) return true;
   if (error.name === "AbortError") return false;
@@ -120,7 +122,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           ? `Boundary calibration ${batch.ordinal + 1}/${context.totalBatches}`
           : `Compiler ${batch.semanticStage ?? "integrated"} batch ${batch.ordinal + 1}/${context.totalBatches}`;
       let activeBatch = batch;
+      const obligations = new CompilerProposalObligations(options.root, batch.sourceId, batch.id);
       for (let attempt = 0; ; attempt += 1) {
+        obligations.assertModelRecoveryAllowed();
         options.onStatus?.(`${label} · creating model session${attempt ? ` · recovery ${attempt}/${MAX_COMPILER_BATCH_RECOVERY_RETRIES}` : ""}`);
         let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
         let modelTextStreamed = false;
@@ -216,6 +220,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           }
           if (!options.onModelText && !options.onModelEvent && report.text && !report.text.endsWith("\n")) stdout.write("\n");
           const failure = compilerBatchFailure(report);
+          obligations.assertModelRecoveryAllowed();
           if (!failure) {
             const message = `Compiler batch ${batch.ordinal + 1} finish handshake verified; `
               + `${report.proposalSucceeded} active proposal(s) remain pending deterministic convergence.`
@@ -237,7 +242,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
               && report.proposalFailed > 0;
             const recoveryInstruction = abandonedNoArtifactsReview
               ? `The prior attempt abandoned ${report.proposalFailed} failed proposal call(s) and left no active drafts. `
-                + "Re-review every supplied evidence segment from the beginning. Failed or withdrawn envelope IDs may now exist in rejected history, so use fresh unique proposal_id values while preserving each intended stable annotation_id or payload id. "
+                + "Re-review every supplied evidence segment from the beginning. Resolve persisted failures using the same exact tool and proposal_id; changing IDs cannot clear an obligation. Use a fresh envelope ID only when replacing an explicitly withdrawn successful draft, preserving its intended stable annotation_id or payload id. "
                 + "Repair only diagnosed defects, retain all other valid work, and finish with outcome=complete whenever any valid proposal remains; never use no-artifacts merely to escape proposal or finish errors. "
               : "Recover the exact active current-batch proposals shown below instead of duplicating them. Preserve unrelated valid drafts, repair only diagnosed defects, and use outcome=complete whenever any active draft remains. ";
             activeBatch = {
@@ -256,6 +261,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           // this batch once in a fresh session, just like a report-level
           // provider interruption or host-owned runaway safety fuse.
           options.signal?.throwIfAborted();
+          obligations.assertModelRecoveryAllowed();
           if (attempt < MAX_COMPILER_BATCH_RECOVERY_RETRIES && isRecoverableCompilerSessionException(error)) {
             const failure = error instanceof Error ? error.message : String(error);
             const message = `Compiler batch ${batch.ordinal + 1} had a recoverable session interruption (${failure}); `

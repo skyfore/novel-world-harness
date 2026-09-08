@@ -17,6 +17,7 @@ import { TraceRecorder } from "../trace/recorder.js";
 import { TraceStore } from "../trace/store.js";
 import { redactTraceSecrets } from "../trace/redaction.js";
 import { CompilerHostReviewRequiredError, CompilerProposalObligations } from "../compiler/proposal-obligations.js";
+import { CompilerFinishReceipts, finishHostError } from "../compiler/finish-receipts.js";
 
 export type CompileSourceOptions = {
   root: string;
@@ -105,6 +106,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
   const profile = config ? profileForRole(config, "extractor").profile : undefined;
   const result = await runCompilerBatches({
     workspaceRoot: options.root,
+    requireFinishReceipt: true,
     source,
     ...(options.maxBatches !== undefined ? { maxBatches: options.maxBatches } : {}),
     resume: options.resume ?? true,
@@ -125,6 +127,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
       const obligations = new CompilerProposalObligations(options.root, batch.sourceId, batch.id);
       for (let attempt = 0; ; attempt += 1) {
         obligations.assertModelRecoveryAllowed();
+        if (await new CompilerFinishReceipts(options.root, batch.sourceId, batch.id).read()) throw finishHostError("resume the saved finish through the host before model recovery");
         options.onStatus?.(`${label} · creating model session${attempt ? ` · recovery ${attempt}/${MAX_COMPILER_BATCH_RECOVERY_RETRIES}` : ""}`);
         let elapsed: ReturnType<typeof startElapsedStatus> | undefined;
         let modelTextStreamed = false;

@@ -1,4 +1,6 @@
 import { CompilerProposalObligations } from "./proposal-obligations.js";
+import { CompilerFinishReceipts } from "./finish-receipts.js";
+import { recoverCompilerFinish } from "./finish-recovery.js";
 import { chapterMetadataForSegments, groupCompilerSegments, requiresStructureDiscovery, sourceBatchId, COMPILER_SEMANTIC_STAGES, type CompilerSemanticStage } from "./batch-plan.js";
 export { COMPILER_SEMANTIC_STAGES, type CompilerSemanticStage } from "./batch-plan.js";
 import crypto from "node:crypto";
@@ -601,12 +603,15 @@ export async function runCompilerBatches(options: {
   batchIds?: readonly string[];
   promptTransform?: (prompt: string, batch: CompilerBatch) => string;
   onProgress?: (message: string) => void;
+  /** Required by production model runners; pure host fixture runners may omit it. */
+  requireFinishReceipt?: boolean;
 }): Promise<{ total: number; completed: number; skipped: number; remaining: number }> {
   const store = new CompilerBatchStore(options.workspaceRoot);
   const boundaryStore = new BoundaryCalibrationStore(options.workspaceRoot);
   const workspace = await WorkspaceStore.create(options.workspaceRoot);
   let activeSource = await workspace.getSource(options.source.id) ?? options.source;
   if (options.resume === false) {
+    await CompilerFinishReceipts.archiveSource(options.workspaceRoot, options.source.id, "Explicit compiler resume=false checkpoint reset");
     await Promise.all([store.reset(options.source.id), boundaryStore.reset(options.source.id)]);
   }
   const initialProgress = await store.read(options.source.id);
@@ -647,16 +652,19 @@ export async function runCompilerBatches(options: {
         : "compiler batch";
     options.onProgress?.(`${label} ${batch.ordinal + 1}/${batches.length}: ${batch.startLine}-${batch.endLine}`);
     const hydrated = await hydrateCompilerBatch(options.workspaceRoot, batch);
-    await options.runner(
-      options.promptTransform ? { ...hydrated, prompt: options.promptTransform(hydrated.prompt, hydrated) } : hydrated,
-      { totalBatches: batches.length },
-    );
+    const recovered = options.requireFinishReceipt && await recoverCompilerFinish(options.workspaceRoot, batch.sourceId, batch.id);
+    if (recovered) options.onProgress?.(`Recovered verified finish for ${batch.id} without a model session.`);
+    else await options.runner(
+        options.promptTransform ? { ...hydrated, prompt: options.promptTransform(hydrated.prompt, hydrated) } : hydrated,
+        { totalBatches: batches.length },
+      );
     if (batch.purpose === "structure-discovery") {
       const plan = await new ChapterSplitPlanStore(options.workspaceRoot).read(options.source.id);
       if (!plan || plan.sourceSha256 !== options.source.contentSha256) {
         throw new Error(`Chapter structure discovery ${batch.id} did not commit a validated split plan.`);
       }
     }
+    if (options.requireFinishReceipt) await new CompilerFinishReceipts(options.workspaceRoot, batch.sourceId, batch.id).assertCompleted();
     await store.markComplete(options.source.id, batch.id);
     completedIds.add(batch.id);
     completed += 1;

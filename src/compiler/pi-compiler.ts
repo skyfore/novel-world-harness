@@ -13,6 +13,7 @@ import {
 import { SOURCE_EVIDENCE_TOOL_NAMES } from "./source-evidence-retrieval.js";
 import { CHAPTER_SPLIT_DISCOVERY_VERSION } from "./chapter-split.js";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
+import { CompilerFinishReceipts, finishHostError } from "./finish-receipts.js";
 
 export const SOURCE_BATCH_DISABLED_PROPOSAL_TOOLS = new Set(["propose_state_delta"]);
 export const BOUNDED_SLICE_DISABLED_TOOLS = new Set(SOURCE_EVIDENCE_TOOL_NAMES);
@@ -89,6 +90,7 @@ export async function createPiCompilerSession(options: PiCompilerOptions): Promi
   const lifecycle = resolvePiCompilerSessionLifecycle(options);
   if (options.sourceId && options.compilerBatchId) {
     new CompilerProposalObligations(options.root, options.sourceId, options.compilerBatchId).assertModelRecoveryAllowed();
+    if (await new CompilerFinishReceipts(options.root, options.sourceId, options.compilerBatchId).read()) throw finishHostError("resume the durable finish before creating a model session");
   }
   const workspace = await LocalFileWorkspace.create(options.root);
   const generatedBy: { provider?: string; model?: string } = {};

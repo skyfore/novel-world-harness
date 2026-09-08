@@ -1,4 +1,5 @@
 import { eventExecutionSchema } from "../world/event-execution.js";
+import { CompilerFinishReceipts } from "./finish-receipts.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -1074,6 +1075,7 @@ export class PreparedNovelCache {
     if (bundle.source.titleInference) {
       await this.assertTitleInferenceEvidence(bundle);
     }
+    await CompilerFinishReceipts.archiveSource(this.workspaceRoot, sourceId, `Materialize prepared revision ${contentHash(bundle)}; exact=${exact}`);
     await workspace.replaceSourceTitleInference(sourceId, bundle.source.titleInference ?? null);
     const canonical = new CanonicalModelStore(this.workspaceRoot);
     const actors = new ActorModelStore(this.workspaceRoot);

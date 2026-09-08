@@ -8,6 +8,7 @@ import { compileSourceCommand } from "../src/commands/compile-source.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { CompilerBatchStore, prepareCompilerBatches } from "../src/compiler/batches.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 
 const roots: string[] = [];
 beforeEach(() => createPiCompilerSession.mockReset());
@@ -28,6 +29,11 @@ it.each(["persisted", "timeout", "report", "correctable"])("gates session creati
       if (mode === "timeout") { journal.record("account_source_units", { proposal_id: "old-page" }, "running"); throw new Error("request timed out"); }
       if (mode === "correctable" && calls === 2) {
         journal.record("account_source_units", { proposal_id: "old-page", page: 2 }, "succeeded");
+        const tools = createCompilerProposalToolset(root);
+        await tools.beginBatch(batch.segmentIds, batch.id, source.id);
+        await tools.tools.find((tool) => tool.name === "finish_compiler_batch")!.execute("finish", {
+          outcome: "no-artifacts", reviewed_segments: batch.segmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "Background only" })), summary: "Reviewed",
+        }, undefined, undefined, {} as never);
         return { assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" };
       }
       if (mode === "correctable") fail(1);

@@ -9,6 +9,7 @@ import { CanonicalModelStore } from "../src/world/canonical-model.js";
 import { withNwhToolRecovery } from "../src/agent/tool-recovery.js";
 import { ensureSourceStructure } from "../src/compiler/structure.js";
 import { createEvidenceFixture } from "./helpers/evidence.js";
+import { recoverCompilerFinish } from "../src/compiler/finish-recovery.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))); });
@@ -32,5 +33,7 @@ it("requires full source reading and the real finish handshake before persisting
   const finished = await call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [], summary: "Independent whole-source character review complete" });
   expect(finished.isError).not.toBe(true);
   expect((await new RoleRosterStore(root).read(fixture.source.id))?.reviews).toHaveLength(1);
-  await expect(call("propose_role_roster_review", { subjectHash: data.subjectHash, entries: [] })).rejects.toThrow("Do not retry in this scope");
+  await expect(recoverCompilerFinish(root, fixture.source.id, `role-roster-${fixture.source.id}-review-1`)).resolves.toBe(true);
+  expect((await new RoleRosterStore(root).read(fixture.source.id))?.reviews).toHaveLength(1);
+  await expect(call("propose_role_roster_review", { subjectHash: data.subjectHash, entries: [] })).rejects.toThrow("freezes this batch");
 });

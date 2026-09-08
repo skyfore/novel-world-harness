@@ -1,6 +1,7 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 import { WorkspaceStore } from "../storage/workspace-store.js";
 import { readSourceMaterial } from "../storage/source-material-store.js";
 import { CanonicalModelStore } from "../world/canonical-model.js";
@@ -92,12 +93,19 @@ export function createRoleRosterTools(root: string, scope: () => { sourceId?: st
   return {
     tools,
     pendingId: () => pending ? `role-review-${pending.runId}` : undefined,
+    snapshot: () => pending ? structuredClone(pending) : undefined,
+    restore(review: RoleRosterReview) { pending = roleRosterReviewSchema.parse(review); },
     async commit() {
       if (!pending) {
         if (scope().batchId?.startsWith(`role-roster-${scope().sourceId}-`)) throw new Error("Dedicated role review requires a complete captured review before finish.");
         return;
       }
       const current = await loadCurrentRoleRoster(root, active().sourceId);
+      const saved = current.roster.reviews.find((review) => review.runId === pending!.runId);
+      if (saved) {
+        if (!isDeepStrictEqual(saved, pending)) throw new Error("Compiler finish requires host review: persisted role review differs from the prepared finish. Stop model retries.");
+        return;
+      }
       await new RoleRosterStore(root).review(current.roster, pending);
     },
     reset() { snapshot = undefined; pages = []; visited.clear(); pending = undefined; },

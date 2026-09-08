@@ -368,6 +368,7 @@ export function buildNwhToolRecoveryAdvice(
   }
 
   if (lower.startsWith("compiler proposal obligation requires host review")
+    || lower.startsWith("compiler finish requires host review")
     || lower.startsWith("compiler accounting page scope mismatch")
     || lower.startsWith("accounting page is missing or already consumed")) {
     return {

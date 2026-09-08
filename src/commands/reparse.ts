@@ -25,6 +25,7 @@ import { SourceAnnotationStore, annotationAnchors } from "../compiler/annotation
 import { EntityResolutionStore } from "../compiler/entity-resolution.js";
 import { EventResolutionStore } from "../compiler/event-resolution.js";
 import { SourceAccountingStore } from "../compiler/source-accounting.js";
+import { CompilerFinishReceipts } from "../compiler/finish-receipts.js";
 import { ensureSourceStructure } from "../compiler/structure.js";
 import { EvidenceAssertionStore } from "../compiler/evidence-assertions.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
@@ -179,6 +180,7 @@ export async function reparseCommand(
 
   try {
     options.onStatus?.("Invalidating selected preparation artifacts");
+    await CompilerFinishReceipts.archiveSource(root, source.id, `Explicit reparse ${runId}; rollback baseline ${previousBundleHash}`, selectedBatchIds);
     await new CompilerBatchStore(root).markIncomplete(source.id, selectedBatchIds);
     const invalidated = await invalidatePreparationArtifacts(root, source.id, selected, Boolean(options.all), new Set(repair.affectedNodeKeys));
     for (const batchId of selectedBatchIds) await rejectPendingCompilerBatchProposals(root, batchId);

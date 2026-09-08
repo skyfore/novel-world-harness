@@ -45,6 +45,7 @@ import {
   type ChapterSplitPlan,
 } from "./chapter-split.js";
 import { EvidenceVerifier } from "./evidence.js";
+import { CompilerFinishReceipts, finishHostError } from "./finish-receipts.js";
 import {
   jsonPointerExists,
   modelEvidenceSelectorsSchema,
@@ -974,6 +975,7 @@ function safeTextSuffix(text: string, maxChars: number): string {
 export function createCompilerProposalToolset(
   workspaceRoot: string,
   generatedBy: { provider?: string; model?: string } = {},
+  hostOptions: { recoverPreparedFinish?: boolean } = {},
 ): CompilerProposalToolset {
   const service = new CompilerProposalService(workspaceRoot);
   const annotationStore = new SourceAnnotationStore(workspaceRoot);
@@ -997,6 +999,7 @@ export function createCompilerProposalToolset(
   let pendingChapterSplitPlan: ChapterSplitPlan | undefined;
   let pendingNovelTitleProposal: SourceTitleProposal | undefined;
   let finished = false;
+  let finishFrozen = false;
   let priorStageCoverage: Promise<AccountingCoverage> | undefined;
   const roleRosterTools = createRoleRosterTools(workspaceRoot, () => ({ sourceId: activeSourceId, batchId: compilerBatchId, finished }));
   let circuitBreak: { reason: string; failureCount: number } | undefined;
@@ -2660,11 +2663,14 @@ export function createCompilerProposalToolset(
   }, { additionalProperties: false });
   const obligations = () => activeSourceId && compilerBatchId
     ? new CompilerProposalObligations(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+  const finishReceipts = () => activeSourceId && compilerBatchId
+    ? new CompilerFinishReceipts(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
   const trackProposal = (tool: ToolDefinition): ToolDefinition => {
     if (!tool.name.startsWith("propose_") && tool.name !== "account_source_units") return tool;
     return {
       ...tool,
       prepareArguments(raw) {
+        if (finishFrozen) throw finishHostError("a prepared finish freezes this batch's mutation set");
         if (!obligations()) return (tool.prepareArguments ? tool.prepareArguments(raw) : raw) as never;
         obligations()?.assertRetryAllowed(tool.name, raw);
         try {
@@ -2712,6 +2718,9 @@ export function createCompilerProposalToolset(
       const blocked = beginToolCall("finish");
       if (blocked) return blocked;
       obligations()?.assertFinishable();
+      const existingFinish = await finishReceipts()?.read();
+      if (existingFinish && !hostOptions.recoverPreparedFinish) throw finishHostError("a prepared finish must be resumed by the host");
+      if (existingFinish && !isDeepStrictEqual(existingFinish.identity.input, input)) throw finishHostError("the original finish input is frozen");
       const listed = [...successfulProposalIds].sort();
       const listedAnnotations = [...successfulAnnotationProposalIds].sort();
       const listedEntityResolutions = [...successfulEntityResolutionProposalIds].sort();
@@ -2978,6 +2987,18 @@ export function createCompilerProposalToolset(
         ),
       ];
       if (validationSections.length) return failFinish(validationSections.join("\n\n"));
+      const receipts = finishReceipts();
+      const finishSource = activeSourceId ? await WorkspaceStore.openReadOnly(workspaceRoot).getSource(activeSourceId) : undefined;
+      const receipt = receipts && finishSource && compilerBatchId ? await receipts.prepare({
+        version: 1, sourceId: finishSource.id, sourceSha256: finishSource.contentSha256, batchId: compilerBatchId,
+        input, segments: validatedSourceSegments,
+        dependencies: await receipts.dependencies({ world: listed, annotation: listedAnnotations,
+          "entity-resolution": listedEntityResolutions, "event-resolution": listedEventResolutions, accounting: listedAccounting }),
+        metadata: { ...(pendingNovelTitleProposal ? { title: pendingNovelTitleProposal } : {}),
+          ...(pendingChapterSplitPlan ? { chapterSplit: pendingChapterSplitPlan } : {}),
+          ...(roleRosterTools.snapshot() ? { roleReview: roleRosterTools.snapshot() } : {}) },
+      }) : undefined;
+      finishFrozen = Boolean(receipt);
       await roleRosterTools.commit();
       if (pendingChapterSplitPlan) {
         if (!activeSourceId) return failFinish("Structure discovery lost its active source identity.");
@@ -2992,8 +3013,12 @@ export function createCompilerProposalToolset(
       }
       if (pendingNovelTitleProposal) {
         if (!activeSourceId) return failFinish("Novel-title proposal lost its active source identity.");
-        await (await WorkspaceStore.create(workspaceRoot))
-          .commitSourceTitleProposal(activeSourceId, pendingNovelTitleProposal.proposalId);
+        const workspace = await WorkspaceStore.create(workspaceRoot), source = await workspace.getSource(activeSourceId);
+        const inference = source?.titleInference;
+        if (inference && !source.pendingTitleProposal) {
+          if (inference.title !== pendingNovelTitleProposal.title || !isDeepStrictEqual(inference.evidence, pendingNovelTitleProposal.evidence)
+            || !isDeepStrictEqual(inference.generatedBy, pendingNovelTitleProposal.generatedBy)) throw finishHostError("accepted novel title differs from the original finish");
+        } else await workspace.commitSourceTitleProposal(activeSourceId, pendingNovelTitleProposal.proposalId);
       }
       if (activeSourceId && listedAnnotations.length) {
         await annotationStore.commitProposals(activeSourceId, listedAnnotations);
@@ -3035,6 +3060,7 @@ export function createCompilerProposalToolset(
         resolutions: listedEntityResolutions.length + listedEventResolutions.length,
         accounting: listedAccounting.length,
       };
+      if (receipts && receipt) await receipts.complete(receipt.fingerprint);
       finished = true;
       return {
         content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}). World proposals: ${artifactCounts.world}; accounting proposals: ${artifactCounts.accounting}. This checkpoint does not certify executable closure or playability.` }],
@@ -3059,7 +3085,15 @@ export function createCompilerProposalToolset(
       withdrawTool,
       replaceBoundaryTool,
       finishTool,
-    ].map(trackProposal),
+    ].map(trackProposal).map((tool) => ({ ...tool, async execute(id, input, signal, onUpdate, context) {
+      if (tool.name !== "finish_compiler_batch" && /^(?:propose_|account_source_units$|withdraw_|configure_|defer_|replace_)/u.test(tool.name)
+        && await finishReceipts()?.read()) throw finishHostError("a prepared finish freezes this batch's mutation set");
+      try { return await tool.execute(id, input, signal, onUpdate, context); }
+      catch (error) {
+        if (tool.name === "finish_compiler_batch" && await finishReceipts()?.read()) throw finishHostError(String(error));
+        throw error;
+      }
+    } })),
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
       priorStageCoverage = undefined;
       roleRosterTools.reset();
@@ -3074,9 +3108,15 @@ export function createCompilerProposalToolset(
       validatedSourceSegments = [];
       compilerBatchId = nextCompilerBatchId;
       activeSourceId = sourceId;
+      const resumingFinish = await finishReceipts()?.read();
+      finishFrozen = Boolean(resumingFinish);
+      if (resumingFinish) await finishReceipts()!.verify(resumingFinish);
       activeBoundaryCalibration = undefined;
       pendingChapterSplitPlan = undefined;
       pendingNovelTitleProposal = undefined;
+      if (resumingFinish?.identity.metadata.title) pendingNovelTitleProposal = resumingFinish.identity.metadata.title;
+      if (resumingFinish?.identity.metadata.chapterSplit) pendingChapterSplitPlan = resumingFinish.identity.metadata.chapterSplit;
+      if (resumingFinish?.identity.metadata.roleReview) roleRosterTools.restore(resumingFinish.identity.metadata.roleReview);
       finished = false;
       circuitBreak = undefined;
       totalFinishFailures = 0;
@@ -3100,13 +3140,18 @@ export function createCompilerProposalToolset(
           new SegmentStore(workspaceRoot).readManifest(activeSourceId),
           segmentSource(workspaceRoot, source),
         ]);
-        if (!persistedManifest || !isDeepStrictEqual(persistedManifest, derivedManifest)) {
+        const partialStructureFinish = hostOptions.recoverPreparedFinish && resumingFinish?.identity.metadata.chapterSplit;
+        const preparedManifest = partialStructureFinish ? await segmentSource(workspaceRoot, source, { chapterSplitPlan: partialStructureFinish }) : undefined;
+        if (!persistedManifest || (!isDeepStrictEqual(persistedManifest, derivedManifest) && !isDeepStrictEqual(persistedManifest, preparedManifest))) {
           throw new Error(`Source evidence index for ${activeSourceId} is missing or stale; re-ingest/reparse before compilation.`);
         }
-        const byId = new Map(derivedManifest.segments.map((segment) => [segment.id, segment]));
+        // A structure finish may already have installed its new manifest. Its
+        // frozen source-verified segments retain the original review scope.
+        const reviewSegments = resumingFinish?.identity.segments ?? derivedManifest.segments;
+        const byId = new Map(reviewSegments.map((segment) => [segment.id, segment]));
         const missing = expectedSegmentIds.filter((id) => !byId.has(id));
         if (missing.length) throw new Error(`Active compiler slice references unknown segment(s): ${missing.join(", ")}.`);
-        validatedSourceSegments = structuredClone(derivedManifest.segments);
+        validatedSourceSegments = structuredClone(reviewSegments);
         boundedSliceSegments = expectedSegmentIds.map((id) => structuredClone(byId.get(id)!));
       }
       if (compilerBatchId && activeSourceId) {
@@ -3126,7 +3171,7 @@ export function createCompilerProposalToolset(
             throw new Error(`Boundary calibration ${compilerBatchId} requires exactly: ${calibrationSegmentIds.join(", ")}.`);
           }
         }
-        if (!activeBoundaryCalibration && compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
+        if (!resumingFinish && !activeBoundaryCalibration && compilerBatchId.startsWith(`batch-${activeSourceId}-`)) {
           // A retry must not inherit a request made by an attempt that never
           // reached the finish/checkpoint handshake. The model decides again
           // from the frozen evidence slice in this fresh turn.

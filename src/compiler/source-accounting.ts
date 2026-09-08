@@ -210,6 +210,12 @@ export class SourceAccountingStore {
       unitDecisions: input.unitDecisions ?? [],
     });
     const current = await this.read(input.source.id);
+    const sameBatch = current?.batchReviews.find((candidate) => candidate.batchId === input.batchId);
+    if (current?.sourceSha256 === input.source.contentSha256 && current.structureVersion === input.structure.structureVersion && sameBatch) {
+      const { reviewedAt: _oldTime, ...oldContent } = sameBatch;
+      const { reviewedAt: _newTime, ...newContent } = review;
+      if (canonicalJson(oldContent) === canonicalJson(newContent)) return current;
+    }
     const priorReviews = current
       && current.sourceSha256 === input.source.contentSha256
       && current.structureVersion === input.structure.structureVersion

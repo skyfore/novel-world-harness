@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { prepareCompilerBatches } from "../src/compiler/batches.js";
 import { CompilerBatchStore } from "../src/compiler/batch-progress.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
+import { recoverCompilerFinish } from "../src/compiler/finish-recovery.js";
 import { SegmentStore } from "../src/compiler/segments.js";
 import { SourceAccountingStore, sourceUnitReviewRange } from "../src/compiler/source-accounting.js";
 import { baseStructuralUnits, ensureSourceStructure } from "../src/compiler/structure.js";
@@ -13,6 +14,7 @@ import { createEvidenceFixture } from "./helpers/evidence.js";
 import { CompilerAccountingPages } from "../src/compiler/accounting-pages.js";
 import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { withNwhToolRecovery } from "../src/agent/tool-recovery.js";
+import { worldStorageRoot } from "../src/world/paths.js";
 
 const roots: string[] = [];
 
@@ -355,25 +357,10 @@ describe("source-unit accounting tools", () => {
 
     const accounting = new SourceAccountingStore(root);
     // Simulate a process failure after proposal acceptance but before the
-    // final accounting manifest write. A fresh session must hydrate accepted
-    // decisions and recreate the marker without asking for duplicate drafts.
+    // final accounting manifest write. Host recovery must hydrate accepted
+    // decisions and replay the original finish without duplicate drafts.
     await accounting.remove(fixture.source.id);
-    const retry = createCompilerProposalToolset(root, { provider: "test", model: "accounting-model" });
-    await retry.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
-    await expect(retry.tools.find((candidate) => candidate.name === "finish_compiler_batch")!.execute(
-      "finish-after-marker-loss",
-      {
-        outcome: "complete",
-        reviewed_segments: reviewedSegments,
-        summary: "Recovered the final marker from already accepted accounting decisions.",
-      } as never,
-      undefined,
-      undefined,
-      {} as never,
-    )).resolves.toMatchObject({
-      details: { compilerBatchFinished: true },
-      terminate: true,
-    });
+    await expect(recoverCompilerFinish(root, fixture.source.id, batch.id)).resolves.toBe(true);
 
     const summary = await accounting.summarize(
       await ensureSourceStructure(root, fixture.source),
@@ -382,10 +369,12 @@ describe("source-unit accounting tools", () => {
     expect(summary.blockingUnits).toBe(0);
     expect(summary.statusCounts["background-only"]).toBe(summary.totalUnits);
 
-    // A later recovery may add exact semantics that overlap decisions which
-    // were valid when the accounting proposals were first accepted. The host
-    // must project those units as represented without mutating or replaying a
-    // conflicting model disposition.
+    // Legacy workspaces predating finish receipts retain the old projection
+    // recovery path. Remove only this synthetic fixture's new receipt to
+    // model that historical input; production recovery must never erase it.
+    await fs.rm(path.join(worldStorageRoot(root), "compiler", "finish-receipts"), { recursive: true });
+    // Later exact semantics can overlap those legacy accepted decisions;
+    // their projection must preserve history without replaying a conflict.
     await accounting.remove(fixture.source.id);
     const semanticRetry = createCompilerProposalToolset(root, {
       provider: "test",

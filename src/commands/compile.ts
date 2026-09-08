@@ -8,6 +8,7 @@ import { loadConfig, profileForRole } from "../config/load.js";
 import { startElapsedStatus } from "../util/elapsed-status.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
+import { recoverCompilerFinish } from "../compiler/finish-recovery.js";
 
 export type CompileCommandOptions = {
   root: string;
@@ -53,6 +54,11 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(options.root, "compiler", () =>
       compileCommand({ ...options, acquireLock: false }));
+  }
+  if (options.sourceId && options.compilerBatchId && await recoverCompilerFinish(options.root, options.sourceId, options.compilerBatchId)) {
+    const message = `Recovered the verified finish for ${options.compilerBatchId} without a model session.`;
+    if (options.onProgress) options.onProgress(message); else stdout.write(`${message}\n`);
+    return;
   }
   const config = await optionalConfig(options);
   const profile = config ? profileForRole(config, "controller").profile : undefined;

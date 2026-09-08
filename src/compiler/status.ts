@@ -12,6 +12,7 @@ import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 import { SegmentStore, SEGMENTER_VERSION, segmentSource } from "./segments.js";
 import { currentCompilerFingerprint, PreparedNovelCache } from "./prepared-cache.js";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
+import { CompilerFinishReceipts } from "./finish-receipts.js";
 
 /** This path uses only peeks: no model sessions, locks, migration, assessment writes or checkpoint repair. */
 export async function inspectCompilerStatus(root: string, sourceId?: string) {
@@ -69,6 +70,14 @@ async function inspectSource(root: string, source: SourceDocument) {
   try { revisions = await new PreparedNovelCache(root).peekArchivedRevisions(source); }
   catch (error) { candidateInspection = "unknown"; diagnostics.push(`Candidate inspection: ${String(error)}`); }
   const finalProgress = await batches.readPersisted(source.id);
+  let finishReceipts: Array<{ batchId: string; state: string; preparedAt: string; completedAt: string | null; fingerprint: string; checkpointed: boolean; recoveryRequired: boolean }> = [];
+  let finishInspection: "verified" | "unknown" = "verified";
+  try {
+    finishReceipts = (await CompilerFinishReceipts.list(root, source.id)).map((receipt) => ({
+      batchId: receipt.identity.batchId, state: receipt.state, preparedAt: receipt.preparedAt, completedAt: receipt.completedAt ?? null,
+      fingerprint: receipt.fingerprint, checkpointed: completed.has(receipt.identity.batchId), recoveryRequired: !completed.has(receipt.identity.batchId),
+    }));
+  } catch (error) { finishInspection = "unknown"; diagnostics.push(`Finish receipt inspection: ${String(error)}`); }
   return {
     sourceId: source.id, sourcePath: source.sourcePath, sourceSha256: source.contentSha256, bytes: source.bytes, sourceIntegrity,
     persistedPipelineVersion: persisted?.pipelineVersion ?? null, effectivePipelineVersion: progress.pipelineVersion,
@@ -80,7 +89,7 @@ async function inspectSource(root: string, source: SourceDocument) {
     remainingBatches: planAvailable ? plan.length - completed.size : null,
     batchReviewComplete: planAvailable && plan.length > 0 && completed.size === plan.length && obligations.length === 0,
     nextUncheckpointedBatch: plan.find((batch) => !completed.has(batch.id))?.id ?? null,
-    obligations, worldProposalInventory: Object.fromEntries(inventory),
+    obligations, finish: { inspection: finishInspection, receipts: finishReceipts, interpretation: "Receipt checksums only; host recovery revalidates dependencies and the original finish before checkpointing." }, worldProposalInventory: Object.fromEntries(inventory),
     latestRun: latestRun ? { id: latestRun.id, startedAt: latestRun.startedAt, endedAt: latestRun.endedAt ?? null, status: latestRun.status,
       counts: latestRun.counts, usage: latestRun.usage, model: model ? { provider: model.providerId, id: model.modelId, thinking: model.thinkingLevel } : null,
       error: latestRun.error ?? null } : null,

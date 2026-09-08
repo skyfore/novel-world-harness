@@ -739,6 +739,12 @@ describe("versioned prepared novel cache", () => {
     vi.mocked(PreparedNovelCache.prototype.publish).mockRestore();
     const candidate = await cache.archiveCandidate(fixture.source);
     expect(candidate.bundleHash).not.toBe(published.bundleHash);
+    const activeBefore = await fs.readFile(path.join(cacheRoot, candidate.contentMd5, "active.json"), "utf8");
+    const inventory = await cache.peekArchivedRevisions(fixture.source);
+    expect(inventory).toContainEqual(expect.objectContaining({ bundleHash: candidate.bundleHash, active: false,
+      closure: expect.objectContaining({ recorded: false, status: "not-run" }), fullNovelReady: null }));
+    expect(inventory).toContainEqual(expect.objectContaining({ bundleHash: published.bundleHash, active: true }));
+    expect(await fs.readFile(path.join(cacheRoot, candidate.contentMd5, "active.json"), "utf8")).toBe(activeBefore);
     await cache.restoreCompilerCheckpoint(fixture.source, candidate.bundleHash!);
     expect((await cache.loadFreshActive(fixture.source))?.bundleHash).toBe(published.bundleHash);
     const revised = await cache.publish(fixture.source);

@@ -181,9 +181,9 @@ export class SegmentStore {
 export async function segmentSource(
   workspaceRoot: string,
   source: SourceDocument,
-  options: { chapterSplitPlan?: ChapterSplitPlan | null } = {},
+  options: { chapterSplitPlan?: ChapterSplitPlan | null; sourceBytes?: Uint8Array } = {},
 ): Promise<SegmentManifest> {
-  const buffer = await readSourceMaterial(workspaceRoot, source);
+  const buffer = options.sourceBytes ? Buffer.from(options.sourceBytes) : await readSourceMaterial(workspaceRoot, source);
   const sourceSha256 = sha256(buffer);
   if (sourceSha256 !== source.contentSha256) {
     throw new Error(`Source changed since ingest: ${source.sourcePath}; expected ${source.contentSha256}, found ${sourceSha256}`);

@@ -1,5 +1,6 @@
 import { CompilerProposalObligations } from "./proposal-obligations.js";
-import { COMPILER_MAX_SEGMENTS_PER_BATCH } from "./limits.js";
+import { chapterMetadataForSegments, groupCompilerSegments, requiresStructureDiscovery, sourceBatchId, COMPILER_SEMANTIC_STAGES, type CompilerSemanticStage } from "./batch-plan.js";
+export { COMPILER_SEMANTIC_STAGES, type CompilerSemanticStage } from "./batch-plan.js";
 import crypto from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { SEGMENTER_VERSION, SegmentStore, readSegmentText, segmentEvidenceRef, segmentSource, type SourceSegment } from "./segments.js";
@@ -69,8 +70,6 @@ export {
   type PersistedBatchProgress,
 } from "./batch-progress.js";
 
-export const COMPILER_SEMANTIC_STAGES = ["observation", "semantic", "executable"] as const;
-export type CompilerSemanticStage = typeof COMPILER_SEMANTIC_STAGES[number];
 
 export type CompilerBatch = {
   id: string;
@@ -238,14 +237,7 @@ type CompilerBatchDraftIdentity = {
   migratedFromBatchId?: string;
 };
 
-const MAX_BATCH_PROMPT_CHARS = 48 * 1024;
-const MAX_BATCH_SOURCE_BYTES = 48 * 1024;
 const MAX_CATALOG_JSON_CHARS = 80_000;
-// A segment is an evidence-addressing unit, not necessarily a model turn. Join
-// small continuation pieces from one author chapter while the aggregate byte
-// and prompt bounds remain authoritative.
-const STRUCTURE_DISCOVERY_MIN_SOURCE_BYTES = 24 * 1024;
-
 export async function prepareCompilerBatches(
   workspaceRoot: string,
   source: SourceDocument,
@@ -267,37 +259,11 @@ export async function prepareCompilerBatches(
   await ensureSourceStructure(workspaceRoot, source);
 
   const chapterMetadata = chapterMetadataForSegments(manifest.segments);
-  const groups: SourceSegment[][] = [];
-  let current: SourceSegment[] = [];
-  let promptCharacters = 0;
-  let sourceBytes = 0;
-  let currentChapter: number | undefined;
-  for (const segment of manifest.segments) {
-    const estimated = segment.promptCharacters;
-    const chapter = chapterMetadata.get(segment.id)!.ordinal;
-    if (current.length && (
-      chapter !== currentChapter
-      || current.length >= COMPILER_MAX_SEGMENTS_PER_BATCH
-      || promptCharacters + estimated > MAX_BATCH_PROMPT_CHARS
-      || sourceBytes + segment.bytes > MAX_BATCH_SOURCE_BYTES
-    )) {
-      groups.push(current);
-      current = [];
-      promptCharacters = 0;
-      sourceBytes = 0;
-    }
-    current.push(segment);
-    promptCharacters += estimated;
-    sourceBytes += segment.bytes;
-    currentChapter = chapter;
-  }
-  if (current.length) groups.push(current);
+  const groups = groupCompilerSegments(manifest.segments);
 
   const artifactCatalog = emptyCompilerArtifactCatalog();
   const batches: CompilerBatch[] = [];
-  const needsStructureDiscovery = Boolean(chapterSplitPlan)
-    || (manifest.segments.every((segment) => segment.kind === "block")
-      && (manifest.segments.length > 1 || source.bytes >= STRUCTURE_DISCOVERY_MIN_SOURCE_BYTES));
+  const needsStructureDiscovery = requiresStructureDiscovery(source, manifest.segments, Boolean(chapterSplitPlan));
   if (needsStructureDiscovery) {
     batches.push(await prepareStructureDiscoveryBatch(workspaceRoot, source, chapterSplitPlan));
   }
@@ -316,7 +282,7 @@ export async function prepareCompilerBatches(
         && chapterSplitPlan.rule
         && chapterHeadingMatches(chapter.title, chapterSplitPlan.rule),
       );
-      const id = `batch-${source.id}-${String(groupOrdinal + 1).padStart(5, "0")}-${semanticStage}-${hash(segmentIds.join("\n")).slice(0, 12)}`;
+      const id = sourceBatchId(source.id, groupOrdinal, semanticStage, segmentIds);
       batches.push({
         id,
         purpose: "source-review",
@@ -700,18 +666,6 @@ export async function runCompilerBatches(options: {
   const skipped = finalBatches.filter((batch) => initiallyCompletedIds.has(batch.id)).length;
   const remaining = finalBatches.filter((batch) => !completedIds.has(batch.id)).length;
   return { total: finalBatches.length, completed, skipped, remaining };
-}
-
-function chapterMetadataForSegments(segments: readonly SourceSegment[]): Map<string, { ordinal: number; title?: string }> {
-  const result = new Map<string, { ordinal: number; title?: string }>();
-  let ordinal = 0;
-  for (const segment of segments) {
-    const continuation = segment.kind === "section" && / \[\d+\]$/.test(segment.title ?? "");
-    if (!continuation || ordinal === 0) ordinal += 1;
-    const title = segment.title?.replace(/ \[\d+\]$/, "");
-    result.set(segment.id, { ordinal, ...(title ? { title } : {}) });
-  }
-  return result;
 }
 
 function buildBatchPrompt(

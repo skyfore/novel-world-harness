@@ -12,7 +12,7 @@
 | T1 | T0 | 将需要宿主裁定的错误传递到调度器 | 工具结果或持久 journal 任一表明禁止重试，均不新建 recovery session；一次可修正失败仍可恢复 | 完成 |
 | T2 | T1 | 持久化账本页身份并诊断 coverage 变化 | 返回精确差分、同作用域 discovery、原 proposal ID 和一次修正 SOP；失败无部分 staging | 完成 |
 | T3 | T2 | 基于完整覆盖证明消解旧 accounting 义务 | 宿主验证每个旧单元和依赖；保留失败历史；跨源/跨批/缺单元/撤回依赖均不能通过 | 完成 |
-| T4 | T3 | 从实际工件生成编译状态 | source hash、版本、有效 completed set、stage counts、持久 blocker、run 与 candidate/closure 分别可见 | 待实施 |
+| T4 | T3 | 从实际工件生成编译状态 | source hash、版本、有效 completed set、stage counts、持久 blocker、run 与 candidate/closure 分别可见 | 完成 |
 | T5 | T0 | 增加来源独立的场景能力验收及受限返修诊断 | 入学 agency、空效果、规范适用域和知识 cut 分别检查；不足明确 blocked/unknown；不能由 schema 自证正确 | 待实施 |
 | T6 | T3 | 给 finish 跨文件副作用增加恢复回执 | 指纹绑定一次 finish；中断后幂等恢复 acceptance/review，checkpoint 必须有完成证明 | 待实施 |
 | T7 | T1–T6 | 集成回归、现场只读复核与实施结果记录 | 类型检查和相关/全量测试通过，提交逐项可审查；如实记录实际小说状态 | 待实施 |
@@ -34,3 +34,5 @@
 - T2：保存单次使用页回执并添加 `coverage-changed` 差分与同身份 SOP。21 句隔离 fixture 重现旧 20 单元中 1 个新增证据覆盖、新页 19+1 的顺序；验证零部分 staging、跨 session 正确修复及消费后的 token 不可复用。3 个相关文件、34 项测试通过；服务端类型检查通过。
 - T3：增加默认只读、显式 `--apply` 且持有 compiler 锁的 host accounting review。证明逐项绑定源哈希、原始失败输入、原单元、依赖内容和审计链；原失败不删除，依赖失效会重新阻塞。补纯读取 Workspace/Trace 入口，防止审计读取触发初始化和运行中断标记。6 个相关文件、51 项测试通过；服务端类型检查通过。
 - 2026-09-08 16:18:42.222 UTC：在 T3 工作树上只读运行真实 p07 review，已从原审计 seq 395→412→413 验证完整 20 单元：19 来自 `acct-00007-p07b`，1 来自 `prop-norm-freedom-day-00007`。预览保存在 `run-records/2026-09-07-longzu1-full-rebuild/remediation-2026-09-08/coverage-preview.json`；未对真实小说使用 `--apply`，无新模型调用、checkpoint 或 candidate。
+- T4：增加 `nwh status --json --source <id>`；状态与编译器共享分组、批次身份和阶段顺序，检查原文与 segment manifest 是否一致，只统计当前版本/计划中的 checkpoint。候选归档、既存 closure、全书 readiness 分开显示。类型检查通过；状态、批次与分段的 53 项回归通过，另验证 candidate 存在但无 assessment 时明确输出 not-run。
+- 2026-09-08 16:29:48.422 UTC：实际 `status --json` 确认为 52/71、observation 23/23、semantic 23/23、executable 6/23、boundary 0/2；仅 p07 当前义务需要 host review。原文校验通过，无 compiler lock，无 candidate。只读状态保存在同一 remediation 目录的 `compiler-status.json`。

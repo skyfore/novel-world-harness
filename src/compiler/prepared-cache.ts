@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { nwhRuntimeDir } from "../agent/runtime-paths.js";
-import { readSourceMaterial, sourceMaterialIdentity } from "../storage/source-material-store.js";
+import { readSourceMaterial, sourceMaterialIdentity, SourceMaterialStore } from "../storage/source-material-store.js";
 import { WorkspaceStore, type SourceDocument } from "../storage/workspace-store.js";
 import { ActorModelStore, characterGoalSchema, characterModelSchema } from "../world/actors.js";
 import { canonicalJson, contentHash } from "../world/canonical.js";
@@ -74,7 +74,7 @@ import { sceneOccurrenceSchema } from "../world/scene-occurrence.js";
 import { eventFrameSchema } from "../world/event-frame.js";
 import { actionSchemaSchema } from "../world/action-ontology.js";
 import { RoleRosterStore, roleRosterSchema } from "./role-roster.js";
-import { assessNovelClosure, assertPreparedReadiness, novelClosureAssessmentSchema } from "./certification.js";
+import { assessNovelClosure, assertPreparedReadiness, novelClosureAssessmentSchema, validateAssessmentRevision } from "./certification.js";
 import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 
 export { COMPILER_PIPELINE_VERSION };
@@ -589,6 +589,33 @@ export class PreparedNovelCache {
       });
     }
     return revisions.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.bundleHash.localeCompare(right.bundleHash));
+  }
+
+  /** Inventory existing revisions without migration, activation or running a new closure assessment. */
+  async peekArchivedRevisions(source: SourceDocument) {
+    const material = await new SourceMaterialStore().read(source);
+    if (!material) throw new Error("Archived source is missing; candidate inspection cannot repair source storage.");
+    const identity = sourceMaterialIdentity(material);
+    const active = await this.readActive(identity.contentMd5);
+    let names: string[];
+    try { names = (await fs.readdir(path.join(this.cachePath(identity.contentMd5), "revisions"))).filter((name) => digestSchema.safeParse(name).success); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT" && !active) return []; throw error; }
+    if (active && !names.includes(active.bundleHash)) throw new Error("Active candidate reference points to a missing archived revision.");
+    const revisions = [];
+    for (const bundleHash of names.sort()) {
+      const cached = await this.readDirectory(identity.contentMd5, this.revisionPath(identity.contentMd5, bundleHash));
+      if (!cached || cached.manifest.bundleHash !== bundleHash) throw new Error(`Incomplete or corrupt candidate archive ${bundleHash}.`);
+      assertSourceIdentity(cached.bundle, identity);
+      const assessment = cached.bundle.readiness;
+      const staleReasons = assessment ? validateAssessmentRevision(cached.bundle, assessment) : [];
+      revisions.push({ bundleHash, archivedAt: cached.manifest.createdAt, active: active?.bundleHash === bundleHash,
+        compilerFingerprint: cached.bundle.compilerFingerprint ?? null,
+        closure: { status: !assessment ? "not-run" : staleReasons.length ? "stale" : assessment.closure.issues.length ? "blocked" : "passed",
+          recorded: Boolean(assessment), issueCount: assessment?.closure.issues.length ?? null, staleReasons },
+        entryReady: assessment?.entryReady ?? null, fullNovelReady: assessment?.fullNovelReady ?? null,
+        assessmentIssueCount: assessment?.issues.length ?? null });
+    }
+    return revisions;
   }
 
   async remove(source: SourceDocument): Promise<boolean> {

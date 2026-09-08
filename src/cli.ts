@@ -165,7 +165,10 @@ program.command("ingest")
     const content = options.stdin ? await readStandardInput() : options.content;
     return ingestContentCommand(content, options.title, configFor(options));
   });
-program.command("status").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace").description("show inventory and the next safe preparation step").action(async (options) => statusCommand(configFor(options)));
+program.command("status").option("-c, --config <path>", "configuration file").option("--root <path>", "local novel workspace")
+  .option("--json", "read-only compiler snapshot with current checkpoints, obligations, runs and candidate closure")
+  .option("--source <id>", "one exact source ID for --json")
+  .description("show inventory and the next safe preparation step").action(async (options) => statusCommand(configFor(options), { json: options.json, sourceId: options.source }));
 program.command("novels")
   .option("--root <path>", "local novel workspace")
   .description("list registered novels in the current workspace")

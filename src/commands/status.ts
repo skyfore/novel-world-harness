@@ -11,8 +11,13 @@ import { inspectPreparation } from "../workflow/prepare.js";
 import { PreparedNovelCache } from "../compiler/prepared-cache.js";
 import { inspectPlayExperience } from "../world/play-experience.js";
 import { formatInstances } from "./catalog.js";
+import { inspectCompilerStatus } from "../compiler/status.js";
 
-export async function statusCommand(configPath: string): Promise<void> {
+export async function statusCommand(configPath: string, options: { json?: boolean; sourceId?: string } = {}): Promise<void> {
+  if (options.json) {
+    console.log(JSON.stringify(await inspectCompilerStatus(path.dirname(path.resolve(configPath)), options.sourceId), null, 2));
+    return;
+  }
   const config = await loadOptionalConfig(configPath);
   const root = path.dirname(path.resolve(configPath));
   const store = await WorkspaceStore.create(root);

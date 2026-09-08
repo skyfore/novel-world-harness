@@ -4,7 +4,7 @@ import path from "node:path";
 import { worldStorageRoot } from "../world/paths.js";
 
 /** Invalidates resumable batch checkpoints when compiler semantics change. */
-export const COMPILER_PIPELINE_VERSION = 33;
+export const COMPILER_PIPELINE_VERSION = 34;
 const SCENE_STAGE_MIGRATION_FROM_PIPELINE_VERSION = 30;
 
 export type BatchProgress = {
@@ -48,6 +48,15 @@ export class CompilerBatchStore {
           batchId.startsWith(`structure-${sourceId}-`)
           || (batchId.startsWith(`batch-${sourceId}-`) && batchId.includes("-observation-"))),
       };
+    }
+    if (parsed.pipelineVersion === 33) {
+      // Cross-stage source coverage changes executable accounting, not the
+      // immutable observation/semantic work. Re-review executable slices with
+      // their exact retained accounting drafts; never re-extract the book.
+      return { ...parsed, pipelineVersion: COMPILER_PIPELINE_VERSION,
+        completedBatchIds: parsed.completedBatchIds.filter((id) =>
+          id.startsWith(`structure-${sourceId}-`) || (id.startsWith(`batch-${sourceId}-`)
+            && /-(observation|semantic)-/.test(id))) };
     }
     if (parsed.pipelineVersion !== COMPILER_PIPELINE_VERSION) {
       return { version: 1, pipelineVersion: COMPILER_PIPELINE_VERSION, sourceId, completedBatchIds: [], updatedAt: new Date(0).toISOString() };

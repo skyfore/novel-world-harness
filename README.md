@@ -245,6 +245,35 @@ one batch per user action so importing a long novel cannot silently trigger an
 unbounded sequence of model requests. Generated artifacts remain pending proposals
 until deterministic validation and explicit acceptance. The MVP compiler does
 not expose capacity counters or ask the model to prioritize semantics by cost.
+
+Compiler CLI runs now write an independent audit run under the workspace's
+`observability/v1/` directory, including Pi tool results and finish diagnostics.
+The printed run ID identifies the audit; it is never reused as a model session.
+Completion output reports world, observation, resolution, and accounting counts
+separately. An accounting-only executable checkpoint does not certify a playable
+world; an accounting-only finish with outstanding proposal failures cannot
+checkpoint the batch. Pipeline 34 retains pipeline-33 observation/semantic checkpoints and all
+draft history, but re-reviews executable batches with same-slice prior evidence
+coverage. A represented source unit still requires executable review where the
+source supports actions, rules, or effects.
+
+`rebuild` and `compile-source` handle SIGINT/SIGTERM by cancelling the active
+model call and releasing the workspace lock after cleanup. After an ungraceful
+host/process loss, inspect and recover the lock on its owning Linux host:
+
+```sh
+nwh compiler-lock inspect
+nwh compiler-lock recover --owner-token <exact-owner.token>
+```
+
+Recovery requires `flock` (util-linux), serializes concurrent recoverers, refuses
+live owners or mismatched host/PID namespaces, and archives the old lock with a
+recovery record under `locks/recovered/`. Never delete the persistent
+`compiler-recovery.mutex` file. Legacy owners have no host metadata: verify their
+PID on the original host, outside sandbox PID views, then add
+`--legacy-owner-host-verified` there. Invalid owner metadata needs host diagnosis;
+the command does not bypass it. Resume compilation only after recovery succeeds.
+
 A defective proposal can be withdrawn to rejected history within its originating
 batch, but valid material must never be withdrawn merely to save calls. Repeated
 unchanged finish failures remain circuit-broken, while host-only runaway safety

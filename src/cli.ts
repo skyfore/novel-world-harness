@@ -18,6 +18,8 @@ import { prepareAllCommand } from "./commands/prepare-all.js";
 import { reparseCommand } from "./commands/reparse.js";
 import { repairExistingCommand } from "./commands/repair-existing.js";
 import { rebuildCommand } from "./commands/rebuild.js";
+import { WorkspaceOperationLock } from "./util/workspace-lock.js";
+import { withCompilerSignals, CompilerInterruptedError } from "./util/compiler-signals.js";
 import { activatePreparedCacheRevisionCommand, inspectNovelClosureCommand, listPreparedCacheRevisionsCommand } from "./commands/prepared-cache.js";
 import { evaluateNovelCommand, freezeNovelEvaluationCommand } from "./commands/novel-evaluation.js";
 import { playWorldCommand } from "./commands/play-world.js";
@@ -56,6 +58,17 @@ program
   .option("--session <id>", "resume an exact saved TUI session in this workspace")
   .option("--new-session", "start a fresh terminal transcript while preserving world progress")
   .option("--no-save", "do not persist the interactive session");
+
+const compilerLock = program.command("compiler-lock").description("Inspect or explicitly recover the workspace compiler lock on its owning host");
+compilerLock.command("inspect").action(async () => {
+  console.log(JSON.stringify(await WorkspaceOperationLock.inspect(rootFor({})), null, 2));
+});
+compilerLock.command("recover")
+  .requiredOption("--owner-token <token>", "exact owner.token returned by compiler-lock inspect")
+  .option("--legacy-owner-host-verified", "attest that a legacy owner PID was checked on its original host, outside sandbox PID views")
+  .action(async (options) => {
+    console.log(JSON.stringify(await WorkspaceOperationLock.recover(rootFor({}), options.ownerToken, options.legacyOwnerHostVerified), null, 2));
+  });
 
 function rootFor(options: { root?: string }): string {
   return options.root ?? program.opts().root ?? process.cwd();
@@ -261,7 +274,7 @@ program
   .action(async (options) => {
     const globalOptions = program.opts();
     const maxBatches = options.maxBatches === undefined ? undefined : nonNegativeInteger(options.maxBatches, "--max-batches");
-    await compileSourceCommand({
+    await withCompilerSignals((signal) => compileSourceCommand({
       root: rootFor(options),
       configPath: configFor(options),
       allowMissingConfig: !options.config,
@@ -269,7 +282,8 @@ program
       model: options.model ?? globalOptions.model,
       ...(maxBatches !== undefined ? { maxBatches } : {}),
       resume: options.resume,
-    });
+      signal,
+    }));
   });
 
 program
@@ -303,8 +317,8 @@ program
   .option("--replace-staging", "preserve displaced drafts in rejected history before replacing conflicting staging")
   .option("--model <model>", "override the Pi compiler model")
   .description("resume or rebuild the core novel world into an immutable candidate without publishing Play")
-  .action(async (options) => { await rebuildCommand({ root: rootFor(options), configPath: configFor(options), sourceId: options.source, chapters: options.chapters,
-    fromRevision: options.fromRevision, replaceStaging: options.replaceStaging, model: options.model ?? program.opts().model }); });
+  .action(async (options) => withCompilerSignals((signal) => rebuildCommand({ root: rootFor(options), configPath: configFor(options), sourceId: options.source, chapters: options.chapters,
+    fromRevision: options.fromRevision, replaceStaging: options.replaceStaging, model: options.model ?? program.opts().model, signal })));
 
 program
   .command("repair-existing")
@@ -523,5 +537,5 @@ try {
   await program.parseAsync(process.argv);
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+  process.exitCode = error instanceof CompilerInterruptedError ? error.exitCode : 1;
 }

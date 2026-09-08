@@ -13,6 +13,9 @@ import { startElapsedStatus } from "../util/elapsed-status.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import type { PiTraceInvocationInput } from "../trace/pi-trace.js";
 import type { TraceContext } from "../trace/recorder.js";
+import { TraceRecorder } from "../trace/recorder.js";
+import { TraceStore } from "../trace/store.js";
+import { redactTraceSecrets } from "../trace/redaction.js";
 
 export type CompileSourceOptions = {
   root: string;
@@ -66,6 +69,22 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(options.root, "compiler", () =>
       compileSourceCommand({ ...options, acquireLock: false }));
+  }
+  if (!options.traceParent) {
+    const recorder = await TraceRecorder.start(new TraceStore(options.root), { kind: "prepare", ...(options.sourceId ? { sourceId: options.sourceId } : {}) });
+    const message = `Compiler audit run: ${recorder.manifest.id}`;
+    if (options.onProgress) options.onProgress(message); else stderr.write(`${message}\n`);
+    try {
+      await recorder.record("validation.completed", { phase: "compiler-host", pid: process.pid, parentPid: process.ppid });
+      await compileSourceCommand({ ...options, acquireLock: false, traceParent: recorder.rootContext });
+      await recorder.finish("succeeded");
+    } catch (error) {
+      await recorder.finish(options.signal?.aborted ? "cancelled" : "failed", {}, {
+        code: "COMPILER_RUN_FAILED", message: error instanceof Error ? error.message : String(error), retryable: false,
+      });
+      throw error;
+    }
+    return;
   }
   const store = await WorkspaceStore.create(options.root);
   const sources = await store.listSources();
@@ -168,6 +187,10 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           },
           onToolResult(name, result, isError) {
             options.onModelToolResult?.(name, result, isError);
+            if (isError && !options.onModelToolResult) {
+              const message = `Compiler tool ${name} failed: ${JSON.stringify(redactTraceSecrets(result))}`;
+              if (options.onProgress) options.onProgress(message); else stderr.write(`${message}\n`);
+            }
           },
           onEvent: options.onModelEvent,
           ...(options.traceParent ? { trace: compilerBatchTraceInvocation(options.traceParent, activeBatch, attempt) } : {}),
@@ -195,7 +218,9 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
           const failure = compilerBatchFailure(report);
           if (!failure) {
             const message = `Compiler batch ${batch.ordinal + 1} finish handshake verified; `
-              + `${report.proposalSucceeded} active proposal(s) remain pending deterministic convergence.`;
+              + `${report.proposalSucceeded} active proposal(s) remain pending deterministic convergence.`
+              + (report.artifactCounts ? ` World=${report.artifactCounts.world}; observations=${report.artifactCounts.annotations}; resolutions=${report.artifactCounts.resolutions}; accounting=${report.artifactCounts.accounting}.`
+                + (batch.semanticStage === "executable" && report.artifactCounts.world === 0 ? " No executable world proposals were produced; this is review progress, not executable certification." : "") : "");
             if (options.onProgress) options.onProgress(message);
             else stdout.write(`${message}\n`);
             return;
@@ -257,6 +282,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
     },
   });
   options.signal?.throwIfAborted();
+  await options.traceParent?.recorder.record("validation.completed", { phase: "compiler-checkpoints", ...result }, options.traceParent);
   const summary = `Compiler batches: total=${result.total} completed=${result.completed} skipped=${result.skipped} remaining=${result.remaining}`;
   if (options.onProgress) options.onProgress(summary);
   else stdout.write(`${summary}\n`);

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { prepareCompilerBatches } from "../src/compiler/batches.js";
+import { CompilerBatchStore } from "../src/compiler/batch-progress.js";
 import { createCompilerProposalToolset } from "../src/compiler/proposal-tools.js";
 import { SegmentStore } from "../src/compiler/segments.js";
 import { SourceAccountingStore, sourceUnitReviewRange } from "../src/compiler/source-accounting.js";
@@ -17,6 +18,53 @@ afterEach(async () => {
 });
 
 describe("source-unit accounting tools", () => {
+  it("inherits checkpointed same-slice observations without treating them as executable artifacts", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-stages-")); roots.push(root);
+    const fixture = await createEvidenceFixture(root, "Hero waits at the gate.\nRain falls quietly on the empty road.");
+    const batch = (await prepareCompilerBatches(root, fixture.source)).find((item) => item.semanticStage === "executable")!;
+    const observationId = batch.id.replace("-executable-", "-observation-");
+    const call = async (set: ReturnType<typeof createCompilerProposalToolset>, name: string, input: unknown) =>
+      set.tools.find((tool) => tool.name === name)!.execute(name, input as never, undefined, undefined, {} as never);
+    const page = async (set: ReturnType<typeof createCompilerProposalToolset>) => {
+      const result = await call(set, "find_source_accounting_units", { status: "all", offset: 0 });
+      return JSON.parse((result.content[0] as { text: string }).text) as { units: Array<{ unitId: string; text: string; status: string }> };
+    };
+    const observations = createCompilerProposalToolset(root);
+    await observations.beginBatch(batch.segmentIds, observationId, fixture.source.id);
+    await call(observations, "propose_entity_mention", { proposal_id: "hero-mention-proposal", annotation_id: "hero-mention",
+      selector: { segment_id: batch.segmentIds[0], exact: "Hero" }, surface: "Hero", form: "proper", kind_candidates: ["character"], confidence: 1 });
+    await call(observations, "finish_compiler_batch", { outcome: "complete", reviewed_segments: batch.segmentIds.map((segment_id) => ({ segment_id, disposition: "proposed", summary: "Exact Hero observation." })), summary: "Exact Hero observation." });
+    const before = createCompilerProposalToolset(root);
+    await before.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+    const first = await page(before);
+    expect(first.units.find((item) => item.text.includes("Hero"))!.status).toBe("unresolved");
+    // Preserve a pre-migration interrupted page; inherited coverage must
+    // supersede just its overlapping decision without deleting the draft.
+    await call(before, "account_source_units", { proposal_id: "old-page", decisions: first.units.filter((item) => item.status === "unresolved").map((item) => ({ unit_id: item.unitId, status: "background-only", reason: "Earlier review." })) });
+    const accounting = new SourceAccountingStore(root);
+    await accounting.withdrawProposal(fixture.source.id, "old-page");
+    await expect(accounting.reproposeRejected(fixture.source.id, "wrong-batch", "old-page", "wrong-recovery", "Recovery test.")).rejects.toThrow("source/batch mismatch");
+    await accounting.reproposeRejected(fixture.source.id, batch.id, "old-page", "old-page-restored", "Host diagnosed an erroneous withdrawal.");
+    await new CompilerBatchStore(root).markComplete(fixture.source.id, observationId);
+    const resumed = createCompilerProposalToolset(root);
+    await resumed.beginBatch(batch.segmentIds, batch.id, fixture.source.id);
+    const after = await page(resumed);
+    expect(after.units.find((item) => item.text.includes("Hero"))!.status).toBe("represented");
+    await expect(call(resumed, "finish_compiler_batch", { outcome: "complete", reviewed_segments: batch.segmentIds.map((segment_id) => ({ segment_id, disposition: "no-artifacts", summary: "No new mechanism." })), summary: "No new executable mechanism." })).rejects.toThrow("Set their reviewed_segments.disposition to proposed and retain every valid draft");
+    const finish = await call(resumed, "finish_compiler_batch", { outcome: "complete", reviewed_segments: batch.segmentIds.map((segment_id) => ({ segment_id, disposition: "proposed", summary: "Source accounting review." })), summary: "Source accounting reviewed; no executable mechanism certified." });
+    expect(finish).toMatchObject({ details: { artifactCounts: { world: 0, accounting: 1 } } });
+    const store = new SourceAccountingStore(root);
+    const manifest = await store.read(fixture.source.id);
+    expect(manifest!.records.find((record) => record.unitId === after.units.find((item) => item.text.includes("Hero"))!.unitId)!.status).toBe("represented");
+    const original = await store.readProposal(fixture.source.id, "rejected", "old-page");
+    const restored = await store.readProposal(fixture.source.id, "accepted", "old-page-restored");
+    expect(restored.decisions).toEqual(original.decisions);
+    expect(restored.restoredFrom!.proposalId).toBe(original.id);
+    // A different slice/batch cannot borrow this coverage.
+    const other = createCompilerProposalToolset(root);
+    await other.beginBatch(batch.segmentIds, batch.id.replace("-00001-", "-00002-"), fixture.source.id);
+    expect((await page(other)).units.find((item) => item.text.includes("Hero"))!.status).toBe("unresolved");
+  });
   it("accepts a matching background decision for a no-artifacts review but rejects a conflicting status", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-accounting-no-artifacts-"));
     roots.push(root);

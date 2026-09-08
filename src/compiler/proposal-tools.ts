@@ -1,6 +1,7 @@
 import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import crypto from "node:crypto";
+import { readPriorStageAccountingCoverage, type AccountingCoverage } from "./accounting-coverage.js";
 import { isDeepStrictEqual } from "node:util";
 import { Type, type TSchema } from "typebox";
 import { z } from "zod";
@@ -998,6 +999,7 @@ export function createCompilerProposalToolset(
   let pendingChapterSplitPlan: ChapterSplitPlan | undefined;
   let pendingNovelTitleProposal: SourceTitleProposal | undefined;
   let finished = false;
+  let priorStageCoverage: Promise<AccountingCoverage> | undefined;
   const roleRosterTools = createRoleRosterTools(workspaceRoot, () => ({ sourceId: activeSourceId, batchId: compilerBatchId, finished }));
   let circuitBreak: { reason: string; failureCount: number } | undefined;
   let totalFinishFailures = 0;
@@ -1669,7 +1671,12 @@ export function createCompilerProposalToolset(
         // later recovery, newly available exact semantics deterministically
         // supersede only the overlapping decisions; the immutable proposal
         // remains history and every still-unrepresented decision is replayed.
-        if (proposalStatus === "accepted" && nowRepresented) return [];
+        const inheritedRepresentation = unit !== undefined && semanticCoverage.inheritedSpans.some((span) =>
+          span.sourceId === structure.sourceId && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, span.startByte, span.endByte));
+        // A migrated, interrupted batch can still have pending classifications
+        // from before cross-stage coverage existed. Preserve those immutable
+        // drafts but project the verified prior evidence over their decisions.
+        if (nowRepresented && (proposalStatus === "accepted" || inheritedRepresentation)) return [];
         return [{ ...decision, proposalId: proposal.id }];
       }));
   };
@@ -1708,6 +1715,7 @@ export function createCompilerProposalToolset(
   const readProspectiveSemanticCoverage = async (): Promise<{
     assertions: EvidenceAssertion[];
     annotations: Array<{ id: string; anchors: ReturnType<typeof annotationAnchors> }>;
+    inheritedSpans: ReturnType<typeof annotationAnchors>;
   }> => {
     const assertions: EvidenceAssertion[] = [];
     for (const proposalId of [...successfulProposalIds].sort()) {
@@ -1718,7 +1726,15 @@ export function createCompilerProposalToolset(
       id: annotationId,
       anchors: annotationAnchors(annotation),
     }));
-    return { assertions, annotations };
+    priorStageCoverage ??= activeSourceId && compilerBatchId
+      ? readPriorStageAccountingCoverage(workspaceRoot, activeSourceId, compilerBatchId, boundedSliceSegments)
+      : Promise.resolve({ assertions: [], annotations: [] });
+    const inherited = await priorStageCoverage;
+    return {
+      assertions: [...inherited.assertions, ...assertions],
+      annotations: [...inherited.annotations, ...annotations],
+      inheritedSpans: [...inherited.assertions.flatMap((item) => item.anchors), ...inherited.annotations.flatMap((item) => item.anchors)],
+    };
   };
 
   const assertOrdinaryAccountingBatch = () => {
@@ -1738,6 +1754,7 @@ export function createCompilerProposalToolset(
     promptGuidelines: [
       "For read-only inspection, page only through exact returned nextOffset values until null; never estimate an offset.",
       "Units marked represented are host-derived from exact evidence or annotations and must not be dispositioned by the model.",
+      "Same-slice checkpointed observation/semantic evidence contributes source coverage only. You must still review executable mechanisms; represented is not proof of an action, rule, or playable world.",
       "A prior field reports the materialized parent/current manifest only as review context; it never satisfies this active batch's fresh accounting requirement.",
       "A non-empty status=unresolved result returns a pageToken and one-based unit indexes. Review every unit, then pass that token to account_source_units with one page_default plus only genuinely different page_overrides.",
       "After a successful page accounting proposal, the unresolved result set shrinks: refetch status=unresolved at offset=0 instead of following the old nextOffset. Repeat until the returned units are empty.",
@@ -2015,7 +2032,8 @@ export function createCompilerProposalToolset(
       label: metadata.label,
       description: metadata.description,
       promptSnippet: metadata.description,
-      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "For each material field or relation, add an evidence_selector with an exact source quote, its payload JSON Pointer, relation, and independently judged strength. Never submit offsets or hashes.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory."],
+      promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "Place proposal_id, payload, evidence_segment_ids and evidence_selectors at the top level. Evidence envelope fields do not belong inside payload.", "For each material field or relation, add an evidence_selector with an exact source quote, its payload JSON Pointer, relation, and independently judged strength. Never submit offsets or hashes.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory.",
+        ...(kind === "event-execution" ? ["Never copy an ad-hoc event.action into this binding. First find/read a supported action-schema, then use action.lane=schema-bound with its exact payload.id, role IDs and parameters. Without a supported mechanism, preserve the occurrence; a complete entryCheckpoint is allowed only when independently justified by embodied entry evidence."] : [])],
       executionMode: "sequential",
       parameters,
       prepareArguments: (args) => prepareProposalToolArguments(args, kind),
@@ -2692,6 +2710,7 @@ export function createCompilerProposalToolset(
       let prospectiveCoverage: Awaited<ReturnType<typeof readProspectiveSemanticCoverage>> = {
         assertions: [],
         annotations: [],
+        inheritedSpans: [],
       };
       let activeAccountingProposals: ActiveSourceAccountingProposal[] = [];
       let activeAccountingDecisions: SourceUnitAccountingDecision[] = [];
@@ -2727,6 +2746,22 @@ export function createCompilerProposalToolset(
             disposition: review.disposition,
           };
         });
+        const accountingUnits = new Map(baseStructuralUnits(accountingStructure).map((unit) => [unit.id, unit]));
+        const coveredSpans = [...prospectiveCoverage.assertions.flatMap((item) => item.anchors), ...prospectiveCoverage.annotations.flatMap((item) => item.anchors)];
+        const conflictingSegments = input.reviewed_segments.filter((review) => {
+          if (review.disposition !== "no-artifacts") return false;
+          const segment = segmentsById.get(review.segment_id)!;
+          return coveredSpans.some((span) => byteRangesOverlap(span.startByte, span.endByte, segment.startByte, segment.endByte))
+            || activeAccountingDecisions.some((decision) => {
+              const unit = accountingUnits.get(decision.unitId);
+              return decision.status !== "background-only" && unit !== undefined
+                && byteRangesOverlap(unit.anchor.startByte, unit.anchor.endByte, segment.startByte, segment.endByte);
+            });
+        });
+        if (conflictingSegments.length) {
+          return failFinish(`Source-accounting review disposition conflicts for segment_id: ${conflictingSegments.map((review) => review.segment_id).join(", ")}. `
+            + "These slices have exact semantic coverage or explicit non-background accounting decisions. Set their reviewed_segments.disposition to proposed and retain every valid draft; absence of a new executable mechanism is not absence of source artifacts. Do not withdraw accounting pages or use no-artifacts to escape this diagnostic. Retry finish once after correcting the review disposition.");
+        }
         accountingIssues = accountingStore.validateBatchReview({
           structure: accountingStructure,
           sourceBytes: accountingBytes,
@@ -2954,10 +2989,15 @@ export function createCompilerProposalToolset(
           sourceBytes: accountingBytes,
         });
       }
+      const artifactCounts = {
+        world: listed.length, annotations: listedAnnotations.length,
+        resolutions: listedEntityResolutions.length + listedEventResolutions.length,
+        accounting: listedAccounting.length,
+      };
       finished = true;
       return {
-        content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}).` }],
-        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: expected, reviewedSegmentIds: reviewedIds },
+        content: [{ type: "text" as const, text: `Compiler batch explicitly finished (${input.outcome}). World proposals: ${artifactCounts.world}; accounting proposals: ${artifactCounts.accounting}. This checkpoint does not certify executable closure or playability.` }],
+        details: { compilerBatchFinished: true, outcome: input.outcome, proposalIds: expected, reviewedSegmentIds: reviewedIds, artifactCounts },
         terminate: true,
       };
     },
@@ -2980,6 +3020,7 @@ export function createCompilerProposalToolset(
       finishTool,
     ],
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
+      priorStageCoverage = undefined;
       roleRosterTools.reset();
       successfulProposalIds.clear();
       successfulAnnotationProposalIds.clear();

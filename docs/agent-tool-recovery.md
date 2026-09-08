@@ -21,7 +21,9 @@ The recovery block controls only tool invocation. It is not source evidence, wor
 | Unknown compiler dependency | Find the source-scoped artifact, read it when exact payload matters, and distinguish `ref` from logical/domain/proposal IDs | Submit a genuinely new dependency first or retry once; preserve unresolved semantics when absent |
 | Unknown actor/player opaque handle | Re-read only the current isolated prompt/options and copy an offered handle | One corrected retry; never search outside actor scope |
 | Invalid JSON/schema/path/enum | Point to the first failing field and correct the smallest invalid part | One corrected retry |
+| Invalid event-execution envelope/action | Keep evidence_segment_ids/evidence_selectors beside payload, not inside it. Find an action-schema in the active source, read its returned ref and copy payload.id into action.schemaId; an ad-hoc occurrence cannot be copied or relabeled as a mechanism | One corrected retry; if no supported mechanism exists, preserve the occurrence without inventing an execution binding |
 | Incomplete compiler finish graph/trace | Treat the full finish diagnostic as one report; repair every listed dependency while preserving valid drafts | One retry after concrete proposal progress; an unchanged full diagnostic stops |
+| Accounting review conflicts with no-artifacts | Correct the named reviewed_segments.disposition to proposed; preserve existing semantic coverage and all valid accounting pages. No new mechanism does not mean no source artifacts | One corrected finish retry; never withdraw whole pages to satisfy the mistaken review label |
 | Canonical entity name lacks a resolved mention | Search both committed and pending entity mentions with `find_source_annotations`; read the returned `ref`, copy `annotationId`, verify `surface === canonicalName` and compatible kind, then use `find_entity_resolution_candidates` and `propose_entity_resolution` to establish the source-supported identity. A substring match or an unparsed mention alone is insufficient | One finish retry after concrete repair of all reported sections; preserve error status and stop on an unchanged full diagnostic |
 | Source-annotation dangling reference | Read the finish inventory or call `find_source_annotations`; copy the exact returned `annotationId`, repair/withdraw only named proposals, and preserve every unlisted draft | One finish retry after concrete repair; never substitute `ref`/`proposalId`, mass-withdraw, or escape through `no-artifacts` |
 | Cross-batch logical supersession in an ordinary source batch | Withdraw only the named current-batch replacement, repair one-sided current dependencies, then peek/defer a confirmed adjacent artifact to the existing two-segment calibration pass; never withdraw the checkpointed prior proposal | One finish retry after concrete withdrawal and deferral; only the calibration batch may replace the prior proposal |
@@ -34,6 +36,31 @@ The recovery block controls only tool invocation. It is not source evidence, wor
 | Unexpected failure | Verify scope and inputs with read-only tools; change something concrete | At most one corrected retry, then stop and report |
 
 If the same diagnostic repeats after the prescribed correction, the agent must stop. Rewording or resubmitting the same call is not recovery.
+
+For a stale workspace compiler lock, model tools cannot repair host ownership.
+Stop model retries. On the owning Linux host run `nwh compiler-lock inspect`,
+copy the exact `owner.token`, and use `nwh compiler-lock recover --owner-token`.
+The host command rejects live owners and foreign host/PID namespaces. A legacy
+owner requires a real original-host PID check before the explicit
+`--legacy-owner-host-verified` attestation; absence in a sandbox is insufficient.
+Preserve the archived lock, checkpoints, and drafts. After recovery, start a fresh
+host compiler turn and rediscover accounting pages; never reuse old page tokens.
+
+Source accounting includes exact same-slice evidence from checkpointed earlier
+observation/semantic stages. Inherited coverage supersedes overlapping old
+accounting decisions in projection while preserving proposal history. This is
+source coverage only, not executable certification. A `represented` unit must
+not receive another accounting disposition; any supported executable mechanism
+still requires its own typed world proposal and validation.
+An accounting-only complete finish cannot clear outstanding proposal failures.
+The host preserves the diagnostic and refuses the checkpoint; repair the named
+failure in a fresh host-started turn rather than treating accounting as success.
+Classify accounting finish diagnostics before generic offset errors: pagination
+instructions inside an accounting diagnostic do not give finish_compiler_batch
+an offset parameter. If an earlier faulty host SOP caused a withdrawal, the
+host-only SourceAccountingStore.reproposeRejected API can stage an exact copy
+under a fresh ID with restoredFrom provenance after an audited same-source/batch
+check. It preserves rejected history and still requires the normal finish gate.
 
 ## Development pattern
 

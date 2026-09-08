@@ -143,12 +143,28 @@ describe("compiler batches", () => {
     });
   });
 
+  it("preserves pipeline-33 observations and semantics while requiring executable accounting review", async () => {
+    const { root, source } = await fixture();
+    const store = new CompilerBatchStore(root);
+    const observation = `batch-${source.id}-00001-observation-fixture`;
+    const semantic = `batch-${source.id}-00001-semantic-fixture`;
+    await fs.mkdir(store.root, { recursive: true });
+    await fs.writeFile(path.join(store.root, `${source.id}.json`), JSON.stringify({
+      version: 1, pipelineVersion: 33, sourceId: source.id,
+      completedBatchIds: [observation, semantic, `batch-${source.id}-00001-executable-fixture`], updatedAt: new Date(0).toISOString(),
+    }));
+    expect((await store.read(source.id)).completedBatchIds).toEqual([observation, semantic]);
+    expect((await store.readPersisted(source.id))!.completedBatchIds).toHaveLength(3);
+  });
+
   it("requires a clean model stop and an explicit, consistent finish handshake", () => {
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toBeUndefined();
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "no-artifacts" })).toBeUndefined();
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: false })).toContain("explicitly finish");
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("without a valid");
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 2, proposalFailed: 1, completionSignaled: true, completionOutcome: "complete" })).toBeUndefined();
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 11, proposalFailed: 3, completionSignaled: true, completionOutcome: "complete",
+      artifactCounts: { world: 0, accounting: 11, annotations: 0, resolutions: 0 } })).toContain("source accounting cannot clear executable proposal failures");
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 1, completionSignaled: true, completionOutcome: "no-artifacts" })).toContain("failed");
     expect(compilerBatchFailure({ assistantStopReason: "length", proposalSucceeded: 2, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("length");
   });

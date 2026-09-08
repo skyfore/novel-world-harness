@@ -1276,7 +1276,7 @@ export type ActionRoleBinding = z.infer<typeof actionRoleBindingSchema>;
 
 export const actionTravelModeSchema = z.enum(["foot", "mounted", "wheeled", "rail", "water", "air", "climb", "crawl", "portal"]);
 
-const schemaBoundActionInvocationSchema = z.object({
+export const schemaBoundActionInvocationSchema = z.object({
   lane: z.literal("schema-bound"),
   schemaId: idSchema,
   roleBindings: z.array(actionRoleBindingSchema).max(64),

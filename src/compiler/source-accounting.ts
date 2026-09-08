@@ -57,6 +57,7 @@ export const sourceAccountingProposalSchema = z.object({
     model: z.string().min(1).optional(),
   }).strict(),
   createdAt: z.string().datetime(),
+  restoredFrom: z.object({ proposalId: idSchema, reason: z.string().trim().min(1).max(1_000) }).strict().optional(),
 }).strict();
 export type SourceAccountingProposal = z.infer<typeof sourceAccountingProposalSchema>;
 export type SourceAccountingProposalStatus = "pending" | "accepted" | "rejected";
@@ -340,6 +341,16 @@ export class SourceAccountingStore {
     return sourceAccountingProposalSchema.parse(JSON.parse(
       await fs.readFile(this.proposalPath(sourceId, status, proposalId), "utf8"),
     ));
+  }
+
+  /** Host-only, auditable re-proposal after a diagnosed erroneous withdrawal.
+   * The original remains rejected; the restored copy still requires finish. */
+  async reproposeRejected(sourceId: string, compilerBatchId: string, proposalId: string, replacementId: string, reason: string): Promise<void> {
+    const original = await this.readProposal(sourceId, "rejected", proposalId);
+    if (original.sourceId !== sourceId || original.compilerBatchId !== compilerBatchId) {
+      throw new Error("Accounting recovery source/batch mismatch; do not retry in another scope.");
+    }
+    await this.stageProposal({ ...original, id: replacementId, createdAt: new Date().toISOString(), restoredFrom: { proposalId, reason } });
   }
 
   async listBatchProposals(

@@ -1,4 +1,5 @@
 export { auditCompiler, type CompilerAuditReport, type CompilerReadinessState } from "./compiler/audit.js";
+export { WorkspaceOperationLock, withWorkspaceOperationLock, type WorkspaceLockOwner } from "./util/workspace-lock.js";
 export { prepareCompilerBatches, runCompilerBatches, CompilerBatchStore, type CompilerBatch } from "./compiler/batches.js";
 export { BoundaryCalibrationStore, type BoundaryCalibrationRequest } from "./compiler/boundary-calibration.js";
 export { ChapterSplitPlanStore, buildChapterStructureSample, chapterHeadingRuleSchema, chapterSplitPlanSchema, type ChapterHeadingRule, type ChapterSplitPlan, type ChapterStructureSample } from "./compiler/chapter-split.js";

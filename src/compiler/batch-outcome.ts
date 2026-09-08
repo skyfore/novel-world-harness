@@ -8,6 +8,7 @@ export type CompilerBatchOutcome = {
   blockedReason?: string;
   /** Compiler mutation/control calls that never received a tool result and were not superseded by a verified retry. */
   unresolvedToolCalls?: number;
+  artifactCounts?: { world: number; annotations: number; resolutions: number; accounting: number };
 };
 
 export function isCompilerProposalTool(toolName: string): boolean {
@@ -26,6 +27,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
   let terminalFinishCallId: string | undefined;
   let completionOutcome: "complete" | "no-artifacts" | undefined;
   let blockedReason: string | undefined;
+  let artifactCounts: CompilerBatchOutcome["artifactCounts"];
 
   for (const value of messages) {
     if (!value || typeof value !== "object") continue;
@@ -86,6 +88,8 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
     }
     if (toolName === "finish_compiler_batch") {
       if (message.isError !== true && call?.finishOutcome) {
+        const counts = details?.artifactCounts as CompilerBatchOutcome["artifactCounts"];
+        if (counts && [counts.world, counts.annotations, counts.resolutions, counts.accounting].every((n) => Number.isInteger(n) && n >= 0)) artifactCounts = counts;
         successfulFinishCallIds.add(message.toolCallId);
         completionOutcome = call.finishOutcome;
         if (Array.isArray(details?.proposalIds)) {
@@ -143,6 +147,7 @@ export function compilerBatchOutcomeFromMessages(messages: readonly unknown[]): 
   }
 
   return {
+    ...(artifactCounts ? { artifactCounts } : {}),
     assistantStopReason,
     ...(assistantErrorMessage ? { assistantErrorMessage } : {}),
     proposalSucceeded: succeeded.size,
@@ -200,6 +205,10 @@ export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | un
   if (!outcome.completionSignaled) {
     if (outcome.proposalFailed > 0) return `${outcome.proposalFailed} proposal tool call(s) failed`;
     return "the model did not explicitly finish the compiler batch";
+  }
+  if (outcome.completionOutcome === "complete" && outcome.proposalFailed > 0
+    && outcome.artifactCounts?.world === 0 && outcome.artifactCounts.accounting > 0) {
+    return `${outcome.proposalFailed} proposal tool call(s) failed before accounting-only completion; source accounting cannot clear executable proposal failures`;
   }
   if (outcome.completionOutcome === "complete" && outcome.proposalSucceeded === 0) {
     return "the model declared completion without a valid typed proposal";

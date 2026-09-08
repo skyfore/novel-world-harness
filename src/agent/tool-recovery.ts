@@ -384,47 +384,13 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
-  if (/offset|surrogate pair|unicode boundary|utf-?8 boundary/u.test(lower)) {
-    return {
-      version: NWH_TOOL_RECOVERY_VERSION,
-      failedTool: toolName,
-      category: "invalid-offset",
-      retryable: true,
-      retryCondition: "Retry only with offset=0 or the exact nextOffset returned by the immediately preceding page.",
+  if (toolName === "finish_compiler_batch" && /source-accounting review disposition conflicts|inside a no-artifacts segment/u.test(lower)) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "Retry finish once after correcting the review disposition; preserve all valid drafts.",
       steps: [
-        "Do not estimate character or byte offsets and do not increment them manually.",
-        `Restart ${toolName} at offset 0 when the prior page token is unavailable; otherwise copy its exact nextOffset.`,
-        "Retry once and continue paging only through returned nextOffset values.",
-      ],
-    };
-  }
-
-  if (/missing or stale|corrupt|collision|cycle detected|safety limit|source changed since ingest|re-ingest|reparse before|permission denied|eacces|unknown active (?:novel|compiler) source|exceed(?:s|ing) the .+ limit/u.test(lower)) {
-    return {
-      version: NWH_TOOL_RECOVERY_VERSION,
-      failedTool: toolName,
-      category: "host-repair-required",
-      retryable: false,
-      retryCondition: "Retry only after the host repairs or refreshes the underlying workspace state and starts a new turn.",
-      steps: [
-        "Stop model-side retries; changing an opaque ID cannot repair stale, corrupt, unsafe, or inaccessible host state.",
-        "Report the exact diagnostic and follow any re-ingest/reparse/repair action already named in it.",
-        "After host repair, rerun the paired discovery tool before reusing any prior ref or ID.",
-      ],
-    };
-  }
-
-  if (/outside (?:the )?active|outside an explicit|requires an active|unavailable (?:during|outside)|not permitted|tool .+ not found|tool execution was blocked/u.test(lower)) {
-    return {
-      version: NWH_TOOL_RECOVERY_VERSION,
-      failedTool: toolName,
-      category: "scope-or-lifecycle",
-      retryable: false,
-      retryCondition: "Do not retry this call in the current scope.",
-      steps: [
-        "Stop repeating the blocked tool name and inspect the tools explicitly active for this turn.",
-        "Continue with the supplied evidence/context and an in-scope tool, or let the host open the required compiler/player phase.",
-        "Never widen source, actor, or future-canon scope to make the call succeed.",
+        "Set the named reviewed_segments.disposition fields to proposed. Existing exact source coverage and accounting decisions remain artifacts even when no new executable mechanism was induced.",
+        "Retain the accounting pages and their per-unit decisions; do not mass-withdraw or reclassify the source as background to make finish pass.",
+        "Retry finish_compiler_batch once with the corrected review fields. If the same diagnostic repeats, stop and report it. finish_compiler_batch has no offset argument.",
       ],
     };
   }
@@ -474,6 +440,51 @@ export function buildNwhToolRecoveryAdvice(
         tool: "find_source_accounting_units",
         arguments: { status: "unresolved", offset: 0, max_results: 20 },
       },
+    };
+  }
+
+  if (/offset|surrogate pair|unicode boundary|utf-?8 boundary/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "invalid-offset",
+      retryable: true,
+      retryCondition: "Retry only with offset=0 or the exact nextOffset returned by the immediately preceding page.",
+      steps: [
+        "Do not estimate character or byte offsets and do not increment them manually.",
+        `Restart ${toolName} at offset 0 when the prior page token is unavailable; otherwise copy its exact nextOffset.`,
+        "Retry once and continue paging only through returned nextOffset values.",
+      ],
+    };
+  }
+
+  if (/missing or stale|corrupt|collision|cycle detected|safety limit|source changed since ingest|re-ingest|reparse before|permission denied|eacces|unknown active (?:novel|compiler) source|exceed(?:s|ing) the .+ limit/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "host-repair-required",
+      retryable: false,
+      retryCondition: "Retry only after the host repairs or refreshes the underlying workspace state and starts a new turn.",
+      steps: [
+        "Stop model-side retries; changing an opaque ID cannot repair stale, corrupt, unsafe, or inaccessible host state.",
+        "Report the exact diagnostic and follow any re-ingest/reparse/repair action already named in it.",
+        "After host repair, rerun the paired discovery tool before reusing any prior ref or ID.",
+      ],
+    };
+  }
+
+  if (/outside (?:the )?active|outside an explicit|requires an active|unavailable (?:during|outside)|not permitted|tool .+ not found|tool execution was blocked/u.test(lower)) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION,
+      failedTool: toolName,
+      category: "scope-or-lifecycle",
+      retryable: false,
+      retryCondition: "Do not retry this call in the current scope.",
+      steps: [
+        "Stop repeating the blocked tool name and inspect the tools explicitly active for this turn.",
+        "Continue with the supplied evidence/context and an in-scope tool, or let the host open the required compiler/player phase.",
+        "Never widen source, actor, or future-canon scope to make the call succeed.",
+      ],
     };
   }
 
@@ -646,6 +657,26 @@ export function buildNwhToolRecoveryAdvice(
         `Retry ${toolName} once after changing that selector. If the intended wording is absent after reading the complete segment, remove/reframe the unsupported field or stop; never guess another quote.`,
       ],
       ...(sourceRead.suggestedCall ? { suggestedCall: sourceRead.suggestedCall } : {}),
+    };
+  }
+
+  if (toolName === "propose_event_execution" && /validation|schema-bound|compiled mechanism|evidence_segment_ids|additional propert/u.test(lower)) {
+    if (scope && (!scope.activeToolNames.includes("find_compiler_artifacts") || !scope.activeToolNames.includes("read_compiler_artifact"))) {
+      return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+        retryCondition: "Mechanism discovery is unavailable in this scope. Resume only in a host-started compiler turn with the required source-scoped discovery tools.",
+        steps: ["Preserve the original validation diagnostic and valid drafts. Do not guess a schema ID, call unavailable tools, or relabel an ad-hoc action to bypass the contract."] };
+    }
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "One corrected retry only after fixing the envelope and using a source-supported compiled mechanism or complete entry checkpoint.",
+      steps: [
+        "Place proposal_id, payload, evidence_segment_ids and evidence_selectors beside each other in the outer argument object; never nest evidence_segment_ids/evidence_selectors inside payload.",
+        "An action binding requires action.lane=schema-bound; never copy an event's ad-hoc action or relabel it without a real mechanism.",
+        "Call find_compiler_artifacts with kind=action-schema in the same active source. Copy its returned ref into read_compiler_artifact, then copy the read payload.id into action.schemaId and use its exact role IDs. A retrieval ref is not a schema ID.",
+        "If no supported schema exists, propose one only when source evidence satisfies the induction contract; otherwise preserve the occurrence without an action binding. Use entryCheckpoint only for a separately supported complete embodied entry, never to bypass a missing mechanism.",
+        "Retry once after concrete correction. If the same diagnostic repeats, stop and report it; never guess schema IDs or submit unchanged proposals.",
+      ],
+      suggestedCall: { tool: "find_compiler_artifacts", arguments: { kind: "action-schema", query: "*", max_results: 20 } },
     };
   }
 

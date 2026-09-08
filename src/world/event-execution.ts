@@ -1,12 +1,15 @@
 import { z } from "zod";
-import { actionInvocationSchema, characterEntryCheckpointSchema, entryProjectionSeedSchema, evidenceRefSchema, idSchema, type CanonicalEvent, type Entity, type EventParticipation, type ValidationIssue } from "./model.js";
+import { schemaBoundActionInvocationSchema, characterEntryCheckpointSchema, entryProjectionSeedSchema, evidenceRefSchema, idSchema, type CanonicalEvent, type Entity, type EventParticipation, type ValidationIssue } from "./model.js";
 import { resolveActionInvocation, type ActionSchema } from "./action-ontology.js";
 import { canonicalJson } from "./canonical.js";
 
 /** Executable-stage linkage leaves the earlier semantic occurrence immutable. */
 export const eventExecutionSchema = z.object({
   id: idSchema, canonicalEventId: idSchema, actorId: idSchema,
-  action: actionInvocationSchema.refine((action) => action.lane === "schema-bound", "Execution bindings require an explicit compiled mechanism").optional(),
+  // Express the lane structurally so JSON Schema shown to the model matches
+  // runtime validation. A refine on the union advertised the forbidden ad-hoc
+  // lane to providers and rejected it only after they submitted a proposal.
+  action: schemaBoundActionInvocationSchema.optional(),
   entryCheckpoint: characterEntryCheckpointSchema.safeExtend({ projectionSeed: entryProjectionSeedSchema }).optional(),
   evidence: z.array(evidenceRefSchema).min(1),
 }).strict().refine((binding) => Boolean(binding.action || binding.entryCheckpoint), "An execution binding must supply an action mechanism or a complete character entry checkpoint");

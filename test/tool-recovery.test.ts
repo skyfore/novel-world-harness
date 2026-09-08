@@ -10,6 +10,26 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it("fixes accounting review dispositions instead of withdrawing pages or inventing finish offsets", () => {
+    const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Source-unit accounting is incomplete: unit is inside a no-artifacts segment; withdraw proposal page-1. Call find_source_accounting_units with offset=0.");
+    expect(advice.category).toBe("invalid-arguments");
+    expect(advice.steps.join(" ")).toContain("reviewed_segments.disposition");
+    expect(advice.steps.join(" ")).toContain("Retain the accounting pages");
+    expect(advice.steps.join(" ")).toContain("finish_compiler_batch has no offset argument");
+    const missing = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Source-unit accounting is incomplete: unreviewed units. Refetch offset=0.");
+    expect(missing.suggestedCall).toMatchObject({ tool: "find_source_accounting_units", arguments: { offset: 0 } });
+  });
+  it("repairs execution envelopes and discovers real mechanisms without relabeling ad-hoc actions", () => {
+    const message = formatNwhToolError("propose_event_execution", new Error("Validation failed: evidence_segment_ids missing; action requires schema-bound"));
+    expect(message).toContain("Validation failed: evidence_segment_ids missing");
+    expect(message).toContain("never nest evidence_segment_ids/evidence_selectors inside payload");
+    const advice = buildNwhToolRecoveryAdvice("propose_event_execution", "Execution bindings require an explicit compiled mechanism");
+    expect(advice.suggestedCall).toMatchObject({ tool: "find_compiler_artifacts", arguments: { kind: "action-schema" } });
+    expect(advice.steps.join(" ")).toContain("read payload.id into action.schemaId");
+    expect(advice.steps.join(" ")).toContain("never copy an event's ad-hoc action");
+    expect(advice.steps.join(" ")).toContain("Retry once after concrete correction");
+    expect(buildNwhToolRecoveryAdvice("propose_event_execution", "requires schema-bound", { activeToolNames: ["propose_event_execution"] })).toMatchObject({ retryable: false, category: "scope-or-lifecycle" });
+  });
   it("turns a stale read ref into an exact paired-discovery SOP", () => {
     const advice = buildNwhToolRecoveryAdvice(
       "read_compiler_artifact",
@@ -291,12 +311,9 @@ describe("agent tool recovery", () => {
     expect(noArtifactsConflict).toMatchObject({
       category: "invalid-arguments",
       retryable: true,
-      suggestedCall: {
-        tool: "withdraw_compiler_proposal",
-        arguments: { proposal_id: "accounting-page-2" },
-      },
     });
-    expect(noArtifactsConflict.steps.join(" ")).toContain("units in no-artifacts segments");
+    expect(noArtifactsConflict.suggestedCall).toBeUndefined();
+    expect(noArtifactsConflict.steps.join(" ")).toContain("Set the named reviewed_segments.disposition fields to proposed");
   });
 
   it("keeps recovery metadata consistent when an actionable error is wrapped again", () => {

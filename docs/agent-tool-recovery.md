@@ -52,9 +52,29 @@ accounting decisions in projection while preserving proposal history. This is
 source coverage only, not executable certification. A `represented` unit must
 not receive another accounting disposition; any supported executable mechanism
 still requires its own typed world proposal and validation.
-An accounting-only complete finish cannot clear outstanding proposal failures.
-The host preserves the diagnostic and refuses the checkpoint; repair the named
-failure in a fresh host-started turn rather than treating accounting as success.
+Every scoped compiler proposal attempt now has a durable, per-proposal journal
+under `world/v3/compiler/proposal-obligations/`. Argument-preflight failures and
+interrupted execution are retained along with their exact proposed input. A
+fresh session hydrates unresolved attempts. Neither accounting nor unrelated
+world proposals clear a failed identity. Finish checks this journal before any
+accept/review writes or successful termination; the outer handshake also rejects
+unresolved proposal failures independently of artifact counts.
+
+Copy the diagnostic's exact tool and proposal_id and make one corrected retry
+after checking all reported selectors against the supplied citable evidence.
+After original and corrected inputs both fail, or an execution lacks a verified
+result, stop for host review; restarting does not reset the guard. Missing
+evidence cannot be repaired by changing the source scope. The host-only
+`CompilerProposalObligations.reviewUnsupported` API requires a reason and audit
+reference, preserves failed history, and does not certify executable coverage.
+For older runs predating the journal, the host must import the exact failed tool
+input and diagnosis from the audit using `record` before resuming that batch.
+These host operations require the workspace compiler lock.
+
+Exact selector validation reports all missing/ambiguous quotes in one diagnostic.
+Copy verbatim punctuation and do not substitute quotes from another segment.
+Artifact discovery includes `readArguments.ref`; copy that ref unchanged.
+`logicalId` identifies the domain object and must never be used to construct a ref.
 Classify accounting finish diagnostics before generic offset errors: pagination
 instructions inside an accounting diagnostic do not give finish_compiler_batch
 an offset parameter. If an earlier faulty host SOP caused a withdrawal, the

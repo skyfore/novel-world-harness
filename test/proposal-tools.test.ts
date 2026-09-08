@@ -1570,11 +1570,8 @@ describe("compiler proposal tools", () => {
       causalParents: [],
       confidence: 1,
     };
-    const prepared = tool.prepareArguments?.({
-      proposal_id: "event-key",
-      payload,
-      evidence_segment_ids: [fixture.segmentId],
-    });
+    const prepared = { proposal_id: "event-key", payload, evidence_segment_ids: [fixture.segmentId] };
+    expect(() => tool.prepareArguments?.(prepared)).toThrow("Validation failed");
     expect(Compile(tool.parameters).Check(prepared)).toBe(false);
     await expect(tool.execute("call-invalid-field", prepared as never, undefined, undefined, {} as ExtensionContext))
       .rejects.toThrow("Unsupported compiler state field 'owner'");

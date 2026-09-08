@@ -206,9 +206,8 @@ export function compilerBatchFailure(outcome: CompilerBatchOutcome): string | un
     if (outcome.proposalFailed > 0) return `${outcome.proposalFailed} proposal tool call(s) failed`;
     return "the model did not explicitly finish the compiler batch";
   }
-  if (outcome.completionOutcome === "complete" && outcome.proposalFailed > 0
-    && outcome.artifactCounts?.world === 0 && outcome.artifactCounts.accounting > 0) {
-    return `${outcome.proposalFailed} proposal tool call(s) failed before accounting-only completion; source accounting cannot clear executable proposal failures`;
+  if (outcome.completionOutcome === "complete" && outcome.proposalFailed > 0) {
+    return `${outcome.proposalFailed} proposal tool call(s) failed before completion; unrelated world proposals and source accounting cannot clear unresolved proposal failures`;
   }
   if (outcome.completionOutcome === "complete" && outcome.proposalSucceeded === 0) {
     return "the model declared completion without a valid typed proposal";

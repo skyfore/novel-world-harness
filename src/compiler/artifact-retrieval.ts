@@ -320,7 +320,7 @@ export function createCompilerArtifactRetrievalTools(
     label: "Find compiler artifacts",
     description: "Search source-scoped canonical and pending artifact semantics. Results are bounded summaries with stable refs and semantic hashes; use read_compiler_artifact for the exact payload.",
     promptSnippet: "Find prior source-scoped compiler artifacts before creating duplicates or revisions",
-    promptGuidelines: ["Use this when the bounded prompt catalog omits an artifact or only shows its identity.", "Never treat artifacts from another source as context."],
+    promptGuidelines: ["Use this when the bounded prompt catalog omits an artifact or only shows its identity.", "Never treat artifacts from another source as context.", "Copy results[].ref verbatim into read_compiler_artifact; logicalId is a domain identity, never a ref construction template. Discovery outside the current citable slice provides context, not citation authority."],
     executionMode: "sequential" as const,
     parameters: findParameters,
     async execute(_id, input, signal) {
@@ -341,6 +341,7 @@ export function createCompilerArtifactRetrievalTools(
         .slice(offset, offset + limit)
         .map((record) => ({
           ref: record.ref,
+          readArguments: { ref: record.ref },
           status: record.status,
           kind: record.kind,
           logicalId: record.logicalId,

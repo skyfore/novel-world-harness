@@ -1,3 +1,5 @@
+import { validateToolArguments } from "@earendil-works/pi-ai";
+import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import crypto from "node:crypto";
@@ -1227,28 +1229,28 @@ export function createCompilerProposalToolset(
     const evidenceAssertions: EvidenceAssertion[] = [];
     const supportingSemanticEvidence: LocatedSemanticEvidence[] = [];
     const counterEvidence: LocatedSemanticEvidence[] = [];
+    const selectorIssues: string[] = [];
     for (let index = 0; index < selectors.length; index += 1) {
       const selector = selectors[index]!;
       const segment = segmentById.get(selector.segment_id);
       if (!segment) {
-        throw new Error(
-          `Evidence selector ${index + 1} references ${selector.segment_id}, which is not present in evidence_segment_ids.`,
-        );
+        selectorIssues.push(`Evidence selector ${index + 1} references ${selector.segment_id}, which is not present in evidence_segment_ids.`);
+        continue;
       }
       if (evidencePointerTargetsEvidence(selector.target_path)) {
-        throw new Error(`Evidence selector target_path '${selector.target_path}' cannot target host-owned evidence fields.`);
+        selectorIssues.push(`Evidence selector ${index + 1} target_path '${selector.target_path}' cannot target host-owned evidence fields.`);
+        continue;
       }
       if (!jsonPointerExists(input.payload, selector.target_path)) {
-        throw new Error(`Evidence selector target_path '${selector.target_path}' does not exist in the proposal payload.`);
+        selectorIssues.push(`Evidence selector ${index + 1} target_path '${selector.target_path}' does not exist in the proposal payload.`);
+        continue;
       }
       let anchor: Awaited<ReturnType<typeof resolveTextAnchor>>;
       try {
         anchor = await resolveTextAnchor(workspaceRoot, segment, selector);
       } catch (error) {
-        throw new Error(
-          `Evidence selector ${index + 1} for target_path '${selector.target_path}' failed: ${error instanceof Error ? error.message : String(error)}`,
-          error instanceof Error ? { cause: error } : undefined,
-        );
+        selectorIssues.push(`Evidence selector ${index + 1} for target_path '${selector.target_path}' failed: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
       }
       const exactReference = evidenceRefSchema.parse({
           span: {
@@ -1302,6 +1304,7 @@ export function createCompilerProposalToolset(
         },
       }));
     }
+    if (selectorIssues.length) throw new Error(selectorIssues.join("\n"));
     if (kind === "event-relation" && counterEvidence.length) {
       payload = {
         ...(payload as Record<string, unknown>),
@@ -2652,6 +2655,40 @@ export function createCompilerProposalToolset(
     }, { additionalProperties: false })),
     summary: Type.String({ minLength: 1, maxLength: 2_000 }),
   }, { additionalProperties: false });
+  const obligations = () => activeSourceId && compilerBatchId
+    ? new CompilerProposalObligations(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+  const trackProposal = (tool: ToolDefinition): ToolDefinition => {
+    if (!tool.name.startsWith("propose_") && tool.name !== "account_source_units") return tool;
+    return {
+      ...tool,
+      prepareArguments(raw) {
+        if (!obligations()) return (tool.prepareArguments ? tool.prepareArguments(raw) : raw) as never;
+        obligations()?.assertRetryAllowed(tool.name, raw);
+        try {
+          const prepared = tool.prepareArguments ? tool.prepareArguments(raw) : raw;
+          return validateToolArguments(tool, { type: "toolCall", id: "compiler-preflight", name: tool.name, arguments: prepared as Record<string, unknown> }) as never;
+        } catch (error) {
+          obligations()?.record(tool.name, raw, "failed", error instanceof Error ? error.message : String(error));
+          throw error;
+        }
+      },
+      async execute(id, input, signal, onUpdate, context) {
+        const journal = obligations();
+        journal?.assertRetryAllowed(tool.name, input);
+        journal?.record(tool.name, input, "running", "Tool result not yet verified; interrupted calls require host inspection before retry.");
+        try {
+          const result = await tool.execute(id, input, signal, onUpdate, context);
+          const details = result.details as { compilerBatchBlocked?: boolean } | undefined;
+          if (details?.compilerBatchBlocked) journal?.record(tool.name, input, "failed", "Compiler circuit breaker opened; stop this turn.");
+          else journal?.record(tool.name, input, "succeeded");
+          return result;
+        } catch (error) {
+          journal?.record(tool.name, input, "failed", error instanceof Error ? error.message : String(error));
+          throw error;
+        }
+      },
+    };
+  };
   const finishTool = defineTool<typeof finishParameters, CompilerFinishDetails>({
     name: "finish_compiler_batch",
     label: "Finish compiler batch",
@@ -2671,6 +2708,7 @@ export function createCompilerProposalToolset(
       if (finished) throw new Error("Compiler batch was already finished.");
       const blocked = beginToolCall("finish");
       if (blocked) return blocked;
+      obligations()?.assertFinishable();
       const listed = [...successfulProposalIds].sort();
       const listedAnnotations = [...successfulAnnotationProposalIds].sort();
       const listedEntityResolutions = [...successfulEntityResolutionProposalIds].sort();
@@ -3018,7 +3056,7 @@ export function createCompilerProposalToolset(
       withdrawTool,
       replaceBoundaryTool,
       finishTool,
-    ],
+    ].map(trackProposal),
     async beginBatch(segmentIds = [], nextCompilerBatchId?: string, sourceId?: string) {
       priorStageCoverage = undefined;
       roleRosterTools.reset();

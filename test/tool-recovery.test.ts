@@ -10,6 +10,12 @@ import {
 } from "../src/agent/tool-recovery.js";
 
 describe("agent tool recovery", () => {
+  it("requires durable obligation repair before finish and stops exhausted retries", () => {
+    const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Unresolved compiler proposal obligations (persisted across sessions): propose_action_schema proposal_id=schema-1: failed: Exact evidence quote was not found in segment source-1.");
+    expect(advice.steps.join(" ")).toContain("same identity");
+    expect(advice.steps.join(" ")).toContain("stop for host review");
+    expect(buildNwhToolRecoveryAdvice("propose_action_schema", "Compiler proposal obligation requires host review: original and corrected inputs failed.").retryable).toBe(false);
+  });
   it("fixes accounting review dispositions instead of withdrawing pages or inventing finish offsets", () => {
     const advice = buildNwhToolRecoveryAdvice("finish_compiler_batch", "Source-unit accounting is incomplete: unit is inside a no-artifacts segment; withdraw proposal page-1. Call find_source_accounting_units with offset=0.");
     expect(advice.category).toBe("invalid-arguments");

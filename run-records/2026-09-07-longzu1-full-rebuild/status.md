@@ -1,5 +1,13 @@
 # 《龙族Ⅰ·火之晨曦》全量候选编译：运行状态
 
+## 2026-09-08 batch 50 恢复协议修复后（当前）
+
+- 有效检查点 50/71：46 个 observation/semantic，executable review 为原序号 47、48、49、52。batch 50 尚未 checkpoint。
+- pipeline 34、prompt 31。未重跑真实 LLM 编译；真实审计输入已在隔离副本验证新门禁及正常 finish。
+- 已在 compiler lock 内把旧 run 的无效 schema 提案导入持久化失败记录，并作有原文依据及 auditRef 的 unsupported-as-submitted 宿主复核；所有草案、accounting 和检查点保持原样，锁已释放。
+- 类型检查和 947 项测试通过。原文审查完成数不代表 executable closure；全书可玩性仍未认证。
+- 详见 [obligation-fix-results-2026-09-08.md](obligation-fix-results-2026-09-08.md)。下方为历史状态。
+
 ## 2026-09-08 修复后状态（取代下方历史运行状态）
 
 - 原阻塞的 executable batch 52 已在 `2026-09-08T07:41:42.630Z` 通过 finish/checkpoint；本轮验证结束，compiler.lock 已释放。

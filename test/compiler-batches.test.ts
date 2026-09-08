@@ -162,9 +162,9 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "no-artifacts" })).toBeUndefined();
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 1, proposalFailed: 0, completionSignaled: false })).toContain("explicitly finish");
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("without a valid");
-    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 2, proposalFailed: 1, completionSignaled: true, completionOutcome: "complete" })).toBeUndefined();
+    expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 2, proposalFailed: 1, completionSignaled: true, completionOutcome: "complete" })).toContain("unresolved proposal failures");
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 11, proposalFailed: 3, completionSignaled: true, completionOutcome: "complete",
-      artifactCounts: { world: 0, accounting: 11, annotations: 0, resolutions: 0 } })).toContain("source accounting cannot clear executable proposal failures");
+      artifactCounts: { world: 0, accounting: 11, annotations: 0, resolutions: 0 } })).toContain("source accounting cannot clear unresolved proposal failures");
     expect(compilerBatchFailure({ assistantStopReason: "stop", proposalSucceeded: 0, proposalFailed: 1, completionSignaled: true, completionOutcome: "no-artifacts" })).toContain("failed");
     expect(compilerBatchFailure({ assistantStopReason: "length", proposalSucceeded: 2, proposalFailed: 0, completionSignaled: true, completionOutcome: "complete" })).toContain("length");
   });
@@ -269,7 +269,7 @@ describe("compiler batches", () => {
     expect(compilerBatchFailure(outcome)).toContain("failed");
   });
 
-  it("treats a successful complete handshake as authoritative after corrected or abandoned drafts", () => {
+  it("rejects an abandoned failure even after an unrelated successful proposal", () => {
     const outcome = compilerBatchOutcomeFromMessages([
       { role: "assistant", content: [{ type: "toolCall", id: "bad", name: "propose_claim", arguments: { proposal_id: "claim-draft" } }], stopReason: "toolUse" },
       { role: "toolResult", toolCallId: "bad", toolName: "propose_claim", isError: true, content: [] },
@@ -280,7 +280,7 @@ describe("compiler batches", () => {
       { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
     ]);
     expect(outcome.proposalFailed).toBe(1);
-    expect(compilerBatchFailure(outcome)).toBeUndefined();
+    expect(compilerBatchFailure(outcome)).toContain("unresolved proposal failures");
   });
 
   it("counts host-recovered proposals acknowledged only by the finish result", () => {

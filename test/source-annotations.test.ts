@@ -1,3 +1,4 @@
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -278,6 +279,7 @@ describe("source annotation compilation", () => {
       confidence: 0.8,
     } as never, undefined, undefined, context)).rejects.toThrow("trigger must be contained");
 
+    new CompilerProposalObligations(root, fixture.source.id, batchId).reviewUnsupported("propose_event_mention", "proposal-event-outside", "Fixture intentionally supplied a trigger outside the extent; discard only this invalid interpretation.", "test:outside-extent");
     await eventMention.execute("dangling-event", {
       proposal_id: "proposal-event-dangling",
       annotation_id: "event-left",

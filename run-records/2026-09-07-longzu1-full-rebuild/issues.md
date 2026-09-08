@@ -1,5 +1,13 @@
 # 问题清单
 
+## 2026-09-08 — batch 50 恢复协议已修复，实际检查点待续跑
+
+- 精确复核修正下方“过期 ref”判断：discovery 返回的 ref 正确，模型把 logicalId 拼成了另一个读取 ref。
+- 原 schema 实际有三个不匹配 selector，新实现一次报告全部诊断，并把参数预检和提案失败持久化到 source/batch；重启或无关提案不能清除失败。
+- finish 在任何 review 写入前检查未解决记录。原始及修正输入均失败后停止，需宿主复核。
+- 旧失败已在锁内导入并据原文审计为 unsupported-as-submitted；不意味着机制已编译。隔离真实输入重放通过，947 项测试通过；未新增实际 batch 50 检查点。
+- 详见 [obligation-fix-results-2026-09-08.md](obligation-fix-results-2026-09-08.md)。
+
 ## 2026-09-08 — 修复并验证原 batch 52 阻塞
 
 - stale compiler lock 已通过新宿主恢复命令归档；原 batch 52 在 `2026-09-08T07:41:42.630Z` 完成检查点，锁已释放。
@@ -7,6 +15,14 @@
 - 修正 accounting-only finish 掩盖 proposal failure，以及 no-artifacts 冲突误导撤回整页/错误分类为 offset 的恢复问题。
 - 中间验证因旧指引撤回的 12 页已审计恢复为带来源的新 pending 副本，最终全部 accepted；原 rejected 历史保留。没有隐去失败。
 - 新 pipeline 有效检查点为 47/71；尚未完成全书执行闭合或可玩认证。完整证据、备份和测试结果见 [fix-results-2026-09-08.md](fix-results-2026-09-08.md)。
+
+## 2026-09-08 — block：executable batch 50 未能通过提案失败门禁
+
+- 阶段/批次/source：executable，batch 50/71，`a28585b1cf867f3e3a16`。
+- 事实：该批先发现两个过期的 `read_compiler_artifact` ref；模型获得同一 active scope 的 discovery 指引后继续。随后 `propose_action_schema schema-remote-communication-00004` 因 segment `a28585b1cf867f3e3a16-00004-f50b153c1580` 的 evidence selector 2 未包含原文精确引句而失败。
+- 宿主行为：模型按 `finish_compiler_batch` 的 accounting disposition SOP 做了一次修正并重试 finish；宿主仍检测到一个先前 proposal tool failure，拒绝将 accounting-only 状态 checkpoint 为成功：`Compiler batch 50 was not checkpointed: 1 proposal tool call(s) failed before accounting-only completion`。
+- 判断：block。进程已退出；`status` 报告 `completedBatches=50`、398 pending、93 rejected，但本次 batch 50 的 finish 未获 checkpoint，不能据该计数推断该批已成功完成。没有删除锁、草案、账本页或检查点，也未对该诊断发起新的未改变重试。
+- 现场：`rebuild.log` 的 batch 50 段、持久化 compiler proposals/batches，以及本次 audit `run-mtsiqp45-33329f86-0903-440a-a2f2-1e1f5f6d208e`。
 
 ## 2026-09-07T09:36Z — 非 block：批次草案受控替换
 

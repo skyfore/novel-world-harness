@@ -324,6 +324,28 @@ export function buildNwhToolRecoveryAdvice(
   errorText = errorText.split(/\r?\n\r?\nReceived arguments:\r?\n/u, 1)[0]!;
   const lower = errorText.normalize("NFKC").toLocaleLowerCase();
 
+  if (lower.startsWith("compiler proposal obligation requires host review")) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "host-repair-required", retryable: false,
+      retryCondition: "Do not retry in this or a fresh session until host adjudication.",
+      steps: ["Stop and retain the exact diagnostic and all valid drafts. The host must inspect the persisted attempt and its evidence before adjudicating; changing IDs, withdrawing unrelated work, or restarting cannot resolve it."],
+    };
+  }
+
+  if (toolName === "finish_compiler_batch" && lower.startsWith("unresolved compiler proposal obligations")) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle",
+      retryable: true,
+      retryCondition: "Retry finish only after every named durable obligation is resolved; unchanged finish and fresh sessions cannot clear failures.",
+      steps: [
+        "Copy each exact tool and proposal_id from the diagnostic. Recheck all selectors against the supplied citable segments, then make at most one corrected proposal retry under that same identity.",
+        "If an ID is missing, use the same-scope discovery tool and copy its exact ref; never construct refs from logicalId or guess IDs. Do not widen the evidence scope.",
+        "If evidence is absent, a call was interrupted, or the corrected attempt fails, stop for host review. Do not add unrelated proposals, withdraw accounting, or restart to erase the obligation.",
+        "Preserve every valid draft. Retry finish once only after actual resolution; if it still fails with the same diagnostic, stop.",
+      ],
+    };
+  }
+
   if (/tool-call budget|tool call budget|tool-call safety fuse|circuit breaker|circuit-breaker/u.test(lower)) {
     return {
       version: NWH_TOOL_RECOVERY_VERSION,
@@ -653,7 +675,7 @@ export function buildNwhToolRecoveryAdvice(
       retryCondition: "Retry once only after reading the named active-source segment and copying the selector text verbatim.",
       steps: [
         ...sourceRead.steps,
-        "Copy the intended non-empty substring verbatim into the failing evidence selector's exact field; do not copy JSON escaping from the prompt or normalize punctuation/whitespace.",
+        "Repair every reported selector in the complete diagnostic, not just the first. Copy the intended non-empty substring verbatim into the failing evidence selector's exact field; do not copy JSON escaping from the prompt or normalize punctuation/whitespace.",
         `Retry ${toolName} once after changing that selector. If the intended wording is absent after reading the complete segment, remove/reframe the unsupported field or stop; never guess another quote.`,
       ],
       ...(sourceRead.suggestedCall ? { suggestedCall: sourceRead.suggestedCall } : {}),

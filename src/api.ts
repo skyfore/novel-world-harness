@@ -479,3 +479,5 @@ export { WebEventBroker, serializeServerSentEvent, type WebEventListener } from 
 export { WebApplicationError, webError } from "./web/errors.js";
 export { createWebHost, isLoopbackHost, type CreateWebHostOptions, type NwhWebHost } from "./web/host.js";
 export { OperationManager, type OperationRunContext, type StartOperationInput } from "./web/operation-manager.js";
+
+export { CompilerProposalObligations } from "./compiler/proposal-obligations.js";

@@ -3071,7 +3071,7 @@ describe("NWH TUI extension", () => {
     expect(sentHiddenMessages[0]).toContain("<source-segment");
   });
 
-  it("lets a successful finish supersede abandoned drafts after low-level retries settle", async () => {
+  it("keeps the same batch when an unrelated successful draft leaves an earlier failure unresolved", async () => {
     const { commands, events, root, sentUserMessages, sentHiddenMessages } = await fixture();
     const novelPath = path.join(root, "retry-novel.txt");
     await fs.writeFile(
@@ -3119,7 +3119,7 @@ describe("NWH TUI extension", () => {
     expect(notifications.some((message) => message.includes("checkpointed"))).toBe(true);
     expect(sentUserMessages).toEqual([]);
     expect(sentHiddenMessages).toHaveLength(1);
-    expect(sentHiddenMessages[0]).toMatch(/batch 2\/\d+/);
+    expect(sentHiddenMessages[0]).toMatch(/batch 1\/\d+/);
     expect(sentHiddenMessages[0]).toContain("<source-segment");
   });
 

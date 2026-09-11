@@ -1,3 +1,4 @@
+import { RuntimeHooks, withRuntimeHooks, type RuntimeHookEvent } from "../src/runtime/hooks.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -95,7 +96,11 @@ describe("play experience catalog", () => {
     }, undefined, fixture.source.id);
 
     let offeredResponseTitle: string | undefined;
-    const outcome = await performPlayTurn({
+    const hooks = new RuntimeHooks({ onError: () => {} });
+    const hookEvents: RuntimeHookEvent[] = [];
+    hooks.subscribe(event => { hookEvents.push(event); });
+    hooks.subscribe(() => { throw new Error("notification service unavailable"); });
+    const outcome = await withRuntimeHooks(hooks, () => performPlayTurn({
       root,
       branchId: "main",
       actorId: "lu-mingfei",
@@ -127,8 +132,10 @@ describe("play experience catalog", () => {
         offeredResponseTitle = input.eligibleResponses[0]?.title;
         return { decision: "select", possibilityId: input.eligibleResponses[0]!.possibilityId };
       },
-    });
+    }));
 
+    expect(hookEvents).toHaveLength(1);
+    expect(hookEvents[0]).toMatchObject({ type: "play.turn", status: "succeeded", metadata: { accepted: true, branchId: "main" } });
     expect(outcome.result.accepted).toBe(true);
     expect(outcome.result.contextBefore.referenceableEntities.map((entity) => entity.id)).not.toContain("interview-letter");
     expect(outcome.result.contextBefore.knowledge).toEqual([]);

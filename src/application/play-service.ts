@@ -1,3 +1,4 @@
+import { currentRuntimeHooks } from "../runtime/hooks.js";
 import crypto from "node:crypto";
 import path from "node:path";
 import { createPiCanonicalAttachmentResolver } from "../agent/pi-canonical-attachment.js";
@@ -790,6 +791,16 @@ export class PlayApplicationService {
     recorder: TraceRecorder,
     playerMoveId: string,
   ): Promise<PlayOperationResult> {
+    return currentRuntimeHooks().run("user.input", "play.input", { workspaceRoot: this.root, sessionId }, () => this.runPlayerMoveInternal(sessionId, input, context, recorder, playerMoveId));
+  }
+
+  private async runPlayerMoveInternal(
+    sessionId: string,
+    input: PlayMoveRequest,
+    context: OperationRunContext,
+    recorder: TraceRecorder,
+    playerMoveId: string,
+  ): Promise<PlayOperationResult> {
     const session = await this.requireWritableSession(sessionId);
     await this.assertExpectedHead(session, input.expectedHead);
     await this.sessions.activate(session.id);
@@ -1095,6 +1106,20 @@ export class PlayApplicationService {
   }
 
   private async narrate(
+    session: ActivePlaySession,
+    purpose: PlayScenePurpose,
+    context: OperationRunContext,
+    narrator: PlayerOpeningNarrator,
+    recorder: TraceRecorder,
+    traceContext: TraceContext,
+    playerMoveId?: string,
+    turnResolution?: PlayerTurnResolution,
+    runtimeContext?: RuntimeContextSupplement,
+  ): Promise<NarrationOutcome> {
+    return currentRuntimeHooks().run("play.response", "play.narrate", { workspaceRoot: this.root, sessionId: session.id, branchId: session.branchId, purpose }, () => this.narrateInternal(session, purpose, context, narrator, recorder, traceContext, playerMoveId, turnResolution, runtimeContext));
+  }
+
+  private async narrateInternal(
     session: ActivePlaySession,
     purpose: PlayScenePurpose,
     context: OperationRunContext,

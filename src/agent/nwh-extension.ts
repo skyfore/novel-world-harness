@@ -1,3 +1,5 @@
+import { currentRuntimeHooks, hookError } from "../runtime/hooks.js";
+import { withCommandHooks } from "./pi-hooks.js";
 import { INITIAL_WORLD_INPUT_GUIDANCE } from "../compiler/initial-world-preflight.js";
 import { reviewNovelRoles } from "../workflow/role-review.js";
 import { CompilerFinishReceipts, finishHostError } from "../compiler/finish-receipts.js";
@@ -447,6 +449,7 @@ export function filterNwhModelContext<T extends NwhContextMessage>(
 export function createNwhExtension(options: NwhExtensionOptions): ExtensionFactory {
   const { workspace, saveSession, mode } = options;
   return (pi: ExtensionAPI) => {
+    pi = withCommandHooks(pi, options.workspace.root);
     const customMessageText = (content: string | Array<{ type: string; text?: string }>) => typeof content === "string"
       ? content
       : content.flatMap((item) => item.type === "text" && item.text ? [item.text] : []).join("\n");
@@ -1017,7 +1020,11 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         }));
         const choices = mergePresentedPlayerChoices(hostChoices, narratedChoices);
         stream.verifyFinalText(narration);
-        if (controller.signal.aborted) return [];
+        if (controller.signal.aborted) {
+          await currentRuntimeHooks().emit({ type: "play.response", name: "play.narrate", status: "cancelled",
+            metadata: { workspaceRoot: workspace.root, branchId: frame.branchId, purpose } });
+          return [];
+        }
         const stillSelected = playerMode
           && selectedPlay?.session.branchId === selection.session.branchId
           && selectedPlay.actor.id === selection.actor.id;
@@ -1047,9 +1054,15 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           } catch (error) {
             ctx.ui.notify(`Scene memory could not be persisted: ${error instanceof Error ? error.message : String(error)}`, "warning");
           }
+          await currentRuntimeHooks().emit({ type: "play.response", name: "play.narrate", status: "succeeded",
+            metadata: { workspaceRoot: workspace.root, branchId: frame.branchId, commitId: frame.commitId, purpose } });
           return choices;
         }
+        await currentRuntimeHooks().emit({ type: "play.response", name: "play.narrate", status: "cancelled",
+          metadata: { workspaceRoot: workspace.root, branchId: frame.branchId, purpose, reason: "selection-changed" } });
       } catch (error) {
+        await currentRuntimeHooks().emit({ type: "play.response", name: "play.narrate", status: controller.signal.aborted ? "cancelled" : "failed", error: hookError(error),
+          metadata: { workspaceRoot: workspace.root, branchId: frame.branchId, purpose } });
         if (controller.signal.aborted) return [];
         showPlayMessage(renderPlaySceneFailure(frame, purpose));
         ctx.ui.notify(`Scene narration failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -1158,184 +1171,186 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
         affordanceId?: string;
       } = {},
     ): Promise<void> => {
-      if (shuttingDown) return;
-      const selection = selectedPlay ?? await activatePlayer(ctx);
-      if (!selection) return;
-      const pendingScene = activePlayerScene;
-      if (pendingScene) await pendingScene.promise;
-      if (shuttingDown) return;
-      showPlayMessage(`**${selection.actor.canonicalName}:** ${utterance}`);
-      const turnLoading = ctx.mode === "tui" && typeof ctx.ui.setWidget === "function" ? createNwhModelLoadingIndicator(ctx.ui, {
-        phaseLabels: {
-          waiting: "世界正在回应",
-          thinking: "正在理解行动",
-          streaming: "场景正在抵达",
-          tool: "正在校验世界状态",
-        },
-      }) : undefined;
-      const showTurnActivity = (message: string) => {
-        if (ctx.mode !== "tui") return;
-        ctx.ui.setStatus("nwh-play-turn", ctx.ui.theme.fg("dim", `${message} · ${selection.actor.canonicalName}`));
-        turnLoading?.setPhase(message.includes("校验") || message.includes("写入") ? "tool" : "thinking", message);
-      };
-      const controller = new AbortController();
-      let completeTurn!: () => void;
-      const completion = new Promise<void>((resolve) => { completeTurn = resolve; });
-      const activeTurn = { controller, cancellable: true, completion };
-      activePlayerTurn = activeTurn;
-      const safeIntent = input.intent && input.intent !== "act" ? input.intent : undefined;
-      const baseTranslator: PlayerActionTranslator = safeIntent
-        ? (translationInput) => deterministicPlayerIntentCandidate(safeIntent, translationInput)
-        : options.playerTranslator ?? createPiPlayerActionTranslator({
+      return currentRuntimeHooks().run("user.input", "play.input", { workspaceRoot: workspace.root, sessionId: ctx.sessionManager?.getSessionId?.() }, async () => {
+        if (shuttingDown) return;
+        const selection = selectedPlay ?? await activatePlayer(ctx);
+        if (!selection) return;
+        const pendingScene = activePlayerScene;
+        if (pendingScene) await pendingScene.promise;
+        if (shuttingDown) return;
+        showPlayMessage(`**${selection.actor.canonicalName}:** ${utterance}`);
+        const turnLoading = ctx.mode === "tui" && typeof ctx.ui.setWidget === "function" ? createNwhModelLoadingIndicator(ctx.ui, {
+          phaseLabels: {
+            waiting: "世界正在回应",
+            thinking: "正在理解行动",
+            streaming: "场景正在抵达",
+            tool: "正在校验世界状态",
+          },
+        }) : undefined;
+        const showTurnActivity = (message: string) => {
+          if (ctx.mode !== "tui") return;
+          ctx.ui.setStatus("nwh-play-turn", ctx.ui.theme.fg("dim", `${message} · ${selection.actor.canonicalName}`));
+          turnLoading?.setPhase(message.includes("校验") || message.includes("写入") ? "tool" : "thinking", message);
+        };
+        const controller = new AbortController();
+        let completeTurn!: () => void;
+        const completion = new Promise<void>((resolve) => { completeTurn = resolve; });
+        const activeTurn = { controller, cancellable: true, completion };
+        activePlayerTurn = activeTurn;
+        const safeIntent = input.intent && input.intent !== "act" ? input.intent : undefined;
+        const baseTranslator: PlayerActionTranslator = safeIntent
+          ? (translationInput) => deterministicPlayerIntentCandidate(safeIntent, translationInput)
+          : options.playerTranslator ?? createPiPlayerActionTranslator({
+              root: workspace.root,
+              ...(options.profile ? { profile: options.profile } : {}),
+              ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+              onStatus: showTurnActivity,
+              signal: controller.signal,
+            });
+        const translator: PlayerActionTranslator = async (input) => {
+          const candidate = await raceWithAbort(Promise.resolve(baseTranslator(input)), controller.signal);
+          controller.signal.throwIfAborted();
+          return candidate;
+        };
+        const adjudicator = options.playerWorldAdjudicator ?? (!options.playerTranslator
+          ? createPiPlayerWorldAdjudicator({
+              root: workspace.root,
+              ...(options.profile ? { profile: options.profile } : {}),
+              ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+              onStatus: showTurnActivity,
+              signal: controller.signal,
+            })
+          : undefined);
+        const contextResolver = options.runtimeContextResolver ?? (!options.playerTranslator
+          ? createPiRuntimeContextResolver({
+              root: workspace.root,
+              ...(options.profile ? { profile: options.profile } : {}),
+              ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+              ...(options.preparedCacheRoot ? { preparedCacheRoot: options.preparedCacheRoot } : {}),
+              onStatus: showTurnActivity,
+              signal: controller.signal,
+            })
+          : undefined);
+        const worldResponseResolver = options.playerWorldResponseResolver ?? (!options.playerTranslator
+          ? createPiPlayerWorldResponseResolver({
+              root: workspace.root,
+              ...(options.profile ? { profile: options.profile } : {}),
+              ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+              onStatus: showTurnActivity,
+              signal: controller.signal,
+            })
+          : undefined);
+        const npcResponseReasoner = options.npcResponseReasoner ?? (!options.playerTranslator
+          ? createPiNpcReactionReasoner({
+              root: workspace.root,
+              ...(options.profile ? { profile: options.profile } : {}),
+              ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+              onStatus: showTurnActivity,
+              signal: controller.signal,
+            })
+          : undefined);
+        const actorReasoner = options.actorReasoner ?? (!options.playerTranslator
+          ? createPiActorReasoner({
+              root: workspace.root,
+              ...(options.profile ? { profile: options.profile } : {}),
+              ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+              onStatus: showTurnActivity,
+              signal: controller.signal,
+            })
+          : undefined);
+        const canonicalAttachmentResolver = options.canonicalAttachmentResolver ?? (!options.playerTranslator
+          ? createPiCanonicalAttachmentResolver({
+              root: workspace.root,
+              ...(options.profile ? { profile: options.profile } : {}),
+              ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
+              onStatus: showTurnActivity,
+              signal: controller.signal,
+            })
+          : undefined);
+        showTurnActivity("正在理解你的行动…");
+        let outcome: Awaited<ReturnType<typeof performPlayTurn>>;
+        try {
+          outcome = await performPlayTurn({
             root: workspace.root,
-            ...(options.profile ? { profile: options.profile } : {}),
-            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-            onStatus: showTurnActivity,
-            signal: controller.signal,
+            branchId: selection.session.branchId,
+            actorId: selection.actor.id,
+            utterance,
+            translator,
+            ...(adjudicator ? { adjudicator } : {}),
+            ...(contextResolver ? { contextResolver } : {}),
+            ...(worldResponseResolver ? { worldResponseResolver } : {}),
+            ...(canonicalAttachmentResolver ? { canonicalAttachmentResolver } : {}),
+            ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
+            ...(actorReasoner ? { actorReasoner } : {}),
+            advanceBackground: options.advanceBackground ?? 0,
+            origin: input.origin ?? "freeform",
+            ...(input.intent ? { intent: input.intent } : {}),
+            ...(input.affordanceId ? { affordanceId: input.affordanceId } : {}),
+            beforeCommit: () => { activeTurn.cancellable = false; },
           });
-      const translator: PlayerActionTranslator = async (input) => {
-        const candidate = await raceWithAbort(Promise.resolve(baseTranslator(input)), controller.signal);
-        controller.signal.throwIfAborted();
-        return candidate;
-      };
-      const adjudicator = options.playerWorldAdjudicator ?? (!options.playerTranslator
-        ? createPiPlayerWorldAdjudicator({
-            root: workspace.root,
-            ...(options.profile ? { profile: options.profile } : {}),
-            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-            onStatus: showTurnActivity,
-            signal: controller.signal,
-          })
-        : undefined);
-      const contextResolver = options.runtimeContextResolver ?? (!options.playerTranslator
-        ? createPiRuntimeContextResolver({
-            root: workspace.root,
-            ...(options.profile ? { profile: options.profile } : {}),
-            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-            ...(options.preparedCacheRoot ? { preparedCacheRoot: options.preparedCacheRoot } : {}),
-            onStatus: showTurnActivity,
-            signal: controller.signal,
-          })
-        : undefined);
-      const worldResponseResolver = options.playerWorldResponseResolver ?? (!options.playerTranslator
-        ? createPiPlayerWorldResponseResolver({
-            root: workspace.root,
-            ...(options.profile ? { profile: options.profile } : {}),
-            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-            onStatus: showTurnActivity,
-            signal: controller.signal,
-          })
-        : undefined);
-      const npcResponseReasoner = options.npcResponseReasoner ?? (!options.playerTranslator
-        ? createPiNpcReactionReasoner({
-            root: workspace.root,
-            ...(options.profile ? { profile: options.profile } : {}),
-            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-            onStatus: showTurnActivity,
-            signal: controller.signal,
-          })
-        : undefined);
-      const actorReasoner = options.actorReasoner ?? (!options.playerTranslator
-        ? createPiActorReasoner({
-            root: workspace.root,
-            ...(options.profile ? { profile: options.profile } : {}),
-            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-            onStatus: showTurnActivity,
-            signal: controller.signal,
-          })
-        : undefined);
-      const canonicalAttachmentResolver = options.canonicalAttachmentResolver ?? (!options.playerTranslator
-        ? createPiCanonicalAttachmentResolver({
-            root: workspace.root,
-            ...(options.profile ? { profile: options.profile } : {}),
-            ...(ctx.model ? { model: `${ctx.model.provider}/${ctx.model.id}` } : {}),
-            onStatus: showTurnActivity,
-            signal: controller.signal,
-          })
-        : undefined);
-      showTurnActivity("正在理解你的行动…");
-      let outcome: Awaited<ReturnType<typeof performPlayTurn>>;
-      try {
-        outcome = await performPlayTurn({
-          root: workspace.root,
-          branchId: selection.session.branchId,
-          actorId: selection.actor.id,
-          utterance,
-          translator,
-          ...(adjudicator ? { adjudicator } : {}),
-          ...(contextResolver ? { contextResolver } : {}),
-          ...(worldResponseResolver ? { worldResponseResolver } : {}),
-          ...(canonicalAttachmentResolver ? { canonicalAttachmentResolver } : {}),
-          ...(npcResponseReasoner ? { npcResponseReasoner } : {}),
-          ...(actorReasoner ? { actorReasoner } : {}),
-          advanceBackground: options.advanceBackground ?? 0,
-          origin: input.origin ?? "freeform",
-          ...(input.intent ? { intent: input.intent } : {}),
-          ...(input.affordanceId ? { affordanceId: input.affordanceId } : {}),
-          beforeCommit: () => { activeTurn.cancellable = false; },
-        });
-      } catch (error) {
+        } catch (error) {
+          if (controller.signal.aborted) {
+            showPlayMessage("行动已取消；候选尚未进入确定性提交，世界状态没有改变。");
+            return;
+          }
+          throw error;
+        } finally {
+          if (activePlayerTurn === activeTurn) activePlayerTurn = undefined;
+          completeTurn();
+          turnLoading?.stop();
+          if (ctx.mode === "tui") {
+            ctx.ui.setStatus("nwh-play-turn", undefined);
+          }
+        }
         if (controller.signal.aborted) {
           showPlayMessage("行动已取消；候选尚未进入确定性提交，世界状态没有改变。");
           return;
         }
-        throw error;
-      } finally {
-        if (activePlayerTurn === activeTurn) activePlayerTurn = undefined;
-        completeTurn();
-        turnLoading?.stop();
-        if (ctx.mode === "tui") {
-          ctx.ui.setStatus("nwh-play-turn", undefined);
+        const persisted = await new PlaySessionStore(workspace.root).read();
+        selectedPlay = {
+          ...selection,
+          ...(persisted ? { session: persisted } : {}),
+          logicalStep: outcome.logicalStep,
+        };
+        setPlayerStatus(ctx, selectedPlay);
+        if (outcome.auditError) ctx.ui.notify(`Player-turn audit could not be persisted: ${outcome.auditError}`, "warning");
+        if (outcome.repairHintError) ctx.ui.notify(`Runtime compiler repair hint could not be persisted: ${outcome.repairHintError}`, "warning");
+        if (outcome.conversationError) ctx.ui.notify(`Conversation memory could not be persisted: ${outcome.conversationError}`, "warning");
+        if (!outcome.result.accepted) {
+          const issueCode = outcome.result.issues[0]?.code ?? "UNKNOWN";
+          showPlayMessage(outcome.result.stage === "adjudication"
+            ? "**场外提示：** 世界裁决暂时未能安全完成。这次意图没有成为世界事件，场景仍停在行动前；你可以直接重试。"
+            : "**场外提示：** 这次输入未能通过世界提交边界，因此没有在剧情中发生；当前场景保持不变。");
+          ctx.ui.notify(`行动未提交（${outcome.result.stage}/${issueCode}）；正在从同一场景恢复。`, "warning");
+          await narratePlayerScene(
+            ctx,
+            selectedPlay,
+            "recovery",
+            {
+              kind: "unresolved",
+              utterance,
+              actorVisibleSummary: "这项请求没有成为世界事件；角色没有执行它，当前世界仍处于请求之前的已提交时刻。",
+            },
+            input.fallbackChoices?.length ? input.fallbackChoices : [],
+            outcome.result.contextSupplement,
+          );
+          return;
         }
-      }
-      if (controller.signal.aborted) {
-        showPlayMessage("行动已取消；候选尚未进入确定性提交，世界状态没有改变。");
-        return;
-      }
-      const persisted = await new PlaySessionStore(workspace.root).read();
-      selectedPlay = {
-        ...selection,
-        ...(persisted ? { session: persisted } : {}),
-        logicalStep: outcome.logicalStep,
-      };
-      setPlayerStatus(ctx, selectedPlay);
-      if (outcome.auditError) ctx.ui.notify(`Player-turn audit could not be persisted: ${outcome.auditError}`, "warning");
-      if (outcome.repairHintError) ctx.ui.notify(`Runtime compiler repair hint could not be persisted: ${outcome.repairHintError}`, "warning");
-      if (outcome.conversationError) ctx.ui.notify(`Conversation memory could not be persisted: ${outcome.conversationError}`, "warning");
-      if (!outcome.result.accepted) {
-        const issueCode = outcome.result.issues[0]?.code ?? "UNKNOWN";
-        showPlayMessage(outcome.result.stage === "adjudication"
-          ? "**场外提示：** 世界裁决暂时未能安全完成。这次意图没有成为世界事件，场景仍停在行动前；你可以直接重试。"
-          : "**场外提示：** 这次输入未能通过世界提交边界，因此没有在剧情中发生；当前场景保持不变。");
-        ctx.ui.notify(`行动未提交（${outcome.result.stage}/${issueCode}）；正在从同一场景恢复。`, "warning");
-        await narratePlayerScene(
-          ctx,
-          selectedPlay,
-          "recovery",
-          {
-            kind: "unresolved",
-            utterance,
-            actorVisibleSummary: "这项请求没有成为世界事件；角色没有执行它，当前世界仍处于请求之前的已提交时刻。",
-          },
-          input.fallbackChoices?.length ? input.fallbackChoices : [],
-          outcome.result.contextSupplement,
-        );
-        return;
-      }
-      if (outcome.backgroundError) {
-        ctx.ui.notify(`Background advancement stopped: ${outcome.backgroundError}`, "warning");
-      }
-      if (outcome.worldResponseError) {
-        ctx.ui.notify(`Immediate world response stopped: ${outcome.worldResponseError}`, "warning");
-      }
-      if (outcome.canonicalRecoveryError) {
-        ctx.ui.notify(`Canonical scaffold recovery stopped: ${outcome.canonicalRecoveryError}`, "warning");
-      }
-      if (outcome.npcResponseError) {
-        showPlayMessage("**场外提示：** 你对在场人物的互动已经发生，但至少一位 NPC 的即时回应未能通过生成或世界校验；系统没有把失败伪装成沉默。你可以用 **/scene** 查看当前已提交时刻，或继续行动。");
-        ctx.ui.notify(`NPC response stopped: ${outcome.npcResponseError}`, "warning");
-      }
-      await narratePlayerScene(ctx, selectedPlay, "turn", undefined, [], outcome.result.contextSupplement);
+        if (outcome.backgroundError) {
+          ctx.ui.notify(`Background advancement stopped: ${outcome.backgroundError}`, "warning");
+        }
+        if (outcome.worldResponseError) {
+          ctx.ui.notify(`Immediate world response stopped: ${outcome.worldResponseError}`, "warning");
+        }
+        if (outcome.canonicalRecoveryError) {
+          ctx.ui.notify(`Canonical scaffold recovery stopped: ${outcome.canonicalRecoveryError}`, "warning");
+        }
+        if (outcome.npcResponseError) {
+          showPlayMessage("**场外提示：** 你对在场人物的互动已经发生，但至少一位 NPC 的即时回应未能通过生成或世界校验；系统没有把失败伪装成沉默。你可以用 **/scene** 查看当前已提交时刻，或继续行动。");
+          ctx.ui.notify(`NPC response stopped: ${outcome.npcResponseError}`, "warning");
+        }
+        await narratePlayerScene(ctx, selectedPlay, "turn", undefined, [], outcome.result.contextSupplement);
+      });
     };
 
     const offerPlayerChoices = async (
@@ -3294,7 +3309,7 @@ export function createNwhExtension(options: NwhExtensionOptions): ExtensionFacto
           `playable instances: ${catalog.instances.length}`,
           `current play: ${current ? `${current.actorName ?? current.actorId ?? "no character"}@${current.branchId} step ${current.logicalStep}` : "none"}`,
           `model: ${modelLabel(ctx.model)}`,
-          `session: ${ctx.sessionManager.getSessionId()}`,
+          `session: ${ctx.sessionManager?.getSessionId?.()}`,
           `session title: ${ctx.sessionManager.getSessionName() ?? "unnamed (agent will name it after a substantive turn)"}`,
           `entries: ${ctx.sessionManager.getEntries().length}`,
           `persistence: ${saveSession ? "on" : "off"}`,

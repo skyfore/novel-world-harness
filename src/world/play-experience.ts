@@ -1,3 +1,4 @@
+import { currentRuntimeHooks } from "../runtime/hooks.js";
 import type { PlayerActionTranslator, PlayerTurnResult, PlayerWorldAdjudicator } from "./player-action.js";
 import { buildActorScopedActionContext, PlayerTurnService } from "./player-action.js";
 import { AUTONOMOUS_BACKGROUND_KINDS, type Entity } from "./model.js";
@@ -292,7 +293,7 @@ export async function selectPlayExperience(
   };
 }
 
-export async function performPlayTurn(options: {
+export type PerformPlayTurnOptions = {
   root: string;
   branchId: string;
   actorId: string;
@@ -318,7 +319,24 @@ export async function performPlayTurn(options: {
   sessionId?: string;
   conversationId?: string;
   sourceId?: string;
-}): Promise<PlayTurnOutcome> {
+};
+
+export async function performPlayTurn(options: PerformPlayTurnOptions): Promise<PlayTurnOutcome> {
+  const metadata = {
+    workspaceRoot: options.root, branchId: options.branchId, actorId: options.actorId, sessionId: options.sessionId,
+    accepted: undefined as boolean | undefined,
+    degraded: undefined as boolean | undefined,
+  };
+  return currentRuntimeHooks().run("play.turn", "performPlayTurn", metadata, async () => {
+    const outcome = await performPlayTurnInternal(options);
+    metadata.accepted = outcome.result.accepted;
+    metadata.degraded = Boolean(outcome.backgroundError || outcome.worldResponseError || outcome.canonicalRecoveryError
+      || outcome.npcResponseError || outcome.conversationError || outcome.auditError || outcome.repairHintError);
+    return outcome;
+  });
+}
+
+async function performPlayTurnInternal(options: PerformPlayTurnOptions): Promise<PlayTurnOutcome> {
   const startedAt = new Date();
   const advanceBackground = options.advanceBackground ?? 0;
   const advanceActors = options.advanceActors ?? 1;

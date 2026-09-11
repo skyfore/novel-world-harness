@@ -1,3 +1,4 @@
+import { currentRuntimeHooks } from "../runtime/hooks.js";
 import { eventExecutionSchema } from "../world/event-execution.js";
 import { CompilerFinishReceipts } from "./finish-receipts.js";
 import crypto from "node:crypto";
@@ -464,6 +465,19 @@ export class PreparedNovelCache {
   async publish(
     source: SourceDocument,
     options: { allowSemanticDebtForRollback?: boolean; lineage?: PreparedRevisionLineage } = {},
+  ): Promise<PreparedCacheResult> {
+    if (options.allowSemanticDebtForRollback) return this.publishInternal(source, options);
+    const metadata = { workspaceRoot: this.workspaceRoot, sourceId: source.id, bundleHash: undefined as string | undefined };
+    return currentRuntimeHooks().run("compilation", "publish-validated-revision", metadata, async () => {
+      const result = await this.publishInternal(source, options);
+      metadata.bundleHash = result.bundleHash;
+      return result;
+    });
+  }
+
+  private async publishInternal(
+    source: SourceDocument,
+    options: { allowSemanticDebtForRollback?: boolean; lineage?: PreparedRevisionLineage },
   ): Promise<PreparedCacheResult> {
     if (options.lineage && !await this.loadRevision(source, options.lineage.parentBundleHash, { allowIncompatible: true })) {
       throw new Error(

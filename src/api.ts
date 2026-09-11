@@ -481,3 +481,5 @@ export { createWebHost, isLoopbackHost, type CreateWebHostOptions, type NwhWebHo
 export { OperationManager, type OperationRunContext, type StartOperationInput } from "./web/operation-manager.js";
 
 export { CompilerProposalObligations } from "./compiler/proposal-obligations.js";
+
+export { RuntimeHooks, runtimeHooks, currentRuntimeHooks, withRuntimeHooks, type RuntimeHook, type RuntimeHookEvent, type RuntimeHookType, type RuntimeHookStatus, type RuntimeHookMetadata, type RuntimeHookFailure } from "./runtime/hooks.js";

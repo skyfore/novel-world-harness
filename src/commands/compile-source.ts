@@ -1,3 +1,4 @@
+import { currentRuntimeHooks } from "../runtime/hooks.js";
 import { stderr, stdout } from "node:process";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { formatRetryNotice } from "../agent/pi-session.js";
@@ -68,10 +69,15 @@ async function optionalConfig(options: CompileSourceOptions) {
 }
 
 export async function compileSourceCommand(options: CompileSourceOptions): Promise<void> {
+  return currentRuntimeHooks().run("compiler.batches", "compile-source", { workspaceRoot: options.root, sourceId: options.sourceId },
+    () => compileSourceInternal(options));
+}
+
+async function compileSourceInternal(options: CompileSourceOptions): Promise<void> {
   options.signal?.throwIfAborted();
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(options.root, "compiler", () =>
-      compileSourceCommand({ ...options, acquireLock: false }));
+      compileSourceInternal({ ...options, acquireLock: false }));
   }
   if (!options.traceParent) {
     const recorder = await TraceRecorder.start(new TraceStore(options.root), { kind: "prepare", ...(options.sourceId ? { sourceId: options.sourceId } : {}) });
@@ -79,7 +85,7 @@ export async function compileSourceCommand(options: CompileSourceOptions): Promi
     if (options.onProgress) options.onProgress(message); else stderr.write(`${message}\n`);
     try {
       await recorder.record("validation.completed", { phase: "compiler-host", pid: process.pid, parentPid: process.ppid });
-      await compileSourceCommand({ ...options, acquireLock: false, traceParent: recorder.rootContext });
+      await compileSourceInternal({ ...options, acquireLock: false, traceParent: recorder.rootContext });
       await recorder.finish("succeeded");
     } catch (error) {
       await recorder.finish(options.signal?.aborted ? "cancelled" : "failed", {}, {

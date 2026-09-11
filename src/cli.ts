@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { Command } from "commander";
+import { HookCommand as Command } from "./runtime/hook-command.js";
 import type { TuiMode } from "@earendil-works/pi-coding-agent";
 import { resolveConfigPath } from "./config/load.js";
 import { auditCommand } from "./commands/audit.js";

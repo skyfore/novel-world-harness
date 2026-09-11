@@ -1,3 +1,4 @@
+import { RuntimeHooks, withRuntimeHooks, type RuntimeHookEvent } from "../src/runtime/hooks.js";
 import { useOfflinePreparationBoundary } from "./helpers/offline-preparation.js";
 useOfflinePreparationBoundary();
 import fs from "node:fs/promises";
@@ -737,7 +738,11 @@ describe("versioned prepared novel cache", () => {
     expect((await canon.getEntity("hero")).aliases).toEqual(["The Hero"]);
     // Exercise production archive semantics, not the legacy fixture's auto-activation helper.
     vi.mocked(PreparedNovelCache.prototype.publish).mockRestore();
-    const candidate = await cache.archiveCandidate(fixture.source);
+    const hooks = new RuntimeHooks();
+    const hookEvents: RuntimeHookEvent[] = [];
+    hooks.subscribe(event => { hookEvents.push(event); });
+    const candidate = await withRuntimeHooks(hooks, () => cache.archiveCandidate(fixture.source));
+    expect(hookEvents).toEqual([]); // archiving a candidate never announces compilation success
     expect(candidate.bundleHash).not.toBe(published.bundleHash);
     const activeBefore = await fs.readFile(path.join(cacheRoot, candidate.contentMd5, "active.json"), "utf8");
     const inventory = await cache.peekArchivedRevisions(fixture.source);
@@ -747,7 +752,9 @@ describe("versioned prepared novel cache", () => {
     expect(await fs.readFile(path.join(cacheRoot, candidate.contentMd5, "active.json"), "utf8")).toBe(activeBefore);
     await cache.restoreCompilerCheckpoint(fixture.source, candidate.bundleHash!);
     expect((await cache.loadFreshActive(fixture.source))?.bundleHash).toBe(published.bundleHash);
-    const revised = await cache.publish(fixture.source);
+    const revised = await withRuntimeHooks(hooks, () => cache.publish(fixture.source));
+    expect(hookEvents).toHaveLength(1);
+    expect(hookEvents[0]).toMatchObject({ type: "compilation", status: "succeeded", metadata: { sourceId: fixture.source.id, bundleHash: revised.bundleHash } });
     await expect(cache.loadFreshActive(fixture.source)).resolves.toMatchObject({ bundleHash: revised.bundleHash });
   });
 

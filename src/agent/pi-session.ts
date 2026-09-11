@@ -1,3 +1,5 @@
+import { currentRuntimeHooks } from "../runtime/hooks.js";
+import { createPiHooksExtension } from "./pi-hooks.js";
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -646,6 +648,10 @@ export class PiAgentSession {
     return (await this.promptWithReport(input)).text;
   }
   async promptWithReport(input: string, options: PiPromptOptions = {}): Promise<PiPromptReport> {
+    return currentRuntimeHooks().run("llm.prompt", "pi.prompt", { workspaceRoot: this.options.workspace.root, sessionId: this.id }, () => this.promptWithReportInternal(input, options));
+  }
+
+  private async promptWithReportInternal(input: string, options: PiPromptOptions = {}): Promise<PiPromptReport> {
     if (this.traceFinished) throw new Error("A traced Pi invocation accepts exactly one prompt.");
     this.activeText = "";
     this.lastAssistantStopReason = undefined;
@@ -659,7 +665,11 @@ export class PiAgentSession {
       await this.trace?.flush();
       const promptMessages = this.session.messages.slice(messageCountBeforePrompt);
       const latest = [...promptMessages].reverse().find((message) => message.role === "assistant");
-      if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) throw new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
+      if (latest?.role === "assistant" && (latest.stopReason === "error" || latest.stopReason === "aborted")) {
+        const error = new Error(latest.errorMessage ?? `Model request ${latest.stopReason}.`);
+        if (latest.stopReason === "aborted") error.name = "AbortError";
+        throw error;
+      }
       const text = this.activeText || (latest?.role === "assistant"
         ? latest.content.flatMap((content) => (content.type === "text" ? [content.text] : [])).join("")
         : "");
@@ -804,6 +814,7 @@ export class PiAgentSession {
             this.stateDir,
           ),
           extensionFactories: [
+            { name: "nwh-hooks", hidden: true, factory: createPiHooksExtension(currentRuntimeHooks(), this.options.workspace.root) },
             ...(this.options.includeNwhExtension === false ? [] : [{
               name: "nwh",
               hidden: true,

@@ -1,0 +1,35 @@
+[
+  {
+    "tool": "propose_event_relation",
+    "proposalId": "rel-man-asks-eva-orders-00009-reconcile-68150c255bf9",
+    "inputHash": "beff29f7fbe237257555adeb4a3b63adb638f7e4a85f4c6a4f151d4c8be16e35",
+    "input": {
+      "proposal_id": "rel-man-asks-eva-orders-00009-reconcile-68150c255bf9",
+      "payload": {
+        "id": "rel-man-asks-eva-orders-00009",
+        "fromEventId": "event-man-asks-coins-00009",
+        "toEventId": "event-eva-orders-coins-00009",
+        "type": "motivates",
+        "operationality": "motivational",
+        "status": "explicit",
+        "confidence": 0.99,
+        "mechanism": "The man's request for two coins is immediately followed by EVA directing Adams to give him two coins."
+      },
+      "evidence_segment_ids": [
+        "a28585b1cf867f3e3a16-00009-6677e8830ee3"
+      ],
+      "evidence_selectors": [
+        {
+          "segment_id": "a28585b1cf867f3e3a16-00009-6677e8830ee3",
+          "exact": "“嘿兄弟，能否还给我两个硬币让我去买罐可乐……我把所有钱都给你了……你看，钱对你只是个玩具，这里又没有超市和可乐机……”\r\n\tAdams的表情变了，死死地攥着几枚硬币，露出一个典型的小气鬼表情。\r\n\t“Adams，给你哥哥两枚硬币。”EVA说。",
+          "target_path": "/mechanism",
+          "relation": "supports",
+          "strength": "explicit"
+        }
+      ]
+    },
+    "status": "failed",
+    "diagnostic": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"motivatedActorIds\"\n    ],\n    \"message\": \"A motivational relation must name at least one motivated actor\"\n  }\n]",
+    "updatedAt": "2026-09-11T14:59:33.342Z"
+  }
+]

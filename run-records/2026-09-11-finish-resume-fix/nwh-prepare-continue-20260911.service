@@ -1,0 +1,14 @@
+[Unit]
+Description=Novel Harness standard candidate preparation continuation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=root
+WorkingDirectory=/root/workplace/novel-world-harness
+ExecStart=/root/.nvm/versions/node/v22.19.0/bin/node --import tsx src/cli.ts prepare-all --source a28585b1cf867f3e3a16 --yes --candidate-only --model openai-codex/gpt-5.6-terra
+Restart=no
+RemainAfterExit=yes
+StandardOutput=append:/root/workplace/novel-world-harness/run-records/2026-09-11-finish-resume-fix/resume.log
+StandardError=inherit

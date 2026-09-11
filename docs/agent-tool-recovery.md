@@ -165,3 +165,26 @@ A parameter failure followed by an evidence failure therefore exhausts the same
 one-correction allowance. Failed preview traces remain visible in compiler status
 as `latestRun.lastToolFailure`, even when there are no proposal obligations.
 Regression tests must call preparation, Pi validation, and execution in order.
+
+## Resuming converged world-only finishes
+
+A completed finish for world proposals precedes their convergence into canonical
+artifacts. For completed world-only receipts with no metadata side effects,
+recovery first verifies source bytes and the original dependency envelopes. If
+all dependencies are accepted, it verifies their exact payloads are still current
+canonical artifacts and rejects new pending work in the same frozen batch. It
+then confirms completion without replaying a finish that requires pending drafts.
+Missing, rejected or changed dependencies still require host review. Prepared
+receipts, un-converged proposals and annotation/resolution/accounting/metadata
+side effects retain their existing recovery checks; this path never reactivates
+superseded identity resolutions or changes a receipt.
+
+Use the standard CLI to continue through graph adjudication, semantic
+reconciliation, role review and candidate archival without publishing Play:
+
+```sh
+node --import tsx src/cli.ts prepare-all --source SOURCE_ID --yes --candidate-only --model openai-codex/gpt-5.6-terra
+```
+
+No stage-specific dependency overrides are needed. Completed graph shard IDs are
+verified without model calls when the loop encounters them again.

@@ -143,3 +143,53 @@ it("recovers an interrupted TUI source finish before offering the next model tur
   expect(next.completedBatches).toBe(1);
   expect((await f.receipts.read())?.state).toBe("completed");
 });
+
+async function convergedWorldFinish() {
+  const { CanonicalModelStore, ProposalStore } = await import("../src/world/canonical-model.js");
+  const { CompilerCommitService } = await import("../src/compiler/validator.js");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-converged-finish-")); roots.push(root);
+  const f = await createEvidenceFixture(root, "The door opened. Then the bell rang.\n");
+  const canon = new CanonicalModelStore(root);
+  for (const [id, orderHint] of [["door", 1], ["bell", 2]] as const) await canon.putEvent({ id, title: id, participants: [],
+    storyTime: { kind: "ordinal", label: id, orderHint }, preconditions: [], observedOutcome: { version: 1, operations: [] },
+    evidence: f.evidence("The door opened. Then the bell rang."), causalParents: [], confidence: 1 });
+  const batchId = `reconcile-${f.source.id}-test-1`;
+  const set = createCompilerProposalToolset(root);
+  await set.beginBatch([f.segmentId], batchId, f.source.id);
+  const call = (name: string, args: unknown) => set.tools.find(t => t.name === name)!.execute(name, args as never, undefined, undefined, {} as never);
+  await call("propose_event_relation", { proposal_id: "relation-proposal", payload: { id: "door-before-bell", fromEventId: "door", toEventId: "bell", type: "before", operationality: "non-operational", status: "explicit", confidence: 1 }, evidence_segment_ids: [f.segmentId] });
+  await call("finish_compiler_batch", { outcome: "complete", reviewed_segments: [{ segment_id: f.segmentId, disposition: "proposed", summary: "Reviewed sequence" }], summary: "Recorded sequence" });
+  const receipt = await new CompilerFinishReceipts(root, f.source.id, batchId).read();
+  expect(receipt?.state).toBe("completed");
+  expect((await new CompilerCommitService(root).accept("event-relation", "relation-proposal")).accepted).toBe(true);
+  expect(await new ProposalStore(root).list("pending")).toEqual([]);
+  return { ...f, root, batchId, receipt, canon, proposals: new ProposalStore(root) };
+}
+
+it("resumes finish → convergence → command restart without a model session or duplicate acceptance", async () => {
+  const { compileCommand } = await import("../src/commands/compile.js");
+  const f = await convergedWorldFinish();
+  const before = await f.canon.listEventRelations();
+  await compileCommand({ root: f.root, sourceId: f.source.id, compilerBatchId: f.batchId,
+    configPath: path.join(f.root, "missing.yaml"), allowMissingConfig: true, acquireLock: false,
+    model: "nonexistent-provider/nonexistent-model", prompt: "Continue the already finished batch", onProgress() {} });
+  await expect(recoverCompilerFinish(f.root, f.source.id, f.batchId)).resolves.toBe(true);
+  expect(await f.canon.listEventRelations()).toEqual(before);
+  expect(await f.proposals.list("accepted")).toHaveLength(1);
+  expect(await new CompilerFinishReceipts(f.root, f.source.id, f.batchId).read()).toEqual(f.receipt);
+});
+
+it("blocks a completed receipt when its accepted canonical output has changed", async () => {
+  const f = await convergedWorldFinish();
+  const relation = await f.canon.getEventRelation("door-before-bell");
+  await f.canon.putEventRelation({ ...relation, confidence: 0.5 });
+  await expect(recoverCompilerFinish(f.root, f.source.id, f.batchId)).rejects.toThrow("host review");
+  expect(await new CompilerFinishReceipts(f.root, f.source.id, f.batchId).read()).toEqual(f.receipt);
+});
+
+it("does not skip a completed world finish after an accepted dependency is removed", async () => {
+  const f = await convergedWorldFinish();
+  await f.proposals.transition("relation-proposal", "accepted", "rejected");
+  await expect(recoverCompilerFinish(f.root, f.source.id, f.batchId)).rejects.toThrow("host review");
+  expect(await new CompilerFinishReceipts(f.root, f.source.id, f.batchId).read()).toEqual(f.receipt);
+});

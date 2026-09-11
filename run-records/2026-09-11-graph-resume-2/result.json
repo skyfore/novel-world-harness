@@ -1,0 +1,5 @@
+{
+  "status": "failed",
+  "error": "Compiler finish requires host review: Error: complete requires at least one active successful proposal submission.. Stop model retries and preserve the receipt and drafts. The host may replay only the original verified finish; changed input or dependencies require inspection.",
+  "endedAt": "2026-09-11T15:09:21.825Z"
+}

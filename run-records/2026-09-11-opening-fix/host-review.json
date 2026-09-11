@@ -1,0 +1,44 @@
+{
+  "sourceId": "a28585b1cf867f3e3a16",
+  "batchId": "opening-batch-a28585b1cf867f3e3a16-00002-executable-684389ad80a1",
+  "reviewedAt": "2026-09-11T03:20:53.548Z",
+  "diagnoses": [
+    {
+      "inputHash": "985f038b8d3b547cd675eb535789f058f6557fd6e44dadb631c59d3598e2ef91",
+      "issues": [
+        "payload.readerContext.facts.4.holderEntityId: actor-stance must name the character or institution that holds the stance or stakes",
+        "payload.readerContext.facts.4.stance: actor-stance must classify its direction",
+        "payload.readerContext.facts: Opening reader context requires one causal-premise fact",
+        "evidence_selectors.2.relation: Invalid option: expected one of \"supports\"|\"contradicts\"|\"contextualizes\""
+      ]
+    },
+    {
+      "inputHash": "523585014bf4a501482419618ba5bea3cefb92ef7030984b9267adbcf2a7d292",
+      "issues": [
+        "payload.readerContext.facts.4.holderEntityId: actor-stance must name the character or institution that holds the stance or stakes",
+        "payload.readerContext.facts.4.stance: actor-stance must classify its direction",
+        "payload.readerContext.facts: Opening reader context requires one causal-premise fact"
+      ]
+    }
+  ],
+  "decision": "The two exact initial inputs are unsupported as submitted: deterministic required context fields are absent, and neither input staged an artifact. Preserve failed history; authorize a freshly validated correction, without asserting that any replacement world is valid.",
+  "mentionCorrection": {
+    "proposal_id": "p-mention-opening-man",
+    "annotation_id": "mention-opening-man",
+    "selector": {
+      "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+      "exact": "他",
+      "prefix": "“康斯……坦丁。”他喊出了那个名字。\r\n\t",
+      "suffix": "猛地坐起，在下午的阳光中睁开眼睛",
+      "occurrence": 1
+    },
+    "surface": "他",
+    "form": "pronoun",
+    "kind_candidates": [
+      "character"
+    ],
+    "confidence": 0.9,
+    "interpretation": "The waking man is the focal embodied character at the checkpoint."
+  },
+  "rejectedDraftPolicy": "Retain all five rejected drafts and their history. Reuse only evidence revalidated through normal proposal and finish gates."
+}

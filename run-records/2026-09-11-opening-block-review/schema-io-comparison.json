@@ -1,0 +1,19 @@
+{
+  "defaultRequired": [
+    "id",
+    "kind",
+    "summary",
+    "temporalClass",
+    "basis",
+    "entityIds",
+    "focalKnowledgeClaimIds",
+    "dependsOnFactIds"
+  ],
+  "inputRequired": [
+    "id",
+    "kind",
+    "summary",
+    "temporalClass",
+    "basis"
+  ]
+}

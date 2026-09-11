@@ -1,0 +1,14 @@
+[Unit]
+Description=Novel Harness audited opening compiler recovery
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=root
+WorkingDirectory=/root/workplace/novel-world-harness
+ExecStart=/root/.nvm/versions/node/v22.19.0/bin/node --import tsx run-records/2026-09-11-preview-boundary-fix/resume.ts
+Restart=no
+RemainAfterExit=yes
+StandardOutput=append:/root/workplace/novel-world-harness/run-records/2026-09-11-preview-boundary-fix/resume.log
+StandardError=inherit

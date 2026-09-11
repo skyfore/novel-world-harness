@@ -6,6 +6,7 @@ const modelPayload = initialWorldSchema.omit({ evidence: true });
 /** Pure input checks: aggregate independent failures before any proposal write. */
 export function initialWorldInputIssues(input: { payload: unknown; evidence_selectors?: unknown }): string[] {
   const issues: string[] = [];
+  if (!input || typeof input !== "object") return ["Input must be an object with proposal_id, payload and evidence_segment_ids."];
   const payload = modelPayload.safeParse(input.payload);
   if (!payload.success) issues.push(...payload.error.issues.map(issue =>
     `payload.${issue.path.join(".")}: ${issue.message}`));

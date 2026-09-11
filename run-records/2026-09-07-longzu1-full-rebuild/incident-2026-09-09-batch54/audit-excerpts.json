@@ -1,0 +1,522 @@
+{
+  "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+  "events": [
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 182,
+      "observedAt": "2026-09-08T17:35:56.759Z",
+      "type": "tool.call.started",
+      "spanId": "span-mtsya8yt-3bccd62e-dc9f-4b87-97b8-73c36f95d147",
+      "parentSpanId": "span-mtsy8nlx-d1e8f5eb-0dac-40e4-aeb7-a634af85a25d",
+      "callId": "call-mtsya8yt-4bf9bb57-80c5-43bb-80b2-b14478b06008",
+      "toolCallId": "call_uI3oDEs5s6giyInBT9209kuX|fc_0f44ca9c428f128a016aa0477b15fc87d094e29af50731f991",
+      "data": {
+        "toolName": "account_source_units",
+        "inputHash": "996d63965d86f70ecce735c2c7368581f03ced60e50938b710e79e6ec988edc6"
+      },
+      "blobRef": {
+        "sha256": "996d63965d86f70ecce735c2c7368581f03ced60e50938b710e79e6ec988edc6",
+        "byteLength": 378,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "page_default": {
+          "reason": "Reviewed in executable stage: this page contains scene narration and dialogue already handled by semantic artifacts; it provides no new reusable executable mechanism, typed constraint, rule, norm, process, goal/model, spatial relation, or possibility.",
+          "status": "background-only"
+        },
+        "page_token": "acctpg-39fefb7edae08667",
+        "proposal_id": "acct-00008-p01"
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 183,
+      "observedAt": "2026-09-08T17:35:57.824Z",
+      "type": "tool.call.completed",
+      "spanId": "span-mtsya8yt-3bccd62e-dc9f-4b87-97b8-73c36f95d147",
+      "parentSpanId": "span-mtsy8nlx-d1e8f5eb-0dac-40e4-aeb7-a634af85a25d",
+      "callId": "call-mtsya8yt-4bf9bb57-80c5-43bb-80b2-b14478b06008",
+      "toolCallId": "call_uI3oDEs5s6giyInBT9209kuX|fc_0f44ca9c428f128a016aa0477b15fc87d094e29af50731f991",
+      "data": {
+        "toolName": "account_source_units",
+        "isError": false
+      },
+      "blobRef": {
+        "sha256": "3be91d38b9092e7a6b72ace1180f4d92468af5adbefc40d094639398ce1d58d5",
+        "byteLength": 1067,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "content": [
+          {
+            "text": "Pending source-accounting proposal acct-00008-p01 recorded for 20 unit(s). These review dispositions do not create world truth.",
+            "type": "text"
+          }
+        ],
+        "details": {
+          "kind": "source-accounting",
+          "proposalId": "acct-00008-p01",
+          "unitIds": [
+            "unit-sentence-be24b1f0864a83f61f14a65d",
+            "unit-sentence-95ea3faf931b775125dc4bb2",
+            "unit-sentence-ed09c39868f65a8150d77365",
+            "unit-sentence-ccb8738f573e4a6449df6578",
+            "unit-sentence-07b97a24d32d059d2e30b8bc",
+            "unit-sentence-1251955df3cde97eef0b05bf",
+            "unit-sentence-58aa9b5620f711e701bee889",
+            "unit-sentence-407c00bef764f0de3ba9d3c6",
+            "unit-sentence-94a4a3d06b298da142f3eadf",
+            "unit-sentence-6d9703eed7ea6e6ccecf2628",
+            "unit-sentence-88e72fac7bdd6d10c56865bf",
+            "unit-sentence-8800ce96231702ee4cc67f97",
+            "unit-sentence-9776c37bf5f70e7025e4c5c0",
+            "unit-sentence-89a56d20090ca691efd014e8",
+            "unit-sentence-c2728f756704c0fe9f0c6295",
+            "unit-sentence-4d0450bbb903b2b39a1424e1",
+            "unit-sentence-dd33ce0cb25914c329df8a2c",
+            "unit-sentence-c215e2c38ae523272890dde8",
+            "unit-sentence-f7ae241ca48046b53b6e2b6d",
+            "unit-sentence-e944084cac5a7bf9bc6acf7a"
+          ]
+        }
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 383,
+      "observedAt": "2026-09-08T17:39:56.526Z",
+      "type": "llm.response.completed",
+      "spanId": "span-mtsyfllq-18f6e1a1-c1af-43d1-ae35-cfafb916b172",
+      "parentSpanId": "span-mtsy8nlx-d1e8f5eb-0dac-40e4-aeb7-a634af85a25d",
+      "callId": "call-mtsyfllq-0a4289ad-7cfe-43a8-bbf9-ab545c4b2347",
+      "data": {
+        "providerId": "openai-codex",
+        "modelId": "gpt-5.6-luna",
+        "api": "openai-codex-responses",
+        "stopReason": "stop",
+        "rawStopReason": "completed",
+        "usage": {
+          "input": 1028,
+          "output": 170,
+          "cacheRead": 184832,
+          "cacheWrite": 0,
+          "reasoning": 121,
+          "totalTokens": 186030,
+          "cost": 0.004106240000000001
+        },
+        "durationMs": 10959,
+        "hasReasoning": true,
+        "streamedReasoningChars": 44,
+        "reasoningContentRecorded": false
+      },
+      "blobRef": {
+        "sha256": "7307ec93502c31159b0d700f15747dcf1b83e5671a7d32c162da03281fec8698",
+        "byteLength": 883,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "api": "openai-codex-responses",
+        "content": [
+          {
+            "charCount": 0,
+            "reasoningContentRecorded": false,
+            "redacted": true,
+            "type": "thinking"
+          },
+          {
+            "text": "Executable analysis found no new reusable mechanism supported by this slice. Existing event/schema payloads were inspected, but source accounting remains incomplete: **396 unresolved units** remain. Batch finish is therefore blocked pending additional accounting pages.",
+            "textSignature": "[REDACTED]",
+            "type": "text"
+          }
+        ],
+        "model": "gpt-5.6-luna",
+        "provider": "openai-codex",
+        "rawStopReason": "completed",
+        "responseId": "resp_0f44ca9c428f128a016aa0486378b487d08d89285f8337de68",
+        "role": "assistant",
+        "stopReason": "stop",
+        "timestamp": 1788889185582,
+        "usage": {
+          "cacheRead": 184832,
+          "cacheWrite": 0,
+          "cost": {
+            "cacheRead": 0.00369664,
+            "cacheWrite": 0,
+            "input": 0.0002056,
+            "output": 0.000204,
+            "total": 0.004106240000000001
+          },
+          "input": 1028,
+          "output": 170,
+          "reasoning": 121,
+          "totalTokens": 186030
+        }
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 404,
+      "observedAt": "2026-09-08T17:40:30.102Z",
+      "type": "tool.call.started",
+      "spanId": "span-mtsyg476-412d5292-5003-4d30-8f4a-042658810c1d",
+      "parentSpanId": "span-mtsyfudt-c4239840-821c-497f-9a3b-777f1b13f2ef",
+      "callId": "call-mtsyg477-99cd381d-632b-434c-a38e-e5b14fb602a3",
+      "toolCallId": "call_Wt1OQcOCvnoIefXLR61RGMDS|fc_08d8f501a8bac4f2016aa0488ca5e887d0baf1e80039b355cb",
+      "data": {
+        "toolName": "account_source_units",
+        "inputHash": "5a573e46e95c0e3fdd1f9a7543061fe7eac39726df942a9a109bb5ca3aff56ae"
+      },
+      "blobRef": {
+        "sha256": "5a573e46e95c0e3fdd1f9a7543061fe7eac39726df942a9a109bb5ca3aff56ae",
+        "byteLength": 296,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "page_default": {
+          "reason": "The unit’s source-grounded content is already represented by the existing semantic event/discourse inventory; no distinct executable mechanism is supported here.",
+          "status": "duplicate-description"
+        },
+        "page_token": "acctpg-ffe9808a9d32f912",
+        "proposal_id": "acct-00008-p01"
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 405,
+      "observedAt": "2026-09-08T17:40:30.905Z",
+      "type": "tool.call.failed",
+      "spanId": "span-mtsyg476-412d5292-5003-4d30-8f4a-042658810c1d",
+      "parentSpanId": "span-mtsyfudt-c4239840-821c-497f-9a3b-777f1b13f2ef",
+      "callId": "call-mtsyg477-99cd381d-632b-434c-a38e-e5b14fb602a3",
+      "toolCallId": "call_Wt1OQcOCvnoIefXLR61RGMDS|fc_08d8f501a8bac4f2016aa0488ca5e887d0baf1e80039b355cb",
+      "data": {
+        "toolName": "account_source_units",
+        "isError": true
+      },
+      "blobRef": {
+        "sha256": "c8257e2b903403d6e4c78d6ac85dc2944983b63eb2c7161333164e3716ef92b5",
+        "byteLength": 1404,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "content": [
+          {
+            "text": "Pending source-accounting proposal acct-00008-p01 already exists with different content; use a new proposal id.\n\n<nwh-tool-recovery>\n{\n  \"version\": 1,\n  \"failedTool\": \"account_source_units\",\n  \"category\": \"unexpected-failure\",\n  \"retryable\": true,\n  \"retryCondition\": \"Retry only when the original diagnostic identifies a concrete argument or current-state correction.\",\n  \"steps\": [\n    \"Do not repeat the same call unchanged.\",\n    \"Use an available read-only discovery tool to verify relevant paths, refs, IDs, and active scope before changing arguments.\",\n    \"Retry account_source_units at most once after a concrete correction; if none is possible or the same failure repeats, stop and surface the exact blocker.\"\n  ]\n}\n</nwh-tool-recovery>",
+            "type": "text"
+          }
+        ],
+        "details": {
+          "nwhToolRecovery": {
+            "category": "unexpected-failure",
+            "failedTool": "account_source_units",
+            "retryable": true,
+            "retryCondition": "Retry only when the original diagnostic identifies a concrete argument or current-state correction.",
+            "steps": [
+              "Do not repeat the same call unchanged.",
+              "Use an available read-only discovery tool to verify relevant paths, refs, IDs, and active scope before changing arguments.",
+              "Retry account_source_units at most once after a concrete correction; if none is possible or the same failure repeats, stop and surface the exact blocker."
+            ],
+            "version": 1
+          }
+        }
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 431,
+      "observedAt": "2026-09-08T17:41:14.097Z",
+      "type": "tool.call.started",
+      "spanId": "span-mtsyh865-0716d35d-5268-42d9-b449-81fee93f6e27",
+      "parentSpanId": "span-mtsyfudt-c4239840-821c-497f-9a3b-777f1b13f2ef",
+      "callId": "call-mtsyh865-cb1b23a1-e459-43d1-8370-c32e0a610c97",
+      "toolCallId": "call_is1QTxVNngill83vdDZTGz8s|fc_08d8f501a8bac4f2016aa048b8a82887d0a3ce0e5c30740d7e",
+      "data": {
+        "toolName": "account_source_units",
+        "inputHash": "896d1088248d17ad62d6d6824c0f63c8732378c2bc0c2a1ae58241d0c48f69a8"
+      },
+      "blobRef": {
+        "sha256": "896d1088248d17ad62d6d6824c0f63c8732378c2bc0c2a1ae58241d0c48f69a8",
+        "byteLength": 358,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "page_default": {
+          "reason": "Reviewed for executable closure: this dialogue and narration introduce no distinct reusable action schema, constraint, rule, norm, process, spatial relation, goal/model, or executable possibility beyond existing semantic artifacts.",
+          "status": "background-only"
+        },
+        "page_token": "acctpg-315cc245a6720551",
+        "proposal_id": "acct-00008-p12"
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 432,
+      "observedAt": "2026-09-08T17:41:14.925Z",
+      "type": "tool.call.completed",
+      "spanId": "span-mtsyh865-0716d35d-5268-42d9-b449-81fee93f6e27",
+      "parentSpanId": "span-mtsyfudt-c4239840-821c-497f-9a3b-777f1b13f2ef",
+      "callId": "call-mtsyh865-cb1b23a1-e459-43d1-8370-c32e0a610c97",
+      "toolCallId": "call_is1QTxVNngill83vdDZTGz8s|fc_08d8f501a8bac4f2016aa048b8a82887d0a3ce0e5c30740d7e",
+      "data": {
+        "toolName": "account_source_units",
+        "isError": false
+      },
+      "blobRef": {
+        "sha256": "f835477d7796ad9023067d9a4e3a9804e109979fdd48abb21722a992e0d3062d",
+        "byteLength": 1067,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "content": [
+          {
+            "text": "Pending source-accounting proposal acct-00008-p12 recorded for 20 unit(s). These review dispositions do not create world truth.",
+            "type": "text"
+          }
+        ],
+        "details": {
+          "kind": "source-accounting",
+          "proposalId": "acct-00008-p12",
+          "unitIds": [
+            "unit-sentence-23baac24b1c2bf6e551ea99a",
+            "unit-sentence-6dfa7450f89e7be4ef0dcf68",
+            "unit-sentence-971d5155fcfa9fd20918d6bd",
+            "unit-sentence-f25a2c31f4cfa61284dab3dc",
+            "unit-sentence-133d7b05e4f0e65cb38d29a6",
+            "unit-sentence-29c79472bf1252ae377a3da8",
+            "unit-sentence-b51635471ad9fb366b1d5424",
+            "unit-sentence-a202cf83a3ae22797e37c6b3",
+            "unit-sentence-defa2fdbf1884716472add51",
+            "unit-sentence-1bcd1e13d329948027f869c1",
+            "unit-sentence-d9779d8472dc06245373042e",
+            "unit-sentence-ca71a1750a6ac7ebf39a071d",
+            "unit-sentence-3880212c2ece84db2ce2d412",
+            "unit-sentence-29be378ba34d44ad8be1149c",
+            "unit-sentence-9b966315080e5e841a1d430c",
+            "unit-sentence-a0f55d15236c84a57c6746b5",
+            "unit-sentence-f01b006e64d0fac1b1f4417b",
+            "unit-sentence-7af4f2fb6f9aa32ef883fd6f",
+            "unit-sentence-802777286f9f330a8ba51018",
+            "unit-sentence-8989bd5d4ab1cf14f9b2be33"
+          ]
+        }
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 792,
+      "observedAt": "2026-09-08T17:49:42.680Z",
+      "type": "tool.call.completed",
+      "spanId": "span-mtsys35h-7daba0d4-8ce3-4821-a5bd-be833bb825ea",
+      "parentSpanId": "span-mtsyfudt-c4239840-821c-497f-9a3b-777f1b13f2ef",
+      "callId": "call-mtsys35h-ea166957-0102-4e66-9231-b73521e9945b",
+      "toolCallId": "call_YRdRpPf5nrPwxzSiZoVW3IXL|fc_08d8f501a8bac4f2016aa04ab560f887d085650d3374c40144",
+      "data": {
+        "toolName": "find_source_accounting_units",
+        "isError": false
+      },
+      "blobRef": {
+        "sha256": "ec0ab8767d69578cca7fd3e571fcf3e221f969385fa39e106d8abfff2e0decb6",
+        "byteLength": 728,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "content": [
+          {
+            "text": "{\"type\":\"source-accounting-units\",\"sourceId\":\"a28585b1cf867f3e3a16\",\"compilerBatchId\":\"batch-a28585b1cf867f3e3a16-00008-executable-5f11f49f932b\",\"total\":0,\"offset\":0,\"nextOffset\":null,\"units\":[],\"policy\":\"represented is host-derived and non-scene is deterministic. prior is materialized parent/current context only and never satisfies this active batch. For a status=unresolved page, review each unit and use pageToken + page_default + page_overrides; the host expands indexes to exact unit IDs. After recording it, refetch unresolved at offset 0 because the result set shrinks.\"}",
+            "type": "text"
+          }
+        ],
+        "details": {
+          "kind": "source-accounting",
+          "proposalId": "accounting-page-0",
+          "unitIds": []
+        }
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 800,
+      "observedAt": "2026-09-08T17:49:55.000Z",
+      "type": "tool.call.started",
+      "spanId": "span-mtsyseci-e3595ec7-0b6a-4410-8fa8-ca813cedd8f8",
+      "parentSpanId": "span-mtsyfudt-c4239840-821c-497f-9a3b-777f1b13f2ef",
+      "callId": "call-mtsysecj-addcb7ab-af05-4dff-b8a1-0a78df91242e",
+      "toolCallId": "call_lujw9BoJBjiC55SKpEjrImEh|fc_08d8f501a8bac4f2016aa04ac0bcac87d0a47bb94b64d12c7e",
+      "data": {
+        "toolName": "finish_compiler_batch",
+        "inputHash": "d1c060a49455bffda1531829aa370292f821201ab9f78cf6f9eef1fcd8640232"
+      },
+      "blobRef": {
+        "sha256": "d1c060a49455bffda1531829aa370292f821201ab9f78cf6f9eef1fcd8640232",
+        "byteLength": 517,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "outcome": "complete",
+        "reviewed_segments": [
+          {
+            "disposition": "proposed",
+            "segment_id": "a28585b1cf867f3e3a16-00008-1fb8ac99a307",
+            "summary": "Recovered and retained active source-accounting proposals; reviewed the full segment for executable-stage artifacts, with no additional reusable mechanism supported beyond existing semantic inventory."
+          }
+        ],
+        "summary": "Recovered the active accounting proposals without duplication, completed review of all unresolved units, and found no diagnosed executable proposal requiring repair."
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 801,
+      "observedAt": "2026-09-08T17:49:55.004Z",
+      "type": "tool.call.failed",
+      "spanId": "span-mtsyseci-e3595ec7-0b6a-4410-8fa8-ca813cedd8f8",
+      "parentSpanId": "span-mtsyfudt-c4239840-821c-497f-9a3b-777f1b13f2ef",
+      "callId": "call-mtsysecj-addcb7ab-af05-4dff-b8a1-0a78df91242e",
+      "toolCallId": "call_lujw9BoJBjiC55SKpEjrImEh|fc_08d8f501a8bac4f2016aa04ac0bcac87d0a47bb94b64d12c7e",
+      "data": {
+        "toolName": "finish_compiler_batch",
+        "isError": true
+      },
+      "blobRef": {
+        "sha256": "4fe89efed71180531c6b75006199e0fc6573b886ae9edfff62da61075cfc4937",
+        "byteLength": 2714,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "content": [
+          {
+            "text": "Unresolved compiler proposal obligations (persisted across sessions):\naccount_source_units proposal_id=acct-00008-p01: failed: Pending source-accounting proposal acct-00008-p01 already exists with different content; use a new proposal id.\nRepair each named proposal with the same exact proposal_id and tool, after checking every selector against the supplied citable segment. Retry once with concrete corrections; never guess IDs, widen evidence scope, add unrelated proposals, withdraw valid accounting, or restart to clear failures. If evidence is absent or the corrected attempt fails, stop for a host review; do not retry finish unchanged.\n\n<nwh-tool-recovery>\n{\n  \"version\": 1,\n  \"failedTool\": \"finish_compiler_batch\",\n  \"category\": \"scope-or-lifecycle\",\n  \"retryable\": true,\n  \"retryCondition\": \"Retry finish only after every named durable obligation is resolved; unchanged finish and fresh sessions cannot clear failures.\",\n  \"steps\": [\n    \"Copy each exact tool and proposal_id from the diagnostic. Recheck all selectors against the supplied citable segments, then make at most one corrected proposal retry under that same identity.\",\n    \"If an ID is missing, use the same-scope discovery tool and copy its exact ref; never construct refs from logicalId or guess IDs. Do not widen the evidence scope.\",\n    \"If evidence is absent, a call was interrupted, or the corrected attempt fails, stop for host review. Do not add unrelated proposals, withdraw accounting, or restart to erase the obligation.\",\n    \"Preserve every valid draft. Retry finish once only after actual resolution; if it still fails with the same diagnostic, stop.\"\n  ]\n}\n</nwh-tool-recovery>",
+            "type": "text"
+          }
+        ],
+        "details": {
+          "nwhToolRecovery": {
+            "category": "scope-or-lifecycle",
+            "failedTool": "finish_compiler_batch",
+            "retryable": true,
+            "retryCondition": "Retry finish only after every named durable obligation is resolved; unchanged finish and fresh sessions cannot clear failures.",
+            "steps": [
+              "Copy each exact tool and proposal_id from the diagnostic. Recheck all selectors against the supplied citable segments, then make at most one corrected proposal retry under that same identity.",
+              "If an ID is missing, use the same-scope discovery tool and copy its exact ref; never construct refs from logicalId or guess IDs. Do not widen the evidence scope.",
+              "If evidence is absent, a call was interrupted, or the corrected attempt fails, stop for host review. Do not add unrelated proposals, withdraw accounting, or restart to erase the obligation.",
+              "Preserve every valid draft. Retry finish once only after actual resolution; if it still fails with the same diagnostic, stop."
+            ],
+            "version": 1
+          }
+        }
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 809,
+      "observedAt": "2026-09-08T17:50:14.209Z",
+      "type": "tool.call.started",
+      "spanId": "span-mtsysnum-4529266a-a1d7-4a29-afb1-d02ed09a1e06",
+      "parentSpanId": "span-mtsyfudt-c4239840-821c-497f-9a3b-777f1b13f2ef",
+      "callId": "call-mtsysnum-14284946-36ea-419b-8eaf-39ae3463a0ab",
+      "toolCallId": "call_YuLqxOnG6seqD54J2iyGsyja|fc_08d8f501a8bac4f2016aa04ad08da087d0b7ed409364384109",
+      "data": {
+        "toolName": "account_source_units",
+        "inputHash": "058a9d0a6e00ae5417da1f4ffcc116483aae332fa700f879071e001232c94c54"
+      },
+      "blobRef": {
+        "sha256": "058a9d0a6e00ae5417da1f4ffcc116483aae332fa700f879071e001232c94c54",
+        "byteLength": 1418,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "decisions": [
+          {
+            "reason": "Reviewed in executable stage: this page contains scene narration and dialogue already handled by semantic artifacts; it provides no new reusable executable mechanism, typed constraint, rule, norm, process, goal/model, spatial relation, or possibility.",
+            "status": "background-only",
+            "unit_id": "unit-sentence-be24b1f0864a83f61f14a65d"
+          },
+          {
+            "reason": "Reviewed in executable stage: this page contains scene narration and dialogue already handled by semantic artifacts; it provides no new reusable executable mechanism, typed constraint, rule, norm, process, goal/model, spatial relation, or possibility.",
+            "status": "background-only",
+            "unit_id": "unit-sentence-95ea3faf931b775125dc4bb2"
+          },
+          {
+            "reason": "Reviewed in executable stage: this page contains scene narration and dialogue already handled by semantic artifacts; it provides no new reusable executable mechanism, typed constraint, rule, norm, process, goal/model, spatial relation, or possibility.",
+            "status": "background-only",
+            "unit_id": "unit-sentence-ed09c39868f65a8150d77365"
+          },
+          {
+            "reason": "Reviewed in executable stage: this page contains scene narration and dialogue already handled by semantic artifacts; it provides no new reusable executable mechanism, typed constraint, rule, norm, process, goal/model, spatial relation, or possibility.",
+            "status": "background-only",
+            "unit_id": "unit-sentence-ccb8738f573e4a6449df6578"
+          }
+        ],
+        "proposal_id": "acct-00008-p01"
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 810,
+      "observedAt": "2026-09-08T17:50:14.989Z",
+      "type": "tool.call.failed",
+      "spanId": "span-mtsysnum-4529266a-a1d7-4a29-afb1-d02ed09a1e06",
+      "parentSpanId": "span-mtsyfudt-c4239840-821c-497f-9a3b-777f1b13f2ef",
+      "callId": "call-mtsysnum-14284946-36ea-419b-8eaf-39ae3463a0ab",
+      "toolCallId": "call_YuLqxOnG6seqD54J2iyGsyja|fc_08d8f501a8bac4f2016aa04ad08da087d0b7ed409364384109",
+      "data": {
+        "toolName": "account_source_units",
+        "isError": true
+      },
+      "blobRef": {
+        "sha256": "c8257e2b903403d6e4c78d6ac85dc2944983b63eb2c7161333164e3716ef92b5",
+        "byteLength": 1404,
+        "mediaType": "application/json"
+      },
+      "verifiedBlob": {
+        "content": [
+          {
+            "text": "Pending source-accounting proposal acct-00008-p01 already exists with different content; use a new proposal id.\n\n<nwh-tool-recovery>\n{\n  \"version\": 1,\n  \"failedTool\": \"account_source_units\",\n  \"category\": \"unexpected-failure\",\n  \"retryable\": true,\n  \"retryCondition\": \"Retry only when the original diagnostic identifies a concrete argument or current-state correction.\",\n  \"steps\": [\n    \"Do not repeat the same call unchanged.\",\n    \"Use an available read-only discovery tool to verify relevant paths, refs, IDs, and active scope before changing arguments.\",\n    \"Retry account_source_units at most once after a concrete correction; if none is possible or the same failure repeats, stop and surface the exact blocker.\"\n  ]\n}\n</nwh-tool-recovery>",
+            "type": "text"
+          }
+        ],
+        "details": {
+          "nwhToolRecovery": {
+            "category": "unexpected-failure",
+            "failedTool": "account_source_units",
+            "retryable": true,
+            "retryCondition": "Retry only when the original diagnostic identifies a concrete argument or current-state correction.",
+            "steps": [
+              "Do not repeat the same call unchanged.",
+              "Use an available read-only discovery tool to verify relevant paths, refs, IDs, and active scope before changing arguments.",
+              "Retry account_source_units at most once after a concrete correction; if none is possible or the same failure repeats, stop and surface the exact blocker."
+            ],
+            "version": 1
+          }
+        }
+      }
+    },
+    {
+      "version": 1,
+      "runId": "run-mtsy5p5e-a40498d2-2f9c-406c-8834-c49c6e81b652",
+      "seq": 827,
+      "observedAt": "2026-09-08T17:50:29.350Z",
+      "type": "run.failed",
+      "spanId": "span-mtsy5p5e-94067028-db35-4a9f-8272-7109149c44f3",
+      "data": {
+        "status": "failed",
+        "error": {
+          "code": "COMPILER_RUN_FAILED",
+          "message": "Compiler proposal obligation requires host review: account_source_units proposal_id=acct-00008-p01: the original and corrected inputs both failed: Pending source-accounting proposal acct-00008-p01 already exists with different content; use a new proposal id.. Do not retry in this or a fresh session; preserve drafts and request host adjudication.",
+          "retryable": false
+        }
+      }
+    }
+  ]
+}

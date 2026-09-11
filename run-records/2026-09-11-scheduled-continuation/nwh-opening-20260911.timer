@@ -1,0 +1,12 @@
+[Unit]
+Description=Continue novel compilation at 2026-09-11 03:15 Asia/Shanghai
+
+[Timer]
+OnCalendar=2026-09-10 19:15:00 UTC
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=true
+Unit=nwh-opening-20260911.service
+
+[Install]
+WantedBy=timers.target

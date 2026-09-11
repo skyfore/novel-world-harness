@@ -1,0 +1,177 @@
+{
+  "reviewedAt": "2026-09-11T07:54:25.226Z",
+  "sourceId": "a28585b1cf867f3e3a16",
+  "batchId": "opening-batch-a28585b1cf867f3e3a16-00002-executable-684389ad80a1",
+  "history": [
+    {
+      "tool": "propose_entity_resolution",
+      "proposalId": "p-resolve-opening-man-fix0911",
+      "inputHash": "85bf72103010ea759c8bbd73cb0b8b26e860b0f6c993f201bb175f4777f043fb",
+      "input": {
+        "proposal_id": "p-resolve-opening-man-fix0911",
+        "resolution_id": "res-opening-man-fix0911",
+        "mention_id": "mention-opening-man",
+        "status": "new-entity",
+        "entity_id": "char-opening-man",
+        "candidates": [
+          {
+            "entity_id": "char-opening-man",
+            "confidence": 0.99,
+            "basis_mention_ids": [
+              "mention-opening-man"
+            ],
+            "evidence_assertion_ids": [],
+            "rationale": "The exact anchored pronoun is the waking focal person; no existing candidate matches and the same-finish entity proposal preserves the source's unidentified designation."
+          }
+        ],
+        "rationale": "The source provides no personal name for the waking man, so it supports a distinct newly proposed unidentified character rather than resolution to a catalog character."
+      },
+      "status": "running",
+      "diagnostic": "Tool result not yet verified; interrupted calls require host inspection before retry.",
+      "updatedAt": "2026-09-11T03:22:20.423Z"
+    },
+    {
+      "tool": "propose_entity_resolution",
+      "proposalId": "p-resolve-opening-man-fix0911",
+      "inputHash": "85bf72103010ea759c8bbd73cb0b8b26e860b0f6c993f201bb175f4777f043fb",
+      "input": {
+        "proposal_id": "p-resolve-opening-man-fix0911",
+        "resolution_id": "res-opening-man-fix0911",
+        "mention_id": "mention-opening-man",
+        "status": "new-entity",
+        "entity_id": "char-opening-man",
+        "candidates": [
+          {
+            "entity_id": "char-opening-man",
+            "confidence": 0.99,
+            "basis_mention_ids": [
+              "mention-opening-man"
+            ],
+            "evidence_assertion_ids": [],
+            "rationale": "The exact anchored pronoun is the waking focal person; no existing candidate matches and the same-finish entity proposal preserves the source's unidentified designation."
+          }
+        ],
+        "rationale": "The source provides no personal name for the waking man, so it supports a distinct newly proposed unidentified character rather than resolution to a catalog character."
+      },
+      "status": "succeeded",
+      "diagnostic": "",
+      "updatedAt": "2026-09-11T03:22:20.424Z"
+    },
+    {
+      "tool": "propose_entity_resolution",
+      "proposalId": "p-resolve-opening-man-fix0911",
+      "inputHash": "ae719d678047bafbedd30ebe822b1d23919b0a67e043b47814043c51ac948b2e",
+      "input": {
+        "proposal_id": "p-resolve-opening-man-fix0911",
+        "resolution_id": "res-opening-man-fix0911",
+        "mention_id": "mention-opening-man",
+        "status": "new-entity",
+        "entity_id": "char-opening-man",
+        "candidates": [
+          {
+            "entity_id": "char-opening-man",
+            "confidence": 0.99,
+            "basis_mention_ids": [
+              "mention-opening-man"
+            ],
+            "evidence_assertion_ids": [],
+            "rationale": "The pending entity proposal has the exact canonical surface “他”; this pronoun is the continuing focal person who wakes at the end of the segment."
+          }
+        ],
+        "valid_story_time": {
+          "kind": "unknown"
+        },
+        "rationale": "The source never supplies this focal person's personal name, so the existing exact-surface pending entity is retained rather than conflated with Constantine."
+      },
+      "status": "running",
+      "diagnostic": "Tool result not yet verified; interrupted calls require host inspection before retry.",
+      "updatedAt": "2026-09-11T03:25:06.230Z"
+    },
+    {
+      "tool": "propose_entity_resolution",
+      "proposalId": "p-resolve-opening-man-fix0911",
+      "inputHash": "ae719d678047bafbedd30ebe822b1d23919b0a67e043b47814043c51ac948b2e",
+      "input": {
+        "proposal_id": "p-resolve-opening-man-fix0911",
+        "resolution_id": "res-opening-man-fix0911",
+        "mention_id": "mention-opening-man",
+        "status": "new-entity",
+        "entity_id": "char-opening-man",
+        "candidates": [
+          {
+            "entity_id": "char-opening-man",
+            "confidence": 0.99,
+            "basis_mention_ids": [
+              "mention-opening-man"
+            ],
+            "evidence_assertion_ids": [],
+            "rationale": "The pending entity proposal has the exact canonical surface “他”; this pronoun is the continuing focal person who wakes at the end of the segment."
+          }
+        ],
+        "valid_story_time": {
+          "kind": "unknown"
+        },
+        "rationale": "The source never supplies this focal person's personal name, so the existing exact-surface pending entity is retained rather than conflated with Constantine."
+      },
+      "status": "failed",
+      "diagnostic": "Pending identity-resolution proposal p-resolve-opening-man-fix0911 already exists with different content; use a new proposal id.",
+      "updatedAt": "2026-09-11T03:25:06.231Z"
+    },
+    {
+      "tool": "propose_entity_resolution",
+      "proposalId": "p-resolve-opening-man-fix0911",
+      "inputHash": "85bf72103010ea759c8bbd73cb0b8b26e860b0f6c993f201bb175f4777f043fb",
+      "input": {
+        "proposal_id": "p-resolve-opening-man-fix0911",
+        "resolution_id": "res-opening-man-fix0911",
+        "mention_id": "mention-opening-man",
+        "status": "new-entity",
+        "entity_id": "char-opening-man",
+        "candidates": [
+          {
+            "entity_id": "char-opening-man",
+            "confidence": 0.99,
+            "basis_mention_ids": [
+              "mention-opening-man"
+            ],
+            "evidence_assertion_ids": [],
+            "rationale": "The exact anchored pronoun is the waking focal person; no existing candidate matches and the same-finish entity proposal preserves the source's unidentified designation."
+          }
+        ],
+        "rationale": "The source provides no personal name for the waking man, so it supports a distinct newly proposed unidentified character rather than resolution to a catalog character."
+      },
+      "status": "running",
+      "diagnostic": "Tool result not yet verified; interrupted calls require host inspection before retry.",
+      "updatedAt": "2026-09-11T07:53:42.968Z"
+    },
+    {
+      "tool": "propose_entity_resolution",
+      "proposalId": "p-resolve-opening-man-fix0911",
+      "inputHash": "85bf72103010ea759c8bbd73cb0b8b26e860b0f6c993f201bb175f4777f043fb",
+      "input": {
+        "proposal_id": "p-resolve-opening-man-fix0911",
+        "resolution_id": "res-opening-man-fix0911",
+        "mention_id": "mention-opening-man",
+        "status": "new-entity",
+        "entity_id": "char-opening-man",
+        "candidates": [
+          {
+            "entity_id": "char-opening-man",
+            "confidence": 0.99,
+            "basis_mention_ids": [
+              "mention-opening-man"
+            ],
+            "evidence_assertion_ids": [],
+            "rationale": "The exact anchored pronoun is the waking focal person; no existing candidate matches and the same-finish entity proposal preserves the source's unidentified designation."
+          }
+        ],
+        "rationale": "The source provides no personal name for the waking man, so it supports a distinct newly proposed unidentified character rather than resolution to a catalog character."
+      },
+      "status": "failed",
+      "diagnostic": "Pending identity-resolution proposal p-resolve-opening-man-fix0911 already exists with different content; use a new proposal id.",
+      "updatedAt": "2026-09-11T07:53:42.969Z"
+    }
+  ],
+  "decision": "Retain the original successful pending identity draft. Reject the attempted in-place rewrite; replay the exact original envelope through normal validation under the original ID. This is no final identity certification.",
+  "previewReview": "Reviewed all four previews and their trace results. The relief sentence is explicitly narrated and may support presentation under source-narrator-established; focal-knowledge instead requires a real seeded claim. Do not invent a claim. A health string is not a numeric health value. Re-review field types and exact evidence before submission. Authorize one fresh host-started attempt with the corrected published preview schema and stop on two preview failures."
+}

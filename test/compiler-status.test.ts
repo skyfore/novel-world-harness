@@ -85,3 +85,18 @@ it("reports blocked opening obligations after all source batches complete withou
   expect(result.obligations).toMatchObject([{ batchId, planOrdinal: null, stage: "opening", requiresHostReview: true }]);
   expect(await snapshot(workspaceStateDir(root))).toEqual(before);
 });
+
+it("retains a failed preview diagnostic when there are no proposal obligations", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-status-preview-")); roots.push(root);
+  const { source } = await createEvidenceFixture(root, "Hero waits.\n");
+  const traces = new TraceStore(root);
+  const run = await traces.createRun({ kind: "prepare", sourceId: source.id, operationId: "opening-test" });
+  const blobRef = await traces.putBlob({ content: [{ type: "text", text: "Initial-world preview validation failed: temporalClass requires at-checkpoint.\n\nReceived arguments:\nprivate payload" }] });
+  await traces.appendEvent(run.id, { type: "tool.call.failed", spanId: run.rootSpanId, data: { toolName: "preview_initial_world", isError: true }, blobRef });
+  await traces.finishRun(run.id, "failed");
+  const before = await snapshot(workspaceStateDir(root));
+  const result = (await inspectCompilerStatus(root, source.id)).sources[0]!;
+  expect(result.obligations).toEqual([]);
+  expect(result.latestRun).toMatchObject({ status: "failed", lastToolFailure: { tool: "preview_initial_world", diagnostic: "Initial-world preview validation failed: temporalClass requires at-checkpoint." } });
+  expect(await snapshot(workspaceStateDir(root))).toEqual(before);
+});

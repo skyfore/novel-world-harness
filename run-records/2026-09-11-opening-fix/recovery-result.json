@@ -1,0 +1,1517 @@
+{
+  "unresolved": [],
+  "initialHistory": [
+    {
+      "tool": "propose_initial_world",
+      "proposalId": "p-initial-opening-world",
+      "inputHash": "985f038b8d3b547cd675eb535789f058f6557fd6e44dadb631c59d3598e2ef91",
+      "input": {
+        "proposal_id": "p-initial-opening-world",
+        "payload": {
+          "version": 1,
+          "readerSetup": "A man jolts awake in afternoon sunlight, sweating after a dream of a child called Constantine and a burning city. The dream has ended, but its emotional shock has not.",
+          "readerContext": {
+            "version": 1,
+            "focalActorId": "char-laotang",
+            "facts": [
+              {
+                "id": "ctx-focal",
+                "kind": "focal-identity",
+                "summary": "The opening follows an unnamed waking man; later discourse identifies this same bearer of the Constantine memory as 老唐.",
+                "temporalClass": "later-discourse-preexisting",
+                "basis": "source-narrator-established",
+                "entityIds": [
+                  "char-laotang"
+                ]
+              },
+              {
+                "id": "ctx-time-place",
+                "kind": "time-place",
+                "summary": "It is afternoon, and the man is awake in what he takes to be the ordinary human world, with an elevated train passing outside.",
+                "temporalClass": "at-checkpoint",
+                "basis": "checkpoint-state",
+                "entityIds": [
+                  "loc-opening-human-world"
+                ]
+              },
+              {
+                "id": "ctx-constantin",
+                "kind": "entity-identity",
+                "summary": "Constantine is the child named within the dream, seen writing in white and later imagined suspended amid the burning city.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-constantin"
+                ]
+              },
+              {
+                "id": "ctx-dream-beat",
+                "kind": "completed-prior-beat",
+                "summary": "Before waking, the man dreamed that Constantine left, then saw the child apparently sacrificed in the burning city marked 白帝.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-constantin",
+                  "loc-baidi"
+                ]
+              },
+              {
+                "id": "ctx-stance",
+                "kind": "actor-stance",
+                "summary": "Within the dream, Constantine fears that many people are outside, while the man answers him not to be afraid.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-laotang",
+                  "char-constantin"
+                ]
+              },
+              {
+                "id": "ctx-pressure",
+                "kind": "immediate-pressure",
+                "summary": "The man treats the dream as false, yet wakes breathless and drenched in cold sweat after calling Constantine's name.",
+                "temporalClass": "at-checkpoint",
+                "basis": "checkpoint-state",
+                "entityIds": [
+                  "char-laotang",
+                  "char-constantin"
+                ]
+              }
+            ],
+            "entityGlosses": [
+              {
+                "entityId": "char-constantin",
+                "relationshipToFocal": "Constantine is the child addressed by the focal man inside the completed dream.",
+                "whyRelevantNow": "The dream's apparent loss of Constantine is the immediate source of the waking man's distress.",
+                "factIds": [
+                  "ctx-constantin",
+                  "ctx-dream-beat",
+                  "ctx-stance",
+                  "ctx-pressure"
+                ]
+              }
+            ],
+            "immediateSituation": {
+              "summary": "The playable present begins just after the man wakes: he is physically safe in afternoon light, but unsettled by a dream he believes was unreal.",
+              "causalFactIds": [
+                "ctx-dream-beat"
+              ],
+              "pressureFactIds": [
+                "ctx-pressure"
+              ],
+              "unresolvedFactIds": [
+                "ctx-pressure"
+              ],
+              "outcomePolicy": "withhold-post-checkpoint-outcomes"
+            }
+          },
+          "participantPresence": [
+            {
+              "entityId": "char-laotang",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-constantin",
+              "mode": "dream"
+            }
+          ],
+          "actorObservations": [
+            {
+              "actorId": "char-laotang",
+              "summary": "He directly perceives afternoon sunlight, his own cold sweat and rapid breathing, and the noise of an elevated train outside."
+            }
+          ],
+          "delta": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.alive",
+                "value": true
+              },
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.location",
+                "value": "loc-opening-human-world"
+              },
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.momentum",
+                "value": "unsettled-after-dream"
+              }
+            ]
+          },
+          "projectionSeed": {
+            "version": 1,
+            "semantics": {
+              "version": 1,
+              "operations": []
+            },
+            "processes": {
+              "version": 1,
+              "operations": []
+            },
+            "norms": {
+              "version": 1,
+              "operations": []
+            },
+            "activeRuleIds": [],
+            "elapsedDays": 0
+          },
+          "checkpoint": {
+            "mode": "chronological",
+            "storyTime": {
+              "kind": "unknown"
+            },
+            "narrativeLayerId": "opening-waking-frame",
+            "rationale": "The dream is completed before the selected lived cut; the man awakening in afternoon sunlight is the earliest bodily actionable present in the supplied opening."
+          }
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "a28585b1cf867f3e3a16-00019-7707f11fa946"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerSetup",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+            "exact": "老唐在盘山公路上狂奔，他不知道自己在躲避什么",
+            "target_path": "/readerContext/facts/0/summary",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Later discourse repeats the opening's Constantine memory for 老唐, identifying the otherwise unnamed opening focal man."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+            "target_path": "/readerContext/facts/1/summary",
+            "relation": "explicit",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "白衣的孩子手持一管墨笔伏案书写",
+            "target_path": "/readerContext/facts/2/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "城市的正中央，立着一根高杆，孩子被挂在高杆顶上",
+            "target_path": "/readerContext/facts/2/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "孩子出门去了，在背后带上了门。",
+            "target_path": "/readerContext/facts/3/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "孩子被挂在高杆顶上，闭着眼睛，整个城市的火焰，都在灼烧他。",
+            "target_path": "/readerContext/facts/3/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“哥哥，外面有很多人。”",
+            "target_path": "/readerContext/facts/4/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“也许会死吧？但是，康斯坦丁，不要害怕。”",
+            "target_path": "/readerContext/facts/4/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“康斯……坦丁。”他喊出了那个名字。\r\n\t他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerContext/facts/5/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "提醒他梦中的一切都是假的",
+            "target_path": "/readerContext/facts/5/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "康斯坦丁，不要害怕",
+            "target_path": "/readerContext/entityGlosses/0/relationshipToFocal",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "像是一场盛大的献祭。",
+            "target_path": "/readerContext/entityGlosses/0/whyRelevantNow",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerContext/immediateSituation/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "梦中的一切都是假的",
+            "target_path": "/readerContext/immediateSituation/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+            "target_path": "/actorObservations/0/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+            "exact": "老唐在盘山公路上狂奔",
+            "target_path": "/delta/operations/0",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Later repeated-memory context identifies the opening focal man as 老唐; his living bodily activity supports alive at the earlier opening cut."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他所在的，只是普普通通的人世。",
+            "target_path": "/delta/operations/1",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "呼吸急促，全身都是冷汗",
+            "target_path": "/delta/operations/2",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "The waking physical reaction grounds a temporary unsettled momentum."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起",
+            "target_path": "/participantPresence/0",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "像是一场盛大的献祭。",
+            "target_path": "/participantPresence/1",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+            "target_path": "/checkpoint/rationale",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "This is the first bodily waking scene following the completed dream in the supplied opening."
+          }
+        ]
+      },
+      "status": "failed",
+      "diagnostic": "Validation failed for tool \"propose_initial_world\":\n  - payload.readerContext.facts.0.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.1.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.2.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.3.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.4.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.5.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - evidence_selectors.2.relation: must be equal to one of the allowed values\n  - evidence_selectors.2.interpretation: must have required properties interpretation\n\nReceived arguments:\n{\n  \"proposal_id\": \"p-initial-opening-world\",\n  \"payload\": {\n    \"version\": 1,\n    \"readerSetup\": \"A man jolts awake in afternoon sunlight, sweating after a dream of a child called Constantine and a burning city. The dream has ended, but its emotional shock has not.\",\n    \"readerContext\": {\n      \"version\": 1,\n      \"focalActorId\": \"char-laotang\",\n      \"facts\": [\n        {\n          \"id\": \"ctx-focal\",\n          \"kind\": \"focal-identity\",\n          \"summary\": \"The opening follows an unnamed waking man; later discourse identifies this same bearer of the Constantine memory as 老唐.\",\n          \"temporalClass\": \"later-discourse-preexisting\",\n          \"basis\": \"source-narrator-established\",\n          \"entityIds\": [\n            \"char-laotang\"\n          ]\n        },\n        {\n          \"id\": \"ctx-time-place\",\n          \"kind\": \"time-place\",\n          \"summary\": \"It is afternoon, and the man is awake in what he takes to be the ordinary human world, with an elevated train passing outside.\",\n          \"temporalClass\": \"at-checkpoint\",\n          \"basis\": \"checkpoint-state\",\n          \"entityIds\": [\n            \"loc-opening-human-world\"\n          ]\n        },\n        {\n          \"id\": \"ctx-constantin\",\n          \"kind\": \"entity-identity\",\n          \"summary\": \"Constantine is the child named within the dream, seen writing in white and later imagined suspended amid the burning city.\",\n          \"temporalClass\": \"before-checkpoint\",\n          \"basis\": \"completed-before-checkpoint\",\n          \"entityIds\": [\n            \"char-constantin\"\n          ]\n        },\n        {\n          \"id\": \"ctx-dream-beat\",\n          \"kind\": \"completed-prior-beat\",\n          \"summary\": \"Before waking, the man dreamed that Constantine left, then saw the child apparently sacrificed in the burning city marked 白帝.\",\n          \"temporalClass\": \"before-checkpoint\",\n          \"basis\": \"completed-before-checkpoint\",\n          \"entityIds\": [\n            \"char-constantin\",\n            \"loc-baidi\"\n          ]\n        },\n        {\n          \"id\": \"ctx-stance\",\n          \"kind\": \"actor-stance\",\n          \"summary\": \"Within the dream, Constantine fears that many people are outside, while the man answers him not to be afraid.\",\n          \"temporalClass\": \"before-checkpoint\",\n          \"basis\": \"completed-before-checkpoint\",\n          \"entityIds\": [\n            \"char-laotang\",\n            \"char-constantin\"\n          ]\n        },\n        {\n          \"id\": \"ctx-pressure\",\n          \"kind\": \"immediate-pressure\",\n          \"summary\": \"The man treats the dream as false, yet wakes breathless and drenched in cold sweat after calling Constantine's name.\",\n          \"temporalClass\": \"at-checkpoint\",\n          \"basis\": \"checkpoint-state\",\n          \"entityIds\": [\n            \"char-laotang\",\n            \"char-constantin\"\n          ]\n        }\n      ],\n      \"entityGlosses\": [\n        {\n          \"entityId\": \"char-constantin\",\n          \"relationshipToFocal\": \"Constantine is the child addressed by the focal man inside the completed dream.\",\n          \"whyRelevantNow\": \"The dream's apparent loss of Constantine is the immediate source of the waking man's distress.\",\n          \"factIds\": [\n            \"ctx-constantin\",\n            \"ctx-dream-beat\",\n            \"ctx-stance\",\n            \"ctx-pressure\"\n          ]\n        }\n      ],\n      \"immediateSituation\": {\n        \"summary\": \"The playable present begins just after the man wakes: he is physically safe in afternoon light, but unsettled by a dream he believes was unreal.\",\n        \"causalFactIds\": [\n          \"ctx-dream-beat\"\n        ],\n        \"pressureFactIds\": [\n          \"ctx-pressure\"\n        ],\n        \"unresolvedFactIds\": [\n          \"ctx-pressure\"\n        ],\n        \"outcomePolicy\": \"withhold-post-checkpoint-outcomes\"\n      }\n    },\n    \"participantPresence\": [\n      {\n        \"entityId\": \"char-laotang\",\n        \"mode\": \"physical\"\n      },\n      {\n        \"entityId\": \"char-constantin\",\n        \"mode\": \"dream\"\n      }\n    ],\n    \"actorObservations\": [\n      {\n        \"actorId\": \"char-laotang\",\n        \"summary\": \"He directly perceives afternoon sunlight, his own cold sweat and rapid breathing, and the noise of an elevated train outside.\"\n      }\n    ],\n    \"delta\": {\n      \"version\": 1,\n      \"operations\": [\n        {\n          \"op\": \"set\",\n          \"entityId\": \"char-laotang\",\n          \"field\": \"character.alive\",\n          \"value\": true\n        },\n        {\n          \"op\": \"set\",\n          \"entityId\": \"char-laotang\",\n          \"field\": \"character.location\",\n          \"value\": \"loc-opening-human-world\"\n        },\n        {\n          \"op\": \"set\",\n          \"entityId\": \"char-laotang\",\n          \"field\": \"character.momentum\",\n          \"value\": \"unsettled-after-dream\"\n        }\n      ]\n    },\n    \"projectionSeed\": {\n      \"version\": 1,\n      \"semantics\": {\n        \"version\": 1,\n        \"operations\": []\n      },\n      \"processes\": {\n        \"version\": 1,\n        \"operations\": []\n      },\n      \"norms\": {\n        \"version\": 1,\n        \"operations\": []\n      },\n      \"activeRuleIds\": [],\n      \"elapsedDays\": 0\n    },\n    \"checkpoint\": {\n      \"mode\": \"chronological\",\n      \"storyTime\": {\n        \"kind\": \"unknown\"\n      },\n      \"narrativeLayerId\": \"opening-waking-frame\",\n      \"rationale\": \"The dream is completed before the selected lived cut; the man awakening in afternoon sunlight is the earliest bodily actionable present in the supplied opening.\"\n    }\n  },\n  \"evidence_segment_ids\": [\n    \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n    \"a28585b1cf867f3e3a16-00019-7707f11fa946\"\n  ],\n  \"evidence_selectors\": [\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗\",\n      \"target_path\": \"/readerSetup\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00019-7707f11fa946\",\n      \"exact\": \"老唐在盘山公路上狂奔，他不知道自己在躲避什么\",\n      \"target_path\": \"/readerContext/facts/0/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"strong-inference\",\n      \"interpretation\": \"Later discourse repeats the opening's Constantine memory for 老唐, identifying the otherwise unnamed opening focal man.\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。\",\n      \"target_path\": \"/readerContext/facts/1/summary\",\n      \"relation\": \"explicit\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"白衣的孩子手持一管墨笔伏案书写\",\n      \"target_path\": \"/readerContext/facts/2/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"城市的正中央，立着一根高杆，孩子被挂在高杆顶上\",\n      \"target_path\": \"/readerContext/facts/2/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"孩子出门去了，在背后带上了门。\",\n      \"target_path\": \"/readerContext/facts/3/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"孩子被挂在高杆顶上，闭着眼睛，整个城市的火焰，都在灼烧他。\",\n      \"target_path\": \"/readerContext/facts/3/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"“哥哥，外面有很多人。”\",\n      \"target_path\": \"/readerContext/facts/4/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"“也许会死吧？但是，康斯坦丁，不要害怕。”\",\n      \"target_path\": \"/readerContext/facts/4/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"“康斯……坦丁。”他喊出了那个名字。\\r\\n\\t他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗\",\n      \"target_path\": \"/readerContext/facts/5/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"提醒他梦中的一切都是假的\",\n      \"target_path\": \"/readerContext/facts/5/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"康斯坦丁，不要害怕\",\n      \"target_path\": \"/readerContext/entityGlosses/0/relationshipToFocal\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"像是一场盛大的献祭。\",\n      \"target_path\": \"/readerContext/entityGlosses/0/whyRelevantNow\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗\",\n      \"target_path\": \"/readerContext/immediateSituation/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"梦中的一切都是假的\",\n      \"target_path\": \"/readerContext/immediateSituation/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。\",\n      \"target_path\": \"/actorObservations/0/summary\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00019-7707f11fa946\",\n      \"exact\": \"老唐在盘山公路上狂奔\",\n      \"target_path\": \"/delta/operations/0\",\n      \"relation\": \"supports\",\n      \"strength\": \"strong-inference\",\n      \"interpretation\": \"Later repeated-memory context identifies the opening focal man as 老唐; his living bodily activity supports alive at the earlier opening cut.\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"他所在的，只是普普通通的人世。\",\n      \"target_path\": \"/delta/operations/1\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"呼吸急促，全身都是冷汗\",\n      \"target_path\": \"/delta/operations/2\",\n      \"relation\": \"supports\",\n      \"strength\": \"strong-inference\",\n      \"interpretation\": \"The waking physical reaction grounds a temporary unsettled momentum.\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"他猛地坐起\",\n      \"target_path\": \"/participantPresence/0\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"像是一场盛大的献祭。\",\n      \"target_path\": \"/participantPresence/1\",\n      \"relation\": \"supports\",\n      \"strength\": \"explicit\"\n    },\n    {\n      \"segment_id\": \"a28585b1cf867f3e3a16-00002-16e2c6da87f3\",\n      \"exact\": \"他猛地坐起，在下午的阳光中睁开眼睛\",\n      \"target_path\": \"/checkpoint/rationale\",\n      \"relation\": \"supports\",\n      \"strength\": \"strong-inference\",\n      \"interpretation\": \"This is the first bodily waking scene following the completed dream in the supplied opening.\"\n    }\n  ]\n}",
+      "updatedAt": "2026-09-10T19:18:54.125Z"
+    },
+    {
+      "tool": "propose_initial_world",
+      "proposalId": "p-initial-opening-world",
+      "inputHash": "523585014bf4a501482419618ba5bea3cefb92ef7030984b9267adbcf2a7d292",
+      "input": {
+        "proposal_id": "p-initial-opening-world",
+        "payload": {
+          "version": 1,
+          "readerSetup": "A man jolts awake in afternoon sunlight, sweating after a dream of a child called Constantine and a burning city. The dream has ended, but its emotional shock has not.",
+          "readerContext": {
+            "version": 1,
+            "focalActorId": "char-laotang",
+            "facts": [
+              {
+                "id": "ctx-focal",
+                "kind": "focal-identity",
+                "summary": "The opening follows an unnamed waking man; later discourse identifies this same bearer of the Constantine memory as 老唐.",
+                "temporalClass": "later-discourse-preexisting",
+                "basis": "source-narrator-established",
+                "entityIds": [
+                  "char-laotang"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": []
+              },
+              {
+                "id": "ctx-time-place",
+                "kind": "time-place",
+                "summary": "It is afternoon, and the man is awake in what he takes to be the ordinary human world, with an elevated train passing outside.",
+                "temporalClass": "at-checkpoint",
+                "basis": "checkpoint-state",
+                "entityIds": [
+                  "loc-opening-human-world"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": []
+              },
+              {
+                "id": "ctx-constantin",
+                "kind": "entity-identity",
+                "summary": "Constantine is the child named within the dream, seen writing in white and later imagined suspended amid the burning city.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-constantin"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": []
+              },
+              {
+                "id": "ctx-dream-beat",
+                "kind": "completed-prior-beat",
+                "summary": "Before waking, the man dreamed that Constantine left, then saw the child apparently sacrificed in the burning city marked 白帝.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-constantin",
+                  "loc-baidi"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": [
+                  "ctx-constantin"
+                ]
+              },
+              {
+                "id": "ctx-stance",
+                "kind": "actor-stance",
+                "summary": "Within the dream, Constantine fears that many people are outside, while the man answers him not to be afraid.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-laotang",
+                  "char-constantin"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": [
+                  "ctx-constantin"
+                ]
+              },
+              {
+                "id": "ctx-pressure",
+                "kind": "immediate-pressure",
+                "summary": "The man treats the dream as false, yet wakes breathless and drenched in cold sweat after calling Constantine's name.",
+                "temporalClass": "at-checkpoint",
+                "basis": "checkpoint-state",
+                "entityIds": [
+                  "char-laotang",
+                  "char-constantin"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": [
+                  "ctx-dream-beat"
+                ]
+              }
+            ],
+            "entityGlosses": [
+              {
+                "entityId": "char-constantin",
+                "relationshipToFocal": "Constantine is the child addressed by the focal man inside the completed dream.",
+                "whyRelevantNow": "The dream's apparent loss of Constantine is the immediate source of the waking man's distress.",
+                "factIds": [
+                  "ctx-constantin",
+                  "ctx-dream-beat",
+                  "ctx-stance",
+                  "ctx-pressure"
+                ]
+              }
+            ],
+            "immediateSituation": {
+              "summary": "The playable present begins just after the man wakes: he is physically safe in afternoon light, but unsettled by a dream he believes was unreal.",
+              "causalFactIds": [
+                "ctx-dream-beat"
+              ],
+              "pressureFactIds": [
+                "ctx-pressure"
+              ],
+              "unresolvedFactIds": [
+                "ctx-pressure"
+              ],
+              "outcomePolicy": "withhold-post-checkpoint-outcomes"
+            }
+          },
+          "participantPresence": [
+            {
+              "entityId": "char-laotang",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-constantin",
+              "mode": "dream"
+            }
+          ],
+          "actorObservations": [
+            {
+              "actorId": "char-laotang",
+              "summary": "He directly perceives afternoon sunlight, his own cold sweat and rapid breathing, and the noise of an elevated train outside."
+            }
+          ],
+          "delta": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.alive",
+                "value": true
+              },
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.location",
+                "value": "loc-opening-human-world"
+              },
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.momentum",
+                "value": "unsettled-after-dream"
+              }
+            ]
+          },
+          "projectionSeed": {
+            "version": 1,
+            "semantics": {
+              "version": 1,
+              "operations": []
+            },
+            "processes": {
+              "version": 1,
+              "operations": []
+            },
+            "norms": {
+              "version": 1,
+              "operations": []
+            },
+            "activeRuleIds": [],
+            "elapsedDays": 0
+          },
+          "checkpoint": {
+            "mode": "chronological",
+            "storyTime": {
+              "kind": "unknown"
+            },
+            "narrativeLayerId": "opening-waking-frame",
+            "rationale": "The dream is completed before the selected lived cut; the man awakening in afternoon sunlight is the earliest bodily actionable present in the supplied opening."
+          }
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "a28585b1cf867f3e3a16-00019-7707f11fa946"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerSetup",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+            "exact": "老唐在盘山公路上狂奔，他不知道自己在躲避什么",
+            "target_path": "/readerContext/facts/0/summary",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Later discourse repeats the opening's Constantine memory for 老唐, identifying the otherwise unnamed opening focal man."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+            "target_path": "/readerContext/facts/1/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "白衣的孩子手持一管墨笔伏案书写",
+            "target_path": "/readerContext/facts/2/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "城市的正中央，立着一根高杆，孩子被挂在高杆顶上",
+            "target_path": "/readerContext/facts/2/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "孩子出门去了，在背后带上了门。",
+            "target_path": "/readerContext/facts/3/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "孩子被挂在高杆顶上，闭着眼睛，整个城市的火焰，都在灼烧他。",
+            "target_path": "/readerContext/facts/3/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“哥哥，外面有很多人。”",
+            "target_path": "/readerContext/facts/4/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“也许会死吧？但是，康斯坦丁，不要害怕。”",
+            "target_path": "/readerContext/facts/4/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“康斯……坦丁。”他喊出了那个名字。\r\n\t他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerContext/facts/5/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "提醒他梦中的一切都是假的",
+            "target_path": "/readerContext/facts/5/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "康斯坦丁，不要害怕",
+            "target_path": "/readerContext/entityGlosses/0/relationshipToFocal",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "像是一场盛大的献祭。",
+            "target_path": "/readerContext/entityGlosses/0/whyRelevantNow",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerContext/immediateSituation/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "梦中的一切都是假的",
+            "target_path": "/readerContext/immediateSituation/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+            "target_path": "/actorObservations/0/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+            "exact": "老唐在盘山公路上狂奔",
+            "target_path": "/delta/operations/0",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Later repeated-memory context identifies the opening focal man as 老唐; his living bodily activity supports alive at the earlier opening cut."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他所在的，只是普普通通的人世。",
+            "target_path": "/delta/operations/1",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "呼吸急促，全身都是冷汗",
+            "target_path": "/delta/operations/2",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "The waking physical reaction grounds a temporary unsettled momentum."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起",
+            "target_path": "/participantPresence/0",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "像是一场盛大的献祭。",
+            "target_path": "/participantPresence/1",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+            "target_path": "/checkpoint/rationale",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "This is the first bodily waking scene following the completed dream in the supplied opening."
+          }
+        ]
+      },
+      "status": "running",
+      "diagnostic": "Tool result not yet verified; interrupted calls require host inspection before retry.",
+      "updatedAt": "2026-09-10T19:19:55.113Z"
+    },
+    {
+      "tool": "propose_initial_world",
+      "proposalId": "p-initial-opening-world",
+      "inputHash": "523585014bf4a501482419618ba5bea3cefb92ef7030984b9267adbcf2a7d292",
+      "input": {
+        "proposal_id": "p-initial-opening-world",
+        "payload": {
+          "version": 1,
+          "readerSetup": "A man jolts awake in afternoon sunlight, sweating after a dream of a child called Constantine and a burning city. The dream has ended, but its emotional shock has not.",
+          "readerContext": {
+            "version": 1,
+            "focalActorId": "char-laotang",
+            "facts": [
+              {
+                "id": "ctx-focal",
+                "kind": "focal-identity",
+                "summary": "The opening follows an unnamed waking man; later discourse identifies this same bearer of the Constantine memory as 老唐.",
+                "temporalClass": "later-discourse-preexisting",
+                "basis": "source-narrator-established",
+                "entityIds": [
+                  "char-laotang"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": []
+              },
+              {
+                "id": "ctx-time-place",
+                "kind": "time-place",
+                "summary": "It is afternoon, and the man is awake in what he takes to be the ordinary human world, with an elevated train passing outside.",
+                "temporalClass": "at-checkpoint",
+                "basis": "checkpoint-state",
+                "entityIds": [
+                  "loc-opening-human-world"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": []
+              },
+              {
+                "id": "ctx-constantin",
+                "kind": "entity-identity",
+                "summary": "Constantine is the child named within the dream, seen writing in white and later imagined suspended amid the burning city.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-constantin"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": []
+              },
+              {
+                "id": "ctx-dream-beat",
+                "kind": "completed-prior-beat",
+                "summary": "Before waking, the man dreamed that Constantine left, then saw the child apparently sacrificed in the burning city marked 白帝.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-constantin",
+                  "loc-baidi"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": [
+                  "ctx-constantin"
+                ]
+              },
+              {
+                "id": "ctx-stance",
+                "kind": "actor-stance",
+                "summary": "Within the dream, Constantine fears that many people are outside, while the man answers him not to be afraid.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-laotang",
+                  "char-constantin"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": [
+                  "ctx-constantin"
+                ]
+              },
+              {
+                "id": "ctx-pressure",
+                "kind": "immediate-pressure",
+                "summary": "The man treats the dream as false, yet wakes breathless and drenched in cold sweat after calling Constantine's name.",
+                "temporalClass": "at-checkpoint",
+                "basis": "checkpoint-state",
+                "entityIds": [
+                  "char-laotang",
+                  "char-constantin"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": [
+                  "ctx-dream-beat"
+                ]
+              }
+            ],
+            "entityGlosses": [
+              {
+                "entityId": "char-constantin",
+                "relationshipToFocal": "Constantine is the child addressed by the focal man inside the completed dream.",
+                "whyRelevantNow": "The dream's apparent loss of Constantine is the immediate source of the waking man's distress.",
+                "factIds": [
+                  "ctx-constantin",
+                  "ctx-dream-beat",
+                  "ctx-stance",
+                  "ctx-pressure"
+                ]
+              }
+            ],
+            "immediateSituation": {
+              "summary": "The playable present begins just after the man wakes: he is physically safe in afternoon light, but unsettled by a dream he believes was unreal.",
+              "causalFactIds": [
+                "ctx-dream-beat"
+              ],
+              "pressureFactIds": [
+                "ctx-pressure"
+              ],
+              "unresolvedFactIds": [
+                "ctx-pressure"
+              ],
+              "outcomePolicy": "withhold-post-checkpoint-outcomes"
+            }
+          },
+          "participantPresence": [
+            {
+              "entityId": "char-laotang",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-constantin",
+              "mode": "dream"
+            }
+          ],
+          "actorObservations": [
+            {
+              "actorId": "char-laotang",
+              "summary": "He directly perceives afternoon sunlight, his own cold sweat and rapid breathing, and the noise of an elevated train outside."
+            }
+          ],
+          "delta": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.alive",
+                "value": true
+              },
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.location",
+                "value": "loc-opening-human-world"
+              },
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.momentum",
+                "value": "unsettled-after-dream"
+              }
+            ]
+          },
+          "projectionSeed": {
+            "version": 1,
+            "semantics": {
+              "version": 1,
+              "operations": []
+            },
+            "processes": {
+              "version": 1,
+              "operations": []
+            },
+            "norms": {
+              "version": 1,
+              "operations": []
+            },
+            "activeRuleIds": [],
+            "elapsedDays": 0
+          },
+          "checkpoint": {
+            "mode": "chronological",
+            "storyTime": {
+              "kind": "unknown"
+            },
+            "narrativeLayerId": "opening-waking-frame",
+            "rationale": "The dream is completed before the selected lived cut; the man awakening in afternoon sunlight is the earliest bodily actionable present in the supplied opening."
+          }
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "a28585b1cf867f3e3a16-00019-7707f11fa946"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerSetup",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+            "exact": "老唐在盘山公路上狂奔，他不知道自己在躲避什么",
+            "target_path": "/readerContext/facts/0/summary",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Later discourse repeats the opening's Constantine memory for 老唐, identifying the otherwise unnamed opening focal man."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+            "target_path": "/readerContext/facts/1/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "白衣的孩子手持一管墨笔伏案书写",
+            "target_path": "/readerContext/facts/2/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "城市的正中央，立着一根高杆，孩子被挂在高杆顶上",
+            "target_path": "/readerContext/facts/2/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "孩子出门去了，在背后带上了门。",
+            "target_path": "/readerContext/facts/3/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "孩子被挂在高杆顶上，闭着眼睛，整个城市的火焰，都在灼烧他。",
+            "target_path": "/readerContext/facts/3/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“哥哥，外面有很多人。”",
+            "target_path": "/readerContext/facts/4/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“也许会死吧？但是，康斯坦丁，不要害怕。”",
+            "target_path": "/readerContext/facts/4/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“康斯……坦丁。”他喊出了那个名字。\r\n\t他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerContext/facts/5/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "提醒他梦中的一切都是假的",
+            "target_path": "/readerContext/facts/5/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "康斯坦丁，不要害怕",
+            "target_path": "/readerContext/entityGlosses/0/relationshipToFocal",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "像是一场盛大的献祭。",
+            "target_path": "/readerContext/entityGlosses/0/whyRelevantNow",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerContext/immediateSituation/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "梦中的一切都是假的",
+            "target_path": "/readerContext/immediateSituation/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+            "target_path": "/actorObservations/0/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+            "exact": "老唐在盘山公路上狂奔",
+            "target_path": "/delta/operations/0",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Later repeated-memory context identifies the opening focal man as 老唐; his living bodily activity supports alive at the earlier opening cut."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他所在的，只是普普通通的人世。",
+            "target_path": "/delta/operations/1",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "呼吸急促，全身都是冷汗",
+            "target_path": "/delta/operations/2",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "The waking physical reaction grounds a temporary unsettled momentum."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起",
+            "target_path": "/participantPresence/0",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "像是一场盛大的献祭。",
+            "target_path": "/participantPresence/1",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+            "target_path": "/checkpoint/rationale",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "This is the first bodily waking scene following the completed dream in the supplied opening."
+          }
+        ]
+      },
+      "status": "failed",
+      "diagnostic": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"readerContext\",\n      \"facts\",\n      4,\n      \"holderEntityId\"\n    ],\n    \"message\": \"actor-stance must name the character or institution that holds the stance or stakes\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"readerContext\",\n      \"facts\",\n      4,\n      \"stance\"\n    ],\n    \"message\": \"actor-stance must classify its direction\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"readerContext\",\n      \"facts\"\n    ],\n    \"message\": \"Opening reader context requires one causal-premise fact\"\n  }\n]",
+      "updatedAt": "2026-09-10T19:19:55.206Z"
+    },
+    {
+      "tool": "propose_initial_world",
+      "proposalId": "p-initial-opening-world",
+      "inputHash": "523585014bf4a501482419618ba5bea3cefb92ef7030984b9267adbcf2a7d292",
+      "input": {
+        "proposal_id": "p-initial-opening-world",
+        "payload": {
+          "version": 1,
+          "readerSetup": "A man jolts awake in afternoon sunlight, sweating after a dream of a child called Constantine and a burning city. The dream has ended, but its emotional shock has not.",
+          "readerContext": {
+            "version": 1,
+            "focalActorId": "char-laotang",
+            "facts": [
+              {
+                "id": "ctx-focal",
+                "kind": "focal-identity",
+                "summary": "The opening follows an unnamed waking man; later discourse identifies this same bearer of the Constantine memory as 老唐.",
+                "temporalClass": "later-discourse-preexisting",
+                "basis": "source-narrator-established",
+                "entityIds": [
+                  "char-laotang"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": []
+              },
+              {
+                "id": "ctx-time-place",
+                "kind": "time-place",
+                "summary": "It is afternoon, and the man is awake in what he takes to be the ordinary human world, with an elevated train passing outside.",
+                "temporalClass": "at-checkpoint",
+                "basis": "checkpoint-state",
+                "entityIds": [
+                  "loc-opening-human-world"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": []
+              },
+              {
+                "id": "ctx-constantin",
+                "kind": "entity-identity",
+                "summary": "Constantine is the child named within the dream, seen writing in white and later imagined suspended amid the burning city.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-constantin"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": []
+              },
+              {
+                "id": "ctx-dream-beat",
+                "kind": "completed-prior-beat",
+                "summary": "Before waking, the man dreamed that Constantine left, then saw the child apparently sacrificed in the burning city marked 白帝.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-constantin",
+                  "loc-baidi"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": [
+                  "ctx-constantin"
+                ]
+              },
+              {
+                "id": "ctx-stance",
+                "kind": "actor-stance",
+                "summary": "Within the dream, Constantine fears that many people are outside, while the man answers him not to be afraid.",
+                "temporalClass": "before-checkpoint",
+                "basis": "completed-before-checkpoint",
+                "entityIds": [
+                  "char-laotang",
+                  "char-constantin"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": [
+                  "ctx-constantin"
+                ]
+              },
+              {
+                "id": "ctx-pressure",
+                "kind": "immediate-pressure",
+                "summary": "The man treats the dream as false, yet wakes breathless and drenched in cold sweat after calling Constantine's name.",
+                "temporalClass": "at-checkpoint",
+                "basis": "checkpoint-state",
+                "entityIds": [
+                  "char-laotang",
+                  "char-constantin"
+                ],
+                "focalKnowledgeClaimIds": [],
+                "dependsOnFactIds": [
+                  "ctx-dream-beat"
+                ]
+              }
+            ],
+            "entityGlosses": [
+              {
+                "entityId": "char-constantin",
+                "relationshipToFocal": "Constantine is the child addressed by the focal man inside the completed dream.",
+                "whyRelevantNow": "The dream's apparent loss of Constantine is the immediate source of the waking man's distress.",
+                "factIds": [
+                  "ctx-constantin",
+                  "ctx-dream-beat",
+                  "ctx-stance",
+                  "ctx-pressure"
+                ]
+              }
+            ],
+            "immediateSituation": {
+              "summary": "The playable present begins just after the man wakes: he is physically safe in afternoon light, but unsettled by a dream he believes was unreal.",
+              "causalFactIds": [
+                "ctx-dream-beat"
+              ],
+              "pressureFactIds": [
+                "ctx-pressure"
+              ],
+              "unresolvedFactIds": [
+                "ctx-pressure"
+              ],
+              "outcomePolicy": "withhold-post-checkpoint-outcomes"
+            }
+          },
+          "participantPresence": [
+            {
+              "entityId": "char-laotang",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-constantin",
+              "mode": "dream"
+            }
+          ],
+          "actorObservations": [
+            {
+              "actorId": "char-laotang",
+              "summary": "He directly perceives afternoon sunlight, his own cold sweat and rapid breathing, and the noise of an elevated train outside."
+            }
+          ],
+          "delta": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.alive",
+                "value": true
+              },
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.location",
+                "value": "loc-opening-human-world"
+              },
+              {
+                "op": "set",
+                "entityId": "char-laotang",
+                "field": "character.momentum",
+                "value": "unsettled-after-dream"
+              }
+            ]
+          },
+          "projectionSeed": {
+            "version": 1,
+            "semantics": {
+              "version": 1,
+              "operations": []
+            },
+            "processes": {
+              "version": 1,
+              "operations": []
+            },
+            "norms": {
+              "version": 1,
+              "operations": []
+            },
+            "activeRuleIds": [],
+            "elapsedDays": 0
+          },
+          "checkpoint": {
+            "mode": "chronological",
+            "storyTime": {
+              "kind": "unknown"
+            },
+            "narrativeLayerId": "opening-waking-frame",
+            "rationale": "The dream is completed before the selected lived cut; the man awakening in afternoon sunlight is the earliest bodily actionable present in the supplied opening."
+          }
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "a28585b1cf867f3e3a16-00019-7707f11fa946"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerSetup",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+            "exact": "老唐在盘山公路上狂奔，他不知道自己在躲避什么",
+            "target_path": "/readerContext/facts/0/summary",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Later discourse repeats the opening's Constantine memory for 老唐, identifying the otherwise unnamed opening focal man."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+            "target_path": "/readerContext/facts/1/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "白衣的孩子手持一管墨笔伏案书写",
+            "target_path": "/readerContext/facts/2/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "城市的正中央，立着一根高杆，孩子被挂在高杆顶上",
+            "target_path": "/readerContext/facts/2/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "孩子出门去了，在背后带上了门。",
+            "target_path": "/readerContext/facts/3/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "孩子被挂在高杆顶上，闭着眼睛，整个城市的火焰，都在灼烧他。",
+            "target_path": "/readerContext/facts/3/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“哥哥，外面有很多人。”",
+            "target_path": "/readerContext/facts/4/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“也许会死吧？但是，康斯坦丁，不要害怕。”",
+            "target_path": "/readerContext/facts/4/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "“康斯……坦丁。”他喊出了那个名字。\r\n\t他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerContext/facts/5/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "提醒他梦中的一切都是假的",
+            "target_path": "/readerContext/facts/5/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "康斯坦丁，不要害怕",
+            "target_path": "/readerContext/entityGlosses/0/relationshipToFocal",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "像是一场盛大的献祭。",
+            "target_path": "/readerContext/entityGlosses/0/whyRelevantNow",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+            "target_path": "/readerContext/immediateSituation/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "梦中的一切都是假的",
+            "target_path": "/readerContext/immediateSituation/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+            "target_path": "/actorObservations/0/summary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00019-7707f11fa946",
+            "exact": "老唐在盘山公路上狂奔",
+            "target_path": "/delta/operations/0",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "Later repeated-memory context identifies the opening focal man as 老唐; his living bodily activity supports alive at the earlier opening cut."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他所在的，只是普普通通的人世。",
+            "target_path": "/delta/operations/1",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "呼吸急促，全身都是冷汗",
+            "target_path": "/delta/operations/2",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "The waking physical reaction grounds a temporary unsettled momentum."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起",
+            "target_path": "/participantPresence/0",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "像是一场盛大的献祭。",
+            "target_path": "/participantPresence/1",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+            "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+            "target_path": "/checkpoint/rationale",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "This is the first bodily waking scene following the completed dream in the supplied opening."
+          }
+        ]
+      },
+      "status": "unsupported",
+      "diagnostic": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"readerContext\",\n      \"facts\",\n      4,\n      \"holderEntityId\"\n    ],\n    \"message\": \"actor-stance must name the character or institution that holds the stance or stakes\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"readerContext\",\n      \"facts\",\n      4,\n      \"stance\"\n    ],\n    \"message\": \"actor-stance must classify its direction\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"readerContext\",\n      \"facts\"\n    ],\n    \"message\": \"Opening reader context requires one causal-premise fact\"\n  }\n]",
+      "updatedAt": "2026-09-11T03:20:53.549Z",
+      "hostReview": {
+        "reason": "The two exact initial inputs are unsupported as submitted: deterministic required context fields are absent, and neither input staged an artifact. Preserve failed history; authorize a freshly validated correction, without asserting that any replacement world is valid.",
+        "auditRef": "run-records/2026-09-11-opening-fix/host-review.json"
+      }
+    }
+  ],
+  "mentionHistory": [
+    {
+      "tool": "propose_entity_mention",
+      "proposalId": "p-mention-opening-man",
+      "inputHash": "cdea1b8f9ad36ecf583009ee36f045d2ce6b22d8a0bd5c1b2e1ea39a62da7b28",
+      "input": {
+        "proposal_id": "p-mention-opening-man",
+        "annotation_id": "mention-opening-man",
+        "selector": {
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "exact": "他猛地坐起",
+          "occurrence": 1
+        },
+        "surface": "他",
+        "form": "pronoun",
+        "kind_candidates": [
+          "character"
+        ],
+        "confidence": 0.9,
+        "interpretation": "The waking man is the focal embodied character at the checkpoint."
+      },
+      "status": "running",
+      "diagnostic": "Tool result not yet verified; interrupted calls require host inspection before retry.",
+      "updatedAt": "2026-09-10T19:16:44.142Z"
+    },
+    {
+      "tool": "propose_entity_mention",
+      "proposalId": "p-mention-opening-man",
+      "inputHash": "cdea1b8f9ad36ecf583009ee36f045d2ce6b22d8a0bd5c1b2e1ea39a62da7b28",
+      "input": {
+        "proposal_id": "p-mention-opening-man",
+        "annotation_id": "mention-opening-man",
+        "selector": {
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "exact": "他猛地坐起",
+          "occurrence": 1
+        },
+        "surface": "他",
+        "form": "pronoun",
+        "kind_candidates": [
+          "character"
+        ],
+        "confidence": 0.9,
+        "interpretation": "The waking man is the focal embodied character at the checkpoint."
+      },
+      "status": "failed",
+      "diagnostic": "A non-zero entity mention surface must exactly equal selector.exact.",
+      "updatedAt": "2026-09-10T19:16:44.143Z"
+    },
+    {
+      "tool": "propose_entity_mention",
+      "proposalId": "p-mention-opening-man",
+      "inputHash": "b5f48b8a45734e94407555d2a1a164a2ac970bbbb8735e3768be446519e75850",
+      "input": {
+        "proposal_id": "p-mention-opening-man",
+        "annotation_id": "mention-opening-man",
+        "selector": {
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "exact": "他",
+          "prefix": "“康斯……坦丁。”他喊出了那个名字。\r\n\t",
+          "suffix": "猛地坐起，在下午的阳光中睁开眼睛",
+          "occurrence": 1
+        },
+        "surface": "他",
+        "form": "pronoun",
+        "kind_candidates": [
+          "character"
+        ],
+        "confidence": 0.9,
+        "interpretation": "The waking man is the focal embodied character at the checkpoint."
+      },
+      "status": "running",
+      "diagnostic": "Tool result not yet verified; interrupted calls require host inspection before retry.",
+      "updatedAt": "2026-09-11T03:20:53.551Z"
+    },
+    {
+      "tool": "propose_entity_mention",
+      "proposalId": "p-mention-opening-man",
+      "inputHash": "b5f48b8a45734e94407555d2a1a164a2ac970bbbb8735e3768be446519e75850",
+      "input": {
+        "proposal_id": "p-mention-opening-man",
+        "annotation_id": "mention-opening-man",
+        "selector": {
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "exact": "他",
+          "prefix": "“康斯……坦丁。”他喊出了那个名字。\r\n\t",
+          "suffix": "猛地坐起，在下午的阳光中睁开眼睛",
+          "occurrence": 1
+        },
+        "surface": "他",
+        "form": "pronoun",
+        "kind_candidates": [
+          "character"
+        ],
+        "confidence": 0.9,
+        "interpretation": "The waking man is the focal embodied character at the checkpoint."
+      },
+      "status": "succeeded",
+      "diagnostic": "",
+      "updatedAt": "2026-09-11T03:20:53.555Z"
+    }
+  ]
+}

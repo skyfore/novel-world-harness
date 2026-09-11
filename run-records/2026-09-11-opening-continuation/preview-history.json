@@ -1,0 +1,1076 @@
+[
+  {
+    "type": "tool.call.started",
+    "seq": 45,
+    "blob": {
+      "evidence_segment_ids": [
+        "a28585b1cf867f3e3a16-00002-16e2c6da87f3"
+      ],
+      "evidence_selectors": [
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerSetup"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/0/summary"
+        },
+        {
+          "exact": "在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/1/summary"
+        },
+        {
+          "exact": "提醒他梦中的一切都是假的",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/2/summary"
+        },
+        {
+          "exact": "他忽然觉得这声音那么悦耳，提醒他梦中的一切都是假的",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/3/summary"
+        },
+        {
+          "exact": "呼吸急促，全身都是冷汗",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/4/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "interpretation": "The directly narrated rapid breathing and cold sweat establish an immediate aftermath of fear without asserting any later outcome.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/immediateSituation/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/actorObservations/0/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "interpretation": "A character who wakes, breathes, and sweats is alive at the checkpoint.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/delta/operations/0"
+        },
+        {
+          "exact": "呼吸急促，全身都是冷汗",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/delta/operations/1"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "interpretation": "The abrupt waking with rapid breathing and cold sweat supports a transient aftermath momentum.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/delta/operations/2"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/checkpoint"
+        }
+      ],
+      "payload": {
+        "actorObservations": [
+          {
+            "actorId": "char-opening-man",
+            "summary": "他在下午阳光中醒来，听见高架轻轨经过的噪音，并感到自己呼吸急促、满身冷汗。"
+          }
+        ],
+        "checkpoint": {
+          "mode": "chronological",
+          "narrativeLayerId": "layer-opening-waking",
+          "rationale": "此切点取自噩梦结束后男子在下午阳光中醒来的实际叙事现在，而非梦中白帝城的献祭画面。",
+          "storyTime": {
+            "kind": "ordinal",
+            "label": "序幕结尾的下午"
+          }
+        },
+        "delta": {
+          "operations": [
+            {
+              "entityId": "char-opening-man",
+              "field": "character.alive",
+              "op": "set",
+              "value": true
+            },
+            {
+              "entityId": "char-opening-man",
+              "field": "character.health",
+              "op": "set",
+              "value": "呼吸急促，全身都是冷汗"
+            },
+            {
+              "entityId": "char-opening-man",
+              "field": "character.momentum",
+              "op": "set",
+              "value": "从噩梦中惊醒，仍感惊惧"
+            }
+          ],
+          "version": 1
+        },
+        "knowledge": {
+          "operations": [],
+          "version": 1
+        },
+        "participantPresence": [
+          {
+            "entityId": "char-opening-man",
+            "mode": "physical"
+          }
+        ],
+        "projectionSeed": {
+          "activeRuleIds": [],
+          "elapsedDays": 0,
+          "norms": {
+            "operations": [],
+            "version": 1
+          },
+          "processes": {
+            "operations": [],
+            "version": 1
+          },
+          "semantics": {
+            "operations": [],
+            "version": 1
+          },
+          "version": 1
+        },
+        "readerContext": {
+          "entityGlosses": [],
+          "facts": [
+            {
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-focal",
+              "kind": "focal-identity",
+              "summary": "焦点人物是一名只以“他”称呼的未具名男子，刚刚惊醒。"
+            },
+            {
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-time-place",
+              "kind": "time-place",
+              "summary": "此刻是下午；他身处有高架轻轨噪音的普通人世。"
+            },
+            {
+              "entityIds": [
+                "char-opening-man",
+                "char-constantin",
+                "loc-baidi"
+              ],
+              "id": "fact-opening-dream",
+              "kind": "causal-premise",
+              "summary": "惊醒前，他经历了涉及白帝城和康斯坦丁的噩梦。"
+            },
+            {
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "holderEntityId": "char-opening-man",
+              "id": "fact-opening-relief",
+              "kind": "actor-stance",
+              "stance": "positive",
+              "summary": "该男子觉得轻轨声悦耳，因为这提醒他梦中的一切都是假的。"
+            },
+            {
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-pressure",
+              "kind": "immediate-pressure",
+              "summary": "他呼吸急促、全身冷汗，正从噩梦的惊惧中恢复。"
+            }
+          ],
+          "focalActorId": "char-opening-man",
+          "immediateSituation": {
+            "causalFactIds": [
+              "fact-opening-dream"
+            ],
+            "outcomePolicy": "withhold-post-checkpoint-outcomes",
+            "pressureFactIds": [
+              "fact-opening-pressure"
+            ],
+            "summary": "未具名男子已醒来，但噩梦的惊惧仍在；眼下需要在普通人世中平复下来。",
+            "unresolvedFactIds": [
+              "fact-opening-pressure"
+            ]
+          },
+          "version": 1
+        },
+        "readerSetup": "一名未具名男子刚从有关白帝城与康斯坦丁的噩梦中惊醒；下午的阳光和高架轻轨声确认他回到了普通人世。",
+        "version": 1
+      },
+      "proposal_id": "p-initial-opening-world"
+    }
+  },
+  {
+    "type": "tool.call.failed",
+    "seq": 46,
+    "blob": {
+      "content": [
+        {
+          "text": "Initial-world preview validation failed:\npayload.readerContext.facts.0.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.0.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\npayload.readerContext.facts.1.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.1.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\npayload.readerContext.facts.2.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.2.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\npayload.readerContext.facts.3.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.3.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\npayload.readerContext.facts.4.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.4.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\nNo proposal was staged. Graph/commit checks have not run.\n\n<nwh-tool-recovery>\n{\n  \"version\": 1,\n  \"failedTool\": \"preview_initial_world\",\n  \"category\": \"invalid-arguments\",\n  \"retryable\": true,\n  \"retryCondition\": \"Retry only after correcting the named field/path against the current tool schema.\",\n  \"steps\": [\n    \"Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.\",\n    \"A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.\",\n    \"Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.\",\n    \"Retry preview_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction.\"\n  ]\n}\n</nwh-tool-recovery>",
+          "type": "text"
+        }
+      ],
+      "details": {
+        "nwhToolRecovery": {
+          "category": "invalid-arguments",
+          "failedTool": "preview_initial_world",
+          "retryable": true,
+          "retryCondition": "Retry only after correcting the named field/path against the current tool schema.",
+          "steps": [
+            "Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.",
+            "A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.",
+            "Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.",
+            "Retry preview_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction."
+          ],
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "type": "tool.call.started",
+    "seq": 54,
+    "blob": {
+      "evidence_segment_ids": [
+        "a28585b1cf867f3e3a16-00002-16e2c6da87f3"
+      ],
+      "evidence_selectors": [
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerSetup"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/0/summary"
+        },
+        {
+          "exact": "在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/1/summary"
+        },
+        {
+          "exact": "提醒他梦中的一切都是假的",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/2/summary"
+        },
+        {
+          "exact": "他忽然觉得这声音那么悦耳，提醒他梦中的一切都是假的",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/3/summary"
+        },
+        {
+          "exact": "呼吸急促，全身都是冷汗",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/4/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "interpretation": "The directly narrated rapid breathing and cold sweat establish an immediate aftermath of fear without asserting any later outcome.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/immediateSituation/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/actorObservations/0/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "interpretation": "A character who wakes, breathes, and sweats is alive at the checkpoint.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/delta/operations/0"
+        },
+        {
+          "exact": "呼吸急促，全身都是冷汗",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/delta/operations/1"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "interpretation": "The abrupt waking with rapid breathing and cold sweat supports a transient aftermath momentum.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/delta/operations/2"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/checkpoint"
+        }
+      ],
+      "payload": {
+        "actorObservations": [
+          {
+            "actorId": "char-opening-man",
+            "summary": "他在下午阳光中醒来，听见高架轻轨经过的噪音，并感到自己呼吸急促、满身冷汗。"
+          }
+        ],
+        "checkpoint": {
+          "mode": "chronological",
+          "narrativeLayerId": "layer-opening-waking",
+          "rationale": "此切点取自噩梦结束后男子在下午阳光中醒来的实际叙事现在，而非梦中白帝城的献祭画面。",
+          "storyTime": {
+            "kind": "ordinal",
+            "label": "序幕结尾的下午"
+          }
+        },
+        "delta": {
+          "operations": [
+            {
+              "entityId": "char-opening-man",
+              "field": "character.alive",
+              "op": "set",
+              "value": true
+            },
+            {
+              "entityId": "char-opening-man",
+              "field": "character.health",
+              "op": "set",
+              "value": "呼吸急促，全身都是冷汗"
+            },
+            {
+              "entityId": "char-opening-man",
+              "field": "character.momentum",
+              "op": "set",
+              "value": "从噩梦中惊醒，仍感惊惧"
+            }
+          ],
+          "version": 1
+        },
+        "knowledge": {
+          "operations": [],
+          "version": 1
+        },
+        "participantPresence": [
+          {
+            "entityId": "char-opening-man",
+            "mode": "physical"
+          }
+        ],
+        "projectionSeed": {
+          "activeRuleIds": [],
+          "elapsedDays": 0,
+          "norms": {
+            "operations": [],
+            "version": 1
+          },
+          "processes": {
+            "operations": [],
+            "version": 1
+          },
+          "semantics": {
+            "operations": [],
+            "version": 1
+          },
+          "version": 1
+        },
+        "readerContext": {
+          "entityGlosses": [],
+          "facts": [
+            {
+              "basis": "checkpoint-state",
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-focal",
+              "kind": "focal-identity",
+              "summary": "焦点人物是一名只以“他”称呼的未具名男子，刚刚惊醒。",
+              "temporalClass": "at-checkpoint"
+            },
+            {
+              "basis": "checkpoint-state",
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-time-place",
+              "kind": "time-place",
+              "summary": "此刻是下午；他身处有高架轻轨噪音的普通人世。",
+              "temporalClass": "at-checkpoint"
+            },
+            {
+              "basis": "completed-before-checkpoint",
+              "entityIds": [
+                "char-opening-man",
+                "char-constantin",
+                "loc-baidi"
+              ],
+              "id": "fact-opening-dream",
+              "kind": "causal-premise",
+              "summary": "惊醒前，他经历了涉及白帝城和康斯坦丁的噩梦。",
+              "temporalClass": "before-checkpoint"
+            },
+            {
+              "basis": "focal-knowledge",
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "holderEntityId": "char-opening-man",
+              "id": "fact-opening-relief",
+              "kind": "actor-stance",
+              "stance": "positive",
+              "summary": "该男子觉得轻轨声悦耳，因为这提醒他梦中的一切都是假的。",
+              "temporalClass": "at-checkpoint"
+            },
+            {
+              "basis": "checkpoint-state",
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-pressure",
+              "kind": "immediate-pressure",
+              "summary": "他呼吸急促、全身冷汗，正从噩梦的惊惧中恢复。",
+              "temporalClass": "at-checkpoint"
+            }
+          ],
+          "focalActorId": "char-opening-man",
+          "immediateSituation": {
+            "causalFactIds": [
+              "fact-opening-dream"
+            ],
+            "outcomePolicy": "withhold-post-checkpoint-outcomes",
+            "pressureFactIds": [
+              "fact-opening-pressure"
+            ],
+            "summary": "未具名男子已醒来，但噩梦的惊惧仍在；眼下需要在普通人世中平复下来。",
+            "unresolvedFactIds": [
+              "fact-opening-pressure"
+            ]
+          },
+          "version": 1
+        },
+        "readerSetup": "一名未具名男子刚从有关白帝城与康斯坦丁的噩梦中惊醒；下午的阳光和高架轻轨声确认他回到了普通人世。",
+        "version": 1
+      },
+      "proposal_id": "p-initial-opening-world"
+    }
+  },
+  {
+    "type": "tool.call.failed",
+    "seq": 55,
+    "blob": {
+      "content": [
+        {
+          "text": "Initial-world preview validation failed:\npayload.readerContext.facts.3.focalKnowledgeClaimIds: focal-knowledge facts must reference at least one seeded knowledge claim\nNo proposal was staged. Graph/commit checks have not run.\n\n<nwh-tool-recovery>\n{\n  \"version\": 1,\n  \"failedTool\": \"preview_initial_world\",\n  \"category\": \"invalid-arguments\",\n  \"retryable\": true,\n  \"retryCondition\": \"Retry only after correcting the named field/path against the current tool schema.\",\n  \"steps\": [\n    \"Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.\",\n    \"A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.\",\n    \"Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.\",\n    \"Retry preview_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction.\"\n  ]\n}\n</nwh-tool-recovery>",
+          "type": "text"
+        }
+      ],
+      "details": {
+        "nwhToolRecovery": {
+          "category": "invalid-arguments",
+          "failedTool": "preview_initial_world",
+          "retryable": true,
+          "retryCondition": "Retry only after correcting the named field/path against the current tool schema.",
+          "steps": [
+            "Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.",
+            "A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.",
+            "Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.",
+            "Retry preview_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction."
+          ],
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "type": "tool.call.started",
+    "seq": 110,
+    "blob": {
+      "evidence_segment_ids": [
+        "a28585b1cf867f3e3a16-00002-16e2c6da87f3"
+      ],
+      "evidence_selectors": [
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerSetup"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/0/summary"
+        },
+        {
+          "exact": "在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/1/summary"
+        },
+        {
+          "exact": "城市的正中央，立着一根高杆，孩子被挂在高杆顶上，闭着眼睛，整个城市的火焰，都在灼烧他。",
+          "interpretation": "The sacrifice image occurs before the focal person wakes in the same narrated dream sequence.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/facts/2/summary"
+        },
+        {
+          "exact": "他忽然觉得这声音那么悦耳，提醒他梦中的一切都是假的",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/3/summary"
+        },
+        {
+          "exact": "又是句奇怪的台词，没头没脑的。",
+          "interpretation": "The source explicitly presents the dream speech as strange and unexplained, supporting a reader-facing unresolved mystery rather than a world fact.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/facts/4/summary"
+        },
+        {
+          "exact": "“康斯……坦丁。”他喊出了那个名字。",
+          "interpretation": "This locates Constantine in the focal person's just-ended dream; the dream itself calls the focal person the child's brother.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/entityGlosses/0/relationshipToFocal"
+        },
+        {
+          "exact": "像是一场盛大的献祭。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/entityGlosses/0/whyRelevantNow"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "interpretation": "The waking physical reaction grounds the immediate post-dream situation; the unexplained imagery is separately identified in the reader facts.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/immediateSituation/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/actorObservations/0/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+          "interpretation": "Sitting up and opening his eyes explicitly establish that the focal character is alive at this cut.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/delta/operations/0"
+        },
+        {
+          "exact": "呼吸急促，全身都是冷汗",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/delta/operations/1"
+        },
+        {
+          "exact": "提醒他梦中的一切都是假的，他所在的，只是普普通通的人世。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/projectionSeed/checkpoint/rationale"
+        }
+      ],
+      "payload": {
+        "actorObservations": [
+          {
+            "actorId": "char-opening-man",
+            "summary": "他在下午阳光中睁眼，浑身冷汗、呼吸急促，并听见窗外高架轻轨经过的噪音。"
+          }
+        ],
+        "delta": {
+          "operations": [
+            {
+              "entityId": "char-opening-man",
+              "field": "character.alive",
+              "op": "set",
+              "value": true
+            },
+            {
+              "entityId": "char-opening-man",
+              "field": "character.health",
+              "op": "set",
+              "value": "冷汗、呼吸急促"
+            }
+          ],
+          "version": 1
+        },
+        "participantPresence": [
+          {
+            "entityId": "char-opening-man",
+            "mode": "physical"
+          }
+        ],
+        "projectionSeed": {
+          "activeRuleIds": [],
+          "checkpoint": {
+            "mode": "chronological",
+            "narrativeLayerId": "layer-waking-world",
+            "rationale": "梦中叙事明确在醒来后被称为假的；此切点取男子醒来的现实层，而不把梦中献祭当作当前世界状态。",
+            "storyTime": {
+              "kind": "ordinal",
+              "label": "梦醒后的下午"
+            }
+          },
+          "elapsedDays": 0,
+          "norms": {
+            "operations": [],
+            "version": 1
+          },
+          "processes": {
+            "operations": [],
+            "version": 1
+          },
+          "semantics": {
+            "operations": [],
+            "version": 1
+          },
+          "version": 1
+        },
+        "readerContext": {
+          "entityGlosses": [
+            {
+              "entityId": "char-constantin",
+              "factIds": [
+                "fact-opening-dream-premise",
+                "fact-opening-pressure"
+              ],
+              "relationshipToFocal": "康斯坦丁是在男子刚醒来的梦中被称作“弟弟”、并被献祭的孩子；这只是一段梦中关系的呈现。",
+              "whyRelevantNow": "这名孩子和献祭画面正是男子惊醒时仍受其影响的梦境核心。"
+            }
+          ],
+          "facts": [
+            {
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-focal",
+              "kind": "focal-identity",
+              "summary": "读者跟随一名未获姓名的男子；叙述只以“他”指称他。"
+            },
+            {
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-time-place",
+              "kind": "time-place",
+              "summary": "此刻是下午；他醒在一个窗外可听见高架轻轨噪音的普通人世。"
+            },
+            {
+              "entityIds": [
+                "char-opening-man",
+                "char-constantin"
+              ],
+              "id": "fact-opening-dream-premise",
+              "kind": "causal-premise",
+              "summary": "在这个醒来的时刻之前，他刚经历了一场包含康斯坦丁被献祭画面的梦。"
+            },
+            {
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "holderEntityId": "char-opening-man",
+              "id": "fact-opening-relief-stance",
+              "kind": "actor-stance",
+              "stance": "positive",
+              "summary": "男子把高架轻轨的声音视为悦耳，因为它提醒他梦中一切都是假的。"
+            },
+            {
+              "entityIds": [
+                "char-opening-man",
+                "char-constantin"
+              ],
+              "id": "fact-opening-pressure",
+              "kind": "immediate-pressure",
+              "summary": "梦里关于康斯坦丁、兄长身份和献祭的内容尚无解释，令刚醒来的男子仍处于惊惧之中。"
+            }
+          ],
+          "focalActorId": "char-opening-man",
+          "immediateSituation": {
+            "causalFactIds": [
+              "fact-opening-dream-premise"
+            ],
+            "outcomePolicy": "withhold-post-checkpoint-outcomes",
+            "pressureFactIds": [
+              "fact-opening-pressure"
+            ],
+            "summary": "男子刚从梦中惊醒，冷汗和急促呼吸尚未平复；读者只知道梦中康斯坦丁与献祭的形象，无法解释它们。",
+            "unresolvedFactIds": [
+              "fact-opening-pressure"
+            ]
+          },
+          "version": 1
+        },
+        "readerSetup": "一个无名男子在下午从一场关于白衣孩子康斯坦丁的可怕梦境中惊醒；他浑身冷汗、呼吸急促，窗外是高架轻轨的声响。",
+        "version": 1
+      },
+      "proposal_id": "p-initial-opening-world"
+    }
+  },
+  {
+    "type": "tool.call.failed",
+    "seq": 111,
+    "blob": {
+      "content": [
+        {
+          "text": "Initial-world preview validation failed:\npayload.readerContext.facts.0.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.0.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\npayload.readerContext.facts.1.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.1.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\npayload.readerContext.facts.2.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.2.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\npayload.readerContext.facts.3.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.3.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\npayload.readerContext.facts.4.temporalClass: Invalid option: expected one of \"at-checkpoint\"|\"before-checkpoint\"|\"later-discourse-preexisting\"\npayload.readerContext.facts.4.basis: Invalid option: expected one of \"checkpoint-state\"|\"completed-before-checkpoint\"|\"source-narrator-established\"|\"focal-knowledge\"\npayload.projectionSeed: Unrecognized key: \"checkpoint\"\nNo proposal was staged. Graph/commit checks have not run.\n\n<nwh-tool-recovery>\n{\n  \"version\": 1,\n  \"failedTool\": \"preview_initial_world\",\n  \"category\": \"invalid-arguments\",\n  \"retryable\": true,\n  \"retryCondition\": \"Retry only after correcting the named field/path against the current tool schema.\",\n  \"steps\": [\n    \"Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.\",\n    \"A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.\",\n    \"Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.\",\n    \"Retry preview_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction.\"\n  ]\n}\n</nwh-tool-recovery>",
+          "type": "text"
+        }
+      ],
+      "details": {
+        "nwhToolRecovery": {
+          "category": "invalid-arguments",
+          "failedTool": "preview_initial_world",
+          "retryable": true,
+          "retryCondition": "Retry only after correcting the named field/path against the current tool schema.",
+          "steps": [
+            "Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.",
+            "A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.",
+            "Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.",
+            "Retry preview_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction."
+          ],
+          "version": 1
+        }
+      }
+    }
+  },
+  {
+    "type": "tool.call.started",
+    "seq": 119,
+    "blob": {
+      "evidence_segment_ids": [
+        "a28585b1cf867f3e3a16-00002-16e2c6da87f3"
+      ],
+      "evidence_selectors": [
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerSetup"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/0/summary"
+        },
+        {
+          "exact": "在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/1/summary"
+        },
+        {
+          "exact": "城市的正中央，立着一根高杆，孩子被挂在高杆顶上，闭着眼睛，整个城市的火焰，都在灼烧他。",
+          "interpretation": "The sacrifice image occurs before the focal person wakes in the same narrated dream sequence.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/facts/2/summary"
+        },
+        {
+          "exact": "他忽然觉得这声音那么悦耳，提醒他梦中的一切都是假的",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/facts/3/summary"
+        },
+        {
+          "exact": "又是句奇怪的台词，没头没脑的。",
+          "interpretation": "The source explicitly presents the dream speech as strange and unexplained, supporting a reader-facing unresolved mystery rather than a world fact.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/facts/4/summary"
+        },
+        {
+          "exact": "“康斯……坦丁。”他喊出了那个名字。",
+          "interpretation": "This locates Constantine in the focal person's just-ended dream; the dream itself calls the focal person the child's brother.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/entityGlosses/0/relationshipToFocal"
+        },
+        {
+          "exact": "像是一场盛大的献祭。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/readerContext/entityGlosses/0/whyRelevantNow"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗",
+          "interpretation": "The waking physical reaction grounds the immediate post-dream situation; the unexplained imagery is separately identified in the reader facts.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/readerContext/immediateSituation/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛，呼吸急促，全身都是冷汗，外面是高架轻轨经过的噪音。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/actorObservations/0/summary"
+        },
+        {
+          "exact": "他猛地坐起，在下午的阳光中睁开眼睛",
+          "interpretation": "Sitting up and opening his eyes explicitly establish that the focal character is alive at this cut.",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "strong-inference",
+          "target_path": "/delta/operations/0"
+        },
+        {
+          "exact": "呼吸急促，全身都是冷汗",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/delta/operations/1"
+        },
+        {
+          "exact": "提醒他梦中的一切都是假的，他所在的，只是普普通通的人世。",
+          "relation": "supports",
+          "segment_id": "a28585b1cf867f3e3a16-00002-16e2c6da87f3",
+          "strength": "explicit",
+          "target_path": "/checkpoint/rationale"
+        }
+      ],
+      "payload": {
+        "actorObservations": [
+          {
+            "actorId": "char-opening-man",
+            "summary": "他在下午阳光中睁眼，浑身冷汗、呼吸急促，并听见窗外高架轻轨经过的噪音。"
+          }
+        ],
+        "checkpoint": {
+          "mode": "chronological",
+          "narrativeLayerId": "layer-waking-world",
+          "rationale": "梦中叙事明确在醒来后被称为假的；此切点取男子醒来的现实层，而不把梦中献祭当作当前世界状态。",
+          "storyTime": {
+            "kind": "ordinal",
+            "label": "梦醒后的下午"
+          }
+        },
+        "delta": {
+          "operations": [
+            {
+              "entityId": "char-opening-man",
+              "field": "character.alive",
+              "op": "set",
+              "value": true
+            },
+            {
+              "entityId": "char-opening-man",
+              "field": "character.health",
+              "op": "set",
+              "value": "冷汗、呼吸急促"
+            }
+          ],
+          "version": 1
+        },
+        "participantPresence": [
+          {
+            "entityId": "char-opening-man",
+            "mode": "physical"
+          }
+        ],
+        "projectionSeed": {
+          "activeRuleIds": [],
+          "elapsedDays": 0,
+          "norms": {
+            "operations": [],
+            "version": 1
+          },
+          "processes": {
+            "operations": [],
+            "version": 1
+          },
+          "semantics": {
+            "operations": [],
+            "version": 1
+          },
+          "version": 1
+        },
+        "readerContext": {
+          "entityGlosses": [
+            {
+              "entityId": "char-constantin",
+              "factIds": [
+                "fact-opening-dream-premise",
+                "fact-opening-pressure"
+              ],
+              "relationshipToFocal": "康斯坦丁是在男子刚醒来的梦中被称作“弟弟”、并被献祭的孩子；这只是一段梦中关系的呈现。",
+              "whyRelevantNow": "这名孩子和献祭画面正是男子惊醒时仍受其影响的梦境核心。"
+            }
+          ],
+          "facts": [
+            {
+              "basis": "checkpoint-state",
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-focal",
+              "kind": "focal-identity",
+              "summary": "读者跟随一名未获姓名的男子；叙述只以“他”指称他。",
+              "temporalClass": "at-checkpoint"
+            },
+            {
+              "basis": "checkpoint-state",
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "id": "fact-opening-time-place",
+              "kind": "time-place",
+              "summary": "此刻是下午；他醒在一个窗外可听见高架轻轨噪音的普通人世。",
+              "temporalClass": "at-checkpoint"
+            },
+            {
+              "basis": "completed-before-checkpoint",
+              "entityIds": [
+                "char-opening-man",
+                "char-constantin"
+              ],
+              "id": "fact-opening-dream-premise",
+              "kind": "causal-premise",
+              "summary": "在这个醒来的时刻之前，他刚经历了一场包含康斯坦丁被献祭画面的梦。",
+              "temporalClass": "before-checkpoint"
+            },
+            {
+              "basis": "focal-knowledge",
+              "entityIds": [
+                "char-opening-man"
+              ],
+              "holderEntityId": "char-opening-man",
+              "id": "fact-opening-relief-stance",
+              "kind": "actor-stance",
+              "stance": "positive",
+              "summary": "男子把高架轻轨的声音视为悦耳，因为它提醒他梦中一切都是假的。",
+              "temporalClass": "at-checkpoint"
+            },
+            {
+              "basis": "source-narrator-established",
+              "entityIds": [
+                "char-opening-man",
+                "char-constantin"
+              ],
+              "id": "fact-opening-pressure",
+              "kind": "immediate-pressure",
+              "summary": "梦里关于康斯坦丁、兄长身份和献祭的内容尚无解释，令刚醒来的男子仍处于惊惧之中。",
+              "temporalClass": "at-checkpoint"
+            }
+          ],
+          "focalActorId": "char-opening-man",
+          "immediateSituation": {
+            "causalFactIds": [
+              "fact-opening-dream-premise"
+            ],
+            "outcomePolicy": "withhold-post-checkpoint-outcomes",
+            "pressureFactIds": [
+              "fact-opening-pressure"
+            ],
+            "summary": "男子刚从梦中惊醒，冷汗和急促呼吸尚未平复；读者只知道梦中康斯坦丁与献祭的形象，无法解释它们。",
+            "unresolvedFactIds": [
+              "fact-opening-pressure"
+            ]
+          },
+          "version": 1
+        },
+        "readerSetup": "一个无名男子在下午从一场关于白衣孩子康斯坦丁的可怕梦境中惊醒；他浑身冷汗、呼吸急促，窗外是高架轻轨的声响。",
+        "version": 1
+      },
+      "proposal_id": "p-initial-opening-world"
+    }
+  },
+  {
+    "type": "tool.call.failed",
+    "seq": 120,
+    "blob": {
+      "content": [
+        {
+          "text": "Initial-world preview validation failed:\npayload.readerContext.facts.3.focalKnowledgeClaimIds: focal-knowledge facts must reference at least one seeded knowledge claim\nNo proposal was staged. Graph/commit checks have not run.\n\n<nwh-tool-recovery>\n{\n  \"version\": 1,\n  \"failedTool\": \"preview_initial_world\",\n  \"category\": \"invalid-arguments\",\n  \"retryable\": true,\n  \"retryCondition\": \"Retry only after correcting the named field/path against the current tool schema.\",\n  \"steps\": [\n    \"Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.\",\n    \"A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.\",\n    \"Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.\",\n    \"Retry preview_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction.\"\n  ]\n}\n</nwh-tool-recovery>",
+          "type": "text"
+        }
+      ],
+      "details": {
+        "nwhToolRecovery": {
+          "category": "invalid-arguments",
+          "failedTool": "preview_initial_world",
+          "retryable": true,
+          "retryCondition": "Retry only after correcting the named field/path against the current tool schema.",
+          "steps": [
+            "Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.",
+            "A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.",
+            "Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.",
+            "Retry preview_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction."
+          ],
+          "version": 1
+        }
+      }
+    }
+  }
+]

@@ -150,3 +150,18 @@ and propagate their original error instead of entering fallback. Standalone
 scoped compiler prompts record their own trace, including failures before model
 creation. Read-only compiler status includes opening/supplemental journals while
 keeping completed ordinary-source batch counts separate.
+
+Preview exposes the same input schema as submission, including enums and nested
+fields. Its second failed check immediately returns host-repair-required while
+retaining the complete validation diagnostic; it does not wait for a third call
+to stop automatic session recovery.
+
+Opening preview attempts are reserved in `prepareArguments`, before Pi's schema
+validation. Domain diagnostics at this boundary enumerate allowed enum values
+and unexpected keys; remaining envelope validation failures use the same attempt
+budget. Execution consumes the prepared attempt after Pi clones/validates it,
+without counting it a second time. Direct host execution uses the same budget.
+A parameter failure followed by an evidence failure therefore exhausts the same
+one-correction allowance. Failed preview traces remain visible in compiler status
+as `latestRun.lastToolFailure`, even when there are no proposal obligations.
+Regression tests must call preparation, Pi validation, and execution in order.

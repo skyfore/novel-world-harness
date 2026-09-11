@@ -2121,34 +2121,66 @@ export function createCompilerProposalToolset(
     });
   });
   const openingPreviewInputs = new Set<string>();
+  let preparedPreviewHash: string | undefined;
+  const previewParameters = proposalToolParameters("initial-world");
+  const previewHash = (input: unknown) => crypto.createHash("sha256").update(JSON.stringify(input) ?? "undefined").digest("hex");
+  const assertPreviewScope = () => {
+    if (!activeSourceId || !compilerBatchId || !isWholeSourceEvidencePass()) {
+      throw new Error("Initial-world preview requires an active opening or reconciliation batch; do not retry outside that host scope.");
+    }
+    assertBatchWritable();
+    if (finishFrozen) throw finishHostError("a saved finish forbids new previews");
+    const journal = new CompilerProposalObligations(workspaceRoot, activeSourceId, compilerBatchId);
+    journal.assertModelRecoveryAllowed();
+    return journal;
+  };
+  const beginPreview = (raw: unknown) => {
+    assertPreviewScope().assertRetryAllowed("propose_initial_world", raw);
+    const hash = previewHash(raw);
+    if (openingPreviewInputs.has(hash) || openingPreviewInputs.size >= 2) {
+      throw new Error("Compiler proposal obligation requires host review: opening preview repeated unchanged input or exhausted its one corrected retry. Preserve drafts and stop; do not restart to repeat previews.");
+    }
+    openingPreviewInputs.add(hash);
+  };
+  const previewFailure = (issues: string[]): never => {
+    const diagnostic = `Initial-world preview validation failed:\n${[...new Set(issues)].join("\n")}\nNo proposal was staged. Graph/commit checks have not run.`;
+    throw new Error(openingPreviewInputs.size >= 2
+      ? `Compiler proposal obligation requires host review: the corrected preview failed. ${diagnostic}\nPreserve drafts; do not restart automatically to repeat previews.`
+      : diagnostic);
+  };
   const previewInitialWorldTool = defineTool({
     name: "preview_initial_world",
     label: "Preview initial world",
     description: "Read-only opening input and exact-evidence preflight. Does not stage, commit, settle failures, or certify graph closure/playability.",
     promptGuidelines: [INITIAL_WORLD_INPUT_GUIDANCE,
       "Use the intended propose_initial_world envelope. Review all errors, then make at most one changed preview; never repeat unchanged input. Submission always revalidates current dependencies."],
-    parameters: Type.Object({
-      proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
-      payload: Type.Unknown(),
-      evidence_segment_ids: Type.Array(Type.String(), { minItems: 1, maxItems: 16 }),
-      evidence_selectors: Type.Optional(Type.Unknown()),
-    }, { additionalProperties: false }),
+    parameters: previewParameters,
+    prepareArguments(raw) {
+      preparedPreviewHash = undefined;
+      beginPreview(raw);
+      let input: ProposalToolInput;
+      try { input = prepareProposalToolArguments(raw); }
+      catch (error) { return previewFailure([error instanceof Error ? error.message : String(error)]); }
+      const issues = initialWorldInputIssues(input);
+      if (issues.length) previewFailure(issues);
+      // Validate here too: outer Pi validation must not be the first place an
+      // envelope failure occurs, otherwise it bypasses our retry accounting.
+      let validated: ProposalToolInput;
+      try {
+        validated = validateToolArguments({ name: "preview_initial_world", description: "Opening preflight", parameters: previewParameters },
+          { type: "toolCall", id: "opening-preflight", name: "preview_initial_world", arguments: input as never });
+      } catch (error) { return previewFailure([error instanceof Error ? error.message : String(error)]); }
+      preparedPreviewHash = previewHash(validated);
+      return validated;
+    },
     executionMode: "sequential",
     async execute(_id, raw, signal): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, unknown> }> {
       signal?.throwIfAborted();
-      if (!activeSourceId || !compilerBatchId || !isWholeSourceEvidencePass()) {
-        throw new Error("Initial-world preview requires an active opening or reconciliation batch; do not retry outside that host scope.");
-      }
-      assertBatchWritable();
-      if (await new CompilerFinishReceipts(workspaceRoot, activeSourceId, compilerBatchId).read()) throw finishHostError("a saved finish forbids new previews");
-      const journal = new CompilerProposalObligations(workspaceRoot, activeSourceId, compilerBatchId);
-      journal.assertModelRecoveryAllowed();
-      journal.assertRetryAllowed("propose_initial_world", raw);
-      const hash = crypto.createHash("sha256").update(JSON.stringify(raw)).digest("hex");
-      if (openingPreviewInputs.has(hash) || openingPreviewInputs.size >= 2) {
-        throw new Error("Compiler proposal obligation requires host review: opening preview repeated unchanged input or exhausted its one corrected retry. Preserve drafts and stop; do not restart to repeat previews.");
-      }
-      openingPreviewInputs.add(hash);
+      const prepared = preparedPreviewHash === previewHash(raw);
+      preparedPreviewHash = undefined;
+      assertPreviewScope();
+      if (await new CompilerFinishReceipts(workspaceRoot, activeSourceId!, compilerBatchId!).read()) throw finishHostError("a saved finish forbids new previews");
+      if (!prepared) beginPreview(raw);
       const blocked = beginToolCall("retrieval");
       if (blocked) return blocked;
       const input = raw as ProposalToolInput;
@@ -2163,7 +2195,7 @@ export function createCompilerProposalToolset(
         issues.push(...validateInitialWorldEvidenceAssertions(parsed, normalized.evidenceAssertions)
           .map(issue => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`));
       }
-      if (issues.length) throw new Error(`Initial-world preview validation failed:\n${[...new Set(issues)].join("\n")}\nNo proposal was staged. Graph/commit checks have not run.`);
+      if (issues.length) previewFailure(issues);
       return {
         content: [{ type: "text" as const, text: JSON.stringify({ valid: true, proposalId: input.proposal_id,
           checked: ["input", "exact-evidence", "field-evidence"], unchecked: ["graph-closure", "commit", "playability"],
@@ -3181,6 +3213,7 @@ export function createCompilerProposalToolset(
       successfulEventResolutionProposalIds.clear();
       successfulAccountingProposalIds.clear();
       openingPreviewInputs.clear();
+      preparedPreviewHash = undefined;
       peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];

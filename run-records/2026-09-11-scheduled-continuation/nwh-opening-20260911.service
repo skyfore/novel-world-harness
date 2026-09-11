@@ -1,0 +1,14 @@
+[Unit]
+Description=Novel Harness scheduled opening-state compilation continuation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=root
+WorkingDirectory=/root/workplace/novel-world-harness
+ExecStart=/root/.nvm/versions/node/v22.19.0/bin/node --import tsx src/cli.ts rebuild --source a28585b1cf867f3e3a16 --model openai-codex/gpt-5.6-terra
+Restart=no
+RemainAfterExit=yes
+StandardOutput=append:/root/workplace/novel-world-harness/run-records/2026-09-11-scheduled-continuation/rebuild.log
+StandardError=inherit

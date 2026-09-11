@@ -1,0 +1,437 @@
+{
+  "note": "Read-only schema reproduction; synthetic fields are NOT accepted evidence or a proposed repair.",
+  "results": [
+    {
+      "inputHash": "985f038b8d3b547cd675eb535789f058f6557fd6e44dadb631c59d3598e2ef91",
+      "parameterError": "Validation failed for tool \"propose_initial_world\":\n  - payload.readerContext.facts.0.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.1.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.2.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.3.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.4.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - payload.readerContext.facts.5.focalKnowledgeClaimIds: must have required properties focalKnowledgeClaimIds, dependsOnFactIds\n  - evidence_selectors.2.relation: must be equal to one of the allowed values\n  - evidence_selectors.2.interpretation: must have required properties interpretation\n\n",
+      "domainIssues": [
+        {
+          "code": "custom",
+          "path": [
+            "readerContext",
+            "facts",
+            4,
+            "holderEntityId"
+          ],
+          "message": "actor-stance must name the character or institution that holds the stance or stakes"
+        },
+        {
+          "code": "custom",
+          "path": [
+            "readerContext",
+            "facts",
+            4,
+            "stance"
+          ],
+          "message": "actor-stance must classify its direction"
+        },
+        {
+          "code": "custom",
+          "path": [
+            "readerContext",
+            "facts"
+          ],
+          "message": "Opening reader context requires one causal-premise fact"
+        }
+      ],
+      "reconstructedAdvice": {
+        "version": 1,
+        "failedTool": "propose_initial_world",
+        "category": "invalid-arguments",
+        "retryable": true,
+        "retryCondition": "Retry only after correcting the named field/path against the current tool schema.",
+        "steps": [
+          "Read the first validation path and constraint in the error; change the smallest responsible field instead of rewriting unrelated valid data.",
+          "Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.",
+          "Retry propose_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction."
+        ]
+      }
+    },
+    {
+      "inputHash": "523585014bf4a501482419618ba5bea3cefb92ef7030984b9267adbcf2a7d292",
+      "parameterError": null,
+      "domainIssues": [
+        {
+          "code": "custom",
+          "path": [
+            "readerContext",
+            "facts",
+            4,
+            "holderEntityId"
+          ],
+          "message": "actor-stance must name the character or institution that holds the stance or stakes"
+        },
+        {
+          "code": "custom",
+          "path": [
+            "readerContext",
+            "facts",
+            4,
+            "stance"
+          ],
+          "message": "actor-stance must classify its direction"
+        },
+        {
+          "code": "custom",
+          "path": [
+            "readerContext",
+            "facts"
+          ],
+          "message": "Opening reader context requires one causal-premise fact"
+        }
+      ],
+      "reconstructedAdvice": {
+        "version": 1,
+        "failedTool": "propose_initial_world",
+        "category": "invalid-arguments",
+        "retryable": true,
+        "retryCondition": "Retry only after correcting the named field/path against the current tool schema.",
+        "steps": [
+          "Read the first validation path and constraint in the error; change the smallest responsible field instead of rewriting unrelated valid data.",
+          "Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.",
+          "Retry propose_initial_world once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction."
+        ]
+      }
+    }
+  ],
+  "syntheticDomainIssues": [],
+  "syntheticGate": "Compiler proposal obligation requires host review: the original and corrected inputs both failed. Do not retry in this or a fresh session; preserve drafts and request host adjudication.",
+  "factSchema": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "maxLength": 200,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "focal-identity",
+          "time-place",
+          "entity-identity",
+          "relationship",
+          "causal-premise",
+          "actor-stance",
+          "social-stakes",
+          "immediate-pressure",
+          "completed-prior-beat"
+        ]
+      },
+      "summary": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      },
+      "temporalClass": {
+        "type": "string",
+        "enum": [
+          "at-checkpoint",
+          "before-checkpoint",
+          "later-discourse-preexisting"
+        ]
+      },
+      "basis": {
+        "type": "string",
+        "enum": [
+          "checkpoint-state",
+          "completed-before-checkpoint",
+          "source-narrator-established",
+          "focal-knowledge"
+        ]
+      },
+      "entityIds": {
+        "default": [],
+        "maxItems": 32,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        }
+      },
+      "holderEntityId": {
+        "type": "string",
+        "maxLength": 200,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+      },
+      "stance": {
+        "type": "string",
+        "enum": [
+          "positive",
+          "negative",
+          "neutral",
+          "ambivalent",
+          "indifferent"
+        ]
+      },
+      "focalKnowledgeClaimIds": {
+        "default": [],
+        "maxItems": 32,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        }
+      },
+      "dependsOnFactIds": {
+        "default": [],
+        "maxItems": 32,
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        }
+      }
+    },
+    "required": [
+      "id",
+      "kind",
+      "summary",
+      "temporalClass",
+      "basis",
+      "entityIds",
+      "focalKnowledgeClaimIds",
+      "dependsOnFactIds"
+    ],
+    "additionalProperties": false
+  },
+  "readerContextSchema": {
+    "type": "object",
+    "properties": {
+      "version": {
+        "type": "number",
+        "const": 1
+      },
+      "focalActorId": {
+        "type": "string",
+        "maxLength": 200,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+      },
+      "facts": {
+        "minItems": 5,
+        "maxItems": 96,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "focal-identity",
+                "time-place",
+                "entity-identity",
+                "relationship",
+                "causal-premise",
+                "actor-stance",
+                "social-stakes",
+                "immediate-pressure",
+                "completed-prior-beat"
+              ]
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "temporalClass": {
+              "type": "string",
+              "enum": [
+                "at-checkpoint",
+                "before-checkpoint",
+                "later-discourse-preexisting"
+              ]
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "checkpoint-state",
+                "completed-before-checkpoint",
+                "source-narrator-established",
+                "focal-knowledge"
+              ]
+            },
+            "entityIds": {
+              "default": [],
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              }
+            },
+            "holderEntityId": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            },
+            "stance": {
+              "type": "string",
+              "enum": [
+                "positive",
+                "negative",
+                "neutral",
+                "ambivalent",
+                "indifferent"
+              ]
+            },
+            "focalKnowledgeClaimIds": {
+              "default": [],
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              }
+            },
+            "dependsOnFactIds": {
+              "default": [],
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "summary",
+            "temporalClass",
+            "basis",
+            "entityIds",
+            "focalKnowledgeClaimIds",
+            "dependsOnFactIds"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "entityGlosses": {
+        "maxItems": 64,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "entityId": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            },
+            "relationshipToFocal": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "whyRelevantNow": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "factIds": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              }
+            }
+          },
+          "required": [
+            "entityId",
+            "relationshipToFocal",
+            "whyRelevantNow",
+            "factIds"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "immediateSituation": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "causalFactIds": {
+            "minItems": 1,
+            "maxItems": 32,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            }
+          },
+          "pressureFactIds": {
+            "minItems": 1,
+            "maxItems": 32,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            }
+          },
+          "unresolvedFactIds": {
+            "minItems": 1,
+            "maxItems": 32,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            }
+          },
+          "outcomePolicy": {
+            "type": "string",
+            "const": "withhold-post-checkpoint-outcomes"
+          }
+        },
+        "required": [
+          "summary",
+          "causalFactIds",
+          "pressureFactIds",
+          "unresolvedFactIds",
+          "outcomePolicy"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "version",
+      "focalActorId",
+      "facts",
+      "entityGlosses",
+      "immediateSituation"
+    ],
+    "additionalProperties": false
+  },
+  "unresolved": [
+    {
+      "tool": "propose_entity_mention",
+      "proposalId": "p-mention-opening-man",
+      "status": "failed",
+      "diagnostic": "A non-zero entity mention surface must exactly equal selector.exact."
+    },
+    {
+      "tool": "propose_initial_world",
+      "proposalId": "p-initial-opening-world",
+      "status": "failed",
+      "diagnostic": "[\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"readerContext\",\n      \"facts\",\n      4,\n      \"holderEntityId\"\n    ],\n    \"message\": \"actor-stance must name the character or institution that holds the stance or stakes\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"readerContext\",\n      \"facts\",\n      4,\n      \"stance\"\n    ],\n    \"message\": \"actor-stance must classify its direction\"\n  },\n  {\n    \"code\": \"custom\",\n    \"path\": [\n      \"readerContext\",\n      \"facts\"\n    ],\n    \"message\": \"Opening reader context requires one causal-premise fact\"\n  }\n]"
+    }
+  ]
+}

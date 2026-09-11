@@ -67,6 +67,19 @@ async function inspectSource(root: string, source: SourceDocument) {
   const inventory = await Promise.all((["pending", "accepted", "rejected"] as const).map(async (status) => [status, (await proposals.list(status, source.id)).length] as const));
   const latestRun = runs[0];
   const events = latestRun ? await new TraceStore(root).peekEvents(latestRun.id) : [];
+  const failedTool = events.findLast(event => event.type === "tool.call.failed");
+  let lastToolFailure: { tool: string; observedAt: string; diagnostic: string } | null = null;
+  if (failedTool) {
+    let diagnostic = "Tool call failed; no readable diagnostic blob is available.";
+    try {
+      const blob = failedTool.blobRef ? await new TraceStore(root).peekBlob(failedTool.blobRef) : null;
+      if (blob && typeof blob === "object" && "content" in blob && Array.isArray(blob.content)) {
+        const text = blob.content.filter(item => item?.type === "text" && typeof item.text === "string").map(item => item.text).join("\n");
+        if (text) diagnostic = text.split("Received arguments:")[0]!.split("<nwh-tool-recovery>")[0]!.trim().slice(0, 4000);
+      }
+    } catch (error) { diagnostics.push(`Tool failure inspection: ${String(error)}`); }
+    lastToolFailure = { tool: String(failedTool.data?.toolName ?? "unknown"), observedAt: failedTool.observedAt, diagnostic };
+  }
   const model = events.findLast((event) => event.type === "llm.request.started")?.data;
   let revisions: Awaited<ReturnType<PreparedNovelCache["peekArchivedRevisions"]>> = [];
   let candidateInspection: "verified" | "unknown" = "verified";
@@ -100,7 +113,7 @@ async function inspectSource(root: string, source: SourceDocument) {
     obligations, finish: { inspection: finishInspection, receipts: finishReceipts, interpretation: "Receipt checksums only; host recovery revalidates dependencies and the original finish before checkpointing." }, worldProposalInventory: Object.fromEntries(inventory),
     latestRun: latestRun ? { id: latestRun.id, operationId: latestRun.operationId ?? null, startedAt: latestRun.startedAt, endedAt: latestRun.endedAt ?? null, status: latestRun.status,
       counts: latestRun.counts, usage: latestRun.usage, model: model ? { provider: model.providerId, id: model.modelId, thinking: model.thinkingLevel } : null,
-      error: latestRun.error ?? null } : null,
+      error: latestRun.error ?? null, lastToolFailure } : null,
     candidates: { inspection: candidateInspection, archived: revisions.length > 0, revisions }, diagnostics,
   };
 }

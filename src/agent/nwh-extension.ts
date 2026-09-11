@@ -1,3 +1,4 @@
+import { INITIAL_WORLD_INPUT_GUIDANCE } from "../compiler/initial-world-preflight.js";
 import { reviewNovelRoles } from "../workflow/role-review.js";
 import { CompilerFinishReceipts, finishHostError } from "../compiler/finish-receipts.js";
 import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
@@ -158,7 +159,7 @@ export function compilerToolNamesForScope(
         ? name !== "peek_adjacent_evidence" && name !== "defer_boundary_artifact"
         : name !== "replace_boundary_proposal";
     })
-    .filter((name) => scope !== "source" || name !== "propose_initial_world")
+    .filter((name) => scope !== "source" || !["propose_initial_world", "preview_initial_world"].includes(name))
     .filter((name) => scope !== "opening" || [
       "find_compiler_artifacts",
       "read_compiler_artifact",
@@ -167,6 +168,7 @@ export function compilerToolNamesForScope(
       "propose_entity",
       "propose_claim",
       "propose_initial_world",
+      "preview_initial_world",
       "withdraw_compiler_proposal",
       "finish_compiler_batch",
     ].includes(name));
@@ -236,7 +238,7 @@ TUI shortcuts:
   /hotkeys shows every shortcut. Prefix ! runs a user shell command.`;
 
 const LOCAL_EVIDENCE_TOOL_NAMES = new Set(["list_files", "search_files", "read_file"]);
-const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence, whole-source evidence retrieval, and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Treat the human player as an unread reader: in addition to concise readerSetup, populate readerContext with the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, the actual holder and direction of each relevant attitude or social pressure, completed pre-checkpoint beats, and the immediate unresolved situation. These are presentation facts, not actor knowledge. Add an actorObservation for every physically present opening character using only what that actor directly perceives. readerSetup, every readerContext summary/gloss, and every actorObservation summary requires an exact explicit or strong-inference field-level evidence selector; weak inference is insufficient. Use find_source_evidence/read_source_evidence only to recover missing identity, causation, stance, or other preexisting context from later discourse; classify it as later-discourse-preexisting and never import an outcome or development after the checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Establish an actionable lived state only for characters bodily present at the opening, with location, plan, or momentum whenever supported; a catalog-wide alive list is not a scene. Later characters receive separate source-backed entry checkpoints on their first embodied canonical events. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.`;
+const INITIAL_WORLD_PROMPT = `Inspect the registered novel's opening evidence, whole-source evidence retrieval, and existing artifact catalog. Propose one evidence-backed initial-world at one coherent temporal checkpoint. Treat the human player as an unread reader: in addition to concise readerSetup, populate readerContext with the focal identity, time/place, every first-use character identity and relationship needed now, causal premises, the actual holder and direction of each relevant attitude or social pressure, completed pre-checkpoint beats, and the immediate unresolved situation. These are presentation facts, not actor knowledge. Add an actorObservation for every physically present opening character using only what that actor directly perceives. readerSetup, every readerContext summary/gloss, and every actorObservation summary requires an exact explicit or strong-inference field-level evidence selector; weak inference is insufficient. Use find_source_evidence/read_source_evidence only to recover missing identity, causation, stance, or other preexisting context from later discourse; classify it as later-discourse-preexisting and never import an outcome or development after the checkpoint. Distinguish narrator frames, recollections, and lived chronology; include checkpoint.mode/rationale and every supported time/layer/event anchor. Establish an actionable lived state only for characters bodily present at the opening, with location, plan, or momentum whenever supported; a catalog-wide alive list is not a scene. Later characters receive separate source-backed entry checkpoints on their first embodied canonical events. Never merge an older frame self with a younger remembered self or grant later knowledge. Propose genuinely missing referenced entities or claims first. Do not include later canonical developments.` + "\n\n" + INITIAL_WORLD_INPUT_GUIDANCE;
 
 type TuiPrepareAllState = {
   sourceId: string;

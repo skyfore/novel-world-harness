@@ -53,10 +53,13 @@ async function inspectSource(root: string, source: SourceDocument) {
     const count = required.filter((batch) => completed.has(batch.id)).length;
     return [stage, { total: planAvailable ? required.length : null, completed: count, remaining: planAvailable ? required.length - count : null }];
   }));
-  const obligations = plan.flatMap((batch) => {
+  const supplementalBatchIds = CompilerProposalObligations.listBatchIds(root, source.id).filter(id => !planned.has(id));
+  const scopes = [...plan.map(batch => ({ id: batch.id, planOrdinal: batch.ordinal + 1 as number | null, stage: batch.stage as string })),
+    ...supplementalBatchIds.map(id => ({ id, planOrdinal: null, stage: id.startsWith("opening-") ? "opening" : "supplemental" }))];
+  const obligations = scopes.flatMap((batch) => {
     const journal = new CompilerProposalObligations(root, source.id, batch.id);
     const host = new Set(journal.requiringHostReview().map((item) => `${item.tool}:${item.proposalId}`));
-    return journal.unresolved().map((item) => ({ batchId: batch.id, planOrdinal: batch.ordinal + 1, stage: batch.stage,
+    return journal.unresolved().map((item) => ({ batchId: batch.id, planOrdinal: batch.planOrdinal, stage: batch.stage,
       tool: item.tool, proposalId: item.proposalId, status: item.status, updatedAt: item.updatedAt, diagnostic: item.diagnostic,
       requiresHostReview: host.has(`${item.tool}:${item.proposalId}`), checkpointed: completed.has(batch.id) }));
   });
@@ -75,7 +78,8 @@ async function inspectSource(root: string, source: SourceDocument) {
   try {
     finishReceipts = (await CompilerFinishReceipts.list(root, source.id)).map((receipt) => ({
       batchId: receipt.identity.batchId, state: receipt.state, preparedAt: receipt.preparedAt, completedAt: receipt.completedAt ?? null,
-      fingerprint: receipt.fingerprint, checkpointed: completed.has(receipt.identity.batchId), recoveryRequired: !completed.has(receipt.identity.batchId),
+        fingerprint: receipt.fingerprint, checkpointed: completed.has(receipt.identity.batchId),
+        recoveryRequired: receipt.state !== "completed" || (planned.has(receipt.identity.batchId) && !completed.has(receipt.identity.batchId)),
     }));
   } catch (error) { finishInspection = "unknown"; diagnostics.push(`Finish receipt inspection: ${String(error)}`); }
   return {
@@ -87,10 +91,14 @@ async function inspectSource(root: string, source: SourceDocument) {
     stages, completedBatchIds, ignoredCheckpointIds: (persisted?.completedBatchIds ?? []).filter((id) => !completed.has(id)),
     totalBatches: planAvailable ? plan.length : null, completedBatches: completed.size,
     remainingBatches: planAvailable ? plan.length - completed.size : null,
-    batchReviewComplete: planAvailable && plan.length > 0 && completed.size === plan.length && obligations.length === 0,
+    batchReviewComplete: planAvailable && plan.length > 0 && completed.size === plan.length && !obligations.some(item => planned.has(item.batchId)),
+    hasUnresolvedObligations: obligations.length > 0,
+    supplementalBatches: supplementalBatchIds.map(id => ({ id, phase: id.startsWith("opening-") ? "opening" : "supplemental",
+      unresolvedObligations: obligations.filter(item => item.batchId === id).length,
+      requiresHostReview: obligations.some(item => item.batchId === id && item.requiresHostReview) })),
     nextUncheckpointedBatch: plan.find((batch) => !completed.has(batch.id))?.id ?? null,
     obligations, finish: { inspection: finishInspection, receipts: finishReceipts, interpretation: "Receipt checksums only; host recovery revalidates dependencies and the original finish before checkpointing." }, worldProposalInventory: Object.fromEntries(inventory),
-    latestRun: latestRun ? { id: latestRun.id, startedAt: latestRun.startedAt, endedAt: latestRun.endedAt ?? null, status: latestRun.status,
+    latestRun: latestRun ? { id: latestRun.id, operationId: latestRun.operationId ?? null, startedAt: latestRun.startedAt, endedAt: latestRun.endedAt ?? null, status: latestRun.status,
       counts: latestRun.counts, usage: latestRun.usage, model: model ? { provider: model.providerId, id: model.modelId, thinking: model.thinkingLevel } : null,
       error: latestRun.error ?? null } : null,
     candidates: { inspection: candidateInspection, archived: revisions.length > 0, revisions }, diagnostics,

@@ -9,6 +9,8 @@ import { startElapsedStatus } from "../util/elapsed-status.js";
 import { withWorkspaceOperationLock } from "../util/workspace-lock.js";
 import { CompilerProposalObligations } from "../compiler/proposal-obligations.js";
 import { recoverCompilerFinish } from "../compiler/finish-recovery.js";
+import { TraceRecorder } from "../trace/recorder.js";
+import { TraceStore } from "../trace/store.js";
 
 export type CompileCommandOptions = {
   root: string;
@@ -54,6 +56,26 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
   if (options.acquireLock !== false) {
     return withWorkspaceOperationLock(options.root, "compiler", () =>
       compileCommand({ ...options, acquireLock: false }));
+  }
+  if (!options.trace && options.prompt !== undefined && options.sourceId && options.compilerBatchId) {
+    const recorder = await TraceRecorder.start(new TraceStore(options.root), {
+      kind: "prepare", sourceId: options.sourceId, operationId: options.compilerBatchId,
+    });
+    try {
+      await recorder.record("validation.completed", { phase: "compiler-host", pid: process.pid, parentPid: process.ppid, compilerBatchId: options.compilerBatchId });
+      await compileCommand({ ...options, acquireLock: false, trace: {
+        parent: recorder.rootContext, invocationName: options.compilerBatchId, attempt: 0,
+        metadata: { sourceId: options.sourceId, compilerBatchId: options.compilerBatchId },
+        parts: [{ id: "compiler.prompt", label: "Scoped compiler prompt", kind: "compiler.batch", role: "user", authority: "untrusted-source", content: options.prompt }],
+      } });
+      await recorder.finish("succeeded");
+    } catch (error) {
+      await recorder.finish(options.signal?.aborted ? "cancelled" : "failed", {}, {
+        code: "COMPILER_PROMPT_FAILED", message: error instanceof Error ? error.message : String(error), retryable: false,
+      });
+      throw error;
+    }
+    return;
   }
   if (options.sourceId && options.compilerBatchId && await recoverCompilerFinish(options.root, options.sourceId, options.compilerBatchId)) {
     const message = `Recovered the verified finish for ${options.compilerBatchId} without a model session.`;
@@ -125,7 +147,7 @@ export async function compileCommand(options: CompileCommandOptions): Promise<vo
         options.onModelToolResult?.(name, result, isError);
       } } : {}),
       ...(options.onModelEvent ? { onEvent: options.onModelEvent } : {}),
-      ...(options.trace ? { trace: options.trace } : {}),
+      ...(options.trace ? { trace: { ...options.trace, attempt } } : {}),
     });
     const abortSession = () => { void session.abort(); };
     options.signal?.addEventListener("abort", abortSession, { once: true });

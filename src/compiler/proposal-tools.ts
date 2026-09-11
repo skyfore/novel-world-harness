@@ -1,5 +1,7 @@
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
+import { initialWorldInputIssues, INITIAL_WORLD_INPUT_GUIDANCE } from "./initial-world-preflight.js";
+import { initialWorldSchema, validateInitialWorldEvidenceAssertions } from "../world/initial.js";
 import { CompilerAccountingPages } from "./accounting-pages.js";
 import { createRoleRosterTools, ROLE_ROSTER_TOOL_NAMES } from "./role-roster-tools.js";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -175,6 +177,7 @@ export const COMPILER_TOOL_NAMES: readonly string[] = Object.freeze([
   "propose_entity_resolution",
   "propose_event_resolution",
   "find_source_accounting_units",
+  "preview_initial_world",
   "account_source_units",
   "withdraw_compiler_proposal",
   "replace_boundary_proposal",
@@ -255,6 +258,7 @@ const SEMANTIC_STAGE_PROPOSAL_TOOLS: Record<CompilerSemanticStage, ReadonlySet<s
 };
 
 const ALL_SEMANTIC_STAGE_RESTRICTED_TOOLS = new Set([
+  "preview_initial_world",
   "propose_novel_title",
   ...SOURCE_ANNOTATION_PROPOSAL_TOOL_NAMES,
   ...ENTITY_RESOLUTION_PROPOSAL_TOOL_NAMES,
@@ -347,7 +351,7 @@ function proposalToolParameters(kind: CompilerProposalKind) {
     proposal_id: idSchema,
     payload: compilerProposalSchemas[kind],
   }).strict();
-  const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(inputSchema);
+  const { $schema: _dialect, ...jsonSchema } = z.toJSONSchema(inputSchema, { io: "input" });
   removeModelWritableEvidence(jsonSchema);
   const properties = jsonSchema.properties as Record<string, unknown>;
   properties.evidence_segment_ids = {
@@ -368,6 +372,18 @@ function proposalToolParameters(kind: CompilerProposalKind) {
   };
   jsonSchema.required = [...new Set([...(jsonSchema.required ?? []), "evidence_segment_ids"])];
   constrainCompilerStateFields(jsonSchema);
+  if (kind === "initial-world") {
+    const payload = properties.payload as Record<string, any>;
+    payload.description = INITIAL_WORLD_INPUT_GUIDANCE;
+    const facts = payload.properties.readerContext.properties.facts;
+    facts.allOf = ["focal-identity", "time-place", "causal-premise", "actor-stance", "immediate-pressure"].map(kind => ({
+      contains: { type: "object", properties: { kind: { const: kind } }, required: ["kind"] },
+    }));
+    facts.items.allOf = [
+      { anyOf: [{ not: { properties: { kind: { const: "actor-stance" } }, required: ["kind"] } }, { required: ["holderEntityId", "stance"] }] },
+      { anyOf: [{ not: { properties: { kind: { const: "social-stakes" } }, required: ["kind"] } }, { required: ["holderEntityId"] }] },
+    ];
+  }
   return Type.Unsafe<ProposalToolInput>(jsonSchema as TSchema);
 }
 
@@ -2042,10 +2058,19 @@ export function createCompilerProposalToolset(
       description: metadata.description,
       promptSnippet: metadata.description,
       promptGuidelines: ["Search/read source evidence before proposing.", "Never claim a proposal is committed world truth.", "Use stable logical IDs and cite precise host-issued segment IDs only through evidence_segment_ids; the host injects schema-required evidence.", "Place proposal_id, payload, evidence_segment_ids and evidence_selectors at the top level. Evidence envelope fields do not belong inside payload.", "For each material field or relation, add an evidence_selector with an exact source quote, its payload JSON Pointer, relation, and independently judged strength. Never submit offsets or hashes.", "Entity canonical names and aliases must occur in their supplied evidence; empty aliases are valid.", "Use ASCII logical entity IDs, never display names or descriptions, in state entity-reference values such as character.inventory.",
-        ...(kind === "event-execution" ? ["Never copy an ad-hoc event.action into this binding. First find/read a supported action-schema, then use action.lane=schema-bound with its exact payload.id, role IDs and parameters. Without a supported mechanism, preserve the occurrence; a complete entryCheckpoint is allowed only when independently justified by embodied entry evidence."] : [])],
+        ...(kind === "event-execution" ? ["Never copy an ad-hoc event.action into this binding. First find/read a supported action-schema, then use action.lane=schema-bound with its exact payload.id, role IDs and parameters. Without a supported mechanism, preserve the occurrence; a complete entryCheckpoint is allowed only when independently justified by embodied entry evidence."] : []),
+        ...(kind === "initial-world" ? [INITIAL_WORLD_INPUT_GUIDANCE] : []),
+        "A failed call that never staged a proposal must be corrected under the same proposal_id. Only replace a successfully staged defective draft under a new ID; a new ID never clears an old failed call."],
       executionMode: "sequential",
       parameters,
-      prepareArguments: (args) => prepareProposalToolArguments(args, kind),
+      prepareArguments: (args) => {
+        const input = prepareProposalToolArguments(args, kind);
+        if (kind === "initial-world" && input?.evidence_segment_ids) {
+          const issues = initialWorldInputIssues(input);
+          if (issues.length) throw new Error(`Initial-world input validation failed:\n${issues.join("\n")}\nExact evidence and graph checks have not run. Correct all listed fields before one corrected submission with the same proposal_id.`);
+        }
+        return input;
+      },
       async execute(_id, input, signal) {
         signal?.throwIfAborted();
         const blocked = beginToolCall("mutation");
@@ -2094,6 +2119,58 @@ export function createCompilerProposalToolset(
         );
       },
     });
+  });
+  const openingPreviewInputs = new Set<string>();
+  const previewInitialWorldTool = defineTool({
+    name: "preview_initial_world",
+    label: "Preview initial world",
+    description: "Read-only opening input and exact-evidence preflight. Does not stage, commit, settle failures, or certify graph closure/playability.",
+    promptGuidelines: [INITIAL_WORLD_INPUT_GUIDANCE,
+      "Use the intended propose_initial_world envelope. Review all errors, then make at most one changed preview; never repeat unchanged input. Submission always revalidates current dependencies."],
+    parameters: Type.Object({
+      proposal_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
+      payload: Type.Unknown(),
+      evidence_segment_ids: Type.Array(Type.String(), { minItems: 1, maxItems: 16 }),
+      evidence_selectors: Type.Optional(Type.Unknown()),
+    }, { additionalProperties: false }),
+    executionMode: "sequential",
+    async execute(_id, raw, signal): Promise<{ content: { type: "text"; text: string }[]; details: Record<string, unknown> }> {
+      signal?.throwIfAborted();
+      if (!activeSourceId || !compilerBatchId || !isWholeSourceEvidencePass()) {
+        throw new Error("Initial-world preview requires an active opening or reconciliation batch; do not retry outside that host scope.");
+      }
+      assertBatchWritable();
+      if (await new CompilerFinishReceipts(workspaceRoot, activeSourceId, compilerBatchId).read()) throw finishHostError("a saved finish forbids new previews");
+      const journal = new CompilerProposalObligations(workspaceRoot, activeSourceId, compilerBatchId);
+      journal.assertModelRecoveryAllowed();
+      journal.assertRetryAllowed("propose_initial_world", raw);
+      const hash = crypto.createHash("sha256").update(JSON.stringify(raw)).digest("hex");
+      if (openingPreviewInputs.has(hash) || openingPreviewInputs.size >= 2) {
+        throw new Error("Compiler proposal obligation requires host review: opening preview repeated unchanged input or exhausted its one corrected retry. Preserve drafts and stop; do not restart to repeat previews.");
+      }
+      openingPreviewInputs.add(hash);
+      const blocked = beginToolCall("retrieval");
+      if (blocked) return blocked;
+      const input = raw as ProposalToolInput;
+      const issues = initialWorldInputIssues(input);
+      // The independent shape errors above must not hide discoverable exact
+      // selector problems. Normalization reads source bytes but stages nothing.
+      let normalized: Awaited<ReturnType<typeof normalizeProposalEvidence>> | undefined;
+      try { normalized = await normalizeProposalEvidence("initial-world", input); }
+      catch (error) { issues.push(error instanceof Error ? error.message : String(error)); }
+      if (normalized && !initialWorldInputIssues(input).length) {
+        const parsed = initialWorldSchema.parse(normalized.payload);
+        issues.push(...validateInitialWorldEvidenceAssertions(parsed, normalized.evidenceAssertions)
+          .map(issue => `${issue.code}${issue.path ? ` at ${issue.path}` : ""}: ${issue.message}`));
+      }
+      if (issues.length) throw new Error(`Initial-world preview validation failed:\n${[...new Set(issues)].join("\n")}\nNo proposal was staged. Graph/commit checks have not run.`);
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ valid: true, proposalId: input.proposal_id,
+          checked: ["input", "exact-evidence", "field-evidence"], unchecked: ["graph-closure", "commit", "playability"],
+          next: "Submit the reviewed envelope with propose_initial_world; the host revalidates it before staging." }) }],
+        details: { readOnly: true, proposalStaged: false },
+      };
+    },
   });
   const annotationResult = (
     proposalId: string,
@@ -3078,6 +3155,7 @@ export function createCompilerProposalToolset(
       peekAdjacentTool,
       deferBoundaryTool,
       ...proposalTools,
+      previewInitialWorldTool,
       ...annotationProposalTools,
       identityResolutionTool,
       eventResolutionTool,
@@ -3102,6 +3180,7 @@ export function createCompilerProposalToolset(
       successfulEntityResolutionProposalIds.clear();
       successfulEventResolutionProposalIds.clear();
       successfulAccountingProposalIds.clear();
+      openingPreviewInputs.clear();
       peekedDirections.clear();
       expectedSegmentIds = [...new Set(segmentIds)].sort();
       boundedSliceSegments = [];

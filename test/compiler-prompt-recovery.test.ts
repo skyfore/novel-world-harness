@@ -87,3 +87,25 @@ describe("compiler prompt recovery", () => {
     expect(onProgress).not.toHaveBeenCalledWith(expect.stringContaining("accepting the final no-artifacts review"));
   });
 });
+
+it("records a failed opening run even when the durable guard prevents session creation", async () => {
+  const fs = await import("node:fs/promises");
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { CompilerProposalObligations } = await import("../src/compiler/proposal-obligations.js");
+  const { TraceStore } = await import("../src/trace/store.js");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-opening-trace-"));
+  createPiCompilerSession.mockReset();
+  try {
+    const journal = new CompilerProposalObligations(root, "source", "opening-batch-source");
+    journal.record("propose_initial_world", { proposal_id: "opening", payload: {} }, "failed", "first");
+    journal.record("propose_initial_world", { proposal_id: "opening", payload: { version: 1 } }, "failed", "second");
+    await expect(compileCommand({ root, configPath: path.join(root, "missing.json"), allowMissingConfig: true,
+      acquireLock: false, saveSession: false, prompt: "Opening evidence", sourceId: "source", compilerBatchId: "opening-batch-source",
+    })).rejects.toThrow("requires host review");
+    expect(createPiCompilerSession).not.toHaveBeenCalled();
+    const runs = await new TraceStore(root).peekRuns({ sourceId: "source" });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ status: "failed", operationId: "opening-batch-source", error: { code: "COMPILER_PROMPT_FAILED" } });
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

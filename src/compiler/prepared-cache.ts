@@ -81,7 +81,7 @@ import { BoundaryCalibrationStore } from "./boundary-calibration.js";
 export { COMPILER_PIPELINE_VERSION };
 
 const CACHE_FORMAT_VERSION = 3;
-export const COMPILER_PROMPT_VERSION = 31;
+export const COMPILER_PROMPT_VERSION = 32;
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const md5Schema = z.string().regex(/^[a-f0-9]{32}$/);
 

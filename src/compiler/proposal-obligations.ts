@@ -30,6 +30,24 @@ export class CompilerHostReviewRequiredError extends Error {
 /** Compiler-lock-owned journal. Synchronous writes also cover synchronous Pi argument preflight. */
 export class CompilerProposalObligations {
   constructor(private readonly root: string, readonly sourceId: string, readonly batchId: string) {}
+  /** Discover actual persisted scopes, including opening/reconciliation, without initializing storage. */
+  static listBatchIds(root: string, sourceId: string): string[] {
+    const directory = path.join(worldStorageRoot(root), "compiler", "proposal-obligations");
+    let scopes: string[];
+    try { scopes = fs.readdirSync(directory); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    const ids = new Set<string>();
+    for (const scope of scopes.filter(name => /^[a-f0-9]{64}$/.test(name))) {
+      for (const file of fs.readdirSync(path.join(directory, scope)).filter(name => /^[a-f0-9]{64}\.json$/.test(name))) {
+        const ledger = ledgerSchema.parse(JSON.parse(fs.readFileSync(path.join(directory, scope, file), "utf8")));
+        if (ledger.sourceId !== sourceId) continue;
+        const expected = crypto.createHash("sha256").update(JSON.stringify([ledger.sourceId, ledger.batchId])).digest("hex");
+        if (expected !== scope) throw new Error("Compiler obligation scope mismatch; stop for host repair.");
+        ids.add(ledger.batchId);
+      }
+    }
+    return [...ids].sort();
+  }
   private directory() {
     const key = crypto.createHash("sha256").update(JSON.stringify([this.sourceId, this.batchId])).digest("hex");
     return path.join(worldStorageRoot(this.root), "compiler", "proposal-obligations", key);

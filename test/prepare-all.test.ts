@@ -1,3 +1,4 @@
+import { CompilerProposalObligations } from "../src/compiler/proposal-obligations.js";
 import { useOfflinePreparationBoundary } from "./helpers/offline-preparation.js";
 useOfflinePreparationBoundary();
 import fs from "node:fs/promises";
@@ -755,6 +756,47 @@ describe("prepare-all command", () => {
     await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toContainEqual(
       expect.objectContaining({ id: "partial-model-opening" }),
     );
+  });
+
+  it("preserves staged opening drafts and the original failure when the journal is unresolved", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-prepare-all-initial-fallback-"));
+    roots.push(root);
+    vi.spyOn(stdout, "write").mockImplementation((() => true) as typeof stdout.write);
+    const fixture = await createEvidenceFixture(root, "The world begins quietly.\n");
+    const batches = await prepareCompilerBatches(root, fixture.source);
+    for (const batch of batches) await new CompilerBatchStore(root).markComplete(fixture.source.id, batch.id);
+    await new CanonicalModelStore(root).putEntity({
+      id: "hero",
+      kind: "character",
+      canonicalName: "Hero",
+      aliases: [],
+      evidence: fixture.evidence("The world begins quietly."),
+    });
+
+    const result = prepareAllCommand({ root, sourceId: fixture.source.id, yes: true, cacheRoot: path.join(root, "prepared-cache") }, {
+      compileSource: async () => { throw new Error("compileSource should not run"); },
+      compileInitialWorld: async (options) => {
+        await new CompilerProposalService(root).submit("initial-world", {
+          proposalId: "partial-model-opening",
+          payload: {
+            version: 1,
+            delta: { version: 1, operations: [] },
+            evidence: fixture.evidence("The world begins quietly."),
+          },
+          generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
+        });
+        new CompilerProposalObligations(root, fixture.source.id, options.compilerBatchId!).record("propose_initial_world", { proposal_id: "failed-opening", payload: {} }, "failed", "invalid opening");
+        throw new Error("original opening failure");
+      },
+      converge: convergeWorldProposals,
+      createBranch: worldCreateCommand,
+    });
+
+    await expect(result).rejects.toThrow("original opening failure");
+    await expect(new CompilerProposalService(root).store.list("pending")).resolves.toContainEqual(
+      expect.objectContaining({ id: "partial-model-opening" }),
+    );
+    await expect(new CompilerProposalService(root).store.list("rejected")).resolves.toEqual([]);
   });
 
   it("rejects unattended execution unless --yes is explicit", async () => {

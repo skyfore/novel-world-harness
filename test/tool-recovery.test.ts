@@ -492,3 +492,14 @@ describe("agent tool recovery", () => {
     expect(withNwhToolRecovery(successful)).toBe(successful);
   });
 });
+
+it("keeps a failed mention's original identity and stops preview scope or retry violations", () => {
+  const advice = buildNwhToolRecoveryAdvice("propose_entity_mention", "A non-zero entity mention surface must exactly equal selector.exact.");
+  expect(advice.category).toBe("invalid-arguments");
+  expect(advice.steps.join(" ")).toContain("same proposal_id");
+  expect(advice.retryCondition).toContain("One corrected call");
+  expect(buildNwhToolRecoveryAdvice("preview_initial_world", "Initial-world preview requires an active opening or reconciliation batch").retryable).toBe(false);
+  expect(buildNwhToolRecoveryAdvice("preview_initial_world", "Compiler proposal obligation requires host review: opening preview repeated unchanged input").retryable).toBe(false);
+  const invalid = buildNwhToolRecoveryAdvice("preview_initial_world", "Initial-world preview validation failed: missing holderEntityId");
+  expect(invalid.steps.join(" ")).toContain("every reported validation path");
+});

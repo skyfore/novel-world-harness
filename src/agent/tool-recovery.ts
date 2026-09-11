@@ -367,6 +367,24 @@ export function buildNwhToolRecoveryAdvice(
     };
   }
 
+  if (toolName === "propose_entity_mention" && lower.includes("surface must exactly equal selector.exact")) {
+    return {
+      version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "invalid-arguments", retryable: true,
+      retryCondition: "One corrected call under the original proposal_id; a further failure requires host review.",
+      steps: [
+        "Keep the same proposal_id: this failed call did not stage a draft. A new ID cannot settle its obligation.",
+        "Copy the mention surface verbatim from the supplied citable segment into both surface and selector.exact. Use exact prefix/suffix from that same segment to disambiguate; do not extend the selector to the surrounding sentence or guess text.",
+        "Correct all reported fields together and retry once. Preserve unrelated drafts; stop if the corrected call fails.",
+      ],
+    };
+  }
+
+  if (lower.startsWith("initial-world preview requires an active")) {
+    return { version: NWH_TOOL_RECOVERY_VERSION, failedTool: toolName, category: "scope-or-lifecycle", retryable: false,
+      retryCondition: "Only the host can establish an opening or reconciliation scope.",
+      steps: ["Stop preview calls in this scope. Do not guess a batch or widen evidence access; preserve the diagnostic for the host."] };
+  }
+
   if (lower.startsWith("compiler proposal obligation requires host review")
     || lower.startsWith("compiler finish requires host review")
     || lower.startsWith("compiler accounting page scope mismatch")
@@ -761,7 +779,8 @@ export function buildNwhToolRecoveryAdvice(
       retryable: true,
       retryCondition: "Retry only after correcting the named field/path against the current tool schema.",
       steps: [
-        "Read the first validation path and constraint in the error; change the smallest responsible field instead of rewriting unrelated valid data.",
+        "Read every reported validation path and constraint; correct all diagnosed fields together while retaining unrelated valid data. For initial-world input, use preview_initial_world when available before submission; it checks input and field evidence, not graph closure or commitment.",
+        "A failed call that never staged a draft must be corrected with the same exact tool and proposal_id. A new ID cannot clear that obligation. After one corrected failed submission, stop for host review even if its diagnostic differs.",
         "Submit one JSON object with the documented field names and enum values; do not wrap the entire argument object or nested payload in an invalid JSON string.",
         `Retry ${toolName} once with corrected arguments. If the same diagnostic repeats, stop and report the path plus attempted correction.`,
       ],

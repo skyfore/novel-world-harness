@@ -66,3 +66,22 @@ it("reports unknown progress for a source-mismatched segment layout and leaves t
   expect(result.batchReviewComplete).toBe(false);
   expect((await store.readManifest(source.id))!.segments[0]!.title).toBe("Untrusted replacement heading");
 });
+
+it("reports blocked opening obligations after all source batches complete without changing state", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nwh-status-opening-")); roots.push(root);
+  const { source } = await createEvidenceFixture(root, "Chapter 1\nHero waits.\n");
+  const plan = await prepareCompilerBatches(root, source);
+  await new CompilerBatchStore(root).replaceCompleted(source.id, plan.map(batch => batch.id));
+  const batchId = `opening-${plan[0]!.id}`;
+  const journal = new CompilerProposalObligations(root, source.id, batchId);
+  journal.record("propose_initial_world", { proposal_id: "opening", payload: {} }, "failed", "shape error");
+  journal.record("propose_initial_world", { proposal_id: "opening", payload: { version: 1 } }, "failed", "semantic error");
+  const before = await snapshot(workspaceStateDir(root));
+  const result = (await inspectCompilerStatus(root, source.id)).sources[0]!;
+  expect(result.batchReviewComplete).toBe(true);
+  expect(result.completedBatches).toBe(plan.length);
+  expect(result.hasUnresolvedObligations).toBe(true);
+  expect(result.supplementalBatches).toEqual([{ id: batchId, phase: "opening", unresolvedObligations: 1, requiresHostReview: true }]);
+  expect(result.obligations).toMatchObject([{ batchId, planOrdinal: null, stage: "opening", requiresHostReview: true }]);
+  expect(await snapshot(workspaceStateDir(root))).toEqual(before);
+});

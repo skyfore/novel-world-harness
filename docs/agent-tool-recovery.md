@@ -125,3 +125,28 @@ Artifact ref '…' was not found.
 ```
 
 Pi skills are currently disabled by the NWH embedding. If skills are enabled later, every model-callable tool introduced by a skill follows this same contract.
+
+## Opening input preflight
+
+`preview_initial_world` is available only in host-scoped opening/reconciliation
+passes. It reads the intended proposal envelope without staging a draft,
+settling a proposal obligation, or committing truth. It aggregates payload shape,
+exact-selector and field-evidence errors where independently checkable. A
+successful preview explicitly leaves graph closure, commit and playability
+unchecked; submission and finish still revalidate. Use at most an original and
+one changed preview per batch session. Repeating unchanged input or exhausting
+that allowance requires host review, never automatic fresh-session recovery.
+Existing durable proposal and finish guards apply before preview work.
+
+Initial-world input schemas expose defaultable arrays as optional and publish
+the required reader fact kinds and stance-holder conditions. The full Zod
+validator still runs before staging. Correct every reported path together. A
+mention whose surface differs from selector.exact must be corrected using exact
+text from the supplied segment under its original failed proposal_id. Fresh
+IDs are only for replacing previously successful drafts, not settling failures.
+
+Opening failures with unresolved obligations or a saved finish preserve drafts
+and propagate their original error instead of entering fallback. Standalone
+scoped compiler prompts record their own trace, including failures before model
+creation. Read-only compiler status includes opening/supplemental journals while
+keeping completed ordinary-source batch counts separate.

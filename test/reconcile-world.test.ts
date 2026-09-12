@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { auditCompiler, type CompilerAuditReport } from "../src/compiler/audit.js";
 import {
   buildWorldReconciliationPrompt,
+  hasWorldReconciliationTargets,
   graphAdjudicationIterationFromBatchId,
   narrativeGraphNearNavigable,
   narrativeGraphRepairIsTargetable,
@@ -306,6 +307,18 @@ describe("world semantic reconciliation", () => {
     expect(graphFirstPrompt).toContain("do not submit a canonical-event replacement that leaves its preconditions unchanged");
     expect(graphFirst.weakEventCandidates.some(({ id }) =>
       graphSecond.weakEventCandidates.some((candidate) => candidate.id === id))).toBe(false);
+    // A resumed first shard must not rebind its existing finish receipt to new targets.
+    await canon.putEvent({ ...(await canon.getEvent("event-01")), id: "event-00" });
+    const resumed = reconciliationContext(await buildWorldReconciliationPrompt(root, fixture.source.id, audit, 1));
+    expect(resumed.repairPlan.proposalIdSuffix).toBe(first.repairPlan.proposalIdSuffix);
+    expect(resumed.weakEventCandidates.map(({ id }) => id)).toEqual(firstIds);
+    const fresh = reconciliationContext(await buildWorldReconciliationPrompt(root, fixture.source.id, audit, 1, { proposalIdSuffixTail: "reviewed-new-round" }));
+    expect(fresh.weakEventCandidates.map(({ id }) => id)).toContain("event-00");
+    expect(fresh.repairPlan.proposalIdSuffix).not.toBe(first.repairPlan.proposalIdSuffix);
+    const originalSecond = reconciliationContext(await buildWorldReconciliationPrompt(root, fixture.source.id, audit, 2));
+    expect(originalSecond.weakEventCandidates.map(({ id }) => id)).toEqual(secondIds);
+    expect(await hasWorldReconciliationTargets(root, fixture.source.id, "bounded", 3)).toBe(false);
+    expect(await hasWorldReconciliationTargets(root, fixture.source.id, "bounded", 3, "reviewed-new-round")).toBe(true);
   });
 
   it("rejects graph-shard no-ops, outgoing-only links, and duplicate typed relations", async () => {

@@ -1,0 +1,44 @@
+{
+  "sourceId": "a28585b1cf867f3e3a16",
+  "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-v3-2",
+  "proposalId": "char-lumingfei-model-reconcile-f79769c4862c",
+  "reviewedAt": "2026-09-11T16:34:39.745Z",
+  "diagnoses": [
+    {
+      "inputHash": "72ff8875ca7d9963107ba7f15f478a9c750eca49626676fd8dace6642ef24f67",
+      "issues": [
+        {
+          "code": "custom",
+          "message": "V2 development phases may modify only explicit legacy: keys; use DevelopmentEpisode plus registered dispositions for new semantics",
+          "path": [
+            "developmentPhases",
+            0,
+            "decisionBiasModifiers"
+          ]
+        }
+      ]
+    },
+    {
+      "inputHash": "f7a2a4f0b6016cf088d0dca75a2bc9c54a27a6acb5653efa8f32c03213ead31d",
+      "issues": [
+        {
+          "code": "custom",
+          "message": "V2 character models may retain free-form traits only under an explicit legacy: namespace; use registered dispositions for new semantics",
+          "path": [
+            "traits"
+          ]
+        },
+        {
+          "code": "custom",
+          "message": "V2 development phases may modify only explicit legacy: keys; use DevelopmentEpisode plus registered dispositions for new semantics",
+          "path": [
+            "developmentPhases",
+            0,
+            "traitModifiers"
+          ]
+        }
+      ]
+    }
+  ],
+  "reason": "Both original inputs are unsupported as submitted: a structured character ontology was combined with unnamespaced legacy numeric modifiers. The corrected attempt moved the same new persistence key between legacy fields instead of using the structured ontology. Neither input staged a proposal. Preserve all historical failures and other pending drafts. The reconciliation prompt now names the cross-field constraint; authorize one model correction under the original proposal ID through normal evidence/schema/finish validation. No replacement character fact is host-certified."
+}

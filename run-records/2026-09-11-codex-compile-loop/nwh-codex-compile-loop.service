@@ -1,0 +1,15 @@
+[Unit]
+Description=Dragon Raja compilation with callback to the owning Codex task
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=root
+WorkingDirectory=/root/workplace/novel-world-harness
+Environment=PATH=/root/.nvm/versions/node/v22.19.0/bin:/root/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash /root/workplace/novel-world-harness/run-records/2026-09-11-codex-compile-loop/run.sh
+Restart=no
+TimeoutStopSec=90
+StandardOutput=append:/root/workplace/novel-world-harness/run-records/2026-09-11-codex-compile-loop/worker.log
+StandardError=inherit

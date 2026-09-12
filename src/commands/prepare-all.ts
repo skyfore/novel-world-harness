@@ -21,6 +21,7 @@ import { WorkspaceStore } from "../storage/workspace-store.js";
 import { resolveNovelSource } from "../world/play-experience.js";
 import {
   buildWorldReconciliationPrompt,
+  hasWorldReconciliationTargets,
   MAX_RECONCILIATION_ITERATIONS,
   narrativeGraphRepairIsTargetable,
   narrativeGraphRepairIterations,
@@ -584,13 +585,7 @@ async function runWorldReconciliationPass(input: {
 }): Promise<void> {
   const audit = input.inspection.audit;
   if (!audit) throw new Error("Cannot reconcile a world without an audit report.");
-  await input.dependencies.compileInitialWorld({
-    root: input.root,
-    configPath: input.configPath,
-    allowMissingConfig: true,
-    ...(input.options.model ? { model: input.options.model } : {}),
-    saveSession: false,
-    prompt: `${await buildWorldReconciliationPrompt(
+  const prompt = await buildWorldReconciliationPrompt(
       input.root,
       input.sourceId,
       audit,
@@ -599,7 +594,18 @@ async function runWorldReconciliationPass(input: {
         mode: input.mode,
         ...(input.options.reparseRunId ? { proposalIdSuffixTail: input.options.reparseRunId } : {}),
       },
-    )}`,
+    );
+  if (!await hasWorldReconciliationTargets(input.root, input.sourceId, input.mode, input.iteration, input.options.reparseRunId)) {
+    input.report(`Skipping empty ${input.mode} semantic shard ${input.iteration}; publication still requires the full audit.`);
+    return;
+  }
+  await input.dependencies.compileInitialWorld({
+    root: input.root,
+    configPath: input.configPath,
+    allowMissingConfig: true,
+    ...(input.options.model ? { model: input.options.model } : {}),
+    saveSession: false,
+    prompt,
     compilerBatchId: `reconcile-${input.sourceId}-${input.mode}-${input.options.reparseRunId ?? "v3"}-${input.iteration}`,
     sourceId: input.sourceId,
     includeLocalTools: false,

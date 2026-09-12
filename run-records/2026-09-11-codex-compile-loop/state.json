@@ -1,0 +1,17 @@
+{
+  "attempt": 4,
+  "status": "running",
+  "sourceId": "a28585b1cf867f3e3a16",
+  "threadId": "01a0912b-5872-75b0-a118-813e3e32d2be",
+  "error": "Codex error: The usage limit has been reached",
+  "reviewedBatchFinished": true,
+  "failureFingerprint": "b02c230aa55e6dd943c7b5e6a7b3ce4b0295e5e9ff0dc4ba643ccdefae72769e",
+  "startedAt": "2026-09-12T12:21:42.872Z",
+  "selectorBatchFinished": true,
+  "semanticRunId": "codex-semantic-plan-fix-20260911",
+  "timer": {
+    "unit": "nwh-codex-reset-01a0912b-3.timer",
+    "scheduledAt": "2026-09-11T20:08:00.000Z",
+    "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-3.timer\nWill run service as unit: nwh-codex-reset-01a0912b-3.service\n"
+  }
+}

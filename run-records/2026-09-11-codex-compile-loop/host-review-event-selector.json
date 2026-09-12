@@ -1,0 +1,221 @@
+{
+  "reviewedAt": "2026-09-11T16:48:30.878Z",
+  "sourceId": "a28585b1cf867f3e3a16",
+  "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-v3-4",
+  "proposalId": "event-bronze-city-self-destruction-reconcile-33dd4567e83b",
+  "reason": "Both original submissions contain the same non-verbatim participants selector: an extra 着 absent from the immutable source. Replaying both selectors through the production source-anchor resolver reproduces the failure, and the corrected exact sentence resolves uniquely. The second attempt changed unrelated title/summary selectors and removed an outcome operation while retaining the failing quote. Neither submission staged an artifact. Preserve all failed inputs and four successful pending drafts. Authorize one evidence-grounded correction under the original proposal ID through the normal complete validation and finish gates; this host review certifies only the corrected text anchor, not event semantics or the removed outcome.",
+  "replay": [
+    {
+      "inputHash": "b473b14b8846f29cbfbd10c165983ac24c7f0ff0b9e3ececb53c6c38124f60df",
+      "diagnostic": "Error: Exact evidence quote was not found in segment a28585b1cf867f3e3a16-00021-0343cf842992.",
+      "corrected": {
+        "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+        "exact": "路明非和诺诺正在潜流中挣扎。"
+      },
+      "anchor": {
+        "version": 1,
+        "sourceId": "a28585b1cf867f3e3a16",
+        "startByte": 691859,
+        "endByte": 691901,
+        "startLine": 4432,
+        "endLine": 4432,
+        "exactHash": "a87ef3f95c338a466c4193c9ce836d705b569c878ff9b40d66ab8e67ef672ab9",
+        "prefixHash": "5d806eb640b0c39ef784a85144eba2ab8d5e2eb9d1c628980174919ee21769e1",
+        "suffixHash": "b75c883a47e0d4b49a49d7c570c4df466aa96d8e5df3c3995f2b5fef0df27176",
+        "contextBytes": 64,
+        "normalization": "source-bytes-v1"
+      }
+    },
+    {
+      "inputHash": "9ea3ac02f97e9f0680e62379efd71ab41d50672e20f59b52b535bade729a93de",
+      "diagnostic": "Error: Exact evidence quote was not found in segment a28585b1cf867f3e3a16-00021-0343cf842992.",
+      "corrected": {
+        "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+        "exact": "路明非和诺诺正在潜流中挣扎。"
+      },
+      "anchor": {
+        "version": 1,
+        "sourceId": "a28585b1cf867f3e3a16",
+        "startByte": 691859,
+        "endByte": 691901,
+        "startLine": 4432,
+        "endLine": 4432,
+        "exactHash": "a87ef3f95c338a466c4193c9ce836d705b569c878ff9b40d66ab8e67ef672ab9",
+        "prefixHash": "5d806eb640b0c39ef784a85144eba2ab8d5e2eb9d1c628980174919ee21769e1",
+        "suffixHash": "b75c883a47e0d4b49a49d7c570c4df466aa96d8e5df3c3995f2b5fef0df27176",
+        "contextBytes": 64,
+        "normalization": "source-bytes-v1"
+      }
+    }
+  ],
+  "failed": [
+    {
+      "tool": "propose_canonical_event",
+      "proposalId": "event-bronze-city-self-destruction-reconcile-33dd4567e83b",
+      "inputHash": "b473b14b8846f29cbfbd10c165983ac24c7f0ff0b9e3ececb53c6c38124f60df",
+      "input": {
+        "proposal_id": "event-bronze-city-self-destruction-reconcile-33dd4567e83b",
+        "payload": {
+          "id": "event-bronze-city-self-destruction-00021",
+          "title": "青铜城启动自毁并发生大规模坍塌",
+          "readerSummary": "青铜城开始运转，齿轮、碎片和顶壁相继坠落；诺诺判断它已启动自毁。",
+          "participants": [
+            "char-lumingfei",
+            "char-nuonuo",
+            "loc-bronze-city-00010"
+          ],
+          "participantPresence": [
+            {
+              "entityId": "char-lumingfei",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-nuonuo",
+              "mode": "physical"
+            }
+          ],
+          "storyTime": {
+            "kind": "ordinal",
+            "label": "青铜城开始运转并坍塌时",
+            "orderHint": 210
+          },
+          "preconditions": [],
+          "observedOutcome": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "loc-bronze-city-00010",
+                "field": "location.condition",
+                "value": "collapsing"
+              }
+            ]
+          },
+          "causalParents": [],
+          "confidence": 0.99
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00021-0343cf842992"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+            "exact": "“青铜城开始运转了！”诺诺说",
+            "target_path": "/title",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+            "exact": "路明非和诺诺正在潜流中挣扎着",
+            "target_path": "/participants",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+            "exact": "“这是启动了自毁？”诺诺深呼吸",
+            "target_path": "/readerSummary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+            "exact": "“青铜城开始运转了！”诺诺说",
+            "target_path": "/storyTime",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "This narrated onset supplies an ordered event position; orderHint is a deterministic reconciliation ordering, not a calendar date."
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+            "exact": "更多的青铜齿轮坠落，搅动了整个水体，然后是大块的青铜碎片，碎片上雕刻着树枝树叶的花纹，顶壁也开始崩塌了。",
+            "target_path": "/observedOutcome/operations/0",
+            "relation": "supports",
+            "strength": "explicit"
+          }
+        ]
+      },
+      "status": "failed",
+      "diagnostic": "Evidence selector 2 for target_path '/participants' failed: Exact evidence quote was not found in segment a28585b1cf867f3e3a16-00021-0343cf842992.",
+      "updatedAt": "2026-09-11T16:44:32.215Z"
+    },
+    {
+      "tool": "propose_canonical_event",
+      "proposalId": "event-bronze-city-self-destruction-reconcile-33dd4567e83b",
+      "inputHash": "9ea3ac02f97e9f0680e62379efd71ab41d50672e20f59b52b535bade729a93de",
+      "input": {
+        "proposal_id": "event-bronze-city-self-destruction-reconcile-33dd4567e83b",
+        "payload": {
+          "id": "event-bronze-city-self-destruction-00021",
+          "title": "青铜城启动自毁并发生大规模坍塌",
+          "readerSummary": "青铜城开始运转，齿轮、碎片和顶壁相继坠落；诺诺判断它已启动自毁。",
+          "participants": [
+            "char-lumingfei",
+            "char-nuonuo",
+            "loc-bronze-city-00010"
+          ],
+          "participantPresence": [
+            {
+              "entityId": "char-lumingfei",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-nuonuo",
+              "mode": "physical"
+            }
+          ],
+          "storyTime": {
+            "kind": "ordinal",
+            "label": "青铜城开始运转并坍塌时",
+            "orderHint": 210
+          },
+          "preconditions": [],
+          "observedOutcome": {
+            "version": 1,
+            "operations": []
+          },
+          "causalParents": [],
+          "confidence": 0.99
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00021-0343cf842992"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+            "exact": "青铜城开始运转了",
+            "target_path": "/title",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+            "exact": "路明非和诺诺正在潜流中挣扎着",
+            "target_path": "/participants",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+            "exact": "这是启动了自毁",
+            "target_path": "/readerSummary",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00021-0343cf842992",
+            "exact": "青铜城开始运转了",
+            "target_path": "/storyTime",
+            "relation": "supports",
+            "strength": "strong-inference",
+            "interpretation": "The narrated onset supplies an ordered event position; orderHint is not a calendar date."
+          }
+        ]
+      },
+      "status": "failed",
+      "diagnostic": "Evidence selector 2 for target_path '/participants' failed: Exact evidence quote was not found in segment a28585b1cf867f3e3a16-00021-0343cf842992.",
+      "updatedAt": "2026-09-11T16:45:32.845Z"
+    }
+  ]
+}

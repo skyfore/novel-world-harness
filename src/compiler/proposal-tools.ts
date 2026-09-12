@@ -3012,6 +3012,10 @@ export function createCompilerProposalToolset(
             activeSourceId,
             graphAdjudicationIteration,
             listed,
+            (() => {
+              const namespace = compilerBatchId!.slice(`reconcile-${activeSourceId}-graph-adjudication-`.length).replace(/-\d+$/, "");
+              return namespace === "v3" ? undefined : namespace;
+            })(),
           )
           : Promise.resolve([]),
         semanticReconciliationBatch

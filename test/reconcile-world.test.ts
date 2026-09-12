@@ -1,3 +1,4 @@
+import { DEFAULT_STATE_FIELDS } from "../src/world/state.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +29,7 @@ afterEach(async () => {
 });
 
 type ReconciliationContext = {
+  stateFieldCatalog: typeof DEFAULT_STATE_FIELDS;
   repairPlan: {
     targetCount: number;
     maxIterations: number;
@@ -215,6 +217,8 @@ describe("world semantic reconciliation", () => {
     const secondPrompt = await buildWorldReconciliationPrompt(root, fixture.source.id, audit, 2);
     const first = reconciliationContext(firstPrompt);
     const second = reconciliationContext(secondPrompt);
+    expect(first.stateFieldCatalog).toEqual(DEFAULT_STATE_FIELDS);
+    expect(first.stateFieldCatalog.find(field => field.key === "artifact.condition")).toMatchObject({ valueType: "number", minimum: 0, maximum: 1 });
     const firstIds = first.weakEventCandidates.map(({ id }) => id);
     const secondIds = second.weakEventCandidates.map(({ id }) => id);
 

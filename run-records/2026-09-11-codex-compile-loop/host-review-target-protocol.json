@@ -1,0 +1,119 @@
+{
+  "reviewedAt": "2026-09-12T16:39:12.374Z",
+  "repairId": "target-review-protocol-v1",
+  "predecessorAttempt": 5,
+  "predecessorStatus": "repeated-failure",
+  "predecessorNamespace": "codex-semantic-plan-fix-20260911",
+  "successorNamespace": "codex-target-review-v1-20260912",
+  "repairedFailureFingerprint": "28e1922793be91d04b6389a2ad19017070e0ac6f8f6b3aca7788ee8031840b9e",
+  "authorization": "User explicitly requested fixes from the analysis and rerun of the existing loop.",
+  "diagnosis": "Prior repeated-failure was manually inferred from unchanged aggregate metrics although no opening goal was proposed and target handling was not enforced. Completed shards did not prove target resolution. Preserve those receipts and carry fresh audit deficits into a versioned successor protocol; this does not retry a failed proposal under a new identity.",
+  "verifiedPredecessorReceipts": [
+    {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-1",
+      "fingerprint": "0959bf12cd234a6ea957a092d8de80a2cddc235b1814c6816e986b11193c6d75"
+    },
+    {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-2",
+      "fingerprint": "02cdb9966119316dec43488210db27ecd30dcf11d2107b063d648fbfeb9c36c3"
+    },
+    {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-3",
+      "fingerprint": "b0aab372dba90299bec5eea6482bd29efbd9f4ecb089e8ecd20e999985de1904"
+    },
+    {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-4",
+      "fingerprint": "ef29ca2a1427ba156dc2630adfa11376977d27943a183709eb41817adfec272c"
+    },
+    {
+      "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-5",
+      "fingerprint": "66524d0b7b7b6d6fcbd70e105b859bb41f79c13c5730b8acf295cac580c2b481"
+    }
+  ],
+  "sourceIntegrity": "verified",
+  "batchReviewComplete": true,
+  "unresolvedObligations": false,
+  "inventory": {
+    "pending": 0,
+    "accepted": 491,
+    "rejected": 114
+  },
+  "remainingTargets": {
+    "eventIds": [
+      "event-13-knockout-00017",
+      "event-academy-emergency-alarm-001",
+      "event-adams-gives-coins-00009",
+      "event-angier-call-00007",
+      "event-angier-invites-caesar-00019",
+      "event-angier-tea-lumingfei-00023",
+      "event-breakfast-meeting-00004",
+      "event-bronze-city-discovered-00010",
+      "event-caesar-bets-00009",
+      "event-caesar-mai-valhalla-battle-00016",
+      "event-cc1000-arrival-00006",
+      "event-cheatmap-001",
+      "event-chen-acceptance-00004",
+      "event-chu-invite-001",
+      "event-church-sanwu-destruction-00017",
+      "event-departure-00005",
+      "event-dragontext-00007",
+      "event-duel-00007",
+      "event-email-open-001",
+      "event-eva-activation-00008",
+      "event-eva-config-001",
+      "event-eva-orders-coins-00009",
+      "event-eva-warns-thirteen-00015",
+      "event-exam-answer-00010",
+      "event-helicopter-00005",
+      "event-laotang-coaching-00003",
+      "event-library-gathering-001",
+      "event-lu-shoot-caesar-00007",
+      "event-lu-shoot-chu-00007",
+      "event-lumingfei-emergency-signal-00021",
+      "event-lumingfei-interview-00003",
+      "event-lumingfei-vision-fall-00010",
+      "event-lumingze-visit-001",
+      "event-man-asks-coins-00009",
+      "event-medical-reveal-00007",
+      "event-near-crash-00014",
+      "event-nono-appears-001",
+      "event-nono-entry-00005",
+      "event-nono-gives-lumingfei-chocolate-00023",
+      "event-norton-capture-00017",
+      "event-norton-fuses-sampson-00021",
+      "event-norton-nmr-scan-00017",
+      "event-nuonuo-game-00003",
+      "event-rescue-briefing-001",
+      "event-sacrifice-vision-00002",
+      "event-thirteen-opens-aquatic-gate-00016",
+      "event-thirteen-opens-control-door-00015",
+      "event-underwater-earthquake-00010",
+      "event-zero-dance-00014",
+      "event-zero-launches-torpedo-00022",
+      "event-zhao-confession-00004",
+      "event-bronze-city-gate-opened-00010",
+      "event-accept-00005",
+      "event-adams-reforms-00009",
+      "event-makeover-00005",
+      "event-nono-shot-00007"
+    ],
+    "characterIds": [
+      "char-lumingfei",
+      "char-caesar",
+      "char-chuzi-hang",
+      "char-jiudeyaji",
+      "char-norton-00010"
+    ],
+    "ruleIds": [],
+    "initialWorld": false,
+    "requiresFullReparse": false
+  },
+  "fixes": [
+    "Exact per-target finish accounting with host proposal association and source-scoped handles",
+    "Durable post-convergence unresolved ledger",
+    "Durable cross-namespace deferral publication gate with audited host review",
+    "Separate ontology migration and opening driver requirements with read-only opening context",
+    "Repeat stopping tied to an applied repair and the failed proposal identity"
+  ],
+  "validation": "101 relevant tests passed across the final suite and focused rerun; repository type checks passed; worker/notify type checks passed. No publication threshold, source bytes, accepted world artifact, failed proposal history or prior checkpoint was modified."
+}

@@ -1,3 +1,5 @@
+import { ProposalStore } from "../world/canonical-model.js";
+import { reconciliationReviewIssues } from "./reconciliation-review.js";
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { CompilerProposalObligations } from "./proposal-obligations.js";
 import { initialWorldInputIssues, INITIAL_WORLD_INPUT_GUIDANCE } from "./initial-world-preflight.js";
@@ -115,6 +117,7 @@ import {
   COMPILER_TOOL_CALL_SAFETY_FUSE,
 } from "./limits.js";
 import {
+  reconciliationReviewTargets,
   graphAdjudicationIterationFromBatchId,
   semanticReconciliationBatchFromBatchId,
   validateGraphAdjudicationProposalScope,
@@ -2762,6 +2765,12 @@ export function createCompilerProposalToolset(
     },
   });
   const finishParameters = Type.Object({
+    target_reviews: Type.Optional(Type.Array(Type.Object({
+      target: Type.String({ minLength: 1 }),
+      disposition: Type.Union([Type.Literal("proposed"), Type.Literal("unsupported"), Type.Literal("capability-gap")]),
+      evidence_segment_ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+      summary: Type.String({ minLength: 1, maxLength: 2000 }),
+    }, { additionalProperties: false }), { maxItems: 128 })),
     outcome: Type.Union([Type.Literal("complete"), Type.Literal("no-artifacts")]),
     reviewed_segments: Type.Array(Type.Object({
       segment_id: Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }),
@@ -2855,6 +2864,23 @@ export function createCompilerProposalToolset(
       }
       if (input.outcome === "complete" && expected.length === 0) {
         return failFinish("complete requires at least one active successful proposal submission.");
+      }
+      const targetScope = activeSourceId && compilerBatchId
+        ? await reconciliationReviewTargets(workspaceRoot, activeSourceId, compilerBatchId) : undefined;
+      if (targetScope !== undefined) {
+        const proposals = new Map<string, { kind: string; payload: Record<string, unknown> }>();
+        for (const id of listed) {
+          const envelope = await new ProposalStore(workspaceRoot).readEnvelope("pending", id);
+          proposals.set(id, { kind: String(envelope.kind), payload: envelope.payload as Record<string, unknown> });
+        }
+        const issues = reconciliationReviewIssues(targetScope, input.target_reviews ?? [], proposals);
+        for (const review of input.target_reviews ?? []) {
+          try { resolveEvidenceSegmentIds(review.evidence_segment_ids); }
+          catch (error) { issues.push(`${review.target}: ${error instanceof Error ? error.message : String(error)}`); }
+        }
+        if (issues.length) return failFinish(`Reconciliation target review: ${issues.join(" ")} Read each listed target and its same-source evidence. Copy read_source_evidence.evidence_segment_id; use find_source_evidence and its exact returned ref if discovery is needed. Preserve all active drafts. Correct the complete report once; if unchanged, stop for host review. Unsupported reports remain unresolved until host review; never invent a proposal to fill the report.`);
+      } else if (input.target_reviews?.length) {
+        return failFinish("target_reviews is outside this batch's versioned target-review scope. Preserve drafts and stop for host review; do not change the plan or batch ID.");
       }
       const reviewedIds = input.reviewed_segments.map((review) => review.segment_id).sort();
       const uniqueReviewedIds = [...new Set(reviewedIds)];

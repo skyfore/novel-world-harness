@@ -1,3 +1,5 @@
+import { CHARACTER_ONTOLOGY_VERSION, CHARACTER_DIMENSION_IDS, CHARACTER_CONTEXT_IDS } from "../world/character-ontology.js";
+import { DEFAULT_STATE_FIELDS } from "../world/state.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -45,6 +47,7 @@ const reconciliationPlanSchema = z.object({
   actorIds: z.array(z.string().min(1)).max(MAX_REPARSE_CHARACTER_REPAIR_TARGETS * MAX_REPARSE_RECONCILIATION_ITERATIONS),
   includeInitialWorld: z.boolean(),
   requireAutonomousDriver: z.boolean(),
+  targetReviewRequired: z.boolean().optional(),
   createdAt: z.string().datetime(),
 }).strict();
 type ReconciliationPlan = z.infer<typeof reconciliationPlanSchema>;
@@ -98,6 +101,31 @@ export async function hasWorldReconciliationTargets(
   return plan.eventIds.length > (iteration - 1) * eventSize
     || (actorSize > 0 && plan.actorIds.length > (iteration - 1) * actorSize)
     || (iteration === 1 && plan.includeInitialWorld);
+}
+
+/** Old immutable receipts remain readable; only new plans require target reports. */
+export async function reconciliationReviewTargets(root: string, sourceId: string, batchId: string): Promise<string[] | undefined> {
+  const mode = batchId.startsWith(`reconcile-${sourceId}-bounded-`) ? "bounded"
+    : batchId.startsWith(`reconcile-${sourceId}-reparse-finalization-`) ? "reparse-finalization" : undefined;
+  if (!mode) return undefined;
+  const suffix = batchId.slice(`reconcile-${sourceId}-${mode}-`.length);
+  const match = /^(.*)-(\d+)$/.exec(suffix);
+  if (!match) throw new Error("Invalid reconciliation batch scope; stop for host review.");
+  const iteration = Number(match[2]);
+  if (!Number.isSafeInteger(iteration) || iteration < 1) throw new Error("Invalid reconciliation iteration; stop for host review.");
+  const namespace = match[1] === "v3" ? undefined : match[1];
+  // Legacy integrations may have issued reconciliation batches without plans.
+  try { await fs.stat(reconciliationPlanPath(root, sourceId, mode, namespace)); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+  const plan = await readReconciliationPlan(root, sourceId, mode, namespace);
+  if (!plan.targetReviewRequired) return undefined;
+  const eventSize = mode === "bounded" ? MAX_EVENT_REPAIR_TARGETS : MAX_REPARSE_EVENT_REPAIR_TARGETS;
+  const actorSize = mode === "bounded" ? MAX_CHARACTER_REPAIR_TARGETS : MAX_REPARSE_CHARACTER_REPAIR_TARGETS;
+  return [
+    ...plan.eventIds.slice((iteration - 1) * eventSize, iteration * eventSize).map(id => `event:${id}`),
+    ...plan.actorIds.slice((iteration - 1) * actorSize, iteration * actorSize).map(id => `character:${id}`),
+    ...(iteration === 1 && plan.includeInitialWorld ? ["initial-world:singleton"] : []),
+  ];
 }
 
 function boundedText(value: string, max = 500): string {
@@ -614,6 +642,7 @@ export async function buildWorldReconciliationPrompt(
         actorIds: allWeakActors.map(([actorId]) => actorId),
         includeInitialWorld: initialWorldNeedsRepair,
         requireAutonomousDriver,
+        targetReviewRequired: mode !== "graph-adjudication",
         createdAt: new Date().toISOString(),
       })
     : await readReconciliationPlan(workspaceRoot, sourceId, mode, namespace);
@@ -653,6 +682,8 @@ export async function buildWorldReconciliationPrompt(
         : { id: actorId },
       eventCount,
       needsExecutableDriver: plan.requireAutonomousDriver && actorId === plan.actorIds[0],
+      needsOntologyMigration: sourceModels.some(model => model.actorId === actorId && model.ontologyVersion !== CHARACTER_ONTOLOGY_VERSION),
+      requiredOntologyVersion: CHARACTER_ONTOLOGY_VERSION,
       currentModelRef: sourceModels.some((model) => model.actorId === actorId)
         ? `canonical:character-model:${actorId}`
         : undefined,
@@ -668,7 +699,7 @@ export async function buildWorldReconciliationPrompt(
 
   const includeInitialWorld = iteration === 1 && plan.includeInitialWorld;
   const repairTargetCount = weakEvents.length + weakActors.length + (includeInitialWorld ? 1 : 0);
-  const estimatedToolCalls = repairTargetCount * ESTIMATED_CALLS_PER_TARGET + 1;
+  const estimatedToolCalls = (repairTargetCount + weakActors.filter(actor => actor.needsExecutableDriver && actor.needsOntologyMigration).length) * ESTIMATED_CALLS_PER_TARGET + 1;
   if (estimatedToolCalls > COMPILER_TOOL_CALL_SAFETY_FUSE - RECONCILIATION_RESERVED_CALLS) {
     throw new Error(
       `Reconciliation plan estimates ${estimatedToolCalls} tool calls and leaves fewer than ${RECONCILIATION_RESERVED_CALLS} calls of safety reserve.`,
@@ -676,12 +707,21 @@ export async function buildWorldReconciliationPrompt(
   }
 
   const context = {
+    stateFieldCatalog: structuredClone(DEFAULT_STATE_FIELDS),
+    characterOntology: { version: CHARACTER_ONTOLOGY_VERSION, dimensions: CHARACTER_DIMENSION_IDS, contexts: CHARACTER_CONTEXT_IDS },
+    ...(plan.requireAutonomousDriver && weakActors.some(actor => actor.needsExecutableDriver) && sourceInitialWorld ? {
+      openingDriverContext: { ref: "canonical:initial-world:singleton", readOnly: true, checkpoint: sourceInitialWorld.checkpoint,
+        storyTime: sourceInitialWorld.checkpoint?.storyTime, delta: sourceInitialWorld.delta, knowledge: sourceInitialWorld.knowledge,
+        participantPresence: sourceInitialWorld.participantPresence, evidence: sourceInitialWorld.evidence },
+    } : {}),
     repairPlan: {
       iteration,
       maxIterations,
       mode,
       requireAutonomousDriver: plan.requireAutonomousDriver,
       targetCount: repairTargetCount,
+      targetReviewRequired: plan.targetReviewRequired ?? false,
+      reviewTargets: [...weakEvents.map(({ event }) => `event:${event.id}`), ...weakActors.map(({ actor }) => `character:${actor.id}`), ...(includeInitialWorld ? ["initial-world:singleton"] : [])],
       eventTargetOffset: weakEventOffset,
       characterTargetOffset: weakActorOffset,
       proposalIdSuffix,
@@ -789,16 +829,18 @@ Rules:
 - Every listed repair candidate already has an exact ref. Call read_compiler_artifact directly with that ref and read all pages before replacing it; do not spend a find_compiler_artifacts call rediscovering a listed ref. Use find_compiler_artifacts only for an omitted or genuinely ambiguous dependency, and use kind=canonical-event for events (event is only a compatibility alias).
 - Use find_source_evidence and read_source_evidence to inspect exact text from the active novel before changing meaning. These are the only raw-source tools in this pass; never use workspace files or another source. Reuse each payload's stable logical ID. Every proposal_id in this pass must end with -${proposalIdSuffix}; correct a failed submission with the same exact proposal_id. Only a separately justified replacement of an explicitly withdrawn successful draft may use a new envelope prefix before that fixed suffix; never change IDs to escape failed obligations.
 - If an exact evidence selector fails, repair that named selector, not unrelated fields. Use find_source_evidence within this source, copy the exact returned ref into read_source_evidence, and copy a verbatim substring from its returned chunk. Copy the returned evidence_segment_id into the selector segment_id and the proposal evidence_segment_ids. Never add or omit a character from exact, reuse the failed quote unchanged, or remove supported outcome operations merely to evade an evidence error. Keep the same failed proposal_id and permit one concretely corrected retry; after a second failure or host-review requirement, stop without restarting or inventing another ID.
-- Stay inside repairPlan. Do not inspect candidates outside weakEventCandidates, weakCharacterCandidates, or initialWorld. Execution capacity is a host-owned runaway safety fuse, not a semantic budget: never omit or withdraw a valid repair merely to save calls.
+- Stay inside repairPlan. Do not inspect mutation candidates outside weakEventCandidates, weakCharacterCandidates, or initialWorld. openingDriverContext is an authorized read-only dependency: read its exact ref and cited source to establish opening truth and actor knowledge, even when the opening is not a mutation target. Execution capacity is a host-owned runaway safety fuse, not a semantic budget: never omit or withdraw a valid repair merely to save calls.
 ${graphAdjudicationPolicy}
 - A canonical event is one causally atomic occurrence and may carry all simultaneous typed effects. Repair a weak event only when its cited text explicitly supports the missing storyTime, timeAdvance, state effect, knowledge effect, narrativeContext, precondition, typed causal relation, readerSummary, participantPresence, or later-character entry checkpoint. A readerSummary may recap only facts established through that event. An entry checkpoint describes the unresolved pre-event cut, supplies only already-true state/knowledge and direct actor perception, and must not copy the event outcome. Do not invent an effect to satisfy a percentage.
 - Match field meaning exactly. Never encode illness as alive=true, closure as location.open=true, conscription as character.location, employment as artifact.owner, or work points as character.title.
-- For each recurring character target, propose exactly one evidence-backed character-model with a real developmentPhase or one phase-bounded character-goal. Preserve the baseline. Activate later phases/goals only through cited world predicates, personally experienced events, acquired knowledge, or story time. Use afterExperiencedCanonicalEventIds when an experience is personal; use afterCanonicalEventIds only for an objective social/world transition. A future phase or goal must not affect the opening self.
+- stateFieldCatalog is the host-owned authoritative field/type/range contract. Check each effect and predicate against its exact key, appliesTo, valueType, cardinality and bounds before submission. artifact.condition and location.condition are numeric values in [0,1], not lifecycle labels such as launched, armed, or collapsing. A type failure requires correcting the named value/field, not swapping evidence selectors. Never invent a numeric score or another field to translate an unsupported lifecycle label, and never erase established effects to bypass validation. If a source-grounded change cannot be represented by the existing contract, report that precise capability gap to the host. One corrected retry under the same proposal_id, then stop for host review.
+- Treat each character target as separate requirements: needsOntologyMigration requires a character-model replacement with ontologyVersion=character-v1 and source-backed registered semantics; a developmentPhase or goal alone does not migrate the model. needsExecutableDriver requires a separate character-goal with an executable opening action. Both may be required for the same actor. For a growth-only target, propose an evidence-backed character-model with a real developmentPhase or a phase-bounded character-goal. Preserve the baseline. Activate later phases/goals only through cited world predicates, personally experienced events, acquired knowledge, or story time. Use afterExperiencedCanonicalEventIds when an experience is personal; use afterCanonicalEventIds only for an objective social/world transition. A future phase or goal must not affect the opening self.
 - Character models with structured dispositions use the character ontology contract: keep new free-form traits and decisionBiases empty. Existing legacy values may be preserved only with their explicit legacy: keys; do not move a rejected key between traits, decisionBiases, traitModifiers, and decisionBiasModifiers. Encode new psychological change with registered dispositions and developmentEpisodes, not unnamespaced developmentPhase modifiers. A phase can retain evidence-backed activation without inventing a numerical modifier. Repair the original proposal_id after inspecting its exact failed fields; one corrected retry only, then stop for host review. Never add legacy: merely to bypass validation of newly invented semantics.
-- When a weakCharacterCandidate has needsExecutableDriver=true, propose a character-goal rather than only a model. It must have a development boundary and at least one concrete candidateAction/actionPattern whose proposedDelta or proposedKnowledge is executable under source-grounded activation/precondition gates at the initial-world checkpoint; a later-phase goal does not satisfy this repair. Use only state and character knowledge already true at that checkpoint, and never leak future canon backward to activate it. Do not invent an action merely to pass the audit; leave the target unchanged if the source cannot support one.
+- When a weakCharacterCandidate has needsExecutableDriver=true, propose a character-goal; also migrate its model if needsOntologyMigration=true. It must have a development boundary and at least one concrete candidateAction/actionPattern whose proposedDelta or proposedKnowledge is executable under source-grounded activation/precondition gates at the initial-world checkpoint; a later-phase goal does not satisfy this repair. Use only state and character knowledge already true at that checkpoint, and never leak future canon backward to activate it. Do not invent an action merely to pass the audit; leave the target unchanged if the source cannot support one.
 - If the initial world appears below and lacks a checkpoint, a comparable storyTime, readerSetup, structured readerContext, one direct actorObservation per physical opening role, or explicit physical participantPresence for its actionable opening role, replace it only when exact source evidence supports one coherent chronological or textual-frame checkpoint. Treat the player as an unread reader: readerContext must establish focal identity, time/place, every needed first-use character gloss, causal premises, the actual holder/direction of relevant stance or pressure, completed pre-checkpoint beats, and the unresolved immediate situation. Give readerSetup and every fact/gloss/situation/observation field an exact explicit or strong-inference evidence selector; weak inference is insufficient. Later discourse may supply only facts already true by the checkpoint; mark them later-discourse-preexisting and never import a later outcome or acquired knowledge. readerSetup/readerContext are presentation-only, never actor knowledge. Never merge narrator-frame and flashback selves.
 - A seasonal or day-part phrase such as "spring afternoon" is not an exact calendar value. When the source establishes it as the opening ordering point but supplies no parseable year/date, encode storyTime as ordinal with a deterministic numeric orderHint; never label natural-language relative time as exact merely to satisfy the audit.
-- Submit at most ${repairTargetCount} high-value replacements, one per listed target. It is valid to leave an unsupported target unchanged; deterministic quality gates will report what remains.
+- Repair every listed target or report its exact source-grounded blocker. A character may require both a model and a goal; do not substitute one for the other. Never merely add an ontology version label to claim a migration.
+- If repairPlan.targetReviewRequired=true, finish must include target_reviews accounting exactly once for every repairPlan.reviewTargets entry. Each record has target, disposition (proposed, unsupported, or capability-gap), evidence_segment_ids (copy evidence_segment_id from read_source_evidence), and summary (all requested weaknesses addressed or each remaining reason, with exact source findings). Read the relevant source for every target. unsupported/capability-gap is an untrusted report awaiting host review, never permission to drop a target or publish. The host automatically links all active proposals to their target; do not enumerate proposal IDs. A proposed record is not proof of repair: the host re-audits committed artifacts. A generic finish summary cannot replace target_reviews.
 - Do not use propose_state_delta. Finish with reviewed_segments=[] and outcome=complete if proposals were recorded, otherwise outcome=no-artifacts.
 
 <reconciliation-context>

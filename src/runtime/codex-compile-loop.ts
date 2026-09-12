@@ -9,11 +9,18 @@ export function isCompilerUsageLimit(message: string): boolean {
 }
 export function compilerFailureFingerprint(message: string): string {
   const stable = message
-    .replace(/proposal_id=[^\s:]+/g, "proposal_id=<id>")
     .replace(/\b(?:run|batch)-[\w-]+/g, "<run-or-batch>")
     .replace(/\b[a-f0-9]{24,64}\b/g, "<hash>")
     .replace(/\s+/g, " ").trim();
   return createHash("sha256").update(stable).digest("hex");
+}
+
+/** A flat audit metric or a different target is not proof that a repair failed. */
+export function compilerFailureRepeatedAfterRepair(
+  currentFingerprint: string,
+  repair: { failureFingerprint: string; repairId: string } | undefined,
+): boolean {
+  return Boolean(repair?.repairId.trim() && repair.failureFingerprint === currentFingerprint);
 }
 /** User-supplied reset anchor, advanced in five-hour windows; never retry before reset. */
 export function nextCompilerReset(now: Date, anchor: Date): Date {

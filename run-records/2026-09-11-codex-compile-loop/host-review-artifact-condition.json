@@ -1,0 +1,211 @@
+{
+  "sourceId": "a28585b1cf867f3e3a16",
+  "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-4",
+  "proposalId": "event-zero-launches-torpedo-00022-reconcile-5c52d91d0334-codex-semantic-plan-fix-20260911",
+  "reviewedAt": "2026-09-12T12:42:50.095Z",
+  "reason": "Both submissions assign the lifecycle string launched to numeric artifact.condition [0,1]; the second only changes selectors and retains the invalid effect. The production state registry reproduces the type rejection, and neither submission staged a proposal. The reconciliation prompt now includes the complete authoritative state field catalog and instructions to repair the named type error. Preserve all failures and the four other successful pending proposals. Authorize one corrected proposal under the same ID through normal schema, evidence, monotonicity and finish gates. This review provides no numeric replacement, certifies no new semantics, and does not authorize inventing fields or removing established effects to evade validation. If the source-supported change is not representable, report the exact capability gap to the host.",
+  "diagnoses": [
+    {
+      "inputHash": "80b123e2b18fabb47a9ddb648b17f64a3ca3c02691512ae29046a765f2c37b96",
+      "diagnostic": "Error: Expected finite number for artifact.condition",
+      "field": {
+        "key": "artifact.condition",
+        "appliesTo": [
+          "artifact"
+        ],
+        "valueType": "number",
+        "cardinality": "one",
+        "visibility": "owner",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "rejectedValue": "launched"
+    },
+    {
+      "inputHash": "0b26cdaded517831a6e97f454ee5885b8d253a5bc5176c2d239b6c18897735f4",
+      "diagnostic": "Error: Expected finite number for artifact.condition",
+      "field": {
+        "key": "artifact.condition",
+        "appliesTo": [
+          "artifact"
+        ],
+        "valueType": "number",
+        "cardinality": "one",
+        "visibility": "owner",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "rejectedValue": "launched"
+    }
+  ],
+  "failed": [
+    {
+      "tool": "propose_canonical_event",
+      "proposalId": "event-zero-launches-torpedo-00022-reconcile-5c52d91d0334-codex-semantic-plan-fix-20260911",
+      "inputHash": "80b123e2b18fabb47a9ddb648b17f64a3ca3c02691512ae29046a765f2c37b96",
+      "input": {
+        "proposal_id": "event-zero-launches-torpedo-00022-reconcile-5c52d91d0334-codex-semantic-plan-fix-20260911",
+        "payload": {
+          "id": "event-zero-launches-torpedo-00022",
+          "title": "零发射风暴鱼雷",
+          "readerSummary": "摩尼亚赫号濒临沉没时，恺撒命令零发射风暴鱼雷；零拉下发射闸，鱼雷冲向诺顿。",
+          "participants": [
+            "char-zero-00014",
+            "char-caesar",
+            "artifact-storm-torpedo-00023",
+            "char-norton-00010"
+          ],
+          "participantPresence": [
+            {
+              "entityId": "char-zero-00014",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-caesar",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-norton-00010",
+              "mode": "remote"
+            }
+          ],
+          "storyTime": {
+            "kind": "ordinal",
+            "label": "摩尼亚赫号濒临沉没、对冲诺顿时",
+            "orderHint": 229
+          },
+          "preconditions": [],
+          "observedOutcome": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "artifact-storm-torpedo-00023",
+                "field": "artifact.condition",
+                "value": "launched"
+              }
+            ]
+          },
+          "sceneOccurrenceIds": [
+            "scene-torpedo-battle-00022"
+          ],
+          "causalParents": [],
+          "confidence": 0.99
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00022-c0d6642068d7"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00022-c0d6642068d7",
+            "exact": "“零，你负责鱼雷的发射。”",
+            "target_path": "/title",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00022-c0d6642068d7",
+            "exact": "摩尼亚赫号的吃水已经很深了，三个水密舱泄漏之后，水位线距离甲板只有不到半米。",
+            "target_path": "/storyTime",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00022-c0d6642068d7",
+            "exact": "零猛地拉下发射闸",
+            "target_path": "/observedOutcome/operations/0/value",
+            "relation": "supports",
+            "strength": "explicit"
+          }
+        ]
+      },
+      "status": "failed",
+      "diagnostic": "Evidence selector 1 for target_path '/title' failed: Exact evidence quote was not found in segment a28585b1cf867f3e3a16-00022-c0d6642068d7.",
+      "updatedAt": "2026-09-12T12:39:01.983Z"
+    },
+    {
+      "tool": "propose_canonical_event",
+      "proposalId": "event-zero-launches-torpedo-00022-reconcile-5c52d91d0334-codex-semantic-plan-fix-20260911",
+      "inputHash": "0b26cdaded517831a6e97f454ee5885b8d253a5bc5176c2d239b6c18897735f4",
+      "input": {
+        "proposal_id": "event-zero-launches-torpedo-00022-reconcile-5c52d91d0334-codex-semantic-plan-fix-20260911",
+        "payload": {
+          "id": "event-zero-launches-torpedo-00022",
+          "title": "零发射风暴鱼雷",
+          "readerSummary": "摩尼亚赫号濒临沉没时，恺撒命令零发射风暴鱼雷；零拉下发射闸，鱼雷冲向诺顿。",
+          "participants": [
+            "char-zero-00014",
+            "char-caesar",
+            "artifact-storm-torpedo-00023",
+            "char-norton-00010"
+          ],
+          "participantPresence": [
+            {
+              "entityId": "char-zero-00014",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-caesar",
+              "mode": "physical"
+            },
+            {
+              "entityId": "char-norton-00010",
+              "mode": "remote"
+            }
+          ],
+          "storyTime": {
+            "kind": "ordinal",
+            "label": "摩尼亚赫号濒临沉没、对冲诺顿时",
+            "orderHint": 229
+          },
+          "preconditions": [],
+          "observedOutcome": {
+            "version": 1,
+            "operations": [
+              {
+                "op": "set",
+                "entityId": "artifact-storm-torpedo-00023",
+                "field": "artifact.condition",
+                "value": "launched"
+              }
+            ]
+          },
+          "sceneOccurrenceIds": [
+            "scene-torpedo-battle-00022"
+          ],
+          "causalParents": [],
+          "confidence": 0.99
+        },
+        "evidence_segment_ids": [
+          "a28585b1cf867f3e3a16-00022-c0d6642068d7"
+        ],
+        "evidence_selectors": [
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00022-c0d6642068d7",
+            "exact": "零猛地拉下发射闸",
+            "target_path": "/title",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00022-c0d6642068d7",
+            "exact": "摩尼亚赫号的吃水已经很深了，三个水密舱泄漏之后，水位线距离甲板只有不到半米。",
+            "target_path": "/storyTime",
+            "relation": "supports",
+            "strength": "explicit"
+          },
+          {
+            "segment_id": "a28585b1cf867f3e3a16-00022-c0d6642068d7",
+            "exact": "火箭引擎在水下喷射出长达百米的烈光，锥形的风暴鱼雷如同一颗子弹那样直射正前方。",
+            "target_path": "/observedOutcome/operations/0/value",
+            "relation": "supports",
+            "strength": "explicit"
+          }
+        ]
+      },
+      "status": "failed",
+      "diagnostic": "Compiler state field 'artifact.condition' requires a finite number value.",
+      "updatedAt": "2026-09-12T12:39:59.473Z"
+    }
+  ]
+}

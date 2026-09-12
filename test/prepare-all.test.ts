@@ -99,7 +99,7 @@ describe("prepare-all command", () => {
     expect(compileInitialWorld).toHaveBeenCalledTimes(1);
   });
 
-  it("repairs a standalone temporal regression through the real preparation audit", async () => {
+  it("requires a durable finish even when an injected worker repairs the temporal regression", async () => {
     const { root, fixture, canon, evidence } = await createRepairRoutingFixture(2);
     const train = (await canon.listEvents()).find((event) => event.id === "event-1")!;
     await canon.putEvent({ ...train, storyTime: { kind: "ordinal", label: "train arrives", orderHint: 5 } });
@@ -126,10 +126,9 @@ describe("prepare-all command", () => {
       cacheRoot: path.join(root, "prepared-cache"),
       createBranch: false,
       onProgress: vi.fn(),
-    }, { compileInitialWorld })).resolves.toMatchObject({
-      stage: "create-branch",
-      audit: { consistency: { causalGraphValid: true, temporalRegressions: [] } },
-    });
+    }, { compileInitialWorld })).rejects.toThrow("Target review requires a verified completed finish receipt");
+    expect((await auditCompiler(root, { sourceId: fixture.source.id })).consistency)
+      .toMatchObject({ causalGraphValid: true, temporalRegressions: [] });
     expect(compileInitialWorld).toHaveBeenCalledTimes(1);
   });
 
@@ -652,7 +651,7 @@ describe("prepare-all command", () => {
           generatedBy: { worker: "test", compilerBatchId: options.compilerBatchId },
         });
       },
-    })).rejects.toThrow("Automatic preparation stopped at 'repair'");
+    })).rejects.toThrow("Target review requires a verified completed finish receipt");
 
     expect(openingCalls).toBe(1);
     expect(repairCalls).toBeGreaterThan(0);

@@ -1,3 +1,8 @@
+import { assertReconciliationDeferralsReviewed } from "../compiler/reconciliation-review-ledger.js";
+import fs from "node:fs/promises";
+import { contentHash } from "../world/canonical.js";
+import { worldStorageRoot } from "../world/paths.js";
+import { reconciliationAuditResults } from "../compiler/reconciliation-review.js";
 import { INITIAL_WORLD_INPUT_GUIDANCE } from "../compiler/initial-world-preflight.js";
 import path from "node:path";
 import { CompilerHostReviewRequiredError, CompilerProposalObligations } from "../compiler/proposal-obligations.js";
@@ -22,6 +27,7 @@ import { resolveNovelSource } from "../world/play-experience.js";
 import {
   buildWorldReconciliationPrompt,
   hasWorldReconciliationTargets,
+  reconciliationReviewTargets,
   MAX_RECONCILIATION_ITERATIONS,
   narrativeGraphRepairIsTargetable,
   narrativeGraphRepairIterations,
@@ -505,6 +511,8 @@ export async function prepareAllCommand(
     || inspection.audit.consistency.semanticReady === false
   )) throw preparationFailure(inspection);
 
+  await assertReconciliationDeferralsReviewed(root, sourceId);
+
   if (["create-branch", "ready"].includes(inspection.stage) && !cacheVerified) {
     report("Reviewing the independent major-character roster before candidate certification.");
     try { await reviewNovelRoles({ root, configPath, sourceId, allowMissingConfig: true,
@@ -582,7 +590,7 @@ async function runWorldReconciliationPass(input: {
   options: PrepareAllCommandOptions;
   dependencies: PrepareAllDependencies;
   report: (message: string) => void;
-}): Promise<void> {
+}): Promise<string[]> {
   const audit = input.inspection.audit;
   if (!audit) throw new Error("Cannot reconcile a world without an audit report.");
   const prompt = await buildWorldReconciliationPrompt(
@@ -597,7 +605,7 @@ async function runWorldReconciliationPass(input: {
     );
   if (!await hasWorldReconciliationTargets(input.root, input.sourceId, input.mode, input.iteration, input.options.reparseRunId)) {
     input.report(`Skipping empty ${input.mode} semantic shard ${input.iteration}; publication still requires the full audit.`);
-    return;
+    return [];
   }
   await input.dependencies.compileInitialWorld({
     root: input.root,
@@ -627,6 +635,24 @@ async function runWorldReconciliationPass(input: {
     onModelEvent: input.options.onModelEvent,
   });
   await convergeForPreparation(input.root, input.sourceId, input.dependencies.converge, input.report);
+  const batchId = `reconcile-${input.sourceId}-${input.mode}-${input.options.reparseRunId ?? "v3"}-${input.iteration}`;
+  const targets = await reconciliationReviewTargets(input.root, input.sourceId, batchId);
+  if (targets !== undefined) {
+    const receipt = await new CompilerFinishReceipts(input.root, input.sourceId, batchId).read();
+    if (!receipt || receipt.state !== "completed") throw new Error("Target review requires a verified completed finish receipt; stop for host review.");
+    const after = await inspectPreparation(input.root, { sourceId: input.sourceId, branchId: input.branchId });
+    if (!after.audit) throw new Error("Target review requires the post-convergence audit; stop for host review.");
+    const results = reconciliationAuditResults(targets, receipt.identity.input.target_reviews ?? [], after.audit);
+    const file = path.join(worldStorageRoot(input.root), "compiler", "reconciliation-reviews", input.sourceId, `${contentHash(batchId)}.json`);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(`${file}.tmp`, JSON.stringify({ version: 1, sourceId: input.sourceId, batchId,
+      finishFingerprint: receipt.fingerprint, auditedAt: new Date().toISOString(), results,
+      interpretation: "A completed receipt records proposal work only. Model deferrals require host review; no-current-audit-finding is not semantic certification. Publication still requires the full audit." }, null, 2));
+    await fs.rename(`${file}.tmp`, file);
+    input.report(`Target audit: ${results.filter(result => result.status === "unresolved").length}/${targets.length} still unresolved; ${results.filter(result => result.hostReviewRequired).length} model deferrals require host review. Ledger: ${file}`);
+    return results.filter(result => result.hostReviewRequired).map(result => `${batchId}:${result.target}`);
+  }
+  return [];
 }
 
 async function convergeForPreparation(

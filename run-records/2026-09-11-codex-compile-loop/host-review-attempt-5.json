@@ -1,0 +1,21 @@
+{
+  "reviewedAt": "2026-09-12T12:52:13.620Z",
+  "attempt": 5,
+  "decision": "stop-repeated-semantic-blockers",
+  "basis": "After the attempt-2 plan/receipt fix and execution of all five nonempty bounded shards, opening autonomous driver coverage remains 0 and controlled character model coverage remains 0.2. Aggregate fingerprint changed because other metrics improved; this is a host decision based on recurring specific blockers, not an exact aggregate fingerprint match.",
+  "completedBatches": [
+    "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-1",
+    "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-2",
+    "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-3",
+    "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-4",
+    "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-5"
+  ],
+  "audit": "audit-attempt-5.json",
+  "service": {
+    "activeState": "failed",
+    "mainPID": 0
+  },
+  "pendingResetTimers": 0,
+  "unresolvedObligations": false,
+  "nextAction": "No automatic restart. Preserve the repair namespace, receipts, proposals and publication thresholds. Further work requires a concrete evidence-backed repair for the remaining semantic blockers."
+}

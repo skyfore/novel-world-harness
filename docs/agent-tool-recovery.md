@@ -188,3 +188,25 @@ node --import tsx src/cli.ts prepare-all --source SOURCE_ID --yes --candidate-on
 
 No stage-specific dependency overrides are needed. Completed graph shard IDs are
 verified without model calls when the loop encounters them again.
+
+New semantic reconciliation plans require `finish_compiler_batch.target_reviews`
+for every exact `repairPlan.reviewTargets` entry. The host associates active
+proposals with targets; models never enumerate proposal IDs to choose the finish
+set. Missing/duplicate/foreign target reports, unbacked `proposed` reports, and
+foreign evidence handles reject finish. Read each listed artifact and source;
+copy `read_source_evidence.evidence_segment_id` (discover with
+`find_source_evidence`, then copy its returned `ref`). Correct the complete report
+once while preserving every valid draft; an unchanged diagnostic stops for host
+review. `unsupported` and `capability-gap` reports preserve unresolved work and
+are not assertions that the novel lacks evidence.
+
+Finish receipts freeze these reports. Post-convergence target audits are stored
+in `compiler/reconciliation-reviews/`; a completed batch or accepted proposal is
+not semantic resolution. Publication scans durable receipts across repair
+namespaces, including on a restart with a clean audit. Deferred reports require
+host source review through `reviewReconciliationDeferrals` under the compiler
+lock, naming the exact completed finish fingerprint, every deferred target,
+reason and audit reference. This does not certify world truth or bypass the full
+publication audit. Original plans and receipts remain immutable. A new reviewed
+repair round is allowed only after reviewing its predecessor's blockers; never
+rotate a namespace to escape proposal obligations or deferred reviews.

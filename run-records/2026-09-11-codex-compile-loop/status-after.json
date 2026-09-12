@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "capturedAt": "2026-09-11T17:06:32.124Z",
+  "capturedAt": "2026-09-12T12:48:15.029Z",
   "workspace": "/root/workplace/novel-world-harness",
   "stateDirectory": "/root/.novel-harness/workspaces/v1/novel-world-harness-96fd81aa9a7d",
   "compilerFingerprint": {
@@ -714,6 +714,30 @@
           "requiresHostReview": false
         },
         {
+          "id": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-1",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-2",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-3",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-4",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
           "id": "reconcile-a28585b1cf867f3e3a16-bounded-v3-1",
           "phase": "supplemental",
           "unresolvedObligations": 0,
@@ -739,6 +763,12 @@
         },
         {
           "id": "reconcile-a28585b1cf867f3e3a16-bounded-v3-5",
+          "phase": "supplemental",
+          "unresolvedObligations": 0,
+          "requiresHostReview": false
+        },
+        {
+          "id": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-semantic-plan-fix-20260911-3",
           "phase": "supplemental",
           "unresolvedObligations": 0,
           "requiresHostReview": false
@@ -779,6 +809,15 @@
             "preparedAt": "2026-09-11T17:05:32.553Z",
             "completedAt": "2026-09-11T17:05:32.559Z",
             "fingerprint": "9128634260084f9177b3382aabd9046c4d51c2f886ec8837624846f438aac59a",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-semantic-plan-fix-20260911-3",
+            "state": "completed",
+            "preparedAt": "2026-09-12T12:26:03.509Z",
+            "completedAt": "2026-09-12T12:26:03.516Z",
+            "fingerprint": "2ce857e2783bba443f711bf47320bf6300276252e893f5a8e19e2e87961dcdad",
             "checkpointed": false,
             "recoveryRequired": false
           },
@@ -837,6 +876,15 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-5",
+            "state": "completed",
+            "preparedAt": "2026-09-12T12:47:57.871Z",
+            "completedAt": "2026-09-12T12:47:57.877Z",
+            "fingerprint": "66524d0b7b7b6d6fcbd70e105b859bb41f79c13c5730b8acf295cac580c2b481",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "batch-a28585b1cf867f3e3a16-00011-executable-3b75ad587862",
             "state": "completed",
             "preparedAt": "2026-09-09T17:12:03.708Z",
@@ -891,6 +939,15 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-3",
+            "state": "completed",
+            "preparedAt": "2026-09-12T12:36:44.118Z",
+            "completedAt": "2026-09-12T12:36:44.133Z",
+            "fingerprint": "b0aab372dba90299bec5eea6482bd29efbd9f4ecb089e8ecd20e999985de1904",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "boundary-a28585b1cf867f3e3a16-3ae0eae40ede0e49",
             "state": "completed",
             "preparedAt": "2026-09-10T15:04:28.069Z",
@@ -918,6 +975,15 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-4",
+            "state": "completed",
+            "preparedAt": "2026-09-12T12:47:16.888Z",
+            "completedAt": "2026-09-12T12:47:16.894Z",
+            "fingerprint": "ef29ca2a1427ba156dc2630adfa11376977d27943a183709eb41817adfec272c",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-v3-3",
             "state": "completed",
             "preparedAt": "2026-09-11T15:53:23.082Z",
@@ -936,12 +1002,39 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-semantic-plan-fix-20260911-4",
+            "state": "completed",
+            "preparedAt": "2026-09-12T12:27:07.042Z",
+            "completedAt": "2026-09-12T12:27:07.047Z",
+            "fingerprint": "ebc663ef1647ca1d7e9865cf89455d78eeaddaffcc69483398bfb6d523c95a96",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "batch-a28585b1cf867f3e3a16-00012-executable-f959f2526287",
             "state": "completed",
             "preparedAt": "2026-09-10T02:53:19.432Z",
             "completedAt": "2026-09-10T02:53:19.565Z",
             "fingerprint": "91ecc66eb60996f5f34be78244a85c15579c7c7de8aa2e6262b5efde2bfc7c95",
             "checkpointed": true,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-2",
+            "state": "completed",
+            "preparedAt": "2026-09-12T12:32:57.868Z",
+            "completedAt": "2026-09-12T12:32:57.875Z",
+            "fingerprint": "02cdb9966119316dec43488210db27ecd30dcf11d2107b063d648fbfeb9c36c3",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-semantic-plan-fix-20260911-2",
+            "state": "completed",
+            "preparedAt": "2026-09-12T12:23:00.225Z",
+            "completedAt": "2026-09-12T12:23:00.230Z",
+            "fingerprint": "a601a95d935a544a45321b3e022db5846ea466ebe7453622e512482e69c8a0d1",
+            "checkpointed": false,
             "recoveryRequired": false
           },
           {
@@ -1044,6 +1137,15 @@
             "recoveryRequired": false
           },
           {
+            "batchId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-1",
+            "state": "completed",
+            "preparedAt": "2026-09-12T12:29:15.777Z",
+            "completedAt": "2026-09-12T12:29:15.783Z",
+            "fingerprint": "0959bf12cd234a6ea957a092d8de80a2cddc235b1814c6816e986b11193c6d75",
+            "checkpointed": false,
+            "recoveryRequired": false
+          },
+          {
             "batchId": "batch-a28585b1cf867f3e3a16-00008-executable-5f11f49f932b",
             "state": "completed",
             "preparedAt": "2026-09-09T16:47:05.912Z",
@@ -1093,39 +1195,35 @@
       },
       "worldProposalInventory": {
         "pending": 0,
-        "accepted": 466,
-        "rejected": 112
+        "accepted": 491,
+        "rejected": 114
       },
       "latestRun": {
-        "id": "run-mtx7jh2p-cb6fdd53-9c3e-4e5d-a215-8c5a52db1e1e",
-        "operationId": "reconcile-a28585b1cf867f3e3a16-graph-adjudication-codex-semantic-plan-fix-20260911-2",
-        "startedAt": "2026-09-11T17:05:47.569Z",
-        "endedAt": "2026-09-11T17:06:32.118Z",
-        "status": "cancelled",
+        "id": "run-mtydqzhu-b5e56a42-6305-40f4-9465-6532a641154d",
+        "operationId": "reconcile-a28585b1cf867f3e3a16-bounded-codex-semantic-plan-fix-20260911-5",
+        "startedAt": "2026-09-12T12:47:21.906Z",
+        "endedAt": "2026-09-12T12:47:57.889Z",
+        "status": "succeeded",
         "counts": {
           "llmRequests": 3,
-          "toolCalls": 25,
+          "toolCalls": 4,
           "retries": 0
         },
         "usage": {
-          "input": 199263,
-          "output": 1293,
-          "cacheRead": 167424,
+          "input": 37003,
+          "output": 330,
+          "cacheRead": 483840,
           "cacheWrite": 0,
-          "reasoning": 445,
-          "totalTokens": 367980,
-          "cost": 0.4475268
+          "reasoning": 90,
+          "totalTokens": 521173,
+          "cost": 0.17473400000000003
         },
         "model": {
           "provider": "openai-codex",
           "id": "gpt-5.6-terra",
           "thinking": "medium"
         },
-        "error": {
-          "code": "COMPILER_PROMPT_FAILED",
-          "message": "Codex error: The usage limit has been reached",
-          "retryable": false
-        },
+        "error": null,
         "lastToolFailure": null
       },
       "candidates": {

@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { RuntimeHooks, withRuntimeHooks } from "../../src/runtime/hooks.js";
-import { compilerFailureFingerprint, isCompilerUsageLimit, nextCompilerReset } from "../../src/runtime/codex-compile-loop.js";
+import { compilerFailureFingerprint, compilerFailureRepeatedAfterRepair, isCompilerUsageLimit, nextCompilerReset } from "../../src/runtime/codex-compile-loop.js";
 import { compileCommand } from "../../src/commands/compile.js";
 import { prepareAllCommand } from "../../src/commands/prepare-all.js";
 import { inspectCompilerStatus } from "../../src/compiler/status.js";
@@ -41,7 +41,7 @@ hooks.subscribe(async event => {
       state.status = "quota-wait";
       state.retryAt = nextCompilerReset(new Date(), new Date("2026-09-11T20:08:00Z")).toISOString();
     } else {
-      state.status = previous.failureFingerprint === state.failureFingerprint ? "repeated-failure" : "needs-review";
+      state.status = compilerFailureRepeatedAfterRepair(state.failureFingerprint, previous.appliedRepair) ? "repeated-failure" : "needs-review";
     }
   }
   await save();

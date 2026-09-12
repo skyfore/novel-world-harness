@@ -1,28 +1,29 @@
 {
-  "attempt": 6,
-  "status": "running",
+  "attempt": 5,
+  "status": "repeated-failure",
   "sourceId": "a28585b1cf867f3e3a16",
   "threadId": "01a0912b-5872-75b0-a118-813e3e32d2be",
   "error": "Automatic preparation stopped at 'repair'. The event graph has 48 unconditional roots across 48 causal components; reparse with phase gates and evidence-backed causal links so later canon cannot all activate at the opening. Only 32% of canonical events have a typed state or knowledge effect (minimum 65%). Only 68% of canonical events have a comparable story-time anchor (minimum 75%). Only 89% of legacy causal-parent edges have independently evidenced causes/enables relations (required 100%). Only 13% of later embodied characters have a complete pre-event entry checkpoint (required 100%). The compiled world has no executable autonomous driver active at the opening checkpoint, so divergence can only wait for canon or repeat local dialogue. Only 20% of character models use the controlled character-v1 vocabulary (required 100% for novel-scale publication). Next diagnostic step: nwh audit --source a28585b1cf867f3e3a16",
   "reviewedBatchFinished": true,
   "failureFingerprint": "28e1922793be91d04b6389a2ad19017070e0ac6f8f6b3aca7788ee8031840b9e",
-  "startedAt": "2026-09-12T16:39:35.116Z",
+  "startedAt": "2026-09-12T12:43:30.861Z",
   "selectorBatchFinished": true,
-  "semanticRunId": "codex-target-review-v1-20260912",
+  "semanticRunId": "codex-semantic-plan-fix-20260911",
   "timer": {
     "unit": "nwh-codex-reset-01a0912b-3.timer",
     "scheduledAt": "2026-09-11T20:08:00.000Z",
     "receipt": "Running timer as unit: nwh-codex-reset-01a0912b-3.timer\nWill run service as unit: nwh-codex-reset-01a0912b-3.service\n"
   },
-  "hostReview": {
-    "path": "run-records/2026-09-11-codex-compile-loop/host-review-target-protocol.json",
-    "reviewedAt": "2026-09-12T16:39:12.374Z",
-    "reason": "User-authorized successor after target-protocol repair; preserves predecessor history."
+  "endedAt": "2026-09-12T12:48:15.026Z",
+  "callback": {
+    "attempt": 5,
+    "delivered": true,
+    "receipt": "Queued message 01a095a9-4bf5-71b1-a12a-7b8b10075c05 for thread 01a0912b-5872-75b0-a118-813e3e32d2be.",
+    "at": "2026-09-12T12:48:15.355Z"
   },
-  "appliedRepair": {
-    "repairId": "target-review-protocol-v1",
-    "failureFingerprint": "28e1922793be91d04b6389a2ad19017070e0ac6f8f6b3aca7788ee8031840b9e",
-    "reviewPath": "run-records/2026-09-11-codex-compile-loop/host-review-target-protocol.json",
-    "appliedAt": "2026-09-12T16:39:12.374Z"
+  "hostReview": {
+    "path": "run-records/2026-09-11-codex-compile-loop/host-review-attempt-5.json",
+    "reviewedAt": "2026-09-12T12:52:13.620Z",
+    "reason": "stop-repeated-semantic-blockers"
   }
 }
